@@ -5,6 +5,7 @@ DO NOT RUN — these require no live OpenAlgo instance. All API calls are mocked
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -1004,6 +1005,275 @@ class TestStrategyRegistry:
 
 
 # ======================================================================
+# StrategyRunner — async tick loop
+# ======================================================================
+
+
+class TestStrategyRunner:
+    """Test the async strategy execution runner."""
+
+    def _make_strategy(self, exchange="NSE"):
+        from packages.core.src.models import OHLCV, Order, Quote
+        from packages.engine.src.strategy import BaseStrategy
+
+        class TickCountStrategy(BaseStrategy):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.ticks: list = []
+                self.squared_off = False
+
+            def on_tick(self, quote: Quote) -> None:
+                self.ticks.append(quote)
+
+            def on_bar(self, bar: OHLCV) -> None:
+                pass
+
+            def on_signal(self, signal: dict) -> None:
+                pass
+
+            def generate_orders(self) -> list[Order]:
+                return []
+
+            def on_square_off(self) -> None:
+                self.squared_off = True
+
+        return TickCountStrategy(name="TestTicker", exchange=exchange)
+
+    @pytest.mark.asyncio
+    async def test_runner_starts_and_stops(self):
+        from unittest.mock import AsyncMock
+        from packages.core.src.models import Quote
+        from packages.engine.src.scheduler import StrategyRunner, TimeScheduler
+
+        strategy = self._make_strategy()
+        mock_client = MagicMock()
+        mock_client.quotes = AsyncMock(return_value=Quote(symbol="RELIANCE", ltp=2500))
+
+        # Scheduler that says market is open, not frozen, not square-off
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.is_deploy_frozen = MagicMock(return_value=False)
+        scheduler.should_square_off = MagicMock(return_value=False)
+
+        runner = StrategyRunner(
+            strategy=strategy, client=mock_client,
+            scheduler=scheduler, tick_interval_seconds=0.01,
+            symbol="RELIANCE",
+        )
+
+        await runner.start()
+        assert runner.is_running
+        await asyncio.sleep(0.05)
+        await runner.stop()
+
+        assert not runner.is_running
+        assert strategy.state.value == "STOPPED"
+        assert runner.tick_count > 0
+        assert len(strategy.ticks) > 0
+
+    @pytest.mark.asyncio
+    async def test_runner_skips_tick_when_deploy_frozen(self):
+        from unittest.mock import AsyncMock
+        from packages.engine.src.scheduler import StrategyRunner, TimeScheduler
+
+        strategy = self._make_strategy()
+        mock_client = MagicMock()
+        mock_client.quotes = AsyncMock()
+
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.is_deploy_frozen = MagicMock(return_value=True)
+        scheduler.should_square_off = MagicMock(return_value=False)
+
+        runner = StrategyRunner(
+            strategy=strategy, client=mock_client,
+            scheduler=scheduler, tick_interval_seconds=0.01,
+        )
+
+        await runner.start()
+        await asyncio.sleep(0.05)
+        await runner.stop()
+
+        # on_tick should NOT have been called — deploy was frozen
+        assert len(strategy.ticks) == 0
+        mock_client.quotes.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_runner_skips_tick_when_market_closed(self):
+        from unittest.mock import AsyncMock
+        from packages.engine.src.scheduler import StrategyRunner, TimeScheduler
+
+        strategy = self._make_strategy()
+        mock_client = MagicMock()
+        mock_client.quotes = AsyncMock()
+
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=False)
+        scheduler.is_deploy_frozen = MagicMock(return_value=False)
+        scheduler.should_square_off = MagicMock(return_value=False)
+
+        runner = StrategyRunner(
+            strategy=strategy, client=mock_client,
+            scheduler=scheduler, tick_interval_seconds=0.01,
+        )
+
+        await runner.start()
+        await asyncio.sleep(0.05)
+        await runner.stop()
+
+        assert len(strategy.ticks) == 0
+        mock_client.quotes.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_square_off_triggers(self):
+        from unittest.mock import AsyncMock
+        from packages.engine.src.scheduler import StrategyRunner, TimeScheduler
+
+        strategy = self._make_strategy()
+        mock_client = MagicMock()
+        mock_client.quotes = AsyncMock()
+
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.is_deploy_frozen = MagicMock(return_value=False)
+        scheduler.should_square_off = MagicMock(return_value=True)
+
+        runner = StrategyRunner(
+            strategy=strategy, client=mock_client,
+            scheduler=scheduler, tick_interval_seconds=0.01,
+        )
+
+        await runner.start()
+        await asyncio.sleep(0.05)
+
+        # Runner should have stopped due to square-off
+        assert not runner.is_running
+        assert strategy.squared_off
+        assert strategy.state.value == "STOPPED"
+
+    @pytest.mark.asyncio
+    async def test_runner_pause_resume(self):
+        from unittest.mock import AsyncMock
+        from packages.core.src.models import Quote
+        from packages.engine.src.scheduler import StrategyRunner, TimeScheduler
+
+        strategy = self._make_strategy()
+        mock_client = MagicMock()
+        mock_client.quotes = AsyncMock(return_value=Quote(symbol="RELIANCE", ltp=2500))
+
+        scheduler = TimeScheduler()
+        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.is_deploy_frozen = MagicMock(return_value=False)
+        scheduler.should_square_off = MagicMock(return_value=False)
+
+        runner = StrategyRunner(
+            strategy=strategy, client=mock_client,
+            scheduler=scheduler, tick_interval_seconds=0.01,
+            symbol="RELIANCE",
+        )
+
+        await runner.start()
+        await asyncio.sleep(0.03)
+        ticks_before_pause = len(strategy.ticks)
+        assert ticks_before_pause > 0
+
+        runner.pause()
+        assert strategy.state.value == "PAUSED"
+        # Loop continues but strategy is paused so _run_loop exits
+        await asyncio.sleep(0.03)
+        await runner.stop()
+
+
+# ======================================================================
+# StrategyScheduler — multi-strategy management
+# ======================================================================
+
+
+class TestStrategyScheduler:
+    """Test multi-strategy lifecycle management."""
+
+    def _make_strategy(self, name="S1", exchange="NSE"):
+        from packages.core.src.models import OHLCV, Order, Quote
+        from packages.engine.src.strategy import BaseStrategy
+
+        class SimpleStrat(BaseStrategy):
+            def on_tick(self, quote: Quote) -> None: pass
+            def on_bar(self, bar: OHLCV) -> None: pass
+            def on_signal(self, signal: dict) -> None: pass
+            def generate_orders(self) -> list[Order]: return []
+
+        return SimpleStrat(name=name, exchange=exchange)
+
+    @pytest.mark.asyncio
+    async def test_register_and_status(self):
+        from packages.engine.src.scheduler import StrategyScheduler
+
+        mock_client = MagicMock()
+        sched = StrategyScheduler(client=mock_client)
+
+        s1 = self._make_strategy("Alpha", "NSE")
+        s2 = self._make_strategy("Beta", "NFO")
+        sched.register(s1, tick_interval=0.5)
+        sched.register(s2, tick_interval=1.0)
+
+        status = sched.status()
+        assert "Alpha" in status
+        assert "Beta" in status
+        assert status["Alpha"]["exchange"] == "NSE"
+        assert status["Beta"]["state"] == "STOPPED"
+
+    @pytest.mark.asyncio
+    async def test_start_and_stop_all(self):
+        from unittest.mock import AsyncMock
+        from packages.core.src.models import Quote
+        from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler
+
+        mock_client = MagicMock()
+        mock_client.quotes = AsyncMock(return_value=Quote(symbol="X", ltp=100))
+
+        ts = TimeScheduler()
+        ts.is_market_open = MagicMock(return_value=True)
+        ts.is_deploy_frozen = MagicMock(return_value=False)
+        ts.should_square_off = MagicMock(return_value=False)
+
+        sched = StrategyScheduler(client=mock_client, time_scheduler=ts)
+        s1 = self._make_strategy("A")
+        sched.register(s1, tick_interval=0.01, symbol="X")
+
+        await sched.start_all()
+        assert sched.get_runner("A").is_running
+
+        await asyncio.sleep(0.03)
+        await sched.stop_all()
+
+        assert not sched.get_runner("A").is_running
+
+    @pytest.mark.asyncio
+    async def test_stop_one(self):
+        from packages.engine.src.scheduler import StrategyScheduler
+
+        mock_client = MagicMock()
+        sched = StrategyScheduler(client=mock_client)
+        s1 = self._make_strategy("ToStop")
+        sched.register(s1)
+
+        with pytest.raises(KeyError, match="No runner"):
+            await sched.stop_one("NonExistent")
+
+    @pytest.mark.asyncio
+    async def test_get_runner(self):
+        from packages.engine.src.scheduler import StrategyScheduler
+
+        mock_client = MagicMock()
+        sched = StrategyScheduler(client=mock_client)
+        s1 = self._make_strategy("Gamma")
+        runner = sched.register(s1)
+
+        assert sched.get_runner("Gamma") is runner
+        assert sched.get_runner("Missing") is None
+
+
+# ======================================================================
 # Package exports
 # ======================================================================
 
@@ -1017,6 +1287,7 @@ class TestPackageExports:
             "SafetySystem", "OrderRouter", "TimeScheduler",
             "BaseStrategy", "StrategyRegistry", "StrategyState",
             "SafetyResult", "SafetyConfig", "KillSwitch",
+            "StrategyRunner", "StrategyScheduler",
         ]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"
