@@ -1,1 +1,3 @@
 # flint-engine dependencies
+# Core package (provides httpx, pydantic, python-dotenv)
+# No additional deps required — engine uses only stdlib + core
