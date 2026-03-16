@@ -20,14 +20,30 @@ FlintTrade bundles everything a trader needs into a single repo: trading termina
 
 ## Quick Start
 
+### Docker (Windows / macOS / Linux — easiest)
 ```bash
-git clone --recursive https://github.com/navaneeshnagarajan/FlintTrade.git
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
-cp .env.example .env    # Add broker creds, LLM config
-make setup              # Installs OpenAlgo + all deps + systemd services
-make start              # Everything comes alive
-# Open http://localhost:3000 → FlintTrade terminal
+cp .env.example .env      # Windows: copy .env.example .env
+# Edit .env — add OPENALGO_API_KEY and broker credentials
+docker compose up
+# Open http://localhost:3000
 ```
+
+### Linux Native (Production servers, Raspberry Pi)
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+bash infra/scripts/setup-production.sh
+nano .env
+sudo systemctl start flinttrade
+```
+
+### Platform guides
+- [Windows](docs/setup/windows.md)
+- [macOS](docs/setup/macos.md)
+- [Linux](docs/setup/linux.md)
+- [Raspberry Pi](docs/setup/raspberry-pi.md)
 
 ## Modules
 

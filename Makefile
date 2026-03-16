@@ -1,6 +1,6 @@
-.PHONY: setup start stop dev update test lint clean deploy rollback backup health help
+.PHONY: setup start stop dev update test lint clean deploy rollback backup health docker-up docker-down docker-build help
 
-setup: ## First-time setup — clones OpenAlgo, installs all deps
+setup: ## First-time setup — Linux/macOS native (see docs/setup/ for Windows)
 	@echo "=== FlintTrade Setup ==="
 	@echo "Cloning OpenAlgo..."
 	@[ -d "infra/openalgo/.git" ] || git subtree add --prefix=infra/openalgo https://github.com/marketcalls/openalgo.git main --squash 2>/dev/null || true
@@ -58,6 +58,15 @@ backup: ## Backup databases
 
 health: ## Health check
 	@bash infra/scripts/health-check.sh
+
+docker-up: ## Start with Docker (cross-platform)
+	docker compose up
+
+docker-down: ## Stop Docker
+	docker compose down
+
+docker-build: ## Rebuild Docker images
+	docker compose build
 
 version: ## Show version
 	@cat VERSION

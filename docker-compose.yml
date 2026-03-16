@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  openalgo:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./infra/openalgo:/app
+      - openalgo_data:/app/db
+    command: >
+      bash -c "pip install -r requirements.txt -q &&
+               python app.py"
+    ports:
+      - "5000:5000"
+    env_file: .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/v1/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  flinttrade:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - audit_data:/data/flinttrade/audit
+    command: python packages/core/src/app.py
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - AUDIT_LOG_DIR=/data/flinttrade/audit
+    depends_on:
+      openalgo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  terminal:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./packages/terminal:/app
+    command: sh -c "npm install && npm run dev -- --host"
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  dashboard:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./packages/dashboard:/app
+    command: sh -c "npm install && npm run dev -- --host"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  backtest:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./packages/backtest:/app
+    command: sh -c "npm install && npm run dev -- --host"
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+
+volumes:
+  openalgo_data:
+  audit_data:
