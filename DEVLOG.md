@@ -89,4 +89,6 @@
 
 ## 2026-03-16 19:45 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | fix(infra): Docker vite host config, .env.example ENABLE_BACKTEST/ENABLE_AI vars
 
+## 2026-03-16 20:00 IST | ubuntu-i3-9350KF-RX6600XT | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(deploy): FlintTrade first run on Custom PC — systemd service active, OpenAlgo connected
+
 ## 2026-03-16 20:15 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | fix(automation): async holidays load — asyncio.run() inside running loop
