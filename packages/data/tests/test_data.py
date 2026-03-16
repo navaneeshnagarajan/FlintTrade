@@ -623,8 +623,9 @@ class TestTickRecorder:
         recorder._process_tick({"symbol": "INFY", "exchange": "NSE", "ltp": 1500.0})
         recorder._flush()
         assert len(recorder._buffer) == 0
-        ticks = storage.get_ticks_by_date(datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-        assert len(ticks) == 2
+        # Query ticks directly — avoids timezone edge cases around midnight
+        result = storage.connection.execute("SELECT COUNT(*) FROM ticks").fetchone()
+        assert result[0] == 2
 
     def test_detect_mode(self):
         from packages.data.src.tick_recorder import TickRecorder
