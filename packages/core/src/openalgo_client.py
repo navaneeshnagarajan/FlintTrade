@@ -109,6 +109,17 @@ class OpenAlgoClient:
             payload.update(extra)
         return payload
 
+    @staticmethod
+    def _unwrap(data: Any) -> Any:
+        """Unwrap OpenAlgo's nested response format.
+
+        OpenAlgo wraps responses as {"status": "success", "data": <payload>}.
+        This extracts the "data" value if present, otherwise returns as-is.
+        """
+        if isinstance(data, dict) and "data" in data:
+            return data["data"]
+        return data
+
     async def _post(
         self,
         endpoint: str,
@@ -330,7 +341,7 @@ class OpenAlgoClient:
     async def order_status(self, orderid: str, strategy: str = "Flint") -> OrderStatus:
         """POST /api/v1/orderstatus"""
         payload = self._body({"strategy": strategy, "orderid": orderid})
-        data = await self._post("orderstatus", payload)
+        data = self._unwrap(await self._post("orderstatus", payload))
         return OrderStatus(**data) if isinstance(data, dict) else OrderStatus()
 
     async def open_position(
@@ -352,13 +363,13 @@ class OpenAlgoClient:
     async def quotes(self, symbol: str, exchange: str = "NSE") -> Quote:
         """POST /api/v1/quotes"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = await self._post("quotes", payload)
+        data = self._unwrap(await self._post("quotes", payload))
         return Quote(**data) if isinstance(data, dict) else Quote()
 
     async def multi_quotes(self, symbols: list[dict[str, str]]) -> list[Quote]:
         """POST /api/v1/multiquotes — symbols=[{"symbol": "X", "exchange": "NSE"}, ...]"""
         payload = self._body({"symbols": symbols})
-        data = await self._post("multiquotes", payload)
+        data = self._unwrap(await self._post("multiquotes", payload))
         if isinstance(data, list):
             return [Quote(**q) for q in data]
         return []
@@ -366,7 +377,7 @@ class OpenAlgoClient:
     async def depth(self, symbol: str, exchange: str = "NSE") -> Depth:
         """POST /api/v1/depth"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = await self._post("depth", payload)
+        data = self._unwrap(await self._post("depth", payload))
         if not isinstance(data, dict):
             return Depth()
         bids = [DepthLevel(**b) for b in data.get("bids", [])]
@@ -394,20 +405,20 @@ class OpenAlgoClient:
             "start_date": start_date,
             "end_date": end_date,
         })
-        data = await self._post("history", payload)
+        data = self._unwrap(await self._post("history", payload))
         if isinstance(data, list):
             return [OHLCV(**bar) for bar in data]
         return []
 
     async def intervals(self) -> list[str]:
         """POST /api/v1/intervals"""
-        data = await self._post("intervals", self._body())
+        data = self._unwrap(await self._post("intervals", self._body()))
         return data if isinstance(data, list) else []
 
     async def option_chain(self, symbol: str, exchange: str = "NFO") -> OptionChain:
         """POST /api/v1/optionchain"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = await self._post("optionchain", payload)
+        data = self._unwrap(await self._post("optionchain", payload))
         if isinstance(data, dict):
             strikes = [OptionChainStrike(**s) for s in data.get("strikes", [])]
             return OptionChain(
@@ -420,13 +431,13 @@ class OpenAlgoClient:
     async def option_greeks(self, symbol: str, exchange: str = "NFO") -> OptionGreek:
         """POST /api/v1/optiongreeks"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = await self._post("optiongreeks", payload)
+        data = self._unwrap(await self._post("optiongreeks", payload))
         return OptionGreek(**data) if isinstance(data, dict) else OptionGreek()
 
     async def multi_option_greeks(self, symbols: list[dict[str, str]]) -> list[OptionGreek]:
         """POST /api/v1/multioptiongreeks"""
         payload = self._body({"symbols": symbols})
-        data = await self._post("multioptiongreeks", payload)
+        data = self._unwrap(await self._post("multioptiongreeks", payload))
         if isinstance(data, list):
             return [OptionGreek(**g) for g in data]
         return []
@@ -485,13 +496,20 @@ class OpenAlgoClient:
 
     async def funds(self) -> Fund:
         """POST /api/v1/funds"""
-        data = await self._post("funds", self._body())
+        raw = await self._post("funds", self._body())
+        data = self._unwrap(raw)
         if isinstance(data, dict):
+            # OpenAlgo uses flat names: availablecash, usedmargin, totalbalance
+            avail = data.get("availablecash", data.get("available_balance", "0"))
+            used = data.get("usedmargin", data.get("used_margin", "0"))
+            total = data.get("totalbalance", data.get("total_balance", "0"))
+            known = {"availablecash", "usedmargin", "totalbalance",
+                     "available_balance", "used_margin", "total_balance", "status"}
             return Fund(
-                available_balance=str(data.get("available_balance", "0")),
-                used_margin=str(data.get("used_margin", "0")),
-                total_balance=str(data.get("total_balance", "0")),
-                extra={k: v for k, v in data.items() if k not in ("available_balance", "used_margin", "total_balance", "status")},
+                available_balance=str(avail),
+                used_margin=str(used),
+                total_balance=str(total),
+                extra={k: v for k, v in data.items() if k not in known},
             )
         return Fund()
 
@@ -502,28 +520,28 @@ class OpenAlgoClient:
 
     async def orderbook(self) -> list[OrderStatus]:
         """POST /api/v1/orderbook"""
-        data = await self._post("orderbook", self._body())
+        data = self._unwrap(await self._post("orderbook", self._body()))
         if isinstance(data, list):
             return [OrderStatus(**o) for o in data]
         return []
 
     async def tradebook(self) -> list[Trade]:
         """POST /api/v1/tradebook"""
-        data = await self._post("tradebook", self._body())
+        data = self._unwrap(await self._post("tradebook", self._body()))
         if isinstance(data, list):
             return [Trade(**t) for t in data]
         return []
 
     async def positionbook(self) -> list[Position]:
         """POST /api/v1/positionbook"""
-        data = await self._post("positionbook", self._body())
+        data = self._unwrap(await self._post("positionbook", self._body()))
         if isinstance(data, list):
             return [Position(**p) for p in data]
         return []
 
     async def holdings(self) -> list[Holding]:
         """POST /api/v1/holdings"""
-        data = await self._post("holdings", self._body())
+        data = self._unwrap(await self._post("holdings", self._body()))
         if isinstance(data, list):
             return [Holding(**h) for h in data]
         return []
