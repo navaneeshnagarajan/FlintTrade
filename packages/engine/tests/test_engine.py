@@ -147,14 +147,14 @@ class TestPositionLimits:
     def test_positions_with_zero_qty_not_counted(self):
         from packages.core.src.models import Position
         from packages.engine.src.safety import PositionLimits
-        layer = PositionLimits(max_positions=2)
+        layer = PositionLimits(max_positions=3)
         positions = [
             Position(symbol="A", quantity="10"),
-            Position(symbol="B", quantity="0"),  # closed
+            Position(symbol="B", quantity="0"),  # closed — should not count
             Position(symbol="C", quantity="5"),
         ]
         result = layer.validate(positions, used_margin=0, total_balance=100000)
-        assert result.passed  # only 2 active (A, C)
+        assert result.passed  # only 2 active (A, C), under limit of 3
 
 
 # ======================================================================

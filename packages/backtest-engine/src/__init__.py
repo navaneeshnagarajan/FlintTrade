@@ -2,51 +2,50 @@
 
 __version__ = "0.1.0-dev"
 
-from .data_connector import (
-    CSVConnector,
-    DataConnector,
-    DataResult,
-    DuckDBConnector,
-    JSONConnector,
-    YFinanceConnector,
-)
-from .metrics import (
-    DrawdownInfo,
-    MonthlyReturn,
-    PerformanceMetrics,
-    PerformanceReport,
-    RiskMetrics,
-    TradeStats,
-)
-from .optimizer import (
-    MonteCarloResult,
-    ParamGrid,
-    WalkForwardOptimizer,
-    WalkForwardResult,
-)
-from .simulator import (
-    BacktestConfig,
-    BacktestResult,
-    BacktestSimulator,
-    EquityPoint,
-    SimOrder,
-    SimTrade,
-)
-from .strategies import (
-    BUILTIN_STRATEGIES,
-    BearCallSpread,
-    BollingerMeanReversion,
-    BullPutSpread,
-    EMACrossover,
-    IronCondor,
-    MACDRSIStrategy,
-    MomentumBreakout,
-    OpeningRangeBreakout,
-    StraddleSell,
-    StrangleSell,
-    SupertrendStrategy,
-    VWAPDeviation,
-)
+try:
+    from .data_connector import (
+        CSVConnector, DataConnector, DataResult,
+        DuckDBConnector, JSONConnector, YFinanceConnector,
+    )
+    from .metrics import (
+        DrawdownInfo, MonthlyReturn, PerformanceMetrics,
+        PerformanceReport, RiskMetrics, TradeStats,
+    )
+    from .optimizer import (
+        MonteCarloResult, ParamGrid, WalkForwardOptimizer, WalkForwardResult,
+    )
+    from .simulator import (
+        BacktestConfig, BacktestResult, BacktestSimulator,
+        EquityPoint, SimOrder, SimTrade,
+    )
+    from .strategies import (
+        BUILTIN_STRATEGIES, BearCallSpread, BollingerMeanReversion,
+        BullPutSpread, EMACrossover, IronCondor, MACDRSIStrategy,
+        MomentumBreakout, OpeningRangeBreakout, StraddleSell,
+        StrangleSell, SupertrendStrategy, VWAPDeviation,
+    )
+except ImportError:
+    from data_connector import (
+        CSVConnector, DataConnector, DataResult,
+        DuckDBConnector, JSONConnector, YFinanceConnector,
+    )
+    from metrics import (
+        DrawdownInfo, MonthlyReturn, PerformanceMetrics,
+        PerformanceReport, RiskMetrics, TradeStats,
+    )
+    from optimizer import (
+        MonteCarloResult, ParamGrid, WalkForwardOptimizer, WalkForwardResult,
+    )
+    from simulator import (
+        BacktestConfig, BacktestResult, BacktestSimulator,
+        EquityPoint, SimOrder, SimTrade,
+    )
+    from strategies import (
+        BUILTIN_STRATEGIES, BearCallSpread, BollingerMeanReversion,
+        BullPutSpread, EMACrossover, IronCondor, MACDRSIStrategy,
+        MomentumBreakout, OpeningRangeBreakout, StraddleSell,
+        StrangleSell, SupertrendStrategy, VWAPDeviation,
+    )
 
 __all__ = [
     # Simulator

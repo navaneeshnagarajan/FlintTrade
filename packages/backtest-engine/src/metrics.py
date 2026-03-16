@@ -10,7 +10,10 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from .simulator import BacktestResult, EquityPoint, SimTrade
+try:
+    from .simulator import BacktestResult, EquityPoint, SimTrade
+except ImportError:
+    from simulator import BacktestResult, EquityPoint, SimTrade
 
 # Annualization factors
 _TRADING_DAYS_PER_YEAR = 252

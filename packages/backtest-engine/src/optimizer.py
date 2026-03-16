@@ -16,8 +16,12 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .metrics import PerformanceMetrics, PerformanceReport, compute_sharpe, compute_returns
-from .simulator import BacktestConfig, BacktestResult, BacktestSimulator, SimTrade
+try:
+    from .metrics import PerformanceMetrics, PerformanceReport, compute_sharpe, compute_returns
+    from .simulator import BacktestConfig, BacktestResult, BacktestSimulator, SimTrade
+except ImportError:
+    from metrics import PerformanceMetrics, PerformanceReport, compute_sharpe, compute_returns
+    from simulator import BacktestConfig, BacktestResult, BacktestSimulator, SimTrade
 
 logger = logging.getLogger("flinttrade.backtest.optimizer")
 

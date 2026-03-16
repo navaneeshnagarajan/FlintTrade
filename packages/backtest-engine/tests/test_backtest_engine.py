@@ -20,6 +20,10 @@ sys.path.insert(0, os.path.join(_test_dir, '..', 'src'))
 # Also need the repo root on the path so that source files'
 # `from packages.core.src.models import ...` etc. resolve correctly.
 sys.path.insert(0, os.path.join(_test_dir, '..', '..', '..'))
+# Add core/src and engine/src for direct imports like `from models import OHLCV`
+# and `from strategy import BaseStrategy`.
+sys.path.insert(0, os.path.join(_test_dir, '..', '..', 'core', 'src'))
+sys.path.insert(0, os.path.join(_test_dir, '..', '..', 'engine', 'src'))
 
 
 # ======================================================================
