@@ -1,6 +1,6 @@
 """5-layer safety system for order validation and risk management.
 
-Layer 1: Order validation (price, qty, exchange, symbol)
+Layer 1: Order validation (price, qty, exchange, symbol, market hours)
 Layer 2: Position limits (max simultaneous, margin usage)
 Layer 3: Portfolio risk (net delta/vega limits for options)
 Layer 4: Daily P&L limits (pause trigger, kill switch)
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, time as dt_time, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -18,6 +19,8 @@ from packages.core.src.models import Order, Position, Quote
 from packages.core.src.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.engine.safety")
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +44,67 @@ class SafetyResult:
     @property
     def passed(self) -> bool:
         return self.verdict == SafetyVerdict.PASS
+
+
+# ---------------------------------------------------------------------------
+# Per-exchange market hours (IST)
+# ---------------------------------------------------------------------------
+
+MARKET_HOURS: dict[str, tuple[dt_time, dt_time]] = {
+    "NSE":   (dt_time(9, 15), dt_time(15, 30)),
+    "BSE":   (dt_time(9, 15), dt_time(15, 30)),
+    "NFO":   (dt_time(9, 15), dt_time(15, 30)),
+    "BFO":   (dt_time(9, 15), dt_time(15, 30)),
+    "CDS":   (dt_time(9, 0),  dt_time(17, 0)),
+    "BCD":   (dt_time(9, 0),  dt_time(17, 0)),
+    "MCX":   (dt_time(9, 0),  dt_time(23, 30)),
+    "NCDEX": (dt_time(10, 0), dt_time(17, 0)),
+}
+
+# Exchanges that are quote-only — orders always rejected
+_QUOTE_ONLY_EXCHANGES = {"NSE_INDEX", "BSE_INDEX"}
+
+
+def is_market_open(exchange: str, at: datetime | None = None) -> bool:
+    """Check if the given exchange is currently open for trading.
+
+    - NSE_INDEX / BSE_INDEX: always False (quote-only, no orders)
+    - Unknown exchanges: False
+    - Known exchanges: True only if current IST time is within market hours
+    """
+    if exchange in _QUOTE_ONLY_EXCHANGES:
+        return False
+
+    if exchange not in MARKET_HOURS:
+        return False
+
+    now = at or datetime.now(IST)
+    current_time = now.time().replace(tzinfo=None)
+    open_time, close_time = MARKET_HOURS[exchange]
+    return open_time <= current_time < close_time
+
+
+def get_expiry_time(exchange: str) -> dt_time:
+    """Return the expiry/settlement time for the given exchange.
+
+    Used for accurate Greeks/theta calculations.
+    """
+    expiry_times: dict[str, dt_time] = {
+        "NFO":   dt_time(15, 30),
+        "BFO":   dt_time(15, 30),
+        "CDS":   dt_time(12, 30),
+        "BCD":   dt_time(12, 30),
+        "MCX":   dt_time(23, 30),
+    }
+    return expiry_times.get(exchange, dt_time(15, 30))
+
+
+def _format_market_hours(exchange: str) -> str:
+    """Format market hours for error messages."""
+    if exchange in MARKET_HOURS:
+        o, c = MARKET_HOURS[exchange]
+        return f"{o.strftime('%H:%M')}–{c.strftime('%H:%M')} IST"
+    return "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +132,7 @@ class OrderValidation:
 
     Checks:
     - Exchange is tradeable (not NSE_INDEX/BSE_INDEX)
+    - Market is open for the exchange (per-exchange hours)
     - Symbol is non-empty
     - Quantity is positive and within exchange limits
     - For LIMIT/SL orders, price is within 5% of LTP
@@ -77,16 +142,28 @@ class OrderValidation:
         self,
         price_deviation_pct: float = 5.0,
         qty_limits: dict[str, int] | None = None,
+        check_market_hours: bool = True,
     ) -> None:
         self.price_deviation_pct = price_deviation_pct
         self.qty_limits = qty_limits or dict(_DEFAULT_QTY_LIMITS)
+        self.check_market_hours = check_market_hours
 
-    def validate(self, order: Order, ltp: float | None = None) -> SafetyResult:
+    def validate(self, order: Order, ltp: float | None = None, at: datetime | None = None) -> SafetyResult:
         exchange = order.exchange.value if hasattr(order.exchange, "value") else str(order.exchange)
 
         # Exchange check
         if exchange not in _TRADEABLE_EXCHANGES:
             return SafetyResult(SafetyVerdict.FAIL, "L1_ORDER", f"Exchange {exchange} is not tradeable")
+
+        # Market hours check
+        if self.check_market_hours and not is_market_open(exchange, at=at):
+            now = at or datetime.now(IST)
+            current_time = now.time().replace(tzinfo=None).strftime("%H:%M")
+            hours = _format_market_hours(exchange)
+            return SafetyResult(
+                SafetyVerdict.FAIL, "L1_ORDER",
+                f"{exchange} is open {hours}. Current time: {current_time}. Market closed.",
+            )
 
         # Symbol check
         if not order.symbol or not order.symbol.strip():
@@ -365,6 +442,7 @@ class SafetyConfig:
     max_net_vega: float = 10_000.0
     pnl_pause_pct: float = 3.0
     pnl_kill_pct: float = 15.0
+    check_market_hours: bool = True
 
 
 class SafetySystem:
@@ -381,7 +459,7 @@ class SafetySystem:
 
     def __init__(self, config: SafetyConfig | None = None) -> None:
         cfg = config or SafetyConfig()
-        self.l1_order = OrderValidation(cfg.price_deviation_pct, cfg.qty_limits)
+        self.l1_order = OrderValidation(cfg.price_deviation_pct, cfg.qty_limits, cfg.check_market_hours)
         self.l2_position = PositionLimits(cfg.max_positions, cfg.max_margin_pct)
         self.l3_portfolio = PortfolioRisk(cfg.max_net_delta, cfg.max_net_vega)
         self.l4_pnl = DailyPnLLimits(cfg.pnl_pause_pct, cfg.pnl_kill_pct)
@@ -399,6 +477,7 @@ class SafetySystem:
         net_vega: float = 0.0,
         daily_pnl: float = 0.0,
         starting_capital: float = 0.0,
+        at: datetime | None = None,
     ) -> list[SafetyResult]:
         """Run order through all 5 layers and return results.
 
@@ -418,8 +497,8 @@ class SafetySystem:
         if not r4.passed:
             return results
 
-        # L1 — order validation
-        r1 = self.l1_order.validate(order, ltp)
+        # L1 — order validation (exchange, market hours, symbol, qty, price)
+        r1 = self.l1_order.validate(order, ltp, at=at)
         results.append(r1)
         if not r1.passed:
             return results

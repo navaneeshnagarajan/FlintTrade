@@ -32,7 +32,7 @@ class TestOrderValidation:
 
     def test_valid_market_order_passes(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation()
+        layer = OrderValidation(check_market_hours=False)
         order = self._make_order()
         result = layer.validate(order)
         assert result.passed
@@ -40,7 +40,7 @@ class TestOrderValidation:
     def test_invalid_exchange_fails(self):
         from packages.core.src.models import Order
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation()
+        layer = OrderValidation(check_market_hours=False)
         order = Order(symbol="NIFTY", action="BUY", exchange="NSE_INDEX", quantity="1")
         result = layer.validate(order)
         assert not result.passed
@@ -48,7 +48,7 @@ class TestOrderValidation:
 
     def test_empty_symbol_fails(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation()
+        layer = OrderValidation(check_market_hours=False)
         order = self._make_order(symbol="")
         result = layer.validate(order)
         assert not result.passed
@@ -56,7 +56,7 @@ class TestOrderValidation:
 
     def test_zero_quantity_fails(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation()
+        layer = OrderValidation(check_market_hours=False)
         order = self._make_order(quantity="0")
         result = layer.validate(order)
         assert not result.passed
@@ -64,7 +64,7 @@ class TestOrderValidation:
 
     def test_quantity_exceeds_limit_fails(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation(qty_limits={"NSE": 100})
+        layer = OrderValidation(qty_limits={"NSE": 100}, check_market_hours=False)
         order = self._make_order(quantity="200")
         result = layer.validate(order)
         assert not result.passed
@@ -72,14 +72,14 @@ class TestOrderValidation:
 
     def test_limit_price_within_tolerance_passes(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation(price_deviation_pct=5.0)
+        layer = OrderValidation(price_deviation_pct=5.0, check_market_hours=False)
         order = self._make_order(pricetype="LIMIT", price="2520")
         result = layer.validate(order, ltp=2500.0)
         assert result.passed
 
     def test_limit_price_exceeds_tolerance_fails(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation(price_deviation_pct=5.0)
+        layer = OrderValidation(price_deviation_pct=5.0, check_market_hours=False)
         order = self._make_order(pricetype="LIMIT", price="3000")
         result = layer.validate(order, ltp=2500.0)
         assert not result.passed
@@ -87,17 +87,139 @@ class TestOrderValidation:
 
     def test_market_order_no_price_check(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation()
+        layer = OrderValidation(check_market_hours=False)
         order = self._make_order(pricetype="MARKET", price="9999")
         result = layer.validate(order, ltp=100.0)
         assert result.passed
 
     def test_all_tradeable_exchanges_pass(self):
         from packages.engine.src.safety import OrderValidation
-        layer = OrderValidation()
+        layer = OrderValidation(check_market_hours=False)
         for exch in ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX"]:
             order = self._make_order(exchange=exch)
             assert layer.validate(order).passed, f"{exch} should pass"
+
+
+# ======================================================================
+# Layer 1 — Market Hours
+# ======================================================================
+
+
+class TestMarketHours:
+    """Test per-exchange market hours checking."""
+
+    def _make_order(self, **overrides):
+        from packages.core.src.models import Order
+        defaults = {"symbol": "RELIANCE", "action": "BUY", "exchange": "NSE", "quantity": "10"}
+        defaults.update(overrides)
+        return Order(**defaults)
+
+    def test_is_market_open_nse_during_hours(self):
+        from packages.engine.src.safety import is_market_open
+        mid_day = datetime(2026, 3, 16, 12, 0, 0, tzinfo=IST)
+        assert is_market_open("NSE", at=mid_day)
+
+    def test_is_market_closed_nse_after_hours(self):
+        from packages.engine.src.safety import is_market_open
+        evening = datetime(2026, 3, 16, 18, 0, 0, tzinfo=IST)
+        assert not is_market_open("NSE", at=evening)
+
+    def test_is_market_closed_nse_before_open(self):
+        from packages.engine.src.safety import is_market_open
+        early = datetime(2026, 3, 16, 8, 0, 0, tzinfo=IST)
+        assert not is_market_open("NSE", at=early)
+
+    def test_mcx_open_late_evening(self):
+        from packages.engine.src.safety import is_market_open
+        late = datetime(2026, 3, 16, 22, 0, 0, tzinfo=IST)
+        assert is_market_open("MCX", at=late)
+
+    def test_mcx_closed_after_2330(self):
+        from packages.engine.src.safety import is_market_open
+        late = datetime(2026, 3, 16, 23, 45, 0, tzinfo=IST)
+        assert not is_market_open("MCX", at=late)
+
+    def test_cds_open_afternoon(self):
+        from packages.engine.src.safety import is_market_open
+        afternoon = datetime(2026, 3, 16, 16, 30, 0, tzinfo=IST)
+        assert is_market_open("CDS", at=afternoon)
+
+    def test_cds_closed_after_1700(self):
+        from packages.engine.src.safety import is_market_open
+        evening = datetime(2026, 3, 16, 17, 30, 0, tzinfo=IST)
+        assert not is_market_open("CDS", at=evening)
+
+    def test_nse_index_always_closed(self):
+        from packages.engine.src.safety import is_market_open
+        mid_day = datetime(2026, 3, 16, 12, 0, 0, tzinfo=IST)
+        assert not is_market_open("NSE_INDEX", at=mid_day)
+
+    def test_bse_index_always_closed(self):
+        from packages.engine.src.safety import is_market_open
+        mid_day = datetime(2026, 3, 16, 12, 0, 0, tzinfo=IST)
+        assert not is_market_open("BSE_INDEX", at=mid_day)
+
+    def test_unknown_exchange_closed(self):
+        from packages.engine.src.safety import is_market_open
+        assert not is_market_open("FAKE")
+
+    def test_get_expiry_time_nfo(self):
+        from packages.engine.src.safety import get_expiry_time
+        assert get_expiry_time("NFO") == time(15, 30)
+
+    def test_get_expiry_time_cds(self):
+        from packages.engine.src.safety import get_expiry_time
+        assert get_expiry_time("CDS") == time(12, 30)
+
+    def test_get_expiry_time_mcx(self):
+        from packages.engine.src.safety import get_expiry_time
+        assert get_expiry_time("MCX") == time(23, 30)
+
+    def test_get_expiry_time_default(self):
+        from packages.engine.src.safety import get_expiry_time
+        assert get_expiry_time("NSE") == time(15, 30)
+
+    def test_order_rejected_outside_market_hours(self):
+        from packages.engine.src.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=True)
+        order = self._make_order(exchange="NSE")
+        evening = datetime(2026, 3, 16, 18, 0, 0, tzinfo=IST)
+        result = layer.validate(order, at=evening)
+        assert not result.passed
+        assert "Market closed" in result.reason
+        assert "09:15" in result.reason
+        assert "15:30" in result.reason
+
+    def test_order_accepted_during_market_hours(self):
+        from packages.engine.src.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=True)
+        order = self._make_order(exchange="NSE")
+        mid_day = datetime(2026, 3, 16, 12, 0, 0, tzinfo=IST)
+        result = layer.validate(order, at=mid_day)
+        assert result.passed
+
+    def test_mcx_order_accepted_late(self):
+        from packages.engine.src.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=True)
+        order = self._make_order(exchange="MCX")
+        late = datetime(2026, 3, 16, 22, 0, 0, tzinfo=IST)
+        result = layer.validate(order, at=late)
+        assert result.passed
+
+    def test_mcx_order_rejected_after_close(self):
+        from packages.engine.src.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=True)
+        order = self._make_order(exchange="MCX")
+        after = datetime(2026, 3, 16, 23, 45, 0, tzinfo=IST)
+        result = layer.validate(order, at=after)
+        assert not result.passed
+        assert "MCX" in result.reason
+        assert "Market closed" in result.reason
+
+    def test_market_hours_dict_has_all_tradeable(self):
+        from packages.engine.src.safety import MARKET_HOURS, _TRADEABLE_EXCHANGES
+        for exch in _TRADEABLE_EXCHANGES:
+            assert exch in MARKET_HOURS, f"{exch} missing from MARKET_HOURS"
 
 
 # ======================================================================
@@ -316,9 +438,12 @@ class TestSafetySystem:
         defaults.update(overrides)
         return Order(**defaults)
 
+    def _make_system(self, check_market_hours=False):
+        from packages.engine.src.safety import SafetyConfig, SafetySystem
+        return SafetySystem(SafetyConfig(check_market_hours=check_market_hours))
+
     def test_all_layers_pass(self):
-        from packages.engine.src.safety import SafetySystem
-        ss = SafetySystem()
+        ss = self._make_system()
         results = ss.check_order(
             self._make_order(),
             ltp=2500.0,
@@ -332,17 +457,45 @@ class TestSafetySystem:
         )
         assert all(r.passed for r in results)
 
+    def test_all_layers_pass_with_market_hours(self):
+        ss = self._make_system(check_market_hours=True)
+        mid_day = datetime(2026, 3, 16, 12, 0, 0, tzinfo=IST)
+        results = ss.check_order(
+            self._make_order(),
+            ltp=2500.0,
+            positions=[],
+            used_margin=10000,
+            total_balance=100000,
+            net_delta=100,
+            net_vega=1000,
+            daily_pnl=500,
+            starting_capital=100000,
+            at=mid_day,
+        )
+        assert all(r.passed for r in results)
+
+    def test_market_closed_blocks_order(self):
+        ss = self._make_system(check_market_hours=True)
+        evening = datetime(2026, 3, 16, 18, 0, 0, tzinfo=IST)
+        results = ss.check_order(
+            self._make_order(),
+            starting_capital=100000,
+            at=evening,
+        )
+        failed = [r for r in results if not r.passed]
+        assert len(failed) == 1
+        assert failed[0].layer == "L1_ORDER"
+        assert "Market closed" in failed[0].reason
+
     def test_kill_switch_blocks_immediately(self):
-        from packages.engine.src.safety import SafetySystem
-        ss = SafetySystem()
+        ss = self._make_system()
         ss.l5_kill.activate("Test")
         results = ss.check_order(self._make_order())
         assert len(results) == 1
         assert results[0].layer == "L5_KILL"
 
     def test_pnl_kill_blocks_before_order_check(self):
-        from packages.engine.src.safety import SafetySystem
-        ss = SafetySystem()
+        ss = self._make_system()
         results = ss.check_order(
             self._make_order(),
             daily_pnl=-20000,
@@ -351,8 +504,7 @@ class TestSafetySystem:
         assert any(r.layer == "L4_PNL" and not r.passed for r in results)
 
     def test_fail_fast_on_invalid_order(self):
-        from packages.engine.src.safety import SafetySystem
-        ss = SafetySystem()
+        ss = self._make_system()
         results = ss.check_order(
             self._make_order(symbol=""),
             daily_pnl=0,
@@ -377,15 +529,18 @@ class TestOrderRouter:
         defaults.update(overrides)
         return Order(**defaults)
 
+    def _make_safety(self):
+        from packages.engine.src.safety import SafetyConfig, SafetySystem
+        return SafetySystem(SafetyConfig(check_market_hours=False))
+
     def test_route_passes_and_places_order(self):
         from packages.core.src.models import OrderResponse
         from packages.engine.src.router import OrderRouter
-        from packages.engine.src.safety import SafetySystem
 
         mock_client = MagicMock()
         mock_client.place_order.return_value = OrderResponse(status="success", orderid="12345")
 
-        router = OrderRouter(client=mock_client, safety=SafetySystem())
+        router = OrderRouter(client=mock_client, safety=self._make_safety())
         decision = router.route(
             self._make_order(),
             ltp=2500.0,
@@ -399,10 +554,9 @@ class TestOrderRouter:
 
     def test_route_blocked_by_safety(self):
         from packages.engine.src.router import OrderRouter
-        from packages.engine.src.safety import SafetySystem
 
         mock_client = MagicMock()
-        router = OrderRouter(client=mock_client, safety=SafetySystem())
+        router = OrderRouter(client=mock_client, safety=self._make_safety())
 
         # Empty symbol will fail L1
         decision = router.route(self._make_order(symbol=""), starting_capital=100000)
@@ -411,10 +565,9 @@ class TestOrderRouter:
 
     def test_disabled_strategy_blocked(self):
         from packages.engine.src.router import OrderRouter, StrategyRouteConfig
-        from packages.engine.src.safety import SafetySystem
 
         mock_client = MagicMock()
-        router = OrderRouter(client=mock_client, safety=SafetySystem())
+        router = OrderRouter(client=mock_client, safety=self._make_safety())
         router.add_strategy_config(StrategyRouteConfig("Flint", enabled=False))
 
         decision = router.route(self._make_order(), starting_capital=100000)
@@ -424,12 +577,11 @@ class TestOrderRouter:
     def test_history_records_decisions(self):
         from packages.core.src.models import OrderResponse
         from packages.engine.src.router import OrderRouter
-        from packages.engine.src.safety import SafetySystem
 
         mock_client = MagicMock()
         mock_client.place_order.return_value = OrderResponse(status="success", orderid="1")
 
-        router = OrderRouter(client=mock_client, safety=SafetySystem())
+        router = OrderRouter(client=mock_client, safety=self._make_safety())
         router.route(self._make_order(), ltp=2500.0, starting_capital=100000, total_balance=100000)
         router.route(self._make_order(symbol=""), starting_capital=100000)
 
@@ -439,12 +591,11 @@ class TestOrderRouter:
 
     def test_api_error_recorded(self):
         from packages.engine.src.router import OrderRouter
-        from packages.engine.src.safety import SafetySystem
 
         mock_client = MagicMock()
         mock_client.place_order.side_effect = RuntimeError("Connection refused")
 
-        router = OrderRouter(client=mock_client, safety=SafetySystem())
+        router = OrderRouter(client=mock_client, safety=self._make_safety())
         decision = router.route(
             self._make_order(),
             ltp=2500.0,
