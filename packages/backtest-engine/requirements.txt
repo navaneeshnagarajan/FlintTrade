@@ -1,1 +1,4 @@
 # flint-backtest-engine dependencies
+numpy>=1.26
+pandas>=2.0
+quantstats>=0.0.62
