@@ -1,6 +1,8 @@
 version: "3.9"
 
 services:
+  # NOTE: infra/openalgo/ is a git subtree. Pull it first:
+  #   git subtree add --prefix=infra/openalgo https://github.com/marketcalls/openalgo.git main --squash
   openalgo:
     image: python:3.11-slim
     working_dir: /app

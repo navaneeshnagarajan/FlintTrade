@@ -86,3 +86,5 @@
 ## 2026-03-16 19:15 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(infra): production deploy scripts — deploy-production.sh, setup-production.sh, health-check.sh
 
 ## 2026-03-16 19:30 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(infra): Docker + cross-platform support — Windows/macOS/Linux/Raspberry Pi setup guides
+
+## 2026-03-16 19:45 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | fix(infra): Docker vite host config, .env.example ENABLE_BACKTEST/ENABLE_AI vars
