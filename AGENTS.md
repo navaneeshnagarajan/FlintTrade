@@ -145,6 +145,15 @@ Every change → append to DEVLOG.md:
 | VPN | WireGuard |
 | Security | fail2ban, UFW |
 
+## Production Deployment (Custom PC)
+- Machine: ubuntu-i3-9350KF-RX6600XT at 192.168.8.50 (LAN) / 10.10.10.1 (VPN)
+- Service: sudo systemctl status flinttrade
+- Logs: journalctl -u flinttrade -f
+- Audit: /data/flinttrade/audit/ (5TB HDD — 5-year SEBI retention)
+- Deploy: infra/scripts/deploy-production.sh (blocked during market hours)
+- First setup: infra/scripts/setup-production.sh
+- SEBI rule: ALL orders must originate from this machine only
+
 ## What NOT to Do
 
 - Commit .env, API keys, TOTP secrets, credentials
