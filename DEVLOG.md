@@ -56,3 +56,7 @@
 ## 2026-03-16 14:53 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | claude.ai Chat | Claude Sonnet 4.6 | main | feat(engine): EMACrossover — first concrete strategy, live sandbox smoke test passed
 
 ## 2026-03-16 14:57 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | claude.ai Chat | Claude Sonnet 4.6 | main | feat(automation): Telegram /kill wired to engine — SEBI kill switch operational
+
+## 2026-03-16 15:05 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | claude.ai Chat | Claude Sonnet 4.6 | main | fix(backtest-engine): resolve all test failures — sys.path ordering, 655 tests passing
+
+## 2026-03-16 15:20 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | claude.ai Chat | Claude Sonnet 4.6 | main | docs: DEVLOG + CHANGELOG updated for full 2026-03-16 build session
