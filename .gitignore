@@ -56,8 +56,8 @@ backtest_results/
 tick_data/
 
 # === Infra bundled deps (cloned via make setup) ===
-infra/openalgo/.git
-infra/openclaw/.git
+infra/openalgo/.env
+infra/openclaw/.env
 
 # === Tools ===
 .lmstudio/

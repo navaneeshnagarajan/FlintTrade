@@ -24,7 +24,7 @@ if [ ! -f "$OPENALGO_DIR/app.py" ]; then
 fi
 
 # Source OpenAlgo's own .env if present
-[ -f "$OPENALGO_DIR/.env" ] && { set -a; source "$OPENALGO_DIR/.env"; set +a; }
+# OpenAlgo reads its own .env via Python dotenv — do not source in bash
 
 cd "$OPENALGO_DIR"
 
