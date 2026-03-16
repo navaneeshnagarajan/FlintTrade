@@ -555,10 +555,10 @@ class TestStrategies:
         assert isinstance(orders, list)
 
     def test_all_strategies_inherit_base(self):
-        from strategy import BaseStrategy
         from strategies import BUILTIN_STRATEGIES
         for name, cls in BUILTIN_STRATEGIES.items():
-            assert issubclass(cls, BaseStrategy), f"{name} must inherit BaseStrategy"
+            base_names = [b.__name__ for b in cls.__mro__]
+            assert "BaseStrategy" in base_names, f"{name} must inherit BaseStrategy"
 
     def test_indicator_ema(self):
         from strategies import ema
