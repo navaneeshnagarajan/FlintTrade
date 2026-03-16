@@ -1,6 +1,7 @@
 /**
- * OpenAlgo REST API client for the frontend.
+ * OpenAlgo REST API client.
  * Base URL from VITE_OPENALGO_HOST, API key from VITE_OPENALGO_API_KEY.
+ * All responses are unwrapped: { data: X, status: "success" } → X
  */
 
 const BASE = import.meta.env.VITE_OPENALGO_HOST || "http://127.0.0.1:5000";
@@ -13,7 +14,9 @@ async function post(endpoint, extra = {}) {
     body: JSON.stringify({ apikey: API_KEY, ...extra }),
   });
   if (!resp.ok) throw new Error(`API ${endpoint}: HTTP ${resp.status}`);
-  return resp.json();
+  const json = await resp.json();
+  if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
+  return json.data ?? json;
 }
 
 // --- Order APIs ---

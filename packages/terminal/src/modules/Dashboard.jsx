@@ -1,154 +1,248 @@
-import { useState, useEffect } from "react";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { TrendingUp, TrendingDown, Activity, AlertTriangle, Wallet, ShoppingCart } from "lucide-react";
-import useWebSocket from "../hooks/useWebSocket";
-import { getFunds, getPositionbook, getOrderbook } from "../services/api";
+import { useState, useEffect, useCallback } from "react";
+import { TrendingUp, TrendingDown, Wallet, ShoppingCart, Activity, Clock } from "lucide-react";
+import { getFunds, getPositionbook, getOrderbook, getQuotes } from "../services/api";
+
+const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
+const INR0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 const INDICES = [
   { symbol: "NIFTY", exchange: "NSE_INDEX", name: "NIFTY 50" },
   { symbol: "BANKNIFTY", exchange: "NSE_INDEX", name: "BANK NIFTY" },
   { symbol: "SENSEX", exchange: "BSE_INDEX", name: "SENSEX" },
-  { symbol: "FINNIFTY", exchange: "NSE_INDEX", name: "FINNIFTY" },
   { symbol: "INDIA VIX", exchange: "NSE_INDEX", name: "VIX" },
 ];
 
 function IndexCard({ data, name }) {
-  const ltp = data?.ltp ?? 0;
-  const change = data?.ltp && data?.prev_close ? data.ltp - data.prev_close : 0;
-  const changePct = data?.prev_close ? (change / data.prev_close) * 100 : 0;
+  if (!data) {
+    return (
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+        <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">{name}</div>
+        <div className="text-2xl font-bold font-mono text-gray-600">&mdash;</div>
+        <div className="text-sm text-gray-600 mt-1">Loading...</div>
+      </div>
+    );
+  }
+
+  const ltp = data.ltp ?? 0;
+  const prevClose = data.prev_close ?? 0;
+  const change = prevClose > 0 ? ltp - prevClose : 0;
+  const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
   const up = change >= 0;
+  const isVix = name === "VIX";
+  const vixHigh = isVix && ltp > 20;
 
   return (
-    <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
-      <div className="text-xs text-gray-400 mb-1">{name}</div>
-      <div className="text-xl font-bold font-mono">{ltp ? ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"}</div>
-      <div className={`flex items-center gap-1 text-sm mt-1 ${up ? "text-emerald-400" : "text-red-400"}`}>
+    <div className={`bg-gray-900 rounded-xl border p-5 ${vixHigh ? "border-red-500/40" : "border-gray-800"}`}>
+      <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">{name}</div>
+      <div className="text-2xl font-bold font-mono">{ltp > 0 ? INR.format(ltp) : "0.00"}</div>
+      <div className={`flex items-center gap-1.5 text-sm mt-2 ${up ? "text-emerald-400" : "text-red-400"}`}>
         {up ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-        <span>{change >= 0 ? "+" : ""}{change.toFixed(2)}</span>
-        <span>({changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%)</span>
+        <span className="font-mono">{change >= 0 ? "+" : ""}{change.toFixed(2)}</span>
+        <span className="font-mono text-xs">({changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%)</span>
       </div>
-    </div>
-  );
-}
-
-function MetricCard({ icon: Icon, label, value, sub, color = "text-gray-100" }) {
-  return (
-    <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
-      <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
-        <Icon size={14} /> {label}
-      </div>
-      <div className={`text-lg font-bold font-mono ${color}`}>{value}</div>
-      {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
     </div>
   );
 }
 
 export default function Dashboard() {
-  const instruments = INDICES.map((i) => ({ symbol: i.symbol, exchange: i.exchange }));
-  const { ticks } = useWebSocket(instruments, "quote");
+  const [indices, setIndices] = useState({});
+  const [funds, setFunds] = useState(null);
+  const [positions, setPositions] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [orderStats, setOrderStats] = useState(null);
+  const [lastFetch, setLastFetch] = useState(null);
 
-  const [pnl, setPnl] = useState({ realized: 0, unrealized: 0 });
-  const [posCount, setPos] = useState(0);
-  const [orderCounts, setOrders] = useState({ executed: 0, pending: 0, rejected: 0 });
-  const [funds, setFunds] = useState({ available: 0, used: 0, total: 0 });
-  const [equityCurve] = useState(() =>
-    Array.from({ length: 30 }, (_, i) => ({
-      day: `D-${30 - i}`,
-      equity: 1000000 + Math.random() * 50000 - 25000 + i * 1000,
-    }))
-  );
+  const fetchAll = useCallback(async () => {
+    // Fetch indices via REST quotes
+    for (const idx of INDICES) {
+      try {
+        const data = await getQuotes(idx.symbol, idx.exchange);
+        setIndices((prev) => ({ ...prev, [`${idx.exchange}:${idx.symbol}`]: data }));
+      } catch { /* API unreachable */ }
+    }
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const f = await getFunds();
-        setFunds({
-          available: parseFloat(f.available_balance || 0),
-          used: parseFloat(f.used_margin || 0),
-          total: parseFloat(f.total_balance || 0),
-        });
-      } catch { /* */ }
-      try {
-        const pos = await getPositionbook();
-        if (Array.isArray(pos)) {
-          setPos(pos.length);
-          const ur = pos.reduce((s, p) => s + parseFloat(p.pnl || 0), 0);
-          setPnl((prev) => ({ ...prev, unrealized: ur }));
-        }
-      } catch { /* */ }
-      try {
-        const ob = await getOrderbook();
-        if (Array.isArray(ob)) {
-          setOrders({
-            executed: ob.filter((o) => o.status === "complete" || o.status === "COMPLETE").length,
-            pending: ob.filter((o) => o.status === "open" || o.status === "OPEN" || o.status === "pending").length,
-            rejected: ob.filter((o) => o.status === "rejected" || o.status === "REJECTED").length,
-          });
-        }
-      } catch { /* */ }
-    };
-    load();
-    const id = setInterval(load, 15000);
-    return () => clearInterval(id);
+    // Fetch funds
+    try {
+      const f = await getFunds();
+      setFunds(f);
+    } catch { /* */ }
+
+    // Fetch positions
+    try {
+      const p = await getPositionbook();
+      setPositions(Array.isArray(p) ? p : []);
+    } catch { setPositions([]); }
+
+    // Fetch orders
+    try {
+      const ob = await getOrderbook();
+      setOrders(ob?.orders || []);
+      setOrderStats(ob?.statistics || null);
+    } catch { setOrders([]); }
+
+    setLastFetch(new Date());
   }, []);
 
-  const utilPct = funds.total > 0 ? (funds.used / funds.total) * 100 : 0;
+  useEffect(() => {
+    fetchAll();
+    const id = setInterval(fetchAll, 5000);
+    return () => clearInterval(id);
+  }, [fetchAll]);
+
+  const availableCash = parseFloat(funds?.availablecash || 0);
+  const usedMargin = parseFloat(funds?.utiliseddebits || 0);
+  const totalBalance = availableCash + usedMargin;
+  const utilPct = totalBalance > 0 ? (usedMargin / totalBalance) * 100 : 0;
+  const totalPnl = positions.reduce((s, p) => s + parseFloat(p.pnl || 0), 0);
 
   return (
-    <div className="space-y-4">
-      {/* Market overview */}
-      <div className="grid grid-cols-5 gap-3">
+    <div className="space-y-6">
+      {/* Market indices */}
+      <div className="grid grid-cols-4 gap-4">
         {INDICES.map((idx) => (
-          <IndexCard key={idx.symbol} data={ticks[`${idx.exchange}:${idx.symbol}`]} name={idx.name} />
+          <IndexCard key={idx.symbol} data={indices[`${idx.exchange}:${idx.symbol}`]} name={idx.name} />
         ))}
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
-        <MetricCard
-          icon={TrendingUp}
-          label="Today's P&L"
-          value={`${(pnl.realized + pnl.unrealized) >= 0 ? "+" : ""}${(pnl.realized + pnl.unrealized).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}
-          sub={`Realized: ${pnl.realized.toFixed(0)} | Unrealized: ${pnl.unrealized.toFixed(0)}`}
-          color={(pnl.realized + pnl.unrealized) >= 0 ? "text-emerald-400" : "text-red-400"}
-        />
-        <MetricCard icon={Activity} label="Active Positions" value={posCount} sub={`Margin: ${funds.used.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} />
-        <MetricCard icon={ShoppingCart} label="Orders" value={orderCounts.executed} sub={`Pending: ${orderCounts.pending} | Rejected: ${orderCounts.rejected}`} />
-        <MetricCard icon={Wallet} label="Funds Available" value={funds.available.toLocaleString("en-IN", { maximumFractionDigits: 0 })} />
-      </div>
-
-      {/* Equity curve + Fund utilization */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-2 bg-gray-900 rounded-lg border border-gray-800 p-4">
-          <div className="text-sm text-gray-400 mb-2">Equity Curve (30 days)</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={equityCurve}>
-              <defs>
-                <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="day" tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
-              <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }} />
-              <Area type="monotone" dataKey="equity" stroke="#22c55e" fill="url(#eqGrad)" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
+      {/* Account metrics */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide mb-3">
+            <Wallet size={14} /> Available Balance
+          </div>
+          <div className="text-3xl font-bold font-mono text-emerald-400">
+            {funds ? `₹${INR0.format(availableCash)}` : "—"}
+          </div>
         </div>
 
-        <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 flex flex-col justify-between">
-          <div>
-            <div className="text-sm text-gray-400 mb-3">Fund Utilization</div>
-            <div className="text-2xl font-bold font-mono">{utilPct.toFixed(1)}%</div>
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide mb-3">
+            <Activity size={14} /> Used Margin
           </div>
-          <div className="w-full bg-gray-800 rounded-full h-3 mt-4">
+          <div className="text-3xl font-bold font-mono text-yellow-400">
+            {funds ? `₹${INR0.format(usedMargin)}` : "—"}
+          </div>
+          <div className="w-full bg-gray-800 rounded-full h-1.5 mt-3">
             <div
-              className={`h-3 rounded-full transition-all ${utilPct > 80 ? "bg-red-500" : utilPct > 50 ? "bg-yellow-500" : "bg-emerald-500"}`}
+              className={`h-1.5 rounded-full transition-all ${utilPct > 80 ? "bg-red-500" : utilPct > 50 ? "bg-yellow-500" : "bg-emerald-500"}`}
               style={{ width: `${Math.min(utilPct, 100)}%` }}
             />
           </div>
-          <div className="text-xs text-gray-500 mt-2">Used: {funds.used.toLocaleString()} / {funds.total.toLocaleString()}</div>
+          <div className="text-xs text-gray-600 mt-1">{utilPct.toFixed(1)}% utilized</div>
         </div>
+
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide mb-3">
+            <TrendingUp size={14} /> Today's P&L
+          </div>
+          <div className={`text-3xl font-bold font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {totalPnl !== 0 ? `${totalPnl >= 0 ? "+" : ""}₹${INR0.format(Math.abs(totalPnl))}` : "₹0"}
+          </div>
+          <div className="text-xs text-gray-600 mt-1">{positions.length} position{positions.length !== 1 ? "s" : ""}</div>
+        </div>
+
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+          <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide mb-3">
+            <ShoppingCart size={14} /> Orders
+          </div>
+          <div className="text-3xl font-bold font-mono">
+            {orderStats ? orderStats.total_completed_orders : orders.length}
+          </div>
+          <div className="text-xs text-gray-600 mt-1">
+            {orderStats
+              ? `Open: ${orderStats.total_open_orders} · Rejected: ${orderStats.total_rejected_orders}`
+              : "No orders today"}
+          </div>
+        </div>
+      </div>
+
+      {/* Positions table */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+          <h3 className="text-sm text-gray-400 uppercase tracking-wide">Open Positions</h3>
+          {lastFetch && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-600">
+              <Clock size={10} />
+              {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
+            </div>
+          )}
+        </div>
+        {positions.length === 0 ? (
+          <div className="px-5 py-10 text-center text-gray-600 text-sm">No open positions</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-500 uppercase tracking-wide">
+                <th className="px-5 py-3 text-left">Symbol</th>
+                <th className="px-5 py-3 text-center">Exchange</th>
+                <th className="px-5 py-3 text-center">Product</th>
+                <th className="px-5 py-3 text-right">Qty</th>
+                <th className="px-5 py-3 text-right">Avg Price</th>
+                <th className="px-5 py-3 text-right">LTP</th>
+                <th className="px-5 py-3 text-right">P&L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((p, i) => {
+                const pnl = parseFloat(p.pnl || 0);
+                return (
+                  <tr key={i} className="border-t border-gray-800/50 hover:bg-gray-800/30">
+                    <td className="px-5 py-2.5 font-medium font-mono">{p.symbol}</td>
+                    <td className="px-5 py-2.5 text-center text-gray-400">{p.exchange}</td>
+                    <td className="px-5 py-2.5 text-center text-gray-400">{p.product}</td>
+                    <td className="px-5 py-2.5 text-right font-mono">{p.quantity}</td>
+                    <td className="px-5 py-2.5 text-right font-mono">{INR.format(p.average_price)}</td>
+                    <td className="px-5 py-2.5 text-right font-mono">{INR.format(p.ltp)}</td>
+                    <td className={`px-5 py-2.5 text-right font-mono font-semibold ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {pnl >= 0 ? "+" : ""}₹{INR0.format(Math.abs(pnl))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Recent orders */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800">
+        <div className="px-5 py-3 border-b border-gray-800">
+          <h3 className="text-sm text-gray-400 uppercase tracking-wide">Recent Orders</h3>
+        </div>
+        {orders.length === 0 ? (
+          <div className="px-5 py-10 text-center text-gray-600 text-sm">No orders today</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-500 uppercase tracking-wide">
+                <th className="px-5 py-3 text-left">Time</th>
+                <th className="px-5 py-3 text-left">Symbol</th>
+                <th className="px-5 py-3 text-center">Action</th>
+                <th className="px-5 py-3 text-right">Qty</th>
+                <th className="px-5 py-3 text-right">Price</th>
+                <th className="px-5 py-3 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o, i) => (
+                <tr key={i} className="border-t border-gray-800/50 hover:bg-gray-800/30">
+                  <td className="px-5 py-2.5 text-gray-400 text-xs font-mono">{o.timestamp || "—"}</td>
+                  <td className="px-5 py-2.5 font-medium font-mono">{o.symbol}</td>
+                  <td className={`px-5 py-2.5 text-center font-semibold ${o.action === "BUY" ? "text-emerald-400" : "text-red-400"}`}>{o.action}</td>
+                  <td className="px-5 py-2.5 text-right font-mono">{o.quantity}</td>
+                  <td className="px-5 py-2.5 text-right font-mono">{o.price || "MKT"}</td>
+                  <td className="px-5 py-2.5 text-center">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      o.order_status === "complete" ? "bg-emerald-500/10 text-emerald-400" :
+                      o.order_status === "rejected" ? "bg-red-500/10 text-red-400" :
+                      "bg-yellow-500/10 text-yellow-400"
+                    }`}>{o.order_status || o.status || "—"}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

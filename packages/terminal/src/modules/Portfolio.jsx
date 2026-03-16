@@ -26,8 +26,14 @@ export default function Portfolio() {
         getPositionbook(), getOrderbook(), getTradebook(), getHoldings(), getFunds(),
       ]);
       if (p.status === "fulfilled" && Array.isArray(p.value)) setPositions(p.value);
-      if (o.status === "fulfilled" && Array.isArray(o.value)) setOrders(o.value);
-      if (t.status === "fulfilled" && Array.isArray(t.value)) setTrades(t.value);
+      if (o.status === "fulfilled") {
+        const ob = o.value;
+        setOrders(ob?.orders || (Array.isArray(ob) ? ob : []));
+      }
+      if (t.status === "fulfilled") {
+        const tb = t.value;
+        setTrades(tb?.trades || (Array.isArray(tb) ? tb : []));
+      }
       if (h.status === "fulfilled" && Array.isArray(h.value)) setHoldings(h.value);
       if (f.status === "fulfilled") setFunds(f.value);
     } catch { /* */ }
@@ -192,16 +198,16 @@ export default function Portfolio() {
       {tab === 4 && (
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-            <div className="text-xs text-gray-400 mb-1">Available Margin</div>
-            <div className="text-xl font-bold font-mono text-emerald-400">{fmtINR(funds.available_balance)}</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Available Cash</div>
+            <div className="text-xl font-bold font-mono text-emerald-400">₹{fmtINR(funds.availablecash)}</div>
           </div>
-          <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-            <div className="text-xs text-gray-400 mb-1">Used Margin</div>
-            <div className="text-xl font-bold font-mono text-yellow-400">{fmtINR(funds.used_margin)}</div>
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+            <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Used Margin</div>
+            <div className="text-xl font-bold font-mono text-yellow-400">₹{fmtINR(funds.utiliseddebits)}</div>
           </div>
-          <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-            <div className="text-xs text-gray-400 mb-1">Total Balance</div>
-            <div className="text-xl font-bold font-mono">{fmtINR(funds.total_balance)}</div>
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+            <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Collateral</div>
+            <div className="text-xl font-bold font-mono">₹{fmtINR(funds.collateral)}</div>
           </div>
         </div>
       )}
