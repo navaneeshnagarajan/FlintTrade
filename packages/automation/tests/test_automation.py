@@ -365,6 +365,127 @@ class TestTelegramBot:
 
 
 # ======================================================================
+# Telegram Bot — Wired Kill Switch (SEBI-critical)
+# ======================================================================
+
+
+class TestTelegramKillSwitch:
+    """Test the wired /kill command — safety, orders, scheduler, audit."""
+
+    def test_kill_switch_activates_safety(self):
+        from packages.automation.src.telegram_bot import TelegramBot
+
+        mock_safety = MagicMock()
+        mock_safety.l5_kill = MagicMock()
+        bot = TelegramBot(safety_system=mock_safety)
+        result = bot.handle_command("/kill", username="test_user")
+
+        mock_safety.l5_kill.activate.assert_called_once()
+        assert "KILL" in result.response
+
+    def test_kill_switch_cancels_orders(self):
+        from packages.automation.src.telegram_bot import TelegramBot
+
+        mock_client = MagicMock()
+        # Make cancel_all_orders return a non-coroutine (sync mock)
+        mock_client.cancel_all_orders = MagicMock(return_value=None)
+        mock_client.close_position = MagicMock(return_value=None)
+        mock_router = MagicMock()
+        mock_router.client = mock_client
+
+        bot = TelegramBot(router=mock_router)
+        bot.handle_command("/kill")
+
+        mock_client.cancel_all_orders.assert_called_once()
+
+    def test_kill_switch_stops_scheduler(self):
+        from packages.automation.src.telegram_bot import TelegramBot
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.stop_all = MagicMock(return_value=None)
+
+        bot = TelegramBot(scheduler=mock_scheduler)
+        bot.handle_command("/kill")
+
+        mock_scheduler.stop_all.assert_called_once()
+
+    def test_kill_switch_logs_audit(self):
+        from packages.automation.src.telegram_bot import TelegramBot
+
+        mock_audit = MagicMock()
+        bot = TelegramBot(audit_logger=mock_audit)
+        bot.handle_command("/kill", username="admin")
+
+        mock_audit.log_event.assert_called_once_with(
+            "KILL_SWITCH",
+            source="telegram",
+            triggered_by="admin",
+        )
+
+    def test_kill_switch_full_response(self):
+        from packages.automation.src.telegram_bot import TelegramBot
+
+        mock_safety = MagicMock()
+        mock_safety.l5_kill = MagicMock()
+        mock_client = MagicMock()
+        mock_client.cancel_all_orders = MagicMock(return_value=None)
+        mock_client.close_position = MagicMock(return_value=None)
+        mock_router = MagicMock()
+        mock_router.client = mock_client
+        mock_scheduler = MagicMock()
+        mock_scheduler.stop_all = MagicMock(return_value=None)
+        mock_audit = MagicMock()
+
+        bot = TelegramBot(
+            router=mock_router,
+            safety_system=mock_safety,
+            scheduler=mock_scheduler,
+            audit_logger=mock_audit,
+        )
+        result = bot.handle_command("/kill")
+
+        assert "KILL SWITCH ACTIVATED" in result.response
+        assert "All orders cancelled" in result.response
+        assert "All positions closed" in result.response
+        assert "All strategies stopped" in result.response
+
+    def test_status_with_wired_router(self):
+        from packages.automation.src.telegram_bot import TelegramBot
+
+        # Mock a router with sync positionbook/funds for testing
+        mock_client = MagicMock()
+        mock_client.positionbook = MagicMock(return_value=[])
+        mock_client.funds = MagicMock()
+        mock_client.funds.return_value = MagicMock(available_balance="100000")
+        mock_router = MagicMock()
+        mock_router.client = mock_client
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.status.return_value = {
+            "EMA_9_21": {"state": "ACTIVE", "exchange": "NSE", "tick_count": 42},
+        }
+
+        bot = TelegramBot(router=mock_router, scheduler=mock_scheduler)
+        result = bot.handle_command("/status")
+
+        assert "EMA_9_21" in result.response
+        assert "NSE" in result.response
+        assert "ACTIVE" in result.response
+
+    def test_kill_fallback_to_legacy_handler(self):
+        """If no safety_system wired, falls back to legacy handler."""
+        from packages.automation.src.telegram_bot import TelegramBot
+
+        kill_fn = MagicMock()
+        bot = TelegramBot()
+        bot.set_handler("kill_switch", kill_fn)
+        result = bot.handle_command("/kill")
+
+        kill_fn.assert_called_once()
+        assert "KILL" in result.response
+
+
+# ======================================================================
 # OpenClaw Bridge — skill registration
 # ======================================================================
 

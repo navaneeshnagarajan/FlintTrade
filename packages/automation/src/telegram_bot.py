@@ -1,10 +1,10 @@
 """Telegram bot for trading alerts and control commands.
 
 Commands:
-  /status   — active positions, day P&L, system health
-  /positions — detailed position list with Greeks
+  /status   — active positions, funds, running strategies
+  /positions — detailed position list with P&L
   /orders   — pending orders
-  /kill     — emergency kill switch (cancel all + close all)
+  /kill     — emergency kill switch (cancel all + close all + stop strategies)
   /pause    — pause a strategy
   /resume   — resume a strategy
   /pnl      — today's P&L breakdown
@@ -16,6 +16,7 @@ Uses python-telegram-bot library.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -79,6 +80,11 @@ def parse_command(text: str) -> tuple[str, list[str]]:
     return (cmd, args)
 
 
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+
 def format_positions(positions: list[dict[str, Any]]) -> str:
     """Format position data into a readable Telegram message."""
     if not positions:
@@ -134,25 +140,45 @@ def format_health(health_data: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Command handlers (callback-based, pluggable)
+# TelegramBot
 # ---------------------------------------------------------------------------
 
 
 class TelegramBot:
     """Telegram bot with trading commands.
 
-    Usage::
+    Can be used in two modes:
+
+    1. Legacy callback mode (backwards-compatible)::
 
         bot = TelegramBot()
-        bot.set_handler("get_positions", lambda: client.positionbook())
-        bot.set_handler("get_orders", lambda: client.orderbook())
-        bot.set_handler("kill_switch", lambda: engine.kill_switch.activate("Telegram /kill"))
-        bot.set_handler("get_health", lambda: {"openalgo_connected": True, ...})
-        bot.start()  # blocking — runs the Telegram polling loop
+        bot.set_handler("kill_switch", lambda: engine.kill_switch.activate(...))
+        bot.handle_command("/kill")
+
+    2. Wired mode (production — connects to engine)::
+
+        bot = TelegramBot(
+            router=router,
+            safety_system=safety,
+            scheduler=scheduler,
+            audit_logger=auditor,
+        )
+        bot.handle_command("/kill")  # activates real kill switch
     """
 
-    def __init__(self, config: BotConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: BotConfig | None = None,
+        router: Any = None,
+        safety_system: Any = None,
+        scheduler: Any = None,
+        audit_logger: Any = None,
+    ) -> None:
         self.config = config or BotConfig.from_env()
+        self.router = router
+        self.safety = safety_system
+        self.scheduler = scheduler
+        self.audit = audit_logger
         self._handlers: dict[str, Callable[..., Any]] = {}
         self._command_log: list[CommandResult] = []
 
@@ -161,7 +187,7 @@ class TelegramBot:
         return list(self._command_log)
 
     def set_handler(self, name: str, handler: Callable[..., Any]) -> None:
-        """Register a handler for a bot function.
+        """Register a handler for a bot function (legacy callback mode).
 
         Expected handlers:
         - get_positions: () -> list[dict]
@@ -180,7 +206,7 @@ class TelegramBot:
             return True  # No restriction if not configured
         return str(chat_id) == str(self.config.chat_id)
 
-    def handle_command(self, text: str, chat_id: str | int = "") -> CommandResult:
+    def handle_command(self, text: str, chat_id: str | int = "", username: str = "") -> CommandResult:
         """Process a command and return a response.
 
         Can be used standalone without python-telegram-bot (e.g., for testing).
@@ -206,7 +232,7 @@ class TelegramBot:
             elif cmd == "orders":
                 response = self._cmd_orders()
             elif cmd == "kill":
-                response = self._cmd_kill()
+                response = self._cmd_kill(username=username)
             elif cmd == "pause":
                 response = self._cmd_pause(args)
             elif cmd == "resume":
@@ -226,17 +252,148 @@ class TelegramBot:
         self._command_log.append(result)
         return result
 
-    # -- Command implementations --
+    # ------------------------------------------------------------------
+    # /kill — SEBI emergency kill switch
+    # ------------------------------------------------------------------
+
+    def _cmd_kill(self, username: str = "") -> str:
+        """Activate kill switch: safety → cancel orders → close positions → stop strategies."""
+        now = datetime.now(IST).strftime("%H:%M:%S IST")
+        errors: list[str] = []
+
+        # 1. Activate SafetySystem kill switch
+        if self.safety and hasattr(self.safety, "l5_kill"):
+            self.safety.l5_kill.activate(f"Telegram /kill by {username or 'operator'}")
+        elif self._handlers.get("kill_switch"):
+            self._handlers["kill_switch"]()
+        else:
+            errors.append("Safety system not configured")
+
+        # 2. Cancel all orders via OpenAlgo
+        if self.router and self.router.client:
+            try:
+                coro = self.router.client.cancel_all_orders(strategy="Flint")
+                if asyncio.iscoroutine(coro):
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(coro)
+                    else:
+                        loop.run_until_complete(coro)
+            except Exception as exc:
+                errors.append(f"cancel_all_orders: {exc}")
+                logger.error("Kill switch cancel_all_orders failed: %s", exc)
+
+        # 3. Close all positions via OpenAlgo
+        if self.router and self.router.client:
+            try:
+                coro = self.router.client.close_position(strategy="Flint")
+                if asyncio.iscoroutine(coro):
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(coro)
+                    else:
+                        loop.run_until_complete(coro)
+            except Exception as exc:
+                errors.append(f"close_position: {exc}")
+                logger.error("Kill switch close_position failed: %s", exc)
+
+        # 4. Stop all strategies
+        if self.scheduler and hasattr(self.scheduler, "stop_all"):
+            try:
+                coro = self.scheduler.stop_all()
+                if asyncio.iscoroutine(coro):
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(coro)
+                    else:
+                        loop.run_until_complete(coro)
+            except Exception as exc:
+                errors.append(f"stop_all: {exc}")
+                logger.error("Kill switch stop_all failed: %s", exc)
+
+        # 5. Audit log
+        if self.audit:
+            self.audit.log_event(
+                "KILL_SWITCH",
+                source="telegram",
+                triggered_by=username or "operator",
+            )
+
+        logger.critical("KILL SWITCH activated via Telegram by %s", username or "operator")
+
+        if errors:
+            error_lines = "\n".join(f"⚠️ {e}" for e in errors)
+            return (
+                f"🔴 KILL SWITCH ACTIVATED\n"
+                f"⚠️ Some actions had errors:\n{error_lines}\n"
+                f"⏱ {now}"
+            )
+
+        return (
+            f"🔴 KILL SWITCH ACTIVATED\n"
+            f"✅ All orders cancelled\n"
+            f"✅ All positions closed\n"
+            f"✅ All strategies stopped\n"
+            f"⏱ {now}"
+        )
+
+    # ------------------------------------------------------------------
+    # /status — live positions, funds, strategies
+    # ------------------------------------------------------------------
 
     def _cmd_status(self) -> str:
-        handler = self._handlers.get("get_positions")
-        if not handler:
-            return "Position handler not configured"
-        positions = handler()
-        return format_positions(positions if isinstance(positions, list) else [])
+        """Return live status: positions, funds, running strategies."""
+        lines: list[str] = []
+
+        # Try wired mode first
+        if self.router and self.router.client:
+            try:
+                # Positions — async client, try to get result
+                positions = self._run_async(self.router.client.positionbook())
+                if positions:
+                    lines.append(format_positions(
+                        [p.model_dump() if hasattr(p, "model_dump") else {"symbol": p.symbol, "quantity": p.quantity, "pnl": p.pnl} for p in positions]
+                    ))
+                else:
+                    lines.append("No open positions.")
+            except Exception:
+                lines.append("No open positions.")
+
+            try:
+                funds = self._run_async(self.router.client.funds())
+                lines.append(f"\n*Funds:* ₹{funds.available_balance} available")
+            except Exception:
+                pass
+
+        elif self._handlers.get("get_positions"):
+            # Legacy callback mode
+            positions = self._handlers["get_positions"]()
+            lines.append(format_positions(positions if isinstance(positions, list) else []))
+        else:
+            lines.append("Position handler not configured")
+
+        # Strategy status
+        if self.scheduler and hasattr(self.scheduler, "status"):
+            status = self.scheduler.status()
+            if status:
+                lines.append("\n*Strategies:*")
+                for name, info in status.items():
+                    state = info.get("state", "?")
+                    exch = info.get("exchange", "?")
+                    lines.append(f"• {name} ({exch}): {state}")
+
+        return "\n".join(lines) if lines else "No data available."
+
+    # ------------------------------------------------------------------
+    # /positions — detailed position list
+    # ------------------------------------------------------------------
 
     def _cmd_positions(self) -> str:
         return self._cmd_status()
+
+    # ------------------------------------------------------------------
+    # /orders — pending orders
+    # ------------------------------------------------------------------
 
     def _cmd_orders(self) -> str:
         handler = self._handlers.get("get_orders")
@@ -245,12 +402,9 @@ class TelegramBot:
         orders = handler()
         return format_orders(orders if isinstance(orders, list) else [])
 
-    def _cmd_kill(self) -> str:
-        handler = self._handlers.get("kill_switch")
-        if not handler:
-            return "Kill switch handler not configured"
-        handler()
-        return "🚨 KILL SWITCH ACTIVATED — All orders cancelled, positions closing."
+    # ------------------------------------------------------------------
+    # /pause, /resume
+    # ------------------------------------------------------------------
 
     def _cmd_pause(self, args: list[str]) -> str:
         if not args:
@@ -270,6 +424,10 @@ class TelegramBot:
         handler(args[0])
         return f"▶ Strategy '{args[0]}' resumed."
 
+    # ------------------------------------------------------------------
+    # /pnl
+    # ------------------------------------------------------------------
+
     def _cmd_pnl(self) -> str:
         handler = self._handlers.get("get_pnl")
         if not handler:
@@ -282,6 +440,10 @@ class TelegramBot:
             return f"*Today's P&L:*\nTotal: {total:+.0f}\nTrades: {trades}\nWins: {wins}"
         return str(data)
 
+    # ------------------------------------------------------------------
+    # /health
+    # ------------------------------------------------------------------
+
     def _cmd_health(self) -> str:
         handler = self._handlers.get("get_health")
         if not handler:
@@ -293,6 +455,24 @@ class TelegramBot:
                 "disk_free_gb": disk.free / (1024 ** 3),
             })
         return format_health(handler())
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_async(coro: Any) -> Any:
+        """Run an async coroutine from sync context."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context — create a future
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(asyncio.run, coro).result(timeout=10)
+            return loop.run_until_complete(coro)
+        except Exception:
+            return asyncio.run(coro)
 
     # ------------------------------------------------------------------
     # Send message (used by alerter)
@@ -339,7 +519,8 @@ class TelegramBot:
             if not update.message or not update.message.text:
                 return
             chat_id = update.message.chat_id
-            result = self.handle_command(update.message.text, chat_id)
+            username = update.effective_user.username if update.effective_user else ""
+            result = self.handle_command(update.message.text, chat_id, username=username)
             await update.message.reply_text(result.response, parse_mode="Markdown")
 
         for cmd_name in ("status", "positions", "orders", "kill", "pause", "resume", "pnl", "health"):
