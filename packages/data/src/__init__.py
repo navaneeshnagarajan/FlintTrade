@@ -1,6 +1,6 @@
 """FlintTrade data package — tick capture, audit logs, trade logging, DuckDB storage."""
 
-__version__ = "0.1.0-dev"
+__version__ = "0.1.0-alpha"
 
 from .audit_logger import AuditLogger
 from .storage import StorageManager

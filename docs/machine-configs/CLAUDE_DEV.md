@@ -1,6 +1,6 @@
-# Machine: nitro-i5-13420H-RTX5050 — PRIMARY BUILD
+# Machine: dev-machine — PRIMARY BUILD
 
-Specs: i5-13420H, RTX 5050 8GB, 16GB RAM, Fedora KDE / Win11
+Specs: Configure your own dev machine (GPU recommended for AI package)
 
 Tools: VS Code + Claude Code (builds), GitHub Desktop (commits)
 
@@ -11,4 +11,4 @@ make test && make lint
 # commit via GitHub Desktop → PR to dev
 ```
 
-DEVLOG: `## YYYY-MM-DD HH:MM IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | branch | summary`
+DEVLOG: `## YYYY-MM-DD HH:MM IST | your-dev-hostname | @yourusername | VS Code | Claude Code (claude-opus-4-6) | branch | summary`

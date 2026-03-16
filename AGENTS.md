@@ -1,7 +1,7 @@
 # FlintTrade — Agent Rules & Codebase Map
 
 > This file is read by Antigravity, Claude Code, and any AI agent working on this repo.
-> Repo: github.com/navaneeshnagarajan/FlintTrade | License: AGPL-3.0 | Version: 0.6.0-dev
+> Repo: github.com/navaneeshnagarajan/FlintTrade | License: AGPL-3.0 | Version: 0.1.0-alpha
 
 ## What is FlintTrade?
 

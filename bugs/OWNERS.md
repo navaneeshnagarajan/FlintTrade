@@ -2,10 +2,10 @@
 
 | File | Writer | Machine |
 |---|---|---|
-| live.md | Production server | ubuntu-i3-9350KF-RX6600XT |
-| in_progress.md | Build machine | nitro-i5-13420H-RTX5050 |
-| in_testing.md | Test machine | mac-m4-16gb |
-| resolved.md | Production server | ubuntu-i3-9350KF-RX6600XT |
+| live.md | Production server | your-production-server |
+| in_progress.md | Build machine | your-dev-machine |
+| in_testing.md | Test machine | your-test-machine |
+| resolved.md | Production server | your-production-server |
 
 Format: `### BUG-{number} | {severity} | {package} | {date}`
 Lifecycle: live → in_progress → in_testing → resolved

@@ -614,7 +614,7 @@ class TestPackageExports:
     def test_version(self):
         init_path = os.path.join(os.path.dirname(__file__), '..', 'src', '__init__.py')
         content = open(init_path).read()
-        assert '__version__ = "0.1.0-dev"' in content
+        assert '__version__ = "0.1.0-alpha"' in content
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

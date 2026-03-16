@@ -1,6 +1,6 @@
 """FlintTrade core package — config, client, models, exceptions."""
 
-__version__ = "0.1.0-dev"
+__version__ = "0.1.0-alpha"
 
 from .config import Settings
 from .exceptions import (

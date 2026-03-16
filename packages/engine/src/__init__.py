@@ -1,6 +1,6 @@
 """FlintTrade engine package — strategy execution, safety, routing, scheduling."""
 
-__version__ = "0.1.0-dev"
+__version__ = "0.1.0-alpha"
 
 from .router import OrderRouter, RoutingDecision, StrategyRouteConfig
 from .safety import (

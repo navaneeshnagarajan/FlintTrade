@@ -508,7 +508,7 @@ class TestPackageExports:
     def test_package_version(self):
         from packages.core.src import __version__
 
-        assert __version__ == "0.1.0-dev"
+        assert __version__ == "0.1.0-alpha"
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

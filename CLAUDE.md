@@ -1,7 +1,7 @@
 # FlintTrade — Master Context
 
 > Open-source algo and manual trading platform. One clone = the whole house.
-> Repo: github.com/navaneeshnagarajan/FlintTrade | License: AGPL-3.0 | Version: 0.6.0-dev
+> Repo: github.com/navaneeshnagarajan/FlintTrade | License: AGPL-3.0 | Version: 0.1.0-alpha
 
 ## What is FlintTrade?
 

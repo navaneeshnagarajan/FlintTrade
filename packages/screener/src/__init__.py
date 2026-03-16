@@ -1,6 +1,6 @@
 """FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis."""
 
-__version__ = "0.1.0-dev"
+__version__ = "0.1.0-alpha"
 
 from .futures_quadrant import FuturesQuadrant, FuturesSnapshot, Quadrant, QuadrantResult
 from .greeks import OptionPosition, PortfolioGreeks, PortfolioGreeksResult, PositionGreeks

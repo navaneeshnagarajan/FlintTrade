@@ -1,6 +1,6 @@
-# Machine: ubuntu-i3-9350KF-RX6600XT — PRODUCTION ONLY
+# Machine: production-server — PRODUCTION ONLY
 
-Specs: i3-9350KF, RX 6600 XT 8GB, 32GB RAM, 512GB NVMe + 5TB HDD, Ubuntu 24.04 LTS
+Specs: Configure your own production server (Linux recommended, 16GB+ RAM)
 
 ## DEPLOY FREEZE: 9:15-3:30 IST. NO deploys during market hours.
 ## Maintenance: 3:45-6:00 PM IST
@@ -9,4 +9,4 @@ Specs: i3-9350KF, RX 6600 XT 8GB, 32GB RAM, 512GB NVMe + 5TB HDD, Ubuntu 24.04 L
 cd ~/FlintTrade && git checkout main && git pull && make deploy
 ```
 
-DEVLOG: `## YYYY-MM-DD HH:MM IST | ubuntu-i3-9350KF-RX6600XT | @navaneeshnagarajan | Terminal | Manual | branch | summary`
+DEVLOG: `## YYYY-MM-DD HH:MM IST | your-server-hostname | @yourusername | Terminal | Manual | branch | summary`

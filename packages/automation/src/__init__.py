@@ -1,6 +1,6 @@
 """FlintTrade automation package — TOTP login, cron, Telegram, OpenClaw, post-market."""
 
-__version__ = "0.1.0-dev"
+__version__ = "0.1.0-alpha"
 
 from .cron_manager import CronManager, JobDefinition, JobHistory, JobStatus
 from .openclaw_bridge import OpenClawBridge, OpenClawConfig, Skill, SkillResult

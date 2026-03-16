@@ -4,7 +4,7 @@
 
 [project]
 name = "FlintTrade"
-version = "0.6.0-dev"
+version = "0.1.0-alpha"
 description = "Open-source algorithmic and manual trading platform built on OpenAlgo"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"

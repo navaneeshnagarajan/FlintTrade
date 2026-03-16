@@ -1,6 +1,6 @@
 """FlintTrade integration package — webhooks, flow builder, alerting."""
 
-__version__ = "0.1.0-dev"
+__version__ = "0.1.0-alpha"
 
 from .alerter import Alert, AlertChannel, Alerter, AlertType
 from .chartink import ChartInkConfig, ChartInkScanResult, ChartInkWebhook

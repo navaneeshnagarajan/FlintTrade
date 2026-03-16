@@ -32,25 +32,22 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | Version | Status | Meaning |
 |---|---|---|
 | 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
-| 0.1.0-dev | Done | Core package — async OpenAlgo client, 39 endpoints |
-| 0.2.0-dev | Done | Backend packages — engine, data, historical, screener, ai, automation, ditto |
-| 0.3.0-dev | Done | React UI — terminal (9 modules), dashboard, backtest |
-| 0.4.0-dev | Done | Strategy execution — StrategyRunner, EMACrossover, E2E order flow |
-| 0.5.0-dev | Done | Automation + kill switch — cron jobs, Telegram /kill, SEBI compliance |
-| 0.6.0-dev | **CURRENT** | Docker + cross-platform — Windows/macOS/Linux/Pi support |
-| 0.7.0 | Next | All packages verified end-to-end, live trading tested |
-| 0.8.0 | Planned | Mac + Antigravity test suite, OpenAlgo subtree pulled |
-| 0.9.0 | Planned | First community contributor PR merged |
+| 0.1.0-alpha | **CURRENT** | All 13 packages built, 662 tests passing, Docker |
+| 0.1.0-beta | Next | All packages verified end-to-end, live trading tested |
+| 0.1.0-rc.1 | Planned | Release candidate — community feedback incorporated |
+| 0.1.0 | Planned | First stable release |
+| 0.2.0 | Planned | Mac + Antigravity test suite, OpenAlgo subtree pulled |
 | 1.0.0 | Planned | Full production release, all platforms tested |
 
+**Pre-release progression:** `alpha` → `beta` → `rc.1` → stable
 **Version bumps:**
 - Update `VERSION` file
 - Update `CHANGELOG.md`
-- Tag: `git tag v0.6.0 && git push --tags`
+- Tag: `git tag -a v0.1.0-alpha -m "Foundation complete"`
 - GitHub Release with changelog summary
 
-**Patch versions (0.6.1, 0.6.2):** bug fixes within a release.
-**Minor versions (0.7.0, 0.8.0):** new package/feature added.
+**Patch versions (0.1.1, 0.1.2):** bug fixes within a release.
+**Minor versions (0.2.0, 0.3.0):** new package/feature added.
 **Major version (1.0.0):** full platform ready for production.
 
 ## Pre-release phase (v0.x — current)

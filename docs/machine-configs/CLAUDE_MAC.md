@@ -1,6 +1,6 @@
-# Machine: mac-m4-16gb — TESTING
+# Machine: test-machine — TESTING
 
-Specs: Apple M4, 16GB unified memory, 256GB SSD, macOS
+Specs: Configure your own test machine (macOS, Linux, or Windows)
 
 Tools: VS Code + Antigravity (tests), GitHub Desktop (commits), Claude Desktop (Cowork for bulk tasks)
 
@@ -11,4 +11,4 @@ git checkout dev && git pull
 # When stable: PR dev → main (during maintenance window)
 ```
 
-DEVLOG: `## YYYY-MM-DD HH:MM IST | mac-m4-16gb | @navaneeshnagarajan | Antigravity | Antigravity/Tester (gemini-2.5-pro) | branch | summary`
+DEVLOG: `## YYYY-MM-DD HH:MM IST | your-test-hostname | @yourusername | Antigravity | Antigravity/Tester (gemini-2.5-pro) | branch | summary`

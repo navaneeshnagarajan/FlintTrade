@@ -1,6 +1,6 @@
 """FlintTrade backtest-engine package — simulation, metrics, optimization, strategies."""
 
-__version__ = "0.1.0-dev"
+__version__ = "0.1.0-alpha"
 
 try:
     from .data_connector import (

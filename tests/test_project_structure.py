@@ -16,4 +16,6 @@ def test_packages():
 def test_version():
     with open(os.path.join(ROOT, "VERSION")) as f:
         v = f.read().strip()
-    assert len(v.replace("-dev","").split(".")) == 3
+    # Strip pre-release suffix (-dev, -alpha, -beta, -rc.N) then check 3-part semver
+    base = v.split("-")[0]
+    assert len(base.split(".")) == 3
