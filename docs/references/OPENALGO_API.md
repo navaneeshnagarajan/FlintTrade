@@ -4,6 +4,11 @@
 > Full docs: https://docs.openalgo.in/api-documentation/v1
 > FlintTrade communicates with OpenAlgo ONLY through these endpoints.
 
+## OpenAlgo Version
+
+This reference is for OpenAlgo v2.0.0.1 (released Feb 24, 2026).
+Run `git subtree pull` in infra/openalgo/ to stay current.
+
 ## Authentication
 
 Every request requires an API key in the JSON body:
@@ -264,6 +269,54 @@ OpenAlgo uses unified symbols across all brokers:
 | Field | Values |
 |---|---|
 | action | `BUY`, `SELL` |
-| exchange | `NSE`, `BSE`, `NFO`, `BFO`, `MCX`, `CDS` |
+| exchange | `NSE`, `BSE`, `NFO`, `BFO`, `MCX`, `CDS`, `BCD`, `NCDEX`, `DELTA` |
 | pricetype | `MARKET`, `LIMIT`, `SL`, `SL-M` |
 | product | `MIS` (intraday), `CNC` (delivery), `NRML` (F&O overnight) |
+
+---
+
+## v2.0.0.1 New Endpoints
+
+### System Health Monitor
+```
+GET /api/v1/health
+→ {"cpu_percent", "memory_percent", "disk_usage", "process_count", "uptime_seconds", ...}
+```
+
+### Gamma Exposure Dashboard (GEX)
+```
+POST /api/v1/data/gex
+{"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
+→ Per-strike gamma exposure data for charting
+```
+
+### IV Smile
+```
+POST /api/v1/data/ivsmile
+{"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
+→ Implied volatility by strike for smile/skew visualization
+```
+
+### OI Profile
+```
+POST /api/v1/data/oiprofile
+{"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
+→ Open interest distribution across strikes
+```
+
+### Max Pain
+```
+POST /api/v1/data/maxpain
+{"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
+→ Max pain strike price calculation
+```
+
+### WebSocket 50-Level Depth
+```javascript
+// mode=4 for 50-level depth (broker-dependent: Dhan supports mode=3 max 20-level)
+ws.send(JSON.stringify({
+  action: 'subscribe_depth',
+  instruments: [{ exchange: 'NSE', symbol: 'RELIANCE' }],
+  mode: 4
+}));
+```

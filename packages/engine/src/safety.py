@@ -65,12 +65,11 @@ MARKET_HOURS: dict[str, tuple[dt_time, dt_time]] = {
 # Exchanges that are quote-only — orders always rejected
 _QUOTE_ONLY_EXCHANGES = {"NSE_INDEX", "BSE_INDEX"}
 
-# Exchange routing: OpenAlgo handles Indian exchanges, ccxt handles crypto
+# Exchange routing: all exchanges route through OpenAlgo (including Delta Exchange)
 OPENALGO_EXCHANGES = {
     "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX",
-    "NSE_INDEX", "BSE_INDEX", "NCDEX",
+    "NSE_INDEX", "BSE_INDEX", "NCDEX", "DELTA",
 }
-CCXT_EXCHANGES = {"DELTA"}
 
 
 def is_market_open(exchange: str, at: datetime | None = None) -> bool:
@@ -84,7 +83,7 @@ def is_market_open(exchange: str, at: datetime | None = None) -> bool:
     if exchange in _QUOTE_ONLY_EXCHANGES:
         return False
 
-    # Delta Exchange — 24/7 via ccxt, not OpenAlgo
+    # Delta Exchange — 24/7 via native OpenAlgo broker integration
     if exchange == "DELTA":
         return True
 
@@ -108,7 +107,7 @@ def get_expiry_time(exchange: str) -> dt_time:
         "CDS":   dt_time(12, 30),
         "BCD":   dt_time(12, 30),
         "MCX":   dt_time(23, 30),
-        "DELTA": dt_time(8, 0),   # UTC daily settlement, ~08:00 IST
+        "DELTA": dt_time(18, 0),  # BTC/ETH weekly options + daily futures: 12:30 UTC = 18:00 IST
     }
     return expiry_times.get(exchange, dt_time(15, 30))
 
@@ -179,11 +178,10 @@ class OrderValidation:
                 f"{exchange} is open {hours}. Current time: {current_time}. Market closed.",
             )
 
-        # Warn for ccxt-routed exchanges (DELTA) — order proceeds but logs a warning
-        if exchange in CCXT_EXCHANGES:
-            logger.warning(
-                "Order for %s exchange — routes via ccxt, not OpenAlgo. "
-                "Ensure ccxt integration package is configured.", exchange,
+        # Log Delta Exchange orders routed through native OpenAlgo broker
+        if exchange == "DELTA":
+            logger.info(
+                "Order for DELTA exchange — routes via OpenAlgo Delta Exchange broker integration",
             )
 
         # Symbol check

@@ -21,7 +21,7 @@ FlintTrade is a self-hosted, multi-market trading platform that bundles OpenAlgo
 | BCD | BCD | BSE Currency Derivatives | 9:00-5:00 PM |
 | MCX | MCX | Commodities (GOLD, SILVER, CRUDEOIL, NATURALGAS, COPPER, ZINC) | 9:00-11:55 PM |
 | NCDEX | NCDEX | Agri Commodities | 10:00-5:00 PM |
-| DELTA | DELTA | Crypto Derivatives (BTC, ETH futures, perpetuals, options) via Delta Exchange | 24/7 |
+| DELTA | DELTA | Crypto Derivatives — BTC/ETH/XRP futures, perpetuals, options. INR settlement. FIU-India compliant. Native OpenAlgo broker. | 24/7 |
 | NSE_INDEX | NSE_INDEX | Index values (NIFTY, BANKNIFTY, VIX, sector indices) | 9:15-3:30 |
 | BSE_INDEX | BSE_INDEX | Index values (SENSEX, BANKEX, sector indices) | 9:15-3:30 |
 
@@ -158,6 +158,21 @@ Every change → append to DEVLOG.md:
 - Deploy: infra/scripts/deploy-production.sh (blocked during market hours)
 - First setup: infra/scripts/setup-production.sh
 - SEBI rule: ALL orders must originate from this machine only
+
+## OpenAlgo v2.0.0.1 Features (absorbed into FlintTrade packages)
+
+- Option Chain + Greeks + GEX + IV Smile + OI Profile + Max Pain → screener
+- 3D Volatility Surface + ATM Straddle Chart + OI Tracker → screener
+- System Health Monitor API → dashboard
+- 50-level WebSocket depth → terminal + data
+- Historify scheduler + symbol validation → historical
+- Flow Editor: Order Status node, SmartOrder negative positions → integration
+- Basket order batched concurrent execution → engine
+- Delta Exchange native broker integration → core (DELTA exchange)
+- Nubra broker integration → core (broker list)
+- WebSocket file descriptor leak fixes (all brokers) → data tick_recorder
+
+**Supported brokers (24 via OpenAlgo v2.0.0.1):** Dhan, Zerodha, Angel One, Fyers, IIFL, 5paisa, Kotak Neo, Upstox, Aliceblue, Firstock, Flattrade, Finvasia/Shoonya, Mastertrust, ICICI Direct, Motilal Oswal, Paytm Money, Tradejini, Zebu, Rupeezy, Compositedge, Delta Exchange, Nubra, and more. FlintTrade code never references specific brokers — OpenAlgo abstracts them.
 
 ## What NOT to Do
 

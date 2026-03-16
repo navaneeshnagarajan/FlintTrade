@@ -357,6 +357,12 @@ class TestClientInit:
             "instruments",
             "analyzer_status",
             "analyzer_toggle",
+            # v2.0.0.1 endpoints
+            "health",
+            "gex",
+            "iv_smile",
+            "max_pain",
+            "oi_profile",
         ]
         for method_name in expected_methods:
             assert hasattr(client, method_name), f"Missing method: {method_name}"

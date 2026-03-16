@@ -193,12 +193,11 @@ class TestMarketHours:
 
     def test_get_expiry_time_delta(self):
         from packages.engine.src.safety import get_expiry_time
-        assert get_expiry_time("DELTA") == time(8, 0)
+        assert get_expiry_time("DELTA") == time(18, 0)
 
-    def test_delta_in_ccxt_exchanges(self):
-        from packages.engine.src.safety import CCXT_EXCHANGES, OPENALGO_EXCHANGES
-        assert "DELTA" in CCXT_EXCHANGES
-        assert "DELTA" not in OPENALGO_EXCHANGES
+    def test_delta_in_openalgo_exchanges(self):
+        from packages.engine.src.safety import OPENALGO_EXCHANGES
+        assert "DELTA" in OPENALGO_EXCHANGES
 
     def test_delta_order_passes_with_warning(self):
         from packages.engine.src.safety import OrderValidation

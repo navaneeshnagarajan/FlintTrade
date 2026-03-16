@@ -577,3 +577,31 @@ class OpenAlgoClient:
     async def analyzer_toggle(self) -> dict[str, Any]:
         """POST /api/v1/analyzer/toggle — toggle sandbox/live mode."""
         return await self._post("analyzer/toggle", self._body())
+
+    # ==================================================================
+    # v2.0.0.1 APIs
+    # ==================================================================
+
+    async def health(self) -> dict[str, Any]:
+        """GET /api/v1/health — System Health Monitor (CPU, memory, process metrics)."""
+        return await self._get("health")
+
+    async def gex(self, symbol: str, expiry: str) -> dict[str, Any]:
+        """POST /api/v1/data/gex — Gamma Exposure Dashboard data."""
+        payload = self._body({"symbol": symbol, "expiry": expiry})
+        return await self._post("data/gex", payload)
+
+    async def iv_smile(self, symbol: str, expiry: str) -> dict[str, Any]:
+        """POST /api/v1/data/ivsmile — IV Smile chart data."""
+        payload = self._body({"symbol": symbol, "expiry": expiry})
+        return await self._post("data/ivsmile", payload)
+
+    async def max_pain(self, symbol: str, expiry: str) -> dict[str, Any]:
+        """POST /api/v1/data/maxpain — Max Pain calculation."""
+        payload = self._body({"symbol": symbol, "expiry": expiry})
+        return await self._post("data/maxpain", payload)
+
+    async def oi_profile(self, symbol: str, expiry: str) -> dict[str, Any]:
+        """POST /api/v1/data/oiprofile — OI Profile data."""
+        payload = self._body({"symbol": symbol, "expiry": expiry})
+        return await self._post("data/oiprofile", payload)
