@@ -1,0 +1,19 @@
+[Unit]
+Description=FlintTrade Trading Platform
+After=network.target openalgo.service
+Wants=openalgo.service
+
+[Service]
+Type=simple
+User=navaneesh
+WorkingDirectory=/home/navaneesh/FlintTrade
+EnvironmentFile=/home/navaneesh/FlintTrade/.env
+ExecStart=/usr/bin/python3 packages/core/src/app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=flinttrade
+
+[Install]
+WantedBy=multi-user.target

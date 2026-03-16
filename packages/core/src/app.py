@@ -44,6 +44,10 @@ def _read_version() -> str:
 class FlintTradeApp:
     """Main application — creates and wires all FlintTrade subsystems.
 
+    Startup is resilient: if OpenAlgo is unreachable or optional services
+    (Telegram, AI) are not configured, the app starts with warnings
+    instead of crashing.
+
     Usage::
 
         app = FlintTradeApp()
@@ -60,12 +64,13 @@ class FlintTradeApp:
 
         self.version = _read_version()
 
+        # Audit logger first — must be available before anything else
+        self.audit = AuditLogger()
+        self.audit.log_event("APP_START", version=self.version)
+
         # Core — settings + API client
         self.settings = Settings.from_env()
         self.client = OpenAlgoClient(self.settings)
-
-        # Data — audit logger
-        self.audit = AuditLogger()
 
         # Engine — safety + router + scheduler
         self.safety = SafetySystem(SafetyConfig(check_market_hours=True))
@@ -80,15 +85,19 @@ class FlintTradeApp:
             time_scheduler=self.time_scheduler,
         )
 
-        # Automation — TOTP login + cron + Telegram
+        # Automation — TOTP login (optional — BROKER_TOTP_SECRET may be empty)
         self.totp = TOTPLogin(
             openalgo_host=self.settings.openalgo_host,
         )
+
+        # Automation — cron manager
         self.cron = CronManager(
             openalgo_client=self.client,
             audit_logger=self.audit,
             totp_login=self.totp,
         )
+
+        # Automation — Telegram bot (optional — token may not be set)
         self.telegram = TelegramBot(
             router=self.router,
             safety_system=self.safety,
@@ -104,23 +113,29 @@ class FlintTradeApp:
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
-        # Log startup to audit
-        self.audit.log_event(
-            "APP_START",
-            version=self.version,
-            host=self.settings.openalgo_host,
-        )
-
-        # Load market holidays
-        self.cron.load_holidays()
+        # Load market holidays (graceful — warns if OpenAlgo unreachable)
+        try:
+            self.cron.load_holidays()
+        except Exception as exc:
+            logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
 
         # Register built-in cron jobs
         self.cron.register_builtin_jobs()
 
-        logger.info(
-            "FlintTrade v%s started — OpenAlgo: %s",
-            self.version, self.settings.openalgo_host,
-        )
+        # Verify OpenAlgo connectivity (non-fatal)
+        try:
+            result = await self.client.ping()
+            broker = result.get("data", {}).get("broker", "unknown") if isinstance(result, dict) else "unknown"
+            logger.info(
+                "FlintTrade v%s started — OpenAlgo: %s (broker: %s)",
+                self.version, self.settings.openalgo_host, broker,
+            )
+        except Exception as exc:
+            logger.warning(
+                "FlintTrade v%s started — OpenAlgo at %s is UNREACHABLE: %s. "
+                "Will retry when orders are placed.",
+                self.version, self.settings.openalgo_host, exc,
+            )
 
         # Wait for shutdown signal
         await self._stop_event.wait()
@@ -135,13 +150,15 @@ class FlintTradeApp:
         # Stop cron
         self.cron.stop()
 
+        # Log shutdown to audit before closing
+        self.audit.log_event("APP_STOP", version=self.version)
+
         # Close API client
         await self.client.close()
 
         # Close audit logger
         self.audit.close()
 
-        # Log shutdown
         logger.info("FlintTrade v%s stopped", self.version)
 
         self._stop_event.set()
