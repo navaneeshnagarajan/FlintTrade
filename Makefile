@@ -1,4 +1,4 @@
-.PHONY: setup start stop update test lint clean deploy rollback backup health help
+.PHONY: setup start stop dev update test lint clean deploy rollback backup health help
 
 setup: ## First-time setup — clones OpenAlgo, installs all deps
 	@echo "=== FlintTrade Setup ==="
@@ -14,6 +14,18 @@ setup: ## First-time setup — clones OpenAlgo, installs all deps
 start: ## Start all services
 	@echo "Starting FlintTrade..."
 	@sudo systemctl start openalgo 2>/dev/null || echo "OpenAlgo: start manually via systemd or infra/openalgo"
+	@python packages/core/src/app.py
+
+dev: ## Start all dev servers (React + Python backend)
+	@echo "=== FlintTrade Dev Mode ==="
+	@echo "  Terminal:  http://localhost:3001"
+	@echo "  Dashboard: http://localhost:3000"
+	@echo "  Backtest:  http://localhost:3002"
+	@echo "  Backend:   OpenAlgo at $${OPENALGO_HOST:-http://127.0.0.1:5000}"
+	@echo ""
+	@cd packages/terminal && npm run dev &
+	@cd packages/dashboard && npm run dev &
+	@cd packages/backtest && npm run dev &
 	@python packages/core/src/app.py
 
 stop: ## Stop all services
