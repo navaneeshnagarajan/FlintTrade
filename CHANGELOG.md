@@ -3,6 +3,8 @@
 All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
 ## [0.6.0-dev] — 2026-03-16
 
 ### Added
