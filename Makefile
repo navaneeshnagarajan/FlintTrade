@@ -29,39 +29,7 @@ OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 # ======================================================================
 
 setup: ## First-time setup — install all dependencies
-	@echo -e "$(CYAN)=== FlintTrade Setup ===$(RESET)"
-	@# Check prerequisites
-	@$(PYTHON) --version >/dev/null 2>&1 || { echo -e "$(RED)ERROR: python3 not found$(RESET)"; exit 1; }
-	@echo -e "$(GREEN)✓$(RESET) Python: $$($(PYTHON) --version)"
-	@if [ -n "$(NPM)" ]; then echo -e "$(GREEN)✓$(RESET) Node: $$(node --version), npm: $$(npm --version)"; \
-	 else echo -e "$(YELLOW)⚠ npm not found — React packages will not be installed$(RESET)"; fi
-	@# Git submodules
-	@echo "Initializing submodules..."
-	@git submodule update --init --recursive 2>/dev/null || echo -e "$(YELLOW)⚠ Some submodules may not be available$(RESET)"
-	@# Python dependencies
-	@echo "Installing Python dependencies..."
-	@$(PYTHON) -m pip install -r requirements.txt --break-system-packages -q 2>/dev/null || \
-	 $(PYTHON) -m pip install -r requirements.txt -q
-	@for req in packages/*/requirements.txt; do \
-	  [ -f "$$req" ] && ($(PYTHON) -m pip install -r "$$req" --break-system-packages -q 2>/dev/null || \
-	    $(PYTHON) -m pip install -r "$$req" -q 2>/dev/null) || true; \
-	done
-	@# Node dependencies (if npm available)
-	@if [ -n "$(NPM)" ]; then \
-	  echo "Installing Node dependencies..."; \
-	  for pkg in packages/terminal packages/dashboard packages/backtest; do \
-	    [ -f "$$pkg/package.json" ] && (cd "$$pkg" && npm install --silent 2>/dev/null && cd - >/dev/null) || true; \
-	  done; \
-	fi
-	@# Workspace directory
-	@mkdir -p "$$HOME/.flinttrade" 2>/dev/null || true
-	@echo ""
-	@echo -e "$(GREEN)=== Setup complete ===$(RESET)"
-	@echo "Next steps:"
-	@echo "  1. Copy .env.example to .env and configure"
-	@echo "  2. Configure infra/openalgo/.env with broker credentials"
-	@echo "  3. Run: make test"
-	@echo "  4. Run: make start"
+	@bash infra/scripts/setup.sh
 
 # ======================================================================
 # Service management

@@ -56,9 +56,9 @@ class LLMConfig:
             try:
                 from packages.core.src.workspace import Workspace
                 ws = Workspace()
-                provider = provider or ws.get("llm.provider", "")
-                host = host or ws.get("llm.host", "http://127.0.0.1:1234")
-                model = model or ws.get("llm.model", "")
+                provider = provider or ws.get("llm.provider", "") or ""
+                host = host or ws.get("llm.host", "") or "http://127.0.0.1:1234"
+                model = model or ws.get("llm.model", "") or ""
             except Exception:
                 host = host or "http://127.0.0.1:1234"
 

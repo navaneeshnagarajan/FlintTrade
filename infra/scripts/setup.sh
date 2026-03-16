@@ -98,15 +98,42 @@ git submodule update --init --recursive 2>/dev/null && ok "Submodules initialize
 # ------------------------------------------------------------------
 header "OpenAlgo setup"
 
+OPENALGO_ENV_CREATED=false
 if [ -d "$FLINTTRADE_DIR/infra/openalgo" ] && [ -f "$FLINTTRADE_DIR/infra/openalgo/requirements.txt" ]; then
     pip3 install -r "$FLINTTRADE_DIR/infra/openalgo/requirements.txt" --break-system-packages -q 2>/dev/null || \
         pip3 install -r "$FLINTTRADE_DIR/infra/openalgo/requirements.txt" -q 2>/dev/null || \
         warn "OpenAlgo deps install failed — may need manual install"
     ok "OpenAlgo dependencies installed"
 
-    if [ ! -f "$FLINTTRADE_DIR/infra/openalgo/.env" ] && [ -f "$FLINTTRADE_DIR/infra/openalgo/.env.sample" ]; then
-        cp "$FLINTTRADE_DIR/infra/openalgo/.env.sample" "$FLINTTRADE_DIR/infra/openalgo/.env"
-        warn "Created infra/openalgo/.env — configure with broker credentials"
+    # gunicorn + eventlet are required for production but not in OpenAlgo's requirements.txt
+    pip3 install gunicorn eventlet --break-system-packages -q 2>/dev/null || \
+        pip3 install gunicorn eventlet -q 2>/dev/null || \
+        warn "gunicorn+eventlet install failed — make start will fall back to python app.py"
+    ok "gunicorn + eventlet installed"
+
+    # Copy .sample.env → .env if missing (OpenAlgo uses .sample.env, not .env.sample)
+    if [ ! -f "$FLINTTRADE_DIR/infra/openalgo/.env" ] && [ -f "$FLINTTRADE_DIR/infra/openalgo/.sample.env" ]; then
+        cp "$FLINTTRADE_DIR/infra/openalgo/.sample.env" "$FLINTTRADE_DIR/infra/openalgo/.env"
+        OPENALGO_ENV_CREATED=true
+        ok "Copied infra/openalgo/.sample.env → infra/openalgo/.env"
+
+        # Generate fresh security keys (replace defaults from sample)
+        SAMPLE_APP_KEY='3daa0403ce2501ee7432b75bf100048e3cf510d63d2754f952e93d88bf07ea84'
+        SAMPLE_PEPPER='a25d94718479b170c16278e321ea6c989358bf499a658fd20c90033cef8ce772'
+        CURRENT_APP_KEY=$(grep "^APP_KEY" "$FLINTTRADE_DIR/infra/openalgo/.env" | sed "s/.*= *'\(.*\)'/\1/")
+        CURRENT_PEPPER=$(grep "^API_KEY_PEPPER" "$FLINTTRADE_DIR/infra/openalgo/.env" | sed "s/.*= *'\(.*\)'/\1/")
+
+        if [ "$CURRENT_APP_KEY" = "$SAMPLE_APP_KEY" ] || [ "$CURRENT_PEPPER" = "$SAMPLE_PEPPER" ]; then
+            NEW_APP_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+            NEW_PEPPER=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+            sed -i "s/$SAMPLE_APP_KEY/$NEW_APP_KEY/" "$FLINTTRADE_DIR/infra/openalgo/.env"
+            sed -i "s/$SAMPLE_PEPPER/$NEW_PEPPER/" "$FLINTTRADE_DIR/infra/openalgo/.env"
+            ok "Generated fresh security keys in infra/openalgo/.env"
+        fi
+
+        warn "Configure broker credentials in infra/openalgo/.env"
+    elif [ -f "$FLINTTRADE_DIR/infra/openalgo/.env" ]; then
+        ok "infra/openalgo/.env exists"
     fi
 else
     warn "infra/openalgo/ not populated — run: git submodule update --init"
@@ -148,10 +175,11 @@ fi
 header "Workspace"
 
 WORKSPACE_DIR="${FLINTTRADE_HOME:-$HOME/.flinttrade}"
-mkdir -p "$WORKSPACE_DIR" 2>/dev/null || true
-ok "Workspace: $WORKSPACE_DIR"
-echo "  Data directories will be created when you configure FlintTrade"
-echo "  through the dashboard or by editing $WORKSPACE_DIR/workspace.json"
+cd "$FLINTTRADE_DIR"
+python3 -m packages.core.src.cli init 2>/dev/null && ok "Workspace initialized: $WORKSPACE_DIR" || {
+    mkdir -p "$WORKSPACE_DIR" 2>/dev/null || true
+    ok "Workspace directory created: $WORKSPACE_DIR"
+}
 
 # ------------------------------------------------------------------
 # 9. Run tests
@@ -172,9 +200,14 @@ header "Setup complete"
 echo ""
 ok "System dependencies verified"
 ok "FlintTrade Python packages installed"
+ok "OpenAlgo dependencies installed"
+ok "gunicorn + eventlet installed"
 [ "$HAS_NODE" = true ] && ok "React packages installed" || warn "React packages skipped (no Node.js)"
-ok "Data directories created"
+ok "Workspace initialized"
 echo ""
+if [ "$OPENALGO_ENV_CREATED" = true ]; then
+    warn "Configure broker credentials in infra/openalgo/.env before trading"
+fi
 echo "Next steps:"
 echo "  1. Edit .env with your OPENALGO_API_KEY"
 echo "  2. Edit infra/openalgo/.env with broker credentials"
