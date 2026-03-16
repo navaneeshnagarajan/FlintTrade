@@ -12,7 +12,7 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/ws": {
-        target: process.env.VITE_WS_URL || "ws://127.0.0.1:8765",
+        target: process.env.VITE_OPENALGO_WS || "ws://127.0.0.1:8765",
         ws: true,
       },
     },
