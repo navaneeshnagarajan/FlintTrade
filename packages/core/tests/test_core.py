@@ -6,7 +6,7 @@ for integration tests. Unit tests use monkeypatching and mocks.
 
 import os
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -303,15 +303,17 @@ class TestClientInit:
     def test_client_creates(self):
         client = self._make_client()
         assert client._base == "http://127.0.0.1:5000/api/v1"
-        client.close()
 
     def test_client_context_manager(self):
+        """Test that async context manager attributes exist."""
         from packages.core.src.config import Settings
         from packages.core.src.openalgo_client import OpenAlgoClient
 
         settings = Settings(openalgo_host="http://127.0.0.1:5000", openalgo_api_key="test123")
-        with OpenAlgoClient(settings) as client:
-            assert client._api_key == "test123"
+        client = OpenAlgoClient(settings)
+        assert client._api_key == "test123"
+        assert hasattr(client, "__aenter__")
+        assert hasattr(client, "__aexit__")
 
     def test_all_endpoint_methods_exist(self):
         client = self._make_client()
@@ -359,7 +361,6 @@ class TestClientInit:
         for method_name in expected_methods:
             assert hasattr(client, method_name), f"Missing method: {method_name}"
             assert callable(getattr(client, method_name)), f"Not callable: {method_name}"
-        client.close()
 
 
 # ======================================================================
@@ -370,33 +371,35 @@ class TestClientInit:
 class TestRateLimiter:
     """Test the token-bucket rate limiter."""
 
-    def test_limiter_allows_burst(self):
+    @pytest.mark.asyncio
+    async def test_limiter_allows_burst(self):
         from packages.core.src.openalgo_client import _RateLimiter
 
         rl = _RateLimiter(10, 1.0)
         start = time.monotonic()
         for _ in range(10):
-            rl.acquire()
+            await rl.acquire()
         elapsed = time.monotonic() - start
         # First 10 should be near-instant (within the burst)
         assert elapsed < 2.0
 
-    def test_limiter_throttles_past_burst(self):
+    @pytest.mark.asyncio
+    async def test_limiter_throttles_past_burst(self):
         from packages.core.src.openalgo_client import _RateLimiter
 
         rl = _RateLimiter(2, 1.0)
         # Exhaust burst
-        rl.acquire()
-        rl.acquire()
+        await rl.acquire()
+        await rl.acquire()
         # Third call should sleep
         start = time.monotonic()
-        rl.acquire()
+        await rl.acquire()
         elapsed = time.monotonic() - start
         assert elapsed >= 0.1  # Should have waited
 
 
 # ======================================================================
-# Error handling tests
+# Error handling tests (async)
 # ======================================================================
 
 
@@ -410,7 +413,8 @@ class TestErrorHandling:
         settings = Settings(openalgo_host="http://127.0.0.1:5000", openalgo_api_key="test123")
         return OpenAlgoClient(settings)
 
-    def test_auth_error_on_401(self):
+    @pytest.mark.asyncio
+    async def test_auth_error_on_401(self):
         from packages.core.src.exceptions import AuthError
 
         client = self._make_client()
@@ -419,12 +423,12 @@ class TestErrorHandling:
         mock_resp.content = b'{"message": "Invalid API key"}'
         mock_resp.json.return_value = {"message": "Invalid API key"}
 
-        with patch.object(client._http, "post", return_value=mock_resp):
-            with pytest.raises(AuthError):
-                client.ping()
-        client.close()
+        client._http.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(AuthError):
+            await client.ping()
 
-    def test_rate_limit_error_on_429(self):
+    @pytest.mark.asyncio
+    async def test_rate_limit_error_on_429(self):
         from packages.core.src.exceptions import RateLimitError
 
         client = self._make_client()
@@ -432,12 +436,12 @@ class TestErrorHandling:
         mock_resp.status_code = 429
         mock_resp.headers = {"Retry-After": "1"}
 
-        with patch.object(client._http, "post", return_value=mock_resp):
-            with pytest.raises(RateLimitError):
-                client.ping()
-        client.close()
+        client._http.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(RateLimitError):
+            await client.ping()
 
-    def test_api_error_on_500(self):
+    @pytest.mark.asyncio
+    async def test_api_error_on_500(self):
         from packages.core.src.exceptions import APIError
 
         client = self._make_client()
@@ -447,24 +451,23 @@ class TestErrorHandling:
         mock_resp.json.return_value = {"message": "Internal error"}
         mock_resp.text = "Internal error"
 
-        with patch.object(client._http, "post", return_value=mock_resp):
-            with pytest.raises(APIError):
-                client.ping()
-        client.close()
+        client._http.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(APIError):
+            await client.ping()
 
-    def test_retry_on_connection_error(self):
+    @pytest.mark.asyncio
+    async def test_retry_on_connection_error(self):
         import httpx
 
         from packages.core.src.exceptions import APIError
 
         client = self._make_client()
+        client._http.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
+        with pytest.raises(APIError, match="Failed after 3 retries"):
+            await client.ping()
 
-        with patch.object(client._http, "post", side_effect=httpx.ConnectError("refused")):
-            with pytest.raises(APIError, match="Failed after 3 retries"):
-                client.ping()
-        client.close()
-
-    def test_error_status_in_response_body(self):
+    @pytest.mark.asyncio
+    async def test_error_status_in_response_body(self):
         from packages.core.src.exceptions import APIError
 
         client = self._make_client()
@@ -473,10 +476,9 @@ class TestErrorHandling:
         mock_resp.content = b'{"status": "error", "message": "Symbol not found"}'
         mock_resp.json.return_value = {"status": "error", "message": "Symbol not found"}
 
-        with patch.object(client._http, "post", return_value=mock_resp):
-            with pytest.raises(APIError, match="Symbol not found"):
-                client.quotes("INVALID")
-        client.close()
+        client._http.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(APIError, match="Symbol not found"):
+            await client.quotes("INVALID")
 
 
 # ======================================================================

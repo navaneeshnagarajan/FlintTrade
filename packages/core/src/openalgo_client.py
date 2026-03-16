@@ -1,7 +1,8 @@
-"""Synchronous OpenAlgo v1 API client with retry, rate-limiting, and typed responses."""
+"""Async OpenAlgo v1 API client with retry, rate-limiting, and typed responses."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -37,11 +38,11 @@ logger = logging.getLogger("flinttrade.core")
 
 
 # ---------------------------------------------------------------------------
-# Token-bucket rate limiter
+# Token-bucket rate limiter (async-compatible)
 # ---------------------------------------------------------------------------
 
 class _RateLimiter:
-    """Simple token-bucket rate limiter."""
+    """Simple token-bucket rate limiter with async acquire."""
 
     def __init__(self, rate: float, per: float = 1.0) -> None:
         self.rate = rate
@@ -49,14 +50,14 @@ class _RateLimiter:
         self.tokens = rate
         self._last = time.monotonic()
 
-    def acquire(self) -> None:
+    async def acquire(self) -> None:
         now = time.monotonic()
         elapsed = now - self._last
         self._last = now
         self.tokens = min(self.rate, self.tokens + elapsed * (self.rate / self.per))
         if self.tokens < 1:
             sleep_time = (1 - self.tokens) * (self.per / self.rate)
-            time.sleep(sleep_time)
+            await asyncio.sleep(sleep_time)
             self.tokens = 0
         else:
             self.tokens -= 1
@@ -67,7 +68,7 @@ class _RateLimiter:
 # ---------------------------------------------------------------------------
 
 class OpenAlgoClient:
-    """Synchronous client for all OpenAlgo v1 REST endpoints.
+    """Async client for all OpenAlgo v1 REST endpoints.
 
     Features:
     - Automatic retry with exponential backoff (3 attempts)
@@ -79,7 +80,7 @@ class OpenAlgoClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings.from_env()
         self._base = f"{self.settings.openalgo_host}/api/v1"
-        self._http = httpx.Client(timeout=30.0)
+        self._http = httpx.AsyncClient(timeout=30.0)
         self._api_key = self.settings.openalgo_api_key
 
         # Rate limiters per category
@@ -87,15 +88,15 @@ class OpenAlgoClient:
         self._smart_limiter = _RateLimiter(2, 1.0)
         self._general_limiter = _RateLimiter(50, 1.0)
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the underlying HTTP client."""
-        self._http.close()
+        await self._http.aclose()
 
-    def __enter__(self) -> OpenAlgoClient:
+    async def __aenter__(self) -> OpenAlgoClient:
         return self
 
-    def __exit__(self, *args: Any) -> None:
-        self.close()
+    async def __aexit__(self, *args: Any) -> None:
+        await self.close()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -108,7 +109,7 @@ class OpenAlgoClient:
             payload.update(extra)
         return payload
 
-    def _post(
+    async def _post(
         self,
         endpoint: str,
         payload: dict[str, Any],
@@ -119,13 +120,13 @@ class OpenAlgoClient:
         """POST with retry + exponential backoff."""
         url = f"{self._base}/{endpoint}"
         rl = limiter or self._general_limiter
-        rl.acquire()
+        await rl.acquire()
 
         last_exc: Exception | None = None
         for attempt in range(1, max_retries + 1):
             try:
                 logger.debug("POST %s attempt=%d", endpoint, attempt)
-                resp = self._http.post(url, json=payload)
+                resp = await self._http.post(url, json=payload)
 
                 if resp.status_code == 429:
                     retry_after = float(resp.headers.get("Retry-After", "1"))
@@ -147,41 +148,41 @@ class OpenAlgoClient:
                 if attempt < max_retries:
                     wait = 2 ** (attempt - 1)
                     logger.warning("Retry %s in %ds: %s", endpoint, wait, exc)
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
             except RateLimitError:
                 last_exc = None
                 if attempt < max_retries:
                     wait = 2 ** (attempt - 1)
                     logger.warning("Rate limited on %s, retry in %ds", endpoint, wait)
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                 else:
                     raise
 
         raise APIError(0, f"Failed after {max_retries} retries: {last_exc}", endpoint)
 
-    def _get(self, endpoint: str, *, params: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Any:
+    async def _get(self, endpoint: str, *, params: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Any:
         """GET with retry."""
         url = f"{self._base}/{endpoint}"
-        self._general_limiter.acquire()
+        await self._general_limiter.acquire()
 
         last_exc: Exception | None = None
         for attempt in range(1, 4):
             try:
-                resp = self._http.get(url, params=params, headers=headers or {})
+                resp = await self._http.get(url, params=params, headers=headers or {})
                 if resp.status_code >= 400:
                     raise APIError(resp.status_code, resp.text, endpoint)
                 return resp.json()
             except (httpx.ConnectError, httpx.TimeoutException) as exc:
                 last_exc = exc
                 if attempt < 3:
-                    time.sleep(2 ** (attempt - 1))
+                    await asyncio.sleep(2 ** (attempt - 1))
         raise APIError(0, f"GET failed after 3 retries: {last_exc}", endpoint)
 
     # ==================================================================
     # Order APIs
     # ==================================================================
 
-    def place_order(self, order: Order) -> OrderResponse:
+    async def place_order(self, order: Order) -> OrderResponse:
         """POST /api/v1/placeorder"""
         payload = self._body({
             "strategy": order.strategy,
@@ -195,10 +196,10 @@ class OpenAlgoClient:
             "trigger_price": order.trigger_price,
             "disclosed_quantity": order.disclosed_quantity,
         })
-        data = self._post("placeorder", payload, limiter=self._order_limiter)
+        data = await self._post("placeorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def place_smart_order(self, order: SmartOrder) -> OrderResponse:
+    async def place_smart_order(self, order: SmartOrder) -> OrderResponse:
         """POST /api/v1/placesmartorder"""
         payload = self._body({
             "strategy": order.strategy,
@@ -213,10 +214,10 @@ class OpenAlgoClient:
             "disclosed_quantity": order.disclosed_quantity,
             "position_size": order.position_size,
         })
-        data = self._post("placesmartorder", payload, limiter=self._smart_limiter)
+        data = await self._post("placesmartorder", payload, limiter=self._smart_limiter)
         return OrderResponse(**data)
 
-    def place_options_order(self, order: OptionsOrder) -> OrderResponse:
+    async def place_options_order(self, order: OptionsOrder) -> OrderResponse:
         """POST /api/v1/optionsorder"""
         payload = self._body({
             "strategy": order.strategy,
@@ -231,10 +232,10 @@ class OpenAlgoClient:
             "product": order.product.value,
             "splitsize": order.splitsize,
         })
-        data = self._post("optionsorder", payload, limiter=self._order_limiter)
+        data = await self._post("optionsorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def place_options_multi_order(self, order: OptionsMultiOrder) -> OrderResponse:
+    async def place_options_multi_order(self, order: OptionsMultiOrder) -> OrderResponse:
         """POST /api/v1/optionsmultiorder"""
         legs = [
             {
@@ -254,10 +255,10 @@ class OpenAlgoClient:
             "pricetype": order.pricetype.value,
             "product": order.product.value,
         })
-        data = self._post("optionsmultiorder", payload, limiter=self._order_limiter)
+        data = await self._post("optionsmultiorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def place_basket_order(self, basket: BasketOrder) -> OrderResponse:
+    async def place_basket_order(self, basket: BasketOrder) -> OrderResponse:
         """POST /api/v1/basketorder"""
         orders = [
             {
@@ -271,10 +272,10 @@ class OpenAlgoClient:
             for o in basket.orders
         ]
         payload = self._body({"strategy": basket.strategy, "orders": orders})
-        data = self._post("basketorder", payload, limiter=self._order_limiter)
+        data = await self._post("basketorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def place_split_order(self, order: SplitOrder) -> OrderResponse:
+    async def place_split_order(self, order: SplitOrder) -> OrderResponse:
         """POST /api/v1/splitorder"""
         payload = self._body({
             "strategy": order.strategy,
@@ -289,10 +290,10 @@ class OpenAlgoClient:
             "disclosed_quantity": order.disclosed_quantity,
             "splitsize": order.splitsize,
         })
-        data = self._post("splitorder", payload, limiter=self._order_limiter)
+        data = await self._post("splitorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def modify_order(self, order: ModifyOrder) -> OrderResponse:
+    async def modify_order(self, order: ModifyOrder) -> OrderResponse:
         """POST /api/v1/modifyorder"""
         payload = self._body({
             "strategy": order.strategy,
@@ -305,34 +306,34 @@ class OpenAlgoClient:
             "quantity": order.quantity,
             "price": order.price,
         })
-        data = self._post("modifyorder", payload, limiter=self._order_limiter)
+        data = await self._post("modifyorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def cancel_order(self, orderid: str, strategy: str = "Flint") -> OrderResponse:
+    async def cancel_order(self, orderid: str, strategy: str = "Flint") -> OrderResponse:
         """POST /api/v1/cancelorder"""
         payload = self._body({"strategy": strategy, "orderid": orderid})
-        data = self._post("cancelorder", payload, limiter=self._order_limiter)
+        data = await self._post("cancelorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def cancel_all_orders(self, strategy: str = "Flint") -> OrderResponse:
+    async def cancel_all_orders(self, strategy: str = "Flint") -> OrderResponse:
         """POST /api/v1/cancelallorder"""
         payload = self._body({"strategy": strategy})
-        data = self._post("cancelallorder", payload, limiter=self._order_limiter)
+        data = await self._post("cancelallorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def close_position(self, strategy: str = "Flint") -> OrderResponse:
+    async def close_position(self, strategy: str = "Flint") -> OrderResponse:
         """POST /api/v1/closeposition"""
         payload = self._body({"strategy": strategy})
-        data = self._post("closeposition", payload, limiter=self._order_limiter)
+        data = await self._post("closeposition", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
-    def order_status(self, orderid: str, strategy: str = "Flint") -> OrderStatus:
+    async def order_status(self, orderid: str, strategy: str = "Flint") -> OrderStatus:
         """POST /api/v1/orderstatus"""
         payload = self._body({"strategy": strategy, "orderid": orderid})
-        data = self._post("orderstatus", payload)
+        data = await self._post("orderstatus", payload)
         return OrderStatus(**data) if isinstance(data, dict) else OrderStatus()
 
-    def open_position(
+    async def open_position(
         self, symbol: str, exchange: str = "NSE", product: str = "MIS", strategy: str = "Flint"
     ) -> dict[str, Any]:
         """POST /api/v1/openposition"""
@@ -342,30 +343,30 @@ class OpenAlgoClient:
             "exchange": exchange,
             "product": product,
         })
-        return self._post("openposition", payload)
+        return await self._post("openposition", payload)
 
     # ==================================================================
     # Data APIs
     # ==================================================================
 
-    def quotes(self, symbol: str, exchange: str = "NSE") -> Quote:
+    async def quotes(self, symbol: str, exchange: str = "NSE") -> Quote:
         """POST /api/v1/quotes"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = self._post("quotes", payload)
+        data = await self._post("quotes", payload)
         return Quote(**data) if isinstance(data, dict) else Quote()
 
-    def multi_quotes(self, symbols: list[dict[str, str]]) -> list[Quote]:
+    async def multi_quotes(self, symbols: list[dict[str, str]]) -> list[Quote]:
         """POST /api/v1/multiquotes — symbols=[{"symbol": "X", "exchange": "NSE"}, ...]"""
         payload = self._body({"symbols": symbols})
-        data = self._post("multiquotes", payload)
+        data = await self._post("multiquotes", payload)
         if isinstance(data, list):
             return [Quote(**q) for q in data]
         return []
 
-    def depth(self, symbol: str, exchange: str = "NSE") -> Depth:
+    async def depth(self, symbol: str, exchange: str = "NSE") -> Depth:
         """POST /api/v1/depth"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = self._post("depth", payload)
+        data = await self._post("depth", payload)
         if not isinstance(data, dict):
             return Depth()
         bids = [DepthLevel(**b) for b in data.get("bids", [])]
@@ -377,7 +378,7 @@ class OpenAlgoClient:
             asks=asks,
         )
 
-    def history(
+    async def history(
         self,
         symbol: str,
         exchange: str = "NSE",
@@ -393,20 +394,20 @@ class OpenAlgoClient:
             "start_date": start_date,
             "end_date": end_date,
         })
-        data = self._post("history", payload)
+        data = await self._post("history", payload)
         if isinstance(data, list):
             return [OHLCV(**bar) for bar in data]
         return []
 
-    def intervals(self) -> list[str]:
+    async def intervals(self) -> list[str]:
         """POST /api/v1/intervals"""
-        data = self._post("intervals", self._body())
+        data = await self._post("intervals", self._body())
         return data if isinstance(data, list) else []
 
-    def option_chain(self, symbol: str, exchange: str = "NFO") -> OptionChain:
+    async def option_chain(self, symbol: str, exchange: str = "NFO") -> OptionChain:
         """POST /api/v1/optionchain"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = self._post("optionchain", payload)
+        data = await self._post("optionchain", payload)
         if isinstance(data, dict):
             strikes = [OptionChainStrike(**s) for s in data.get("strikes", [])]
             return OptionChain(
@@ -416,21 +417,21 @@ class OpenAlgoClient:
             )
         return OptionChain()
 
-    def option_greeks(self, symbol: str, exchange: str = "NFO") -> OptionGreek:
+    async def option_greeks(self, symbol: str, exchange: str = "NFO") -> OptionGreek:
         """POST /api/v1/optiongreeks"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        data = self._post("optiongreeks", payload)
+        data = await self._post("optiongreeks", payload)
         return OptionGreek(**data) if isinstance(data, dict) else OptionGreek()
 
-    def multi_option_greeks(self, symbols: list[dict[str, str]]) -> list[OptionGreek]:
+    async def multi_option_greeks(self, symbols: list[dict[str, str]]) -> list[OptionGreek]:
         """POST /api/v1/multioptiongreeks"""
         payload = self._body({"symbols": symbols})
-        data = self._post("multioptiongreeks", payload)
+        data = await self._post("multioptiongreeks", payload)
         if isinstance(data, list):
             return [OptionGreek(**g) for g in data]
         return []
 
-    def option_symbol(
+    async def option_symbol(
         self,
         symbol: str,
         exchange: str = "NFO",
@@ -446,29 +447,29 @@ class OpenAlgoClient:
             "offset": offset,
             "option_type": option_type,
         })
-        return self._post("optionsymbol", payload)
+        return await self._post("optionsymbol", payload)
 
-    def synthetic_future(self, symbol: str, exchange: str = "NFO", expiry_date: str = "") -> dict[str, Any]:
+    async def synthetic_future(self, symbol: str, exchange: str = "NFO", expiry_date: str = "") -> dict[str, Any]:
         """POST /api/v1/syntheticfuture"""
         payload = self._body({"symbol": symbol, "exchange": exchange, "expiry_date": expiry_date})
-        return self._post("syntheticfuture", payload)
+        return await self._post("syntheticfuture", payload)
 
-    def expiry(self, symbol: str, exchange: str = "NFO") -> dict[str, Any]:
+    async def expiry(self, symbol: str, exchange: str = "NFO") -> dict[str, Any]:
         """POST /api/v1/expiry"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        return self._post("expiry", payload)
+        return await self._post("expiry", payload)
 
-    def symbol(self, symbol: str, exchange: str = "NSE") -> dict[str, Any]:
+    async def symbol(self, symbol: str, exchange: str = "NSE") -> dict[str, Any]:
         """POST /api/v1/symbol"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
-        return self._post("symbol", payload)
+        return await self._post("symbol", payload)
 
-    def search(self, query: str) -> dict[str, Any]:
+    async def search(self, query: str) -> dict[str, Any]:
         """POST /api/v1/search"""
         payload = self._body({"query": query})
-        return self._post("search", payload)
+        return await self._post("search", payload)
 
-    def ticker(self, exchange: str, symbol: str, interval: str = "5m", from_date: str = "", to_date: str = "") -> Any:
+    async def ticker(self, exchange: str, symbol: str, interval: str = "5m", from_date: str = "", to_date: str = "") -> Any:
         """GET /api/v1/ticker/{exchange}:{symbol} — uses X-API-KEY header."""
         endpoint = f"ticker/{exchange}:{symbol}"
         params: dict[str, str] = {"interval": interval}
@@ -476,15 +477,15 @@ class OpenAlgoClient:
             params["from"] = from_date
         if to_date:
             params["to"] = to_date
-        return self._get(endpoint, params=params, headers={"X-API-KEY": self._api_key})
+        return await self._get(endpoint, params=params, headers={"X-API-KEY": self._api_key})
 
     # ==================================================================
     # Account APIs
     # ==================================================================
 
-    def funds(self) -> Fund:
+    async def funds(self) -> Fund:
         """POST /api/v1/funds"""
-        data = self._post("funds", self._body())
+        data = await self._post("funds", self._body())
         if isinstance(data, dict):
             return Fund(
                 available_balance=str(data.get("available_balance", "0")),
@@ -494,35 +495,35 @@ class OpenAlgoClient:
             )
         return Fund()
 
-    def margin(self, positions: list[dict[str, Any]]) -> dict[str, Any]:
+    async def margin(self, positions: list[dict[str, Any]]) -> dict[str, Any]:
         """POST /api/v1/margin"""
         payload = self._body({"positions": positions})
-        return self._post("margin", payload)
+        return await self._post("margin", payload)
 
-    def orderbook(self) -> list[OrderStatus]:
+    async def orderbook(self) -> list[OrderStatus]:
         """POST /api/v1/orderbook"""
-        data = self._post("orderbook", self._body())
+        data = await self._post("orderbook", self._body())
         if isinstance(data, list):
             return [OrderStatus(**o) for o in data]
         return []
 
-    def tradebook(self) -> list[Trade]:
+    async def tradebook(self) -> list[Trade]:
         """POST /api/v1/tradebook"""
-        data = self._post("tradebook", self._body())
+        data = await self._post("tradebook", self._body())
         if isinstance(data, list):
             return [Trade(**t) for t in data]
         return []
 
-    def positionbook(self) -> list[Position]:
+    async def positionbook(self) -> list[Position]:
         """POST /api/v1/positionbook"""
-        data = self._post("positionbook", self._body())
+        data = await self._post("positionbook", self._body())
         if isinstance(data, list):
             return [Position(**p) for p in data]
         return []
 
-    def holdings(self) -> list[Holding]:
+    async def holdings(self) -> list[Holding]:
         """POST /api/v1/holdings"""
-        data = self._post("holdings", self._body())
+        data = await self._post("holdings", self._body())
         if isinstance(data, list):
             return [Holding(**h) for h in data]
         return []
@@ -531,30 +532,30 @@ class OpenAlgoClient:
     # Utility APIs
     # ==================================================================
 
-    def ping(self) -> dict[str, Any]:
+    async def ping(self) -> dict[str, Any]:
         """POST /api/v1/ping — health check."""
-        return self._post("ping", self._body())
+        return await self._post("ping", self._body())
 
-    def holidays(self, year: str = "2026") -> dict[str, Any]:
+    async def holidays(self, year: str = "2026") -> dict[str, Any]:
         """POST /api/v1/holidays"""
-        return self._post("holidays", self._body({"year": year}))
+        return await self._post("holidays", self._body({"year": year}))
 
-    def timings(self, date: str = "") -> dict[str, Any]:
+    async def timings(self, date: str = "") -> dict[str, Any]:
         """POST /api/v1/timings"""
-        return self._post("timings", self._body({"date": date}))
+        return await self._post("timings", self._body({"date": date}))
 
-    def telegram(self, message: str) -> dict[str, Any]:
+    async def telegram(self, message: str) -> dict[str, Any]:
         """POST /api/v1/telegram"""
-        return self._post("telegram", self._body({"message": message}))
+        return await self._post("telegram", self._body({"message": message}))
 
-    def instruments(self, exchange: str = "NSE") -> dict[str, Any]:
+    async def instruments(self, exchange: str = "NSE") -> dict[str, Any]:
         """POST /api/v1/instruments"""
-        return self._post("instruments", self._body({"exchange": exchange}))
+        return await self._post("instruments", self._body({"exchange": exchange}))
 
-    def analyzer_status(self) -> dict[str, Any]:
+    async def analyzer_status(self) -> dict[str, Any]:
         """POST /api/v1/analyzer/status — check if sandbox mode is active."""
-        return self._post("analyzer/status", self._body())
+        return await self._post("analyzer/status", self._body())
 
-    def analyzer_toggle(self) -> dict[str, Any]:
+    async def analyzer_toggle(self) -> dict[str, Any]:
         """POST /api/v1/analyzer/toggle — toggle sandbox/live mode."""
-        return self._post("analyzer/toggle", self._body())
+        return await self._post("analyzer/toggle", self._body())
