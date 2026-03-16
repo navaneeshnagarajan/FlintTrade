@@ -115,7 +115,7 @@ class FlintTradeApp:
         """Start all services and wait until stopped."""
         # Load market holidays (graceful — warns if OpenAlgo unreachable)
         try:
-            self.cron.load_holidays()
+            await self.cron.load_holidays()
         except Exception as exc:
             logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
 

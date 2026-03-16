@@ -235,11 +235,10 @@ def make_eod_logout_job(
     return eod_logout_job
 
 
-def load_holidays_from_client(openalgo_client: Any) -> set[str]:
-    """Load market holidays from OpenAlgo API on startup."""
+async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
+    """Load market holidays from OpenAlgo API. Must be awaited."""
     try:
-        import asyncio
-        data = asyncio.run(openalgo_client.holidays())
+        data = await openalgo_client.holidays()
         holidays_list = data.get("holidays", []) if isinstance(data, dict) else []
         if isinstance(holidays_list, list):
             result = set(holidays_list)
@@ -310,10 +309,10 @@ class CronManager:
     # Built-in job registration
     # ------------------------------------------------------------------
 
-    def load_holidays(self) -> set[str]:
-        """Load holidays from OpenAlgo and cache them."""
+    async def load_holidays(self) -> set[str]:
+        """Load holidays from OpenAlgo and cache them. Must be awaited."""
         if self.openalgo_client:
-            self._holidays = load_holidays_from_client(self.openalgo_client)
+            self._holidays = await load_holidays_from_client(self.openalgo_client)
         return self._holidays
 
     def register_builtin_jobs(self) -> None:
