@@ -1,77 +1,167 @@
-.PHONY: setup start stop dev update test lint clean deploy rollback backup health docker-up docker-down docker-build help
+# FlintTrade Makefile
+# Usage: make help
 
-setup: ## First-time setup — Linux/macOS native (see docs/setup/ for Windows)
-	@echo "=== FlintTrade Setup ==="
-	@echo "Cloning OpenAlgo..."
-	@[ -d "infra/openalgo/.git" ] || git subtree add --prefix=infra/openalgo https://github.com/marketcalls/openalgo.git main --squash 2>/dev/null || true
-	@echo "Installing Python deps..."
-	@pip install --break-system-packages -r requirements.txt 2>/dev/null || pip install -r requirements.txt
-	@for pkg in packages/*/requirements.txt; do [ -f "$$pkg" ] && pip install --break-system-packages -r "$$pkg" 2>/dev/null || pip install -r "$$pkg" 2>/dev/null; done
-	@echo "Installing Node deps..."
-	@for pkg in packages/*/package.json; do [ -f "$$pkg" ] && (cd "$$(dirname $$pkg)" && npm install && cd -); done
-	@echo "✅ FlintTrade setup complete"
+SHELL := /usr/bin/env bash
+PYTHON := $(shell which python3 2>/dev/null || which python 2>/dev/null)
+NPM := $(shell which npm 2>/dev/null)
+FLINTTRADE_DIR := $(shell pwd)
 
-start: ## Start all services
-	@echo "Starting FlintTrade..."
-	@sudo systemctl start openalgo 2>/dev/null || echo "OpenAlgo: start manually via systemd or infra/openalgo"
-	@python packages/core/src/app.py
+# Colors
+GREEN  := \033[32m
+RED    := \033[31m
+YELLOW := \033[33m
+CYAN   := \033[36m
+RESET  := \033[0m
 
-dev: ## Start all dev servers (React + Python backend)
-	@echo "=== FlintTrade Dev Mode ==="
+# Source .env if it exists
+ifneq (,$(wildcard .env))
+  include .env
+  export
+endif
+
+OPENALGO_PORT ?= 5000
+DATA_DIR ?= $(FLINTTRADE_DIR)/data
+LOG_DIR ?= $(FLINTTRADE_DIR)/logs
+AUDIT_LOG_DIR ?= $(DATA_DIR)/audit
+TICK_DATA_DIR ?= $(DATA_DIR)/ticks
+OPENALGO_PID := /tmp/flinttrade-openalgo.pid
+
+.PHONY: setup start stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help
+
+# ======================================================================
+# Setup
+# ======================================================================
+
+setup: ## First-time setup — install all dependencies
+	@echo -e "$(CYAN)=== FlintTrade Setup ===$(RESET)"
+	@# Check prerequisites
+	@$(PYTHON) --version >/dev/null 2>&1 || { echo -e "$(RED)ERROR: python3 not found$(RESET)"; exit 1; }
+	@echo -e "$(GREEN)✓$(RESET) Python: $$($(PYTHON) --version)"
+	@if [ -n "$(NPM)" ]; then echo -e "$(GREEN)✓$(RESET) Node: $$(node --version), npm: $$(npm --version)"; \
+	 else echo -e "$(YELLOW)⚠ npm not found — React packages will not be installed$(RESET)"; fi
+	@# Git submodules
+	@echo "Initializing submodules..."
+	@git submodule update --init --recursive 2>/dev/null || echo -e "$(YELLOW)⚠ Some submodules may not be available$(RESET)"
+	@# Python dependencies
+	@echo "Installing Python dependencies..."
+	@$(PYTHON) -m pip install -r requirements.txt --break-system-packages -q 2>/dev/null || \
+	 $(PYTHON) -m pip install -r requirements.txt -q
+	@for req in packages/*/requirements.txt; do \
+	  [ -f "$$req" ] && ($(PYTHON) -m pip install -r "$$req" --break-system-packages -q 2>/dev/null || \
+	    $(PYTHON) -m pip install -r "$$req" -q 2>/dev/null) || true; \
+	done
+	@# Node dependencies (if npm available)
+	@if [ -n "$(NPM)" ]; then \
+	  echo "Installing Node dependencies..."; \
+	  for pkg in packages/terminal packages/dashboard packages/backtest; do \
+	    [ -f "$$pkg/package.json" ] && (cd "$$pkg" && npm install --silent 2>/dev/null && cd - >/dev/null) || true; \
+	  done; \
+	fi
+	@# Data directories
+	@mkdir -p "$(DATA_DIR)" "$(LOG_DIR)" "$(AUDIT_LOG_DIR)" "$(TICK_DATA_DIR)" 2>/dev/null || true
+	@echo ""
+	@echo -e "$(GREEN)=== Setup complete ===$(RESET)"
+	@echo "Next steps:"
+	@echo "  1. Copy .env.example to .env and configure"
+	@echo "  2. Configure infra/openalgo/.env with broker credentials"
+	@echo "  3. Run: make test"
+	@echo "  4. Run: make start"
+
+# ======================================================================
+# Service management
+# ======================================================================
+
+start: ## Start OpenAlgo service
+	@echo -e "$(CYAN)=== Starting FlintTrade ===$(RESET)"
+	@bash infra/scripts/start-openalgo.sh
+	@echo -e "$(GREEN)=== FlintTrade running ===$(RESET)"
+
+stop: ## Stop OpenAlgo service
+	@bash infra/scripts/stop-openalgo.sh
+
+restart: stop start ## Restart OpenAlgo
+
+status: ## Show service status
+	@bash infra/scripts/status.sh
+
+health: ## Run health check
+	@bash infra/scripts/health-check.sh
+
+dev: ## Start React dev servers + backend
+	@echo -e "$(CYAN)=== FlintTrade Dev Mode ===$(RESET)"
 	@echo "  Terminal:  http://localhost:3001"
 	@echo "  Dashboard: http://localhost:3000"
 	@echo "  Backtest:  http://localhost:3002"
-	@echo "  Backend:   OpenAlgo at $${OPENALGO_HOST:-http://127.0.0.1:5000}"
+	@echo "  OpenAlgo:  http://localhost:$(OPENALGO_PORT)"
 	@echo ""
-	@cd packages/terminal && npm run dev &
-	@cd packages/dashboard && npm run dev &
-	@cd packages/backtest && npm run dev &
-	@python packages/core/src/app.py
+	@if [ -n "$(NPM)" ]; then \
+	  cd packages/terminal && npm run dev & \
+	  cd packages/dashboard && npm run dev & \
+	  cd packages/backtest && npm run dev & \
+	fi
+	@bash infra/scripts/start-openalgo.sh
 
-stop: ## Stop all services
-	@sudo systemctl stop openalgo 2>/dev/null || echo "Manual stop required"
-
-update: ## Pull latest from all upstreams
-	@git subtree pull --prefix=infra/openalgo https://github.com/marketcalls/openalgo.git main --squash
-	@git pull origin dev
-	@echo "✅ Updated"
+# ======================================================================
+# Testing and quality
+# ======================================================================
 
 test: ## Run all tests
-	@python -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib
-	@echo "✅ Tests passed"
+	@$(PYTHON) -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib
 
-lint: ## Run linters
-	@ruff check packages/*/src/ --output-format=github 2>/dev/null || ruff check packages/*/src/
+test-fast: ## Run tests, stop on first failure
+	@$(PYTHON) -m pytest packages/*/tests/ tests/ -x --tb=short --import-mode=importlib
 
-clean: ## Remove build artifacts
+lint: ## Run linter (ruff)
+	@if command -v ruff >/dev/null 2>&1; then \
+	  ruff check packages/ tests/; \
+	else \
+	  echo -e "$(YELLOW)ruff not installed. Install with: pip install ruff$(RESET)"; \
+	fi
+
+# ======================================================================
+# Maintenance
+# ======================================================================
+
+update: ## Update submodules and dependencies
+	@echo "Updating submodules..."
+	@git submodule update --remote --merge 2>/dev/null || true
+	@echo "Updating Python dependencies..."
+	@$(PYTHON) -m pip install -r requirements.txt --upgrade --break-system-packages -q 2>/dev/null || \
+	 $(PYTHON) -m pip install -r requirements.txt --upgrade -q
+	@echo -e "$(GREEN)✓ Updated$(RESET)"
+
+clean: ## Remove build artifacts (with confirmation)
+	@echo "This will remove __pycache__, .pytest_cache, and node_modules."
+	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 0
 	@find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@find . -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	@find packages -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
+	@echo -e "$(GREEN)✓ Cleaned$(RESET)"
 
-deploy: ## Deploy to production (blue-green)
-	@bash infra/scripts/deploy.sh
+# ======================================================================
+# Docker
+# ======================================================================
 
-rollback: ## Rollback
-	@bash infra/scripts/rollback.sh
-
-backup: ## Backup databases
-	@bash infra/scripts/backup.sh
-
-health: ## Health check
-	@bash infra/scripts/health-check.sh
-
-docker-up: ## Start with Docker (cross-platform)
+docker-up: ## Start all services with Docker
 	docker compose up
 
-docker-down: ## Stop Docker
+docker-down: ## Stop Docker services
 	docker compose down
 
 docker-build: ## Rebuild Docker images
 	docker compose build
 
+# ======================================================================
+# Info
+# ======================================================================
+
 version: ## Show version
 	@cat VERSION
 
-help: ## Show help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+help: ## Show this help
+	@echo -e "$(CYAN)FlintTrade$(RESET) — make targets:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+	  awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-15s$(RESET) %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help

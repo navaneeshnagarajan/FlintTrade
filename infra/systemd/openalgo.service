@@ -1,12 +1,26 @@
+# Standalone OpenAlgo Service (alternative to flinttrade.service)
+# Use this if you want to run OpenAlgo independently of FlintTrade
+#
+# INSTALL:
+#   1. Edit this file — replace REPLACE_USER and REPLACE_DIR
+#   2. sudo cp openalgo.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload && sudo systemctl enable openalgo
+
 [Unit]
-Description=OpenAlgo (FlintTrade)
+Description=OpenAlgo Trading API
 After=network.target
+
 [Service]
 Type=simple
-User=
-WorkingDirectory=/home//FlintTrade/infra/openalgo
-ExecStart=/home//FlintTrade/infra/openalgo/.venv/bin/gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app
+User=REPLACE_USER
+WorkingDirectory=REPLACE_DIR/infra/openalgo
+EnvironmentFile=REPLACE_DIR/infra/openalgo/.env
+ExecStart=/usr/bin/gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app
 Restart=on-failure
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openalgo
+
 [Install]
 WantedBy=multi-user.target

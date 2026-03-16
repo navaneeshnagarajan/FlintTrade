@@ -1,53 +1,54 @@
 # FlintTrade systemd Services
 
-## Install
-
-Before installing, edit `flinttrade.service` and replace the placeholder values:
-- `REPLACE_WITH_YOUR_USERNAME` → your Linux username
-- `REPLACE_WITH_INSTALL_DIR` → path to your FlintTrade clone (e.g. `/home/youruser/FlintTrade`)
+## Quick Install
 
 ```bash
-sudo cp flinttrade.service /etc/systemd/system/
-sudo cp openalgo.service /etc/systemd/system/
+# 1. Edit the service file — replace placeholders
+sed -i "s|REPLACE_USER|$(whoami)|g; s|REPLACE_DIR|$(pwd)|g" infra/systemd/flinttrade.service
+
+# 2. Copy to systemd
+sudo cp infra/systemd/flinttrade.service /etc/systemd/system/
+
+# 3. Reload and enable
 sudo systemctl daemon-reload
-```
-
-## Enable (auto-start on boot)
-
-```bash
-sudo systemctl enable openalgo
 sudo systemctl enable flinttrade
 ```
 
-## Start / Stop
+## Usage
 
 ```bash
-sudo systemctl start flinttrade    # starts after openalgo
-sudo systemctl stop flinttrade
-sudo systemctl restart flinttrade
+sudo systemctl start flinttrade     # Start (OpenAlgo on port 5000)
+sudo systemctl stop flinttrade      # Stop
+sudo systemctl restart flinttrade   # Restart
+sudo systemctl status flinttrade    # Check status
 ```
 
 ## Logs
 
 ```bash
-journalctl -u flinttrade -f         # live tail
-journalctl -u flinttrade --since today
-journalctl -u openalgo -f           # OpenAlgo logs
+journalctl -u flinttrade -f              # Live tail
+journalctl -u flinttrade --since today   # Today's logs
+journalctl -u flinttrade -n 50           # Last 50 lines
 ```
 
 ## Deploy Freeze
 
-**NEVER restart flinttrade or openalgo between 9:15 AM - 3:30 PM IST** when
-equity/F&O positions are open. MCX extends to 11:55 PM. Crypto (DELTA) is 24/7.
+**NEVER restart during market hours with open positions.**
+
+| Market | Hours (IST) |
+|--------|-------------|
+| NSE/BSE/NFO/BFO | 9:15 AM – 3:30 PM |
+| CDS/BCD | 9:00 AM – 5:00 PM |
+| MCX | 9:00 AM – 11:55 PM |
+| DELTA (crypto) | 24/7 — check positions first |
 
 If a bug is found during market hours:
-1. Use OpenAlgo Action Center to disable the strategy
-2. Or send `/kill` via Telegram bot
-3. Fix the code after market close (3:30 PM for equity)
-4. Then `sudo systemctl restart flinttrade`
+1. Send `/kill` via Telegram bot
+2. Or use OpenAlgo Action Center to disable the strategy
+3. Fix and deploy after your market closes
 
 ## Service Order
 
-1. `openalgo.service` starts first (port 5000)
-2. `flinttrade.service` starts after (reads from OpenAlgo API)
-3. If OpenAlgo is slow to start, FlintTrade warns but does not crash
+1. `flinttrade.service` starts OpenAlgo (port 5000) via gunicorn
+2. FlintTrade packages connect to OpenAlgo's REST API
+3. If OpenAlgo fails, the service auto-restarts after 5 seconds

@@ -1,18 +1,30 @@
+# FlintTrade OpenAlgo Service
+#
+# INSTALL:
+#   1. Edit this file — replace REPLACE_USER and REPLACE_DIR
+#   2. sudo cp flinttrade.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable flinttrade
+#   5. sudo systemctl start flinttrade
+#
+# LOGS:  journalctl -u flinttrade -f
+# STATUS: sudo systemctl status flinttrade
+
 [Unit]
-Description=FlintTrade Trading Platform
-After=network.target openalgo.service
-Wants=openalgo.service
+Description=FlintTrade (OpenAlgo + Platform)
+After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-# IMPORTANT: Update User and WorkingDirectory to match your system
-# Example: User=youruser, WorkingDirectory=/home/youruser/FlintTrade
-User=REPLACE_WITH_YOUR_USERNAME
-WorkingDirectory=REPLACE_WITH_INSTALL_DIR
-EnvironmentFile=REPLACE_WITH_INSTALL_DIR/.env
-ExecStart=/usr/bin/python3 packages/core/src/app.py
+# IMPORTANT: Replace these with your actual values
+User=REPLACE_USER
+WorkingDirectory=REPLACE_DIR/infra/openalgo
+EnvironmentFile=REPLACE_DIR/.env
+EnvironmentFile=REPLACE_DIR/infra/openalgo/.env
+ExecStart=/usr/bin/gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app
 Restart=on-failure
-RestartSec=10
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=flinttrade
