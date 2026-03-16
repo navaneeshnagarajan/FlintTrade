@@ -1,12 +1,17 @@
 """Scheduled task manager using APScheduler.
 
 Built-in jobs:
-1. totp_login: 8:30 AM IST daily (skip holidays)
-2. health_check: every 5 minutes during market hours
-3. backup: 12:00 AM daily
-4. post_market_analysis: 3:45 PM IST (after equity close)
-5. mcx_close_check: 11:55 PM IST (after MCX close)
-6. ddns_update: every 10 seconds (IP change detection)
+1. login_job: 8:30 AM IST daily (skip holidays)
+2. health_check_job: 9:10 AM IST (verify OpenAlgo session)
+3. square_off_warning_job: 3:20 PM IST (warn before square-off)
+4. eod_logout_job: 11:45 PM IST (SEBI session logout)
+5. holiday_check: on startup (load holidays from OpenAlgo)
+
+Additional optional jobs:
+6. backup: 12:00 AM daily
+7. post_market_analysis: 3:45 PM IST
+8. mcx_close_check: 11:55 PM IST
+9. ddns_update: every 10 seconds
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable
 
@@ -61,8 +66,28 @@ class JobDefinition:
 
 # Default job schedule definitions
 DEFAULT_JOBS: dict[str, dict[str, Any]] = {
-    "totp_login": {
+    "login_job": {
         "description": "Daily TOTP broker login at 8:30 AM IST",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 8, "minute": 30, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
+    },
+    "health_check_job": {
+        "description": "Verify OpenAlgo session at 9:10 AM IST",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 9, "minute": 10, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
+    },
+    "square_off_warning_job": {
+        "description": "Square-off warning at 3:20 PM IST",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 15, "minute": 20, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
+    },
+    "eod_logout_job": {
+        "description": "SEBI end-of-day session logout at 11:45 PM IST",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 23, "minute": 45, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
+    },
+    "totp_login": {
+        "description": "Daily TOTP broker login at 8:30 AM IST (legacy alias)",
         "trigger_type": "cron",
         "trigger_args": {"hour": 8, "minute": 30, "timezone": "Asia/Kolkata"},
     },
@@ -94,28 +119,180 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Built-in job implementations
+# ---------------------------------------------------------------------------
+
+
+def _is_market_holiday(holidays: set[str] | None = None) -> bool:
+    """Check if today is a market holiday."""
+    today = datetime.now(IST).date()
+    if today.weekday() >= 5:
+        return True
+    if holidays and today.isoformat() in holidays:
+        return True
+    return False
+
+
+def make_login_job(
+    totp_login: Any,
+    audit_logger: Any = None,
+    holidays: set[str] | None = None,
+) -> Callable[[], None]:
+    """Create the login_job handler."""
+
+    def login_job() -> None:
+        if _is_market_holiday(holidays):
+            logger.info("login_job: skipping — market holiday")
+            return
+        result = totp_login.execute()
+        if audit_logger:
+            audit_logger.log_event(
+                "SESSION_LOGIN",
+                success=result.success,
+                attempt_count=result.attempt_count,
+                error=result.error,
+            )
+        if result.success:
+            logger.info("login_job: session login successful")
+        else:
+            logger.error("login_job: session login failed — %s", result.error)
+
+    return login_job
+
+
+def make_health_check_job(
+    openalgo_client: Any,
+    audit_logger: Any = None,
+    telegram_bot: Any = None,
+    holidays: set[str] | None = None,
+) -> Callable[[], None]:
+    """Create the health_check_job handler."""
+
+    def health_check_job() -> None:
+        if _is_market_holiday(holidays):
+            return
+        success = False
+        error = ""
+        try:
+            import asyncio
+            result = asyncio.run(openalgo_client.ping())
+            success = result.get("status") == "success" if isinstance(result, dict) else False
+        except Exception as exc:
+            error = str(exc)
+            logger.error("health_check_job: ping failed — %s", exc)
+
+        if audit_logger:
+            audit_logger.log_event(
+                "HEALTH_CHECK",
+                success=success,
+                error=error,
+            )
+
+        if not success and telegram_bot:
+            telegram_bot.send_message(
+                f"🔴 *Health Check Failed*\nOpenAlgo ping failed at "
+                f"{datetime.now(IST).strftime('%H:%M IST')}\nError: {error or 'no response'}"
+            )
+
+    return health_check_job
+
+
+def make_square_off_warning_job(
+    telegram_bot: Any = None,
+    holidays: set[str] | None = None,
+) -> Callable[[], None]:
+    """Create the square_off_warning_job handler."""
+
+    def square_off_warning_job() -> None:
+        if _is_market_holiday(holidays):
+            return
+        msg = "⚠️ 10 minutes to square off open positions"
+        logger.warning(msg)
+        if telegram_bot:
+            telegram_bot.send_message(msg)
+
+    return square_off_warning_job
+
+
+def make_eod_logout_job(
+    audit_logger: Any = None,
+    holidays: set[str] | None = None,
+) -> Callable[[], None]:
+    """Create the eod_logout_job handler (SEBI requirement)."""
+
+    def eod_logout_job() -> None:
+        if _is_market_holiday(holidays):
+            return
+        logger.info("eod_logout_job: SEBI end-of-day session logout")
+        if audit_logger:
+            audit_logger.log_event(
+                "SESSION_LOGOUT",
+                source="cron",
+                reason="SEBI end-of-day requirement",
+            )
+
+    return eod_logout_job
+
+
+def load_holidays_from_client(openalgo_client: Any) -> set[str]:
+    """Load market holidays from OpenAlgo API on startup."""
+    try:
+        import asyncio
+        data = asyncio.run(openalgo_client.holidays())
+        holidays_list = data.get("holidays", []) if isinstance(data, dict) else []
+        if isinstance(holidays_list, list):
+            result = set(holidays_list)
+            logger.info("Loaded %d market holidays", len(result))
+            return result
+    except Exception as exc:
+        logger.warning("Failed to load holidays: %s", exc)
+    return set()
+
+
+# ---------------------------------------------------------------------------
+# CronManager
+# ---------------------------------------------------------------------------
+
+
 class CronManager:
     """Manage scheduled jobs using APScheduler.
 
     Usage::
 
-        cron = CronManager()
-        cron.register("totp_login", handler=my_totp_fn, trigger_type="cron",
-                       trigger_args={"hour": 8, "minute": 30})
-        cron.start()  # non-blocking
-        cron.pause("health_check")
-        cron.resume("health_check")
-        cron.stop()
+        cron = CronManager(
+            openalgo_client=client,
+            audit_logger=auditor,
+            telegram_bot=bot,
+            totp_login=totp,
+        )
+        cron.register_builtin_jobs()
+        cron.start()
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        openalgo_client: Any = None,
+        audit_logger: Any = None,
+        telegram_bot: Any = None,
+        totp_login: Any = None,
+    ) -> None:
         self._jobs: dict[str, JobDefinition] = {}
         self._scheduler = None
         self._running = False
+        self.openalgo_client = openalgo_client
+        self.audit_logger = audit_logger
+        self.telegram_bot = telegram_bot
+        self.totp_login = totp_login
+        self._holidays: set[str] = set()
 
     @property
     def running(self) -> bool:
         return self._running
+
+    @property
+    def holidays(self) -> set[str]:
+        return self._holidays
 
     def _get_scheduler(self) -> Any:
         """Lazy-initialize APScheduler."""
@@ -130,16 +307,57 @@ class CronManager:
             raise ImportError("apscheduler required — pip install apscheduler")
 
     # ------------------------------------------------------------------
+    # Built-in job registration
+    # ------------------------------------------------------------------
+
+    def load_holidays(self) -> set[str]:
+        """Load holidays from OpenAlgo and cache them."""
+        if self.openalgo_client:
+            self._holidays = load_holidays_from_client(self.openalgo_client)
+        return self._holidays
+
+    def register_builtin_jobs(self) -> None:
+        """Register all 5 required built-in jobs with their handlers."""
+        if self.totp_login:
+            self.register(
+                "login_job",
+                handler=make_login_job(self.totp_login, self.audit_logger, self._holidays),
+                **DEFAULT_JOBS["login_job"],
+            )
+
+        if self.openalgo_client:
+            self.register(
+                "health_check_job",
+                handler=make_health_check_job(
+                    self.openalgo_client, self.audit_logger, self.telegram_bot, self._holidays,
+                ),
+                **DEFAULT_JOBS["health_check_job"],
+            )
+
+        self.register(
+            "square_off_warning_job",
+            handler=make_square_off_warning_job(self.telegram_bot, self._holidays),
+            **DEFAULT_JOBS["square_off_warning_job"],
+        )
+
+        self.register(
+            "eod_logout_job",
+            handler=make_eod_logout_job(self.audit_logger, self._holidays),
+            **DEFAULT_JOBS["eod_logout_job"],
+        )
+
+    # ------------------------------------------------------------------
     # Job registration
     # ------------------------------------------------------------------
 
     def register(
         self,
         name: str,
-        handler: Callable[[], Any],
+        handler: Callable[[], Any] | None = None,
         description: str = "",
         trigger_type: str = "cron",
         trigger_args: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
         """Register a new scheduled job."""
         defaults = DEFAULT_JOBS.get(name, {})

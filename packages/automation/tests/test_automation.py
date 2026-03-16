@@ -227,6 +227,103 @@ class TestCronManager:
         assert DEFAULT_JOBS["health_check"]["trigger_args"]["minutes"] == 5
         assert DEFAULT_JOBS["ddns_update"]["trigger_args"]["seconds"] == 10
 
+    def test_cron_accepts_wired_dependencies(self):
+        from packages.automation.src.cron_manager import CronManager
+        cron = CronManager(
+            openalgo_client=MagicMock(),
+            audit_logger=MagicMock(),
+            telegram_bot=MagicMock(),
+            totp_login=MagicMock(),
+        )
+        assert cron.openalgo_client is not None
+        assert cron.audit_logger is not None
+
+
+# ======================================================================
+# Cron Manager — Built-in Job Implementations
+# ======================================================================
+
+
+class TestCronBuiltinJobs:
+    """Test the 5 required built-in cron job implementations."""
+
+    def test_login_job_skips_holiday(self):
+        from packages.automation.src.cron_manager import make_login_job
+        mock_totp = MagicMock()
+        mock_audit = MagicMock()
+        # Today is a "holiday" — put today's date in the set
+        today = datetime.now(IST).date().isoformat()
+        job = make_login_job(mock_totp, mock_audit, holidays={today})
+        job()
+        mock_totp.execute.assert_not_called()
+
+    def test_login_job_runs_on_trading_day(self):
+        from packages.automation.src.cron_manager import make_login_job
+        mock_totp = MagicMock()
+        mock_totp.execute.return_value = MagicMock(success=True, attempt_count=1, error="")
+        mock_audit = MagicMock()
+        # Empty holidays — if today is a weekday it runs; if weekend it skips (both are valid)
+        job = make_login_job(mock_totp, mock_audit, holidays=set())
+        job()
+        today = datetime.now(IST).date()
+        if today.weekday() < 5:
+            mock_totp.execute.assert_called_once()
+            mock_audit.log_event.assert_called_once()
+
+    def test_health_check_sends_alert_on_failure(self):
+        from packages.automation.src.cron_manager import make_health_check_job
+        mock_client = MagicMock()
+        mock_client.ping = MagicMock(side_effect=RuntimeError("connection refused"))
+        mock_audit = MagicMock()
+        mock_bot = MagicMock()
+        job = make_health_check_job(mock_client, mock_audit, mock_bot, holidays=set())
+        today = datetime.now(IST).date()
+        if today.weekday() < 5:
+            job()
+            mock_audit.log_event.assert_called()
+            mock_bot.send_message.assert_called_once()
+            msg = mock_bot.send_message.call_args[0][0]
+            assert "Health Check Failed" in msg
+
+    def test_eod_logout_logs_audit(self):
+        from packages.automation.src.cron_manager import make_eod_logout_job
+        mock_audit = MagicMock()
+        job = make_eod_logout_job(mock_audit, holidays=set())
+        today = datetime.now(IST).date()
+        if today.weekday() < 5:
+            job()
+            mock_audit.log_event.assert_called_once_with(
+                "SESSION_LOGOUT",
+                source="cron",
+                reason="SEBI end-of-day requirement",
+            )
+
+    def test_square_off_warning_sends_telegram(self):
+        from packages.automation.src.cron_manager import make_square_off_warning_job
+        mock_bot = MagicMock()
+        job = make_square_off_warning_job(mock_bot, holidays=set())
+        today = datetime.now(IST).date()
+        if today.weekday() < 5:
+            job()
+            mock_bot.send_message.assert_called_once()
+            msg = mock_bot.send_message.call_args[0][0]
+            assert "square off" in msg.lower()
+
+    def test_register_builtin_jobs(self):
+        from packages.automation.src.cron_manager import CronManager
+        cron = CronManager(
+            openalgo_client=MagicMock(),
+            audit_logger=MagicMock(),
+            telegram_bot=MagicMock(),
+            totp_login=MagicMock(),
+        )
+        cron.register_builtin_jobs()
+        names = [j["name"] for j in cron.list_jobs()]
+        assert "login_job" in names
+        assert "health_check_job" in names
+        assert "square_off_warning_job" in names
+        assert "eod_logout_job" in names
+
 
 # ======================================================================
 # Telegram Bot — command parsing
