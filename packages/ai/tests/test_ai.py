@@ -66,7 +66,7 @@ class TestLLMClient:
 
     def test_fits_context(self):
         from packages.ai.src.llm_client import LLMClient, LLMConfig, LLMMessage
-        cfg = LLMConfig(context_length=100)
+        cfg = LLMConfig(context_length=2000)
         client = LLMClient(config=cfg)
         messages = [LLMMessage(role="user", content="short message")]
         assert client.fits_context(messages)

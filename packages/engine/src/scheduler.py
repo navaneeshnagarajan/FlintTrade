@@ -107,7 +107,7 @@ class TimeScheduler:
         if sched.is_24x7:
             return True
 
-        now = (at or self.now_ist()).timetz()
+        now = (at or self.now_ist()).time().replace(tzinfo=None)
         return sched.market_open <= now <= sched.market_close
 
     def is_trading_day(self, exchange: str, on: date | None = None) -> bool:
@@ -136,7 +136,7 @@ class TimeScheduler:
             return None
 
         now = at or self.now_ist()
-        now_t = now.timetz()
+        now_t = now.time().replace(tzinfo=None)
         if not (sched.market_open <= now_t <= sched.market_close):
             return None
 
@@ -145,7 +145,7 @@ class TimeScheduler:
             minute=sched.square_off.minute,
             second=0, microsecond=0,
         )
-        remaining = sq_dt - now.replace(tzinfo=None if sq_dt.tzinfo is None else IST)
+        remaining = sq_dt - now
         if hasattr(remaining, "total_seconds") and remaining.total_seconds() < 0:
             return timedelta(0)
         return remaining
@@ -156,7 +156,7 @@ class TimeScheduler:
         if sched is None or sched.is_24x7:
             return False
 
-        now_t = (at or self.now_ist()).timetz()
+        now_t = (at or self.now_ist()).time().replace(tzinfo=None)
         return now_t >= sched.square_off
 
     # ------------------------------------------------------------------
@@ -168,7 +168,7 @@ class TimeScheduler:
 
         If no exchanges given, checks equity window (default from CLAUDE.md).
         """
-        now_t = (at or self.now_ist()).timetz()
+        now_t = (at or self.now_ist()).time().replace(tzinfo=None)
         target_exchanges = exchanges or ["NSE"]
 
         for exch in target_exchanges:

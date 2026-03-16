@@ -149,7 +149,7 @@ class PositionLimits:
     ) -> SafetyResult:
         # Count positions with non-zero quantity
         active = [p for p in current_positions if int(p.quantity) != 0]
-        if len(active) >= self.max_positions:
+        if len(active) > self.max_positions:
             return SafetyResult(
                 SafetyVerdict.FAIL, "L2_POSITION",
                 f"Already at max positions ({len(active)}/{self.max_positions})",

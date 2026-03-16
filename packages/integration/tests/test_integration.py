@@ -556,30 +556,30 @@ class TestAlerter:
     def test_throttle_blocks_duplicate(self):
         from packages.integration.src.alerter import Alert, AlertThrottler
         throttler = AlertThrottler(window_seconds=60)
-        alert = Alert(alert_type="ORDER_PLACED", symbol="RELIANCE")
+        alert = Alert(alert_type="ORDER_PLACED", message="test", symbol="RELIANCE")
         assert throttler.should_send(alert)
         assert not throttler.should_send(alert)  # same symbol+type within 60s
 
     def test_throttle_allows_different_symbol(self):
         from packages.integration.src.alerter import Alert, AlertThrottler
         throttler = AlertThrottler(window_seconds=60)
-        a1 = Alert(alert_type="ORDER_PLACED", symbol="RELIANCE")
-        a2 = Alert(alert_type="ORDER_PLACED", symbol="TCS")
+        a1 = Alert(alert_type="ORDER_PLACED", message="test", symbol="RELIANCE")
+        a2 = Alert(alert_type="ORDER_PLACED", message="test", symbol="TCS")
         assert throttler.should_send(a1)
         assert throttler.should_send(a2)  # different symbol
 
     def test_throttle_allows_different_type(self):
         from packages.integration.src.alerter import Alert, AlertThrottler
         throttler = AlertThrottler(window_seconds=60)
-        a1 = Alert(alert_type="ORDER_PLACED", symbol="RELIANCE")
-        a2 = Alert(alert_type="ORDER_FILLED", symbol="RELIANCE")
+        a1 = Alert(alert_type="ORDER_PLACED", message="test", symbol="RELIANCE")
+        a2 = Alert(alert_type="ORDER_FILLED", message="test", symbol="RELIANCE")
         assert throttler.should_send(a1)
         assert throttler.should_send(a2)  # different type
 
     def test_throttle_reset(self):
         from packages.integration.src.alerter import Alert, AlertThrottler
         throttler = AlertThrottler(window_seconds=60)
-        alert = Alert(alert_type="ORDER_PLACED", symbol="RELIANCE")
+        alert = Alert(alert_type="ORDER_PLACED", message="test", symbol="RELIANCE")
         throttler.should_send(alert)
         throttler.reset()
         assert throttler.should_send(alert)  # reset clears throttle
