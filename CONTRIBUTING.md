@@ -6,10 +6,10 @@
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 cp .env.example .env && make setup
-git checkout dev && git pull
-git checkout -b feature/{package}-{description}
-# develop → test → commit → push → PR to dev
 ```
+
+> **Note:** During pre-release (v0.x), all work goes directly to main.
+> Feature branches and PRs activate at v1.0.0.
 
 ## DEVLOG (required for every change)
 
@@ -29,37 +29,46 @@ Examples:
 
 FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`
 
-| Version | When | Meaning |
+| Version | Status | Meaning |
 |---|---|---|
-| 0.1.0-dev | Now | Foundation only. No working code. |
-| 0.1.0 | core package working | First functional release. OpenAlgo client connects and places orders. |
-| 0.2.0 | engine + data working | Safety layers, order routing, tick capture, audit logs. |
-| 0.3.0 | terminal UI working | Manual trading possible through FlintTrade. |
-| 0.4.0 | historical + screener | Data pipeline, OI analysis, Greeks. |
-| 0.5.0 | backtest-engine + backtest UI | Backtesting with equity curves and metrics. |
-| 0.6.0 | integration | TradingView webhooks, ChartInk, visual flow builder. |
-| 0.7.0 | ai | LLM chat, RAG, ML signals. |
-| 0.8.0 | automation | Telegram bot, cron, OpenClaw, TOTP auto-login. |
-| 0.9.0 | dashboard + ditto | Portfolio overview, multi-account. |
-| 1.0.0 | All 13 packages working | First production release. Full platform. |
+| 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
+| 0.1.0-dev | Done | Core package — async OpenAlgo client, 39 endpoints |
+| 0.2.0-dev | Done | Backend packages — engine, data, historical, screener, ai, automation, ditto |
+| 0.3.0-dev | Done | React UI — terminal (9 modules), dashboard, backtest |
+| 0.4.0-dev | Done | Strategy execution — StrategyRunner, EMACrossover, E2E order flow |
+| 0.5.0-dev | Done | Automation + kill switch — cron jobs, Telegram /kill, SEBI compliance |
+| 0.6.0-dev | **CURRENT** | Docker + cross-platform — Windows/macOS/Linux/Pi support |
+| 0.7.0 | Next | All packages verified end-to-end, live trading tested |
+| 0.8.0 | Planned | Mac + Antigravity test suite, OpenAlgo subtree pulled |
+| 0.9.0 | Planned | First community contributor PR merged |
+| 1.0.0 | Planned | Full production release, all platforms tested |
 
 **Version bumps:**
 - Update `VERSION` file
 - Update `CHANGELOG.md`
-- Tag: `git tag v0.1.0 && git push --tags`
-- GitHub Release with changelog summary (no AI/chat references)
+- Tag: `git tag v0.6.0 && git push --tags`
+- GitHub Release with changelog summary
 
-**Patch versions (0.1.1, 0.1.2):** bug fixes within a release.
-**Minor versions (0.2.0, 0.3.0):** new package/feature added.
+**Patch versions (0.6.1, 0.6.2):** bug fixes within a release.
+**Minor versions (0.7.0, 0.8.0):** new package/feature added.
 **Major version (1.0.0):** full platform ready for production.
 
-## Rules
+## Pre-release phase (v0.x — current)
+
+- All commits go directly to main
+- No PRs required until v1.0.0
+- DEVLOG entry required for every commit
+- Never commit .env, secrets, or private data to any branch
+- AI tools (Claude Code, Antigravity) may be credited in commit bodies.
+  Never include private data (order IDs, account balances, API keys)
+  in commits, DEVLOG, CHANGELOG, or any file tracked by git.
+
+## Post-release (v1.0.0 onward)
 
 - Branch: `feature/{pkg}-{name}`, `fix/{pkg}-{name}`, `hotfix/{name}`
-- Commits: `feat(terminal): add scalper panel` (conventional commits)
-- Always squash and merge
 - PRs to dev require 1 approval from @navaneeshnagarajan
+- Always squash and merge
 - Run `make test && make lint` before pushing
+- Commits: `feat(terminal): add scalper panel` (conventional commits)
 - Never commit secrets (.env, keys, tokens)
 - Never reference specific brokers in package code (use OpenAlgo abstraction)
-- Never mention AI tools in commit messages, PR titles, or release notes

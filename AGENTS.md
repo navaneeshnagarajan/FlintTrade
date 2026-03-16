@@ -1,7 +1,7 @@
 # FlintTrade — Agent Rules & Codebase Map
 
 > This file is read by Antigravity, Claude Code, and any AI agent working on this repo.
-> Repo: github.com/navaneeshnagarajan/FlintTrade | License: AGPL-3.0 | Version: 0.1.0-dev
+> Repo: github.com/navaneeshnagarajan/FlintTrade | License: AGPL-3.0 | Version: 0.6.0-dev
 
 ## What is FlintTrade?
 
@@ -127,7 +127,12 @@ Every change → append to DEVLOG.md:
 
 ## Deploy Freeze
 
-9:15 AM - 3:30 PM IST: NO deploys on production. If bug found → OpenAlgo Action Center → disable strategy. Fix after 3:30 PM.
+- NSE/BSE/NFO/BFO traders: 9:15 AM – 3:30 PM IST — NO deploys
+- CDS/BCD traders: 9:00 AM – 5:00 PM IST — NO deploys
+- MCX traders: 9:00 AM – 11:55 PM IST — NO deploys
+- DELTA/crypto: check open positions before any restart (24/7 market)
+- If a bug is found during market hours → use OpenAlgo Action Center
+  to disable the strategy. Fix and deploy after your market closes.
 
 ## Technology Stack
 
