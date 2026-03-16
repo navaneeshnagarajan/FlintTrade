@@ -12,8 +12,9 @@ setup: ## First-time setup — clones OpenAlgo, installs all deps
 	@echo "✅ FlintTrade setup complete"
 
 start: ## Start all services
-	@echo "Starting OpenAlgo + FlintTrade..."
-	@sudo systemctl start openalgo 2>/dev/null || echo "Run: cd infra/openalgo && uv run app.py"
+	@echo "Starting FlintTrade..."
+	@sudo systemctl start openalgo 2>/dev/null || echo "OpenAlgo: start manually via systemd or infra/openalgo"
+	@python packages/core/src/app.py
 
 stop: ## Stop all services
 	@sudo systemctl stop openalgo 2>/dev/null || echo "Manual stop required"

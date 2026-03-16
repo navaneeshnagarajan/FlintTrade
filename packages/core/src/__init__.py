@@ -41,8 +41,11 @@ from .models import (
     Trade,
 )
 from .openalgo_client import OpenAlgoClient
+from .app import FlintTradeApp
 
 __all__ = [
+    # App
+    "FlintTradeApp",
     # Client
     "OpenAlgoClient",
     # Config
