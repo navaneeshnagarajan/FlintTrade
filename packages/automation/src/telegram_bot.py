@@ -39,10 +39,26 @@ class BotConfig:
 
     @classmethod
     def from_env(cls) -> BotConfig:
+        """Load from env vars, falling back to workspace.json."""
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+        enabled = os.getenv("TELEGRAM_ENABLED", "")
+
+        if not token:
+            try:
+                from packages.core.src.workspace import Workspace
+                ws = Workspace()
+                token = token or ws.get("notifications.telegram_bot_token_ref", "")
+                chat_id = chat_id or ws.get("notifications.telegram_chat_id", "")
+                if not enabled:
+                    enabled = "true" if ws.get("notifications.telegram_enabled", False) else "false"
+            except Exception:
+                pass
+
         return cls(
-            token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
-            chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
-            enabled=os.getenv("TELEGRAM_ENABLED", "false").lower() == "true",
+            token=token,
+            chat_id=chat_id,
+            enabled=(enabled or "false").lower() == "true",
         )
 
 

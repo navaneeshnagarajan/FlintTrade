@@ -21,30 +21,10 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 
 class TestTOTPLogin:
-    """Test TOTP code generation and login flow."""
-
-    def test_generate_totp_produces_6_digits(self):
-        from packages.automation.src.totp_login import generate_totp
-        # Standard base32 test secret
-        code = generate_totp("JBSWY3DPEHPK3PXP")
-        assert len(code) == 6
-        assert code.isdigit()
-
-    def test_generate_totp_empty_secret_raises(self):
-        from packages.automation.src.totp_login import generate_totp
-        with pytest.raises(ValueError, match="empty"):
-            generate_totp("")
-
-    def test_generate_totp_changes_over_time(self):
-        from packages.automation.src.totp_login import generate_totp
-        # Two calls with the same secret at the same time should match
-        code1 = generate_totp("JBSWY3DPEHPK3PXP")
-        code2 = generate_totp("JBSWY3DPEHPK3PXP")
-        assert code1 == code2
+    """Test TOTP module — now a stub (broker auth handled by OpenAlgo)."""
 
     def test_is_trading_day_weekday(self):
         from packages.automation.src.totp_login import is_trading_day
-        # A known Monday
         monday = date(2026, 3, 16)
         assert monday.weekday() == 0
         assert is_trading_day(monday)
@@ -58,62 +38,16 @@ class TestTOTPLogin:
 
     def test_login_result_dataclass(self):
         from packages.automation.src.totp_login import LoginResult
-        result = LoginResult(
-            success=True,
-            totp_generated=True,
-            session_verified=True,
-            attempt_count=1,
-        )
-        assert result.success
-        assert result.attempt_count == 1
-
-    def test_totp_login_no_secret(self, monkeypatch):
-        monkeypatch.setenv("BROKER_TOTP_SECRET", "")
-        from packages.automation.src.totp_login import TOTPLogin
-        login = TOTPLogin(totp_secret="")
-        result = login.execute(skip_holiday_check=True)
+        result = LoginResult(success=False, error="test")
         assert not result.success
-        assert "not configured" in result.error
+        assert result.error == "test"
 
-    def test_totp_login_mock_success(self):
+    def test_totp_login_stub_returns_not_implemented(self):
         from packages.automation.src.totp_login import TOTPLogin
-        login = TOTPLogin(
-            openalgo_host="http://localhost:5000",
-            totp_secret="JBSWY3DPEHPK3PXP",
-        )
-        # Mock HTTP calls
-        mock_http = MagicMock()
-        mock_response_login = MagicMock()
-        mock_response_login.status_code = 200
-        mock_response_login.json.return_value = {"status": "success"}
-        mock_response_ping = MagicMock()
-        mock_response_ping.status_code = 200
-        mock_response_ping.json.return_value = {"status": "success"}
-        mock_http.post.side_effect = [mock_response_login, mock_response_ping]
-        login._http = mock_http
-
-        result = login.execute(skip_holiday_check=True)
-        assert result.success
-        assert result.totp_generated
-        assert result.session_verified
-
-    def test_totp_login_retry_on_failure(self):
-        from packages.automation.src.totp_login import TOTPLogin
-        login = TOTPLogin(
-            totp_secret="JBSWY3DPEHPK3PXP",
-            max_retries=2,
-            retry_delay=0.01,
-        )
-        mock_http = MagicMock()
-        mock_fail = MagicMock()
-        mock_fail.status_code = 500
-        mock_fail.text = "error"
-        mock_http.post.return_value = mock_fail
-        login._http = mock_http
-
-        result = login.execute(skip_holiday_check=True)
+        login = TOTPLogin()
+        result = login.execute()
         assert not result.success
-        assert result.attempt_count == 2
+        assert "removed" in result.error.lower() or "not implemented" in result.error.lower()
 
 
 # ======================================================================
@@ -154,12 +88,10 @@ class TestCronManager:
         handlers = {name: MagicMock() for name in DEFAULT_JOBS}
         cron.register_defaults(handlers)
         names = [j["name"] for j in cron.list_jobs()]
-        assert "totp_login" in names
         assert "health_check" in names
         assert "backup" in names
         assert "post_market_analysis" in names
         assert "mcx_close_check" in names
-        assert "ddns_update" in names
 
     def test_pause_resume_job(self):
         from packages.automation.src.cron_manager import CronManager, JobStatus
@@ -221,11 +153,11 @@ class TestCronManager:
 
     def test_default_job_definitions(self):
         from packages.automation.src.cron_manager import DEFAULT_JOBS
-        assert "totp_login" in DEFAULT_JOBS
-        assert DEFAULT_JOBS["totp_login"]["trigger_args"]["hour"] == 8
-        assert DEFAULT_JOBS["totp_login"]["trigger_args"]["minute"] == 30
+        assert "health_check" in DEFAULT_JOBS
         assert DEFAULT_JOBS["health_check"]["trigger_args"]["minutes"] == 5
-        assert DEFAULT_JOBS["ddns_update"]["trigger_args"]["seconds"] == 10
+        assert "backup" in DEFAULT_JOBS
+        assert "totp_login" not in DEFAULT_JOBS  # removed — OpenAlgo handles auth
+        assert "ddns_update" not in DEFAULT_JOBS  # removed — infrastructure-specific
 
     def test_cron_accepts_wired_dependencies(self):
         from packages.automation.src.cron_manager import CronManager
@@ -246,29 +178,6 @@ class TestCronManager:
 
 class TestCronBuiltinJobs:
     """Test the 5 required built-in cron job implementations."""
-
-    def test_login_job_skips_holiday(self):
-        from packages.automation.src.cron_manager import make_login_job
-        mock_totp = MagicMock()
-        mock_audit = MagicMock()
-        # Today is a "holiday" — put today's date in the set
-        today = datetime.now(IST).date().isoformat()
-        job = make_login_job(mock_totp, mock_audit, holidays={today})
-        job()
-        mock_totp.execute.assert_not_called()
-
-    def test_login_job_runs_on_trading_day(self):
-        from packages.automation.src.cron_manager import make_login_job
-        mock_totp = MagicMock()
-        mock_totp.execute.return_value = MagicMock(success=True, attempt_count=1, error="")
-        mock_audit = MagicMock()
-        # Empty holidays — if today is a weekday it runs; if weekend it skips (both are valid)
-        job = make_login_job(mock_totp, mock_audit, holidays=set())
-        job()
-        today = datetime.now(IST).date()
-        if today.weekday() < 5:
-            mock_totp.execute.assert_called_once()
-            mock_audit.log_event.assert_called_once()
 
     def test_health_check_sends_alert_on_failure(self):
         from packages.automation.src.cron_manager import make_health_check_job
@@ -315,14 +224,13 @@ class TestCronBuiltinJobs:
             openalgo_client=MagicMock(),
             audit_logger=MagicMock(),
             telegram_bot=MagicMock(),
-            totp_login=MagicMock(),
         )
         cron.register_builtin_jobs()
         names = [j["name"] for j in cron.list_jobs()]
-        assert "login_job" in names
         assert "health_check_job" in names
         assert "square_off_warning_job" in names
         assert "eod_logout_job" in names
+        assert "login_job" not in names  # removed
 
 
 # ======================================================================
@@ -783,10 +691,10 @@ class TestPackageExports:
     def test_all_exports(self):
         from packages.automation.src import __all__
         expected = [
-            "TOTPLogin", "CronManager", "TelegramBot",
+            "CronManager", "TelegramBot",
             "OpenClawBridge", "PostMarketAnalysis",
             "LoginResult", "JobDefinition", "BotConfig",
-            "DailyReport", "TradeEntry",
+            "DailyReport", "TradeEntry", "is_trading_day",
         ]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"

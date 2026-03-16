@@ -20,10 +20,6 @@ ifneq (,$(wildcard .env))
 endif
 
 OPENALGO_PORT ?= 5000
-DATA_DIR ?= $(FLINTTRADE_DIR)/data
-LOG_DIR ?= $(FLINTTRADE_DIR)/logs
-AUDIT_LOG_DIR ?= $(DATA_DIR)/audit
-TICK_DATA_DIR ?= $(DATA_DIR)/ticks
 OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 
 .PHONY: setup start stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help
@@ -57,8 +53,8 @@ setup: ## First-time setup — install all dependencies
 	    [ -f "$$pkg/package.json" ] && (cd "$$pkg" && npm install --silent 2>/dev/null && cd - >/dev/null) || true; \
 	  done; \
 	fi
-	@# Data directories
-	@mkdir -p "$(DATA_DIR)" "$(LOG_DIR)" "$(AUDIT_LOG_DIR)" "$(TICK_DATA_DIR)" 2>/dev/null || true
+	@# Workspace directory
+	@mkdir -p "$$HOME/.flinttrade" 2>/dev/null || true
 	@echo ""
 	@echo -e "$(GREEN)=== Setup complete ===$(RESET)"
 	@echo "Next steps:"

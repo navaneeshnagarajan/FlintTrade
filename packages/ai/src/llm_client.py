@@ -46,10 +46,26 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> LLMConfig:
+        """Load LLM config from workspace.json, with env var overrides."""
+        provider = os.getenv("LLM_PROVIDER", "")
+        host = os.getenv("LLM_HOST", "")
+        model = os.getenv("LLM_MODEL", "")
+
+        # Fall back to workspace config if env vars are not set
+        if not provider or not host:
+            try:
+                from packages.core.src.workspace import Workspace
+                ws = Workspace()
+                provider = provider or ws.get("llm.provider", "")
+                host = host or ws.get("llm.host", "http://127.0.0.1:1234")
+                model = model or ws.get("llm.model", "")
+            except Exception:
+                host = host or "http://127.0.0.1:1234"
+
         return cls(
-            provider=os.getenv("LLM_PROVIDER", ""),
-            host=os.getenv("LLM_HOST", "http://127.0.0.1:1234"),
-            model=os.getenv("LLM_MODEL", ""),
+            provider=provider,
+            host=host,
+            model=model,
             api_key=os.getenv("OPENAI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", ""),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
         )

@@ -26,7 +26,16 @@ from typing import Any
 
 logger = logging.getLogger("flinttrade.data.audit")
 
-_DEFAULT_AUDIT_DIR = os.getenv("AUDIT_LOG_DIR", "/data/flinttrade/audit")
+def _default_audit_dir() -> str:
+    """Resolve audit directory: env override > workspace > fallback."""
+    env = os.getenv("AUDIT_LOG_DIR")
+    if env:
+        return env
+    try:
+        from packages.core.src.workspace import Workspace
+        return str(Workspace().archive_dir / "audit")
+    except Exception:
+        return os.path.join(Path.home(), ".flinttrade", "archive", "audit")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -43,7 +52,7 @@ class AuditLogger:
     """
 
     def __init__(self, audit_dir: str | None = None) -> None:
-        self._audit_dir = Path(audit_dir or _DEFAULT_AUDIT_DIR)
+        self._audit_dir = Path(audit_dir or _default_audit_dir())
         self._audit_dir.mkdir(parents=True, exist_ok=True)
         self._current_date: str = ""
         self._current_file: Any = None

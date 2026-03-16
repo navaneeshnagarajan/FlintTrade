@@ -1,4 +1,4 @@
-"""FlintTrade automation package — TOTP login, cron, Telegram, OpenClaw, post-market."""
+"""FlintTrade automation package — cron, Telegram, OpenClaw, post-market."""
 
 __version__ = "0.1.0-alpha"
 
@@ -11,12 +11,12 @@ from .post_market import (
     TradeEntry,
 )
 from .telegram_bot import BotConfig, CommandResult, TelegramBot
-from .totp_login import LoginResult, TOTPLogin
+from .totp_login import LoginResult, is_trading_day
 
 __all__ = [
-    # TOTP
-    "TOTPLogin",
+    # Trading day utilities (retained from totp_login)
     "LoginResult",
+    "is_trading_day",
     # Cron
     "CronManager",
     "JobDefinition",

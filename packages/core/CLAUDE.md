@@ -16,6 +16,13 @@
 - Log work in root DEVLOG.md
 - Branch: feature/core-{description}
 
+## Configuration architecture
+- `.env` → infrastructure only (OpenAlgo host, port, API key)
+- `~/.flinttrade/workspace.json` → user preferences (paths, modules, UI, LLM, Telegram)
+- `Workspace` class resolves paths cross-platform (Linux/macOS/Windows)
+- `FlintTradeConfig` combines Settings (from .env) + Workspace (from workspace.json)
+- Packages read config through FlintTradeConfig, never os.environ for paths
+
 ## Sandbox/Analyzer mode
 - OpenAlgo has built-in Analyzer mode (sandbox): /api/v1/analyzer/toggle and /api/v1/analyzer/status
 - FlintTrade must support toggling between live and sandbox mode

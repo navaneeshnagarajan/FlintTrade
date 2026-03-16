@@ -500,6 +500,8 @@ class TestPackageExports:
 
         assert "OpenAlgoClient" in __all__
         assert "Settings" in __all__
+        assert "FlintTradeConfig" in __all__
+        assert "Workspace" in __all__
         assert "Order" in __all__
         assert "Quote" in __all__
         assert "APIError" in __all__

@@ -38,6 +38,7 @@ class OpenClawConfig:
 
     @classmethod
     def from_env(cls) -> OpenClawConfig:
+        """Load OpenClaw config — env vars are all that's needed here."""
         return cls(
             host="http://127.0.0.1",
             port=int(os.getenv("OPENCLAW_PORT", "18789")),

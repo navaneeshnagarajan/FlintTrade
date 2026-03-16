@@ -21,7 +21,16 @@ import httpx
 logger = logging.getLogger("flinttrade.ditto.accounts")
 
 IST = timezone(timedelta(hours=5, minutes=30))
-_DEFAULT_DB = os.getenv("DATA_DIR", "/data/flinttrade") + "/ditto_accounts.sqlite"
+def _default_db() -> str:
+    """Resolve SQLite path: env override > workspace > fallback."""
+    env = os.getenv("DATA_DIR")
+    if env:
+        return env + "/ditto_accounts.sqlite"
+    try:
+        from packages.core.src.workspace import Workspace
+        return str(Workspace().fast_data_dir / "ditto_accounts.sqlite")
+    except Exception:
+        return str(Path.home() / ".flinttrade" / "data" / "ditto_accounts.sqlite")
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +151,7 @@ class AccountManager:
         db_path: str | None = None,
         encryption_key: str | None = None,
     ) -> None:
-        self._db_path = db_path or _DEFAULT_DB
+        self._db_path = db_path or _default_db()
         self._enc_key = encryption_key
         self._conn: sqlite3.Connection | None = None
         self._cache: dict[str, BrokerAccount] = {}

@@ -143,14 +143,15 @@ if [ "$HAS_NODE" = true ]; then
 fi
 
 # ------------------------------------------------------------------
-# 8. Data directories
+# 8. Workspace directory
 # ------------------------------------------------------------------
-header "Data directories"
+header "Workspace"
 
-for dir in "$DATA_DIR" "$LOG_DIR" "$AUDIT_LOG_DIR" "$TICK_DATA_DIR"; do
-    mkdir -p "$dir" 2>/dev/null || sudo mkdir -p "$dir"
-    ok "$dir"
-done
+WORKSPACE_DIR="${FLINTTRADE_HOME:-$HOME/.flinttrade}"
+mkdir -p "$WORKSPACE_DIR" 2>/dev/null || true
+ok "Workspace: $WORKSPACE_DIR"
+echo "  Data directories will be created when you configure FlintTrade"
+echo "  through the dashboard or by editing $WORKSPACE_DIR/workspace.json"
 
 # ------------------------------------------------------------------
 # 9. Run tests

@@ -2,7 +2,8 @@
 
 __version__ = "0.1.0-alpha"
 
-from .config import Settings
+from .config import FlintTradeConfig, Settings
+from .workspace import Workspace
 from .exceptions import (
     APIError,
     AuthError,
@@ -50,6 +51,8 @@ __all__ = [
     "OpenAlgoClient",
     # Config
     "Settings",
+    "FlintTradeConfig",
+    "Workspace",
     # Exceptions
     "FlintTradeError",
     "APIError",

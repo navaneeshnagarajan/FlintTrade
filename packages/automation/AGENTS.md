@@ -1,6 +1,6 @@
 # FlintTrade — automation
 
-> ML pipeline, cron, Telegram bot, OpenClaw agent, TOTP auto-login, post-market analysis
+> Cron scheduler, Telegram bot, OpenClaw agent bridge, post-market analysis
 
 ## Absorbs
 - OpenClaw (infra/openclaw/) → AI agent gateway, Telegram/WhatsApp/Discord, heartbeats, skills
@@ -15,9 +15,8 @@
 - Log work in root DEVLOG.md
 - Branch: feature/automation-{description}
 
-## TOTP auto-login
-- Use pyotp library to generate TOTP codes for daily broker auto-login
-- Cron job at 8:30 AM IST: generate TOTP → login to OpenAlgo → verify session
-- TOTP secret stored in .env (BROKER_TOTP_SECRET) — NEVER commit
-- jugaad-data holidays() to skip weekends and NSE holidays
-- pyotp + jugaad-data = invisible daily login
+## Broker authentication
+- Broker login (TOTP, OAuth, PIN) is handled by OpenAlgo, NOT FlintTrade
+- FlintTrade connects to OpenAlgo via API key only
+- If the OpenAlgo session expires, the dashboard notifies the user to
+  re-authenticate at the OpenAlgo web interface

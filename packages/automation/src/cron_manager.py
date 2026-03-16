@@ -1,17 +1,18 @@
 """Scheduled task manager using APScheduler.
 
 Built-in jobs:
-1. login_job: 8:30 AM IST daily (skip holidays)
-2. health_check_job: 9:10 AM IST (verify OpenAlgo session)
-3. square_off_warning_job: 3:20 PM IST (warn before square-off)
-4. eod_logout_job: 11:45 PM IST (SEBI session logout)
-5. holiday_check: on startup (load holidays from OpenAlgo)
+1. health_check_job: 9:10 AM IST (verify OpenAlgo session)
+2. square_off_warning_job: 3:20 PM IST (warn before square-off)
+3. eod_logout_job: 11:45 PM IST (SEBI session logout)
+4. holiday_check: on startup (load holidays from OpenAlgo)
 
 Additional optional jobs:
-6. backup: 12:00 AM daily
-7. post_market_analysis: 3:45 PM IST
-8. mcx_close_check: 11:55 PM IST
-9. ddns_update: every 10 seconds
+5. backup: 12:00 AM daily
+6. post_market_analysis: 3:45 PM IST
+7. mcx_close_check: 11:55 PM IST
+
+Note: Broker login (TOTP) is NOT handled by FlintTrade.
+OpenAlgo manages broker authentication. See packages/automation/src/totp_login.py.
 """
 
 from __future__ import annotations
@@ -66,11 +67,6 @@ class JobDefinition:
 
 # Default job schedule definitions
 DEFAULT_JOBS: dict[str, dict[str, Any]] = {
-    "login_job": {
-        "description": "Daily TOTP broker login at 8:30 AM IST",
-        "trigger_type": "cron",
-        "trigger_args": {"hour": 8, "minute": 30, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
-    },
     "health_check_job": {
         "description": "Verify OpenAlgo session at 9:10 AM IST",
         "trigger_type": "cron",
@@ -85,11 +81,6 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "description": "SEBI end-of-day session logout at 11:45 PM IST",
         "trigger_type": "cron",
         "trigger_args": {"hour": 23, "minute": 45, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
-    },
-    "totp_login": {
-        "description": "Daily TOTP broker login at 8:30 AM IST (legacy alias)",
-        "trigger_type": "cron",
-        "trigger_args": {"hour": 8, "minute": 30, "timezone": "Asia/Kolkata"},
     },
     "health_check": {
         "description": "Check OpenAlgo/WebSocket health every 5 minutes during market hours",
@@ -111,11 +102,6 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "trigger_type": "cron",
         "trigger_args": {"hour": 23, "minute": 55, "timezone": "Asia/Kolkata"},
     },
-    "ddns_update": {
-        "description": "DDNS IP change detection every 10 seconds",
-        "trigger_type": "interval",
-        "trigger_args": {"seconds": 10},
-    },
 }
 
 
@@ -132,33 +118,6 @@ def _is_market_holiday(holidays: set[str] | None = None) -> bool:
     if holidays and today.isoformat() in holidays:
         return True
     return False
-
-
-def make_login_job(
-    totp_login: Any,
-    audit_logger: Any = None,
-    holidays: set[str] | None = None,
-) -> Callable[[], None]:
-    """Create the login_job handler."""
-
-    def login_job() -> None:
-        if _is_market_holiday(holidays):
-            logger.info("login_job: skipping — market holiday")
-            return
-        result = totp_login.execute()
-        if audit_logger:
-            audit_logger.log_event(
-                "SESSION_LOGIN",
-                success=result.success,
-                attempt_count=result.attempt_count,
-                error=result.error,
-            )
-        if result.success:
-            logger.info("login_job: session login successful")
-        else:
-            logger.error("login_job: session login failed — %s", result.error)
-
-    return login_job
 
 
 def make_health_check_job(
@@ -316,14 +275,7 @@ class CronManager:
         return self._holidays
 
     def register_builtin_jobs(self) -> None:
-        """Register all 5 required built-in jobs with their handlers."""
-        if self.totp_login:
-            self.register(
-                "login_job",
-                handler=make_login_job(self.totp_login, self.audit_logger, self._holidays),
-                **DEFAULT_JOBS["login_job"],
-            )
-
+        """Register built-in jobs with their handlers."""
         if self.openalgo_client:
             self.register(
                 "health_check_job",

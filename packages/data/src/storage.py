@@ -18,8 +18,16 @@ import duckdb
 
 logger = logging.getLogger("flinttrade.data.storage")
 
-# Default DB path from .env.example
-_DEFAULT_DB_PATH = os.getenv("DUCKDB_PATH", "/data/flinttrade/flint.duckdb")
+def _default_db_path() -> str:
+    """Resolve DuckDB path: env override > workspace > fallback."""
+    env = os.getenv("DUCKDB_PATH")
+    if env:
+        return env
+    try:
+        from packages.core.src.workspace import Workspace
+        return str(Workspace().fast_data_dir / "flint.duckdb")
+    except Exception:
+        return str(Path.home() / ".flinttrade" / "data" / "flint.duckdb")
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +125,7 @@ class StorageManager:
     """
 
     def __init__(self, db_path: str | None = None) -> None:
-        self._db_path = db_path or _DEFAULT_DB_PATH
+        self._db_path = db_path or _default_db_path()
         # Ensure parent directory exists
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn: duckdb.DuckDBPyConnection | None = None

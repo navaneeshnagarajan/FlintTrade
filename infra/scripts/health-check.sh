@@ -9,8 +9,22 @@ HEALTHY=true
 # Source .env
 [ -f "$FLINTTRADE_DIR/.env" ] && { set -a; source "$FLINTTRADE_DIR/.env"; set +a; }
 OPENALGO_PORT="${OPENALGO_PORT:-5000}"
-DATA_DIR="${DATA_DIR:-$FLINTTRADE_DIR/data}"
-AUDIT_LOG_DIR="${AUDIT_LOG_DIR:-$DATA_DIR/audit}"
+
+# Resolve workspace paths
+WORKSPACE_DIR="${FLINTTRADE_HOME:-$HOME/.flinttrade}"
+WORKSPACE_JSON="$WORKSPACE_DIR/workspace.json"
+
+# Read data dir from workspace.json if available
+if [ -f "$WORKSPACE_JSON" ] && command -v python3 >/dev/null 2>&1; then
+    DATA_DIR=$(python3 -c "
+import json, os
+with open('$WORKSPACE_JSON') as f:
+    c = json.load(f)
+print(os.path.expanduser(c.get('storage',{}).get('fast','~/.flinttrade/data')))
+" 2>/dev/null || echo "$WORKSPACE_DIR/data")
+else
+    DATA_DIR="$WORKSPACE_DIR/data"
+fi
 
 ok()   { echo "✓ $1"; }
 fail() { echo "✗ $1"; HEALTHY=false; }
@@ -37,18 +51,18 @@ if command -v df >/dev/null 2>&1; then
     fi
 fi
 
-# 3. Data directory
+# 3. Workspace directory
+if [ -d "$WORKSPACE_DIR" ]; then
+    ok "Workspace directory: $WORKSPACE_DIR"
+else
+    fail "Workspace directory missing: $WORKSPACE_DIR"
+fi
+
+# 4. Data directory
 if [ -d "$DATA_DIR" ] && [ -w "$DATA_DIR" ]; then
     ok "Data directory writable: $DATA_DIR"
 else
-    fail "Data directory missing or not writable: $DATA_DIR"
-fi
-
-# 4. Audit directory
-if [ -d "$AUDIT_LOG_DIR" ] && [ -w "$AUDIT_LOG_DIR" ]; then
-    ok "Audit directory writable: $AUDIT_LOG_DIR"
-else
-    fail "Audit directory missing or not writable: $AUDIT_LOG_DIR"
+    warn "Data directory missing or not writable: $DATA_DIR"
 fi
 
 # 5. .env configured
