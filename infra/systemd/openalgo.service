@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenAlgo (FlintTrade)
+After=network.target
+[Service]
+Type=simple
+User=
+WorkingDirectory=/home//FlintTrade/infra/openalgo
+ExecStart=/home//FlintTrade/infra/openalgo/.venv/bin/gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

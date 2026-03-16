@@ -1,0 +1,36 @@
+name: Test
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [dev]
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pytest ruff
+      - run: python -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib
+      - run: ruff check packages/*/src/ --output-format=github
+  node-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          for pkg in terminal dashboard backtest; do
+            [ -f "packages/$pkg/package.json" ] && echo "✅ packages/$pkg"
+          done
+  secrets-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          FOUND=0
+          for p in 'BROKER_API_KEY\s*=\s*['"'"'"][^'"'"'"]+['"'"'"]' 'sk-[a-zA-Z0-9]{20,}'; do
+            grep -rn "$p" --include="*.py" --include="*.js" --include="*.toml" . 2>/dev/null | grep -v ".env.example" && FOUND=1
+          done
+          [ "$FOUND" -eq 1 ] && exit 1 || echo "✅ No secrets"

@@ -1,0 +1,70 @@
+# === SECRETS (NEVER COMMIT) ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# === Node.js ===
+node_modules/
+package-lock.json
+yarn.lock
+
+# === IDE ===
+.vscode/
+!.vscode/settings.json
+.idea/
+*.swp
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Data (large files) ===
+*.parquet
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.db
+data/raw/
+data/processed/
+!tests/fixtures/*.csv
+
+# === Trading ===
+logs/
+*.log
+audit_logs/
+backtest_results/
+tick_data/
+
+# === Infra bundled deps (cloned via make setup) ===
+infra/openalgo/.git
+infra/openclaw/.git
+
+# === Tools ===
+.lmstudio/
+.openclaw/
+chroma_data/
+.gitnexus/
+
+# === Build ===
+*.zip
+*.tar.gz

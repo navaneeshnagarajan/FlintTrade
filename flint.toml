@@ -1,0 +1,97 @@
+# ============================================================
+# FlintTrade Project Configuration
+# ============================================================
+
+[project]
+name = "FlintTrade"
+version = "0.1.0-dev"
+description = "Open-source algorithmic and manual trading platform built on OpenAlgo"
+license = "AGPL-3.0"
+repository = "https://github.com/navaneeshnagarajan/FlintTrade"
+python_requires = ">=3.11"
+node_requires = ">=20.0.0"
+
+[packages]
+core = { path = "packages/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }
+engine = { path = "packages/engine", lang = "python", description = "Strategy execution, order routing, safety layers, kill switches" }
+terminal = { path = "packages/terminal", lang = "react", description = "Trading UI — scalper, option chain, OI analysis, DOM, charts" }
+dashboard = { path = "packages/dashboard", lang = "react", description = "Portfolio overview, P&L, market overview, system status" }
+ai = { path = "packages/ai", lang = "python", description = "LLM chat, RAG, ML signals, autonomous trading, news sentiment" }
+data = { path = "packages/data", lang = "python", description = "Real-time tick capture, WebSocket storage, audit logs" }
+historical = { path = "packages/historical", lang = "python", description = "Historical data download, merge, DuckDB/Parquet, free NSE data" }
+screener = { path = "packages/screener", lang = "python", description = "Market scanner, OI spurt, PCR, max pain, portfolio Greeks" }
+backtest = { path = "packages/backtest", lang = "react", description = "Backtest UI, request builder, results viewer" }
+backtest-engine = { path = "packages/backtest-engine", lang = "python", description = "Event-driven simulation, vectorbt strategies, metrics" }
+integration = { path = "packages/integration", lang = "python", description = "TradingView, ChartInk, webhooks, Chrome extension, Excel, Amibroker" }
+automation = { path = "packages/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, TOTP auto-login" }
+ditto = { path = "packages/ditto", lang = "python", description = "Multi-broker, multi-account orchestration (AlgoMirror patterns)" }
+
+[infra]
+openalgo = { path = "infra/openalgo", type = "subtree", upstream = "https://github.com/marketcalls/openalgo.git" }
+openclaw = { path = "infra/openclaw", type = "subtree", upstream = "https://github.com/openclaw/openclaw.git" }
+
+[openalgo]
+api_version = "v1"
+default_host = "http://127.0.0.1:5000"
+default_ws = "ws://127.0.0.1:8765"
+
+[openalgo.rate_limits]
+orders_per_second = 10
+smart_orders_per_second = 2
+general_per_second = 50
+webhooks_per_minute = 100
+
+[sebi]
+max_orders_per_second = 10
+static_ip_required = true
+audit_log_retention_years = 5
+algo_registration_required = true
+kill_switch_mandatory = true
+
+[naming]
+strategy_id_format = "{PACKAGE}-{TYPE}-{NUMBER}"
+bug_id_format = "BUG-{NUMBER}"
+branch_prefixes = ["feature/", "fix/", "hotfix/", "release/"]
+commit_types = ["feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "hotfix"]
+
+[deploy]
+health_check_endpoint = "/api/v1/ping"
+deploy_freeze_start = "09:15"
+deploy_freeze_end = "15:30"
+maintenance_window_start = "15:45"
+maintenance_window_end = "18:00"
+
+[exchanges]
+# All exchanges supported by OpenAlgo — FlintTrade must handle ALL of these
+NSE = { name = "NSE Equity", hours = "09:15-15:30" }
+BSE = { name = "BSE Equity", hours = "09:15-15:30" }
+NFO = { name = "NSE F&O", hours = "09:15-15:30" }
+BFO = { name = "BSE F&O", hours = "09:15-15:30" }
+CDS = { name = "Currency Derivatives", hours = "09:00-17:00" }
+BCD = { name = "BSE Currency", hours = "09:00-17:00" }
+MCX = { name = "Commodities", hours = "09:00-23:55" }
+NCDEX = { name = "Agri Commodities", hours = "10:00-17:00" }
+
+[exchanges.deploy_freeze]
+# Deploy freeze must cover ALL active exchanges
+equity_end = "15:30"
+currency_end = "17:00"
+mcx_end = "23:55"
+# Safe deploy window: after MCX close (11:55 PM) until 8:30 AM next day
+
+[exchanges.crypto]
+# Delta Exchange — supported by OpenAlgo for crypto derivatives
+DELTA = { name = "Delta Exchange (Crypto)", hours = "24/7", products = "BTC/ETH futures, perpetuals, options, trackers" }
+# Crypto trades 24/7 — deploy freeze is effectively always active if you hold crypto positions
+# INR settlement, FIU-India compliant, no 30% crypto tax (derivatives = speculative income)
+
+[brokers]
+# Full broker list supported by OpenAlgo (FlintTrade works with ALL of them)
+supported = [
+  "5paisa", "5paisa-xts", "AliceBlue", "AngelOne", "Compositedge",
+  "Definedge", "Delta Exchange", "Dhan", "Dhan-Sandbox", "Firstock",
+  "Flattrade", "Fyers", "Groww", "IIFL-XTS", "IndiaBulls", "IndMoney",
+  "JainamXTS", "Kotak Neo", "Motilal Oswal", "Mstock", "Nubra",
+  "Paytm Money", "Pocketful", "RMoney", "Samco", "Shoonya",
+  "Tradejini", "Upstox", "Wisdom Capital", "Zebu", "Zerodha"
+]
