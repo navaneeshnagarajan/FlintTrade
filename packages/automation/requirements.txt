@@ -1,1 +1,5 @@
 # flint-automation dependencies
+pyotp>=2.9
+jugaad-data>=0.1
+python-telegram-bot>=21.0
+apscheduler>=3.10
