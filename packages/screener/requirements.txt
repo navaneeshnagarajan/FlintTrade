@@ -1,1 +1,4 @@
 # flint-screener dependencies
+py-vollib-vectorized>=0.1
+mibian>=0.1
+nsepython>=0.1
