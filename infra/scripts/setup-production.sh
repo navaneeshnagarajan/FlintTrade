@@ -8,7 +8,7 @@ echo "=== FlintTrade First-Time Setup ==="
 # Python deps
 echo "Installing system packages..."
 sudo apt-get update -q
-sudo apt-get install -y python3-pip python3-venv git curl nodejs npm -q
+sudo apt-get install -y python3-pip python3-venv git curl nodejs -q
 
 # Clone repo if not present
 if [ ! -d "/home/navaneesh/FlintTrade" ]; then

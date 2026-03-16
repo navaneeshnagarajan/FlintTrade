@@ -78,3 +78,5 @@
 ## 2026-03-16 18:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | chore: deployment readiness check — all imports verified, systemd valid, .env.example complete
 
 ## 2026-03-16 18:30 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(infra): production deploy scripts — deploy-production.sh, setup-production.sh, health-check.sh
+
+## 2026-03-16 19:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | fix(deps): jugaad-data version corrected to 0.31.0, npm conflict removed from setup-production.sh
