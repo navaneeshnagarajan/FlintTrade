@@ -179,6 +179,48 @@ class TestMarketHours:
         from packages.engine.src.safety import get_expiry_time
         assert get_expiry_time("NSE") == time(15, 30)
 
+    def test_delta_always_open(self):
+        from packages.engine.src.safety import is_market_open
+        # 3:30 AM — even the middle of the night
+        night = datetime(2026, 3, 16, 3, 30, 0, tzinfo=IST)
+        assert is_market_open("DELTA", at=night)
+
+    def test_delta_open_midday(self):
+        from packages.engine.src.safety import is_market_open
+        mid_day = datetime(2026, 3, 16, 12, 0, 0, tzinfo=IST)
+        assert is_market_open("DELTA", at=mid_day)
+
+    def test_get_expiry_time_delta(self):
+        from packages.engine.src.safety import get_expiry_time
+        assert get_expiry_time("DELTA") == time(8, 0)
+
+    def test_delta_in_ccxt_exchanges(self):
+        from packages.engine.src.safety import CCXT_EXCHANGES, OPENALGO_EXCHANGES
+        assert "DELTA" in CCXT_EXCHANGES
+        assert "DELTA" not in OPENALGO_EXCHANGES
+
+    def test_delta_order_passes_with_warning(self):
+        from packages.engine.src.safety import OrderValidation
+        layer = OrderValidation(check_market_hours=True)
+        # DELTA is not in the core Exchange enum yet, so mock the order
+        order = MagicMock()
+        order.exchange = MagicMock()
+        order.exchange.value = "DELTA"
+        order.symbol = "BTCUSD"
+        order.quantity = "1"
+        order.pricetype = MagicMock()
+        order.pricetype.value = "MARKET"
+        order.price = "0"
+        # Any time — should pass (24/7)
+        night = datetime(2026, 3, 16, 3, 0, 0, tzinfo=IST)
+        result = layer.validate(order, at=night)
+        assert result.passed
+
+    def test_openalgo_exchanges_complete(self):
+        from packages.engine.src.safety import OPENALGO_EXCHANGES
+        for exch in ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NSE_INDEX", "BSE_INDEX"]:
+            assert exch in OPENALGO_EXCHANGES, f"{exch} missing from OPENALGO_EXCHANGES"
+
     def test_order_rejected_outside_market_hours(self):
         from packages.engine.src.safety import OrderValidation
         layer = OrderValidation(check_market_hours=True)

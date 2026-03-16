@@ -59,21 +59,34 @@ MARKET_HOURS: dict[str, tuple[dt_time, dt_time]] = {
     "BCD":   (dt_time(9, 0),  dt_time(17, 0)),
     "MCX":   (dt_time(9, 0),  dt_time(23, 30)),
     "NCDEX": (dt_time(10, 0), dt_time(17, 0)),
+    "DELTA": (dt_time(0, 0),  dt_time(23, 59)),  # 24/7 crypto
 }
 
 # Exchanges that are quote-only — orders always rejected
 _QUOTE_ONLY_EXCHANGES = {"NSE_INDEX", "BSE_INDEX"}
+
+# Exchange routing: OpenAlgo handles Indian exchanges, ccxt handles crypto
+OPENALGO_EXCHANGES = {
+    "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX",
+    "NSE_INDEX", "BSE_INDEX", "NCDEX",
+}
+CCXT_EXCHANGES = {"DELTA"}
 
 
 def is_market_open(exchange: str, at: datetime | None = None) -> bool:
     """Check if the given exchange is currently open for trading.
 
     - NSE_INDEX / BSE_INDEX: always False (quote-only, no orders)
+    - DELTA: always True (24/7 crypto via ccxt, not OpenAlgo)
     - Unknown exchanges: False
     - Known exchanges: True only if current IST time is within market hours
     """
     if exchange in _QUOTE_ONLY_EXCHANGES:
         return False
+
+    # Delta Exchange — 24/7 via ccxt, not OpenAlgo
+    if exchange == "DELTA":
+        return True
 
     if exchange not in MARKET_HOURS:
         return False
@@ -95,6 +108,7 @@ def get_expiry_time(exchange: str) -> dt_time:
         "CDS":   dt_time(12, 30),
         "BCD":   dt_time(12, 30),
         "MCX":   dt_time(23, 30),
+        "DELTA": dt_time(8, 0),   # UTC daily settlement, ~08:00 IST
     }
     return expiry_times.get(exchange, dt_time(15, 30))
 
@@ -112,7 +126,7 @@ def _format_market_hours(exchange: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Valid exchanges that can receive orders (excludes index-only segments)
-_TRADEABLE_EXCHANGES = {"NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX"}
+_TRADEABLE_EXCHANGES = {"NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "DELTA"}
 
 # Per-exchange max single-order quantity defaults (can be overridden)
 _DEFAULT_QTY_LIMITS: dict[str, int] = {
@@ -163,6 +177,13 @@ class OrderValidation:
             return SafetyResult(
                 SafetyVerdict.FAIL, "L1_ORDER",
                 f"{exchange} is open {hours}. Current time: {current_time}. Market closed.",
+            )
+
+        # Warn for ccxt-routed exchanges (DELTA) — order proceeds but logs a warning
+        if exchange in CCXT_EXCHANGES:
+            logger.warning(
+                "Order for %s exchange — routes via ccxt, not OpenAlgo. "
+                "Ensure ccxt integration package is configured.", exchange,
             )
 
         # Symbol check
