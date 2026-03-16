@@ -228,7 +228,7 @@ class TestAuditLogger:
             action="BUY", quantity="10", price="2500",
         )
         audit.log_order_cancelled(strategy="Flint", orderid="123")
-        audit.log_login(user="admin", ip="10.10.10.2")
+        audit.log_login(user="admin", ip="192.168.1.100")
         audit.close()
 
         files = list(tmp_path.glob("audit_*.jsonl"))
@@ -282,7 +282,7 @@ class TestAuditLogger:
     def test_log_login_logout(self, tmp_path):
         from packages.data.src.audit_logger import AuditLogger
         audit = AuditLogger(str(tmp_path))
-        audit.log_login(user="admin", ip="10.10.10.2", method="TOTP")
+        audit.log_login(user="admin", ip="192.168.1.100", method="TOTP")
         audit.log_logout(user="admin", reason="session_timeout")
         audit.close()
 

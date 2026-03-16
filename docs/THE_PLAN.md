@@ -20,7 +20,7 @@ make setup
 make start
 ```
 
-FlintTrade is the WHOLE HOUSE — not just the app. It bundles the application, infrastructure, AI, deployment, security, and monitoring into one monorepo. KalamIQ (the previous personal infrastructure project) is absorbed entirely. There is no separate KalamIQ repo going forward.
+FlintTrade is the WHOLE HOUSE — not just the app. It bundles the application, infrastructure, AI, deployment, security, and monitoring into one monorepo. All personal infrastructure configuration is absorbed entirely.
 
 ---
 
@@ -32,7 +32,7 @@ FlintTrade is the WHOLE HOUSE — not just the app. It bundles the application, 
 | Acer Nitro (Fedora KDE or Win11) | i5-13420H, RTX 5050 8GB, 16GB RAM | Primary development machine. Claude Code + Antigravity. |
 | MacBook Air M4 15" | M4, 16GB unified, 256GB SSD | Secondary dev + testing + travel access via VPN. |
 
-Network: TP-Link ER605 dual WAN (ACT 500Mbps primary, BSNL 200Mbps failover), Deco X60 mesh, WireGuard VPN (10.10.10.0/24), DDNS via kalamiq.ddns.net, fail2ban + UFW.
+Network: Dual WAN router (primary + failover ISP), mesh WiFi, WireGuard VPN, DDNS, fail2ban + UFW.
 
 ---
 
@@ -278,7 +278,7 @@ Get-ChildItem -Force | Where-Object { $_.Name -ne '.git' } | Remove-Item -Recurs
 # Extract FlintTrade-foundation.zip here
 git checkout dev
 git add -A
-git commit -m "feat: FlintTrade foundation — complete rebuild with 25+ absorbed repos, KalamIQ infra, CI fixes"
+git commit -m "feat: FlintTrade foundation — complete rebuild with 25+ absorbed repos, infra, CI fixes"
 git push origin dev
 ```
 PR dev → main → squash and merge.
@@ -311,9 +311,9 @@ Then: feature/engine-safety-layers and feature/data-audit-logger in parallel.
 
 ---
 
-## 11. What KalamIQ Becomes
+## 11. Infrastructure Consolidation
 
-Nothing. KalamIQ repo stays on GitHub as historical archive. All its infrastructure (WireGuard, DDNS, fail2ban, cron, OpenClaw config, machine configs) lives inside FlintTrade/infra/ now. The only thing that remains personal is your .env file with API keys and TOTP secrets.
+All personal infrastructure configuration (WireGuard, DDNS, fail2ban, cron, machine configs) lives inside FlintTrade/infra/ now. The only thing that remains personal is your .env file with API keys and TOTP secrets.
 
 ---
 

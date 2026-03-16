@@ -5,9 +5,11 @@ Wants=openalgo.service
 
 [Service]
 Type=simple
-User=navaneesh
-WorkingDirectory=/home/navaneesh/FlintTrade
-EnvironmentFile=/home/navaneesh/FlintTrade/.env
+# IMPORTANT: Update User and WorkingDirectory to match your system
+# Example: User=youruser, WorkingDirectory=/home/youruser/FlintTrade
+User=REPLACE_WITH_YOUR_USERNAME
+WorkingDirectory=REPLACE_WITH_INSTALL_DIR
+EnvironmentFile=REPLACE_WITH_INSTALL_DIR/.env
 ExecStart=/usr/bin/python3 packages/core/src/app.py
 Restart=on-failure
 RestartSec=10

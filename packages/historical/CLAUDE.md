@@ -19,7 +19,7 @@
 ## Multi-exchange data
 - Support historical data for ALL exchanges: NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX
 - MCX data includes evening session (post 3:30 PM)
-- Expired commodity options available via Dhan (5yr data)
+- Expired commodity options available via broker API (some brokers provide 5yr data)
 - openchart library provides free NSE/NFO data only — MCX/CDS needs broker API via OpenAlgo
 
 ## Crypto historical data

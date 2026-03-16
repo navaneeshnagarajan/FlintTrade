@@ -41,7 +41,7 @@ class TestLLMClient:
 
         from packages.ai.src.llm_client import LLMConfig
         cfg = LLMConfig.from_env()
-        assert cfg.provider == "lmstudio"
+        assert cfg.provider == ""
         assert "1234" in cfg.host
 
     def test_client_creates_with_config(self):

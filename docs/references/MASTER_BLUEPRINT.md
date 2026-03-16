@@ -87,7 +87,7 @@ Install core tools via Homebrew: Python 3.12, Node.js 22, Rust toolchain, Ollama
 
 The 2kW inverter with 2×200Ah batteries (24V system) provides **4,800Wh nominal** energy. At 50% depth of discharge (optimal for lead-acid longevity) and 85% inverter efficiency, usable energy is **2,040Wh**. Running the headless server (~200W), router (~12W), and one mesh unit (~10W) gives approximately **9.2 hours of backup**. Even at 80% DoD, the system provides **14+ hours**.
 
-Since home inverters typically lack USB data communication, place a small UPS with USB (APC Back-UPS 600VA) between the inverter output and the PC for NUT monitoring. Configure ASRock H370M-HDV BIOS: **Advanced → ACPI Configuration → Restore on AC/Power Loss → "Power On"** for automatic restart. Create a systemd service that cancels all open orders, stops OpenAlgo/OpenClaw, syncs databases to the external SSD, then initiates shutdown when NUT detects low battery.
+Since home inverters typically lack USB data communication, place a small UPS with USB (APC Back-UPS 600VA) between the inverter output and the PC for NUT monitoring. Configure your motherboard BIOS: **Advanced → ACPI Configuration → Restore on AC/Power Loss → "Power On"** for automatic restart. Create a systemd service that cancels all open orders, stops OpenAlgo/OpenClaw, syncs databases to the external SSD, then initiates shutdown when NUT detects low battery.
 
 ---
 
@@ -366,7 +366,7 @@ Configure WAN1 as Static IP (primary, for SEBI compliance), WAN/LAN1 as secondar
 
 ### WireGuard VPN
 
-Run WireGuard on the Ubuntu trading server (the ER605 does not natively support WireGuard). Configure as a 10.10.10.0/24 network with the server at 10.10.10.1, laptop at 10.10.10.2, MacBook at 10.10.10.3. Forward UDP 51820 on the ER605 from WAN to the server. Access OpenAlgo through the VPN tunnel at `http://10.10.10.1:5000` — never expose OpenAlgo directly to the public internet.
+Run WireGuard on the Ubuntu trading server. Configure a private VPN subnet (e.g. 10.x.x.0/24) with the server, dev machine, and laptop as peers. Forward UDP 51820 on your router from WAN to the server. Access OpenAlgo through the VPN tunnel — never expose OpenAlgo directly to the public internet.
 
 ---
 

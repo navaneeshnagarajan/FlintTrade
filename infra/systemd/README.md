@@ -2,6 +2,10 @@
 
 ## Install
 
+Before installing, edit `flinttrade.service` and replace the placeholder values:
+- `REPLACE_WITH_YOUR_USERNAME` → your Linux username
+- `REPLACE_WITH_INSTALL_DIR` → path to your FlintTrade clone (e.g. `/home/youruser/FlintTrade`)
+
 ```bash
 sudo cp flinttrade.service /etc/systemd/system/
 sudo cp openalgo.service /etc/systemd/system/

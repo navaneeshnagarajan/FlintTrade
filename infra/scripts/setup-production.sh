@@ -1,7 +1,11 @@
 #!/bin/bash
-# FlintTrade First-Time Setup — Custom PC (Ubuntu 24.04)
+# FlintTrade First-Time Setup (Ubuntu 24.04)
 # Run once only
 set -euo pipefail
+
+INSTALL_DIR="${FLINTTRADE_DIR:-$HOME/FlintTrade}"
+REPO_URL="${FLINTTRADE_REPO:-https://github.com/navaneeshnagarajan/FlintTrade.git}"
+CURRENT_USER=$(whoami)
 
 echo "=== FlintTrade First-Time Setup ==="
 
@@ -11,12 +15,12 @@ sudo apt-get update -q
 sudo apt-get install -y python3-pip python3-venv git curl nodejs -q
 
 # Clone repo if not present
-if [ ! -d "/home/navaneesh/FlintTrade" ]; then
+if [ ! -d "$INSTALL_DIR" ]; then
     echo "Cloning FlintTrade..."
-    git clone https://github.com/navaneeshnagarajan/FlintTrade.git /home/navaneesh/FlintTrade
+    git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-cd /home/navaneesh/FlintTrade
+cd "$INSTALL_DIR"
 
 # Python dependencies
 echo "Installing Python dependencies..."
@@ -28,15 +32,15 @@ if [ ! -f .env ]; then
     cp .env.example .env
     echo ""
     echo "IMPORTANT: Edit .env with your credentials before starting:"
-    echo "  nano /home/navaneesh/FlintTrade/.env"
+    echo "  nano $INSTALL_DIR/.env"
     echo ""
 fi
 
-# Create audit log directory on 5TB HDD
+# Create audit log directory
 echo "Creating audit log directory..."
 sudo mkdir -p /data/flinttrade/audit
-sudo chown navaneesh:navaneesh /data/flinttrade
-sudo chown navaneesh:navaneesh /data/flinttrade/audit
+sudo chown "$CURRENT_USER:$CURRENT_USER" /data/flinttrade
+sudo chown "$CURRENT_USER:$CURRENT_USER" /data/flinttrade/audit
 
 # Install systemd service
 echo "Installing systemd service..."

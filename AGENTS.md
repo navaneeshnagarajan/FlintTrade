@@ -151,7 +151,7 @@ Every change → append to DEVLOG.md:
 | Security | fail2ban, UFW |
 
 ## Production Deployment (Custom PC)
-- Machine: ubuntu-i3-9350KF-RX6600XT at 192.168.8.50 (LAN) / 10.10.10.1 (VPN)
+- Machine: production server (configure LAN/VPN IPs in .env)
 - Service: sudo systemctl status flinttrade
 - Logs: journalctl -u flinttrade -f
 - Audit: /data/flinttrade/audit/ (5TB HDD — 5-year SEBI retention)

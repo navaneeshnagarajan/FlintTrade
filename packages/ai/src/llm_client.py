@@ -47,9 +47,9 @@ class LLMConfig:
     @classmethod
     def from_env(cls) -> LLMConfig:
         return cls(
-            provider=os.getenv("LLM_PROVIDER", "lmstudio"),
+            provider=os.getenv("LLM_PROVIDER", ""),
             host=os.getenv("LLM_HOST", "http://127.0.0.1:1234"),
-            model=os.getenv("LLM_MODEL", "qwen/qwen3.5-9b"),
+            model=os.getenv("LLM_MODEL", ""),
             api_key=os.getenv("OPENAI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", ""),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
         )

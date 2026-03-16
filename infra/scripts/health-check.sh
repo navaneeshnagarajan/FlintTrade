@@ -16,7 +16,8 @@ sudo systemctl is-active openalgo && echo "  RUNNING" || echo "  STOPPED"
 
 # OpenAlgo ping
 echo "OpenAlgo API:"
-source /home/navaneesh/FlintTrade/.env 2>/dev/null || true
+FLINTTRADE_DIR="${FLINTTRADE_DIR:-$HOME/FlintTrade}"
+source "$FLINTTRADE_DIR/.env" 2>/dev/null || true
 OPENALGO_HOST=${OPENALGO_HOST:-"http://127.0.0.1:5000"}
 curl -sf "$OPENALGO_HOST/api/v1/ping" \
   -H "Content-Type: application/json" \

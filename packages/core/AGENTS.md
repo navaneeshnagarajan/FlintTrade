@@ -19,6 +19,6 @@
 ## Sandbox/Analyzer mode
 - OpenAlgo has built-in Analyzer mode (sandbox): /api/v1/analyzer/toggle and /api/v1/analyzer/status
 - FlintTrade must support toggling between live and sandbox mode
-- Dhan Sandbox provides ₹1 crore virtual capital
+- OpenAlgo Analyzer mode provides virtual capital for paper trading
 - All orders in sandbox mode go through OpenAlgo's analyzer, not real broker
 - UI must show clear visual indicator (colored theme) when in sandbox mode

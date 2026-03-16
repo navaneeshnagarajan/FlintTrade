@@ -1,10 +1,9 @@
 #!/bin/bash
 # FlintTrade Production Deployment Script
-# Run on: ubuntu-i3-9350KF-RX6600XT (Custom PC)
 # DO NOT run during market hours (9:15 AM - 3:30 PM IST)
 set -euo pipefail
 
-REPO_DIR="/home/navaneesh/FlintTrade"
+REPO_DIR="${FLINTTRADE_DIR:-$HOME/FlintTrade}"
 SERVICE_NAME="flinttrade"
 PYTHON="/usr/bin/python3"
 
