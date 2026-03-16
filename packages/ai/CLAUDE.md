@@ -16,3 +16,6 @@
 - Write tests in tests/test_ai.py
 - Log work in root DEVLOG.md
 - Branch: feature/ai-{description}
+
+## Additional reference
+- MiroFish (github.com/666ghj/MiroFish) — swarm intelligence engine with multi-agent simulation, GraphRAG, agent memory (Zep). Reference for market crowd behavior modeling and scenario prediction.

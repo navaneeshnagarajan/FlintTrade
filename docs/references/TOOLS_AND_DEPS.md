@@ -327,6 +327,7 @@
 | **Steadfast 1-click trading** | — | Multi-broker quick options trading (BankNifty, Nifty, Finnifty, Sensex) | terminal (reference) |
 | **Open-Interest-NSE-Live-Analysis** | — | Live OI analysis toolkit with multi-strike visualization | screener |
 | **py_vollib** (vollib) | 370+ | Core options pricing library (Black, BS, BSM) with analytical + numerical Greeks | screener, backtest-engine |
+| **MiroFish** (666ghj) | 10k+ | Swarm intelligence prediction engine — multi-agent simulation, GraphRAG knowledge graphs, agent memory (Zep), prediction reports. Use for market scenario simulation and crowd behavior modeling. | ai (reference) |
 
 ## Crypto / Commodity / Currency Reference Repos
 
