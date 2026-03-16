@@ -1,1 +1,4 @@
 # flint-ditto dependencies
+cryptography>=42.0
+numba>=0.59
+numpy>=1.26
