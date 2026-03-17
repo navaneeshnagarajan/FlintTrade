@@ -1,3 +1,6 @@
+# === Reference material (screenshots, scraped sites, design notes) ===
+.reference/
+
 # === SECRETS (NEVER COMMIT) ===
 .env
 .env.*

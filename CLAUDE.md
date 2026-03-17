@@ -1,175 +1,195 @@
-# FlintTrade — Master Context
+# FlintTrade — Project Context
 
-> Open-source algo and manual trading platform. One clone = the whole house.
-> Repo: github.com/navaneeshnagarajan/FlintTrade | License: AGPL-3.0 | Version: 0.1.0-alpha
+> Single source of truth for any AI agent working on this repo.
+> Read this file first. Then read PLAN.md to know what to do next.
 
-## What is FlintTrade?
+## What This Is
 
-FlintTrade is a self-hosted, multi-market trading platform that bundles OpenAlgo + infrastructure + application into ONE repo. `git clone` → `make setup` → `make start` → live trading. No external subscriptions. Replaces Sensibull, Tradetron, TradingView paid.
+Open-source modular trading platform for Indian markets built on OpenAlgo.
+13 packages, monorepo, AGPL-3.0.
+Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
-**OpenAlgo runs as a managed subprocess** (git subtree in `infra/openalgo/`). FlintTrade manages its lifecycle — start, stop, update, health check. Users never touch OpenAlgo directly.
+## Architecture
 
-## Supported Markets (via OpenAlgo)
+FlintTrade sits ON TOP of OpenAlgo. Never modifies it.
 
-| Exchange | Code | What | Trading Hours (IST) |
-|---|---|---|---|
-| NSE | NSE | Equities | 9:15-3:30 |
-| BSE | BSE | Equities | 9:15-3:30 |
-| NFO | NFO | NSE F\&O (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, stock options) | 9:15-3:30 |
-| BFO | BFO | BSE F\&O (SENSEX, BANKEX, SENSEX50) | 9:15-3:30 |
-| CDS | CDS | NSE Currency Derivatives (USDINR, EURINR, GBPINR, JPYINR) | 9:00-5:00 PM |
-| BCD | BCD | BSE Currency Derivatives | 9:00-5:00 PM |
-| MCX | MCX | Commodities (GOLD, SILVER, CRUDEOIL, NATURALGAS, COPPER, ZINC) | 9:00-11:55 PM |
-| NCDEX | NCDEX | Agri Commodities | 10:00-5:00 PM |
-| DELTA | DELTA | Crypto Derivatives — BTC/ETH/XRP futures, perpetuals, options. INR settlement. FIU-India compliant. Native OpenAlgo broker. | 24/7 |
-| NSE_INDEX | NSE_INDEX | Index values (NIFTY, BANKNIFTY, VIX, sector indices) | 9:15-3:30 |
-| BSE_INDEX | BSE_INDEX | Index values (SENSEX, BANKEX, sector indices) | 9:15-3:30 |
+- **OpenAlgo** handles broker connections (30+ brokers), REST API on port 5000, WebSocket on port 8765
+- **FlintTrade** handles everything else: terminal UI, strategies, backtesting, AI, data, screener, multi-account
+- Three git submodules: `infra/openalgo`, `infra/algomirror`, `infra/openclaw`
 
-**Deploy freeze depends on what you trade:**
-- Equity/F\&O only: 9:15 AM - 3:30 PM
-- Currency: 9:00 AM - 5:00 PM
-- MCX Commodities: 9:00 AM - 11:55 PM (almost 24/7 on some days)
-- Crypto (Delta Exchange): 24/7 — deploy requires position check before restart
+```
+FlintTrade (React + Python) ──── REST/WS ────→ OpenAlgo (Flask, port 5000) ──→ Broker API
+```
+
+## Configuration Architecture
+
+Two-tier config. No exceptions.
+
+| Layer | File | What goes here |
+|---|---|---|
+| Infrastructure | `.env` | `OPENALGO_HOST`, `OPENALGO_PORT`, `OPENALGO_API_KEY`, `OPENALGO_WS_PORT` |
+| User preferences | `~/.flinttrade/workspace.json` | Storage paths, enabled modules, LLM config, Telegram, theme, SEBI settings |
+
+- `.env.example` has ALL values blank. Only 4 variables.
+- Broker credentials are configured in OpenAlgo, NOT FlintTrade.
+- TOTP auto-login is NOT implemented. OpenAlgo handles broker authentication.
+- Cross-platform workspace: `~/.flinttrade/` (Linux), `~/Library/Application Support/flinttrade/` (macOS), `%APPDATA%/flinttrade/` (Windows)
 
 ## Monorepo Structure
 
-```
-FlintTrade/
-├── packages/
-│   ├── core/            → OpenAlgo API client, config, models, logger (absorbs openalgo-python-library SDK)
-│   ├── engine/          → Strategy execution, safety layers, order routing (absorbs openengine patterns)
-│   ├── terminal/        → Scalper, option chain, DOM, charts (absorbs fastscalper + OpenTerminal + pinets + fyers-websockets patterns)
-│   ├── dashboard/       → P&L, portfolio, market overview (absorbs stock-market-dashboard + trading-dashboard + openalgo-mobile patterns)
-│   ├── ai/              → LLM chat, RAG, ML signals, news sentiment (absorbs openalgo-mcp + openadvisor + finnews-ai patterns)
-│   ├── data/            → Tick capture, audit logs (absorbs openquest QuestDB patterns)
-│   ├── historical/      → Historical download, DuckDB/Parquet (absorbs historify + openchart)
-│   ├── screener/        → OI spurt, PCR, max pain, portfolio Greeks (absorbs openalgo-portfoliogreeks)
-│   ├── backtest/        → Backtest UI
-│   ├── backtest-engine/ → Simulation engine (absorbs openengine + vectorbt-backtesting-skills)
-│   ├── integration/     → TradingView, ChartInk, webhooks (absorbs openalgo-flow + chrome + excel + amibroker)
-│   ├── automation/      → ML pipeline, cron, Telegram, OpenClaw, TOTP auto-login
-│   └── ditto/           → Multi-broker, multi-account (absorbs algomirror)
-├── infra/
-│   ├── openalgo/        → git subtree (managed service, port 5000)
-│   ├── openclaw/        → git subtree (AI agent, port 18789)
-│   ├── nginx/           → blue-green reverse proxy
-│   ├── systemd/         → service files
-│   ├── scripts/         → deploy, rollback, backup, health, setup
-│   ├── wireguard/       → VPN configs
-│   ├── security/        → fail2ban, UFW
-│   └── cron/            → TOTP login, health check, backup, DDNS
-├── bugs/                → git-native bug tracking
-├── docs/                → architecture, operations, SEBI, machine configs, references
-├── tests/               → shared test infrastructure
-└── .github/             → CI, PR templates, issue templates
-```
+### Python packages (10)
 
-## Absorbed Repos Map
+| Package | Description |
+|---|---|
+| `core` | OpenAlgo API client, Workspace config, models, exceptions |
+| `engine` | Strategy execution, 5-layer safety system, order routing |
+| `data` | Tick capture, DuckDB storage, SEBI audit logs |
+| `historical` | Historical OHLCV download, DuckDB/Parquet pipeline |
+| `screener` | OI analysis, PCR, max pain, portfolio Greeks, IV |
+| `backtest-engine` | Event-driven simulator, 12 strategy templates, optimizer |
+| `ai` | LLM client, RAG pipeline, ML signals, news sentiment |
+| `integration` | TradingView webhooks, ChartInk, visual flow builder |
+| `automation` | Cron scheduler, Telegram bot, OpenClaw bridge, post-market |
+| `ditto` | Multi-broker multi-account mirroring, margin calc, trailing SL |
 
-"Absorb" = rewrite the logic into our architecture using the original as reference. NOT copy-paste.
+### React packages (3)
 
-| marketcalls repo | Absorbed into | What we take |
+| Package | Port | Description |
 |---|---|---|
-| openalgo | infra/openalgo/ (subtree) | Runs as managed service |
-| openalgo-python-library | packages/core/ | SDK patterns, 80+ indicators |
-| openengine | packages/backtest-engine/ | Event-driven backtest architecture |
-| algomirror | packages/ditto/ | Multi-account routing, margin calc, trailing SL |
-| historify | packages/historical/ | DuckDB pipeline, data management |
-| openchart | packages/historical/ | Free NSE data (no broker API needed) |
-| openquest | packages/data/ | QuestDB tick aggregation patterns |
-| fastscalper-tauri | packages/terminal/ | Scalper UI patterns |
-| OpenTerminal | packages/terminal/ | Trading terminal patterns |
-| openalgo-pinets | packages/terminal/ | PineTS indicators, TradingView chart integration |
-| fyers-websockets | packages/terminal/ | 50-level DOM, order flow analytics |
-| tradingview-yahoo-finance | packages/terminal/ | TradingView chart integration patterns |
-| openalgo-portfoliogreeks | packages/screener/ | Portfolio Greeks calculator |
-| openalgo-mcp | packages/ai/ | MCP natural language trading patterns |
-| openadvisor | packages/ai/ | CatBoost ML recommendations |
-| finnews-ai | packages/ai/ | Financial news sentiment |
-| openalgo-flow | packages/integration/ | Visual strategy builder |
-| openalgo-chrome | packages/integration/ | Chrome extension trading |
-| OpenAlgo-Excel | packages/integration/ | Excel add-in |
-| OpenAlgoPlugin | packages/integration/ | Amibroker plugin |
-| vectorbt-backtesting-skills | packages/backtest-engine/ | 12 strategy templates, agent skills |
-| stock-market-dashboard | packages/dashboard/ | React dashboard patterns |
-| trading-dashboard | packages/dashboard/ | React dashboard patterns |
-| openalgo-mobile | packages/dashboard/ | Flutter UI → React responsive patterns |
-| openalgo-desktop | future | Tauri 2.0 wrapper (after web is done) |
-| openalgo-node | reference | Node.js SDK patterns |
-| openalgo-java/rust/go/.NET | reference | SDK patterns in other languages |
-| openalgo-webpage | reference | Marketing site |
-| openalgo-docs | reference | Documentation (already in project knowledge) |
-| openalgo-helm | infra/ (future) | Kubernetes deployment |
-| openalgo-backtrader (p2c2e) | packages/backtest-engine/ | Backtrader integration |
-| openalgo-chart (crypt0inf0) | packages/terminal/ | Chart component patterns |
+| `terminal` | 5173 | Trading terminal — scalper, option chain, charts, screener |
+| `dashboard` | 5174 | Portfolio overview, P&L analytics |
+| `backtest` | 5175 | Backtest configuration and results UI |
 
-## Git Branching
+## Current State
 
-```
-main ────────────────→ Production (PR from dev only, CI must pass, squash merge)
-  └─ dev ────────────→ Integration (PR from feature/fix only, requires 1 approval)
-       ├─ feature/*  → New features (anyone creates, PRs to dev, auto-deleted)
-       ├─ fix/*      → Bug fixes (PRs to dev, auto-deleted)
-       ├─ hotfix/*   → Emergency (PRs to main + backport to dev)
-       └─ release/*  → Version prep (PRs to main)
-```
+- **Version:** 0.1.0-alpha
+- **Tests:** 670 passing (pytest + vitest)
+- **Terminal:** React 19 on port 5173, dashboard module with live OpenAlgo API, dark theme, 8-module sidebar (F1-F8)
+- **Infrastructure:** Makefile, setup.sh, systemd templates, health check
+- **Workspace:** Cross-platform config system, created on `make setup`
+- **First trade:** Successfully placed through FlintTrade → OpenAlgo → Dhan Sandbox
 
-Branch names MUST include package: `feature/terminal-scalper`, `fix/engine-routing`
-Commits: `feat(terminal): add scalper panel` — conventional commits always
-Always squash and merge. Every time.
+## Decisions Made (do not revisit)
 
-## DEVLOG
+- No TOTP auto-login — OpenAlgo handles broker auth
+- Storage via `workspace.json`, not hardcoded paths or `.env`
+- `.env` has exactly 4 variables — nothing else
+- Ports: OpenAlgo 5000, WS 8765, Terminal 5173, Dashboard 5174, Backtest 5175
+- Dev on Nitro (Windows) / Mac, Ubuntu = deployment only
+- `.env.example` values ALL BLANK
+- No personal hostnames, IPs, or provider names in committed code
+- FlintTrade (capital T) in display text, `flinttrade` in paths/packages
+- Pre-release (v0.x): all commits to main, no PRs required
 
-Every change → append to DEVLOG.md:
+## OpenAlgo API Quick Reference
+
+All POST unless marked GET. Body: `{ "apikey": "...", ...params }`.
+
+### Orders (12 endpoints)
+| Endpoint | Method | What |
+|---|---|---|
+| `placeorder` | POST | Place single order |
+| `placesmartorder` | POST | Smart order with position sizing |
+| `modifyorder` | POST | Modify pending order |
+| `cancelorder` | POST | Cancel single order |
+| `cancelallorder` | POST | Cancel all orders for strategy |
+| `closeposition` | POST | Close all positions for strategy |
+| `openposition` | POST | Get open position for strategy |
+| `orderstatus` | POST | Check order status |
+| `optionsorder` | POST | Place options order with strike calc |
+| `optionsmultiorder` | POST | Multiple options legs |
+| `basketorder` | POST | Batch multiple orders |
+| `splitorder` | POST | Split large order into chunks |
+
+### Accounts (9 endpoints)
+| Endpoint | Method | What |
+|---|---|---|
+| `funds` | POST | Available balance, margin, collateral |
+| `orderbook` | POST | Today's orders with statistics |
+| `tradebook` | POST | Today's executed trades |
+| `positionbook` | POST | Open positions with P&L |
+| `holdings` | POST | Long-term holdings |
+| `margin` | POST | Margin requirement for order |
+| `ping` | **GET** | Connection check, returns broker name |
+| `analyzer/status` | **GET** | Sandbox mode status |
+| `analyzer/toggle` | POST | Toggle sandbox mode |
+
+### Data (21 endpoints)
+| Endpoint | Method | What |
+|---|---|---|
+| `quotes` | POST | LTP, OHLC, volume for single symbol |
+| `multiquotes` | POST | Quotes for multiple symbols |
+| `depth` | POST | Order book (5 or 50 level) |
+| `history` | POST | Historical OHLCV data |
+| `optionchain` | POST | Full option chain with Greeks |
+| `optiongreeks` | POST | Greeks for single option |
+| `multioptiongreeks` | POST | Greeks for multiple options |
+| `optionsymbol` | POST | Resolve option symbol |
+| `symbol` | POST | Symbol lookup |
+| `search` | POST | Fuzzy symbol search |
+| `expiry` | POST | Expiry dates for symbol |
+| `intervals` | **GET** | Supported chart intervals |
+| `syntheticfuture` | POST | Synthetic future price |
+| `ticker` | POST | Subscribe to ticker |
+| `instruments` | **GET** | Full instrument list |
+| `gex` | POST | Gamma exposure |
+| `iv_smile` | POST | IV smile curve |
+| `max_pain` | POST | Max pain strike |
+| `oi_profile` | POST | OI profile |
+| `telegram` | POST | Send Telegram message |
+| `health` | **GET** | System health check |
+
+### Utilities (2 endpoints)
+| Endpoint | Method | What |
+|---|---|---|
+| `holidays` | **GET** | Market holidays list |
+| `timings` | **GET** | Exchange trading hours |
+
+### Rate limits
+- Orders: 10/sec
+- Smart orders: 2/sec
+- General API: 50/sec
+
+### WebSocket (port 8765)
+- Mode 1: LTP only
+- Mode 2: Quote (LTP + bid/ask + volume + OI)
+- Mode 3: Depth (full order book)
+- Subscribe: `{ "action": "subscribe_ltp", "instruments": [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}] }`
+
+## Code Standards
+
+- **Python:** PEP 8, ruff linting, type hints, Google-style docstrings
+- **React:** Functional components, hooks only, Tailwind CSS v4, lucide-react icons
+- **Tests:** pytest with `--import-mode=importlib`, vitest for React
+- **Git:** Conventional commits (`feat(pkg):`, `fix(pkg):`, `docs:`, `refactor(pkg):`)
+- **Branch:** main only during pre-alpha (v0.x)
+
+## How to Work on This Project
+
+1. Read this file (CLAUDE.md)
+2. Read PLAN.md — find the next unchecked task
+3. Implement it
+4. Run tests: `python -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib`
+5. Update PLAN.md (check off completed task)
+6. Append to DEVLOG.md
+7. Commit with conventional message
+8. Push to origin main
+
+## DEVLOG Format
+
 ```
 ## YYYY-MM-DD HH:MM IST | Machine | @username | IDE/Tool | AI Model/Agent | Branch | Summary
 ```
 
-## Deploy Freeze
+Machines: `nitro-dev` (Windows), `mac-dev` (macOS), `ubuntu-server` (production)
 
-- NSE/BSE/NFO/BFO traders: 9:15 AM – 3:30 PM IST — NO deploys
-- CDS/BCD traders: 9:00 AM – 5:00 PM IST — NO deploys
-- MCX traders: 9:00 AM – 11:55 PM IST — NO deploys
-- DELTA/crypto: check open positions before any restart (24/7 market)
-- If a bug is found during market hours → use OpenAlgo Action Center
-  to disable the strategy. Fix and deploy after your market closes.
+## Do NOT
 
-## Technology Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.11+, Flask |
-| Frontend | React 19, Vite, Tailwind CSS, TradingView Lightweight Charts v5 |
-| Real-time | WebSocket, ZMQ |
-| Database | DuckDB (analytics), SQLite (state), Parquet (archival) |
-| AI/ML | LM Studio, ChromaDB, LightGBM, CatBoost |
-| AI Agent | OpenClaw (gateway), Ollama (fallback) |
-| Testing | pytest (Python), Vitest (React), ruff (linting) |
-| CI/CD | GitHub Actions |
-| Deploy | nginx, systemd, bash scripts |
-| VPN | WireGuard |
-| Security | fail2ban, UFW |
-
-## OpenAlgo v2.0.0.1 Features (absorbed into FlintTrade packages)
-
-- Option Chain + Greeks + GEX + IV Smile + OI Profile + Max Pain → screener
-- 3D Volatility Surface + ATM Straddle Chart + OI Tracker → screener
-- System Health Monitor API → dashboard
-- 50-level WebSocket depth → terminal + data
-- Historify scheduler + symbol validation → historical
-- Flow Editor: Order Status node, SmartOrder negative positions → integration
-- Basket order batched concurrent execution → engine
-- Delta Exchange native broker integration → core (DELTA exchange)
-- Nubra broker integration → core (broker list)
-- WebSocket file descriptor leak fixes (all brokers) → data tick_recorder
-
-**Supported brokers (24 via OpenAlgo v2.0.0.1):** Dhan, Zerodha, Angel One, Fyers, IIFL, 5paisa, Kotak Neo, Upstox, Aliceblue, Firstock, Flattrade, Finvasia/Shoonya, Mastertrust, ICICI Direct, Motilal Oswal, Paytm Money, Tradejini, Zebu, Rupeezy, Compositedge, Delta Exchange, Nubra, and more. FlintTrade code never references specific brokers — OpenAlgo abstracts them.
-
-## What NOT to Do
-
-- Commit .env, API keys, TOTP secrets, credentials
-- Modify infra/openalgo/ source (use subtree pull for updates)
-- Push directly to main or dev
-- Reference specific brokers in package code
-- Restart OpenAlgo during market hours with open positions
+- Modify files in `infra/openalgo/`, `infra/algomirror/`, `infra/openclaw/` (submodules)
+- Hardcode credentials, IPs, hostnames, or personal values
+- Use mock/placeholder data in the terminal — every number comes from API
+- Commit `.env` files
+- Use ports 3000/3001/3002 (reserved for other tools)
+- Reference specific brokers in package code — OpenAlgo abstracts them
 - Skip DEVLOG entries
+- Add TOTP auto-login (OpenAlgo handles broker auth)
