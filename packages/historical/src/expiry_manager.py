@@ -14,9 +14,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any
 
-from packages.core.src.models import OHLCV
 from packages.core.src.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.historical.expiry")

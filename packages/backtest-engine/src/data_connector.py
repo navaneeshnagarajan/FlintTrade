@@ -11,7 +11,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger("flinttrade.backtest.data_connector")
@@ -85,9 +85,9 @@ def validate_bars(bars: list[dict[str, Any]]) -> list[str]:
             if val is None or float(val) <= 0:
                 issues.append(f"Bar {i}: {field_name}={val} invalid")
 
-        h, l = float(bar.get("high", 0)), float(bar.get("low", 0))
-        if h < l:
-            issues.append(f"Bar {i}: high ({h}) < low ({l})")
+        high_val, low_val = float(bar.get("high", 0)), float(bar.get("low", 0))
+        if high_val < low_val:
+            issues.append(f"Bar {i}: high ({high_val}) < low ({low_val})")
 
     return issues
 

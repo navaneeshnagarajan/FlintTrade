@@ -13,10 +13,8 @@ is auto-modified via OpenAlgo /api/v1/modifyorder.
 from __future__ import annotations
 
 import logging
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 logger = logging.getLogger("flinttrade.ditto.trailing_sl")
 

@@ -8,7 +8,6 @@ skew). Predicts BUY/SELL/HOLD for next N candles with a confidence score.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path

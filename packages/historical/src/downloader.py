@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
-from typing import Any
+from datetime import date, timedelta
 
 from packages.core.src.models import OHLCV
 from packages.core.src.openalgo_client import OpenAlgoClient

@@ -11,16 +11,14 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
-from packages.core.src.models import OHLCV
 
 from .downloader import DownloadResult
-from .free_data import FreeBar, FreeDataResult
+from .free_data import FreeDataResult
 
 logger = logging.getLogger("flinttrade.historical.pipeline")
 

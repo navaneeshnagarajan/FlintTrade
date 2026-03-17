@@ -9,26 +9,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import signal
 import sys
 from pathlib import Path
-from typing import Any
 
 # Ensure repo root is on sys.path for cross-package imports
 _REPO_ROOT = str(Path(__file__).resolve().parents[3])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from packages.core.src.config import Settings
-from packages.core.src.openalgo_client import OpenAlgoClient
-from packages.data.src.audit_logger import AuditLogger
-from packages.engine.src.router import OrderRouter
-from packages.engine.src.safety import SafetyConfig, SafetySystem
-from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler
-from packages.automation.src.cron_manager import CronManager
-from packages.automation.src.telegram_bot import TelegramBot
-from packages.automation.src.totp_login import TOTPLogin
+from packages.core.src.config import Settings  # noqa: E402
+from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: E402
+from packages.data.src.audit_logger import AuditLogger  # noqa: E402
+from packages.engine.src.router import OrderRouter  # noqa: E402
+from packages.engine.src.safety import SafetyConfig, SafetySystem  # noqa: E402
+from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler  # noqa: E402
+from packages.automation.src.cron_manager import CronManager  # noqa: E402
+from packages.automation.src.telegram_bot import TelegramBot  # noqa: E402
 
 logger = logging.getLogger("flinttrade")
 
@@ -85,16 +82,10 @@ class FlintTradeApp:
             time_scheduler=self.time_scheduler,
         )
 
-        # Automation — TOTP login (optional — BROKER_TOTP_SECRET may be empty)
-        self.totp = TOTPLogin(
-            openalgo_host=self.settings.openalgo_host,
-        )
-
         # Automation — cron manager
         self.cron = CronManager(
             openalgo_client=self.client,
             audit_logger=self.audit,
-            totp_login=self.totp,
         )
 
         # Automation — Telegram bot (optional — token may not be set)

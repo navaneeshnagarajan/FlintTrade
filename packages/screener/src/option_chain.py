@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
-from packages.core.src.models import OptionChain, OptionChainStrike, Quote
+from packages.core.src.models import OptionChainStrike
 from packages.core.src.openalgo_client import OpenAlgoClient
 
 logger = logging.getLogger("flinttrade.screener.option_chain")

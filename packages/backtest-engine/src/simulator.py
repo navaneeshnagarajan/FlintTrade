@@ -14,13 +14,11 @@ Supports:
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from packages.core.src.models import OHLCV, Order, Quote
+from packages.core.src.models import OHLCV, Order
 from packages.engine.src.strategy import BaseStrategy
 
 logger = logging.getLogger("flinttrade.backtest.simulator")

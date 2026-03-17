@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from enum import Enum
-from typing import Any
 
-from .account_manager import BrokerAccount
 
 logger = logging.getLogger("flinttrade.ditto.risk")
 

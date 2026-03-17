@@ -17,11 +17,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 try:
-    from .metrics import PerformanceMetrics, PerformanceReport, compute_sharpe, compute_returns
-    from .simulator import BacktestConfig, BacktestResult, BacktestSimulator, SimTrade
+    from .metrics import PerformanceMetrics, PerformanceReport  # noqa: F401
+    from .simulator import BacktestConfig, BacktestSimulator, SimTrade  # noqa: F401
 except ImportError:
-    from metrics import PerformanceMetrics, PerformanceReport, compute_sharpe, compute_returns
-    from simulator import BacktestConfig, BacktestResult, BacktestSimulator, SimTrade
+    from metrics import PerformanceMetrics, PerformanceReport  # noqa: F401
+    from simulator import BacktestConfig, BacktestSimulator, SimTrade  # noqa: F401
 
 logger = logging.getLogger("flinttrade.backtest.optimizer")
 
