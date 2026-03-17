@@ -10,8 +10,8 @@ import { useEffect } from "react";
 export default function useKeyboard(setModule, handlers = {}) {
   useEffect(() => {
     const onKey = (e) => {
-      // F1-F9 → module 0-8
-      if (e.key >= "F1" && e.key <= "F9") {
+      // F1-F8 → module 0-7
+      if (e.key >= "F1" && e.key <= "F8") {
         e.preventDefault();
         setModule(parseInt(e.key.slice(1), 10) - 1);
         return;

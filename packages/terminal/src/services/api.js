@@ -19,6 +19,14 @@ async function post(endpoint, extra = {}) {
   return json.data ?? json;
 }
 
+async function get(endpoint) {
+  const resp = await fetch(`${BASE}/api/v1/${endpoint}`);
+  if (!resp.ok) throw new Error(`API ${endpoint}: HTTP ${resp.status}`);
+  const json = await resp.json();
+  if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
+  return json.data ?? json;
+}
+
 // --- Order APIs ---
 export const placeOrder = (params) => post("placeorder", params);
 export const placeSmartOrder = (params) => post("placesmartorder", params);
@@ -38,7 +46,7 @@ export const getOptionChain = (symbol, exchange = "NFO") => post("optionchain", 
 export const getOptionGreeks = (symbol, exchange = "NFO") => post("optiongreeks", { symbol, exchange });
 export const getExpiry = (symbol, exchange = "NFO") => post("expiry", { symbol, exchange });
 export const searchSymbol = (query) => post("search", { query });
-export const getIntervals = () => post("intervals");
+export const getIntervals = () => get("intervals");
 
 // --- Account APIs ---
 export const getFunds = () => post("funds");
@@ -48,6 +56,6 @@ export const getPositionbook = () => post("positionbook");
 export const getHoldings = () => post("holdings");
 
 // --- Utility APIs ---
-export const ping = () => post("ping");
-export const analyzerStatus = () => post("analyzer/status");
+export const ping = () => get("ping");
+export const analyzerStatus = () => get("analyzer/status");
 export const analyzerToggle = () => post("analyzer/toggle");
