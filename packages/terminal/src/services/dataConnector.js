@@ -25,6 +25,7 @@ import {
   getOptionChain,
   getHistory,
   getExpiry,
+  getQuotes,
 } from "./api.js";
 import { wsService } from "./websocket.js";
 import { dataBus } from "./dataBus.js";
@@ -51,6 +52,7 @@ const POLL = {
   orders: 10_000,
   funds: 30_000,
   holdings: 60_000,
+  indexQuotes: 10_000, // REST fallback for ticker bar when WS not delivering
 };
 
 const DEV = import.meta.env.DEV === true || import.meta.env.MODE === "development";
@@ -65,6 +67,7 @@ const _intervals = {
   orders: null,
   funds: null,
   holdings: null,
+  indexQuotes: null,
 };
 
 /** Tracks whether the connector has been started to prevent double-init. */
@@ -173,11 +176,30 @@ async function pollFunds() {
 /**
  * Fetches holdings and publishes to dataBus.
  * Holdings change infrequently; called by the holdings interval.
+ * Dhan Sandbox may not support holdings — errors are silently suppressed.
  */
 async function pollHoldings() {
   const data = await rateLimitedCall("holdings", getHoldings);
   if (data !== undefined) {
     dataBus.publish("holdings", data);
+  }
+}
+
+/**
+ * REST fallback for index quotes when WebSocket isn't delivering ticks.
+ * Polls each index instrument via getQuotes and publishes to the same
+ * dataBus topic that WebSocket ticks would use.
+ */
+async function pollIndexQuotes() {
+  for (const inst of INDEX_INSTRUMENTS) {
+    const data = await rateLimitedCall(
+      `quote:${inst.symbol}`,
+      () => getQuotes(inst.symbol, inst.exchange)
+    );
+    if (data !== undefined) {
+      const topic = `quote:${inst.symbol.toUpperCase()}:${inst.exchange.toUpperCase()}`;
+      dataBus.publish(topic, data);
+    }
   }
 }
 
@@ -300,6 +322,7 @@ export function startDataConnector() {
   pollOrders();
   pollFunds();
   pollHoldings();
+  pollIndexQuotes();
 
   // Adaptive positions schedule (5 s market / 60 s off-market).
   _schedulePositions();
@@ -307,6 +330,7 @@ export function startDataConnector() {
   _intervals.orders = setInterval(pollOrders, POLL.orders);
   _intervals.funds = setInterval(pollFunds, POLL.funds);
   _intervals.holdings = setInterval(pollHoldings, POLL.holdings);
+  _intervals.indexQuotes = setInterval(pollIndexQuotes, POLL.indexQuotes);
 
   devLog("started — polling positions, orders, funds, holdings");
 }

@@ -15,6 +15,7 @@ export default defineConfig({
       "/ws": {
         target: process.env.VITE_OPENALGO_WS || "ws://127.0.0.1:8765",
         ws: true,
+        rewrite: (path) => path.replace(/^\/ws/, ""),
       },
     },
   },

@@ -9,7 +9,7 @@ const INDICES = [
   { symbol: 'NIFTY', exchange: 'NSE_INDEX', name: 'NIFTY 50' },
   { symbol: 'SENSEX', exchange: 'BSE_INDEX', name: 'SENSEX' },
   { symbol: 'BANKNIFTY', exchange: 'NSE_INDEX', name: 'BANK NIFTY' },
-  { symbol: 'INDIA VIX', exchange: 'NSE_INDEX', name: 'VIX' },
+  { symbol: 'INDIAVIX', exchange: 'NSE_INDEX', name: 'VIX' },
 ]
 
 function IndexChip({ symbol, exchange, name }) {

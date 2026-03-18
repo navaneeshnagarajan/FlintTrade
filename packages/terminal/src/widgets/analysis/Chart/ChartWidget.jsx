@@ -41,6 +41,7 @@ const CHART_THEME = {
     fontFamily: "'JetBrains Mono', ui-monospace, monospace",
     fontSize: 11,
   },
+  localization: { timeZone: 'Asia/Kolkata' },
   grid: {
     vertLines: { color: '#1a1a2e' },
     horzLines: { color: '#1a1a2e' },

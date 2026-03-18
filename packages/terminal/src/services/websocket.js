@@ -5,7 +5,11 @@
  * Dispatches tick updates via custom DOM events.
  */
 
-const WS_URL = import.meta.env.VITE_OPENALGO_WS || import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8765";
+// In dev mode, connect via Vite proxy (/ws → ws://127.0.0.1:8765).
+// In production, connect directly to the configured WS host.
+const WS_URL = import.meta.env.DEV
+  ? `ws://${window.location.host}/ws`
+  : (import.meta.env.VITE_OPENALGO_WS || import.meta.env.VITE_WS_URL || "ws://127.0.0.1:8765");
 
 class WebSocketService {
   constructor() {
