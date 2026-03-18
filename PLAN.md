@@ -115,3 +115,6 @@
 - ChromaDB RAG for trading knowledge base
 - GitNexus codebase intelligence indexing
 - Fine-tuning with Unsloth QLoRA on trading data
+
+See `docs/references/REPOS.md` for the full repository knowledge base (120 entries)
+See `RESTRUCTURE.md` for the complete platform restructuring blueprint

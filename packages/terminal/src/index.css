@@ -31,3 +31,118 @@ body {
   margin: 0;
   overflow: hidden;
 }
+
+/* FlexLayout dark theme overrides */
+.flexlayout__layout {
+  --color-1: #0a0a0f;
+  --color-2: #12121a;
+  --color-3: #1e1e2e;
+  --color-4: #16161f;
+  --color-text: #e4e4e7;
+  --color-drag1: rgba(59, 130, 246, 0.5);
+  --color-drag2: rgba(59, 130, 246, 0.25);
+  background-color: var(--color-1);
+}
+
+.flexlayout__tab {
+  background-color: var(--color-1);
+  border-color: var(--color-3);
+  overflow: auto;
+}
+
+.flexlayout__tabset {
+  background-color: var(--color-1);
+  border-bottom: 1px solid var(--color-3);
+}
+
+.flexlayout__tabset_header {
+  background-color: var(--color-2);
+  border-bottom: 1px solid var(--color-3);
+}
+
+.flexlayout__tabset-selected {
+  background-color: var(--color-2);
+}
+
+.flexlayout__tab_button {
+  color: #71717a;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.flexlayout__tab_button--selected {
+  color: var(--color-text);
+  background-color: var(--color-1);
+}
+
+.flexlayout__tab_button:hover {
+  color: var(--color-text);
+  background-color: var(--color-2);
+}
+
+.flexlayout__splitter {
+  background-color: var(--color-4);
+}
+
+.flexlayout__splitter:hover,
+.flexlayout__splitter_drag {
+  background-color: var(--color-3);
+}
+
+.flexlayout__tab_toolbar_button {
+  color: #52525b;
+}
+
+.flexlayout__tab_toolbar_button:hover {
+  color: var(--color-text);
+  background-color: var(--color-2);
+}
+
+.flexlayout__tab_toolbar_button-max svg,
+.flexlayout__tab_toolbar_button-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.flexlayout__border {
+  background-color: var(--color-2);
+  border-color: var(--color-3);
+}
+
+.flexlayout__popup_menu {
+  background-color: var(--color-2);
+  border: 1px solid var(--color-3);
+  color: var(--color-text);
+  border-radius: 6px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+
+.flexlayout__popup_menu_item {
+  color: #71717a;
+  padding: 6px 12px;
+}
+
+.flexlayout__popup_menu_item:hover {
+  background-color: #1a1a26;
+  color: var(--color-text);
+}
+
+.flexlayout__drag_rect {
+  background-color: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 4px;
+}
+
+.flexlayout__edge_rect {
+  background-color: rgba(59, 130, 246, 0.3);
+}
+
+/* Hide scrollbar in FlexLayout overflow menu */
+.flexlayout__tabset_content::-webkit-scrollbar {
+  display: none;
+}
+
+.flexlayout__tabset_content {
+  scrollbar-width: none;
+}

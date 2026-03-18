@@ -65,6 +65,19 @@ infra/openclaw/.env
 chroma_data/
 .gitnexus/
 
+# === Reference (cloned repos, screenshots, captured code — local only) ===
+.reference/repos/
+.reference/screenshots/
+.reference/CAPTURE_STATUS.md
+
+# === Playwright MCP (screenshots from browser testing) ===
+.playwright-mcp/
+
+# === Planning files (session-specific, not committed) ===
+task_plan.md
+findings.md
+progress.md
+
 # === Build ===
 *.zip
 *.tar.gz

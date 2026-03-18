@@ -117,6 +117,8 @@ Claude Code on every machine has these installed globally:
 
 **MCP Servers:** context7 (live library docs), playwright (browser testing), sequential-thinking, github, firecrawl
 
+For the complete list of all repositories, libraries, skills, and tools, see `docs/references/REPOS.md`
+
 ### USE THESE ACTIVELY
 - `/brainstorm` before starting any major feature
 - `/write-plan` to create structured implementation plans

@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "flexlayout-react": "^0.8.19",
     "lightweight-charts": "^5.0.0",
     "lucide-react": "^0.577.0",
     "react": "^19.0.0",

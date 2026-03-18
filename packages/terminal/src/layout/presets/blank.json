@@ -1,0 +1,16 @@
+{
+  "global": {
+    "splitterSize": 4,
+    "tabEnableClose": true,
+    "tabSetEnableMaximize": true
+  },
+  "layout": {
+    "type": "row",
+    "children": [
+      {
+        "type": "tabset",
+        "children": []
+      }
+    ]
+  }
+}

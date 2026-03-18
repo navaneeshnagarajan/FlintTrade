@@ -1,0 +1,28 @@
+{
+  "global": {
+    "splitterSize": 4,
+    "tabEnableClose": true,
+    "tabSetEnableMaximize": true
+  },
+  "layout": {
+    "type": "row",
+    "children": [
+      {
+        "type": "tabset",
+        "weight": 70,
+        "children": [
+          { "type": "tab", "name": "Scalper", "component": "scalper" }
+        ]
+      },
+      {
+        "type": "tabset",
+        "weight": 30,
+        "children": [
+          { "type": "tab", "name": "Positions", "component": "positions" },
+          { "type": "tab", "name": "Orders", "component": "orders" },
+          { "type": "tab", "name": "Option Chain", "component": "optionchain" }
+        ]
+      }
+    ]
+  }
+}
