@@ -1,5 +1,9 @@
 {
-    "python.defaultInterpreterPath": "C:\\Users\\navan\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+    "python.defaultInterpreterPath": "C:\\Program Files\\Python314\\python.exe",
     "python.terminal.activateEnvironment": false,
-    "python.envFile": "${workspaceFolder}/.env"
+    "python.terminal.useEnvFile": true,
+    "python.envFile": "${workspaceFolder}/.env",
+    "python.analysis.autoSearchPaths": false,
+    "python.analysis.extraPaths": [],
+    "python.experiments.enabled": false
 }

@@ -9,12 +9,14 @@ const widgets = {
   orders: lazy(() => import('../widgets/trading/Orders/OrdersWidget')),
   holdings: lazy(() => import('../widgets/trading/Holdings/HoldingsWidget')),
   tradebook: lazy(() => import('../widgets/trading/TradeBook/TradeBookWidget')),
+  orderpad: lazy(() => import('../widgets/trading/OrderPad/OrderPadWidget')),
 
   // Analysis widgets
   chart: lazy(() => import('../widgets/analysis/Chart/ChartWidget')),
   optionchain: lazy(() => import('../widgets/analysis/OptionChain/OptionChainWidget')),
   oichart: lazy(() => import('../widgets/analysis/OIChart/OIChartWidget')),
   straddle: lazy(() => import('../widgets/analysis/Straddle/StraddleWidget')),
+  depth: lazy(() => import('../widgets/analysis/Depth/DepthWidget')),
 
   // Utility widgets
   watchlist: lazy(() => import('../widgets/utility/Watchlist/WatchlistWidget')),
@@ -32,6 +34,8 @@ export const widgetCatalog = [
   { id: 'optionchain', name: 'Option Chain', icon: 'Grid3x3', category: 'Analysis' },
   { id: 'oichart', name: 'OI Chart', icon: 'BarChart3', category: 'Analysis' },
   { id: 'straddle', name: 'Straddle', icon: 'Activity', category: 'Analysis' },
+  { id: 'orderpad', name: 'Order Pad', icon: 'FileEdit', category: 'Trading' },
+  { id: 'depth', name: 'Depth', icon: 'Layers', category: 'Analysis' },
   { id: 'watchlist', name: 'Watchlist', icon: 'Star', category: 'Utility' },
 ]
 
