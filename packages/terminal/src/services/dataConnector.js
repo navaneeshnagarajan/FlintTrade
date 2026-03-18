@@ -176,12 +176,20 @@ async function pollFunds() {
 /**
  * Fetches holdings and publishes to dataBus.
  * Holdings change infrequently; called by the holdings interval.
- * Dhan Sandbox may not support holdings — errors are silently suppressed.
+ * Some brokers (e.g. Dhan Sandbox) may not support this endpoint — fail silently.
  */
+let _holdingsErrorLogged = false;
 async function pollHoldings() {
-  const data = await rateLimitedCall("holdings", getHoldings);
-  if (data !== undefined) {
+  if (!generalLimiter.tryConsume(1)) return;
+  try {
+    const data = await getHoldings();
     dataBus.publish("holdings", data);
+    _holdingsErrorLogged = false;
+  } catch {
+    if (!_holdingsErrorLogged) {
+      devLog("holdings endpoint not supported by this broker — disabling poll");
+      _holdingsErrorLogged = true;
+    }
   }
 }
 
