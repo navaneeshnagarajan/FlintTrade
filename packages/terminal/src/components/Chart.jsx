@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { createChart } from "lightweight-charts";
+import { createChart, CandlestickSeries, HistogramSeries } from "lightweight-charts";
 import { getHistory } from "../services/api";
 
 /**
@@ -25,7 +25,7 @@ export default function Chart({ symbol = "NIFTY", exchange = "NSE_INDEX", interv
       timeScale: { borderColor: "#2a2a3e", timeVisible: true, secondsVisible: false },
     });
 
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#22c55e",
       downColor: "#ef4444",
       borderUpColor: "#22c55e",
@@ -34,7 +34,7 @@ export default function Chart({ symbol = "NIFTY", exchange = "NSE_INDEX", interv
       wickDownColor: "#ef4444",
     });
 
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
       priceScaleId: "vol",
     });

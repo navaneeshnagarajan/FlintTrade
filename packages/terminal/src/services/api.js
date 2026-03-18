@@ -4,7 +4,7 @@
  * All responses are unwrapped: { data: X, status: "success" } → X
  */
 
-const BASE = import.meta.env.VITE_OPENALGO_HOST || "http://127.0.0.1:5000";
+const BASE = import.meta.env.DEV ? "" : (import.meta.env.VITE_OPENALGO_HOST || "http://127.0.0.1:5000");
 const API_KEY = import.meta.env.VITE_OPENALGO_API_KEY || "";
 
 async function post(endpoint, extra = {}) {
@@ -56,6 +56,6 @@ export const getPositionbook = () => post("positionbook");
 export const getHoldings = () => post("holdings");
 
 // --- Utility APIs ---
-export const ping = () => get("ping");
+export const ping = () => post("ping");
 export const analyzerStatus = () => get("analyzer/status");
 export const analyzerToggle = () => post("analyzer/toggle");
