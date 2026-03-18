@@ -1,0 +1,55 @@
+{
+  "global": {
+    "splitterSize": 4,
+    "tabEnableClose": true,
+    "tabSetEnableMaximize": true
+  },
+  "layout": {
+    "type": "row",
+    "children": [
+      {
+        "type": "row",
+        "weight": 65,
+        "children": [
+          {
+            "type": "tabset",
+            "weight": 60,
+            "children": [
+              { "type": "tab", "name": "Chart", "component": "chart" },
+              { "type": "tab", "name": "Dashboard", "component": "dashboard" }
+            ]
+          },
+          {
+            "type": "row",
+            "weight": 40,
+            "children": [
+              {
+                "type": "tabset",
+                "weight": 50,
+                "children": [
+                  { "type": "tab", "name": "OI Chart", "component": "oichart" }
+                ]
+              },
+              {
+                "type": "tabset",
+                "weight": 50,
+                "children": [
+                  { "type": "tab", "name": "Positions", "component": "positions" },
+                  { "type": "tab", "name": "Orders", "component": "orders" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "tabset",
+        "weight": 35,
+        "children": [
+          { "type": "tab", "name": "Option Chain", "component": "optionchain" },
+          { "type": "tab", "name": "Watchlist", "component": "watchlist" }
+        ]
+      }
+    ]
+  }
+}

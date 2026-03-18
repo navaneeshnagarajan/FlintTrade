@@ -1,0 +1,41 @@
+{
+  "global": {
+    "splitterSize": 4,
+    "tabEnableClose": true,
+    "tabSetEnableMaximize": true
+  },
+  "layout": {
+    "type": "row",
+    "children": [
+      {
+        "type": "tabset",
+        "weight": 60,
+        "children": [
+          { "type": "tab", "name": "Positions", "component": "positions" },
+          { "type": "tab", "name": "Orders", "component": "orders" },
+          { "type": "tab", "name": "Holdings", "component": "holdings" }
+        ]
+      },
+      {
+        "type": "row",
+        "weight": 40,
+        "children": [
+          {
+            "type": "tabset",
+            "weight": 50,
+            "children": [
+              { "type": "tab", "name": "Dashboard", "component": "dashboard" }
+            ]
+          },
+          {
+            "type": "tabset",
+            "weight": 50,
+            "children": [
+              { "type": "tab", "name": "Chart", "component": "chart" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

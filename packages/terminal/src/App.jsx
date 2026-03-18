@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { Model } from "flexlayout-react";
+import { startDataConnector, stopDataConnector } from "./services/dataConnector";
 import TopBar from "./chrome/TopBar";
 import TickerBar from "./chrome/TickerBar";
 import WidgetPicker from "./chrome/WidgetPicker";
@@ -106,6 +107,12 @@ export default function App() {
   // Open full-page tool
   const handleSelectTool = useCallback((toolId) => {
     setActiveTool(toolId);
+  }, []);
+
+  // Start DataBus connector (WebSocket + API polling)
+  useEffect(() => {
+    startDataConnector();
+    return () => stopDataConnector();
   }, []);
 
   // Global keyboard: Escape closes tools/pickers
