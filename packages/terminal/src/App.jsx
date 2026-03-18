@@ -11,6 +11,7 @@ import {
   getActiveLayoutId, setActiveLayoutId, generateLayoutId,
 } from "./layout/layoutStore";
 import minimalPreset from "./layout/presets/minimal.json";
+import useGlobalKeys from "./hooks/useGlobalKeys";
 
 // Full-page tools (lazy loaded — only fetched when opened)
 const tools = {
@@ -115,18 +116,17 @@ export default function App() {
     return () => stopDataConnector();
   }, []);
 
-  // Global keyboard: Escape closes tools/pickers
-  useEffect(() => {
-    const handleKey = (e) => {
-      if (e.key === "Escape") {
-        if (activeTool) { setActiveTool(null); return; }
-        if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
-        if (toolsMenuOpen) { setToolsMenuOpen(false); return; }
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [activeTool, widgetPickerOpen, toolsMenuOpen]);
+  // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
+  useGlobalKeys({
+    onEscape: useCallback(() => {
+      if (activeTool) { setActiveTool(null); return; }
+      if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
+      if (toolsMenuOpen) { setToolsMenuOpen(false); return; }
+    }, [activeTool, widgetPickerOpen, toolsMenuOpen]),
+    onCommandPalette: useCallback(() => {
+      // Future: open command palette (Ctrl+K)
+    }, []),
+  });
 
   const ToolComponent = activeTool ? tools[activeTool] : null;
 
