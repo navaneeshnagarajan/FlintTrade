@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -12,12 +12,12 @@ from pydantic import BaseModel, Field
 # Enums
 # ---------------------------------------------------------------------------
 
-class Action(str, Enum):
+class Action(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
 
 
-class Exchange(str, Enum):
+class Exchange(StrEnum):
     NSE = "NSE"
     BSE = "BSE"
     NFO = "NFO"
@@ -30,25 +30,25 @@ class Exchange(str, Enum):
     BSE_INDEX = "BSE_INDEX"
 
 
-class PriceType(str, Enum):
+class PriceType(StrEnum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
     SL = "SL"
     SL_M = "SL-M"
 
 
-class Product(str, Enum):
+class Product(StrEnum):
     MIS = "MIS"
     CNC = "CNC"
     NRML = "NRML"
 
 
-class OptionType(str, Enum):
+class OptionType(StrEnum):
     CE = "CE"
     PE = "PE"
 
 
-class Interval(str, Enum):
+class Interval(StrEnum):
     m1 = "1m"
     m2 = "2m"
     m3 = "3m"

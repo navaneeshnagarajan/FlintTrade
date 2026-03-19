@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta, timezone
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 logger = logging.getLogger("flinttrade.ditto.risk")
@@ -18,14 +18,14 @@ logger = logging.getLogger("flinttrade.ditto.risk")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-class RiskStatus(str, Enum):
+class RiskStatus(StrEnum):
     OK = "OK"
     WARNING = "WARNING"
     CRITICAL = "CRITICAL"
     PAUSED = "PAUSED"
 
 
-class TradeGrade(str, Enum):
+class TradeGrade(StrEnum):
     A = "A"  # Excellent: good entry, minimal slippage, disciplined exit
     B = "B"  # Good: decent entry, some slippage
     C = "C"  # Mediocre: late entry or early exit

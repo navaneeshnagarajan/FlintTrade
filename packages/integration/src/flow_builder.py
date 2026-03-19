@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 logger = logging.getLogger("flinttrade.integration.flow_builder")
@@ -29,14 +29,14 @@ logger = logging.getLogger("flinttrade.integration.flow_builder")
 # ---------------------------------------------------------------------------
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     SIGNAL = "SIGNAL"
     CONDITION = "CONDITION"
     ACTION = "ACTION"
     EXIT = "EXIT"
 
 
-class SignalSource(str, Enum):
+class SignalSource(StrEnum):
     TRADINGVIEW = "TRADINGVIEW"
     CHARTINK = "CHARTINK"
     PYTHON_SCRIPT = "PYTHON_SCRIPT"
@@ -44,7 +44,7 @@ class SignalSource(str, Enum):
     MANUAL = "MANUAL"
 
 
-class ConditionType(str, Enum):
+class ConditionType(StrEnum):
     PRICE_ABOVE = "PRICE_ABOVE"
     PRICE_BELOW = "PRICE_BELOW"
     OI_THRESHOLD = "OI_THRESHOLD"
@@ -54,7 +54,7 @@ class ConditionType(str, Enum):
     PCR_BELOW = "PCR_BELOW"
 
 
-class ActionType(str, Enum):
+class ActionType(StrEnum):
     PLACE_ORDER = "PLACE_ORDER"
     MODIFY_ORDER = "MODIFY_ORDER"
     CANCEL_ORDER = "CANCEL_ORDER"
@@ -62,7 +62,7 @@ class ActionType(str, Enum):
     CLOSE_POSITION = "CLOSE_POSITION"
 
 
-class ExitType(str, Enum):
+class ExitType(StrEnum):
     STOP_LOSS = "STOP_LOSS"
     TARGET = "TARGET"
     TRAILING_SL = "TRAILING_SL"

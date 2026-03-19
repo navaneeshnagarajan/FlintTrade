@@ -16,7 +16,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from enum import Enum
+from enum import Enum, StrEnum
 
 import httpx
 
@@ -29,7 +29,7 @@ logger = logging.getLogger("flinttrade.ditto.mirror")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-class AllocationMode(str, Enum):
+class AllocationMode(StrEnum):
     EQUAL = "EQUAL"
     WEIGHTED = "WEIGHTED"
     MARGIN_AWARE = "MARGIN_AWARE"

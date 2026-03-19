@@ -6,8 +6,7 @@ DO NOT RUN — written for pytest. All tests use mocks, no live API calls.
 from __future__ import annotations
 
 import os
-import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

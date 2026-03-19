@@ -9,7 +9,6 @@ import hashlib
 import hmac
 import json
 import os
-import time
 from unittest.mock import MagicMock
 
 import pytest

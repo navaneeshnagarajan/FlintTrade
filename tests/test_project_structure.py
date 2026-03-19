@@ -1,9 +1,9 @@
 import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PACKAGES = ["core","engine","terminal","dashboard","ai","data","historical","screener","backtest","backtest-engine","integration","automation","ditto"]
+PACKAGES = ["core","engine","terminal","ai","data","historical","screener","backtest-engine","integration","automation","ditto"]
 
 def test_root_files():
-    for f in ["CLAUDE.md","AGENTS.md","README.md","VERSION","LICENSE",".gitignore",".env.example","flint.toml","Makefile"]:
+    for f in ["CLAUDE.md","AGENTS.md","README.md","VERSION","LICENSE",".gitignore",".env.example","flint.toml","Makefile","SOP.md","CODE_OF_CONDUCT.md","SECURITY.md"]:
         assert os.path.exists(os.path.join(ROOT, f)), f"Missing: {f}"
 
 def test_packages():

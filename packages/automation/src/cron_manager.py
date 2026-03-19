@@ -21,7 +21,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any, Callable
 
 logger = logging.getLogger("flinttrade.automation.cron")
@@ -29,7 +29,7 @@ logger = logging.getLogger("flinttrade.automation.cron")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     DISABLED = "DISABLED"

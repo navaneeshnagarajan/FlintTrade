@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 from packages.core.src.openalgo_client import OpenAlgoClient
@@ -24,7 +24,7 @@ from packages.core.src.openalgo_client import OpenAlgoClient
 logger = logging.getLogger("flinttrade.integration.alerter")
 
 
-class AlertType(str, Enum):
+class AlertType(StrEnum):
     ORDER_PLACED = "ORDER_PLACED"
     ORDER_FILLED = "ORDER_FILLED"
     ORDER_CANCELLED = "ORDER_CANCELLED"
@@ -37,7 +37,7 @@ class AlertType(str, Enum):
     CUSTOM = "CUSTOM"
 
 
-class AlertChannel(str, Enum):
+class AlertChannel(StrEnum):
     TELEGRAM = "TELEGRAM"
     CONSOLE = "CONSOLE"
 

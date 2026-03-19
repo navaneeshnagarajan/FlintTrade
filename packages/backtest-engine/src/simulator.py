@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 from packages.core.src.models import OHLCV, Order
@@ -29,19 +29,19 @@ logger = logging.getLogger("flinttrade.backtest.simulator")
 # ---------------------------------------------------------------------------
 
 
-class OrderSide(str, Enum):
+class OrderSide(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
 
 
-class SimOrderType(str, Enum):
+class SimOrderType(StrEnum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
     SL = "SL"
     TRAILING_SL = "TRAILING_SL"
 
 
-class SimOrderStatus(str, Enum):
+class SimOrderStatus(StrEnum):
     PENDING = "PENDING"
     FILLED = "FILLED"
     CANCELLED = "CANCELLED"

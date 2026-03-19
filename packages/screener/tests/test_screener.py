@@ -5,9 +5,7 @@ DO NOT RUN — written for pytest. All tests use synthetic data, no API calls.
 
 from __future__ import annotations
 
-import math
 import os
-from unittest.mock import MagicMock
 
 import pytest
 

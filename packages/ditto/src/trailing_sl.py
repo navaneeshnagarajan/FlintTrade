@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 
 logger = logging.getLogger("flinttrade.ditto.trailing_sl")
 
 
-class TrailingMode(str, Enum):
+class TrailingMode(StrEnum):
     POINTS = "POINTS"
     PERCENTAGE = "PERCENTAGE"
     SUPERTREND = "SUPERTREND"

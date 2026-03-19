@@ -1,11 +1,9 @@
 """Tests for FlintTrade workspace configuration."""
 
 import json
-import os
 import platform
 from pathlib import Path
 
-import pytest
 
 
 class TestWorkspaceResolution:

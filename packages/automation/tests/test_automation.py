@@ -6,11 +6,9 @@ DO NOT RUN — written for pytest. All tests use mocks, no live API calls.
 from __future__ import annotations
 
 import os
-import time
 from datetime import date, datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 IST = timezone(timedelta(hours=5, minutes=30))
 

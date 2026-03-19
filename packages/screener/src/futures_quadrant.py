@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 
 logger = logging.getLogger("flinttrade.screener.futures_quadrant")
 
 
-class Quadrant(str, Enum):
+class Quadrant(StrEnum):
     LONG_BUILDUP = "LONG_BUILDUP"
     SHORT_BUILDUP = "SHORT_BUILDUP"
     SHORT_COVERING = "SHORT_COVERING"

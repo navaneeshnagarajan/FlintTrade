@@ -6,7 +6,7 @@ for integration tests. Unit tests use monkeypatching and mocks.
 
 import os
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

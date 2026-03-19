@@ -16,7 +16,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any, Generator
 
 import httpx
@@ -24,7 +24,7 @@ import httpx
 logger = logging.getLogger("flinttrade.ai.llm")
 
 
-class LLMProvider(str, Enum):
+class LLMProvider(StrEnum):
     LMSTUDIO = "lmstudio"
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"

@@ -7,10 +7,9 @@ API tests mock the OpenAlgo client.
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta
+from datetime import date
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ======================================================================
