@@ -5,8 +5,47 @@ This package shadows the parent ``strategies.py`` module when Python resolves
 we re-export everything from that module here so that existing test imports like
 ``from strategies import EMACrossover`` continue to work.
 
-Additional strategies (e.g. EMASuperTrendDEMA) live in sub-modules of this package:
-    from packages.backtest_engine.src.strategies.ema_supertrend_dema import EMASuperTrendDEMA
+Sub-modules (28 additional strategies across 6 categories):
+
+    Trend (7):
+        trend_ema_crossover    — TrendEMACrossover (EMA crossover + confirmation)
+        trend_sma_crossover    — SMACrossover
+        trend_macd_signal      — MACDSignal
+        trend_supertrend       — DoubleSupertrend
+        trend_parabolic_sar    — ParabolicSAR
+        trend_ichimoku         — IchimokuCloud
+        trend_hull_ma          — HullMA
+
+    Momentum (5):
+        momentum_rsi           — RSIMomentum, RSIDivergence
+        momentum_stochastic    — StochasticCrossover
+        momentum_cci           — CCIStrategy
+        momentum_williams_r    — WilliamsR
+        momentum_roc           — ROCMomentum
+
+    Mean Reversion (5):
+        mean_reversion_vwap    — VWAPReversion
+        mean_reversion_rsi     — RSIMeanRevert
+        mean_reversion_keltner — KeltnerChannelReversion
+        mean_reversion_ma_envelope — MAEnvelope
+        [BollingerMeanReversion already in strategies.py]
+
+    Volatility (5):
+        volatility_atr_breakout      — ATRBreakout
+        volatility_bollinger_squeeze — BollingerSqueeze
+        volatility_donchian_breakout — DonchianBreakout
+        volatility_vix_based         — VIXRegime
+        volatility_range_expansion   — RangeExpansion
+
+    Volume (3):
+        volume_obv_divergence — OBVDivergence
+        volume_vwap_cross     — VWAPCross
+        volume_breakout       — VolumeBreakout
+
+    Options (3):
+        options_straddle_strangle — ATMStraddleSell, OTMStrangleSell
+        options_iron_condor       — IronCondorStrategy
+        options_wheel             — WheelStrategy
 """
 
 from __future__ import annotations
@@ -39,7 +78,7 @@ if _spec is not None and _spec.loader is not None:
     macd = _re_export("macd")
     supertrend = _re_export("supertrend")
 
-    # Strategy classes
+    # Strategy classes from parent strategies.py
     _BacktestStrategyMixin = _re_export("_BacktestStrategyMixin")
     EMACrossover = _re_export("EMACrossover")
     SupertrendStrategy = _re_export("SupertrendStrategy")
@@ -54,4 +93,107 @@ if _spec is not None and _spec.loader is not None:
     MomentumBreakout = _re_export("MomentumBreakout")
     OpeningRangeBreakout = _re_export("OpeningRangeBreakout")
     BUILTIN_STRATEGIES = _re_export("BUILTIN_STRATEGIES")
+
+# ---------------------------------------------------------------------------
+# New strategy sub-modules — imported lazily to keep startup fast.
+# All are available via:
+#   from packages.backtest_engine.src.strategies.<module> import <Class>
+# or via the ALL_STRATEGIES registry below.
+# ---------------------------------------------------------------------------
+
+# Trend
+from .trend_ema_crossover import TrendEMACrossover  # noqa: E402
+from .trend_hull_ma import HullMA  # noqa: E402
+from .trend_ichimoku import IchimokuCloud  # noqa: E402
+from .trend_macd_signal import MACDSignal  # noqa: E402
+from .trend_parabolic_sar import ParabolicSAR  # noqa: E402
+from .trend_sma_crossover import SMACrossover  # noqa: E402
+from .trend_supertrend import DoubleSupertrend  # noqa: E402
+
+# Momentum
+from .momentum_cci import CCIStrategy  # noqa: E402
+from .momentum_roc import ROCMomentum  # noqa: E402
+from .momentum_rsi import RSIDivergence, RSIMomentum  # noqa: E402
+from .momentum_stochastic import StochasticCrossover  # noqa: E402
+from .momentum_williams_r import WilliamsR  # noqa: E402
+
+# Mean Reversion
+from .mean_reversion_keltner import KeltnerChannelReversion  # noqa: E402
+from .mean_reversion_ma_envelope import MAEnvelope  # noqa: E402
+from .mean_reversion_rsi import RSIMeanRevert  # noqa: E402
+from .mean_reversion_vwap import VWAPReversion  # noqa: E402
+
+# Volatility
+from .volatility_atr_breakout import ATRBreakout  # noqa: E402
+from .volatility_bollinger_squeeze import BollingerSqueeze  # noqa: E402
+from .volatility_donchian_breakout import DonchianBreakout  # noqa: E402
+from .volatility_range_expansion import RangeExpansion  # noqa: E402
+from .volatility_vix_based import VIXRegime  # noqa: E402
+
+# Volume
+from .volume_breakout import VolumeBreakout  # noqa: E402
+from .volume_obv_divergence import OBVDivergence  # noqa: E402
+from .volume_vwap_cross import VWAPCross  # noqa: E402
+
+# Options
+from .options_iron_condor import IronCondorStrategy  # noqa: E402
+from .options_straddle_strangle import ATMStraddleSell, OTMStrangleSell  # noqa: E402
+from .options_wheel import WheelStrategy  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Unified strategy registry — all 28 new classes + 12 legacy
+# ---------------------------------------------------------------------------
+from packages.engine.src.strategy import BaseStrategy as _BaseStrategy  # noqa: E402
+
+ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
+    # Legacy (12 from strategies.py)
+    "EMACrossover": EMACrossover,
+    "Supertrend": SupertrendStrategy,
+    "MACD_RSI": MACDRSIStrategy,
+    "BollingerMR": BollingerMeanReversion,
+    "VWAPDev": VWAPDeviation,
+    "StraddleSell": StraddleSell,
+    "StrangleSell": StrangleSell,
+    "IronCondor": IronCondor,
+    "BullPutSpread": BullPutSpread,
+    "BearCallSpread": BearCallSpread,
+    "MomentumBreakout": MomentumBreakout,
+    "ORB": OpeningRangeBreakout,
+    # Trend (7 new)
+    "TrendEMACrossover": TrendEMACrossover,
+    "SMACrossover": SMACrossover,
+    "MACDSignal": MACDSignal,
+    "DoubleSupertrend": DoubleSupertrend,
+    "ParabolicSAR": ParabolicSAR,
+    "IchimokuCloud": IchimokuCloud,
+    "HullMA": HullMA,
+    # Momentum (6 new)
+    "RSIMomentum": RSIMomentum,
+    "RSIDivergence": RSIDivergence,
+    "StochasticCrossover": StochasticCrossover,
+    "CCI": CCIStrategy,
+    "WilliamsR": WilliamsR,
+    "ROCMomentum": ROCMomentum,
+    # Mean Reversion (4 new; BollingerMR already in legacy)
+    "VWAPReversion": VWAPReversion,
+    "RSIMeanRevert": RSIMeanRevert,
+    "KeltnerReversion": KeltnerChannelReversion,
+    "MAEnvelope": MAEnvelope,
+    # Volatility (5 new)
+    "ATRBreakout": ATRBreakout,
+    "BollingerSqueeze": BollingerSqueeze,
+    "DonchianBreakout": DonchianBreakout,
+    "VIXRegime": VIXRegime,
+    "RangeExpansion": RangeExpansion,
+    # Volume (3 new)
+    "OBVDivergence": OBVDivergence,
+    "VWAPCross": VWAPCross,
+    "VolumeBreakout": VolumeBreakout,
+    # Options (3 new)
+    "ATMStraddleSell": ATMStraddleSell,
+    "OTMStrangleSell": OTMStrangleSell,
+    "IronCondorStrategy": IronCondorStrategy,
+    "WheelStrategy": WheelStrategy,
+    # User's personal strategy (in ema_supertrend_dema.py)
+}
 

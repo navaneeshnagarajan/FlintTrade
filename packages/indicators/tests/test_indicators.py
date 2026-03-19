@@ -216,9 +216,9 @@ class TestSupertrend:
 
         n = 5
         h = np.full(n, 101.0, dtype=np.float64)
-        l = np.full(n, 99.0, dtype=np.float64)
+        lo = np.full(n, 99.0, dtype=np.float64)
         c = np.full(n, 100.0, dtype=np.float64)
-        st, _ = supertrend(h, l, c, period=10)
+        st, _ = supertrend(h, lo, c, period=10)
         # Insufficient data — all ST values should be NaN
         assert np.all(np.isnan(st))
 
@@ -248,20 +248,20 @@ class TestVWAP:
         from packages.indicators.src.trend import vwap
 
         h = np.array([105.0], dtype=np.float64)
-        l = np.array([95.0], dtype=np.float64)
+        lo = np.array([95.0], dtype=np.float64)
         c = np.array([100.0], dtype=np.float64)
         vol = np.array([500.0], dtype=np.float64)
-        result = vwap(h, l, c, vol)
+        result = vwap(h, lo, c, vol)
         assert result[0] == pytest.approx((105 + 95 + 100) / 3.0)
 
     def test_vwap_zero_volume_returns_nan(self):
         from packages.indicators.src.trend import vwap
 
         h = np.array([100.0, 101.0], dtype=np.float64)
-        l = np.array([99.0, 100.0], dtype=np.float64)
+        lo = np.array([99.0, 100.0], dtype=np.float64)
         c = np.array([100.0, 100.5], dtype=np.float64)
         vol = np.array([0.0, 0.0], dtype=np.float64)
-        result = vwap(h, l, c, vol)
+        result = vwap(h, lo, c, vol)
         assert np.all(np.isnan(result))
 
 
@@ -463,9 +463,9 @@ class TestATR:
 
         n = 20
         h = np.full(n, 101.0, dtype=np.float64)
-        l = np.full(n, 99.0, dtype=np.float64)
+        lo = np.full(n, 99.0, dtype=np.float64)
         c = np.full(n, 100.0, dtype=np.float64)
-        result = atr(h, l, c, period=14)
+        result = atr(h, lo, c, period=14)
         assert np.all(np.isnan(result[:13]))  # indices 0-12 should be NaN
         assert not np.isnan(result[13])
 
@@ -474,9 +474,9 @@ class TestATR:
 
         n = 40
         h = np.full(n, 101.0, dtype=np.float64)
-        l = np.full(n, 99.0, dtype=np.float64)
+        lo = np.full(n, 99.0, dtype=np.float64)
         c = np.full(n, 100.0, dtype=np.float64)
-        result = atr(h, l, c)
+        result = atr(h, lo, c)
         assert result.shape == (n,)
 
 
@@ -558,10 +558,10 @@ class TestUtils:
         from packages.indicators.src.utils import validate_ohlcv
 
         h = np.array([1.0, 2.0], dtype=np.float64)
-        l = np.array([1.0], dtype=np.float64)
+        lo = np.array([1.0], dtype=np.float64)
         c = np.array([1.0, 2.0], dtype=np.float64)
         with pytest.raises(ValueError, match="length mismatch"):
-            validate_ohlcv(h, l, c)
+            validate_ohlcv(h, lo, c)
 
     def test_validate_series_passes_for_valid_array(self):
         from packages.indicators.src.utils import validate_series

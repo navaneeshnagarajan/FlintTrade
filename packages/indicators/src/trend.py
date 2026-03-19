@@ -1,4 +1,5 @@
-"""Trend indicators — EMA, SMA, DEMA, Supertrend, VWAP.
+"""Trend indicators — EMA, SMA, DEMA, TEMA, WMA, HMA, Ichimoku, Parabolic SAR,
+Supertrend, VWAP.
 
 All functions:
 - Accept numpy float64 arrays
@@ -234,3 +235,252 @@ def vwap(
     cum_tp_vol = np.cumsum(typical_price * volume)
     cum_vol = np.cumsum(volume)
     return np.where(cum_vol > 0, cum_tp_vol / cum_vol, np.nan)
+
+
+def tema(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
+    """Triple Exponential Moving Average.
+
+    TEMA = 3 * EMA(close, period)
+         - 3 * EMA(EMA(close, period), period)
+         + EMA(EMA(EMA(close, period), period), period)
+
+    Further reduces lag compared to DEMA by applying three EMA passes.
+
+    Args:
+        close: Close prices, shape (n,).
+        period: EMA period.
+
+    Returns:
+        TEMA values, shape (n,). First ``3 * (period - 1)`` values are NaN.
+    """
+    validate_series(close, min_length=1)
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    e1 = ema(close, period)
+
+    valid1 = ~np.isnan(e1)
+    e1_valid = e1[valid1]
+    if len(e1_valid) < period:
+        return result
+
+    e2_valid = ema(e1_valid, period)
+    valid1_indices = np.where(valid1)[0]
+    e2 = np.full(n, np.nan, dtype=np.float64)
+    e2[valid1_indices] = e2_valid
+
+    valid2 = ~np.isnan(e2)
+    e2_clean = e2[valid2]
+    if len(e2_clean) < period:
+        return result
+
+    e3_valid = ema(e2_clean, period)
+    valid2_indices = np.where(valid2)[0]
+    e3 = np.full(n, np.nan, dtype=np.float64)
+    e3[valid2_indices] = e3_valid
+
+    all_valid = ~np.isnan(e1) & ~np.isnan(e2) & ~np.isnan(e3)
+    result[all_valid] = (
+        3.0 * e1[all_valid] - 3.0 * e2[all_valid] + e3[all_valid]
+    )
+    return result
+
+
+def wma(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
+    """Weighted Moving Average.
+
+    Weights are linearly increasing: bar at position i within the window
+    has weight (i + 1).  The denominator is period * (period + 1) / 2.
+
+    Args:
+        close: Close prices, shape (n,).
+        period: WMA window (must be >= 1).
+
+    Returns:
+        WMA values, shape (n,). First ``period - 1`` values are NaN.
+    """
+    validate_series(close, min_length=1)
+    if period < 1:
+        raise ValueError(f"WMA period must be >= 1, got {period}")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+    denom = float(period * (period + 1)) / 2.0
+    weights = np.arange(1, period + 1, dtype=np.float64)
+
+    for i in range(period - 1, n):
+        result[i] = np.dot(close[i - period + 1 : i + 1], weights) / denom
+
+    return result
+
+
+def hull(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
+    """Hull Moving Average.
+
+    HMA = WMA(2 * WMA(close, period // 2) - WMA(close, period), int(sqrt(period)))
+
+    Combines speed and smoothness — minimal lag while remaining smooth.
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Hull period (must be >= 4 for meaningful sqrt sub-period).
+
+    Returns:
+        HMA values, shape (n,).
+    """
+    validate_series(close, min_length=1)
+    if period < 1:
+        raise ValueError(f"Hull period must be >= 1, got {period}")
+
+    half_period = max(1, period // 2)
+    sqrt_period = max(1, int(np.sqrt(period)))
+
+    wma_half = wma(close, half_period)
+    wma_full = wma(close, period)
+
+    diff = 2.0 * wma_half - wma_full
+    return wma(diff, sqrt_period)
+
+
+def ichimoku(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    conversion_period: int = 9,
+    base_period: int = 26,
+    span_b_period: int = 52,
+    displacement: int = 26,
+) -> tuple[
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+]:
+    """Ichimoku Cloud.
+
+    Returns the five Ichimoku components aligned to the same index space as
+    the input arrays.  Leading spans A and B are NOT shifted forward here —
+    callers that need the visual cloud shift should offset by ``displacement``.
+
+    Components:
+        - Tenkan-sen (Conversion Line):  avg(highest_high, lowest_low) over conversion_period
+        - Kijun-sen  (Base Line):        avg(highest_high, lowest_low) over base_period
+        - Senkou Span A (Leading Span A): avg(tenkan, kijun), aligned at current bar
+        - Senkou Span B (Leading Span B): avg(highest, lowest) over span_b_period
+        - Chikou Span  (Lagging Span):   close shifted back by displacement bars
+
+    Args:
+        high: High prices, shape (n,).
+        low:  Low prices,  shape (n,).
+        close: Close prices, shape (n,).
+        conversion_period: Tenkan period (default 9).
+        base_period: Kijun period (default 26).
+        span_b_period: Senkou Span B period (default 52).
+        displacement: Cloud displacement / chikou shift (default 26).
+
+    Returns:
+        Tuple of (tenkan, kijun, senkou_a, senkou_b, chikou), each shape (n,).
+    """
+    validate_ohlcv(high, low, close, min_length=1)
+    n = len(close)
+
+    def _donchian_mid(period: int) -> NDArray[np.float64]:
+        result = np.full(n, np.nan, dtype=np.float64)
+        for i in range(period - 1, n):
+            result[i] = (
+                np.max(high[i - period + 1 : i + 1])
+                + np.min(low[i - period + 1 : i + 1])
+            ) / 2.0
+        return result
+
+    tenkan = _donchian_mid(conversion_period)
+    kijun = _donchian_mid(base_period)
+    senkou_a = np.where(~np.isnan(tenkan) & ~np.isnan(kijun), (tenkan + kijun) / 2.0, np.nan)
+    senkou_b = _donchian_mid(span_b_period)
+
+    # Chikou: close shifted backwards by displacement bars
+    chikou = np.full(n, np.nan, dtype=np.float64)
+    if displacement < n:
+        chikou[: n - displacement] = close[displacement:]
+
+    return tenkan, kijun, senkou_a, senkou_b, chikou
+
+
+def parabolic_sar(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    af_step: float = 0.02,
+    af_max: float = 0.2,
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Parabolic SAR.
+
+    Classic Wilder Parabolic SAR.  Starts in uptrend using the first bar's low
+    as the initial SAR and highest high seen so far as the extreme point.
+
+    Args:
+        high: High prices, shape (n,).
+        low:  Low prices,  shape (n,).
+        af_step: Acceleration factor increment per new extreme (default 0.02).
+        af_max:  Maximum acceleration factor (default 0.2).
+
+    Returns:
+        Tuple of:
+        - sar: SAR values, shape (n,). Index 0 is NaN (no prior bar).
+        - uptrend: bool array, shape (n,). True = price is in uptrend.
+    """
+    from packages.indicators.src.utils import validate_ohlcv as _val
+
+    _val(high, low, high, min_length=2)  # reuse ohlcv validator with high as close proxy
+    n = len(high)
+
+    sar = np.full(n, np.nan, dtype=np.float64)
+    uptrend = np.ones(n, dtype=np.bool_)
+
+    # Initialise at bar 1 (first bar we can compute SAR for)
+    _up = True
+    _af = af_step
+    _ep = high[0]  # extreme point
+    _sar = low[0]  # SAR starts below first bar in uptrend
+
+    for i in range(1, n):
+        # Tentative SAR for this bar
+        _sar_new = _sar + _af * (_ep - _sar)
+
+        # Ensure SAR doesn't go above the two prior lows (uptrend)
+        # or below the two prior highs (downtrend)
+        if _up:
+            _sar_new = min(_sar_new, low[i - 1])
+            if i >= 2:
+                _sar_new = min(_sar_new, low[i - 2])
+        else:
+            _sar_new = max(_sar_new, high[i - 1])
+            if i >= 2:
+                _sar_new = max(_sar_new, high[i - 2])
+
+        # Flip check
+        if _up and low[i] < _sar_new:
+            _up = False
+            _sar_new = _ep  # flip: SAR becomes the prior extreme
+            _ep = low[i]
+            _af = af_step
+        elif not _up and high[i] > _sar_new:
+            _up = True
+            _sar_new = _ep
+            _ep = high[i]
+            _af = af_step
+        else:
+            # Update extreme point and AF
+            if _up and high[i] > _ep:
+                _ep = high[i]
+                _af = min(_af + af_step, af_max)
+            elif not _up and low[i] < _ep:
+                _ep = low[i]
+                _af = min(_af + af_step, af_max)
+
+        sar[i] = _sar_new
+        uptrend[i] = _up
+        _sar = _sar_new
+
+    return sar, uptrend
