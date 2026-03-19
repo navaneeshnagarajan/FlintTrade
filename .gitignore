@@ -24,7 +24,6 @@ htmlcov/
 
 # === Node.js ===
 node_modules/
-package-lock.json
 yarn.lock
 
 # === IDE ===
@@ -69,6 +68,15 @@ chroma_data/
 .reference/repos/
 .reference/screenshots/
 .reference/CAPTURE_STATUS.md
+
+# === Firecrawl scrape cache ===
+.firecrawl/
+
+# === Raw Claude Chat exports (large, personal) ===
+docs/conversations/conversations.json
+docs/conversations/memories.json
+docs/conversations/projects.json
+docs/conversations/users.json
 
 # === Playwright MCP (screenshots from browser testing) ===
 .playwright-mcp/
