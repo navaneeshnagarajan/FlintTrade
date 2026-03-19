@@ -32,7 +32,7 @@ export interface MarketDepth {
 }
 
 export interface OHLCVBar {
-  time: number;
+  timestamp: number;
   open: number;
   high: number;
   low: number;

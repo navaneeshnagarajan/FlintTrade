@@ -3,7 +3,8 @@
 > Single source of truth for what to build next.
 > Every Claude Code session reads this + CLAUDE.md + SOP.md before starting.
 > Approved spec: `docs/superpowers/specs/2026-03-19-flinttrade-v2-foundation-design.md`
-> Deadline: **April 30, 2026 (v0.1.0-beta)**
+> **Beta sprint plan: `docs/superpowers/plans/2026-03-19-beta-sprint.md`** (10 task groups, everything included)
+> Deadline: **March 30, 2026 (v0.1.0-beta)**
 
 ---
 
@@ -116,57 +117,59 @@
 ## Week 3: Widget Absorption + New Widgets — from spec Section 13
 
 ### New Widgets (7 planned)
-- [ ] SectorMap widget — absorb from openalgo-chart SectorHeatmapModal (treemap heatmap)
-- [ ] Calculator widget — absorb from openalgo-chart RiskCalculatorPanel (brokerage, margin, P&L)
+- [x] SectorMap widget — absorb from openalgo-chart SectorHeatmapModal (treemap heatmap)
+- [x] Calculator widget — absorb from openalgo-chart RiskCalculatorPanel (brokerage, margin, P&L)
   - [ ] Use April 2026 STT rates: 0.05% futures, 0.15% options
-- [ ] MTM Monitor widget — absorb from algo_trading_strategies_india (portfolio MTM SL/Target)
-- [ ] Risk Panel widget — build new (max position, margin usage, daily limits)
-- [ ] News Feed widget — absorb from finnews-ai (sentiment-tagged financial news)
-- [ ] Ticker widget — build new (customizable scrolling prices)
-- [ ] AI Advisor widget — absorb from openalgo-chatbot + openalgo-voice (LLM chat, voice input)
+- [x] MTM Monitor widget — absorb from algo_trading_strategies_india (portfolio MTM SL/Target)
+- [x] Risk Panel widget — build new (max position, margin usage, daily limits)
+- [x] News Feed widget — UI built, needs live RSS data wiring
+- [x] Ticker widget — built (customizable scrolling prices)
+- [x] AI Advisor widget — UI built, needs Python backend wiring
 
 ### Setup Wizard
-- [ ] Create /setup route (react-router-dom already installed)
+- [x] Create /setup route (react-router-dom already installed)
 - [ ] Quick Setup mode (2 steps): OpenAlgo URL + API key test, persona pick
 - [ ] Guided Setup mode (5 steps): persona, connection, experience, trading defaults, done
 - [ ] Advanced Setup mode (7 steps): all of Guided + LLM config + Telegram/data/risk
 - [ ] All settings saved to workspace.json, changeable in Settings tool
 
 ### Widget Factory Updates
-- [ ] Register all 7 new widgets in widgetFactory.tsx
-- [ ] Add new widgets to WidgetPicker catalog
-- [ ] Update layout presets to include new widgets where appropriate
+- [x] Register all 7 new widgets in widgetFactory.tsx
+- [x] Add new widgets to WidgetPicker catalog
+- [x] Update layout presets to include new widgets where appropriate
 
 ---
 
 ## Week 4: Tools + Investor Route — from spec Section 13
 
 ### Tool Build-Out (6 stubs → functional)
-- [ ] P&L Dashboard tool — calendar heatmap, trade stats (absorb etftracker patterns)
-- [ ] Strategy Builder tool — multi-leg builder, payoff chart, Greeks (absorb Algomirror patterns)
-- [ ] Trade Journal tool — analytics, screenshots, review (absorb trading-journal patterns)
-- [ ] Flow Builder tool — visual automation (absorb openalgo-flow, 54 node types)
-- [ ] Market Intelligence tool — FII/DII, sector rotation, RRG (absorb etftracker dashboards)
-- [ ] Backtest Lab tool — parameter config, equity curve, trade log (connect to backtest-engine)
+- [x] P&L Dashboard tool — calendar heatmap, trade stats (absorbed etftracker patterns)
+- [x] Strategy Builder tool — multi-leg builder, payoff chart, Greeks (absorbed Algomirror patterns)
+- [x] Trade Journal tool — analytics, screenshots, review (absorbed trading-journal patterns)
+- [x] Flow Builder tool — UI built with node definitions, needs visual ReactFlow canvas + executor
+- [x] Market Intelligence tool — FII/DII, sector rotation (absorbed etftracker dashboards), needs deep build (10 tabs)
+- [x] Backtest Lab tool — config form + results view built, needs VectorBT wiring
 
 ### Investor Route (/invest)
-- [ ] Create /invest route with lazy-loaded module
+- [x] Create /invest route with lazy-loaded module
 - [ ] Portfolio Tracker — absorb virfolio patterns
 - [ ] Holdings view — reuse terminal Holdings widget adapted for investor context
 - [ ] Net Worth Dashboard — build from scratch
+- [ ] Mutual Fund Explorer (jugaad-data MF NAV API)
+- [ ] SIP Calculator
+- [ ] Asset Quilt (etftracker)
+- [ ] Sector Rotation (etftracker + sector-rotation-map)
+- [ ] Stock Screener (openscreener + screener-scraper)
+- [ ] ETF Tracker (etftracker)
+- [ ] IPO Tracker
 
-### Investor Route — Deferred to v0.2.0
-The following are designed but not needed for beta:
-- Mutual Fund Explorer (jugaad-data MF NAV API)
-- SIP Calculator
-- Asset Quilt (etftracker)
-- Sector Rotation (etftracker + sector-rotation-map)
-- Stock Screener (openscreener + screener-scraper)
-- ETF Tracker (etftracker)
-- IPO Tracker
-
-### /learn Route — Deferred to v0.2.0
-Not needed for beta. Basic content only if time permits in Week 6.
+### /learn Route
+- [x] Create /learn route with lazy-loaded module
+- [ ] Market Basics content
+- [ ] Glossary (searchable)
+- [ ] Strategy Library (browse 29+ strategies)
+- [ ] Paper Trading guide
+- [ ] Video Hub (curated YouTube)
 
 ---
 

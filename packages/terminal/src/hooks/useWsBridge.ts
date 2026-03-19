@@ -17,9 +17,9 @@ export function useWsBridge(): void {
   const store = useStore();
 
   useEffect(() => {
-    const wsUrl = useConnectionStore.getState().wsUrl;
+    const { wsUrl, apiKey } = useConnectionStore.getState();
     if (!wsUrl) return;
-    const ws = getWsService(wsUrl);
+    const ws = getWsService(wsUrl, apiKey);
 
     const unsubTick = ws.onTick((tick: WsTick) => {
       const key = `${tick.exchange}:${tick.symbol}`;
@@ -28,10 +28,13 @@ export function useWsBridge(): void {
 
     const unsubStatus = ws.onStatus((connected: boolean) => {
       setWsConnected(connected);
+      // Subscribe to indices once connected (after auth completes)
+      if (connected) {
+        ws.subscribe(INDEX_INSTRUMENTS, "ltp");
+      }
     });
 
     ws.connect();
-    ws.subscribe(INDEX_INSTRUMENTS, "ltp");
 
     return () => {
       unsubTick();

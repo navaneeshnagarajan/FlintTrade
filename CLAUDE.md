@@ -1,7 +1,40 @@
-# FlintTrade
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > Single source of truth. Every Claude Code session on every machine starts here.
 > After reading this, read PLAN.md to know what to build next.
+
+## Quick Commands
+
+```bash
+# Terminal (React) — run from packages/terminal/
+npm install                                    # install deps
+npm run dev                                    # dev server at localhost:5173
+npm run build                                  # tsc --noEmit + vite build
+npm run typecheck                              # tsc --noEmit only
+npx vitest run                                 # all tests (~26)
+npx vitest run src/path/to/file.test.ts        # single test file
+npx vitest run -t "test name"                  # single test by name
+
+# Python — run from repo root
+make test                                      # all pytest tests (~712)
+make test-fast                                 # stop on first failure
+python -m pytest packages/core/tests/test_foo.py -v              # single file
+python -m pytest packages/core/tests/test_foo.py::test_name -v   # single test
+make lint                                      # ruff check
+
+# Services
+make start                                     # start OpenAlgo
+make stop                                      # stop OpenAlgo
+make dev                                       # terminal dev + OpenAlgo
+make status                                    # check services
+make health                                    # health check
+
+# CI (GitHub Actions — 3 jobs: python-tests, node-tests, secrets-check)
+gh run list --limit 1                          # check latest CI
+gh run view <id> --log-failed                  # diagnose failure
+```
 
 ## What This Is
 
@@ -153,66 +186,13 @@ Two-tier config. No exceptions.
 
 The `dashboard` and `backtest` stub packages were deleted. Everything is in `terminal` now.
 
-## Terminal — Widgets
+## Terminal — Widgets & Tools
 
-### Existing (21 widgets, all TSX)
+21 widgets (all TSX) + 7 full-page tools + 7 layout presets. All registered in `src/chrome/widgetFactory.tsx`.
 
-**Trading (7):**
-
-| Widget | Status |
-|--------|--------|
-| Dashboard | Built (TSX) — account overview, indices, P&L |
-| Scalper | Built (TSX) — 3-panel CE/Spot/PE + order buttons |
-| Order Pad | Built (TSX) — full order entry form |
-| Positions | Built (TSX) — live positions + P&L |
-| Orders | Built (TSX) — order book |
-| Holdings | Built (TSX) — delivery holdings |
-| Trade Book | Built (TSX) — trade history |
-
-**Analysis (6):**
-
-| Widget | Status |
-|--------|--------|
-| Chart | Built (TSX) — LWC v5, indicators, drawing tools |
-| Option Chain | Built (TSX) — full chain, OI/LTP/Greeks |
-| OI Chart | Built (TSX) — horizontal OI bars, PCR, S/R |
-| Straddle | Built (TSX) — ATM tracking, overlays |
-| Depth | Built (TSX) — 5-level bid/ask |
-| Greeks | Built (TSX) — portfolio Delta/Gamma/Theta/Vega |
-
-**Utility (1):**
-
-| Widget | Status |
-|--------|--------|
-| Watchlist | Built (TSX) — live quotes, sparklines, search |
-
-**New (7):**
-
-| Widget | Status |
-|--------|--------|
-| Sector Map | Built (TSX) — absorbed from openalgo-chart SectorHeatmapModal |
-| News Feed | Built (TSX) — absorbed from finnews-ai, sentiment-tagged |
-| Calculator | Built (TSX) — absorbed from openalgo-chart RiskCalculatorPanel |
-| Ticker | Built (TSX) — customizable scrolling prices |
-| MTM Monitor | Built (TSX) — absorbed from algo_trading_strategies_india |
-| Risk Panel | Built (TSX) — max position, margin usage, daily limits |
-| AI Advisor | Built (TSX) — absorbed from openalgo-chatbot + voice |
-
-### Tools (7 full-page views)
-
-| Tool | Status |
-|------|--------|
-| P&L Dashboard | Built — calendar heatmap, trade stats (absorbed etftracker) |
-| Strategy Builder | Built — multi-leg, payoff chart, Greeks (absorbed Algomirror) |
-| Flow Builder | Built — 54 node types, visual automation (absorbed openalgo-flow) |
-| Market Intelligence | Built — FII/DII, sector rotation, RRG (absorbed etftracker) |
-| Backtest Lab | Built — tick-level options backtesting (VectorBT) |
-| Trade Journal | Built — analytics, screenshots, review (absorbed trading-journal) |
-| Settings | Built — in-app config, restart button |
-
-### Layout Presets (7)
-
-Start Fresh, Scalper Zone, Volatility Trading, Market Watch, Options Desk, Investor View, and custom user layouts. Serialized via Dockview API.
+- **Widgets:** `src/widgets/` — Trading (7), Analysis (6), Utility (1), New (7)
+- **Tools:** `src/tools/` — P&L Dashboard, Strategy Builder, Flow Builder, Market Intelligence, Backtest Lab, Trade Journal, Settings
+- **Layout presets:** Start Fresh, Scalper Zone, Volatility Trading, Market Watch, Options Desk, Investor View, custom. Serialized via Dockview API.
 
 ## Current State
 
@@ -253,7 +233,7 @@ Start Fresh, Scalper Zone, Volatility Trading, Market Watch, Options Desk, Inves
 `placeorder`, `placesmartorder`, `modifyorder`, `cancelorder`, `cancelallorder`, `closeposition`, `openposition`, `orderstatus`, `optionsorder`, `optionsmultiorder`, `basketorder`, `splitorder`
 
 ### Accounts (POST unless noted)
-`funds`, `orderbook`, `tradebook`, `positionbook`, `holdings`, `margin`, `ping` (**GET**), `analyzer/status` (**GET**), `analyzer/toggle`
+`funds`, `orderbook`, `tradebook`, `positionbook`, `holdings`, `margin`, `ping` (**POST**), `analyzer/status` (**GET**), `analyzer/toggle`
 
 ### Data (POST unless noted)
 `quotes`, `multiquotes`, `depth`, `history`, `optionchain`, `optiongreeks`, `multioptiongreeks`, `optionsymbol`, `symbol`, `search`, `expiry`, `intervals` (**GET**), `syntheticfuture`, `ticker`, `instruments` (**GET**), `gex`, `iv_smile`, `max_pain`, `oi_profile`
@@ -263,7 +243,9 @@ Start Fresh, Scalper Zone, Volatility Trading, Market Watch, Options Desk, Inves
 
 ### WebSocket (port 8765)
 Modes: 1=LTP, 2=Quote, 3=Depth (50 levels in v2)
-Subscribe: `{ "action": "subscribe_ltp", "instruments": [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}] }`
+Auth: `{ "action": "authenticate", "api_key": "<key>" }`
+Subscribe: `{ "action": "subscribe", "symbols": [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}], "mode": "LTP" }`
+Tick data arrives nested: `{ "type": "market_data", "data": { "ltp": ..., "symbol": ... } }`
 
 ### Rate limits
 Orders: 10/sec | Smart orders: 2/sec | General API: 50/sec
@@ -305,10 +287,11 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 
 ## Code Standards
 
-- **TypeScript:** Strict mode, no `any` types, all new terminal code in `.ts`/`.tsx`
+- **TypeScript:** Strict mode, no `any` types, all new terminal code in `.ts`/`.tsx`. Path alias `@` → `packages/terminal/src/`
 - **React:** Functional components, hooks, Tailwind CSS v4, shadcn/ui components, lucide-react icons
 - **Python:** PEP 8, ruff, type hints, Google docstrings, absolute imports
-- **Tests:** pytest (Python, importlib mode) + Vitest (terminal). Every new function needs a test.
+- **Tests:** pytest (Python, `--import-mode=importlib` required for flat package layout) + Vitest (terminal). Every new function needs a test.
+- **Vite proxy (dev):** `/api` → OpenAlgo:5000, `/ws` → ws://127.0.0.1:8765. In dev mode `api.ts` uses relative paths (empty base); production uses full host from connectionStore. Don't bypass the proxy in dev.
 - **Git:** Conventional commits (`feat(pkg):`, `fix(pkg):`, `docs:`, `test:`, `chore:`)
 - **Branch:** main only (pre-alpha)
 - **Widgets:** Every widget is a Dockview panel registered in `widgetFactory.tsx`

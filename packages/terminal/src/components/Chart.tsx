@@ -89,14 +89,14 @@ export default function Chart({
         if (cancelled || !Array.isArray(data)) return;
 
         const candles = data.map((b) => ({
-          time: Math.floor(new Date(String(b.time)).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+          time: b.timestamp as unknown as import("lightweight-charts").Time,
           open: b.open,
           high: b.high,
           low: b.low,
           close: b.close,
         }));
         const volumes = data.map((b) => ({
-          time: Math.floor(new Date(String(b.time)).getTime() / 1000) as unknown as import("lightweight-charts").Time,
+          time: b.timestamp as unknown as import("lightweight-charts").Time,
           value: b.volume || 0,
           color: b.close >= b.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
         }));

@@ -67,7 +67,7 @@ interface HlineRef {
 }
 
 interface OhlcvBar {
-  time: string | number;
+  timestamp: number;
   open: number;
   high: number;
   low: number;
@@ -853,10 +853,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
         barsRef.current = data as OhlcvBar[];
 
         const times: Time[] = (data as OhlcvBar[]).map(
-          (b) =>
-            Math.floor(
-              new Date(String(b.time)).getTime() / 1000,
-            ) as unknown as Time,
+          (b) => b.timestamp as unknown as Time,
         );
         timesRef.current = times;
 

@@ -104,13 +104,16 @@ export class WebSocketService {
 
     this.ws.onopen = () => {
       this.reconnectDelay = 1000;
-      this.setConnected(true);
-      // OpenAlgo v2: authenticate immediately after connection
+      this.startHeartbeat();
+      // OpenAlgo v2: authenticate first, then subscribe after auth response
       if (this.apiKey) {
         this.send({ action: "authenticate", api_key: this.apiKey });
+        // Don't set connected or resubscribe yet — wait for auth response in onmessage
+      } else {
+        // No auth needed — connect and subscribe immediately
+        this.setConnected(true);
+        this.resubscribeAll();
       }
-      this.startHeartbeat();
-      this.resubscribeAll();
     };
 
     this.ws.onclose = () => {
@@ -127,8 +130,22 @@ export class WebSocketService {
       try {
         const msg = JSON.parse(event.data) as Record<string, unknown>;
 
-        // Control/system messages (action field: pong, authenticated, subscribe_ack, etc.)
-        if (typeof msg["action"] === "string" || typeof msg["type"] === "undefined" && typeof msg["action"] === "string") {
+        // Auth response: { type: "auth", status: "success", message: "Authentication successful" }
+        if (msg["type"] === "auth" && msg["status"] === "success") {
+          if (!this.connected) {
+            this.setConnected(true);
+            this.resubscribeAll();
+          }
+          return;
+        }
+
+        // Subscription ack: { type: "subscribe", status: "success", subscriptions: [...] }
+        if (msg["type"] === "subscribe" || msg["type"] === "unsubscribe") {
+          return;
+        }
+
+        // Control/system messages (action field: pong, etc.)
+        if (typeof msg["action"] === "string") {
           return;
         }
 
