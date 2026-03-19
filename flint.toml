@@ -23,12 +23,12 @@ screener = { path = "packages/screener", lang = "python", description = "Market 
 backtest = { path = "packages/backtest", lang = "react", description = "Backtest UI, request builder, results viewer" }
 backtest-engine = { path = "packages/backtest-engine", lang = "python", description = "Event-driven simulation, vectorbt strategies, metrics" }
 integration = { path = "packages/integration", lang = "python", description = "TradingView, ChartInk, webhooks, Chrome extension, Excel, Amibroker" }
-automation = { path = "packages/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, TOTP auto-login" }
+automation = { path = "packages/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, post-market analysis" }
 ditto = { path = "packages/ditto", lang = "python", description = "Multi-broker, multi-account orchestration (AlgoMirror patterns)" }
 
 [infra]
-openalgo = { path = "infra/openalgo", type = "subtree", upstream = "https://github.com/marketcalls/openalgo.git" }
-openclaw = { path = "infra/openclaw", type = "subtree", upstream = "https://github.com/openclaw/openclaw.git" }
+openalgo = { path = "infra/openalgo", type = "submodule", upstream = "https://github.com/marketcalls/openalgo.git" }
+openclaw = { path = "infra/openclaw", type = "submodule", upstream = "https://github.com/openclaw/openclaw.git" }
 
 [openalgo]
 api_version = "v1"

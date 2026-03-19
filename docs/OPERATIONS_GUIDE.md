@@ -17,7 +17,6 @@
 
 | Time | Action |
 |---|---|
-| 8:30 AM | Auto-login cron fires |
 | 9:15-3:30 | MARKET HOURS — deploy freeze |
 | 3:45-6:00 PM | Maintenance window |
 | 6:00 PM+ | Development |
@@ -26,9 +25,8 @@
 
 | Time | Action |
 |---|---|
-| 8:30 AM | Auto-login cron fires |
 | 9:00 AM-11:55 PM | MARKET HOURS — deploy freeze |
-| 12:00 AM-8:30 AM | Maintenance + development window |
+| 12:00 AM-9:00 AM | Maintenance + development window |
 
 ## Emergency: OpenAlgo Action Center → disable strategy. NEVER restart with open positions.
 

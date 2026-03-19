@@ -22,7 +22,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-alpha
 - `.env` = 4 infrastructure vars (OPENALGO_HOST, PORT, API_KEY, WS_PORT)
 - `~/.flinttrade/workspace.json` = user preferences (paths, modules, LLM, theme)
 - Broker credentials in OpenAlgo's `.env`, NOT FlintTrade
-- No TOTP auto-login
+- Broker auth handled entirely by OpenAlgo
 
 ## Packages
 
@@ -32,7 +32,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-alpha
 ## Current State
 
 - 670 tests passing
-- Terminal: live dashboard, 8-module sidebar (F1-F8), dark theme. Only F1 built.
+- Terminal: live dashboard, Dockview layout, dark theme.
 - First trade placed via Dhan Sandbox
 - Read PLAN.md for next tasks
 
@@ -71,5 +71,5 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-alpha
 - Use mock data in terminal
 - Commit `.env` files
 - Use ports 3000/3001/3002
-- Add TOTP auto-login
+- Implement broker auth (OpenAlgo handles it)
 - Duplicate what OpenAlgo already provides

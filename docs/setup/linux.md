@@ -7,7 +7,7 @@
    cd FlintTrade && cp .env.example .env
    docker compose up
    ```
-3. Open http://localhost:3000
+3. Open http://localhost:5173
 
 ## Option B — Native (Production, recommended for 24/7 servers)
 1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`

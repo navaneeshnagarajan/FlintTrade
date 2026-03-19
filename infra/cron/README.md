@@ -1,1 +1,1 @@
-# Cron jobs: TOTP login, health check, backup, DDNS watcher
+# Cron jobs: health check, backup, DDNS watcher

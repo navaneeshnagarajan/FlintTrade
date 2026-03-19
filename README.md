@@ -1,6 +1,6 @@
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-662%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-696%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Node](https://img.shields.io/badge/node-20%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
@@ -15,39 +15,40 @@ Open-source modular trading platform for Indian markets, built on [OpenAlgo](htt
 
 FlintTrade is a self-hosted trading platform that sits on top of OpenAlgo. OpenAlgo handles broker connections and order execution across 30+ Indian brokers. FlintTrade handles everything else: strategy execution, risk management, backtesting, real-time analysis, AI-powered signals, and multi-account orchestration.
 
-The platform is organized into 13 independent packages. Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
+The platform is organized into 11 independent packages (10 Python + 1 React). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
 
 FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a platform you run on your own hardware, with your own broker accounts, under your own control. It's designed for SEBI-compliant algorithmic trading in India.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    FlintTrade                        │
-│                                                     │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│  │ terminal │ │dashboard │ │ backtest │  React UIs  │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘            │
-│       └─────────────┼───────────┘                   │
-│                     │                               │
-│  ┌──────────┐ ┌─────┴────┐ ┌──────────┐            │
-│  │  engine  │ │   core   │ │    ai    │  Python     │
-│  │  safety  │ │  client  │ │  signals │  backend    │
-│  │  router  │ │  models  │ │  RAG     │             │
-│  └────┬─────┘ └─────┬────┘ └──────────┘            │
-│       │             │                               │
-│  ┌────┴─────┐ ┌─────┴────┐ ┌──────────┐            │
-│  │screener  │ │   data   │ │historical│  Analysis   │
-│  │backtest- │ │  audit   │ │ ditto    │  & data     │
-│  │engine    │ │  ticks   │ │ mirror   │             │
-│  └──────────┘ └──────────┘ └──────────┘            │
-│                     │                               │
-│  ┌──────────┐ ┌─────┴────┐                         │
-│  │automaton │ │integratn │  Automation              │
-│  │  cron    │ │ webhooks │  & hooks                 │
-│  │ telegram │ │ flow     │                          │
-│  └──────────┘ └──────────┘                         │
-└────────────────────┬────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                     FlintTrade                        │
+│                                                      │
+│  ┌────────────────────────────────────────────┐      │
+│  │  terminal (React + TypeScript)              │      │
+│  │  Dockview workspace, widget-composable UI   │      │
+│  │  shadcn/ui, Zustand + Jotai, TanStack Query │      │
+│  └────────────────────┬───────────────────────┘      │
+│                       │                              │
+│  ┌──────────┐ ┌───────┴──┐ ┌──────────┐             │
+│  │  engine  │ │   core   │ │    ai    │  Python      │
+│  │  safety  │ │  client  │ │  signals │  backend     │
+│  │  router  │ │  models  │ │  RAG     │              │
+│  └────┬─────┘ └─────┬────┘ └──────────┘             │
+│       │             │                                │
+│  ┌────┴─────┐ ┌─────┴────┐ ┌──────────┐             │
+│  │screener  │ │   data   │ │historical│  Analysis    │
+│  │backtest- │ │  audit   │ │ ditto    │  & data      │
+│  │engine    │ │  ticks   │ │ mirror   │              │
+│  └──────────┘ └──────────┘ └──────────┘             │
+│                     │                                │
+│  ┌──────────┐ ┌─────┴────┐                          │
+│  │automaton │ │integratn │  Automation               │
+│  │  cron    │ │ webhooks │  & hooks                  │
+│  │ telegram │ │ flow     │                           │
+│  └──────────┘ └──────────┘                          │
+└────────────────────┬─────────────────────────────────┘
                      │ REST API + WebSocket
               ┌──────┴──────┐
               │   OpenAlgo  │  Managed service (port 5000)
@@ -72,27 +73,25 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 | **backtest-engine** | Event-driven simulator, 12 strategies, walk-forward optimizer | ✅ Built |
 | **ai** | LLM client, RAG, ML signals, sentiment, MCP bridge | ✅ Built |
 | **integration** | TradingView webhooks, ChartInk, visual flow builder | ✅ Built |
-| **automation** | TOTP login, cron jobs, Telegram bot, OpenClaw bridge | ✅ Built |
+| **automation** | Cron jobs, Telegram bot, OpenClaw bridge | ✅ Built |
 | **ditto** | Multi-account mirroring, margin calculator, trailing SL | ✅ Built |
-| **terminal** | React trading terminal — scalper, option chain, charts (9 modules) | ✅ Built |
-| **dashboard** | React dashboard — P&L, portfolio, system status, journal | ✅ Built |
-| **backtest** | React backtest UI — config, results, equity curves, compare | ✅ Built |
+| **terminal** | React + TypeScript trading terminal — Dockview workspace, widget-composable, scalper, option chain, charts | ✅ Built |
 | Infrastructure | Makefile, systemd, Docker, deploy scripts | 🔨 In Progress |
 
 ## Current State
 
 **What works:**
-- 13 packages with source code and **662 passing tests**
+- 11 packages with source code and **696 passing tests** (670 Python + 26 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
 - 12 backtest strategy templates (EMA crossover, Supertrend, straddle sell, iron condor, etc.)
-- React terminal, dashboard, and backtest UI source code
+- React terminal with Dockview widget-composable workspace
 - Docker Compose for cross-platform development
 
 **What's in progress:**
 - Infrastructure automation (`make setup`, `make start` end-to-end)
-- Git subtrees for OpenAlgo, OpenClaw, AlgoMirror
+- Git submodules for OpenAlgo, OpenClaw, AlgoMirror
 - Live WebSocket data feed in terminal UI
 
 **What's planned:**
@@ -106,7 +105,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 662 tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 696 tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -123,8 +122,8 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 13 packages, 662 tests, CI | ✅ Complete |
-| Infrastructure | Makefile, systemd, deploy scripts, git subtrees | 🔨 In Progress |
+| Foundation | Monorepo, 11 packages, 696 tests, CI | ✅ Complete |
+| Infrastructure | Makefile, systemd, deploy scripts, git submodules | 🔨 In Progress |
 | Live Connection | OpenAlgo sandbox trading, WebSocket data | 📋 Next |
 | Terminal | Live option chain, scalper, real-time charts | 📋 Planned |
 | AI Integration | OpenClaw agent skills, autonomous signals | 📋 Planned |
@@ -145,7 +144,7 @@ FlintTrade is designed for SEBI-compliant algorithmic trading:
 | Requirement | Version | Notes |
 |-------------|---------|-------|
 | Python | 3.11+ | Backend, strategy engine, AI |
-| Node.js | 20+ | React terminal, dashboard, backtest UI |
+| Node.js | 20+ | React terminal UI |
 | OpenAlgo | v2.0+ | Broker connectivity (runs as managed service) |
 | DuckDB | 1.0+ | Analytics database (installed via pip) |
 | Docker | 24+ | Optional — for cross-platform deployment |

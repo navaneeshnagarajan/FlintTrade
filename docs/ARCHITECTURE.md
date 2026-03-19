@@ -3,22 +3,50 @@
 ## Package Dependency Graph
 
 ```
-┌─── FlintTrade (one repo) ────────────────────────────────┐
-│                                                           │
-│  terminal ─── dashboard ─── screener ─── ai              │
-│      │             │            │          │              │
-│               engine ◄──── backtest-engine                │
-│                    │            │                         │
-│               core ◄──── data ◄── historical             │
-│                    │                                     │
-│            automation ──── integration ── ditto           │
-└────────────────────┼──────────────────────────────────────┘
+┌─── FlintTrade (one repo) ─────────────────────────────────┐
+│                                                            │
+│  terminal (React + TypeScript, Dockview workspace)         │
+│      │                                                     │
+│      ├── screener ─── ai                                   │
+│      │      │          │                                   │
+│      ├── engine ◄──── backtest-engine                      │
+│      │      │          │                                   │
+│      ├── core ◄──── data ◄── historical                    │
+│      │      │                                              │
+│      └── automation ──── integration ── ditto               │
+└────────────────────┼───────────────────────────────────────┘
                      │ REST API + WebSocket
               ┌──────┴───────┐
-              │   OpenAlgo   │ infra/openalgo/ (git subtree)
+              │   OpenAlgo   │ infra/openalgo/ (git submodule)
               │  30+ brokers │
               └──────────────┘
 ```
+
+## Frontend Architecture (terminal)
+
+The terminal is a single React + TypeScript application using **Dockview** for a
+widget-composable workspace. Users build their own layouts by dragging and
+docking widgets (charts, order pad, positions, option chain, etc.).
+
+### State Management
+
+| Layer | Library | Purpose |
+|-------|---------|---------|
+| Global UI state | Zustand | Theme, layout, connection status, settings |
+| Per-widget state | Jotai | Atomic state for individual widget instances |
+| Server state | TanStack Query | API data fetching, caching, polling |
+
+### Key Frontend Dependencies
+
+| Library | Purpose |
+|---------|---------|
+| Dockview + dockview-react | Widget docking and layout management |
+| shadcn/ui + Radix UI | Accessible, themeable UI components |
+| TanStack React Table | High-performance data tables |
+| Glide Data Grid | Virtualized grids for option chains and order books |
+| react-hook-form + zod | Form validation |
+| TradingView Lightweight Charts v5 | Financial charting |
+| Tailwind CSS v4 | Utility-first styling |
 
 ## Safety Layers (engine)
 
@@ -104,8 +132,8 @@ make update     # Update submodules + deps
 
 | Directory | Source | Type |
 |-----------|--------|------|
-| `infra/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | git subtree |
-| `infra/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | git subtree |
+| `infra/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | git submodule |
+| `infra/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | git submodule |
 | `infra/algomirror/` | [marketcalls/algomirror](https://github.com/marketcalls/algomirror) | git submodule |
 
 ### Scripts
@@ -120,9 +148,9 @@ make update     # Update submodules + deps
 
 ### Broker Authentication
 
-Broker login (TOTP, OAuth, PIN, SMS OTP) is handled entirely by OpenAlgo.
+Broker login is handled entirely by OpenAlgo (not by FlintTrade).
 FlintTrade connects via API key only. If the OpenAlgo session expires,
-the dashboard notifies the user to re-authenticate at the OpenAlgo web interface.
+the terminal notifies the user to re-authenticate at the OpenAlgo web interface.
 
 ### Docker
 

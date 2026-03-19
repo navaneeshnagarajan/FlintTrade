@@ -7,7 +7,7 @@
 | Kill switch | Telegram /killswitch + UI + auto P&L trigger |
 | 5-year audit logs | Append-only on /data partition (5TB HDD) |
 | Algo registration | Strategy configs exported for broker |
-| Daily session management | TOTP auto-login cron in infra/cron/ |
+| Daily session management | Manual broker login via OpenAlgo web UI (sessions expire ~3:30 AM IST) |
 
 ## Exchange-Specific Considerations
 
@@ -20,6 +20,15 @@
 
 MCX commodities: GOLD/SILVER expiry at 11:30 PM, CRUDEOIL at 11:30 PM, NATURALGAS at 11:30 PM.
 Always check per-commodity expiry via OpenAlgo's /api/v1/expiry endpoint.
+
+## STT Rate Changes (effective April 1, 2026)
+
+| Segment | Old Rate | New Rate | Change |
+|---|---|---|---|
+| Futures (sell side) | 0.02% | 0.05% | +150% |
+| Options (sell side) | 0.10% | 0.15% | +50% |
+
+These rates apply to sell-side turnover. Factor into strategy P&L calculations and backtest cost models.
 
 ## Crypto (Delta Exchange)
 - Delta Exchange is FIU-India registered (AML/KYC compliant)

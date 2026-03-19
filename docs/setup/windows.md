@@ -10,7 +10,7 @@
    notepad .env   # Add your broker credentials
    docker compose up
    ```
-3. Open http://localhost:3000
+3. Open http://localhost:5173
 
 ## Option B — WSL2 (Native performance)
 1. Install WSL2: `wsl --install`

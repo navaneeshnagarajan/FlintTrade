@@ -110,28 +110,82 @@
 
 ## Frontend Libraries
 
+### Dockview + dockview-react
+- **What:** Docking layout framework — drag, dock, split, float panels
+- **Used by:** packages/terminal (widget-composable workspace)
+- **How:** Users build their own layouts by dragging and docking widgets. Replaces fixed layout.
+- **Install:** `npm install dockview dockview-react`
+
+### shadcn/ui + Radix UI
+- **What:** Accessible, themeable component library built on Radix primitives
+- **Used by:** packages/terminal (all UI components)
+- **How:** Copy components via CLI (`npx shadcn-ui@latest add button`). Customized with Tailwind.
+- **Install:** `npm install class-variance-authority clsx tailwind-merge @radix-ui/react-slot @radix-ui/react-dialog @radix-ui/react-dropdown-menu @radix-ui/react-select @radix-ui/react-tabs @radix-ui/react-tooltip @radix-ui/react-popover @radix-ui/react-switch`
+
+### Zustand
+- **What:** Lightweight global state management
+- **Used by:** packages/terminal (global UI state — theme, layout, connection, settings)
+- **How:** Create stores with `create()`. No boilerplate, no providers.
+- **Install:** `npm install zustand`
+
+### Jotai
+- **What:** Atomic state management for fine-grained reactivity
+- **Used by:** packages/terminal (per-widget state, symbol atoms)
+- **How:** Define atoms for each widget instance. Derived atoms for computed values.
+- **Install:** `npm install jotai`
+
+### TanStack React Query
+- **What:** Server state management — data fetching, caching, background refresh
+- **Used by:** packages/terminal (all API calls to OpenAlgo)
+- **How:** `useQuery` for reads, `useMutation` for writes. Auto-refetch, stale-while-revalidate.
+- **Install:** `npm install @tanstack/react-query`
+
+### TanStack React Table
+- **What:** Headless table library — sorting, filtering, pagination, virtualization
+- **Used by:** packages/terminal (order book, trade book, positions table)
+- **How:** Define column defs, use `useReactTable` hook. Renders via Tailwind.
+- **Install:** `npm install @tanstack/react-table`
+
+### Glide Data Grid
+- **What:** High-performance virtualized grid for large datasets
+- **Used by:** packages/terminal (option chain, order book with 50-level depth)
+- **How:** Renders only visible cells. Handles 100k+ rows at 60fps.
+- **Install:** `npm install @glideapps/glide-data-grid`
+
+### react-hook-form + zod
+- **What:** Form management with schema validation
+- **Used by:** packages/terminal (order forms, settings, strategy config)
+- **How:** `useForm` hook with zod resolver for type-safe validation.
+- **Install:** `npm install react-hook-form zod @hookform/resolvers`
+
+### react-router-dom
+- **What:** Client-side routing for React SPAs
+- **Used by:** packages/terminal (module navigation)
+- **How:** Route-based code splitting for terminal modules.
+- **Install:** `npm install react-router-dom`
+
+### date-fns
+- **What:** Lightweight date utility library
+- **Used by:** packages/terminal (trade timestamps, market hours, expiry formatting)
+- **How:** Pure functions, tree-shakeable. `format()`, `differenceInMinutes()`, etc.
+- **Install:** `npm install date-fns`
+
 ### TradingView Lightweight Charts (v5)
 - **What:** Professional financial charting library — candlesticks, volume, indicators
-- **Used by:** packages/terminal (scalper charts, option charts), packages/dashboard (price overview)
+- **Used by:** packages/terminal (scalper charts, option charts)
 - **How:** React integration. Multi-pane synchronized charts (CE/Spot/PE). Multi-timeframe.
 - **Install:** `npm install lightweight-charts`
 - **Reference:** OpenAlgo's PineTS uses this library
 
-### Recharts
-- **What:** React chart library for non-financial charts
-- **Used by:** packages/dashboard (P&L charts, equity curves), packages/backtest (metrics visualization)
-- **How:** AreaChart, BarChart, LineChart, PieChart components.
-- **Install:** `npm install recharts`
-
-### Tailwind CSS
-- **What:** Utility-first CSS framework
-- **Used by:** ALL React packages
-- **How:** Use utility classes directly in JSX. Dark mode via `dark:` prefix.
-- **Install:** `npm install tailwindcss`
+### Tailwind CSS (v4)
+- **What:** Utility-first CSS framework with `@tailwindcss/vite` plugin
+- **Used by:** packages/terminal
+- **How:** Use utility classes directly in JSX. Dark mode via class strategy.
+- **Install:** `npm install tailwindcss @tailwindcss/vite`
 
 ### Lucide React
 - **What:** Icon library (fork of Feather Icons)
-- **Used by:** ALL React packages
+- **Used by:** packages/terminal
 - **How:** `import { TrendingUp, Settings } from 'lucide-react'`
 - **Install:** `npm install lucide-react`
 
@@ -234,7 +288,7 @@
 | lightgbm | microsoft/LightGBM | ai | `pip install lightgbm` |
 | chromadb | chroma-core/chroma | ai | `pip install chromadb` |
 | duckdb | duckdb/duckdb | historical, data | `pip install duckdb` |
-| pyotp | pyauth/pyotp | automation | `pip install pyotp` |
+| pyotp | pyauth/pyotp | automation (optional) | `pip install pyotp` |
 
 ## External Repos — OpenAlgo Ecosystem
 
@@ -352,6 +406,6 @@
 
 | Library | Install | What | Package |
 |---|---|---|---|
-| **pyotp** | `pip install pyotp` | TOTP code generation for daily broker auto-login | automation |
+| **pyotp** | `pip install pyotp` | TOTP code generation (optional, broker login handled by OpenAlgo) | automation |
 | **jugaad-data** | `pip install jugaad-data` | NSE/BSE holidays, free Indian market data | automation, historical |
 | **nsepython** | `pip install nsepython` | NSE option chain, FII/DII data, PCR, advance/decline (free, no broker API) | screener |

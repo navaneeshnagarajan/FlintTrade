@@ -148,7 +148,7 @@ POST /api/v1/history
 
 ### Intervals
 ```
-POST /api/v1/intervals  {"apikey": "key"}
+GET /api/v1/intervals
 → ["1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h", "D"]
 ```
 
@@ -201,12 +201,12 @@ POST /api/v1/holdings      {"apikey": "key"}
 ## Utility APIs
 
 ```
-POST /api/v1/ping          {"apikey": "key"}               // health check
-POST /api/v1/holidays      {"apikey": "key", "year": "2026"}
-POST /api/v1/timings       {"apikey": "key", "date": "2026-03-14"}
+GET  /api/v1/ping                                          // health check
+GET  /api/v1/holidays                                      // market holidays
+GET  /api/v1/timings                                       // market timings
 POST /api/v1/telegram      {"apikey": "key", "message": "text"}
-POST /api/v1/instruments   {"apikey": "key", "exchange": "NSE"}
-POST /api/v1/analyzer/status  {"apikey": "key"}
+GET  /api/v1/instruments                                   // instrument master
+GET  /api/v1/analyzer/status                               // analyzer status
 POST /api/v1/analyzer/toggle  {"apikey": "key"}
 ```
 

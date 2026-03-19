@@ -32,7 +32,7 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | Version | Status | Meaning |
 |---|---|---|
 | 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
-| 0.1.0-alpha | **CURRENT** | All 13 packages built, 662 tests passing, Docker |
+| 0.1.0-alpha | **CURRENT** | All 13 packages built, 696 tests passing, Docker |
 | 0.1.0-beta | Next | All packages verified end-to-end, live trading tested |
 | 0.1.0-rc.1 | Planned | Release candidate — community feedback incorporated |
 | 0.1.0 | Planned | First stable release |

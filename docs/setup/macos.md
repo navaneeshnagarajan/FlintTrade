@@ -10,7 +10,7 @@
    open .env   # Add your broker credentials
    docker compose up
    ```
-3. Open http://localhost:3000
+3. Open http://localhost:5173
 
 ## Option B — Native macOS
 Requires: Python 3.12 (`brew install python`), Node.js 22 (`brew install node`)

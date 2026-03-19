@@ -44,7 +44,7 @@ First pre-release. All 13 packages built, 662 tests passing, Docker support.
 - TradingView webhooks, ChartInk, visual flow builder, alerter
 
 ### Added — Automation & Ditto
-- TOTP auto-login, cron manager (5 jobs), Telegram bot with /kill switch
+- Cron manager (5 jobs), Telegram bot with /kill switch
 - Position mirroring, margin-aware allocation, trailing SL, risk manager
 
 ### Added — Frontend

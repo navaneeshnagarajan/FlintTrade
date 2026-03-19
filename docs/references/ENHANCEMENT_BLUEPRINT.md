@@ -1,3 +1,5 @@
+> **Status:** Absorbed into v2 spec (2026-03-19). Retained for reference.
+
 # Autonomous Indian F&O Platform: Enhancement Blueprint
 
 The existing blueprint gains nine critical capabilities through these additions: a professional manual scalping terminal built atop OpenAlgo, multi-broker routing via AlgoMirror with ₹0 brokerage on Kotak Neo, and a fully automated daily broker login system using pyotp — eliminating the feared 3 AM problem entirely. **None of the enhancements below replace existing blueprint components; all are additive layers** that integrate with the existing autonomous trading architecture.
