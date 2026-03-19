@@ -13,6 +13,8 @@
 
 ---
 
+## 2026-03-19 23:20 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | docs: Task 9 — 35-file documentation audit. 13 updated (CONTRIBUTING deadline, README Python/Node versions, SEBI no private infra, QUICKSTART test count, OPENALGO_API subtree→submodule+expiry_date, TOOLS_AND_DEPS removed pyotp, setup .env clarification, cron no login_job, automation no TOTP, terminal README expanded). 1 archived (flexlayout plan→historical). 21 verified correct (no changes needed). tsc step already in CI.
+
 ## 2026-03-19 23:10 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): Task 3.1 — Chart widget upgraded to 15 indicators + 7 drawing tools. New indicators: VWAP (daily reset), SMA(20), WMA(20), Ichimoku Cloud (5 lines), Pivot Points (PP/R1-R3/S1-S3), Stochastic(14,3,3), ATR(14), ADX(14) with +DI/-DI. Drawing tools: H-Line, V-Line, Trend Line, Ray, Fibonacci (7 levels), Rectangle, Text annotation. Drawing toolbar + Undo/Clear All. Indicator dropdown grouped: Overlays(9) | Volume | Oscillators(5). 1,238 lines added. tsc clean, 26/26 vitest.
 
 ## 2026-03-19 23:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | test(backtest-engine): Task 3.5 — 67 new tests for 28 absorbed strategies across 8 test classes (trend, momentum, mean reversion, volatility, volume, options). Covers all 6 categories. Total 863 Python tests passing.
