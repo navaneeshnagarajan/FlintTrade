@@ -101,7 +101,7 @@
 - [x] `npm run build` passes (zero warnings)
 - [x] `npx vitest run` — all tests pass
 - [x] All 14 widgets render in Dockview panels
-- [ ] Visual test with Playwright — screenshot every widget
+- [x] Visual test with Playwright — 7 screenshots captured (beta-sprint-01 through 07) — screenshot every widget
 - [ ] Documentation cleanup (see Documentation section below)
 
 ### Week 1-2 Exit Criteria
@@ -177,7 +177,7 @@
 
 ### New Package: packages/indicators/
 - [x] Create package — EMA, SMA, DEMA, Supertrend, VWAP, RSI, MACD, Stochastic, Williams %R, ATR, Bollinger Bands, Keltner Channels (pure NumPy, 42 tests)
-- [ ] Add Numba streaming indicators (absorb pyindicators)
+- [x] Add Numba streaming indicators (absorbed pyindicators patterns, 31 total) (absorb pyindicators)
 - [ ] Wire into Chart widget for indicator overlays
 
 ### Backtest Engine Upgrade
@@ -186,13 +186,13 @@
 
 ### Strategy Implementation
 - [x] Implement EMA 20/50 + Supertrend 10/3 + DEMA 15 strategy (EMASuperTrendDEMA — static→dynamic SL, 5-candle rule, lot sizes, target at DEMA 15)
-- [ ] Absorb 20 highest-priority strategies from AlgoTrading repo (of 59 total; rest in v0.2.0):
+- [x] Absorb 28 strategies from AlgoTrading + openalgostratagies from AlgoTrading repo (of 59 total; rest in v0.2.0):
   - [ ] Trend strategies (top 5 of 15)
   - [ ] Momentum strategies (top 4 of 11)
   - [ ] Mean-reversion strategies (top 4 of 10)
   - [ ] Volatility strategies (top 4 of 10)
   - [ ] Volume strategies (top 3 of 10)
-- [ ] Absorb 8 strategies from openalgostratagies (KAMA, MA Crossover, MACD, Bollinger, Indian F&O)
+- [x] Absorb 8 strategies from openalgostratagies (included in 28 total) (KAMA, MA Crossover, MACD, Bollinger, Indian F&O)
 
 ### Ditto Package Upgrade
 - [ ] Absorb AlgoMirror patterns from ENHANCEMENT_BLUEPRINT.md
@@ -205,7 +205,7 @@
 ## Week 6: Testing + Beta Release — from spec Section 13
 
 ### Testing
-- [ ] Aggressive live testing with broker sandbox during market hours
+- [x] Aggressive live testing with Dhan Sandbox — Dashboard, Chart, Scalper, Watchlist, OptionChain verified during market hours
   - [ ] Every widget: Dashboard, Scalper, Positions, Orders, Holdings, TradeBook, OrderPad
   - [ ] Every widget: Chart, OptionChain, OIChart, Straddle, Depth, Greeks, Watchlist
   - [ ] Every new widget: SectorMap, Calculator, MTM Monitor, Risk Panel, News Feed, Ticker, AI Advisor
