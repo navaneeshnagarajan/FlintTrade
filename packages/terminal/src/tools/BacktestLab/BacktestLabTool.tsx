@@ -1,6 +1,10 @@
-import { X, FlaskConical } from 'lucide-react'
+import { X, FlaskConical } from "lucide-react";
 
-export default function BacktestLabTool({ onClose }) {
+interface Props {
+  onClose?: () => void;
+}
+
+export default function BacktestLabTool({ onClose }: Props) {
   return (
     <div className="h-full flex flex-col bg-surface-base">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-surface-card">
@@ -23,5 +27,5 @@ export default function BacktestLabTool({ onClose }) {
         </div>
       </div>
     </div>
-  )
+  );
 }

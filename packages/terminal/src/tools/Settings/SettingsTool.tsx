@@ -7,7 +7,7 @@
  * Stub sections: Keyboard, LLM, Telegram, Ditto, Automation, Layouts, About
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type JSX } from "react";
 import {
   X,
   Settings,
@@ -25,8 +25,58 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  type LucideIcon,
 } from "lucide-react";
-import { ping } from "../../services/api";
+import { ping } from "@/services/api";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface GeneralSettings {
+  theme: "dark" | "light";
+  fontSize: "small" | "normal" | "large";
+  density: "compact" | "comfortable";
+}
+
+interface ApiSettings {
+  host: string;
+  apiKey: string;
+  wsPort: string;
+}
+
+interface TradingSettings {
+  exchange: string;
+  product: "MIS" | "NRML" | "CNC";
+  orderType: "MARKET" | "LIMIT" | "SL" | "SL-M";
+  quantity: string;
+}
+
+interface RiskSettings {
+  maxPositionLots: string;
+  mtmStoploss: string;
+  mtmTarget: string;
+  maxOrdersPerMinute: string;
+}
+
+interface AllSettings {
+  general: GeneralSettings;
+  api: ApiSettings;
+  trading: TradingSettings;
+  risk: RiskSettings;
+}
+
+interface SectionDef {
+  id: keyof AllSettings | "keyboard" | "llm" | "telegram" | "ditto" | "automation" | "layouts" | "about";
+  label: string;
+  icon: LucideIcon;
+  functional: boolean;
+}
+
+interface SelectOption {
+  value: string;
+  label: string;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,7 +84,7 @@ import { ping } from "../../services/api";
 
 const STORAGE_KEY = "flinttrade:settings";
 
-const DEFAULT_SETTINGS = {
+const DEFAULT_SETTINGS: AllSettings = {
   general: {
     theme: "dark",
     fontSize: "normal",
@@ -59,30 +109,29 @@ const DEFAULT_SETTINGS = {
   },
 };
 
-const SECTIONS = [
-  { id: "general",   label: "General",          icon: Monitor,    functional: true  },
-  { id: "api",       label: "API Connection",    icon: Wifi,       functional: true  },
-  { id: "trading",   label: "Trading Defaults",  icon: TrendingUp, functional: true  },
-  { id: "risk",      label: "Risk",              icon: ShieldAlert,functional: true  },
-  { id: "keyboard",  label: "Keyboard",          icon: Keyboard,   functional: false },
-  { id: "llm",       label: "LLM",               icon: Brain,      functional: false },
-  { id: "telegram",  label: "Telegram",          icon: Send,       functional: false },
-  { id: "ditto",     label: "Ditto",             icon: Copy,       functional: false },
-  { id: "automation",label: "Automation",        icon: Bot,        functional: false },
-  { id: "layouts",   label: "Layouts",           icon: Layout,     functional: false },
-  { id: "about",     label: "About",             icon: Info,       functional: false },
+const SECTIONS: SectionDef[] = [
+  { id: "general",    label: "General",         icon: Monitor,    functional: true  },
+  { id: "api",        label: "API Connection",   icon: Wifi,       functional: true  },
+  { id: "trading",    label: "Trading Defaults", icon: TrendingUp, functional: true  },
+  { id: "risk",       label: "Risk",             icon: ShieldAlert,functional: true  },
+  { id: "keyboard",   label: "Keyboard",         icon: Keyboard,   functional: false },
+  { id: "llm",        label: "LLM",              icon: Brain,      functional: false },
+  { id: "telegram",   label: "Telegram",         icon: Send,       functional: false },
+  { id: "ditto",      label: "Ditto",            icon: Copy,       functional: false },
+  { id: "automation", label: "Automation",       icon: Bot,        functional: false },
+  { id: "layouts",    label: "Layouts",          icon: Layout,     functional: false },
+  { id: "about",      label: "About",            icon: Info,       functional: false },
 ];
 
 // ---------------------------------------------------------------------------
 // Persistence helpers
 // ---------------------------------------------------------------------------
 
-function loadSettings() {
+function loadSettings(): AllSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw);
-    // Deep merge with defaults to handle new keys added after first save
+    const parsed = JSON.parse(raw) as Partial<AllSettings>;
     return {
       general:  { ...DEFAULT_SETTINGS.general,  ...(parsed.general  ?? {}) },
       api:      { ...DEFAULT_SETTINGS.api,       ...(parsed.api      ?? {}) },
@@ -94,7 +143,7 @@ function loadSettings() {
   }
 }
 
-function saveSettings(settings) {
+function saveSettings(settings: AllSettings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
@@ -106,13 +155,21 @@ function saveSettings(settings) {
 // Reusable form primitives
 // ---------------------------------------------------------------------------
 
-function Label({ children }) {
+function Label({ children }: { children: React.ReactNode }) {
   return (
     <label className="block text-xs text-text-secondary mb-1">{children}</label>
   );
 }
 
-function TextInput({ value, onChange, placeholder, type = "text", disabled = false }) {
+interface TextInputProps {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+  type?: string;
+  disabled?: boolean;
+}
+
+function TextInput({ value, onChange, placeholder, type = "text", disabled = false }: TextInputProps) {
   return (
     <input
       type={type}
@@ -125,7 +182,13 @@ function TextInput({ value, onChange, placeholder, type = "text", disabled = fal
   );
 }
 
-function SelectInput({ value, onChange, options }) {
+interface SelectInputProps {
+  value: string;
+  onChange: (val: string) => void;
+  options: SelectOption[];
+}
+
+function SelectInput({ value, onChange, options }: SelectInputProps) {
   return (
     <select
       value={value}
@@ -139,7 +202,13 @@ function SelectInput({ value, onChange, options }) {
   );
 }
 
-function SegmentControl({ value, onChange, options }) {
+interface SegmentControlProps {
+  value: string;
+  onChange: (val: string) => void;
+  options: SelectOption[];
+}
+
+function SegmentControl({ value, onChange, options }: SegmentControlProps) {
   return (
     <div className="flex items-center bg-surface-base border border-border-default rounded overflow-hidden w-fit">
       {options.map(({ value: v, label }) => (
@@ -159,7 +228,7 @@ function SegmentControl({ value, onChange, options }) {
   );
 }
 
-function FieldRow({ label, children }) {
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
       <Label>{label}</Label>
@@ -168,7 +237,7 @@ function FieldRow({ label, children }) {
   );
 }
 
-function SectionTitle({ children }) {
+function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h2 className="text-sm font-semibold text-text-primary mb-4 pb-2 border-b border-border-default">
       {children}
@@ -176,7 +245,7 @@ function SectionTitle({ children }) {
   );
 }
 
-function HintText({ children }) {
+function HintText({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] text-text-muted mt-0.5">{children}</p>;
 }
 
@@ -184,7 +253,12 @@ function HintText({ children }) {
 // Section panels
 // ---------------------------------------------------------------------------
 
-function GeneralSection({ settings, onChange }) {
+interface GeneralSectionProps {
+  settings: GeneralSettings;
+  onChange: (field: keyof GeneralSettings, value: string) => void;
+}
+
+function GeneralSection({ settings, onChange }: GeneralSectionProps) {
   return (
     <div className="space-y-5">
       <SectionTitle>General</SectionTitle>
@@ -226,9 +300,14 @@ function GeneralSection({ settings, onChange }) {
   );
 }
 
-function ApiSection({ settings, onChange }) {
-  const [testing, setTesting] = useState(false);
-  const [connStatus, setConnStatus] = useState(null); // null | "connected" | "failed"
+interface ApiSectionProps {
+  settings: ApiSettings;
+  onChange: (field: keyof ApiSettings, value: string) => void;
+}
+
+function ApiSection({ settings, onChange }: ApiSectionProps) {
+  const [testing, setTesting]       = useState(false);
+  const [connStatus, setConnStatus] = useState<"connected" | "failed" | null>(null);
   const [connMessage, setConnMessage] = useState("");
 
   async function handleTestConnection() {
@@ -241,7 +320,7 @@ function ApiSection({ settings, onChange }) {
       setConnMessage("OpenAlgo is reachable and responding.");
     } catch (e) {
       setConnStatus("failed");
-      setConnMessage(e.message || "Connection failed. Check host and API key.");
+      setConnMessage(e instanceof Error ? e.message : "Connection failed. Check host and API key.");
     } finally {
       setTesting(false);
     }
@@ -279,10 +358,9 @@ function ApiSection({ settings, onChange }) {
         <HintText>OpenAlgo WebSocket port (default 8765). Used for live tick data.</HintText>
       </FieldRow>
 
-      {/* Test connection button + status */}
       <div className="space-y-2">
         <button
-          onClick={handleTestConnection}
+          onClick={() => void handleTestConnection()}
           disabled={testing}
           className="flex items-center gap-2 px-4 py-1.5 text-xs font-medium rounded bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 hover:border-accent/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
@@ -313,7 +391,12 @@ function ApiSection({ settings, onChange }) {
   );
 }
 
-function TradingDefaultsSection({ settings, onChange }) {
+interface TradingDefaultsSectionProps {
+  settings: TradingSettings;
+  onChange: (field: keyof TradingSettings, value: string) => void;
+}
+
+function TradingDefaultsSection({ settings, onChange }: TradingDefaultsSectionProps) {
   return (
     <div className="space-y-5">
       <SectionTitle>Trading Defaults</SectionTitle>
@@ -372,13 +455,19 @@ function TradingDefaultsSection({ settings, onChange }) {
   );
 }
 
-function RiskSection({ settings, onChange }) {
+interface RiskSectionProps {
+  settings: RiskSettings;
+  onChange: (field: keyof RiskSettings, value: string) => void;
+}
+
+function RiskSection({ settings, onChange }: RiskSectionProps) {
   return (
     <div className="space-y-5">
       <SectionTitle>Risk Management</SectionTitle>
 
       <div className="p-3 rounded bg-warning/5 border border-warning/20 text-[11px] text-warning/80">
-        Risk limits are enforced client-side. They do NOT replace broker-level risk controls. Always configure risk at the broker/OpenAlgo level as primary protection.
+        Risk limits are enforced client-side. They do NOT replace broker-level risk controls.
+        Always configure risk at the broker/OpenAlgo level as primary protection.
       </div>
 
       <FieldRow label="Max Position Size (lots)">
@@ -424,15 +513,28 @@ function RiskSection({ settings, onChange }) {
   );
 }
 
-function StubSection({ section }) {
+type StubSectionId = "keyboard" | "llm" | "telegram" | "ditto" | "automation" | "layouts" | "about";
+
+const STUB_DESCRIPTIONS: Record<StubSectionId, string> = {
+  keyboard:   "Customise keyboard shortcuts for order placement, widget navigation, and terminal actions.",
+  llm:        "Configure local or cloud LLM providers (Ollama, OpenAI, Anthropic) for AI signals and market analysis.",
+  telegram:   "Set up a Telegram bot for trade alerts, MTM notifications, and remote kill-switch commands.",
+  ditto:      "Mirror trades across multiple accounts with configurable lot ratios and margin controls.",
+  automation: "Schedule strategies, configure cron jobs, and set up post-market analysis pipelines.",
+  layouts:    "Save, load, and manage FlexLayout workspace configurations. Export and share layouts.",
+  about:      "FlintTrade version, build info, OpenAlgo connection details, and open-source license.",
+};
+
+function StubSection({ section }: { section: SectionDef }) {
   const Icon = section.icon;
+  const desc = STUB_DESCRIPTIONS[section.id as StubSectionId] ?? "This section is under development.";
   return (
     <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted py-16">
       <Icon size={36} className="opacity-30" />
       <div className="text-center">
         <div className="text-sm font-medium text-text-secondary">{section.label}</div>
         <div className="text-xs text-text-muted mt-1 max-w-xs text-center leading-relaxed">
-          {stubDescription(section.id)}
+          {desc}
         </div>
       </div>
       <div className="mt-2 px-3 py-1 rounded-full text-[10px] text-text-muted border border-border-default">
@@ -442,34 +544,27 @@ function StubSection({ section }) {
   );
 }
 
-function stubDescription(id) {
-  const descriptions = {
-    keyboard:   "Customise keyboard shortcuts for order placement, widget navigation, and terminal actions.",
-    llm:        "Configure local or cloud LLM providers (Ollama, OpenAI, Anthropic) for AI signals and market analysis.",
-    telegram:   "Set up a Telegram bot for trade alerts, MTM notifications, and remote kill-switch commands.",
-    ditto:      "Mirror trades across multiple accounts with configurable lot ratios and margin controls.",
-    automation: "Schedule strategies, configure cron jobs, and set up post-market analysis pipelines.",
-    layouts:    "Save, load, and manage FlexLayout workspace configurations. Export and share layouts.",
-    about:      "FlintTrade version, build info, OpenAlgo connection details, and open-source license.",
-  };
-  return descriptions[id] || "This section is under development.";
-}
-
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function SettingsTool({ onClose }) {
-  const [activeSection, setActiveSection] = useState("general");
-  const [settings, setSettings] = useState(loadSettings);
+interface Props {
+  onClose?: () => void;
+}
 
-  // Persist on every change
+export default function SettingsTool({ onClose }: Props) {
+  const [activeSection, setActiveSection] = useState<SectionDef["id"]>("general");
+  const [settings, setSettings] = useState<AllSettings>(loadSettings);
+
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
 
-  // Generic updater for a top-level section key
-  const updateSection = useCallback((sectionId, field, value) => {
+  const updateSection = useCallback(<K extends keyof AllSettings>(
+    sectionId: K,
+    field: keyof AllSettings[K],
+    value: string,
+  ) => {
     setSettings((prev) => ({
       ...prev,
       [sectionId]: {
@@ -481,9 +576,9 @@ export default function SettingsTool({ onClose }) {
 
   const currentSection = SECTIONS.find((s) => s.id === activeSection);
 
-  function renderPanel() {
+  function renderPanel(): JSX.Element {
     if (!currentSection?.functional) {
-      return <StubSection section={currentSection} />;
+      return <StubSection section={currentSection ?? SECTIONS[0]} />;
     }
 
     switch (activeSection) {
@@ -491,39 +586,39 @@ export default function SettingsTool({ onClose }) {
         return (
           <GeneralSection
             settings={settings.general}
-            onChange={(field, value) => updateSection("general", field, value)}
+            onChange={(field, value) => updateSection("general", field as keyof GeneralSettings, value)}
           />
         );
       case "api":
         return (
           <ApiSection
             settings={settings.api}
-            onChange={(field, value) => updateSection("api", field, value)}
+            onChange={(field, value) => updateSection("api", field as keyof ApiSettings, value)}
           />
         );
       case "trading":
         return (
           <TradingDefaultsSection
             settings={settings.trading}
-            onChange={(field, value) => updateSection("trading", field, value)}
+            onChange={(field, value) => updateSection("trading", field as keyof TradingSettings, value)}
           />
         );
       case "risk":
         return (
           <RiskSection
             settings={settings.risk}
-            onChange={(field, value) => updateSection("risk", field, value)}
+            onChange={(field, value) => updateSection("risk", field as keyof RiskSettings, value)}
           />
         );
       default:
-        return <StubSection section={currentSection} />;
+        return <StubSection section={currentSection ?? SECTIONS[0]} />;
     }
   }
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
 
-      {/* ── Title bar ── */}
+      {/* Title bar */}
       <div className="flex-none flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card">
         <div className="flex items-center gap-2">
           <Settings size={14} className="text-accent" />
@@ -538,7 +633,7 @@ export default function SettingsTool({ onClose }) {
         </button>
       </div>
 
-      {/* ── Body: sidebar + panel ── */}
+      {/* Body: sidebar + panel */}
       <div className="flex-1 flex overflow-hidden">
 
         {/* Sidebar */}
@@ -575,7 +670,7 @@ export default function SettingsTool({ onClose }) {
         </div>
       </div>
 
-      {/* ── Footer: autosave indicator ── */}
+      {/* Footer: autosave indicator */}
       <div className="flex-none px-4 py-1.5 bg-surface-card border-t border-border-default flex items-center gap-1.5">
         <div className="w-1.5 h-1.5 rounded-full bg-profit" />
         <span className="text-[10px] text-text-muted">Changes saved automatically to local storage</span>

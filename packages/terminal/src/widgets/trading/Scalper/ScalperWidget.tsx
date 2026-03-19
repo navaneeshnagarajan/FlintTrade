@@ -1,5 +1,4 @@
 // Migrated to TSX — Phase 4 Batch 1
-// Keeps useWebSocket (JS hook) for real-time tick data — it will be migrated separately.
 // Direct API calls (placeOrder, cancelAllOrders, closePosition, getExpiry, getQuotes)
 // are intentional here: Scalper requires interactive one-click orders, not cached REST data.
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -22,25 +21,14 @@ import {
   getExpiry,
   getQuotes,
 } from "@/services/api";
-import type { PlaceOrderParams } from "@/types/api";
+import useWebSocket from "@/hooks/useWebSocket";
+import type { PlaceOrderParams, WsInstrument, WsTick } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
-
-// useWebSocket is a JS file — its ambient declaration lives in declarations.d.ts
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const useWebSocket: (instruments: WsInstrument[], mode: string) => { ticks: TickMap; connected: boolean } =
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require("@/hooks/useWebSocket").default;
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
-interface WsInstrument {
-  symbol: string;
-  exchange: string;
-}
-
-interface TickData {
-  ltp?: number;
-  close?: number;
+/** WsTick extended with optional prev_close that some OpenAlgo responses carry */
+interface TickData extends WsTick {
   prev_close?: number;
 }
 
