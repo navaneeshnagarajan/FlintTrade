@@ -6,7 +6,9 @@
 *.key
 *.crt
 secrets/
-workspace.json
+# User workspace config lives at ~/.flinttrade/workspace.json (never in repo)
+# Only ignore if someone accidentally copies it to repo root
+/workspace.json
 
 # === Python ===
 __pycache__/

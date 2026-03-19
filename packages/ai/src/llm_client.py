@@ -29,6 +29,12 @@ class LLMProvider(StrEnum):
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
+    GEMINI = "gemini"
+    DEEPSEEK = "deepseek"
+    GROQ = "groq"
+    MISTRAL = "mistral"
+    TOGETHER = "together"
+    CUSTOM = "custom"  # Any OpenAI-compatible endpoint
 
 
 @dataclass
@@ -65,7 +71,16 @@ class LLMConfig:
             provider=provider,
             host=host,
             model=model,
-            api_key=os.getenv("OPENAI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", ""),
+            api_key=(
+                os.getenv("OPENAI_API_KEY", "")
+                or os.getenv("ANTHROPIC_API_KEY", "")
+                or os.getenv("GEMINI_API_KEY", "")
+                or os.getenv("DEEPSEEK_API_KEY", "")
+                or os.getenv("GROQ_API_KEY", "")
+                or os.getenv("MISTRAL_API_KEY", "")
+                or os.getenv("TOGETHER_API_KEY", "")
+                or os.getenv("LLM_API_KEY", "")  # Generic fallback
+            ),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
         )
 
@@ -97,11 +112,19 @@ class LLMResponse:
 
 
 # Provider-specific base URLs for the OpenAI-compatible chat endpoint
+# Most providers use the OpenAI-compatible API format.
+# "custom" uses {host}/v1/chat/completions for any compatible endpoint.
 _PROVIDER_URLS: dict[str, str] = {
     "lmstudio": "{host}/v1/chat/completions",
     "ollama": "{host}/v1/chat/completions",
     "openai": "https://api.openai.com/v1/chat/completions",
     "anthropic": "https://api.anthropic.com/v1/messages",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    "deepseek": "https://api.deepseek.com/v1/chat/completions",
+    "groq": "https://api.groq.com/openai/v1/chat/completions",
+    "mistral": "https://api.mistral.ai/v1/chat/completions",
+    "together": "https://api.together.xyz/v1/chat/completions",
+    "custom": "{host}/v1/chat/completions",
 }
 
 
