@@ -1,4 +1,27 @@
-import * as LucideIcons from "lucide-react";
+import {
+  LayoutDashboard,
+  Zap,
+  Table2,
+  ClipboardList,
+  Wallet,
+  BookOpen,
+  FileEdit,
+  CandlestickChart,
+  Grid3x3,
+  BarChart3,
+  Activity,
+  Layers,
+  Sigma,
+  Star,
+  Calculator,
+  Newspaper,
+  TrendingUp,
+  Bot,
+  Target,
+  ShieldAlert,
+  Map,
+  Box,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   Dialog,
@@ -9,6 +32,33 @@ import {
 import { useLayoutStore } from "@/stores/layoutStore";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import type { WidgetMeta } from "@/types/widgets";
+
+// Explicit icon registry — replaces `import * as LucideIcons` to allow tree-shaking.
+// Only the icons actually used in widgetCatalog are imported here.
+const ICON_MAP: Record<string, LucideIcon> = {
+  LayoutDashboard,
+  Zap,
+  Table2,
+  ClipboardList,
+  Wallet,
+  BookOpen,
+  FileEdit,
+  CandlestickChart,
+  Grid3x3,
+  BarChart3,
+  Activity,
+  Layers,
+  Sigma,
+  Star,
+  Calculator,
+  Newspaper,
+  TrendingUp,
+  Bot,
+  Target,
+  ShieldAlert,
+  Map,
+  Box,
+};
 
 interface WidgetPickerProps {
   isOpen: boolean;
@@ -43,7 +93,7 @@ export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-[520px] max-h-[80vh] flex flex-col bg-surface-card border-border-default p-0">
+      <DialogContent className="sm:max-w-130 max-h-[80vh] flex flex-col bg-surface-card border-border-default p-0">
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default">
           <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
             Add Widget
@@ -63,9 +113,7 @@ export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
                 </h3>
                 <div className="grid grid-cols-4 gap-2">
                   {widgets.map((widget) => {
-                    const Icon: LucideIcon =
-                      (LucideIcons as unknown as Record<string, LucideIcon>)[widget.icon] ||
-                      LucideIcons.Box;
+                    const Icon: LucideIcon = ICON_MAP[widget.icon] ?? Box;
                     return (
                       <button
                         key={widget.id}

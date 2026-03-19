@@ -94,14 +94,12 @@ export default defineConfig({
           ) {
             return "vendor-forms";
           }
-          // Everything else in node_modules EXCEPT lucide-react.
-          // lucide-react must NOT be assigned a manual chunk: Rollup tree-shakes
-          // it per-widget chunk (each widget only pulls in its own icons).
-          // Forcing it into one chunk would bundle all ~1000 icons together (896 KB).
-          if (
-            id.includes("node_modules/") &&
-            !id.includes("node_modules/lucide-react")
-          ) {
+          // NOTE: lucide-react is intentionally NOT assigned a manual chunk.
+          // The wildcard `import * as LucideIcons` has been removed from WidgetPicker
+          // so Rollup can now tree-shake lucide per-chunk (each widget/chrome file
+          // only pulls in the icons it explicitly imports).
+          // Everything else in node_modules — clsx, tailwind-merge, date-fns, cmdk, etc.
+          if (id.includes("node_modules/")) {
             return "vendor-misc";
           }
         },
