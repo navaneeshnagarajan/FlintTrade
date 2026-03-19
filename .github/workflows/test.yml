@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [dev]
+    branches: [main, dev]
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
@@ -20,10 +20,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: |
-          for pkg in terminal dashboard backtest; do
-            [ -f "packages/$pkg/package.json" ] && echo "✅ packages/$pkg"
-          done
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Install dependencies
+        run: cd packages/terminal && npm ci --legacy-peer-deps
+      - name: TypeScript strict check
+        run: cd packages/terminal && npx tsc --noEmit
+      - name: Run Vitest tests
+        run: cd packages/terminal && npx vitest run
+      - name: Build check
+        run: cd packages/terminal && npm run build
   secrets-check:
     runs-on: ubuntu-latest
     steps:

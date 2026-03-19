@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [0.1.0-alpha] — 2026-03-16
 
-First pre-release. All 13 packages built, 662 tests passing, Docker support.
+First pre-release. All 11 packages built, 696 tests passing, Docker support.
 
 ### Added — Core
 - async OpenAlgo client — 45+ endpoints, rate limiting (10 OPS orders,
@@ -48,9 +48,8 @@ First pre-release. All 13 packages built, 662 tests passing, Docker support.
 - Position mirroring, margin-aware allocation, trailing SL, risk manager
 
 ### Added — Frontend
-- terminal: 9-module React trading terminal — scalper, option chain,
-  OI analysis, futures quadrant, TradingView charts, keyboard shortcuts
-- dashboard: portfolio overview, P&L analytics, system status, trade journal
+- terminal: Dockview widget-composable trading terminal — 14 widgets (TSX),
+  7 tools, TypeScript strict, shadcn/ui, Zustand+Jotai+TanStack Query
 
 ### Added — Infrastructure
 - Docker support — docker-compose.yml for Windows/macOS/Linux/Raspberry Pi

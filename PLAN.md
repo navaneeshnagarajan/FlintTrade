@@ -11,9 +11,9 @@
 
 - **Version:** 0.1.0-alpha
 - **Tests:** 26 terminal (Vitest) + 670 Python (pytest) = 696 total
-- **Terminal:** 14 widgets (JSX) + 7 tools (1 functional, 6 stubs) in Dockview v5 shell
-- **TypeScript migration:** Phase 1-3 complete (foundation, state, shell). Phase 4 (widget JSX→TSX) pending.
-- **Files:** 57 TS/TSX (shell, stores, atoms, services, hooks, chrome, shadcn/ui) + 23 JSX (widgets, tools, legacy)
+- **Terminal:** 14 widgets (TSX) + 7 tools (1 functional, 6 stubs) in Dockview v5 shell
+- **TypeScript migration:** Phase 1-5 complete. Zero JSX/JS files remain. 80 TS/TSX files.
+- **Files:** 47 TSX + 33 TS = 80 TypeScript files. Zero JavaScript.
 - **Packages:** 10 Python + 1 React (terminal). Stub packages `dashboard/` and `backtest/` deleted.
 - **Dependencies:** All v2 deps installed (Dockview 5.1, Zustand 5, Jotai, TanStack Query 5, Glide Data Grid 6, shadcn/ui, react-hook-form, zod). Old deps removed (FlexLayout, recharts, postcss).
 - **State:** Zustand stores (4), Jotai atoms, TanStack Query hooks (6), WebSocket service with ping/pong — all wired.
@@ -26,8 +26,8 @@
 - [x] Phase 1: Foundation Setup (TS 5.9, Dockview 5.1, shadcn/ui, all deps)
 - [x] Phase 2: State Architecture (Zustand stores, Jotai atoms, TanStack Query hooks, API service, WebSocket service)
 - [x] Phase 3: Shell + Layout (App.tsx, chrome components, widgetFactory, 7 presets)
-- [ ] **Phase 4: Widget Migration (14 widgets + 7 tools JSX→TSX + shadcn/ui)**
-- [ ] Phase 5: Verification + Doc Cleanup
+- [x] Phase 4: Widget Migration (14 widgets + 7 tools + Chart + useWebSocket → TSX/TS)
+- [x] Phase 5: Verification (tsc clean, build clean, 26/26 tests, spec review fixes applied)
 - [ ] Phase 6: New Widgets + Absorption (7 new widgets)
 - [ ] Phase 7: Tools Build-Out (6 stub tools → functional)
 - [ ] Phase 8: Routes (/setup, /invest)
