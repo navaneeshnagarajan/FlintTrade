@@ -5,8 +5,8 @@
 # FlintTrade
 
 ![Tests](https://img.shields.io/badge/tests-738%20passed-brightgreen)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Node](https://img.shields.io/badge/node-20%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
 ![Status](https://img.shields.io/badge/status-pre--alpha-red)
 
@@ -154,8 +154,8 @@ FlintTrade is designed for SEBI-compliant algorithmic trading:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Python | 3.11+ | Backend, strategy engine, AI |
-| Node.js | 20+ | React terminal UI |
+| Python | 3.12+ | Backend, strategy engine, AI |
+| Node.js | 22+ | React terminal UI |
 | OpenAlgo | v2.0+ | Broker connectivity (runs as managed service) |
 | DuckDB | 1.0+ | Analytics database (installed via pip) |
 | Docker | 24+ | Optional — for cross-platform deployment |

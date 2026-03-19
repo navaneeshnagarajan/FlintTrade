@@ -7,7 +7,7 @@
 ## OpenAlgo Version
 
 This reference is for OpenAlgo v2.0.0.1 (released Feb 24, 2026).
-Run `git subtree pull` in infra/openalgo/ to stay current.
+Run `git submodule update --remote infra/openalgo` to stay current.
 
 ## Authentication
 
@@ -154,7 +154,7 @@ GET /api/v1/intervals
 
 ### OptionChain
 ```
-POST /api/v1/optionchain  {"apikey": "key", "symbol": "NIFTY", "exchange": "NFO"}
+POST /api/v1/optionchain  {"apikey": "key", "symbol": "NIFTY", "exchange": "NFO", "expiry_date": "260326"}
 → All strikes with CE/PE: LTP, OI, volume, bid/ask, IV, Greeks
 ```
 

@@ -7,7 +7,7 @@
    git clone https://github.com/navaneeshnagarajan/FlintTrade.git
    cd FlintTrade
    copy .env.example .env
-   notepad .env   # Add your broker credentials
+   notepad .env   # Add your OPENALGO_API_KEY (broker credentials go in infra/openalgo/.env)
    docker compose up
    ```
 3. Open http://localhost:5173

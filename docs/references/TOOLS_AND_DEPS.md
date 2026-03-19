@@ -288,7 +288,7 @@
 | lightgbm | microsoft/LightGBM | ai | `pip install lightgbm` |
 | chromadb | chroma-core/chroma | ai | `pip install chromadb` |
 | duckdb | duckdb/duckdb | historical, data | `pip install duckdb` |
-| pyotp | pyauth/pyotp | automation (optional) | `pip install pyotp` |
+| nsepython | — | automation, screener | `pip install nsepython` |
 
 ## External Repos — OpenAlgo Ecosystem
 
@@ -406,6 +406,5 @@
 
 | Library | Install | What | Package |
 |---|---|---|---|
-| **pyotp** | `pip install pyotp` | TOTP code generation (optional, broker login handled by OpenAlgo) | automation |
 | **jugaad-data** | `pip install jugaad-data` | NSE/BSE holidays, free Indian market data | automation, historical |
 | **nsepython** | `pip install nsepython` | NSE option chain, FII/DII data, PCR, advance/decline (free, no broker API) | screener |

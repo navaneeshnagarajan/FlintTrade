@@ -5,7 +5,7 @@
 | Static IP | Configured in broker dashboard (dual WAN IPs) |
 | Max 10 OPS | Rate limiter in engine + OpenAlgo built-in |
 | Kill switch | Telegram /killswitch + UI + auto P&L trigger |
-| 5-year audit logs | Append-only on /data partition (5TB HDD) |
+| 5-year audit logs | Append-only on /data partition (configurable path via workspace.json) |
 | Algo registration | Strategy configs exported for broker |
 | Daily session management | Manual broker login via OpenAlgo web UI (sessions expire ~3:30 AM IST) |
 

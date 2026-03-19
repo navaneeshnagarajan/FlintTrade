@@ -16,7 +16,7 @@
 - Branch: feature/automation-{description}
 
 ## Broker authentication
-- Broker login (TOTP, OAuth, PIN) is handled by OpenAlgo, NOT FlintTrade
+- Broker login (OAuth, PIN, and session management) is handled by OpenAlgo, NOT FlintTrade
 - FlintTrade connects to OpenAlgo via API key only
 - If the OpenAlgo session expires, the dashboard notifies the user to
   re-authenticate at the OpenAlgo web interface
