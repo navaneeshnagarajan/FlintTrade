@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getPositionbook } from "@/services/api";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -14,13 +15,17 @@ function isMarketHours(): boolean {
 }
 
 export function usePositions() {
-  return useQuery<Position[]>({
+  const query = useQuery<Position[]>({
     queryKey: ["positions"],
     queryFn: getPositionbook,
     refetchInterval: isMarketHours() ? 5_000 : 60_000,
-    select: (data) => {
-      useTradingStore.getState().updateFromPositions(data);
-      return data;
-    },
   });
+
+  useEffect(() => {
+    if (query.data) {
+      useTradingStore.getState().updateFromPositions(query.data);
+    }
+  }, [query.data]);
+
+  return query;
 }

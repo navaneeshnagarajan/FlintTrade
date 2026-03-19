@@ -203,6 +203,7 @@ export default function HoldingsWidget(_props: WidgetProps) {
             </span>
           )}
           <button
+            type="button"
             onClick={() => void refetch()}
             disabled={isFetching}
             className="text-text-muted hover:text-text-primary disabled:opacity-40"

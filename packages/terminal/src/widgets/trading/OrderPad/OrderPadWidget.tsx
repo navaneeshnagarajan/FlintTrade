@@ -59,7 +59,7 @@ const orderSchema = z.object({
   action: z.enum(["BUY", "SELL"]),
   orderType: z.enum(["MARKET", "LIMIT", "SL", "SL-M"]),
   product: z.enum(["MIS", "NRML", "CNC"]),
-  qty: z.number().int().min(1, "Quantity must be at least 1"),
+  qty: z.coerce.number().int().min(1, "Quantity must be at least 1"),
   price: z.number().min(0).optional(),
   trigPrice: z.number().min(0).optional(),
   discQty: z.number().int().min(0).optional(),

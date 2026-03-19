@@ -106,29 +106,31 @@ function FilterPill({ value, label, count, activeFilter, onClick }: FilterPillPr
 
 export default function TradeBookWidget(_props: WidgetProps) {
   const { data: tradesData, dataUpdatedAt, refetch, isFetching } = useTradebook();
-  const [sorting, setSorting] = useState<SortingState>([{ id: "timeSortMs", desc: true }]);
+  const [sorting, setSorting] = useState<SortingState>([]);
   const [filter, setFilter] = useState<FilterValue>(FILTER_ALL);
 
   const allRows = useMemo<TradeRow[]>(() => {
     const raw = (tradesData ?? []) as RawTrade[];
-    return raw.map((t) => {
-      const side = resolveSide(t);
-      const qty = parseInt(
-        String(t.quantity ?? t.qty ?? t.filled_quantity ?? 0),
-        10,
-      );
-      const price = parseFloat(String(t.average_price ?? t.price ?? t.trade_price ?? 0));
-      const { display, ms } = parseTradeTime(t);
-      return {
-        timeDisplay: display,
-        timeSortMs: ms,
-        symbol: ((t.symbol ?? t.tradingsymbol) || "—").toUpperCase(),
-        side,
-        qty,
-        price,
-        value: qty * price,
-      };
-    });
+    return raw
+      .map((t) => {
+        const side = resolveSide(t);
+        const qty = parseInt(
+          String(t.quantity ?? t.qty ?? t.filled_quantity ?? 0),
+          10,
+        );
+        const price = parseFloat(String(t.average_price ?? t.price ?? t.trade_price ?? 0));
+        const { display, ms } = parseTradeTime(t);
+        return {
+          timeDisplay: display,
+          timeSortMs: ms,
+          symbol: ((t.symbol ?? t.tradingsymbol) || "—").toUpperCase(),
+          side,
+          qty,
+          price,
+          value: qty * price,
+        };
+      })
+      .sort((a, b) => b.timeSortMs - a.timeSortMs);
   }, [tradesData]);
 
   const counts = useMemo(
@@ -229,6 +231,7 @@ export default function TradeBookWidget(_props: WidgetProps) {
             </span>
           )}
           <button
+            type="button"
             onClick={() => void refetch()}
             disabled={isFetching}
             className="text-text-muted hover:text-text-primary disabled:opacity-40"

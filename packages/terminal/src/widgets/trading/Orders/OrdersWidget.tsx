@@ -134,6 +134,7 @@ export default function OrdersWidget(_props: WidgetProps) {
           Orders{rows.length > 0 ? ` — ${rows.length}` : ""}
         </span>
         <button
+          type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
           className="text-text-muted hover:text-text-primary disabled:opacity-40"

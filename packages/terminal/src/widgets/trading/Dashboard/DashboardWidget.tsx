@@ -24,6 +24,8 @@ interface RawPosition {
 
 interface RawOrder {
   symbol: string;
+  orderId?: string;
+  order_id?: string;
   action?: string;
   quantity?: string | number;
   price?: string | number;
@@ -52,7 +54,7 @@ const INDICES: IndexDef[] = [
   { symbol: "BANKNIFTY", exchange: "NSE_INDEX", name: "BANK NIFTY" },
   { symbol: "SENSEX", exchange: "BSE_INDEX", name: "SENSEX" },
   { symbol: "FINNIFTY", exchange: "NSE_INDEX", name: "FIN NIFTY" },
-  { symbol: "INDIA VIX", exchange: "NSE_INDEX", name: "VIX" },
+  { symbol: "INDIAVIX", exchange: "NSE_INDEX", name: "VIX" },
 ];
 
 // ─── IndexCard ────────────────────────────────────────────────────────────────
@@ -192,7 +194,7 @@ export default function DashboardWidget(_props: WidgetProps) {
                 const qty = parseInt(String(p.quantity ?? 0), 10);
                 const pnlPct = avg > 0 && qty !== 0 ? (pnl / (avg * Math.abs(qty))) * 100 : 0;
                 return (
-                  <tr key={i} className="border-t border-border-subtle hover:bg-surface-hover/50">
+                  <tr key={p.symbol || String(i)} className="border-t border-border-subtle hover:bg-surface-hover/50">
                     <td className="px-3 py-1 font-medium font-mono">{p.symbol}</td>
                     <td className={`px-3 py-1 text-right font-mono ${qty > 0 ? "text-profit" : qty < 0 ? "text-loss" : ""}`}>{qty}</td>
                     <td className="px-3 py-1 text-right font-mono text-text-secondary">{INR.format(avg)}</td>
@@ -232,7 +234,7 @@ export default function DashboardWidget(_props: WidgetProps) {
             </thead>
             <tbody>
               {orders.map((o, i) => (
-                <tr key={i} className="border-t border-border-subtle hover:bg-surface-hover/50">
+                <tr key={o.orderId ?? o.order_id ?? (o.symbol + (o.timestamp ?? "") + String(i))} className="border-t border-border-subtle hover:bg-surface-hover/50">
                   <td className="px-3 py-1 text-text-muted font-mono">{o.timestamp ?? "—"}</td>
                   <td className="px-3 py-1 font-medium font-mono">{o.symbol}</td>
                   <td className={`px-3 py-1 text-center font-medium ${o.action === "BUY" ? "text-profit" : "text-loss"}`}>{o.action}</td>
