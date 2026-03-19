@@ -6,10 +6,16 @@ import { getWsService } from "@/services/websocket";
 import type { WsTick, WsInstrument } from "@/types/api";
 
 const INDEX_INSTRUMENTS: WsInstrument[] = [
+  // Equity indices
   { symbol: "NIFTY", exchange: "NSE_INDEX" },
   { symbol: "BANKNIFTY", exchange: "NSE_INDEX" },
   { symbol: "SENSEX", exchange: "BSE_INDEX" },
   { symbol: "INDIAVIX", exchange: "NSE_INDEX" },
+  // MCX commodities (match Groww 915 ticker)
+  { symbol: "GOLD", exchange: "MCX" },
+  { symbol: "SILVER", exchange: "MCX" },
+  { symbol: "CRUDEOIL", exchange: "MCX" },
+  { symbol: "NATURALGAS", exchange: "MCX" },
 ];
 
 export function useWsBridge(): void {

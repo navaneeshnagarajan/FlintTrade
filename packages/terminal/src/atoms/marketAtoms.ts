@@ -16,8 +16,15 @@ export const sensexAtom = tickAtomFamily("BSE_INDEX:SENSEX");
 export const bankniftyAtom = tickAtomFamily("NSE_INDEX:BANKNIFTY");
 export const vixAtom = tickAtomFamily("NSE_INDEX:INDIAVIX");
 
+// MCX commodity atoms
+export const goldAtom = tickAtomFamily("MCX:GOLD");
+export const silverAtom = tickAtomFamily("MCX:SILVER");
+export const crudeOilAtom = tickAtomFamily("MCX:CRUDEOIL");
+export const naturalGasAtom = tickAtomFamily("MCX:NATURALGAS");
+
 /**
- * Derived atom: indices summary for TickerBar
+ * Derived atom: indices + MCX summary for TickerBar
+ * Matches Groww 915 ticker: NIFTY, SENSEX, BANKNIFTY, VIX + GOLD, SILVER, CRUDEOIL, NATURALGAS
  */
 export const indicesSummaryAtom = atom((get) => {
   return [
@@ -25,6 +32,10 @@ export const indicesSummaryAtom = atom((get) => {
     { name: "SENSEX", data: get(sensexAtom) },
     { name: "BANK NIFTY", data: get(bankniftyAtom) },
     { name: "VIX", data: get(vixAtom) },
+    { name: "GOLD", data: get(goldAtom) },
+    { name: "SILVER", data: get(silverAtom) },
+    { name: "CRUDEOIL", data: get(crudeOilAtom) },
+    { name: "NATGAS", data: get(naturalGasAtom) },
   ];
 });
 
