@@ -13,14 +13,54 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { RefreshCw, ChevronDown, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
+import { RefreshCw, ChevronDown, AlertCircle } from "lucide-react";
 import { getExpiry, getOptionChain, getQuotes } from "../../../services/api";
+import type { Quote } from "../../../types/api";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface FlexLayoutNode {
+  getId?: () => string;
+}
+
+interface SymbolDef {
+  label: string;
+  exchange: string;
+  spotSymbol: string;
+  spotExchange: string;
+}
+
+type FilterType = "All" | "OI Increase" | "OI Decrease";
+
+interface RawOptionRow {
+  strike_price?: number;
+  strike?: number;
+  oi?: number;
+  open_interest?: number;
+}
+
+interface RawOptionChain {
+  calls?: RawOptionRow[];
+  puts?: RawOptionRow[];
+  atm_strike?: number;
+  pcr?: number;
+}
+
+interface OIRowData {
+  strike: number;
+  callOI: number;
+  putOI: number;
+  callOIChange: number;
+  putOIChange: number;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const SYMBOLS = [
+const SYMBOLS: SymbolDef[] = [
   { label: "NIFTY",      exchange: "NFO", spotSymbol: "NIFTY",      spotExchange: "NSE_INDEX" },
   { label: "BANKNIFTY",  exchange: "NFO", spotSymbol: "BANKNIFTY",  spotExchange: "NSE_INDEX" },
   { label: "FINNIFTY",   exchange: "NFO", spotSymbol: "FINNIFTY",   spotExchange: "NSE_INDEX" },
@@ -28,14 +68,14 @@ const SYMBOLS = [
   { label: "SENSEX",     exchange: "BFO", spotSymbol: "SENSEX",     spotExchange: "BSE_INDEX" },
 ];
 
-const FILTERS = ["All", "OI Increase", "OI Decrease"];
-const STRIKES_AROUND_ATM = 15; // each side — wider view for OI analysis
+const FILTERS: FilterType[] = ["All", "OI Increase", "OI Decrease"];
+const STRIKES_AROUND_ATM = 15;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function isMarketHours() {
+function isMarketHours(): boolean {
   const now = new Date();
   const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const day = ist.getDay();
@@ -46,7 +86,7 @@ function isMarketHours() {
 
 const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-function fmtOI(v) {
+function fmtOI(v: number | null | undefined): string {
   if (v == null || v === 0) return "0";
   const n = Number(v);
   if (n >= 1_00_00_000) return `${(n / 1_00_00_000).toFixed(1)}Cr`;
@@ -55,7 +95,7 @@ function fmtOI(v) {
   return NUM0.format(n);
 }
 
-function fmtExpiry(raw) {
+function fmtExpiry(raw: string): string {
   if (!raw) return raw;
   try {
     const d = new Date(raw);
@@ -70,13 +110,21 @@ function fmtExpiry(raw) {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-/** Dropdown selector — shared pattern across analysis widgets. */
-function Selector({ value, options, onChange, className = "" }) {
+interface SelectorProps {
+  value: string;
+  options: string[];
+  onChange: (val: string) => void;
+  className?: string;
+}
+
+function Selector({ value, options, onChange, className = "" }: SelectorProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function onOut(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    function onOut(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
     document.addEventListener("mousedown", onOut);
     return () => document.removeEventListener("mousedown", onOut);
   }, []);
@@ -113,27 +161,20 @@ function Selector({ value, options, onChange, className = "" }) {
 // OI Bar Row
 // ---------------------------------------------------------------------------
 
-/**
- * A single strike row in the OI chart.
- *
- * Layout: [Call OI bar ←] [Strike label] [→ Put OI bar]
- * Bars extend outward from the centre column proportionally to maxOI.
- */
-function OIRow({
-  strike,
-  callOI,
-  putOI,
-  maxOI,
-  isAtm,
-  isMaxCall,
-  isMaxPut,
-  spotLtp,
-}) {
+interface OIRowProps {
+  strike: number;
+  callOI: number;
+  putOI: number;
+  maxOI: number;
+  isAtm: boolean;
+  isMaxCall: boolean;
+  isMaxPut: boolean;
+  spotLtp: number | null;
+}
+
+function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotLtp }: OIRowProps) {
   const callPct = maxOI > 0 ? Math.min((callOI / maxOI) * 100, 100) : 0;
   const putPct  = maxOI > 0 ? Math.min((putOI  / maxOI) * 100, 100) : 0;
-
-  // Spot LTP indicator: show a tiny tick when spot is within this strike's band
-  // We approximate band as ±(half of strike step). For display we just highlight ATM.
 
   return (
     <div
@@ -143,9 +184,8 @@ function OIRow({
           : "border-border-subtle hover:bg-surface-hover/30"
       }`}
     >
-      {/* ── Call OI bar side (left, right-aligned) ── */}
+      {/* Call OI bar side (left, right-aligned) */}
       <div className="flex-1 flex items-center justify-end pr-1 relative h-full overflow-hidden">
-        {/* Bar grows from right to left */}
         <div
           className="absolute right-0 top-1/2 -translate-y-1/2 h-3.5 rounded-l-sm transition-all duration-300"
           style={{
@@ -167,7 +207,7 @@ function OIRow({
         )}
       </div>
 
-      {/* ── Strike label ── */}
+      {/* Strike label */}
       <div
         className={`flex-none w-18 text-center font-mono font-semibold border-x px-1 h-full flex flex-col items-center justify-center ${
           isAtm
@@ -179,7 +219,6 @@ function OIRow({
           <span className="text-[8px] text-accent/70 leading-none">ATM</span>
         )}
         {NUM0.format(strike)}
-        {/* Spot LTP line — only shown on ATM */}
         {isAtm && spotLtp != null && (
           <span className="text-[8px] text-text-muted font-normal font-sans leading-none">
             {spotLtp.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
@@ -187,9 +226,8 @@ function OIRow({
         )}
       </div>
 
-      {/* ── Put OI bar side (right, left-aligned) ── */}
+      {/* Put OI bar side (right, left-aligned) */}
       <div className="flex-1 flex items-center pl-1 relative h-full overflow-hidden">
-        {/* Bar grows from left to right */}
         <div
           className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 rounded-r-sm transition-all duration-300"
           style={{
@@ -218,27 +256,28 @@ function OIRow({
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function OIChartWidget({ node }) {
-  // ── selector state ──
+interface OIChartWidgetProps {
+  node?: FlexLayoutNode;
+}
+
+export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
-  const [expiries, setExpiries] = useState([]);
-  const [selectedExpiry, setSelectedExpiry] = useState(null);
-  const [filter, setFilter] = useState("All"); // All | OI Increase | OI Decrease
+  const [expiries, setExpiries] = useState<string[]>([]);
+  const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterType>("All");
 
-  // ── data state ──
-  const [chain, setChain]   = useState(null);
-  const [spot, setSpot]     = useState(null);
+  const [chain, setChain]     = useState<RawOptionChain | null>(null);
+  const [spot, setSpot]       = useState<Quote | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState(null);
-  const [lastRefresh, setLastRefresh] = useState(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  // ── previous OI snapshot for filter logic ──
-  const prevOIRef = useRef({}); // { "strike_CE": number, "strike_PE": number }
+  const prevOIRef = useRef<Record<string, number>>({});
 
   const symDef   = SYMBOLS[activeSymbolIdx];
   const exchange = symDef.exchange;
 
-  // ── fetch expiries ──
+  // fetch expiries
   useEffect(() => {
     setExpiries([]);
     setSelectedExpiry(null);
@@ -250,18 +289,18 @@ export default function OIChartWidget({ node }) {
       try {
         const data = await getExpiry(symDef.label, exchange);
         if (cancelled) return;
-        const list = Array.isArray(data) ? data : (data?.expiry ?? []);
+        const list = Array.isArray(data) ? data as string[] : ((data as { expiry?: string[] })?.expiry ?? []);
         setExpiries(list);
         if (list.length > 0) setSelectedExpiry(list[0]);
       } catch (e) {
-        if (!cancelled) setError(`Expiry load failed: ${e.message}`);
+        if (!cancelled) setError(`Expiry load failed: ${(e as Error).message}`);
       }
     })();
 
     return () => { cancelled = true; };
   }, [activeSymbolIdx, symDef.label, exchange]);
 
-  // ── fetch chain + spot ──
+  // fetch chain + spot
   const fetchData = useCallback(async () => {
     if (!selectedExpiry) return;
     setLoading(true);
@@ -274,9 +313,8 @@ export default function OIChartWidget({ node }) {
       ]);
 
       if (chainRes.status === "fulfilled") {
-        const newChain = chainRes.value;
-        // Update previous OI snapshot for next cycle
-        const snapshot = {};
+        const newChain = chainRes.value as unknown as RawOptionChain;
+        const snapshot: Record<string, number> = {};
         (newChain.calls ?? []).forEach((c) => {
           const k = `${c.strike_price ?? c.strike}_CE`;
           snapshot[k] = Number(c.oi ?? c.open_interest ?? 0);
@@ -288,7 +326,7 @@ export default function OIChartWidget({ node }) {
         prevOIRef.current = snapshot;
         setChain(newChain);
       } else {
-        setError(`Chain error: ${chainRes.reason?.message}`);
+        setError(`Chain error: ${(chainRes.reason as Error)?.message}`);
       }
 
       if (spotRes.status === "fulfilled") {
@@ -300,7 +338,7 @@ export default function OIChartWidget({ node }) {
     }
   }, [selectedExpiry, symDef, exchange]);
 
-  // ── auto-refresh ──
+  // auto-refresh
   useEffect(() => {
     fetchData();
     const interval = isMarketHours() ? 5000 : 30000;
@@ -308,17 +346,26 @@ export default function OIChartWidget({ node }) {
     return () => clearInterval(id);
   }, [fetchData]);
 
-  // ── computed strike rows ──
+  // computed strike rows
   const { rows, atmStrike, maxOI, totalCallOI, totalPutOI, pcr, maxCallStrike, maxPutStrike } = useMemo(() => {
     if (!chain) {
-      return { rows: [], atmStrike: null, maxOI: 0, totalCallOI: 0, totalPutOI: 0, pcr: null, maxCallStrike: null, maxPutStrike: null };
+      return {
+        rows: [] as OIRowData[],
+        atmStrike: null as number | null,
+        maxOI: 0,
+        totalCallOI: 0,
+        totalPutOI: 0,
+        pcr: null as number | null,
+        maxCallStrike: null as number | null,
+        maxPutStrike: null as number | null,
+      };
     }
 
-    const callMap = {};
-    const putMap  = {};
+    const callMap: Record<number, RawOptionRow> = {};
+    const putMap:  Record<number, RawOptionRow> = {};
 
-    (chain.calls ?? []).forEach((c) => { callMap[c.strike_price ?? c.strike] = c; });
-    (chain.puts  ?? []).forEach((p) => { putMap[p.strike_price  ?? p.strike] = p; });
+    (chain.calls ?? []).forEach((c) => { callMap[c.strike_price ?? c.strike ?? 0] = c; });
+    (chain.puts  ?? []).forEach((p) => { putMap[p.strike_price  ?? p.strike  ?? 0] = p; });
 
     const allStrikes = Array.from(
       new Set([...Object.keys(callMap).map(Number), ...Object.keys(putMap).map(Number)])
@@ -331,13 +378,12 @@ export default function OIChartWidget({ node }) {
           allStrikes[0] ?? 0)
       : allStrikes[Math.floor(allStrikes.length / 2)] ?? null);
 
-    const atmIdx = allStrikes.indexOf(atm);
+    const atmIdx = allStrikes.indexOf(atm ?? 0);
     const lo = Math.max(0, atmIdx - STRIKES_AROUND_ATM);
     const hi = Math.min(allStrikes.length - 1, atmIdx + STRIKES_AROUND_ATM);
     const visible = allStrikes.slice(lo, hi + 1);
 
-    // Build row data
-    let rawRows = visible.map((s) => {
+    let rawRows: OIRowData[] = visible.map((s) => {
       const callOI = Number(callMap[s]?.oi ?? callMap[s]?.open_interest ?? 0);
       const putOI  = Number(putMap[s]?.oi  ?? putMap[s]?.open_interest  ?? 0);
       const prevCallOI = prevOIRef.current[`${s}_CE`] ?? callOI;
@@ -351,7 +397,6 @@ export default function OIChartWidget({ node }) {
       };
     });
 
-    // Apply filter
     if (filter === "OI Increase") {
       rawRows = rawRows.filter((r) => r.callOIChange > 0 || r.putOIChange > 0);
     } else if (filter === "OI Decrease") {
@@ -365,12 +410,17 @@ export default function OIChartWidget({ node }) {
     );
 
     const totalCallOI = rawRows.reduce((s, r) => s + r.callOI, 0);
-    const totalPutOI  = rawRows.reduce((s, r) => s + r.putOI, 0);
-    const pcr = chain.pcr ?? (totalCallOI > 0 ? totalPutOI / totalCallOI : null);
+    const totalPutOI  = rawRows.reduce((s, r) => s + r.putOI,  0);
+    const pcrVal = chain.pcr ?? (totalCallOI > 0 ? totalPutOI / totalCallOI : null);
 
-    // Max OI strikes = support / resistance
-    const maxCallRow = rawRows.reduce((a, b) => b.callOI > a.callOI ? b : a, rawRows[0] ?? { callOI: 0 });
-    const maxPutRow  = rawRows.reduce((a, b) => b.putOI  > a.putOI  ? b : a, rawRows[0] ?? { putOI: 0 });
+    const maxCallRow = rawRows.reduce(
+      (a, b) => b.callOI > a.callOI ? b : a,
+      rawRows[0] ?? { callOI: 0, strike: 0, putOI: 0, callOIChange: 0, putOIChange: 0 }
+    );
+    const maxPutRow = rawRows.reduce(
+      (a, b) => b.putOI > a.putOI ? b : a,
+      rawRows[0] ?? { callOI: 0, strike: 0, putOI: 0, callOIChange: 0, putOIChange: 0 }
+    );
 
     return {
       rows: rawRows,
@@ -378,27 +428,22 @@ export default function OIChartWidget({ node }) {
       maxOI,
       totalCallOI,
       totalPutOI,
-      pcr,
+      pcr: pcrVal,
       maxCallStrike: maxCallRow?.strike ?? null,
       maxPutStrike:  maxPutRow?.strike  ?? null,
     };
   }, [chain, spot, filter]);
 
   const spotLtp = spot?.ltp ?? null;
-
-  // ── expiry buttons (first 5) ──
   const expiryButtons = expiries.slice(0, 5);
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Render
-  // ────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5 space-y-1.5">
 
-        {/* Row 1: symbol, expiry, refresh */}
+        {/* Row 1 */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <Selector
             value={symDef.label}
@@ -409,12 +454,10 @@ export default function OIChartWidget({ node }) {
             }}
           />
 
-          {/* Exchange badge (read-only display) */}
           <span className="px-2 py-1 text-[10px] font-medium text-text-muted bg-surface-base border border-border-default rounded">
             {exchange}
           </span>
 
-          {/* Expiry buttons */}
           <div className="flex items-center gap-1">
             {expiryButtons.length === 0 && !loading && (
               <span className="text-[10px] text-text-muted px-1">No expiries</span>
@@ -436,7 +479,6 @@ export default function OIChartWidget({ node }) {
 
           <div className="flex-1" />
 
-          {/* Manual refresh */}
           <button
             onClick={fetchData}
             disabled={loading}
@@ -447,9 +489,8 @@ export default function OIChartWidget({ node }) {
           </button>
         </div>
 
-        {/* Row 2: spot, PCR, filter buttons */}
+        {/* Row 2: spot, PCR, filter */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Spot LTP */}
           {spotLtp != null ? (
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-text-muted uppercase tracking-wide">Spot</span>
@@ -461,7 +502,6 @@ export default function OIChartWidget({ node }) {
             <span className="text-[10px] text-text-muted">Spot: —</span>
           )}
 
-          {/* PCR badge */}
           {pcr != null && (
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-text-muted uppercase tracking-wide">PCR</span>
@@ -480,7 +520,6 @@ export default function OIChartWidget({ node }) {
             </div>
           )}
 
-          {/* S/R labels */}
           {maxPutStrike != null && (
             <div className="flex items-center gap-1">
               <span className="text-[8px] text-profit/80 bg-profit/10 border border-profit/20 rounded px-1 py-0.5 font-mono">
@@ -498,7 +537,6 @@ export default function OIChartWidget({ node }) {
 
           <div className="flex-1" />
 
-          {/* Filter buttons */}
           <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
             {FILTERS.map((f) => (
               <button
@@ -517,7 +555,7 @@ export default function OIChartWidget({ node }) {
         </div>
       </div>
 
-      {/* ── Error banner ── */}
+      {/* Error banner */}
       {error && (
         <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
           <AlertCircle size={11} />
@@ -525,7 +563,7 @@ export default function OIChartWidget({ node }) {
         </div>
       )}
 
-      {/* ── Column header row ── */}
+      {/* Column header row */}
       <div className="flex-none flex items-center text-[10px] text-text-muted bg-surface-card border-b border-border-default h-5.5 px-0">
         <div className="flex-1 text-right pr-2 uppercase tracking-wide text-loss/70">
           Call OI
@@ -538,7 +576,7 @@ export default function OIChartWidget({ node }) {
         </div>
       </div>
 
-      {/* ── Chart body ── */}
+      {/* Chart body */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {!selectedExpiry && !loading ? (
           <div className="h-full flex items-center justify-center text-text-muted text-xs">
@@ -572,7 +610,7 @@ export default function OIChartWidget({ node }) {
         )}
       </div>
 
-      {/* ── Footer: totals, timestamps ── */}
+      {/* Footer */}
       {chain && rows.length > 0 && (
         <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-[10px]">
           <span className="text-text-muted uppercase tracking-wide">Total</span>

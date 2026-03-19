@@ -6,8 +6,6 @@
  *   - ATM strike auto-detected from spot LTP
  *   - Three headline values: Straddle Price (CE LTP + PE LTP), CE Price, PE Price
  *   - TradingView Lightweight Charts v5 line chart of straddle price over time
- *     - Uses LineSeries (v5 API: chart.addSeries(LineSeries, options))
- *     - Accumulates live data points; falls back gracefully when history unavailable
  *   - Overlay toggles: Straddle / Spot / Synthetic Future
  *   - Auto-refresh: 3s market hours, 30s off-market
  *   - P&L display when a straddle position is detected in positions data
@@ -15,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createChart, LineSeries } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, LineData, Time } from "lightweight-charts";
 import {
   RefreshCw,
   ChevronDown,
@@ -29,24 +28,74 @@ import {
   getQuotes,
   getPositionbook,
 } from "../../../services/api";
+import type { Quote, Position } from "../../../types/api";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface FlexLayoutNode {
+  getId?: () => string;
+}
+
+interface SymbolDef {
+  label: string;
+  exchange: string;
+  spotSymbol: string;
+  spotExchange: string;
+}
+
+interface RawOptionRow {
+  strike_price?: number;
+  strike?: number;
+  ltp?: number;
+  last_price?: number;
+}
+
+interface RawOptionChain {
+  calls?: RawOptionRow[];
+  puts?: RawOptionRow[];
+  atm_strike?: number;
+}
+
+type OverlayName = "Straddle" | "Spot" | "SynFut";
+
+interface ChartPoint {
+  time: Time;
+  value: number;
+}
+
+interface StraddleChartProps {
+  dataPoints: ChartPoint[];
+  spotPoints: ChartPoint[];
+  synfutPoints: ChartPoint[];
+  activeOverlays: OverlayName[];
+  height?: number;
+}
+
+interface StraddleChartFillProps {
+  straddlePoints: ChartPoint[];
+  spotPoints: ChartPoint[];
+  synfutPoints: ChartPoint[];
+  activeOverlays: OverlayName[];
+}
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const SYMBOLS = [
+const SYMBOLS: SymbolDef[] = [
   { label: "NIFTY",     exchange: "NFO", spotSymbol: "NIFTY",     spotExchange: "NSE_INDEX" },
   { label: "BANKNIFTY", exchange: "NFO", spotSymbol: "BANKNIFTY", spotExchange: "NSE_INDEX" },
   { label: "FINNIFTY",  exchange: "NFO", spotSymbol: "FINNIFTY",  spotExchange: "NSE_INDEX" },
 ];
 
-const OVERLAYS = ["Straddle", "Spot", "SynFut"];
+const OVERLAYS: OverlayName[] = ["Straddle", "Spot", "SynFut"];
 
-// Chart theme colours aligned with FlintTrade dark theme
 const CHART_COLORS = {
-  straddle:   "#3b82f6",  // accent blue
-  spot:       "#eab308",  // warning yellow
-  synfut:     "#a78bfa",  // purple
+  straddle:   "#3b82f6",
+  spot:       "#eab308",
+  synfut:     "#a78bfa",
   background: "#0a0a0f",
   text:       "#71717a",
   grid:       "#1e1e2e",
@@ -57,7 +106,7 @@ const CHART_COLORS = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function isMarketHours() {
+function isMarketHours(): boolean {
   const now = new Date();
   const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const day = ist.getDay();
@@ -66,15 +115,15 @@ function isMarketHours() {
   return mins >= 555 && mins <= 930;
 }
 
-const NUM = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
+const NUM  = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-function fmtPrice(v) {
+function fmtPrice(v: number | null | undefined): string {
   if (v == null || v === 0) return "—";
   return NUM.format(v);
 }
 
-function fmtExpiry(raw) {
+function fmtExpiry(raw: string): string {
   if (!raw) return raw;
   try {
     const d = new Date(raw);
@@ -85,21 +134,59 @@ function fmtExpiry(raw) {
   }
 }
 
-/** Convert a JS Date to a lightweight-charts UTC seconds timestamp. */
-function toChartTime(date) {
-  return Math.floor(date.getTime() / 1000);
+function toChartTime(date: Date): Time {
+  return Math.floor(date.getTime() / 1000) as unknown as Time;
+}
+
+function appendPoint(arr: ChartPoint[], point: ChartPoint): void {
+  if (arr.length > 0 && arr[arr.length - 1].time === point.time) {
+    arr[arr.length - 1] = point;
+  } else {
+    arr.push(point);
+  }
+}
+
+function findAtm(chain: RawOptionChain, spotLtp: number): number | null {
+  if (!chain) return null;
+  if (chain.atm_strike) return Number(chain.atm_strike);
+  if (!spotLtp) return null;
+
+  const strikes = Array.from(new Set([
+    ...(chain.calls ?? []).map((c) => Number(c.strike_price ?? c.strike)),
+    ...(chain.puts  ?? []).map((p) => Number(p.strike_price ?? p.strike)),
+  ])).filter(Boolean).sort((a, b) => a - b);
+
+  if (strikes.length === 0) return null;
+
+  return strikes.reduce((prev, cur) =>
+    Math.abs(cur - spotLtp) < Math.abs(prev - spotLtp) ? cur : prev,
+    strikes[0]
+  );
+}
+
+function findOption(arr: RawOptionRow[], strike: number): RawOptionRow | null {
+  return arr.find((o) => Number(o.strike_price ?? o.strike) === Number(strike)) ?? null;
 }
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function Selector({ value, options, onChange, className = "" }) {
+interface SelectorProps {
+  value: string;
+  options: string[];
+  onChange: (val: string) => void;
+  className?: string;
+}
+
+function Selector({ value, options, onChange, className = "" }: SelectorProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function onOut(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    function onOut(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
     document.addEventListener("mousedown", onOut);
     return () => document.removeEventListener("mousedown", onOut);
   }, []);
@@ -132,11 +219,15 @@ function Selector({ value, options, onChange, className = "" }) {
   );
 }
 
-/** The three headline price boxes. */
-function PriceHeadline({ straddlePrice, cePrice, pePrice }) {
+interface PriceHeadlineProps {
+  straddlePrice: number | null;
+  cePrice: number | null;
+  pePrice: number | null;
+}
+
+function PriceHeadline({ straddlePrice, cePrice, pePrice }: PriceHeadlineProps) {
   return (
     <div className="flex items-stretch gap-px bg-border-default">
-      {/* Straddle = CE + PE */}
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
         <span className="text-[10px] text-text-muted uppercase tracking-wider">Straddle</span>
         <span className="font-mono text-xl font-bold text-text-primary leading-none">
@@ -145,7 +236,6 @@ function PriceHeadline({ straddlePrice, cePrice, pePrice }) {
         <span className="text-[9px] text-text-muted font-normal">CE + PE</span>
       </div>
 
-      {/* CE price */}
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
         <span className="text-[10px] text-text-muted uppercase tracking-wider">CE</span>
         <span className="font-mono text-base font-semibold text-loss leading-none">
@@ -154,7 +244,6 @@ function PriceHeadline({ straddlePrice, cePrice, pePrice }) {
         <span className="text-[9px] text-loss/60">Call</span>
       </div>
 
-      {/* PE price */}
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
         <span className="text-[10px] text-text-muted uppercase tracking-wider">PE</span>
         <span className="font-mono text-base font-semibold text-profit leading-none">
@@ -166,18 +255,20 @@ function PriceHeadline({ straddlePrice, cePrice, pePrice }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Chart component (internal — isolated lifecycle)
-// ---------------------------------------------------------------------------
+// Internal chart component (isolated lifecycle)
+function StraddleChart({
+  dataPoints,
+  spotPoints,
+  synfutPoints,
+  activeOverlays,
+  height = 180,
+}: StraddleChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef     = useRef<IChartApi | null>(null);
+  const straddleRef  = useRef<ISeriesApi<"Line"> | null>(null);
+  const spotRef      = useRef<ISeriesApi<"Line"> | null>(null);
+  const synfutRef    = useRef<ISeriesApi<"Line"> | null>(null);
 
-function StraddleChart({ dataPoints, spotPoints, synfutPoints, activeOverlays, height = 180 }) {
-  const containerRef = useRef(null);
-  const chartRef     = useRef(null);
-  const straddleRef  = useRef(null);
-  const spotRef      = useRef(null);
-  const synfutRef    = useRef(null);
-
-  // Create chart once
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -216,7 +307,7 @@ function StraddleChart({ dataPoints, spotPoints, synfutPoints, activeOverlays, h
     spotRef.current = chart.addSeries(LineSeries, {
       color:     CHART_COLORS.spot,
       lineWidth: 1,
-      lineStyle: 2, // dashed
+      lineStyle: 2,
       priceLineVisible: false,
       lastValueVisible: true,
       visible: false,
@@ -247,29 +338,27 @@ function StraddleChart({ dataPoints, spotPoints, synfutPoints, activeOverlays, h
     };
   }, [height]);
 
-  // Update data
   useEffect(() => {
     if (!straddleRef.current) return;
     if (dataPoints.length > 0) {
-      straddleRef.current.setData(dataPoints);
+      straddleRef.current.setData(dataPoints as LineData[]);
     }
   }, [dataPoints]);
 
   useEffect(() => {
     if (!spotRef.current) return;
     if (spotPoints.length > 0) {
-      spotRef.current.setData(spotPoints);
+      spotRef.current.setData(spotPoints as LineData[]);
     }
   }, [spotPoints]);
 
   useEffect(() => {
     if (!synfutRef.current) return;
     if (synfutPoints.length > 0) {
-      synfutRef.current.setData(synfutPoints);
+      synfutRef.current.setData(synfutPoints as LineData[]);
     }
   }, [synfutPoints]);
 
-  // Toggle overlay visibility
   useEffect(() => {
     if (!straddleRef.current || !spotRef.current || !synfutRef.current) return;
     straddleRef.current.applyOptions({ visible: activeOverlays.includes("Straddle") });
@@ -280,36 +369,64 @@ function StraddleChart({ dataPoints, spotPoints, synfutPoints, activeOverlays, h
   return <div ref={containerRef} className="w-full" style={{ height }} />;
 }
 
+function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOverlays }: StraddleChartFillProps) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(180);
+
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setHeight(Math.max(80, entry.contentRect.height));
+      }
+    });
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={wrapRef} className="w-full h-full">
+      <StraddleChart
+        dataPoints={straddlePoints}
+        spotPoints={spotPoints}
+        synfutPoints={synfutPoints}
+        activeOverlays={activeOverlays}
+        height={height}
+      />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function StraddleWidget({ node }) {
-  // ── selector state ──
+interface StraddleWidgetProps {
+  node?: FlexLayoutNode;
+}
+
+export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
-  const [expiries, setExpiries]               = useState([]);
-  const [selectedExpiry, setSelectedExpiry]   = useState(null);
-  const [activeOverlays, setActiveOverlays]   = useState(["Straddle"]);
+  const [expiries, setExpiries]               = useState<string[]>([]);
+  const [selectedExpiry, setSelectedExpiry]   = useState<string | null>(null);
+  const [activeOverlays, setActiveOverlays]   = useState<OverlayName[]>(["Straddle"]);
 
-  // ── data state ──
-  const [chain, setChain]         = useState(null);
-  const [spot, setSpot]           = useState(null);
-  const [positions, setPositions] = useState(null);
+  const [chain, setChain]         = useState<RawOptionChain | null>(null);
+  const [spot, setSpot]           = useState<Quote | null>(null);
+  const [positions, setPositions] = useState<Position[] | null>(null);
   const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState(null);
-  const [lastRefresh, setLastRefresh] = useState(null);
+  const [error, setError]         = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  // ── accumulated chart data ──
-  // Each point: { time: UTC seconds, value: number }
-  const straddlePointsRef = useRef([]);
-  const spotPointsRef     = useRef([]);
-  const synfutPointsRef   = useRef([]);
-  const [chartVersion, setChartVersion] = useState(0); // trigger re-render for chart data
+  const straddlePointsRef = useRef<ChartPoint[]>([]);
+  const spotPointsRef     = useRef<ChartPoint[]>([]);
+  const synfutPointsRef   = useRef<ChartPoint[]>([]);
+  const [chartVersion, setChartVersion] = useState(0);
 
   const symDef   = SYMBOLS[activeSymbolIdx];
   const exchange = symDef.exchange;
 
-  // ── fetch expiries ──
+  // fetch expiries
   useEffect(() => {
     setExpiries([]);
     setSelectedExpiry(null);
@@ -324,18 +441,18 @@ export default function StraddleWidget({ node }) {
       try {
         const data = await getExpiry(symDef.label, exchange);
         if (cancelled) return;
-        const list = Array.isArray(data) ? data : (data?.expiry ?? []);
+        const list = Array.isArray(data) ? data as string[] : ((data as { expiry?: string[] })?.expiry ?? []);
         setExpiries(list);
         if (list.length > 0) setSelectedExpiry(list[0]);
       } catch (e) {
-        if (!cancelled) setError(`Expiry load failed: ${e.message}`);
+        if (!cancelled) setError(`Expiry load failed: ${(e as Error).message}`);
       }
     })();
 
     return () => { cancelled = true; };
   }, [activeSymbolIdx, symDef.label, exchange]);
 
-  // ── main data fetch ──
+  // main data fetch
   const fetchData = useCallback(async () => {
     if (!selectedExpiry) return;
     setLoading(true);
@@ -348,14 +465,14 @@ export default function StraddleWidget({ node }) {
         getPositionbook(),
       ]);
 
-      let newChain = null;
-      let newSpot  = null;
+      let newChain: RawOptionChain | null = null;
+      let newSpot: Quote | null  = null;
 
       if (chainRes.status === "fulfilled") {
-        newChain = chainRes.value;
+        newChain = chainRes.value as unknown as RawOptionChain;
         setChain(newChain);
       } else {
-        setError(`Chain error: ${chainRes.reason?.message}`);
+        setError(`Chain error: ${(chainRes.reason as Error)?.message}`);
       }
 
       if (spotRes.status === "fulfilled") {
@@ -367,7 +484,7 @@ export default function StraddleWidget({ node }) {
         setPositions(posRes.value);
       }
 
-      // ── Accumulate chart data points ──
+      // Accumulate chart data points
       if (newChain && newSpot) {
         const spotLtp = Number(newSpot.ltp ?? 0);
         const atm = findAtm(newChain, spotLtp);
@@ -381,14 +498,12 @@ export default function StraddleWidget({ node }) {
           if (straddleVal > 0) {
             const t = toChartTime(new Date());
 
-            // Append to straddle series (deduplicate same-second)
             appendPoint(straddlePointsRef.current, { time: t, value: straddleVal });
 
             if (spotLtp > 0) {
               appendPoint(spotPointsRef.current, { time: t, value: spotLtp });
             }
 
-            // Synthetic future = spot + CE - PE
             const synfutVal = spotLtp + ceLtp - peLtp;
             if (synfutVal > 0) {
               appendPoint(synfutPointsRef.current, { time: t, value: synfutVal });
@@ -404,7 +519,7 @@ export default function StraddleWidget({ node }) {
     }
   }, [selectedExpiry, symDef, exchange]);
 
-  // ── auto-refresh ──
+  // auto-refresh
   useEffect(() => {
     fetchData();
     const interval = isMarketHours() ? 3000 : 30000;
@@ -412,7 +527,7 @@ export default function StraddleWidget({ node }) {
     return () => clearInterval(id);
   }, [fetchData]);
 
-  // ── derived values ──
+  // derived values
   const { atmStrike, ceLtp, peLtp, straddlePrice, pnl } = useMemo(() => {
     if (!chain || !spot) {
       return { atmStrike: null, ceLtp: null, peLtp: null, straddlePrice: null, pnl: null };
@@ -429,16 +544,15 @@ export default function StraddleWidget({ node }) {
     const peLtpVal = Number(pe?.ltp ?? pe?.last_price ?? 0) || null;
     const straddleVal = (ceLtpVal != null && peLtpVal != null) ? ceLtpVal + peLtpVal : null;
 
-    // P&L: look for matching positions (CE + PE at ATM strike)
-    let pnlVal = null;
+    let pnlVal: number | null = null;
     if (positions && Array.isArray(positions)) {
       const straddlePos = positions.filter((p) => {
-        const sym = (p.symbol ?? p.tradingsymbol ?? "").toUpperCase();
+        const sym = ((p as unknown as { symbol?: string; tradingsymbol?: string }).symbol ?? (p as unknown as { tradingsymbol?: string }).tradingsymbol ?? "").toUpperCase();
         return sym.includes(String(atm)) && (sym.endsWith("CE") || sym.endsWith("PE"));
       });
       if (straddlePos.length > 0) {
         pnlVal = straddlePos.reduce((s, p) => {
-          return s + Number(p.pnl ?? p.unrealised_pnl ?? p.m2m ?? 0);
+          return s + Number(p.pnl ?? 0);
         }, 0);
       }
     }
@@ -446,22 +560,20 @@ export default function StraddleWidget({ node }) {
     return { atmStrike: atm, ceLtp: ceLtpVal, peLtp: peLtpVal, straddlePrice: straddleVal, pnl: pnlVal };
   }, [chain, spot, positions]);
 
-  // ── toggle overlay ──
-  function toggleOverlay(name) {
+  function toggleOverlay(name: OverlayName) {
     setActiveOverlays((prev) =>
       prev.includes(name) ? prev.filter((o) => o !== name) : [...prev, name]
     );
   }
 
-  // ── expiry buttons (first 5) ──
   const expiryButtons = expiries.slice(0, 5);
   const spotLtp = spot?.ltp ?? null;
-  const spotChange = spot?.ltp && spot?.prev_close
-    ? Number(spot.ltp) - Number(spot.prev_close)
+  const spotChange = spot?.ltp && (spot as unknown as { prev_close?: number }).prev_close
+    ? Number(spot.ltp) - Number((spot as unknown as { prev_close?: number }).prev_close)
     : null;
   const spotUp = spotChange == null ? null : spotChange >= 0;
 
-  // Stable chart data arrays (only change when chartVersion bumps)
+  // Stable chart data arrays
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const chartStraddlePoints = useMemo(() => [...straddlePointsRef.current], [chartVersion]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -471,16 +583,13 @@ export default function StraddleWidget({ node }) {
 
   const hasChartData = chartStraddlePoints.length > 0;
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Render
-  // ────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5 space-y-1.5">
 
-        {/* Row 1: symbol, expiry, refresh */}
+        {/* Row 1 */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <Selector
             value={symDef.label}
@@ -491,7 +600,6 @@ export default function StraddleWidget({ node }) {
             }}
           />
 
-          {/* Expiry buttons */}
           <div className="flex items-center gap-1">
             {expiryButtons.length === 0 && !loading && (
               <span className="text-[10px] text-text-muted px-1">No expiries</span>
@@ -513,14 +621,12 @@ export default function StraddleWidget({ node }) {
 
           <div className="flex-1" />
 
-          {/* ATM strike badge */}
           {atmStrike != null && (
             <span className="px-2 py-0.5 text-[10px] font-mono font-semibold text-accent bg-accent/10 border border-accent/30 rounded">
               ATM {NUM0.format(atmStrike)}
             </span>
           )}
 
-          {/* Manual refresh */}
           <button
             onClick={fetchData}
             disabled={loading}
@@ -531,7 +637,7 @@ export default function StraddleWidget({ node }) {
           </button>
         </div>
 
-        {/* Row 2: spot price + change */}
+        {/* Row 2: spot + P&L */}
         <div className="flex items-center gap-3 flex-wrap">
           {spotLtp != null ? (
             <div className="flex items-center gap-1.5">
@@ -550,7 +656,6 @@ export default function StraddleWidget({ node }) {
             <span className="text-[10px] text-text-muted">Spot: —</span>
           )}
 
-          {/* P&L badge */}
           {pnl != null && (
             <div className={`flex items-center gap-1 ml-2 px-2 py-0.5 rounded border text-xs font-mono font-semibold ${
               pnl >= 0
@@ -571,7 +676,7 @@ export default function StraddleWidget({ node }) {
         </div>
       </div>
 
-      {/* ── Error banner ── */}
+      {/* Error banner */}
       {error && (
         <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
           <AlertCircle size={11} />
@@ -579,7 +684,7 @@ export default function StraddleWidget({ node }) {
         </div>
       )}
 
-      {/* ── Headline prices ── */}
+      {/* Headline prices */}
       <div className="flex-none">
         <PriceHeadline
           straddlePrice={straddlePrice}
@@ -588,7 +693,7 @@ export default function StraddleWidget({ node }) {
         />
       </div>
 
-      {/* ── Overlay toggles ── */}
+      {/* Overlay toggles */}
       <div className="flex-none flex items-center gap-1 px-2 py-1 bg-surface-card border-b border-border-default">
         <span className="text-[10px] text-text-muted mr-1">Overlay</span>
         {OVERLAYS.map((name) => {
@@ -616,7 +721,7 @@ export default function StraddleWidget({ node }) {
         })}
       </div>
 
-      {/* ── Chart area ── */}
+      {/* Chart area */}
       <div className="flex-1 overflow-hidden relative">
         {!selectedExpiry && !loading ? (
           <div className="h-full flex items-center justify-center text-text-muted text-xs">
@@ -646,79 +751,4 @@ export default function StraddleWidget({ node }) {
       </div>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Full-height chart container — fills whatever flex-1 gives it
-// ---------------------------------------------------------------------------
-
-function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOverlays }) {
-  const wrapRef = useRef(null);
-  const [height, setHeight] = useState(180);
-
-  useEffect(() => {
-    if (!wrapRef.current) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setHeight(Math.max(80, entry.contentRect.height));
-      }
-    });
-    ro.observe(wrapRef.current);
-    return () => ro.disconnect();
-  }, []);
-
-  return (
-    <div ref={wrapRef} className="w-full h-full">
-      <StraddleChart
-        dataPoints={straddlePoints}
-        spotPoints={spotPoints}
-        synfutPoints={synfutPoints}
-        activeOverlays={activeOverlays}
-        height={height}
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Pure helpers (no hooks — safe to call inside useMemo)
-// ---------------------------------------------------------------------------
-
-/** Find the ATM strike from an option chain + spot price. */
-function findAtm(chain, spotLtp) {
-  if (!chain) return null;
-
-  if (chain.atm_strike) return Number(chain.atm_strike);
-
-  if (!spotLtp) return null;
-
-  const strikes = Array.from(new Set([
-    ...(chain.calls ?? []).map((c) => Number(c.strike_price ?? c.strike)),
-    ...(chain.puts  ?? []).map((p) => Number(p.strike_price ?? p.strike)),
-  ])).filter(Boolean).sort((a, b) => a - b);
-
-  if (strikes.length === 0) return null;
-
-  return strikes.reduce((prev, cur) =>
-    Math.abs(cur - spotLtp) < Math.abs(prev - spotLtp) ? cur : prev,
-    strikes[0]
-  );
-}
-
-/** Find a specific option row by strike from a calls or puts array. */
-function findOption(arr, strike) {
-  return arr.find((o) => Number(o.strike_price ?? o.strike) === Number(strike)) ?? null;
-}
-
-/**
- * Append a data point to a sorted chart series array.
- * Replaces the last point if its timestamp matches (same second).
- * Keeps the array sorted by time (lightweight-charts requirement).
- */
-function appendPoint(arr, point) {
-  if (arr.length > 0 && arr[arr.length - 1].time === point.time) {
-    arr[arr.length - 1] = point;
-  } else {
-    arr.push(point);
-  }
 }

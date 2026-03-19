@@ -15,12 +15,75 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { RefreshCw, ChevronDown, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { getExpiry, getOptionChain, getQuotes, placeOrder } from "../../../services/api";
+import type { Quote } from "../../../types/api";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface FlexLayoutNode {
+  getId?: () => string;
+}
+
+interface SymbolDef {
+  label: string;
+  exchange: string;
+  spotSymbol: string;
+  spotExchange: string;
+}
+
+type ViewType = "LTP" | "OI" | "GREEKS";
+
+/** Raw option row from OpenAlgo optionchain API */
+interface RawOptionRow {
+  strike_price?: number;
+  strike?: number;
+  ltp?: number;
+  last_price?: number;
+  change_percent?: number;
+  change_pct?: number;
+  oi?: number;
+  open_interest?: number;
+  oi_change?: number;
+  delta?: number;
+  iv?: number;
+  implied_volatility?: number;
+}
+
+/** OpenAlgo optionchain raw API shape */
+interface RawOptionChain {
+  calls?: RawOptionRow[];
+  puts?: RawOptionRow[];
+  atm_strike?: number;
+  pcr?: number;
+}
+
+interface StrikeRow {
+  strike: number;
+  call: RawOptionRow | null;
+  put: RawOptionRow | null;
+}
+
+interface OrderToast {
+  text: string;
+  ok: boolean;
+}
+
+interface OrderParams {
+  symbol: string;
+  exchange: string;
+  strike: number;
+  optionType: string;
+  expiry: string;
+  action: string;
+  ltp: number | null;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const SYMBOLS = [
+const SYMBOLS: SymbolDef[] = [
   { label: "NIFTY",      exchange: "NFO", spotSymbol: "NIFTY",      spotExchange: "NSE_INDEX" },
   { label: "BANKNIFTY",  exchange: "NFO", spotSymbol: "BANKNIFTY",  spotExchange: "NSE_INDEX" },
   { label: "FINNIFTY",   exchange: "NFO", spotSymbol: "FINNIFTY",   spotExchange: "NSE_INDEX" },
@@ -29,32 +92,31 @@ const SYMBOLS = [
 ];
 
 const EXCHANGES = ["NFO", "BFO"];
-const VIEWS = ["LTP", "OI", "GREEKS"];
-const STRIKES_AROUND_ATM = 10; // each side
+const VIEWS: ViewType[] = ["LTP", "OI", "GREEKS"];
+const STRIKES_AROUND_ATM = 10;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Returns true during NSE/BSE market hours (Mon–Fri 09:15–15:30 IST). */
-function isMarketHours() {
+function isMarketHours(): boolean {
   const now = new Date();
   const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const day = ist.getDay();
   if (day === 0 || day === 6) return false;
   const mins = ist.getHours() * 60 + ist.getMinutes();
-  return mins >= 555 && mins <= 930; // 09:15 – 15:30
+  return mins >= 555 && mins <= 930;
 }
 
-const NUM = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
+const NUM  = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-function fmtLtp(v) {
+function fmtLtp(v: number | null | undefined): string {
   if (v == null || v === 0) return "—";
   return NUM.format(v);
 }
 
-function fmtOI(v) {
+function fmtOI(v: number | null | undefined): string {
   if (v == null || v === 0) return "—";
   const n = Number(v);
   if (n >= 1_00_00_000) return `${(n / 1_00_00_000).toFixed(1)}Cr`;
@@ -63,24 +125,23 @@ function fmtOI(v) {
   return NUM0.format(n);
 }
 
-function fmtChg(v) {
+function fmtChg(v: number | null | undefined): string {
   if (v == null) return "—";
   const n = Number(v);
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
-function fmtDelta(v) {
+function fmtDelta(v: number | null | undefined): string {
   if (v == null) return "—";
   return Number(v).toFixed(3);
 }
 
-function fmtIV(v) {
+function fmtIV(v: number | null | undefined): string {
   if (v == null) return "—";
   return `${(Number(v) * 100).toFixed(1)}%`;
 }
 
-/** Format a raw expiry string (YYYY-MM-DD or DD-Mon-YYYY) to short "27 Mar" style. */
-function fmtExpiry(raw) {
+function fmtExpiry(raw: string): string {
   if (!raw) return raw;
   try {
     const d = new Date(raw);
@@ -95,11 +156,20 @@ function fmtExpiry(raw) {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-/** Tiny Buy / Sell buttons used in the chain rows. */
-function BuySellButtons({ symbol, exchange, strike, optionType, expiry, ltp, onOrder }) {
-  const [loading, setLoading] = useState(null); // "B" | "S" | null
+interface BuySellButtonsProps {
+  symbol: string;
+  exchange: string;
+  strike: number;
+  optionType: string;
+  expiry: string | null;
+  ltp: number | null;
+  onOrder: (params: OrderParams) => Promise<void>;
+}
 
-  async function handleClick(action) {
+function BuySellButtons({ symbol, exchange, strike, optionType, expiry, ltp, onOrder }: BuySellButtonsProps) {
+  const [loading, setLoading] = useState<"B" | "S" | null>(null);
+
+  async function handleClick(action: "B" | "S") {
     if (!symbol || !expiry) return;
     setLoading(action);
     try {
@@ -131,8 +201,13 @@ function BuySellButtons({ symbol, exchange, strike, optionType, expiry, ltp, onO
   );
 }
 
-/** OI mini bar — visual representation of open interest relative to max in chain. */
-function OIBar({ value, maxValue, side }) {
+interface OIBarProps {
+  value: number | null | undefined;
+  maxValue: number;
+  side: "call" | "put";
+}
+
+function OIBar({ value, maxValue, side }: OIBarProps) {
   if (!value || !maxValue) return null;
   const pct = Math.min((Number(value) / Number(maxValue)) * 100, 100);
   return (
@@ -152,13 +227,21 @@ function OIBar({ value, maxValue, side }) {
   );
 }
 
-/** Dropdown selector component. */
-function Selector({ value, options, onChange, className = "" }) {
+interface SelectorProps {
+  value: string;
+  options: string[];
+  onChange: (val: string) => void;
+  className?: string;
+}
+
+function Selector({ value, options, onChange, className = "" }: SelectorProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function onOut(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    function onOut(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
     document.addEventListener("mousedown", onOut);
     return () => document.removeEventListener("mousedown", onOut);
   }, []);
@@ -195,32 +278,32 @@ function Selector({ value, options, onChange, className = "" }) {
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function OptionChainWidget({ node }) {
-  // ── selector state ──
+interface OptionChainWidgetProps {
+  node?: FlexLayoutNode;
+}
+
+export default function OptionChainWidget({ node: _node }: OptionChainWidgetProps) {
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
-  const [exchangeOverride, setExchangeOverride] = useState(null); // null = use symbol default
-  const [expiries, setExpiries] = useState([]);
-  const [selectedExpiry, setSelectedExpiry] = useState(null);
-  const [view, setView] = useState("LTP"); // LTP | OI | GREEKS
+  const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
+  const [expiries, setExpiries] = useState<string[]>([]);
+  const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
+  const [view, setView] = useState<ViewType>("LTP");
 
-  // ── data state ──
-  const [chain, setChain] = useState(null);    // { calls, puts, atm_strike, pcr }
-  const [spot, setSpot]   = useState(null);    // { ltp, prev_close }
+  const [chain, setChain] = useState<RawOptionChain | null>(null);
+  const [spot, setSpot]   = useState<Quote | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [lastRefresh, setLastRefresh] = useState(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  // ── order toast ──
-  const [orderMsg, setOrderMsg] = useState(null);
+  const [orderMsg, setOrderMsg] = useState<OrderToast | null>(null);
 
-  const symDef = SYMBOLS[activeSymbolIdx];
+  const symDef   = SYMBOLS[activeSymbolIdx];
   const exchange = exchangeOverride ?? symDef.exchange;
 
-  // ── scroll to ATM ref ──
-  const atmRowRef = useRef(null);
-  const tableBodyRef = useRef(null);
+  const atmRowRef   = useRef<HTMLTableRowElement | null>(null);
+  const tableBodyRef = useRef<HTMLDivElement | null>(null);
 
-  // ── fetch expiries when symbol/exchange changes ──
+  // fetch expiries when symbol/exchange changes
   useEffect(() => {
     setExpiries([]);
     setSelectedExpiry(null);
@@ -232,19 +315,18 @@ export default function OptionChainWidget({ node }) {
       try {
         const data = await getExpiry(symDef.label, exchange);
         if (cancelled) return;
-        // data may be array or { expiry: [...] }
-        const list = Array.isArray(data) ? data : (data?.expiry ?? []);
+        const list = Array.isArray(data) ? data as string[] : ((data as { expiry?: string[] })?.expiry ?? []);
         setExpiries(list);
         if (list.length > 0) setSelectedExpiry(list[0]);
       } catch (e) {
-        if (!cancelled) setError(`Failed to load expiries: ${e.message}`);
+        if (!cancelled) setError(`Failed to load expiries: ${(e as Error).message}`);
       }
     })();
 
     return () => { cancelled = true; };
   }, [activeSymbolIdx, exchange, symDef.label]);
 
-  // ── fetch chain + spot ──
+  // fetch chain + spot
   const fetchData = useCallback(async () => {
     if (!selectedExpiry) return;
     setLoading(true);
@@ -257,9 +339,9 @@ export default function OptionChainWidget({ node }) {
       ]);
 
       if (chainData.status === "fulfilled") {
-        setChain(chainData.value);
+        setChain(chainData.value as unknown as RawOptionChain);
       } else {
-        setError(`Chain error: ${chainData.reason?.message}`);
+        setError(`Chain error: ${(chainData.reason as Error)?.message}`);
       }
 
       if (spotData.status === "fulfilled") {
@@ -271,7 +353,7 @@ export default function OptionChainWidget({ node }) {
     }
   }, [selectedExpiry, symDef, exchange]);
 
-  // ── auto-refresh ──
+  // auto-refresh
   useEffect(() => {
     fetchData();
     const interval = isMarketHours() ? 3000 : 30000;
@@ -279,7 +361,7 @@ export default function OptionChainWidget({ node }) {
     return () => clearInterval(id);
   }, [fetchData]);
 
-  // ── scroll ATM into view when chain loads ──
+  // scroll ATM into view when chain loads
   useEffect(() => {
     if (atmRowRef.current && tableBodyRef.current) {
       setTimeout(() => {
@@ -288,15 +370,16 @@ export default function OptionChainWidget({ node }) {
     }
   }, [chain]);
 
-  // ── compute ordered strike list, ATM, max OI ──
-  const { strikes, atmStrike, maxCallOI, maxPutOI } = useMemo(() => {
-    if (!chain) return { strikes: [], atmStrike: null, maxCallOI: 0, maxPutOI: 0 };
+  // compute ordered strike list, ATM, max OI
+  // maxPutOI is computed for future OI bar on the put side (reserved for Glide Data Grid migration)
+  const { strikes, atmStrike, maxCallOI } = useMemo(() => {
+    if (!chain) return { strikes: [] as StrikeRow[], atmStrike: null as number | null, maxCallOI: 0 };
 
-    const callMap = {};
-    const putMap  = {};
+    const callMap: Record<number, RawOptionRow> = {};
+    const putMap:  Record<number, RawOptionRow> = {};
 
-    (chain.calls ?? []).forEach((c) => { callMap[c.strike_price ?? c.strike] = c; });
-    (chain.puts  ?? []).forEach((p) => { putMap[p.strike_price  ?? p.strike] = p; });
+    (chain.calls ?? []).forEach((c) => { callMap[c.strike_price ?? c.strike ?? 0] = c; });
+    (chain.puts  ?? []).forEach((p) => { putMap[p.strike_price  ?? p.strike  ?? 0] = p; });
 
     const allStrikes = Array.from(
       new Set([
@@ -311,62 +394,53 @@ export default function OptionChainWidget({ node }) {
           allStrikes[0] ?? 0)
       : allStrikes[Math.floor(allStrikes.length / 2)] ?? null);
 
-    // slice to STRIKES_AROUND_ATM each side
-    const atmIdx = allStrikes.indexOf(atm);
+    const atmIdx = allStrikes.indexOf(atm ?? 0);
     const lo = Math.max(0, atmIdx - STRIKES_AROUND_ATM);
     const hi = Math.min(allStrikes.length - 1, atmIdx + STRIKES_AROUND_ATM);
     const visible = allStrikes.slice(lo, hi + 1);
 
     const maxCallOI = Math.max(0, ...visible.map((s) => Number(callMap[s]?.oi ?? 0)));
-    const maxPutOI  = Math.max(0, ...visible.map((s) => Number(putMap[s]?.oi  ?? 0)));
 
     return {
       strikes: visible.map((s) => ({ strike: s, call: callMap[s] ?? null, put: putMap[s] ?? null })),
       atmStrike: atm,
       maxCallOI,
-      maxPutOI,
     };
   }, [chain, spot]);
 
-  // ── spot derived values ──
+  // spot derived values
   const spotLtp      = spot?.ltp ?? null;
-  const spotPrevClose = spot?.prev_close ?? spot?.close ?? null;
+  const spotPrevClose = (spot as unknown as { prev_close?: number })?.prev_close ?? spot?.close ?? null;
   const spotChange   = spotLtp && spotPrevClose ? spotLtp - spotPrevClose : null;
   const spotChangePct = spotChange && spotPrevClose ? (spotChange / spotPrevClose) * 100 : null;
   const spotUp       = spotChange == null ? null : spotChange >= 0;
 
-  // ── order handler ──
-  async function handleOrder({ symbol: _sym, exchange: _ex, strike, optionType, expiry, action, ltp: _ltp }) {
-    // Build an option symbol name — actual symbol depends on broker convention.
-    // We use OpenAlgo's optionsorder or placeorder; here we call placeorder with
-    // a generated symbol and let the broker adapter resolve it.
+  // order handler
+  async function handleOrder({ strike, optionType, expiry, action }: OrderParams) {
     const orderSymbol = `${symDef.label}${expiry}${strike}${optionType}`;
     try {
       await placeOrder({
         strategy: "FlintChain",
         symbol: orderSymbol,
         exchange,
-        action,
+        action: action === "B" ? "BUY" : "SELL",
         quantity: 1,
-        pricetype: "MARKET",
+        orderType: "MARKET",
         product: "MIS",
       });
       setOrderMsg({ text: `${action} ${orderSymbol} sent`, ok: true });
     } catch (e) {
-      setOrderMsg({ text: e.message, ok: false });
+      setOrderMsg({ text: (e as Error).message, ok: false });
     } finally {
       setTimeout(() => setOrderMsg(null), 3000);
     }
   }
 
-  // ── PCR ──
   const pcr = chain?.pcr ?? null;
-
-  // ── expiry display list (first 5) ──
   const expiryButtons = expiries.slice(0, 5);
 
-  // ── render helpers ──
-  function renderCallCells(call, strike) {
+  // render helpers
+  function renderCallCells(call: RawOptionRow | null, strike: number) {
     if (!call) {
       return (
         <>
@@ -441,7 +515,7 @@ export default function OptionChainWidget({ node }) {
     );
   }
 
-  function renderPutCells(put, strike) {
+  function renderPutCells(put: RawOptionRow | null, strike: number) {
     if (!put) {
       return (
         <>
@@ -516,7 +590,6 @@ export default function OptionChainWidget({ node }) {
     );
   }
 
-  // Column headers based on view
   function CallHeaders() {
     if (view === "LTP")    return <><th className="px-1 py-1 text-right text-[10px] text-loss/80 uppercase tracking-wide">Chg%</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI</th><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th></>;
     if (view === "OI")     return <><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI Chg</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th></>;
@@ -529,16 +602,13 @@ export default function OptionChainWidget({ node }) {
     return <><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Delta</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">IV</th></>;
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Render
-  // ────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
 
-      {/* ── Top bar: symbol, exchange, expiry, spot, PCR ── */}
+      {/* Top bar */}
       <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5 space-y-1.5">
 
-        {/* Row 1: symbol selector, exchange selector, expiry buttons, refresh */}
+        {/* Row 1 */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <Selector
             value={symDef.label}
@@ -556,7 +626,6 @@ export default function OptionChainWidget({ node }) {
             onChange={setExchangeOverride}
           />
 
-          {/* Expiry buttons */}
           <div className="flex items-center gap-1">
             {expiryButtons.length === 0 && !loading && (
               <span className="text-[10px] text-text-muted px-1">No expiries</span>
@@ -576,10 +645,8 @@ export default function OptionChainWidget({ node }) {
             ))}
           </div>
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* View tabs */}
           <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
             {VIEWS.map((v) => (
               <button
@@ -596,7 +663,6 @@ export default function OptionChainWidget({ node }) {
             ))}
           </div>
 
-          {/* Manual refresh */}
           <button
             onClick={fetchData}
             disabled={loading}
@@ -607,7 +673,7 @@ export default function OptionChainWidget({ node }) {
           </button>
         </div>
 
-        {/* Row 2: spot price + change + PCR */}
+        {/* Row 2: spot + PCR */}
         <div className="flex items-center gap-3 flex-wrap">
           {spotLtp != null ? (
             <>
@@ -621,7 +687,7 @@ export default function OptionChainWidget({ node }) {
                 <div className={`flex items-center gap-0.5 text-xs font-mono ${spotUp ? "text-profit" : "text-loss"}`}>
                   {spotUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
                   <span>{spotChange >= 0 ? "+" : ""}{spotChange.toFixed(2)}</span>
-                  <span className="text-[10px]">({spotChangePct >= 0 ? "+" : ""}{spotChangePct?.toFixed(2)}%)</span>
+                  <span className="text-[10px]">({spotChangePct != null && spotChangePct >= 0 ? "+" : ""}{spotChangePct?.toFixed(2)}%)</span>
                 </div>
               )}
             </>
@@ -649,7 +715,7 @@ export default function OptionChainWidget({ node }) {
         </div>
       </div>
 
-      {/* ── Error banner ── */}
+      {/* Error banner */}
       {error && (
         <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
           <AlertCircle size={11} />
@@ -657,7 +723,7 @@ export default function OptionChainWidget({ node }) {
         </div>
       )}
 
-      {/* ── Order toast ── */}
+      {/* Order toast */}
       {orderMsg && (
         <div className={`flex-none px-2 py-1 text-xs border-b ${
           orderMsg.ok
@@ -668,7 +734,7 @@ export default function OptionChainWidget({ node }) {
         </div>
       )}
 
-      {/* ── Chain table ── */}
+      {/* Chain table */}
       <div className="flex-1 overflow-auto" ref={tableBodyRef}>
         {!selectedExpiry && !loading ? (
           <div className="h-full flex items-center justify-center text-text-muted text-xs">
@@ -687,13 +753,10 @@ export default function OptionChainWidget({ node }) {
           <table className="w-full border-separate border-spacing-0">
             <thead className="sticky top-0 z-10 bg-surface-card">
               <tr className="border-b border-border-default">
-                {/* Calls header — right-aligned columns */}
                 <CallHeaders />
-                {/* Strike */}
                 <th className="px-2 py-1 text-center text-[10px] text-accent uppercase tracking-wider w-16 border-x border-border-default">
                   STRIKE
                 </th>
-                {/* Puts header — left-aligned columns */}
                 <PutHeaders />
               </tr>
             </thead>
@@ -701,10 +764,10 @@ export default function OptionChainWidget({ node }) {
             <tbody>
               {strikes.map(({ strike, call, put }, idx) => {
                 const isAtm = strike === atmStrike;
-                const isNearAtm = Math.abs(idx - strikes.findIndex((s) => s.strike === atmStrike)) <= 2;
+                const atmIdx = strikes.findIndex((s) => s.strike === atmStrike);
+                const isNearAtm = Math.abs(idx - atmIdx) <= 2;
 
                 const callOI = call?.oi ?? call?.open_interest ?? 0;
-                const putOI  = put?.oi  ?? put?.open_interest  ?? 0;
 
                 return (
                   <tr
@@ -718,14 +781,11 @@ export default function OptionChainWidget({ node }) {
                           : "border-border-subtle hover:bg-surface-hover/30"
                     }`}
                   >
-                    {/* ── CALL cells ── */}
                     <td className="relative" colSpan={0}>
-                      {/* OI bar background behind call side */}
                       <OIBar value={callOI} maxValue={maxCallOI} side="call" />
                     </td>
                     {renderCallCells(call, strike)}
 
-                    {/* ── STRIKE cell ── */}
                     <td className={`px-1 py-0.5 text-center font-mono text-xs font-semibold border-x ${
                       isAtm
                         ? "text-accent border-accent/40 bg-accent/10"
@@ -737,7 +797,6 @@ export default function OptionChainWidget({ node }) {
                       {NUM0.format(strike)}
                     </td>
 
-                    {/* ── PUT cells ── */}
                     {renderPutCells(put, strike)}
                   </tr>
                 );
@@ -747,7 +806,7 @@ export default function OptionChainWidget({ node }) {
         )}
       </div>
 
-      {/* ── Footer: call/put total OI summary ── */}
+      {/* Footer */}
       {chain && strikes.length > 0 && (
         <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-[10px]">
           <span className="text-text-muted uppercase tracking-wide">Total OI</span>

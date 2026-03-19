@@ -1,16 +1,40 @@
 import { useEffect, useRef } from "react";
 import { createChart, CandlestickSeries, HistogramSeries } from "lightweight-charts";
+import type { IChartApi, ISeriesApi } from "lightweight-charts";
 import { getHistory } from "../services/api";
+
+interface ChartProps {
+  symbol?: string;
+  exchange?: string;
+  interval?: string;
+  height?: number;
+  className?: string;
+}
+
+interface WsTickEvent {
+  symbol: string;
+  exchange: string;
+  ltp: number;
+  open?: number;
+  high?: number;
+  low?: number;
+}
 
 /**
  * TradingView Lightweight Charts v5 wrapper.
  * Fetches historical OHLCV via API, streams live ticks via WebSocket events.
  */
-export default function Chart({ symbol = "NIFTY", exchange = "NSE_INDEX", interval = "5m", height = 400, className = "" }) {
-  const containerRef = useRef(null);
-  const chartRef = useRef(null);
-  const candleRef = useRef(null);
-  const volumeRef = useRef(null);
+export default function Chart({
+  symbol = "NIFTY",
+  exchange = "NSE_INDEX",
+  interval = "5m",
+  height = 400,
+  className = "",
+}: ChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
 
   // Create chart
   useEffect(() => {
@@ -57,8 +81,10 @@ export default function Chart({ symbol = "NIFTY", exchange = "NSE_INDEX", interv
 
   // Fetch historical data
   useEffect(() => {
-    if (!candleRef.current) return;
+    if (!candleRef.current || !volumeRef.current) return;
     let cancelled = false;
+    const candleSeries = candleRef.current;
+    const volumeSeries = volumeRef.current;
 
     (async () => {
       try {
@@ -71,39 +97,43 @@ export default function Chart({ symbol = "NIFTY", exchange = "NSE_INDEX", interv
         if (cancelled || !Array.isArray(data)) return;
 
         const candles = data.map((b) => ({
-          time: Math.floor(new Date(b.timestamp).getTime() / 1000),
+          time: Math.floor(new Date(String(b.time)).getTime() / 1000) as unknown as import("lightweight-charts").Time,
           open: b.open,
           high: b.high,
           low: b.low,
           close: b.close,
         }));
         const volumes = data.map((b) => ({
-          time: Math.floor(new Date(b.timestamp).getTime() / 1000),
+          time: Math.floor(new Date(String(b.time)).getTime() / 1000) as unknown as import("lightweight-charts").Time,
           value: b.volume || 0,
           color: b.close >= b.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
         }));
 
-        candleRef.current.setData(candles);
-        volumeRef.current.setData(volumes);
-      } catch { /* API may not be available */ }
+        candleSeries.setData(candles);
+        volumeSeries.setData(volumes);
+      } catch {
+        /* API may not be available */
+      }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [symbol, exchange, interval]);
 
   // Live tick updates via WebSocket
   useEffect(() => {
-    const onTick = (e) => {
-      const d = e.detail;
+    const onTick = (e: Event) => {
+      const d = (e as CustomEvent<WsTickEvent>).detail;
       if (d?.symbol !== symbol || d?.exchange !== exchange) return;
       if (!d.ltp || !candleRef.current) return;
 
-      const now = Math.floor(Date.now() / 1000);
+      const now = Math.floor(Date.now() / 1000) as unknown as import("lightweight-charts").Time;
       candleRef.current.update({
         time: now,
-        open: d.open || d.ltp,
-        high: d.high || d.ltp,
-        low: d.low || d.ltp,
+        open: d.open ?? d.ltp,
+        high: d.high ?? d.ltp,
+        low: d.low ?? d.ltp,
         close: d.ltp,
       });
     };
