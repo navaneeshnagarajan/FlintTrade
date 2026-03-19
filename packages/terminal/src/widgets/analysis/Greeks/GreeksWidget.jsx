@@ -219,7 +219,7 @@ export default function GreeksWidget({ node }) {
   const { rows, totals } = useMemo(() => {
     const rows = fnoPositions.map((pos) => {
       const qty = parseInt(pos.quantity || pos.net_quantity || 0, 10);
-      const ltp = ltpMap[pos.symbol] ?? parseFloat(pos.ltp || 0) || null;
+      const ltp = ltpMap[pos.symbol] ?? (parseFloat(pos.ltp || 0) || null);
       const g = greeksMap[pos.symbol] ?? {};
 
       // Greeks from API — field names may vary; try multiple aliases

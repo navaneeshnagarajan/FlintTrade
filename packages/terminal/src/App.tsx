@@ -1,4 +1,4 @@
-import { useState, useCallback, lazy, Suspense } from "react";
+import { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
@@ -48,15 +48,32 @@ export default function App() {
   const onDockviewReady = useCallback(
     (event: DockviewReadyEvent) => {
       setDockviewApi(event.api);
-      // Add default dashboard panel
-      event.api.addPanel({
-        id: "dashboard",
-        component: "dashboard",
-        title: "Dashboard",
-      });
+      const activeTabId = useLayoutStore.getState().activeTabId;
+      const savedLayout = useLayoutStore.getState().getTabLayout(activeTabId);
+      if (savedLayout) {
+        try {
+          event.api.fromJSON(savedLayout as any);
+        } catch {
+          event.api.addPanel({ id: "dashboard", component: "dashboard", title: "Dashboard" });
+        }
+      } else {
+        event.api.addPanel({ id: "dashboard", component: "dashboard", title: "Dashboard" });
+      }
     },
     [setDockviewApi]
   );
+
+  // Auto-save layout on changes
+  useEffect(() => {
+    const api = useLayoutStore.getState().dockviewApi;
+    if (!api) return;
+    const disposable = api.onDidLayoutChange(() => {
+      const activeTabId = useLayoutStore.getState().activeTabId;
+      const layout = api.toJSON();
+      useLayoutStore.getState().saveTabLayout(activeTabId, layout as unknown as Record<string, unknown>);
+    });
+    return () => disposable.dispose();
+  }, []);
 
   const handleSelectTool = useCallback((toolId: ToolId) => {
     setActiveTool(toolId);

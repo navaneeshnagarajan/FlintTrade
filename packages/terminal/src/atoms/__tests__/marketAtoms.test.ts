@@ -3,15 +3,11 @@ import { createStore } from "jotai";
 import {
   tickAtomFamily,
   niftyAtom,
-  sensexAtom,
-  bankniftyAtom,
-  vixAtom,
 } from "../marketAtoms";
 import type { WsTick } from "@/types/api";
 
 describe("marketAtoms", () => {
   it("tickAtomFamily creates unique atoms per instrument key", () => {
-    const store = createStore();
     const niftyTick = tickAtomFamily("NSE_INDEX:NIFTY");
     const bnfTick = tickAtomFamily("NSE_INDEX:BANKNIFTY");
     expect(niftyTick).not.toBe(bnfTick);
