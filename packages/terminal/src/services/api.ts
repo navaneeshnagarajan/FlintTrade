@@ -118,7 +118,11 @@ export const getHistory = (
   end_date: string,
 ) => post<OHLCVBar[]>("history", { symbol, exchange, interval, start_date, end_date });
 export const getOptionChain = (symbol: string, exchange = "NFO", expiry?: string) =>
-  post<OptionChainData>("optionchain", { symbol, exchange, ...(expiry ? { expiry } : {}) }); // BUG FIX 3: includes expiry parameter
+  post<OptionChainData>("optionchain", {
+    underlying: symbol, // OpenAlgo v2 uses 'underlying' not 'symbol'
+    exchange,
+    ...(expiry ? { expiry_date: expiry } : {}), // OpenAlgo v2 uses 'expiry_date' not 'expiry'
+  });
 export const getOptionGreeks = (symbol: string, exchange = "NFO") =>
   post<Greeks>("optiongreeks", { symbol, exchange });
 export const getExpiry = (
@@ -168,6 +172,6 @@ export const getHoldings = async (): Promise<Holding[]> => {
 };
 
 // --- Utility ---
-export const ping = () => get<{ status: string }>("ping"); // BUG FIX 1: was POST, OpenAlgo docs specify GET
+export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
 export const analyzerStatus = () => get<{ enabled: boolean }>("analyzer/status");
 export const analyzerToggle = () => post<void>("analyzer/toggle");
