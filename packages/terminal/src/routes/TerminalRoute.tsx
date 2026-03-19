@@ -3,7 +3,6 @@ import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { useWsBridge } from "@/hooks/useWsBridge";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import TopBar from "@/chrome/TopBar";
 import TickerBar from "@/chrome/TickerBar";
@@ -14,24 +13,21 @@ import type { ToolId } from "@/types/widgets";
 
 // Full-page tools (lazy loaded -- only fetched when opened)
 const tools: Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>> = {
-  "settings": lazy(() => import("./tools/Settings/SettingsTool")),
-  "backtest-lab": lazy(() => import("./tools/BacktestLab/BacktestLabTool")),
-  "trade-journal": lazy(() => import("./tools/TradeJournal/TradeJournalTool")),
-  "strategy-builder": lazy(() => import("./tools/StrategyBuilder/StrategyBuilderTool")),
-  "pnl-dashboard": lazy(() => import("./tools/PnLDashboard/PnLDashboardTool")),
-  "market-intelligence": lazy(() => import("./tools/MarketIntelligence/MarketIntelligenceTool")),
-  "flow-builder": lazy(() => import("./tools/FlowBuilder/FlowBuilderTool")),
+  "settings": lazy(() => import("../tools/Settings/SettingsTool")),
+  "backtest-lab": lazy(() => import("../tools/BacktestLab/BacktestLabTool")),
+  "trade-journal": lazy(() => import("../tools/TradeJournal/TradeJournalTool")),
+  "strategy-builder": lazy(() => import("../tools/StrategyBuilder/StrategyBuilderTool")),
+  "pnl-dashboard": lazy(() => import("../tools/PnLDashboard/PnLDashboardTool")),
+  "market-intelligence": lazy(() => import("../tools/MarketIntelligence/MarketIntelligenceTool")),
+  "flow-builder": lazy(() => import("../tools/FlowBuilder/FlowBuilderTool")),
 };
 
-export default function App() {
+export default function TerminalRoute() {
   const [widgetPickerOpen, setWidgetPickerOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
 
   const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
-
-  // Connect WebSocket bridge for live market data
-  useWsBridge();
 
   // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
   useGlobalKeys({

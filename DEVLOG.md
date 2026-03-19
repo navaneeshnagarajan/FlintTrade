@@ -13,6 +13,8 @@
 
 ---
 
+## 2026-03-19 13:07 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): React Router v7 wiring — created src/routes/ with RootLayout (useWsBridge shared), TerminalRoute (git mv from App.tsx, fixed tool import paths), SetupRoute, InvestRoute, LearnRoute. Rewrote main.tsx with createBrowserRouter, lazy routes, default redirect / → /terminal. tsc clean, 26 tests pass.
+
 ## 2026-03-19 12:40 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): Batch 3 TSX migration — WatchlistWidget + 7 tool stubs + useWebSocket. Replaced dataBus with selectedSymbolAtom (Jotai), added selectedSymbolAtom to marketAtoms.ts, full strict types on all settings interfaces, migrated useWebSocket.js to .ts using getWsService(). Deleted all 9 JSX/JS originals. declarations.d.ts now empty. tsc clean, 26 tests pass.
 
 ## 2026-03-19 12:35 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): Batch 2 TSX migration — 6 analysis widgets (Chart, OptionChain, OIChart, Straddle, Depth, Greeks) + Chart.tsx shared component. Full TypeScript strict types, removed 7 JSX files, updated declarations.d.ts. tsc clean, 26 terminal tests pass.
