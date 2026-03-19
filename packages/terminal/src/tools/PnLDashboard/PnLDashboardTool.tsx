@@ -1,31 +1,507 @@
-import { X, PieChart } from "lucide-react";
+// Absorbed patterns from:
+//   etftracker/frontend/src/pages/Dashboard1_AssetQuilt.tsx — heatmap color scale concept (green/red/gray grid cells)
+//   tier1-core/openalgo/frontend/src/pages/PnLTracker.tsx — daily/weekly/monthly summary cards, drawdown calc
+//   trading-journal/frontend/app/dashboard/analytics/page.tsx — symbol breakdown bar chart pattern
+
+import { useMemo } from "react";
+import { PieChart, X, TrendingUp, TrendingDown, AlertCircle, Calendar, BarChart2, Wallet } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { usePositions } from "@/hooks/usePositions";
+import { useFunds } from "@/hooks/useFunds";
+import { useTradebook } from "@/hooks/useTradebook";
+import type { Position, Trade } from "@/types/api";
 
 interface Props {
   onClose?: () => void;
 }
 
-export default function PnLDashboardTool({ onClose }: Props) {
+// ---- Helpers ----
+
+function formatINR(value: number): string {
+  const abs = Math.abs(value);
+  let formatted: string;
+  if (abs >= 10_000_000) {
+    formatted = `${(abs / 10_000_000).toFixed(2)}Cr`;
+  } else if (abs >= 100_000) {
+    formatted = `${(abs / 100_000).toFixed(2)}L`;
+  } else if (abs >= 1_000) {
+    formatted = `${(abs / 1_000).toFixed(2)}K`;
+  } else {
+    formatted = abs.toFixed(2);
+  }
+  return `${value < 0 ? "-" : ""}₹${formatted}`;
+}
+
+function pnlClass(v: number) {
+  if (v > 0) return "text-emerald-400";
+  if (v < 0) return "text-red-400";
+  return "text-[#8888a0]";
+}
+
+// Calendar heatmap cell color (absorbed from etftracker heatmap colorscale concept)
+function heatmapColor(pnl: number, maxAbs: number): string {
+  if (maxAbs === 0) return "bg-[#1a1a28]";
+  const ratio = Math.abs(pnl) / maxAbs;
+  if (pnl > 0) {
+    if (ratio > 0.75) return "bg-emerald-600";
+    if (ratio > 0.4) return "bg-emerald-700/80";
+    return "bg-emerald-900/60";
+  }
+  if (pnl < 0) {
+    if (ratio > 0.75) return "bg-red-600";
+    if (ratio > 0.4) return "bg-red-700/80";
+    return "bg-red-900/60";
+  }
+  return "bg-[#1e1e2e]";
+}
+
+// Derive daily P&L series from tradebook
+interface DailyPnl {
+  date: string; // YYYY-MM-DD
+  pnl: number;
+}
+
+function computeDailyPnl(trades: Trade[]): DailyPnl[] {
+  // Group by date, then pair BUY-SELL intraday for realized P&L
+  const byDate: Record<string, Trade[]> = {};
+  trades.forEach((t) => {
+    const date = t.timestamp?.slice(0, 10) ?? "unknown";
+    if (!byDate[date]) byDate[date] = [];
+    byDate[date].push(t);
+  });
+
+  return Object.entries(byDate).map(([date, dayTrades]) => {
+    const groups: Record<string, Trade[]> = {};
+    dayTrades.forEach((t) => {
+      if (!groups[t.symbol]) groups[t.symbol] = [];
+      groups[t.symbol].push(t);
+    });
+
+    let dayPnl = 0;
+    for (const legs of Object.values(groups)) {
+      const buys = legs.filter((t) => t.action === "BUY").map((t) => ({ qty: t.quantity, price: t.price }));
+      const sells = legs.filter((t) => t.action === "SELL").map((t) => ({ qty: t.quantity, price: t.price }));
+      let bi = 0;
+      let si = 0;
+      while (bi < buys.length && si < sells.length) {
+        const matched = Math.min(buys[bi].qty, sells[si].qty);
+        dayPnl += (sells[si].price - buys[bi].price) * matched;
+        buys[bi] = { ...buys[bi], qty: buys[bi].qty - matched };
+        sells[si] = { ...sells[si], qty: sells[si].qty - matched };
+        if (buys[bi].qty === 0) bi++;
+        if (sells[si].qty === 0) si++;
+      }
+    }
+    return { date, pnl: dayPnl };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Position breakdown by instrument
+interface SymbolPnl {
+  symbol: string;
+  pnl: number;
+  pct: number;
+  quantity: number;
+}
+
+function computeSymbolBreakdown(positions: Position[]): SymbolPnl[] {
+  return positions
+    .map((p) => ({ symbol: p.symbol, pnl: p.pnl, pct: p.pnlPercent, quantity: p.quantity }))
+    .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
+}
+
+// Drawdown from cumulative P&L series
+function computeDrawdown(daily: DailyPnl[]): { drawdowns: { date: string; dd: number }[]; maxDrawdown: number } {
+  let peak = 0;
+  let cum = 0;
+  let maxDrawdown = 0;
+  const drawdowns = daily.map(({ date, pnl }) => {
+    cum += pnl;
+    if (cum > peak) peak = cum;
+    const dd = peak > 0 ? ((cum - peak) / peak) * 100 : 0;
+    if (dd < maxDrawdown) maxDrawdown = dd;
+    return { date, dd };
+  });
+  return { drawdowns, maxDrawdown };
+}
+
+// ---- Sub-tabs ----
+
+function SummaryTab({ positions, funds }: { positions: Position[]; funds: { availableCash: number; usedMargin: number; totalBalance: number } | undefined }) {
+  const totalPnl = positions.reduce((s, p) => s + p.pnl, 0);
+  const positivePos = positions.filter((p) => p.pnl > 0);
+  const negativePos = positions.filter((p) => p.pnl < 0);
+
   return (
-    <div className="h-full flex flex-col bg-surface-base">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-surface-card">
+    <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-2">
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="p-3">
+            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">MTM P&L</div>
+            <div className={`text-xl font-bold font-mono ${pnlClass(totalPnl)}`}>{formatINR(totalPnl)}</div>
+            <div className="text-[10px] text-[#6666a0] mt-0.5">{positions.length} open positions</div>
+          </CardContent>
+        </Card>
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="p-3">
+            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Available Margin</div>
+            <div className="text-xl font-bold font-mono text-[#e0e0f0]">{formatINR(funds?.availableCash ?? 0)}</div>
+            <div className="text-[10px] text-[#6666a0] mt-0.5">Used: {formatINR(funds?.usedMargin ?? 0)}</div>
+          </CardContent>
+        </Card>
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="p-3">
+            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Total Balance</div>
+            <div className="text-xl font-bold font-mono text-[#e0e0f0]">{formatINR(funds?.totalBalance ?? 0)}</div>
+            <div className="text-[10px] text-[#6666a0] mt-0.5">
+              {positivePos.length}P / {negativePos.length}N positions
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Positions breakdown */}
+      <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <CardHeader className="p-3 pb-1">
+          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Open Positions</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {positions.length === 0 ? (
+            <div className="text-center py-6 text-[#4a4a6a] text-xs">No open positions</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+                  <TableHead className="text-[10px] text-[#6666a0] h-7 pl-3 font-normal">Symbol</TableHead>
+                  <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Product</TableHead>
+                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">Qty</TableHead>
+                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">Avg</TableHead>
+                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">LTP</TableHead>
+                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right pr-3 font-normal">P&L</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {positions.map((pos, i) => (
+                  <TableRow key={`${pos.symbol}-${i}`} className="border-[#1a1a28] hover:bg-[#0d0d14]">
+                    <TableCell className="py-1 pl-3 text-xs font-mono text-[#c8c8e0] font-medium">{pos.symbol}</TableCell>
+                    <TableCell className="py-1 text-xs text-[#6666a0]">{pos.product}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-[#a0a0c0] text-right">{pos.quantity}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-[#8888a0] text-right">{pos.averagePrice.toFixed(2)}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-[#e0e0f0] text-right">{pos.ltp.toFixed(2)}</TableCell>
+                    <TableCell className={`py-1 text-xs font-mono text-right pr-3 ${pnlClass(pos.pnl)}`}>
+                      {formatINR(pos.pnl)}
+                      <span className={`text-[9px] ml-1 ${pnlClass(pos.pnlPercent)}`}>
+                        ({pos.pnlPercent >= 0 ? "+" : ""}{pos.pnlPercent.toFixed(2)}%)
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Instrument P&L breakdown — absorbed from analytics BarChart pattern */}
+      {positions.length > 0 && (
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardHeader className="p-3 pb-1">
+            <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">P&L by Instrument</CardTitle>
+          </CardHeader>
+          <CardContent className="p-3 pt-1 space-y-1.5">
+            {computeSymbolBreakdown(positions).map(({ symbol, pnl }) => {
+              const maxAbs = Math.max(...positions.map((p) => Math.abs(p.pnl)), 1);
+              const w = (Math.abs(pnl) / maxAbs) * 100;
+              return (
+                <div key={symbol} className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-[#c8c8e0] w-24 shrink-0 truncate">{symbol}</span>
+                  <div className="flex-1 h-4 bg-[#0d0d14] rounded overflow-hidden">
+                    <div
+                      className={`h-full rounded transition-all ${pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"}`}
+                      style={{ width: `${w}%` }}
+                    />
+                  </div>
+                  <span className={`text-xs font-mono w-20 text-right shrink-0 ${pnlClass(pnl)}`}>{formatINR(pnl)}</span>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function CalendarTab({ trades }: { trades: Trade[] }) {
+  const daily = useMemo(() => computeDailyPnl(trades), [trades]);
+
+  // Build a calendar view for the last 3 months
+  const today = new Date();
+  const months: { year: number; month: number; label: string }[] = [];
+  for (let i = 2; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString("en-IN", { month: "short", year: "2-digit" }) });
+  }
+
+  const pnlByDate = useMemo(() => {
+    const m: Record<string, number> = {};
+    daily.forEach(({ date, pnl }) => { m[date] = pnl; });
+    return m;
+  }, [daily]);
+
+  const maxAbs = useMemo(() => {
+    return Math.max(...daily.map((d) => Math.abs(d.pnl)), 1);
+  }, [daily]);
+
+  const totalPnl = daily.reduce((s, d) => s + d.pnl, 0);
+  const tradingDays = daily.filter((d) => d.pnl !== 0).length;
+  const greenDays = daily.filter((d) => d.pnl > 0).length;
+  const redDays = daily.filter((d) => d.pnl < 0).length;
+
+  const DOW_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+
+  return (
+    <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
+      {/* Summary strip */}
+      <div className="grid grid-cols-4 gap-2">
+        {[
+          { label: "Total P&L", value: formatINR(totalPnl), pos: totalPnl >= 0 },
+          { label: "Trading Days", value: String(tradingDays), pos: undefined },
+          { label: "Green Days", value: String(greenDays), pos: true },
+          { label: "Red Days", value: String(redDays), pos: redDays === 0 },
+        ].map(({ label, value, pos }) => (
+          <Card key={label} className="bg-[#12121a] border-[#1e1e2e]">
+            <CardContent className="p-3">
+              <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">{label}</div>
+              <div className={`text-base font-bold font-mono ${pos === undefined ? "text-[#e0e0f0]" : pos ? "text-emerald-400" : "text-red-400"}`}>{value}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Calendar heatmap — absorbed from etftracker heatmap color concept */}
+      {months.map(({ year, month, label }) => {
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        // Offset: Monday=0
+        let startOffset = firstDay.getDay() - 1;
+        if (startOffset < 0) startOffset = 6;
+
+        const cells: (number | null)[] = Array(startOffset).fill(null);
+        for (let d = 1; d <= lastDay.getDate(); d++) cells.push(d);
+        while (cells.length % 7 !== 0) cells.push(null);
+
+        return (
+          <Card key={`${year}-${month}`} className="bg-[#12121a] border-[#1e1e2e]">
+            <CardHeader className="p-3 pb-1">
+              <CardTitle className="text-xs font-medium text-[#8888a0]">{label}</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 pt-0">
+              {/* Day-of-week header */}
+              <div className="grid grid-cols-7 gap-1 mb-1">
+                {DOW_LABELS.map((l, i) => (
+                  <div key={i} className="text-center text-[9px] text-[#4a4a6a]">{l}</div>
+                ))}
+              </div>
+              {/* Weeks */}
+              {Array.from({ length: cells.length / 7 }).map((_, wi) => (
+                <div key={wi} className="grid grid-cols-7 gap-1 mb-1">
+                  {cells.slice(wi * 7, wi * 7 + 7).map((day, di) => {
+                    if (!day) return <div key={di} className="h-7" />;
+                    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                    const pnl = pnlByDate[dateStr];
+                    const isToday = dateStr === today.toISOString().slice(0, 10);
+                    const isFuture = new Date(dateStr) > today;
+                    return (
+                      <div
+                        key={di}
+                        title={pnl !== undefined ? `${dateStr}: ${formatINR(pnl)}` : dateStr}
+                        className={`h-7 rounded flex items-center justify-center text-[9px] font-mono cursor-default transition-colors
+                          ${isFuture ? "bg-[#0d0d14] text-[#3a3a5a]" :
+                            pnl !== undefined ? `${heatmapColor(pnl, maxAbs)} text-white/80` :
+                            "bg-[#1a1a28] text-[#4a4a6a]"}
+                          ${isToday ? "ring-1 ring-[#3b82f6]" : ""}`}
+                      >
+                        {day}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function DrawdownTab({ trades }: { trades: Trade[] }) {
+  const daily = useMemo(() => computeDailyPnl(trades), [trades]);
+  const { drawdowns, maxDrawdown } = useMemo(() => computeDrawdown(daily), [daily]);
+
+  const cumulativeSeries = useMemo(() => {
+    let cum = 0;
+    return daily.map(({ date, pnl }) => { cum += pnl; return { date, cum }; });
+  }, [daily]);
+
+  if (daily.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-[#4a4a6a]">
+        <BarChart2 size={40} />
+        <p className="text-sm">No historical trade data</p>
+      </div>
+    );
+  }
+
+  const maxCum = Math.max(...cumulativeSeries.map((d) => d.cum), 1);
+  const minCum = Math.min(...cumulativeSeries.map((d) => d.cum), -1);
+  const range = maxCum - minCum || 1;
+
+  return (
+    <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="p-3">
+            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Max Drawdown</div>
+            <div className={`text-xl font-bold font-mono ${maxDrawdown < 0 ? "text-red-400" : "text-emerald-400"}`}>
+              {maxDrawdown.toFixed(2)}%
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="p-3">
+            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Net Cumulative P&L</div>
+            <div className={`text-xl font-bold font-mono ${pnlClass(cumulativeSeries[cumulativeSeries.length - 1]?.cum ?? 0)}`}>
+              {formatINR(cumulativeSeries[cumulativeSeries.length - 1]?.cum ?? 0)}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Equity curve */}
+      <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <CardHeader className="p-3 pb-1">
+          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Equity Curve</CardTitle>
+        </CardHeader>
+        <CardContent className="p-3 pt-1">
+          <div className="relative h-32 flex items-end gap-0.5">
+            {cumulativeSeries.map(({ date, cum }) => {
+              const normalized = (cum - minCum) / range;
+              const h = Math.max(2, normalized * 100);
+              return (
+                <div
+                  key={date}
+                  title={`${date}: ${formatINR(cum)}`}
+                  className={`flex-1 rounded-sm transition-all ${cum >= 0 ? "bg-emerald-600/60" : "bg-red-600/60"}`}
+                  style={{ height: `${h}%` }}
+                />
+              );
+            })}
+            {/* Zero line */}
+            <div
+              className="absolute left-0 right-0 h-px bg-[#2a2a3d]"
+              style={{ bottom: `${(-minCum / range) * 100}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-1">
+            <span className="text-[9px] text-[#4a4a6a]">{cumulativeSeries[0]?.date ?? ""}</span>
+            <span className="text-[9px] text-[#4a4a6a]">{cumulativeSeries[cumulativeSeries.length - 1]?.date ?? ""}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Drawdown chart */}
+      <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <CardHeader className="p-3 pb-1">
+          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Drawdown (%)</CardTitle>
+        </CardHeader>
+        <CardContent className="p-3 pt-1">
+          <div className="relative h-20 flex items-start gap-0.5">
+            {drawdowns.map(({ date, dd }) => {
+              const h = Math.abs(dd) / Math.max(Math.abs(maxDrawdown), 1) * 100;
+              return (
+                <div
+                  key={date}
+                  title={`${date}: ${dd.toFixed(2)}%`}
+                  className="flex-1 rounded-sm bg-red-800/50 transition-all"
+                  style={{ height: `${Math.max(2, h)}%` }}
+                />
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ---- Main component ----
+
+export default function PnLDashboardTool({ onClose }: Props) {
+  const { data: positions = [], isLoading: posLoading, isError: posError } = usePositions();
+  const { data: funds, isLoading: fundsLoading } = useFunds();
+  const { data: trades = [], isLoading: tradesLoading } = useTradebook();
+
+  const isLoading = posLoading || fundsLoading || tradesLoading;
+  const isError = posError;
+
+  const totalPnl = positions.reduce((s, p) => s + p.pnl, 0);
+
+  return (
+    <div className="h-full flex flex-col bg-[#0a0a0f]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1e1e2e] bg-[#12121a] shrink-0">
         <div className="flex items-center gap-2">
-          <PieChart size={18} className="text-accent" />
-          <h1 className="text-sm font-semibold text-text-primary">P&L Dashboard</h1>
+          <PieChart size={16} className="text-[#3b82f6]" />
+          <h1 className="text-sm font-semibold text-[#e0e0f0]">P&L Dashboard</h1>
+          {isLoading && <span className="text-[10px] text-[#4a4a6a]">Loading...</span>}
+          {isError && <AlertCircle size={12} className="text-red-400" />}
+          {!isLoading && !isError && (
+            <Badge
+              variant="outline"
+              className={`text-[9px] px-1.5 py-0 border-0 font-mono font-medium ${totalPnl >= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
+            >
+              {totalPnl >= 0 ? <TrendingUp size={9} className="inline mr-0.5" /> : <TrendingDown size={9} className="inline mr-0.5" />}
+              {formatINR(totalPnl)}
+            </Badge>
+          )}
         </div>
-        <button onClick={onClose} className="text-text-muted hover:text-text-primary">
-          <X size={16} />
+        <button onClick={onClose} className="text-[#4a4a6a] hover:text-[#e0e0f0] transition-colors">
+          <X size={15} />
         </button>
       </div>
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <PieChart size={48} className="mx-auto mb-3 text-text-muted" />
-          <div className="text-lg text-text-primary font-medium">P&L Dashboard</div>
-          <div className="text-sm text-text-secondary mt-1">
-            Calendar heatmap, trade stats, winning streaks
-          </div>
-          <div className="text-xs text-text-muted mt-3">Coming in Phase 3-4</div>
-        </div>
-      </div>
+
+      {/* Tabs */}
+      <Tabs defaultValue="summary" className="flex-1 flex flex-col min-h-0">
+        <TabsList className="shrink-0 rounded-none bg-[#0d0d14] border-b border-[#1e1e2e] justify-start px-3 h-8 gap-1">
+          <TabsTrigger value="summary" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+            <Wallet size={11} className="mr-1" />Summary
+          </TabsTrigger>
+          <TabsTrigger value="calendar" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+            <Calendar size={11} className="mr-1" />Calendar
+          </TabsTrigger>
+          <TabsTrigger value="drawdown" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+            <BarChart2 size={11} className="mr-1" />Drawdown
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="summary" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
+          <SummaryTab positions={positions} funds={funds} />
+        </TabsContent>
+
+        <TabsContent value="calendar" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
+          <CalendarTab trades={trades} />
+        </TabsContent>
+
+        <TabsContent value="drawdown" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
+          <DrawdownTab trades={trades} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
