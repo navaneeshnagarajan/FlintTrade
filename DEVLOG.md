@@ -96,3 +96,17 @@
 ## 2026-03-17 05:15 IST | ubuntu-i3-9350KF-RX6600XT | @navaneeshnagarajan | Claude Code | Claude Code (claude-opus-4-6) | main | Terminal UI redesign — real data, professional dark theme, no mock data
 
 ## 2026-03-17 22:15 IST | nitro-dev | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | docs: autonomous project handover — CLAUDE.md rewritten as single source of truth, PLAN.md with task tracking, QUICKSTART.md replacing old machine-configs, .reference/ for cross-machine design assets
+
+## 2026-03-18 00:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): production-grade OptionChainWidget — symbol/exchange selectors, 5 expiry buttons, spot LTP/change/PCR, scrollable chain table 20 strikes around ATM, LTP/OI/GREEKS view tabs, OI bars, B/S buttons, auto-refresh 3s/30s, 19.87 kB bundle, build clean
+
+## 2026-03-18 12:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): HoldingsWidget rewrite + TradeBookWidget new — sortable columns, search filter, LTP via multiquotes, total invested/value/P&L header, BUY/SELL pills, filter pills, market-aware refresh (60s holdings / 30s|120s trades), widgetFactory registered, build clean (HoldingsWidget 6.05 kB, TradeBookWidget 4.96 kB)
+
+## 2026-03-18 15:30 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): Phase 3 analysis widgets — OIChartWidget (horizontal bar OI chart, call/put bars, ATM highlight, S/R labels, PCR badge, OI filter, 5s/30s refresh, pure CSS bars, 12.49 kB) + StraddleWidget (ATM straddle tracker, CE+PE headline prices, TW Lightweight Charts v5 LineSeries accumulation, overlay toggles Straddle/Spot/SynFut, P&L from positions, 3s/30s refresh, 13.17 kB); widgetFactory registered both; build clean
+
+## 2026-03-19 10:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | docs: full audit — 10 audit docs (GAPS, CODE, TOOLS, FINAL_SWEEP, REPO_FEATURE_MAP, TECH_COMPARISON, BEST_IN_CLASS, MISSING_ITEMS, DISCORD_GITHUB_FINDINGS), conversation summaries (CORE1, CORE2, SESSION_LOG), v2 foundation design spec, 96-task implementation plan
+
+## 2026-03-19 10:20 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | chore: delete stub packages — dashboard/ and backtest/ (now integrated into terminal routes)
+
+## 2026-03-19 10:25 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | chore: blank .env.example values, track package-lock.json in git
+
+## 2026-03-19 10:50 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): v2 foundation — TypeScript 5.9 strict, Dockview 5.1, Zustand 5, Jotai 2.18, TanStack Query 5, TanStack Table 8, Glide Data Grid 6, shadcn/ui (16 components), react-hook-form + zod, date-fns, react-router-dom; removed flexlayout-react + recharts; API + widget type definitions; FlintTrade dark theme merged with shadcn CSS variables; Dockview theme overrides

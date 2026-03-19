@@ -1,6 +1,69 @@
 @import "tailwindcss";
 
-@theme {
+@layer base {
+  :root {
+    --radius: 0.5rem;
+    --background: 240 10% 3.9%;
+    --foreground: 240 5% 89%;
+    --card: 240 10% 7%;
+    --card-foreground: 240 5% 89%;
+    --popover: 240 10% 7%;
+    --popover-foreground: 240 5% 89%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 15%;
+    --secondary-foreground: 240 5% 89%;
+    --muted: 240 5% 15%;
+    --muted-foreground: 240 5% 45%;
+    --accent: 240 5% 15%;
+    --accent-foreground: 240 5% 89%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 17%;
+    --input: 240 6% 17%;
+    --ring: 217 91% 60%;
+    --chart-1: 217 91% 60%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 0 84% 60%;
+    --chart-4: 48 96% 53%;
+    --chart-5: 280 65% 60%;
+  }
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* FlintTrade trading-specific colors */
+  --color-profit: #22c55e;
+  --color-loss: #ef4444;
+  --color-warning: #eab308;
   --color-surface-base: #0a0a0f;
   --color-surface-card: #12121a;
   --color-surface-hover: #1a1a26;
@@ -9,10 +72,6 @@
   --color-text-primary: #e4e4e7;
   --color-text-secondary: #71717a;
   --color-text-muted: #52525b;
-  --color-profit: #22c55e;
-  --color-loss: #ef4444;
-  --color-accent: #3b82f6;
-  --color-warning: #eab308;
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
@@ -30,119 +89,23 @@
 body {
   margin: 0;
   overflow: hidden;
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
 }
 
-/* FlexLayout dark theme overrides */
-.flexlayout__layout {
-  --color-1: #0a0a0f;
-  --color-2: #12121a;
-  --color-3: #1e1e2e;
-  --color-4: #16161f;
-  --color-text: #e4e4e7;
-  --color-drag1: rgba(59, 130, 246, 0.5);
-  --color-drag2: rgba(59, 130, 246, 0.25);
-  background-color: var(--color-1);
-}
-
-.flexlayout__tab {
-  background-color: var(--color-1);
-  border-color: var(--color-3);
-  overflow: auto;
-}
-
-.flexlayout__tabset {
-  background-color: var(--color-1);
-  border-bottom: 1px solid var(--color-3);
-}
-
-.flexlayout__tabset_header {
-  background-color: var(--color-2);
-  border-bottom: 1px solid var(--color-3);
-}
-
-.flexlayout__tabset-selected {
-  background-color: var(--color-2);
-}
-
-.flexlayout__tab_button {
-  color: #71717a;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 11px;
-  padding: 4px 10px;
-}
-
-.flexlayout__tab_button--selected {
-  color: var(--color-text);
-  background-color: var(--color-1);
-}
-
-.flexlayout__tab_button:hover {
-  color: var(--color-text);
-  background-color: var(--color-2);
-}
-
-.flexlayout__splitter {
-  background-color: var(--color-4);
-}
-
-.flexlayout__splitter:hover,
-.flexlayout__splitter_drag {
-  background-color: var(--color-3);
-}
-
-.flexlayout__tab_toolbar_button {
-  color: #52525b;
-}
-
-.flexlayout__tab_toolbar_button:hover {
-  color: var(--color-text);
-  background-color: var(--color-2);
-}
-
-.flexlayout__tab_toolbar_button-max svg,
-.flexlayout__tab_toolbar_button-close svg {
-  width: 12px;
-  height: 12px;
-}
-
-.flexlayout__border {
-  background-color: var(--color-2);
-  border-color: var(--color-3);
-}
-
-.flexlayout__popup_menu {
-  background-color: var(--color-2);
-  border: 1px solid var(--color-3);
-  color: var(--color-text);
-  border-radius: 6px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-}
-
-.flexlayout__popup_menu_item {
-  color: #71717a;
-  padding: 6px 12px;
-}
-
-.flexlayout__popup_menu_item:hover {
-  background-color: #1a1a26;
-  color: var(--color-text);
-}
-
-.flexlayout__drag_rect {
-  background-color: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  border-radius: 4px;
-}
-
-.flexlayout__edge_rect {
-  background-color: rgba(59, 130, 246, 0.3);
-}
-
-/* Hide scrollbar in FlexLayout overflow menu */
-.flexlayout__tabset_content::-webkit-scrollbar {
-  display: none;
-}
-
-.flexlayout__tabset_content {
-  scrollbar-width: none;
+/* Dockview theme overrides */
+.dockview-theme-dark {
+  --dv-activegroup-visiblepanel-tab-background-color: #12121a;
+  --dv-activegroup-hiddenpanel-tab-background-color: #0a0a0f;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #12121a;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #0a0a0f;
+  --dv-tab-divider-color: #1e1e2e;
+  --dv-activegroup-visiblepanel-tab-color: #e4e4e7;
+  --dv-activegroup-hiddenpanel-tab-color: #71717a;
+  --dv-inactivegroup-visiblepanel-tab-color: #a1a1aa;
+  --dv-inactivegroup-hiddenpanel-tab-color: #71717a;
+  --dv-separator-border: #1e1e2e;
+  --dv-paneview-header-border-color: #1e1e2e;
+  --dv-background-color: #0a0a0f;
 }
