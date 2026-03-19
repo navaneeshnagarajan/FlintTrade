@@ -116,12 +116,14 @@ export class WebSocketService {
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as Record<string, unknown>;
-        if (data["action"] === "pong") return;
+        // Control messages from OpenAlgo (pong, connected, subscribe_ack, etc.)
+        // carry an "action" field but no tick data — pass them silently.
+        if (typeof data["action"] === "string") return;
 
-        // Validate required fields before propagating
+        // Validate required fields before propagating tick data
         const symbol = data["symbol"];
         if (typeof symbol !== "string" || symbol.length === 0) {
-          console.warn("[WS] Malformed message: missing or invalid symbol", data);
+          console.warn("[WS] Malformed tick: missing or invalid symbol", data);
           return;
         }
 

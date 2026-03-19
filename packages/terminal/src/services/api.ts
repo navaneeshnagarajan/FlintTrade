@@ -39,6 +39,9 @@ const ORDER_ENDPOINTS = new Set([
 const SMART_ORDER_ENDPOINTS = new Set(["placesmartorder"]);
 
 function getBase(): string {
+  // In dev mode, Vite proxy handles routing to OpenAlgo — use relative paths
+  // In production, use the full host from connectionStore
+  if (import.meta.env.DEV) return "";
   return useConnectionStore.getState().host;
 }
 
@@ -118,8 +121,11 @@ export const getOptionChain = (symbol: string, exchange = "NFO", expiry?: string
   post<OptionChainData>("optionchain", { symbol, exchange, ...(expiry ? { expiry } : {}) }); // BUG FIX 3: includes expiry parameter
 export const getOptionGreeks = (symbol: string, exchange = "NFO") =>
   post<Greeks>("optiongreeks", { symbol, exchange });
-export const getExpiry = (symbol: string, exchange = "NFO") =>
-  post<{ expiry: string[] }>("expiry", { symbol, exchange });
+export const getExpiry = (
+  symbol: string,
+  exchange = "NFO",
+  instrumenttype: "options" | "futures" = "options",
+) => post<{ expiry: string[] }>("expiry", { symbol, exchange, instrumenttype });
 export function searchSymbol(query: string): Promise<Array<{ symbol: string; exchange: string }>> {
   // Sanitize: strip characters that are not word chars, spaces, hyphens, or dots
   const sanitized = query.replace(/[^\w\s\-.]/g, "").slice(0, 50).trim();
@@ -132,10 +138,34 @@ export const getIntervals = () => get<string[]>("intervals");
 
 // --- Account ---
 export const getFunds = () => post<Funds>("funds");
-export const getOrderbook = () => post<Order[]>("orderbook");
-export const getTradebook = () => post<Trade[]>("tradebook");
-export const getPositionbook = () => post<Position[]>("positionbook");
-export const getHoldings = () => post<Holding[]>("holdings");
+
+// OpenAlgo wraps list responses: { data: { orders: [...], statistics: {...} } }
+// post() unwraps json.data, so we receive { orders: [...], statistics: {...} }.
+// We extract the nested array and fall back to the raw value for brokers that
+// return a plain array (future-proofing / broker inconsistency).
+export const getOrderbook = async (): Promise<Order[]> => {
+  const raw = await post<Order[] | { orders?: Order[] }>("orderbook");
+  if (Array.isArray(raw)) return raw;
+  return Array.isArray(raw.orders) ? raw.orders : [];
+};
+
+export const getTradebook = async (): Promise<Trade[]> => {
+  const raw = await post<Trade[] | { trades?: Trade[] }>("tradebook");
+  if (Array.isArray(raw)) return raw;
+  return Array.isArray(raw.trades) ? raw.trades : [];
+};
+
+export const getPositionbook = async (): Promise<Position[]> => {
+  const raw = await post<Position[] | { positions?: Position[] }>("positionbook");
+  if (Array.isArray(raw)) return raw;
+  return Array.isArray(raw.positions) ? raw.positions : [];
+};
+
+export const getHoldings = async (): Promise<Holding[]> => {
+  const raw = await post<Holding[] | { holdings?: Holding[] }>("holdings");
+  if (Array.isArray(raw)) return raw;
+  return Array.isArray(raw.holdings) ? raw.holdings : [];
+};
 
 // --- Utility ---
 export const ping = () => get<{ status: string }>("ping"); // BUG FIX 1: was POST, OpenAlgo docs specify GET
