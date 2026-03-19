@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; case \"$f\" in *.jsx|*.tsx|*.js|*.ts) cd \"$(git rev-parse --show-toplevel)/packages/terminal\" 2>/dev/null && npx vite build --logLevel error 2>&1 | tail -3 ;; *.py) cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null && python -m py_compile \"$f\" 2>&1 ;; esac; } 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Checking build..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"systemMessage\": \"Remember: run tests before claiming done. Check CLAUDE.md SOP.\"}'",
+            "statusMessage": "Reminding SOP..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | { read -r cmd; case \"$cmd\" in *'rm -rf /'*|*'rm -rf ~'*|*'format'*|*'DROP TABLE'*|*'--force'*) echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Destructive command blocked by hook\"}}' ;; esac; } 2>/dev/null || true",
+            "timeout": 5,
+            "statusMessage": "Safety check..."
+          }
+        ]
+      }
+    ]
+  }
+}
