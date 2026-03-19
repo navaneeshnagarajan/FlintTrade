@@ -110,3 +110,7 @@
 ## 2026-03-19 10:25 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | chore: blank .env.example values, track package-lock.json in git
 
 ## 2026-03-19 10:50 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): v2 foundation — TypeScript 5.9 strict, Dockview 5.1, Zustand 5, Jotai 2.18, TanStack Query 5, TanStack Table 8, Glide Data Grid 6, shadcn/ui (16 components), react-hook-form + zod, date-fns, react-router-dom; removed flexlayout-react + recharts; API + widget type definitions; FlintTrade dark theme merged with shadcn CSS variables; Dockview theme overrides
+
+## 2026-03-19 10:55 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): store types (1.6.3), Dockview smoke test (1.7), vitest jsdom config (1.7.2), index.html → main.tsx (1.8)
+
+## 2026-03-19 11:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): Phase 2 state architecture — 4 Zustand stores (connection, trading, settings, layout) with TDD (16 tests), Jotai atoms (tickAtomFamily + 4 index atoms, 3 tests), TanStack Query hooks (positions/orders/holdings/funds/optionchain/tradebook), typed API service with 3 bug fixes (ping GET, closePosition strategy, optionchain expiry), WebSocket rewrite with 30s heartbeat + Jotai bridge, rateLimiter TS migration, DataBus removed, QueryClient provider — 26 tests all passing
