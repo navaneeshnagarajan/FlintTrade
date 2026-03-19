@@ -13,6 +13,8 @@
 
 ---
 
+## 2026-03-19 23:10 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): Task 3.1 — Chart widget upgraded to 15 indicators + 7 drawing tools. New indicators: VWAP (daily reset), SMA(20), WMA(20), Ichimoku Cloud (5 lines), Pivot Points (PP/R1-R3/S1-S3), Stochastic(14,3,3), ATR(14), ADX(14) with +DI/-DI. Drawing tools: H-Line, V-Line, Trend Line, Ray, Fibonacci (7 levels), Rectangle, Text annotation. Drawing toolbar + Undo/Clear All. Indicator dropdown grouped: Overlays(9) | Volume | Oscillators(5). 1,238 lines added. tsc clean, 26/26 vitest.
+
 ## 2026-03-19 23:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | test(backtest-engine): Task 3.5 — 67 new tests for 28 absorbed strategies across 8 test classes (trend, momentum, mean reversion, volatility, volume, options). Covers all 6 categories. Total 863 Python tests passing.
 
 ## 2026-03-19 22:55 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(indicators+backtest-engine): Tasks 3.4+3.5 — 31 indicators (18 new: TEMA, WMA, Hull MA, Ichimoku, Parabolic SAR, CCI, ROC, CMO, TRIX, StochRSI, BOP, Donchian, NATR, HistVol, OBV, AD, CMF, MFI, VWMA) + 28 strategies absorbed (7 trend, 5 momentum, 4 mean reversion, 5 volatility, 3 volume, 3 options including Wheel/Iron Condor/Straddle). 5,220 lines added. 796 pytest + 26 vitest passing.
