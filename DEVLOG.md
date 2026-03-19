@@ -13,6 +13,10 @@
 
 ---
 
+## 2026-03-19 12:40 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): Batch 3 TSX migration — WatchlistWidget + 7 tool stubs + useWebSocket. Replaced dataBus with selectedSymbolAtom (Jotai), added selectedSymbolAtom to marketAtoms.ts, full strict types on all settings interfaces, migrated useWebSocket.js to .ts using getWsService(). Deleted all 9 JSX/JS originals. declarations.d.ts now empty. tsc clean, 26 tests pass.
+
+## 2026-03-19 12:35 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): Batch 2 TSX migration — 6 analysis widgets (Chart, OptionChain, OIChart, Straddle, Depth, Greeks) + Chart.tsx shared component. Full TypeScript strict types, removed 7 JSX files, updated declarations.d.ts. tsc clean, 26 terminal tests pass.
+
 ## 2026-03-14 23:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Manual | main | Project foundation — monorepo structure, 13 packages, CI/CD, SEBI compliance framework, per-package CLAUDE.md + AGENTS.md
 
 ## 2026-03-16 08:02 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(core): OpenAlgo client — 39 endpoints, async httpx, rate limiting, retry logic, pydantic models
@@ -123,4 +127,8 @@
 
 ## 2026-03-19 12:00 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | docs: 35-file cleanup from spec Section 15 — README (test count, arch diagram), ARCHITECTURE (submodule, Dockview), TOOLS_AND_DEPS (14 new deps), TOTP removed from 6 files, 3 files archived to historical/, 3 temp files deleted, OPENALGO_API (5 GET fixes), setup docs (port 5173), SEBI_COMPLIANCE (STT rates April 2026), ENHANCEMENT_BLUEPRINT marked absorbed
 
-## 2026-03-19 12:17 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): Phase 4 Batch 1 — 7 trading widgets migrated JSX→TSX; TanStack Query hooks replace direct API calls; TanStack Table v8 + shadcn Table for Positions/Orders/Holdings/TradeBook; Jotai tickAtomFamily in Dashboard index cards; react-hook-form + zod in OrderPad; ScalperWidget fully typed; declarations.d.ts updated with typed useWebSocket ambient; tsc --noEmit clean, 26/26 tests pass
+## 2026-03-19 12:17 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): Phase 4 Batch 1 — 7 trading widgets migrated JSX→TSX; TanStack Query hooks replace direct API calls; TanStack Table v8 + shadcn Table for Positions/Orders/Holdings/TradeBook; Jotai tickAtomFamily in Dashboard index cards; react-hook-form + zod in OrderPad; ScalperWidget fully typed; declarations.d.ts updated with typed useWebSocket ambient; tsc --noEmit clean, 26/26 tests pass
+
+## 2026-03-19 12:30 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): Phase 4 Batch 2 — 6 analysis widgets + Chart component migrated JSX→TSX; ChartWidget LWC v5 typed refs + fixed unsubscribeClick; OptionChainWidget useOptionChain hook + shadcn Select/Tabs; OIChart/Straddle/Depth/Greeks all typed with proper API integration
+
+## 2026-03-19 12:42 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | main | feat(terminal): Phase 4 Batch 3 + Phase 5 verification — Watchlist + 7 tools + useWebSocket migrated; dataBus replaced with selectedSymbolAtom (Jotai); useWebSocket.js→.ts; SettingsTool typed AllSettings; ZERO JSX/JS remain. 80 TS/TSX files. tsc 0 errors, vite build clean, 26/26 tests pass.
