@@ -15,6 +15,7 @@ export default function useWebSocket(
   mode: WsMode = "ltp",
 ): { ticks: TickMap; connected: boolean } {
   const wsUrl                         = useConnectionStore((s) => s.wsUrl);
+  const apiKey                        = useConnectionStore((s) => s.apiKey);
   const [ticks, setTicks]             = useState<TickMap>({});
   const [connected, setConnected]     = useState(false);
   const prevRef                       = useRef<WsInstrument[]>([]);
@@ -22,7 +23,7 @@ export default function useWebSocket(
   // Subscribe to tick and status callbacks
   useEffect(() => {
     if (!wsUrl) return;
-    const ws = getWsService(wsUrl);
+    const ws = getWsService(wsUrl, apiKey);
     if (!ws.isConnected) ws.connect();
 
     const unsubTick = ws.onTick((tick: WsTick) => {

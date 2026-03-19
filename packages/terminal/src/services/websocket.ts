@@ -1,4 +1,4 @@
-import type { WsTick, WsMode, WsInstrument, WsAction } from "@/types/api";
+import type { WsTick, WsMode, WsInstrument } from "@/types/api";
 
 type TickCallback = (tick: WsTick) => void;
 type StatusCallback = (connected: boolean) => void;
@@ -19,7 +19,7 @@ export class WebSocketService {
   private depthCallbacks = new Set<(data: Record<string, unknown>) => void>();
   private statusCallbacks = new Set<StatusCallback>();
 
-  constructor(private url: string) {}
+  constructor(private url: string, private apiKey: string = "") {}
 
   get isConnected(): boolean { return this.connected; }
 
@@ -69,8 +69,12 @@ export class WebSocketService {
     );
     if (newInsts.length === 0) return;
     this.subscriptions[mode] = [...this.subscriptions[mode], ...newInsts];
-    const action: WsAction = `subscribe_${mode}` as WsAction;
-    this.send({ action, instruments: newInsts });
+    // OpenAlgo v2 WS protocol: { action: "subscribe", symbols: [...], mode: "LTP" }
+    this.send({
+      action: "subscribe",
+      symbols: newInsts.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
+      mode: mode.toUpperCase(),
+    });
   }
 
   unsubscribe(instruments: WsInstrument[], mode: WsMode = "ltp"): void {
@@ -79,8 +83,10 @@ export class WebSocketService {
         (inst) => s.symbol === inst.symbol && s.exchange === inst.exchange
       )
     );
-    const action: WsAction = `unsubscribe_${mode}` as WsAction;
-    this.send({ action, instruments });
+    this.send({
+      action: "unsubscribe",
+      symbols: instruments.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
+    });
   }
 
   getSubscriptions(mode: WsMode): WsInstrument[] {
@@ -99,6 +105,10 @@ export class WebSocketService {
     this.ws.onopen = () => {
       this.reconnectDelay = 1000;
       this.setConnected(true);
+      // OpenAlgo v2: authenticate immediately after connection
+      if (this.apiKey) {
+        this.send({ action: "authenticate", api_key: this.apiKey });
+      }
       this.startHeartbeat();
       this.resubscribeAll();
     };
@@ -115,41 +125,48 @@ export class WebSocketService {
 
     this.ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as Record<string, unknown>;
-        // Control messages from OpenAlgo (pong, connected, subscribe_ack, etc.)
-        // carry an "action" field but no tick data — pass them silently.
-        if (typeof data["action"] === "string") return;
+        const msg = JSON.parse(event.data) as Record<string, unknown>;
 
-        // Validate required fields before propagating tick data
-        const symbol = data["symbol"];
+        // Control/system messages (action field: pong, authenticated, subscribe_ack, etc.)
+        if (typeof msg["action"] === "string" || typeof msg["type"] === "undefined" && typeof msg["action"] === "string") {
+          return;
+        }
+
+        // OpenAlgo v2 market data: { type: "market_data", mode: 1|2|3, topic: "SYMBOL.EXCHANGE", data: {...} }
+        const tickData = (msg["data"] && typeof msg["data"] === "object")
+          ? msg["data"] as Record<string, unknown>
+          : msg; // Fallback: try root level for backwards compatibility
+
+        const symbol = tickData["symbol"];
         if (typeof symbol !== "string" || symbol.length === 0) {
-          console.warn("[WS] Malformed tick: missing or invalid symbol", data);
+          // Silently ignore system messages without symbol (auth responses, etc.)
+          if (msg["type"] || msg["status"] || msg["message"]) return;
+          console.warn("[WS] Malformed tick: missing symbol", msg);
           return;
         }
 
-        // Depth mode (mode 3) sends bids/asks without ltp — handle separately
-        if (Array.isArray(data["bids"]) || Array.isArray(data["asks"])) {
-          this.depthCallbacks.forEach((cb) => cb(data));
+        const exchange = typeof tickData["exchange"] === "string" ? tickData["exchange"] : "";
+
+        // Depth mode (mode 3) sends bids/asks without ltp
+        if (Array.isArray(tickData["bids"]) || Array.isArray(tickData["asks"])) {
+          this.depthCallbacks.forEach((cb) => cb(tickData));
           return;
         }
 
-        const ltp = data["ltp"];
-        if (typeof ltp !== "number") {
-          console.warn("[WS] Malformed message: ltp is not a number", data);
-          return;
-        }
+        const ltp = tickData["ltp"];
+        if (typeof ltp !== "number") return; // Quote/other mode without LTP — skip silently
 
         const tick: WsTick = {
           symbol,
-          exchange: typeof data["exchange"] === "string" ? data["exchange"] : "",
+          exchange,
           ltp,
-          open: typeof data["open"] === "number" ? data["open"] : undefined,
-          high: typeof data["high"] === "number" ? data["high"] : undefined,
-          low: typeof data["low"] === "number" ? data["low"] : undefined,
-          close: typeof data["close"] === "number" ? data["close"] : undefined,
-          volume: typeof data["volume"] === "number" ? data["volume"] : undefined,
-          change: typeof data["change"] === "number" ? data["change"] : undefined,
-          pct: typeof data["pct"] === "number" ? data["pct"] : undefined,
+          open: typeof tickData["open"] === "number" ? tickData["open"] : undefined,
+          high: typeof tickData["high"] === "number" ? tickData["high"] : undefined,
+          low: typeof tickData["low"] === "number" ? tickData["low"] : undefined,
+          close: typeof tickData["close"] === "number" ? tickData["close"] : undefined,
+          volume: typeof tickData["volume"] === "number" ? tickData["volume"] : undefined,
+          change: typeof tickData["change"] === "number" ? tickData["change"] : undefined,
+          pct: typeof tickData["pct"] === "number" ? tickData["pct"] : undefined,
         };
         this.tickCallbacks.forEach((cb) => cb(tick));
       } catch {
@@ -189,8 +206,11 @@ export class WebSocketService {
   private resubscribeAll(): void {
     for (const mode of ["ltp", "quote", "depth"] as WsMode[]) {
       if (this.subscriptions[mode].length > 0) {
-        const action: WsAction = `subscribe_${mode}` as WsAction;
-        this.send({ action, instruments: this.subscriptions[mode] });
+        this.send({
+          action: "subscribe",
+          symbols: this.subscriptions[mode].map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
+          mode: mode.toUpperCase(),
+        });
       }
     }
   }
@@ -203,9 +223,9 @@ export class WebSocketService {
 
 let instance: WebSocketService | null = null;
 
-export function getWsService(url?: string): WebSocketService {
+export function getWsService(url?: string, apiKey?: string): WebSocketService {
   if (!instance && url) {
-    instance = new WebSocketService(url);
+    instance = new WebSocketService(url, apiKey || "");
   }
   return instance!;
 }
