@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import type { StateCreator } from "zustand";
 import type { ConnectionStatus } from "@/types/stores";
 
 interface ConnectionStore {
@@ -15,24 +16,19 @@ interface ConnectionStore {
   setLastPing: (timestamp: number) => void;
 }
 
-const BASE = "";
-const API_KEY = "";
-const WS_URL = "";
+const storeImpl: StateCreator<ConnectionStore> = (set) => ({
+  host: "",
+  apiKey: "",
+  wsUrl: "",
+  status: "disconnected",
+  wsConnected: false,
+  lastPing: null,
+  setStatus: (status) => set({ status }),
+  setWsConnected: (wsConnected) => set({ wsConnected }),
+  setConfig: (config) => set((state) => ({ ...state, ...config })),
+  setLastPing: (lastPing) => set({ lastPing }),
+});
 
-export const useConnectionStore = create<ConnectionStore>()(
-  devtools(
-    (set) => ({
-      host: BASE,
-      apiKey: API_KEY,
-      wsUrl: WS_URL,
-      status: "disconnected",
-      wsConnected: false,
-      lastPing: null,
-      setStatus: (status) => set({ status }, false, "setStatus"),
-      setWsConnected: (wsConnected) => set({ wsConnected }, false, "setWsConnected"),
-      setConfig: (config) => set((state) => ({ ...state, ...config }), false, "setConfig"),
-      setLastPing: (lastPing) => set({ lastPing }, false, "setLastPing"),
-    }),
-    { name: "connection" }
-  )
-);
+export const useConnectionStore = import.meta.env.DEV
+  ? create<ConnectionStore>()(devtools(storeImpl, { name: "connection" }))
+  : create<ConnectionStore>()(storeImpl);

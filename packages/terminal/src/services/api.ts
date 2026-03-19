@@ -19,6 +19,24 @@ import type {
   Greeks,
 } from "@/types/api";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
+
+// Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
+const ORDER_ENDPOINTS = new Set([
+  "placeorder",
+  "modifyorder",
+  "cancelorder",
+  "cancelallorder",
+  "closeposition",
+  "openposition",
+  "optionsorder",
+  "optionsmultiorder",
+  "basketorder",
+  "splitorder",
+]);
+
+// Endpoints subject to the 2/s smart-order rate limit
+const SMART_ORDER_ENDPOINTS = new Set(["placesmartorder"]);
 
 function getBase(): string {
   return useConnectionStore.getState().host;
@@ -29,6 +47,21 @@ function getApiKey(): string {
 }
 
 async function post<T>(endpoint: string, extra: Record<string, unknown> = {}): Promise<T> {
+  // Enforce rate limits before making the request
+  if (SMART_ORDER_ENDPOINTS.has(endpoint)) {
+    if (!smartOrderLimiter.tryConsume()) {
+      throw new Error(`Rate limit exceeded for ${endpoint} (smart order: 2/s)`);
+    }
+  } else if (ORDER_ENDPOINTS.has(endpoint)) {
+    if (!orderLimiter.tryConsume()) {
+      throw new Error(`Rate limit exceeded for ${endpoint} (order: 10/s)`);
+    }
+  } else {
+    if (!generalLimiter.tryConsume()) {
+      throw new Error(`Rate limit exceeded for ${endpoint} (general: 50/s)`);
+    }
+  }
+
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -84,8 +117,14 @@ export const getOptionGreeks = (symbol: string, exchange = "NFO") =>
   post<Greeks>("optiongreeks", { symbol, exchange });
 export const getExpiry = (symbol: string, exchange = "NFO") =>
   post<{ expiry: string[] }>("expiry", { symbol, exchange });
-export const searchSymbol = (query: string) =>
-  post<Array<{ symbol: string; exchange: string }>>("search", { query });
+export function searchSymbol(query: string): Promise<Array<{ symbol: string; exchange: string }>> {
+  // Sanitize: strip characters that are not word chars, spaces, hyphens, or dots
+  const sanitized = query.replace(/[^\w\s\-.]/g, "").slice(0, 50).trim();
+  if (!sanitized) {
+    throw new Error("Search query is empty after sanitization");
+  }
+  return post<Array<{ symbol: string; exchange: string }>>("search", { query: sanitized });
+}
 export const getIntervals = () => get<string[]>("intervals");
 
 // --- Account ---

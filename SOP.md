@@ -95,6 +95,24 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → FIX → UPDATE → C
 9. Test with live OpenAlgo sandbox before claiming done
 10. Conventional commits, specific file staging, never `git add -A`
 
+## Step 10: SECURITY (every feature)
+- No API keys in localStorage (use sessionStorage minimum, backend proxy long-term)
+- Rate limiters must be wired to API calls (not just defined)
+- Validate all user inputs at trust boundaries (search, forms, WebSocket messages)
+- Use `hmac.compare_digest()` for secret comparisons (never `==` or `!=`)
+- Content-Security-Policy header on all HTML pages
+- Devtools middleware disabled in production builds
+- Never bind dev servers to `0.0.0.0` — use `127.0.0.1`
+- Run security audit (Security Engineer agent) before any release
+
+## Step 11: ATTRIBUTION (when absorbing code)
+- Check the source repo's LICENSE before absorbing any code
+- Add entry to `NOTICE` file with: project name, author, license, copyright year
+- Add entry to `README.md` Acknowledgements → "Code Absorbed" table
+- Update `docs/REPO_FEATURE_MAP.md` with absorption classification
+- If AGPL-3.0: compatible (our license). If MIT/Apache: compatible. If GPL-2.0 only: incompatible.
+- Never absorb code without attribution — this is a legal requirement
+
 ## DO NOT
 - Skip reading docs at session start
 - Write code without checking repos for absorption first

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
+import type { StateCreator } from "zustand";
 import type { DockviewApi } from "dockview-react";
 
 interface LayoutTab {
@@ -27,72 +28,54 @@ function generateId(): string {
 
 const defaultTabId = generateId();
 
-export const useLayoutStore = create<LayoutStore>()(
-  devtools(
-    persist(
-      (set, get) => ({
-        tabs: [{ id: defaultTabId, name: "Workspace" }],
-        activeTabId: defaultTabId,
-        dockviewApi: null,
-        addTab: (name) => {
-          const id = generateId();
-          const tabName = name || `Layout ${get().tabs.length + 1}`;
-          set(
-            (state) => ({
-              tabs: [...state.tabs, { id, name: tabName }],
-              activeTabId: id,
-            }),
-            false,
-            "addTab"
-          );
-        },
-        removeTab: (id) => {
-          set(
-            (state) => {
-              const remaining = state.tabs.filter((t) => t.id !== id);
-              if (remaining.length === 0) return state;
-              const newActive =
-                state.activeTabId === id ? remaining[0].id : state.activeTabId;
-              return { tabs: remaining, activeTabId: newActive };
-            },
-            false,
-            "removeTab"
-          );
-        },
-        setActiveTab: (id) => set({ activeTabId: id }, false, "setActiveTab"),
-        renameTab: (id, name) => {
-          set(
-            (state) => ({
-              tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
-            }),
-            false,
-            "renameTab"
-          );
-        },
-        saveTabLayout: (id, layout) => {
-          set(
-            (state) => ({
-              tabs: state.tabs.map((t) =>
-                t.id === id ? { ...t, serializedLayout: layout } : t
-              ),
-            }),
-            false,
-            "saveTabLayout"
-          );
-        },
-        getTabLayout: (id) => {
-          return get().tabs.find((t) => t.id === id)?.serializedLayout;
-        },
-        setDockviewApi: (api) => set({ dockviewApi: api }, false, "setDockviewApi"),
-      }),
-      {
-        name: "flinttrade:layouts",
-        partialize: (state) => ({
-          tabs: state.tabs,
-          activeTabId: state.activeTabId,
-        }),
-      }
-    ),
-    { name: "layout" }
-  )
-);
+const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (set, get) => ({
+  tabs: [{ id: defaultTabId, name: "Workspace" }],
+  activeTabId: defaultTabId,
+  dockviewApi: null,
+  addTab: (name) => {
+    const id = generateId();
+    const tabName = name || `Layout ${get().tabs.length + 1}`;
+    set((state) => ({
+      tabs: [...state.tabs, { id, name: tabName }],
+      activeTabId: id,
+    }));
+  },
+  removeTab: (id) => {
+    set((state) => {
+      const remaining = state.tabs.filter((t) => t.id !== id);
+      if (remaining.length === 0) return state;
+      const newActive =
+        state.activeTabId === id ? remaining[0].id : state.activeTabId;
+      return { tabs: remaining, activeTabId: newActive };
+    });
+  },
+  setActiveTab: (id) => set({ activeTabId: id }),
+  renameTab: (id, name) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
+    }));
+  },
+  saveTabLayout: (id, layout) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, serializedLayout: layout } : t
+      ),
+    }));
+  },
+  getTabLayout: (id) => {
+    return get().tabs.find((t) => t.id === id)?.serializedLayout;
+  },
+  setDockviewApi: (api) => set({ dockviewApi: api }),
+});
+
+const persistedStore = persist(storeImpl, {
+  name: "flinttrade:layouts",
+  partialize: (state) => ({
+    tabs: state.tabs,
+    activeTabId: state.activeTabId,
+  }) as LayoutStore,
+});
+
+export const useLayoutStore = import.meta.env.DEV
+  ? create<LayoutStore>()(devtools(persistedStore, { name: "layout" }))
+  : create<LayoutStore>()(persistedStore);

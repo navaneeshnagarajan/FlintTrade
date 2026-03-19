@@ -109,23 +109,36 @@ export class WebSocketService {
 
     this.ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        if (data.action === "pong") return;
+        const data = JSON.parse(event.data) as Record<string, unknown>;
+        if (data["action"] === "pong") return;
+
+        // Validate required fields before propagating
+        const symbol = data["symbol"];
+        const ltp = data["ltp"];
+        if (typeof symbol !== "string" || symbol.length === 0) {
+          console.warn("[WS] Malformed message: missing or invalid symbol", data);
+          return;
+        }
+        if (typeof ltp !== "number") {
+          console.warn("[WS] Malformed message: ltp is not a number", data);
+          return;
+        }
+
         const tick: WsTick = {
-          symbol: data.symbol || "",
-          exchange: data.exchange || "",
-          ltp: data.ltp ?? 0,
-          open: data.open,
-          high: data.high,
-          low: data.low,
-          close: data.close,
-          volume: data.volume,
-          change: data.change,
-          pct: data.pct,
+          symbol,
+          exchange: typeof data["exchange"] === "string" ? data["exchange"] : "",
+          ltp,
+          open: typeof data["open"] === "number" ? data["open"] : undefined,
+          high: typeof data["high"] === "number" ? data["high"] : undefined,
+          low: typeof data["low"] === "number" ? data["low"] : undefined,
+          close: typeof data["close"] === "number" ? data["close"] : undefined,
+          volume: typeof data["volume"] === "number" ? data["volume"] : undefined,
+          change: typeof data["change"] === "number" ? data["change"] : undefined,
+          pct: typeof data["pct"] === "number" ? data["pct"] : undefined,
         };
         this.tickCallbacks.forEach((cb) => cb(tick));
       } catch {
-        // ignore malformed messages
+        console.warn("[WS] Failed to parse message", event.data);
       }
     };
   }

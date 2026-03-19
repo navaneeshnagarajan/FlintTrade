@@ -6,6 +6,7 @@
 *.key
 *.crt
 secrets/
+workspace.json
 
 # === Python ===
 __pycache__/

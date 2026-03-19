@@ -799,6 +799,7 @@ These cloned repos are not directly useful for FlintTrade:
 3. **trading-strategies-openalgo** (tier2-ecosystem) -- Full backtest engine + strategy framework. Direct replacement for backtest-engine stubs.
 4. **pyindicators** (marketcalls-all) -- Complete indicator library. Direct bootstrap for packages/indicators/.
 5. **etftracker** (marketcalls-all) -- 10 investor-grade dashboards in React. Direct bootstrap for investor features.
+6. **investing-algorithm-framework** (external) -- Event-driven + vectorized backtesting, 50+ metrics (CAGR, Sharpe, drawdown, win rate), declarative TakeProfit/StopLoss rules, portfolio persistence, permutation testing for statistical significance. Apache-2.0 license. ADAPT for backtest-engine upgrade.
 
 ---
 

@@ -9,6 +9,8 @@ OpenAlgo webhook limits.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import time
 from dataclasses import dataclass
@@ -196,7 +198,16 @@ class WebhookServer:
         if endpoint.secret:
             auth_header = request.headers.get("X-Webhook-Secret", "")
             sig_header = request.headers.get("X-Signature", "")
-            if auth_header != endpoint.secret and not sig_header:
+            if sig_header:
+                # Validate HMAC-SHA256 signature against the raw body
+                body_for_auth = request.get_data()
+                expected = hmac.new(
+                    endpoint.secret.encode(), body_for_auth, hashlib.sha256
+                ).hexdigest()
+                if not hmac.compare_digest(expected, sig_header):
+                    logger.warning("Signature validation failed for %s", path)
+                    return jsonify({"status": "error", "message": "Unauthorized"}), 401
+            elif not hmac.compare_digest(auth_header, endpoint.secret):
                 logger.warning("Auth failed for %s", path)
                 return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
