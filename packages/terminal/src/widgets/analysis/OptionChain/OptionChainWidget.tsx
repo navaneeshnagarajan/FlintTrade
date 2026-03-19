@@ -3,17 +3,27 @@
  *
  * Features:
  *   - Symbol + Exchange selectors, first-5 expiry buttons
- *   - Spot LTP, change, change%, PCR badge
- *   - Three view tabs: LTP | OI | GREEKS
+ *   - Spot LTP, change, change% (green/red arrow), PCR badge (computed from OI)
+ *   - Three view tabs: LTP | OI | GREEKS (Delta/Gamma/Theta/Vega/IV)
+ *   - OI interpretation badges: Long Build Up / Short Covering / Long Unwinding / Short Build Up
  *   - Scrollable chain table: 10 strikes above ATM, ATM row highlighted, 10 below
  *   - Buy/Sell mini buttons per strike (calls + puts)
+ *   - BASKET toggle — select strikes, badge count, basket panel
  *   - Color-coded change%, OI bars, ATM accent border
  *   - Auto-refresh: 3 s market hours, 30 s off-hours
  *   - Dense layout: text-xs data, text-[10px] headers, font-mono numbers
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { RefreshCw, ChevronDown, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
+import {
+  RefreshCw,
+  ChevronDown,
+  TrendingUp,
+  TrendingDown,
+  AlertCircle,
+  ShoppingBasket,
+  X,
+} from "lucide-react";
 import { getExpiry, getOptionChain, getQuotes, placeOrder } from "../../../services/api";
 import type { Quote } from "../../../types/api";
 
@@ -46,6 +56,9 @@ interface RawOptionRow {
   open_interest?: number;
   oi_change?: number;
   delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
   iv?: number;
   implied_volatility?: number;
 }
@@ -77,6 +90,21 @@ interface OrderParams {
   expiry: string;
   action: string;
   ltp: number | null;
+}
+
+/** OI interpretation badge type — from OiPulse patterns */
+type OISignal =
+  | "Long Build Up"   // price up + OI up   → bullish
+  | "Short Covering"  // price up + OI down  → short squeeze
+  | "Long Unwinding"  // price down + OI down → bulls exiting
+  | "Short Build Up"  // price down + OI up  → bearish
+  | null;
+
+interface BasketItem {
+  strike: number;
+  optionType: "CE" | "PE";
+  ltp: number | null;
+  expiry: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +164,11 @@ function fmtDelta(v: number | null | undefined): string {
   return Number(v).toFixed(3);
 }
 
+function fmtGreek(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return Number(v).toFixed(4);
+}
+
 function fmtIV(v: number | null | undefined): string {
   if (v == null) return "—";
   return `${(Number(v) * 100).toFixed(1)}%`;
@@ -149,6 +182,45 @@ function fmtExpiry(raw: string): string {
     return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
   } catch {
     return raw;
+  }
+}
+
+/**
+ * Classify OI signal from OiPulse patterns.
+ * price change direction + OI change direction → signal type.
+ */
+function getOISignal(row: RawOptionRow | null): OISignal {
+  if (!row) return null;
+  const chgPct = row.change_percent ?? row.change_pct ?? null;
+  const oiChg  = row.oi_change ?? null;
+  if (chgPct == null || oiChg == null) return null;
+  const priceUp = Number(chgPct) >= 0;
+  const oiUp    = Number(oiChg) >= 0;
+  if (priceUp  && oiUp)   return "Long Build Up";
+  if (priceUp  && !oiUp)  return "Short Covering";
+  if (!priceUp && !oiUp)  return "Long Unwinding";
+  /* !priceUp && oiUp */  return "Short Build Up";
+}
+
+/** Tailwind classes for each OI signal type */
+function oiSignalStyle(signal: OISignal): string {
+  switch (signal) {
+    case "Long Build Up":   return "bg-profit/15 text-profit border-profit/30";
+    case "Short Covering":  return "bg-warning/15 text-warning border-warning/30";
+    case "Long Unwinding":  return "bg-orange-500/15 text-orange-400 border-orange-500/30";
+    case "Short Build Up":  return "bg-loss/15 text-loss border-loss/30";
+    default:                return "";
+  }
+}
+
+/** Short label for badge */
+function oiSignalShort(signal: OISignal): string {
+  switch (signal) {
+    case "Long Build Up":  return "LBU";
+    case "Short Covering": return "SCov";
+    case "Long Unwinding": return "LU";
+    case "Short Build Up": return "SBU";
+    default:               return "";
   }
 }
 
@@ -274,6 +346,23 @@ function Selector({ value, options, onChange, className = "" }: SelectorProps) {
   );
 }
 
+/** OI signal badge — compact pill shown in the strike row */
+interface OIBadgeProps {
+  signal: OISignal;
+}
+
+function OIBadge({ signal }: OIBadgeProps) {
+  if (!signal) return <span className="text-text-muted">—</span>;
+  return (
+    <span
+      className={`inline-flex items-center px-1 py-0 text-[9px] font-semibold rounded border leading-tight ${oiSignalStyle(signal)}`}
+      title={signal}
+    >
+      {oiSignalShort(signal)}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
@@ -296,6 +385,10 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const [orderMsg, setOrderMsg] = useState<OrderToast | null>(null);
+
+  // Basket state — selected strikes for multi-leg orders
+  const [basket, setBasket] = useState<BasketItem[]>([]);
+  const [basketOpen, setBasketOpen] = useState(false);
 
   const symDef   = SYMBOLS[activeSymbolIdx];
   const exchange = exchangeOverride ?? symDef.exchange;
@@ -370,10 +463,15 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     }
   }, [chain]);
 
-  // compute ordered strike list, ATM, max OI
-  // maxPutOI is computed for future OI bar on the put side (reserved for Glide Data Grid migration)
-  const { strikes, atmStrike, maxCallOI } = useMemo(() => {
-    if (!chain) return { strikes: [] as StrikeRow[], atmStrike: null as number | null, maxCallOI: 0 };
+  // compute ordered strike list, ATM, max OI, computed PCR
+  const { strikes, atmStrike, maxCallOI, maxPutOI, computedPCR } = useMemo(() => {
+    if (!chain) return {
+      strikes: [] as StrikeRow[],
+      atmStrike: null as number | null,
+      maxCallOI: 0,
+      maxPutOI: 0,
+      computedPCR: null as number | null,
+    };
 
     const callMap: Record<number, RawOptionRow> = {};
     const putMap:  Record<number, RawOptionRow> = {};
@@ -399,21 +497,32 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     const hi = Math.min(allStrikes.length - 1, atmIdx + STRIKES_AROUND_ATM);
     const visible = allStrikes.slice(lo, hi + 1);
 
-    const maxCallOI = Math.max(0, ...visible.map((s) => Number(callMap[s]?.oi ?? 0)));
+    const maxCallOI = Math.max(0, ...visible.map((s) => Number(callMap[s]?.oi ?? callMap[s]?.open_interest ?? 0)));
+    const maxPutOI  = Math.max(0, ...visible.map((s) => Number(putMap[s]?.oi  ?? putMap[s]?.open_interest  ?? 0)));
+
+    // Compute PCR from total put OI / total call OI (all visible strikes)
+    const totalCallOI = visible.reduce((acc, s) => acc + Number(callMap[s]?.oi ?? callMap[s]?.open_interest ?? 0), 0);
+    const totalPutOI  = visible.reduce((acc, s) => acc + Number(putMap[s]?.oi  ?? putMap[s]?.open_interest  ?? 0), 0);
+    const computedPCR = totalCallOI > 0 ? totalPutOI / totalCallOI : null;
 
     return {
       strikes: visible.map((s) => ({ strike: s, call: callMap[s] ?? null, put: putMap[s] ?? null })),
       atmStrike: atm,
       maxCallOI,
+      maxPutOI,
+      computedPCR,
     };
   }, [chain, spot]);
 
   // spot derived values
-  const spotLtp      = spot?.ltp ?? null;
+  const spotLtp       = spot?.ltp ?? null;
   const spotPrevClose = (spot as unknown as { prev_close?: number })?.prev_close ?? spot?.close ?? null;
-  const spotChange   = spotLtp && spotPrevClose ? spotLtp - spotPrevClose : null;
+  const spotChange    = spotLtp && spotPrevClose ? spotLtp - spotPrevClose : null;
   const spotChangePct = spotChange && spotPrevClose ? (spotChange / spotPrevClose) * 100 : null;
-  const spotUp       = spotChange == null ? null : spotChange >= 0;
+  const spotUp        = spotChange == null ? null : spotChange >= 0;
+
+  // PCR — prefer API value, fallback to computed
+  const pcr = chain?.pcr != null ? chain.pcr : computedPCR;
 
   // order handler
   async function handleOrder({ strike, optionType, expiry, action }: OrderParams) {
@@ -436,43 +545,103 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     }
   }
 
-  const pcr = chain?.pcr ?? null;
+  // basket helpers
+  function addToBasket(strike: number, optionType: "CE" | "PE", ltp: number | null) {
+    if (!selectedExpiry) return;
+    setBasket((prev) => {
+      const exists = prev.some((b) => b.strike === strike && b.optionType === optionType);
+      if (exists) return prev;
+      return [...prev, { strike, optionType, ltp, expiry: selectedExpiry }];
+    });
+    setBasketOpen(true);
+  }
+
+  function removeFromBasket(strike: number, optionType: "CE" | "PE") {
+    setBasket((prev) => prev.filter((b) => !(b.strike === strike && b.optionType === optionType)));
+  }
+
+  function isInBasket(strike: number, optionType: "CE" | "PE"): boolean {
+    return basket.some((b) => b.strike === strike && b.optionType === optionType);
+  }
+
   const expiryButtons = expiries.slice(0, 5);
 
-  // render helpers
+  // ---------------------------------------------------------------------------
+  // Render helpers
+  // ---------------------------------------------------------------------------
+
   function renderCallCells(call: RawOptionRow | null, strike: number) {
     if (!call) {
+      if (view === "GREEKS") {
+        return (
+          <>
+            <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-center"></td>
+          </>
+        );
+      }
       return (
         <>
           <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
           <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
-          {view !== "GREEKS" && <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>}
+          <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>
+          {view === "OI" && <td className="px-1 py-0.5 text-right font-mono text-text-muted">—</td>}
           <td className="px-1 py-0.5 text-center"></td>
         </>
       );
     }
+
     const ltp    = call.ltp ?? call.last_price ?? null;
     const chgPct = call.change_percent ?? call.change_pct ?? null;
     const oi     = call.oi ?? call.open_interest ?? null;
     const oiChg  = call.oi_change ?? null;
     const delta  = call.delta ?? null;
+    const gamma  = call.gamma ?? null;
+    const theta  = call.theta ?? null;
+    const vega   = call.vega ?? null;
     const iv     = call.iv ?? call.implied_volatility ?? null;
     const chgUp  = chgPct == null ? null : Number(chgPct) >= 0;
+    const oiSignal = getOISignal(call);
+    const inBasket = isInBasket(strike, "CE");
+
+    const basketBtn = (
+      <button
+        onClick={() => inBasket ? removeFromBasket(strike, "CE") : addToBasket(strike, "CE", ltp)}
+        className={`ml-0.5 px-1 py-0.5 text-[9px] font-semibold rounded border transition-colors leading-none ${
+          inBasket
+            ? "bg-accent/20 border-accent/50 text-accent"
+            : "bg-surface-hover border-border-default text-text-muted hover:text-accent hover:border-accent/40"
+        }`}
+        title={inBasket ? "Remove from basket" : "Add to basket"}
+      >
+        +B
+      </button>
+    );
 
     if (view === "LTP") {
       return (
         <>
+          <td className="px-1 py-0.5 text-right">
+            <OIBadge signal={oiSignal} />
+          </td>
           <td className={`px-1 py-0.5 text-right font-mono text-xs ${chgUp === true ? "text-profit" : chgUp === false ? "text-loss" : "text-text-muted"}`}>
             {fmtChg(chgPct)}
           </td>
           <td className="px-1 py-0.5 text-right font-mono text-xs text-text-primary">{fmtLtp(ltp)}</td>
           <td className="px-1 py-0.5 text-right font-mono text-xs text-text-secondary">{fmtOI(oi)}</td>
           <td className="px-1 py-0.5 text-center">
-            <BuySellButtons
-              symbol={symDef.label} exchange={exchange}
-              strike={strike} optionType="CE" expiry={selectedExpiry}
-              ltp={ltp} onOrder={handleOrder}
-            />
+            <div className="flex items-center justify-end gap-0.5">
+              {basketBtn}
+              <BuySellButtons
+                symbol={symDef.label} exchange={exchange}
+                strike={strike} optionType="CE" expiry={selectedExpiry}
+                ltp={ltp} onOrder={handleOrder}
+              />
+            </div>
           </td>
         </>
       );
@@ -482,34 +651,45 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
       const oiChgUp = oiChg == null ? null : Number(oiChg) >= 0;
       return (
         <>
+          <td className="px-1 py-0.5 text-right">
+            <OIBadge signal={oiSignal} />
+          </td>
           <td className={`px-1 py-0.5 text-right font-mono text-xs ${oiChgUp === true ? "text-profit" : oiChgUp === false ? "text-loss" : "text-text-muted"}`}>
             {oiChg != null ? `${Number(oiChg) >= 0 ? "+" : ""}${fmtOI(Math.abs(oiChg))}` : "—"}
           </td>
           <td className="px-1 py-0.5 text-right font-mono text-xs text-text-secondary">{fmtOI(oi)}</td>
           <td className="px-1 py-0.5 text-right font-mono text-xs text-text-primary">{fmtLtp(ltp)}</td>
           <td className="px-1 py-0.5 text-center">
-            <BuySellButtons
-              symbol={symDef.label} exchange={exchange}
-              strike={strike} optionType="CE" expiry={selectedExpiry}
-              ltp={ltp} onOrder={handleOrder}
-            />
+            <div className="flex items-center justify-end gap-0.5">
+              {basketBtn}
+              <BuySellButtons
+                symbol={symDef.label} exchange={exchange}
+                strike={strike} optionType="CE" expiry={selectedExpiry}
+                ltp={ltp} onOrder={handleOrder}
+              />
+            </div>
           </td>
         </>
       );
     }
 
-    // GREEKS view
+    // GREEKS view — Delta / Gamma / Theta / Vega / IV / LTP
     return (
       <>
         <td className="px-1 py-0.5 text-right font-mono text-xs text-text-secondary">{fmtIV(iv)}</td>
         <td className="px-1 py-0.5 text-right font-mono text-xs text-text-primary">{fmtDelta(delta)}</td>
-        <td className="px-1 py-0.5 text-right font-mono text-xs text-text-secondary">{fmtLtp(ltp)}</td>
+        <td className="px-1 py-0.5 text-right font-mono text-xs text-text-secondary">{fmtGreek(gamma)}</td>
+        <td className="px-1 py-0.5 text-right font-mono text-xs text-text-secondary">{fmtGreek(theta)}</td>
+        <td className="px-1 py-0.5 text-right font-mono text-xs text-text-secondary">{fmtGreek(vega)}</td>
         <td className="px-1 py-0.5 text-center">
-          <BuySellButtons
-            symbol={symDef.label} exchange={exchange}
-            strike={strike} optionType="CE" expiry={selectedExpiry}
-            ltp={ltp} onOrder={handleOrder}
-          />
+          <div className="flex items-center justify-end gap-0.5">
+            {basketBtn}
+            <BuySellButtons
+              symbol={symDef.label} exchange={exchange}
+              strike={strike} optionType="CE" expiry={selectedExpiry}
+              ltp={ltp} onOrder={handleOrder}
+            />
+          </div>
         </td>
       </>
     );
@@ -517,38 +697,77 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
 
   function renderPutCells(put: RawOptionRow | null, strike: number) {
     if (!put) {
+      if (view === "GREEKS") {
+        return (
+          <>
+            <td className="px-1 py-0.5 text-center"></td>
+            <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
+            <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
+          </>
+        );
+      }
       return (
         <>
           <td className="px-1 py-0.5 text-center"></td>
           <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
           <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
-          {view !== "GREEKS" && <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>}
+          {view === "OI" && <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>}
+          <td className="px-1 py-0.5 text-left font-mono text-text-muted">—</td>
         </>
       );
     }
+
     const ltp    = put.ltp ?? put.last_price ?? null;
     const chgPct = put.change_percent ?? put.change_pct ?? null;
     const oi     = put.oi ?? put.open_interest ?? null;
     const oiChg  = put.oi_change ?? null;
     const delta  = put.delta ?? null;
+    const gamma  = put.gamma ?? null;
+    const theta  = put.theta ?? null;
+    const vega   = put.vega ?? null;
     const iv     = put.iv ?? put.implied_volatility ?? null;
     const chgUp  = chgPct == null ? null : Number(chgPct) >= 0;
+    const oiSignal = getOISignal(put);
+    const inBasket = isInBasket(strike, "PE");
+
+    const basketBtn = (
+      <button
+        onClick={() => inBasket ? removeFromBasket(strike, "PE") : addToBasket(strike, "PE", ltp)}
+        className={`mr-0.5 px-1 py-0.5 text-[9px] font-semibold rounded border transition-colors leading-none ${
+          inBasket
+            ? "bg-accent/20 border-accent/50 text-accent"
+            : "bg-surface-hover border-border-default text-text-muted hover:text-accent hover:border-accent/40"
+        }`}
+        title={inBasket ? "Remove from basket" : "Add to basket"}
+      >
+        +B
+      </button>
+    );
 
     if (view === "LTP") {
       return (
         <>
           <td className="px-1 py-0.5 text-center">
-            <BuySellButtons
-              symbol={symDef.label} exchange={exchange}
-              strike={strike} optionType="PE" expiry={selectedExpiry}
-              ltp={ltp} onOrder={handleOrder}
-            />
+            <div className="flex items-center justify-start gap-0.5">
+              <BuySellButtons
+                symbol={symDef.label} exchange={exchange}
+                strike={strike} optionType="PE" expiry={selectedExpiry}
+                ltp={ltp} onOrder={handleOrder}
+              />
+              {basketBtn}
+            </div>
           </td>
           <td className="px-1 py-0.5 text-left font-mono text-xs text-text-primary">{fmtLtp(ltp)}</td>
           <td className={`px-1 py-0.5 text-left font-mono text-xs ${chgUp === true ? "text-profit" : chgUp === false ? "text-loss" : "text-text-muted"}`}>
             {fmtChg(chgPct)}
           </td>
           <td className="px-1 py-0.5 text-left font-mono text-xs text-text-secondary">{fmtOI(oi)}</td>
+          <td className="px-1 py-0.5 text-left">
+            <OIBadge signal={oiSignal} />
+          </td>
         </>
       );
     }
@@ -558,48 +777,111 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
       return (
         <>
           <td className="px-1 py-0.5 text-center">
-            <BuySellButtons
-              symbol={symDef.label} exchange={exchange}
-              strike={strike} optionType="PE" expiry={selectedExpiry}
-              ltp={ltp} onOrder={handleOrder}
-            />
+            <div className="flex items-center justify-start gap-0.5">
+              <BuySellButtons
+                symbol={symDef.label} exchange={exchange}
+                strike={strike} optionType="PE" expiry={selectedExpiry}
+                ltp={ltp} onOrder={handleOrder}
+              />
+              {basketBtn}
+            </div>
           </td>
           <td className="px-1 py-0.5 text-left font-mono text-xs text-text-primary">{fmtLtp(ltp)}</td>
           <td className="px-1 py-0.5 text-left font-mono text-xs text-text-secondary">{fmtOI(oi)}</td>
           <td className={`px-1 py-0.5 text-left font-mono text-xs ${oiChgUp === true ? "text-profit" : oiChgUp === false ? "text-loss" : "text-text-muted"}`}>
             {oiChg != null ? `${Number(oiChg) >= 0 ? "+" : ""}${fmtOI(Math.abs(oiChg))}` : "—"}
           </td>
+          <td className="px-1 py-0.5 text-left">
+            <OIBadge signal={oiSignal} />
+          </td>
         </>
       );
     }
 
-    // GREEKS
+    // GREEKS — LTP / Delta / Gamma / Theta / Vega / IV
     return (
       <>
         <td className="px-1 py-0.5 text-center">
-          <BuySellButtons
-            symbol={symDef.label} exchange={exchange}
-            strike={strike} optionType="PE" expiry={selectedExpiry}
-            ltp={ltp} onOrder={handleOrder}
-          />
+          <div className="flex items-center justify-start gap-0.5">
+            <BuySellButtons
+              symbol={symDef.label} exchange={exchange}
+              strike={strike} optionType="PE" expiry={selectedExpiry}
+              ltp={ltp} onOrder={handleOrder}
+            />
+            {basketBtn}
+          </div>
         </td>
-        <td className="px-1 py-0.5 text-left font-mono text-xs text-text-secondary">{fmtLtp(ltp)}</td>
         <td className="px-1 py-0.5 text-left font-mono text-xs text-text-primary">{fmtDelta(delta)}</td>
+        <td className="px-1 py-0.5 text-left font-mono text-xs text-text-secondary">{fmtGreek(gamma)}</td>
+        <td className="px-1 py-0.5 text-left font-mono text-xs text-text-secondary">{fmtGreek(theta)}</td>
+        <td className="px-1 py-0.5 text-left font-mono text-xs text-text-secondary">{fmtGreek(vega)}</td>
         <td className="px-1 py-0.5 text-left font-mono text-xs text-text-secondary">{fmtIV(iv)}</td>
       </>
     );
   }
 
   function CallHeaders() {
-    if (view === "LTP")    return <><th className="px-1 py-1 text-right text-[10px] text-loss/80 uppercase tracking-wide">Chg%</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI</th><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th></>;
-    if (view === "OI")     return <><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI Chg</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th></>;
-    return <><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">IV</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">Delta</th><th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th></>;
+    if (view === "LTP") return (
+      <>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">Signal</th>
+        <th className="px-1 py-1 text-right text-[10px] text-loss/80 uppercase tracking-wide">Chg%</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">LTP</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI</th>
+        <th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-16">Action</th>
+      </>
+    );
+    if (view === "OI") return (
+      <>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">Signal</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI Chg</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">OI</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">LTP</th>
+        <th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-16">Action</th>
+      </>
+    );
+    // GREEKS
+    return (
+      <>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">IV</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">Delta</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">Gamma</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">Theta</th>
+        <th className="px-1 py-1 text-right text-[10px] text-text-muted uppercase tracking-wide">Vega</th>
+        <th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-16">Action</th>
+      </>
+    );
   }
 
   function PutHeaders() {
-    if (view === "LTP")    return <><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-left text-[10px] text-profit/80 uppercase tracking-wide">Chg%</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">OI</th></>;
-    if (view === "OI")     return <><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">OI</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">OI Chg</th></>;
-    return <><th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-12">Action</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">LTP</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Delta</th><th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">IV</th></>;
+    if (view === "LTP") return (
+      <>
+        <th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-16">Action</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">LTP</th>
+        <th className="px-1 py-1 text-left text-[10px] text-profit/80 uppercase tracking-wide">Chg%</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">OI</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Signal</th>
+      </>
+    );
+    if (view === "OI") return (
+      <>
+        <th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-16">Action</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">LTP</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">OI</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">OI Chg</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Signal</th>
+      </>
+    );
+    // GREEKS
+    return (
+      <>
+        <th className="px-1 py-1 text-center text-[10px] text-text-muted uppercase tracking-wide w-16">Action</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Delta</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Gamma</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Theta</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">Vega</th>
+        <th className="px-1 py-1 text-left text-[10px] text-text-muted uppercase tracking-wide">IV</th>
+      </>
+    );
   }
 
   return (
@@ -647,6 +929,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
 
           <div className="flex-1" />
 
+          {/* View toggle */}
           <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
             {VIEWS.map((v) => (
               <button
@@ -663,6 +946,24 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             ))}
           </div>
 
+          {/* Basket button */}
+          <button
+            onClick={() => setBasketOpen((p) => !p)}
+            className={`relative flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${
+              basketOpen
+                ? "bg-accent/15 border-accent/50 text-accent"
+                : "bg-surface-hover border-border-default text-text-muted hover:text-text-primary hover:border-accent/30"
+            }`}
+            title="Basket orders"
+          >
+            <ShoppingBasket size={11} />
+            {basket.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 text-[8px] font-bold rounded-full bg-accent text-white leading-none">
+                {basket.length}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={fetchData}
             disabled={loading}
@@ -673,35 +974,46 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
           </button>
         </div>
 
-        {/* Row 2: spot + PCR */}
+        {/* Row 2: spot LTP with change% + PCR badge */}
         <div className="flex items-center gap-3 flex-wrap">
           {spotLtp != null ? (
             <>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-text-muted uppercase tracking-wide">Spot</span>
-                <span className="font-mono text-sm font-semibold text-text-primary">
+                <span className="font-mono text-sm font-bold text-text-primary">
                   {NUM.format(spotLtp)}
                 </span>
+                {spotChange != null && (
+                  <div className={`flex items-center gap-0.5 text-xs font-mono font-semibold ${spotUp ? "text-profit" : "text-loss"}`}>
+                    {spotUp
+                      ? <TrendingUp size={12} strokeWidth={2.5} />
+                      : <TrendingDown size={12} strokeWidth={2.5} />
+                    }
+                    <span>{spotChange >= 0 ? "+" : ""}{spotChange.toFixed(2)}</span>
+                    <span className="text-[11px] opacity-80">
+                      ({spotChangePct != null && spotChangePct >= 0 ? "+" : ""}{spotChangePct?.toFixed(2)}%)
+                    </span>
+                  </div>
+                )}
               </div>
-              {spotChange != null && (
-                <div className={`flex items-center gap-0.5 text-xs font-mono ${spotUp ? "text-profit" : "text-loss"}`}>
-                  {spotUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-                  <span>{spotChange >= 0 ? "+" : ""}{spotChange.toFixed(2)}</span>
-                  <span className="text-[10px]">({spotChangePct != null && spotChangePct >= 0 ? "+" : ""}{spotChangePct?.toFixed(2)}%)</span>
-                </div>
-              )}
             </>
           ) : (
             <span className="text-[10px] text-text-muted">Spot: —</span>
           )}
 
+          {/* PCR badge — color-coded */}
           {pcr != null && (
-            <div className="flex items-center gap-1 ml-2">
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">PCR</span>
-              <span className={`font-mono text-xs font-semibold ${
-                Number(pcr) >= 1.2 ? "text-profit" : Number(pcr) <= 0.8 ? "text-loss" : "text-warning"
-              }`}>
-                {Number(pcr).toFixed(2)}
+            <div className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-semibold font-mono ${
+              Number(pcr) >= 1.2
+                ? "bg-profit/10 border-profit/30 text-profit"
+                : Number(pcr) <= 0.8
+                  ? "bg-loss/10 border-loss/30 text-loss"
+                  : "bg-warning/10 border-warning/30 text-warning"
+            }`}>
+              <span className="font-sans font-medium text-text-muted mr-0.5">PCR</span>
+              {Number(pcr).toFixed(2)}
+              <span className="ml-1 font-sans font-normal text-[9px] opacity-70">
+                {Number(pcr) >= 1.2 ? "Bullish" : Number(pcr) <= 0.8 ? "Bearish" : "Neutral"}
               </span>
             </div>
           )}
@@ -713,6 +1025,21 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             </div>
           )}
         </div>
+
+        {/* OI signal legend (compact, shown only in OI/LTP view) */}
+        {view !== "GREEKS" && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {(["Long Build Up", "Short Covering", "Long Unwinding", "Short Build Up"] as OISignal[]).map((sig) => (
+              <span
+                key={sig}
+                className={`inline-flex items-center gap-1 px-1 py-0 text-[9px] font-medium rounded border ${oiSignalStyle(sig)}`}
+              >
+                <span className="font-bold">{oiSignalShort(sig)}</span>
+                <span className="opacity-70">{sig}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Error banner */}
@@ -731,6 +1058,56 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             : "bg-loss/10 border-loss/20 text-loss"
         }`}>
           {orderMsg.text}
+        </div>
+      )}
+
+      {/* Basket panel */}
+      {basketOpen && (
+        <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5">
+          <div className="flex items-center gap-2 mb-1">
+            <ShoppingBasket size={11} className="text-accent" />
+            <span className="text-[10px] font-semibold text-text-primary uppercase tracking-wide">
+              Basket ({basket.length})
+            </span>
+            {basket.length > 0 && (
+              <button
+                onClick={() => setBasket([])}
+                className="ml-auto text-[9px] text-text-muted hover:text-loss transition-colors"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          {basket.length === 0 ? (
+            <p className="text-[10px] text-text-muted">
+              Click +B on any strike to add it here.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {basket.map((item) => (
+                <div
+                  key={`${item.strike}-${item.optionType}`}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${
+                    item.optionType === "CE"
+                      ? "bg-loss/10 border-loss/30 text-loss"
+                      : "bg-profit/10 border-profit/30 text-profit"
+                  }`}
+                >
+                  <span className="font-semibold">{NUM0.format(item.strike)} {item.optionType}</span>
+                  {item.ltp != null && (
+                    <span className="text-text-muted">@ {fmtLtp(item.ltp)}</span>
+                  )}
+                  <button
+                    onClick={() => removeFromBasket(item.strike, item.optionType)}
+                    className="ml-0.5 text-text-muted hover:text-text-primary transition-colors"
+                    aria-label="Remove"
+                  >
+                    <X size={9} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -768,6 +1145,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
                 const isNearAtm = Math.abs(idx - atmIdx) <= 2;
 
                 const callOI = call?.oi ?? call?.open_interest ?? 0;
+                const putOI  = put?.oi  ?? put?.open_interest  ?? 0;
 
                 return (
                   <tr
@@ -775,26 +1153,37 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
                     ref={isAtm ? atmRowRef : null}
                     className={`group border-b transition-colors ${
                       isAtm
-                        ? "border-b-accent/40 bg-accent/5 border-t-accent/40"
+                        ? "border-b-accent/40 border-t-accent/40"
                         : isNearAtm
-                          ? "border-border-subtle bg-surface-hover/20 hover:bg-surface-hover/40"
+                          ? "border-border-subtle hover:bg-surface-hover/40"
                           : "border-border-subtle hover:bg-surface-hover/30"
                     }`}
+                    style={isAtm ? { backgroundColor: "rgba(99,102,241,0.07)" } : undefined}
                   >
+                    {/* OI bar layer — call side */}
                     <td className="relative" colSpan={0}>
                       <OIBar value={callOI} maxValue={maxCallOI} side="call" />
                     </td>
+
                     {renderCallCells(call, strike)}
 
-                    <td className={`px-1 py-0.5 text-center font-mono text-xs font-semibold border-x ${
+                    {/* ATM strike cell */}
+                    <td className={`px-1 py-0.5 text-center font-mono text-xs font-bold border-x ${
                       isAtm
-                        ? "text-accent border-accent/40 bg-accent/10"
+                        ? "text-accent border-accent/40 bg-accent/12"
                         : "text-text-primary border-border-default"
                     }`}>
                       {isAtm && (
-                        <span className="block text-[9px] text-accent/70 leading-none mb-0.5">ATM</span>
+                        <span className="block text-[9px] text-accent font-semibold leading-none mb-0.5 tracking-wide">
+                          ATM
+                        </span>
                       )}
                       {NUM0.format(strike)}
+                    </td>
+
+                    {/* OI bar layer — put side */}
+                    <td className="relative" colSpan={0}>
+                      <OIBar value={putOI} maxValue={maxPutOI} side="put" />
                     </td>
 
                     {renderPutCells(put, strike)}
@@ -817,7 +1206,14 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             PE: {fmtOI(strikes.reduce((s, r) => s + Number(r.put?.oi  ?? r.put?.open_interest  ?? 0), 0))}
           </span>
           {atmStrike != null && (
-            <span className="text-text-muted ml-2">ATM: <span className="font-mono text-accent">{NUM0.format(atmStrike)}</span></span>
+            <span className="text-text-muted ml-2">
+              ATM: <span className="font-mono text-accent font-semibold">{NUM0.format(atmStrike)}</span>
+            </span>
+          )}
+          {basket.length > 0 && (
+            <span className="text-accent font-semibold">
+              Basket: {basket.length} leg{basket.length > 1 ? "s" : ""}
+            </span>
           )}
           <span className="ml-auto text-text-muted">
             {isMarketHours() ? "Live · 3s" : "Closed · 30s"}
