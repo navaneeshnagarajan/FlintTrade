@@ -67,11 +67,16 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → FIX → UPDATE → C
   ```
   Machines: `nitro-dev`, `mac-dev`, `ubuntu-server`
 
-### Step 9: COMMIT
+### Step 9: COMMIT + CI
 - Conventional commit: `feat(pkg):`, `fix(pkg):`, `docs:`, `test:`, `chore:`
 - Plan step numbers in commit body
 - Specific file staging (never `git add -A`)
 - Push to origin main
+- **WAIT for GitHub Actions CI to pass** before moving to next task:
+  - Check: `gh run list --limit 1` or `gh run watch <id> --exit-status`
+  - CI runs 3 jobs: `python-tests` (pytest + ruff), `node-tests` (tsc + vitest + build), `secrets-check`
+  - If CI fails: fix immediately before ANY new work. Use `gh run view <id> --log-failed` to diagnose.
+  - Never leave CI red — a broken build blocks everyone.
 
 ## Enforced by Hooks
 - **PostToolUse (Write|Edit):** Auto build check on TS/React files
