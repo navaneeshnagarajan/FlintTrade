@@ -10,10 +10,11 @@
 ## Current State (updated 2026-03-19)
 
 - **Version:** 0.1.0-alpha
-- **Tests:** 26 terminal (Vitest) + 670 Python (pytest) = 696 total
-- **Terminal:** 14 widgets (TSX) + 7 tools (1 functional, 6 stubs) in Dockview v5 shell
-- **TypeScript migration:** Phase 1-5 complete. Zero JSX/JS files remain. 80 TS/TSX files.
-- **Files:** 47 TSX + 33 TS = 80 TypeScript files. Zero JavaScript.
+- **Tests:** 26 terminal (Vitest) + 712 Python (pytest) = 738 total
+- **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes in Dockview v5 shell
+- **TypeScript migration:** Complete. Zero JSX/JS files. ~90 TS/TSX files.
+- **Python:** 12 packages (10 original + indicators + strategies sub-package), 712 tests passing
+- **CI:** GitHub Actions green (python-tests + node-tests + secrets-check)
 - **Packages:** 10 Python + 1 React (terminal). Stub packages `dashboard/` and `backtest/` deleted.
 - **Dependencies:** All v2 deps installed (Dockview 5.1, Zustand 5, Jotai, TanStack Query 5, Glide Data Grid 6, shadcn/ui, react-hook-form, zod). Old deps removed (FlexLayout, recharts, postcss).
 - **State:** Zustand stores (4), Jotai atoms, TanStack Query hooks (6), WebSocket service with ping/pong — all wired.
@@ -28,11 +29,11 @@
 - [x] Phase 3: Shell + Layout (App.tsx, chrome components, widgetFactory, 7 presets)
 - [x] Phase 4: Widget Migration (14 widgets + 7 tools + Chart + useWebSocket → TSX/TS)
 - [x] Phase 5: Verification (tsc clean, build clean, 26/26 tests, spec review fixes applied)
-- [ ] Phase 6: New Widgets + Absorption (7 new widgets)
-- [ ] Phase 7: Tools Build-Out (6 stub tools → functional)
-- [ ] Phase 8: Routes (/setup, /invest)
-- [ ] Phase 9: Python Upgrades + Strategies
-- [ ] Phase 10: Testing + Beta Release
+- [x] Phase 6: New Widgets + Absorption (7 new widgets — SectorMap, Calculator, MTMMonitor, RiskPanel, News, Ticker, AIAdvisor)
+- [x] Phase 7: Tools Build-Out (6 stub tools → functional — TradeJournal, PnLDashboard, StrategyBuilder, BacktestLab, MarketIntelligence, FlowBuilder)
+- [x] Phase 8: Routes (/setup wizard with Quick/Guided/Advanced, /invest with holdings+SIP, /learn placeholder)
+- [x] Phase 9: Python Upgrades (indicators package — 13 indicators, 42 tests; user's EMASuperTrendDEMA strategy)
+- [ ] Phase 10: Testing + Beta Release (live testing, performance, tag v0.1.0-beta)
 
 ---
 
