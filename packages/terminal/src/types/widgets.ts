@@ -20,13 +20,20 @@ export type WidgetId =
   | "holdings"
   | "tradebook"
   | "orderpad"
+  | "mtmmonitor"
+  | "riskpanel"
   | "chart"
   | "optionchain"
   | "oichart"
   | "straddle"
   | "depth"
   | "greeks"
-  | "watchlist";
+  | "sectormap"
+  | "watchlist"
+  | "calculator"
+  | "news"
+  | "ticker"
+  | "aiadvisor";
 
 export type ToolId =
   | "settings"

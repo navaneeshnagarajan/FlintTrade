@@ -13,6 +13,8 @@
 
 ---
 
+## 2026-03-19 13:45 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): 4 new widgets absorbed from reference repos — SectorMapWidget (squarified treemap + 3 modes, from openalgo-chart SectorHeatmap), CalculatorWidget (risk/reward engine + brokerage calculator with Apr 2026 STT rates, from openalgo-chart RiskCalculatorPanel), MTMMonitorWidget (Lightweight Charts v5 area series, IST tick formatter, target/SL price lines, from openalgo PnLTracker), RiskPanelWidget (margin/position/PnL progress bars with color-coded risk levels). tsc --noEmit clean, no registrations yet.
+
 ## 2026-03-19 13:07 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): React Router v7 wiring — created src/routes/ with RootLayout (useWsBridge shared), TerminalRoute (git mv from App.tsx, fixed tool import paths), SetupRoute, InvestRoute, LearnRoute. Rewrote main.tsx with createBrowserRouter, lazy routes, default redirect / → /terminal. tsc clean, 26 tests pass.
 
 ## 2026-03-19 12:40 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-sonnet-4-6) | main | feat(terminal): Batch 3 TSX migration — WatchlistWidget + 7 tool stubs + useWebSocket. Replaced dataBus with selectedSymbolAtom (Jotai), added selectedSymbolAtom to marketAtoms.ts, full strict types on all settings interfaces, migrated useWebSocket.js to .ts using getWsService(). Deleted all 9 JSX/JS originals. declarations.d.ts now empty. tsc clean, 26 tests pass.

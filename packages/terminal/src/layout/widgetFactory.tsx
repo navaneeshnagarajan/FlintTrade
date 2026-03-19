@@ -26,6 +26,17 @@ const lazyWidgets = {
 
   // Utility widgets
   watchlist: lazy(() => import("@/widgets/utility/Watchlist/WatchlistWidget")),
+  calculator: lazy(() => import("@/widgets/utility/Calculator/CalculatorWidget")),
+  news: lazy(() => import("@/widgets/utility/News/NewsWidget")),
+  ticker: lazy(() => import("@/widgets/utility/Ticker/TickerWidget")),
+  aiadvisor: lazy(() => import("@/widgets/utility/AIAdvisor/AIAdvisorWidget")),
+
+  // New trading widgets
+  mtmmonitor: lazy(() => import("@/widgets/trading/MTMMonitor/MTMMonitorWidget")),
+  riskpanel: lazy(() => import("@/widgets/trading/RiskPanel/RiskPanelWidget")),
+
+  // New analysis widgets
+  sectormap: lazy(() => import("@/widgets/analysis/SectorMap/SectorMapWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -46,6 +57,13 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "depth", name: "Depth", icon: "Layers", category: "Analysis" },
   { id: "greeks", name: "Greeks", icon: "Sigma", category: "Analysis" },
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility" },
+  { id: "calculator", name: "Calculator", icon: "Calculator", category: "Utility" },
+  { id: "news", name: "News Feed", icon: "Newspaper", category: "Utility" },
+  { id: "ticker", name: "Ticker", icon: "TrendingUp", category: "Utility" },
+  { id: "aiadvisor", name: "AI Advisor", icon: "Bot", category: "Utility" },
+  { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading" },
+  { id: "riskpanel", name: "Risk Panel", icon: "ShieldAlert", category: "Trading" },
+  { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------
