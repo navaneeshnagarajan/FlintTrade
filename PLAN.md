@@ -301,6 +301,12 @@ These are tracked, not forgotten. Every one gets built eventually.
 
 | # | Feature | Source Repo | Target Version |
 |---|---------|-------------|---------------|
+| 0 | **Live Market Signals Pipeline** | packages/ai (BUILT), packages/indicators (BUILT) | **v0.2.0** |
+|   | → WebSocket ticks → indicator calc → signal generation → notification/execution | | |
+|   | → User-configurable: instruments, indicators, thresholds, actions (notify/alert/auto-execute) | | |
+|   | → AI: 12 providers (local/cloud/both), overnight optimization + morning validation | | |
+|   | → Approval workflow: AI suggests → user reviews → one-click execute | | |
+|   | → Self-learning loop: results feed back into training data | | |
 | 1 | Chrome Extension | openalgo-chrome | v0.2.0 |
 | 2 | Excel Integration | OpenAlgo-Excel | v0.2.0 |
 | 3 | WhatsApp Alerts | wabridge | v0.2.0 |
