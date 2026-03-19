@@ -1,5 +1,8 @@
 """FlintTrade application entry point — wires all packages together.
 
+Includes a lightweight Flask API server (port 5001) for FlintTrade-specific
+endpoints that are separate from the OpenAlgo API (port 5000).
+
 Usage:
     python packages/core/src/app.py
     # or: make start
@@ -11,12 +14,16 @@ import asyncio
 import logging
 import signal
 import sys
+import threading
 from pathlib import Path
+from typing import Any
 
 # Ensure repo root is on sys.path for cross-package imports
 _REPO_ROOT = str(Path(__file__).resolve().parents[3])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+
+from flask import Flask, jsonify, request  # noqa: E402
 
 from packages.core.src.config import Settings  # noqa: E402
 from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: E402
@@ -26,6 +33,7 @@ from packages.engine.src.safety import SafetyConfig, SafetySystem  # noqa: E402
 from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler  # noqa: E402
 from packages.automation.src.cron_manager import CronManager  # noqa: E402
 from packages.automation.src.telegram_bot import TelegramBot  # noqa: E402
+from packages.ai.src.llm_client import LLMClient, LLMConfig, LLMMessage  # noqa: E402
 
 logger = logging.getLogger("flinttrade")
 
@@ -36,6 +44,139 @@ def _read_version() -> str:
     if version_file.exists():
         return version_file.read_text().strip()
     return "0.0.0-dev"
+
+
+# ---------------------------------------------------------------------------
+# Flask API server — FlintTrade-specific endpoints (port 5001)
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT = (
+    "You are FlintTrade AI Advisor, a knowledgeable trading assistant for "
+    "Indian markets (NSE, BSE, NFO, MCX). You help with market analysis, "
+    "options strategies, technical indicators, and portfolio management. "
+    "Be concise, accurate, and always remind users that your responses are "
+    "informational — not financial advice. Never recommend specific trades "
+    "without proper risk disclaimers."
+)
+
+
+def _is_llm_configured() -> bool:
+    """Check whether the LLM provider is configured."""
+    try:
+        cfg = LLMConfig.from_env()
+        return bool(cfg.provider)
+    except Exception:
+        return False
+
+
+def create_flask_app() -> Flask:
+    """Create the Flask app with FlintTrade API routes.
+
+    Returns:
+        Flask application with ``/api/v1/advisor`` and ``/api/v1/advisor/status``
+        endpoints registered.
+    """
+    app = Flask(__name__)
+
+    @app.route("/api/v1/advisor", methods=["POST"])
+    def advisor_chat() -> tuple[Any, int]:
+        """Chat with the AI advisor via the configured LLM backend.
+
+        Request JSON:
+            message (str): User's message text.
+            context (str, optional): Additional context (e.g. current positions).
+
+        Returns:
+            JSON with ``status`` and ``data.response`` on success, or
+            ``status`` and ``message`` on error.
+        """
+        if not _is_llm_configured():
+            return jsonify({
+                "status": "error",
+                "message": (
+                    "LLM not configured. Set provider in Settings \u2192 AI."
+                ),
+            }), 200
+
+        body = request.get_json(silent=True) or {}
+        user_message: str = body.get("message", "").strip()
+        context: str = body.get("context", "").strip()
+
+        if not user_message:
+            return jsonify({
+                "status": "error",
+                "message": "message field is required.",
+            }), 400
+
+        # Build conversation messages
+        messages: list[LLMMessage] = [
+            LLMMessage(role="system", content=_SYSTEM_PROMPT),
+        ]
+        if context:
+            messages.append(LLMMessage(
+                role="system",
+                content=f"Current trading context:\n{context}",
+            ))
+        messages.append(LLMMessage(role="user", content=user_message))
+
+        try:
+            client = LLMClient()
+            response = client.chat(messages)
+            client.close()
+
+            if response.success:
+                return jsonify({
+                    "status": "success",
+                    "data": {"response": response.content},
+                }), 200
+
+            return jsonify({
+                "status": "error",
+                "message": f"LLM error: {response.error}",
+            }), 200
+        except Exception as exc:
+            logger.exception("Advisor endpoint error")
+            return jsonify({
+                "status": "error",
+                "message": f"Internal error: {exc}",
+            }), 500
+
+    @app.route("/api/v1/advisor/status", methods=["GET"])
+    def advisor_status() -> tuple[Any, int]:
+        """Check whether the AI advisor LLM backend is configured."""
+        configured = _is_llm_configured()
+        cfg = LLMConfig.from_env() if configured else None
+        return jsonify({
+            "status": "success",
+            "data": {
+                "configured": configured,
+                "provider": cfg.provider if cfg else "",
+                "model": cfg.model if cfg else "",
+            },
+        }), 200
+
+    return app
+
+
+def _run_flask_server(app: Flask, port: int = 5001) -> None:
+    """Run the Flask API server in a daemon thread.
+
+    Args:
+        app: Flask application instance.
+        port: Port to bind (default 5001).
+    """
+    thread = threading.Thread(
+        target=lambda: app.run(
+            host="127.0.0.1",
+            port=port,
+            debug=False,
+            use_reloader=False,
+        ),
+        name="flinttrade-api",
+        daemon=True,
+    )
+    thread.start()
+    logger.info("FlintTrade API server started on http://127.0.0.1:%d", port)
 
 
 class FlintTradeApp:
@@ -104,6 +245,10 @@ class FlintTradeApp:
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
+        # Start FlintTrade API server (Flask, port 5001)
+        flask_app = create_flask_app()
+        _run_flask_server(flask_app, port=5001)
+
         # Load market holidays (graceful — warns if OpenAlgo unreachable)
         try:
             await self.cron.load_holidays()

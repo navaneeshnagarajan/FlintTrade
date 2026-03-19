@@ -1,20 +1,22 @@
 /**
  * AIAdvisorWidget — chat interface for the FlintTrade AI trading advisor.
  *
- * UI structure ready to wire to LLM backend once configured in Settings.
+ * Wired to the FlintTrade Python backend at /ft-api/api/v1/advisor.
  * Features:
  *   - Message thread with user/assistant bubbles
  *   - Input + send button (keyboard: Enter to send, Shift+Enter for newline)
  *   - Local message history via useState
- *   - Empty state with configuration guidance
- *   - Graceful "not configured" stub response when backend is absent
+ *   - Loading spinner while waiting for LLM response
+ *   - "Not configured" state with guidance to Settings when LLM provider is unset
+ *   - Checks advisor/status on mount to sync LLM config state
  */
 
-import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
-import { MessageSquare, Send, Bot, User } from "lucide-react";
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
+import { MessageSquare, Send, Bot, User, Loader2, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,13 +28,16 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+interface AdvisorResponse {
+  status: "success" | "error";
+  data?: { response: string };
+  message?: string;
+}
 
-/** Shown when the LLM backend is not yet configured. */
-const NOT_CONFIGURED_REPLY =
-  "AI advisor not configured. Go to Settings → AI/LLM to set up.";
+interface AdvisorStatusResponse {
+  status: "success" | "error";
+  data?: { configured: boolean; provider: string; model: string };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,11 +52,59 @@ function fmtTime(ts: number): string {
 }
 
 /**
- * Stub — returns false until the LLM bridge is implemented.
- * Replace with a real check (env var / settings atom) once wired.
+ * Check if the LLM provider is configured in the settings store.
+ * Updated on mount by querying the backend status endpoint.
  */
-function isAIConfigured(): boolean {
-  return false;
+function useIsAIConfigured(): boolean {
+  return useSettingsStore((s) => s.llm.provider.length > 0);
+}
+
+/**
+ * POST a message to the advisor backend and return the response text.
+ * Throws on network or server errors.
+ */
+async function postAdvisorMessage(
+  message: string,
+  context: string,
+): Promise<string> {
+  const base = import.meta.env.DEV ? "/ft-api" : "";
+  const resp = await fetch(`${base}/api/v1/advisor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, context }),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`Advisor API: HTTP ${resp.status}`);
+  }
+
+  const json = (await resp.json()) as AdvisorResponse;
+
+  if (json.status === "error") {
+    return json.message ?? "Unknown error from advisor.";
+  }
+
+  return json.data?.response ?? "No response from advisor.";
+}
+
+/**
+ * Fetch advisor status from the backend and sync LLM config into the settings store.
+ */
+async function fetchAdvisorStatus(): Promise<void> {
+  try {
+    const base = import.meta.env.DEV ? "/ft-api" : "";
+    const resp = await fetch(`${base}/api/v1/advisor/status`);
+    if (!resp.ok) return;
+    const json = (await resp.json()) as AdvisorStatusResponse;
+    if (json.status === "success" && json.data) {
+      useSettingsStore.getState().setLLM({
+        provider: json.data.provider,
+        model: json.data.model,
+      });
+    }
+  } catch {
+    // Backend may not be running — leave settings as-is
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +141,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
       >
         <div
           className={[
-            "px-2.5 py-1.5 rounded-lg text-xs leading-relaxed",
+            "px-2.5 py-1.5 rounded-lg text-xs leading-relaxed whitespace-pre-wrap",
             isUser
               ? "bg-primary/15 text-text-primary rounded-tr-none border border-primary/20"
               : "bg-surface-card text-text-primary rounded-tl-none border border-border-default",
@@ -118,6 +171,12 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const configured = useIsAIConfigured();
+
+  // On mount, check backend status to sync LLM config into settings store
+  useEffect(() => {
+    void fetchAdvisorStatus();
+  }, []);
 
   // Auto-scroll to bottom whenever messages change
   useEffect(() => {
@@ -140,12 +199,13 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
     setDraft("");
     setSending(true);
 
-    // Simulate async reply — replace with real LLM call when backend is wired
-    await new Promise<void>((resolve) => setTimeout(resolve, 200));
-
-    const replyContent = isAIConfigured()
-      ? "LLM backend response would appear here."
-      : NOT_CONFIGURED_REPLY;
+    let replyContent: string;
+    try {
+      replyContent = await postAdvisorMessage(text, "");
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      replyContent = `Error: ${errMsg}`;
+    }
 
     const assistantMsg: ChatMessage = {
       role: "assistant",
@@ -183,28 +243,50 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         <span
           className={[
             "text-[9px] font-medium px-1.5 py-0.5 rounded border",
-            isAIConfigured()
+            configured
               ? "text-profit bg-profit/10 border-profit/30"
               : "text-text-muted bg-surface-hover border-border-default",
           ].join(" ")}
         >
-          {isAIConfigured() ? "Connected" : "Not configured"}
+          {configured ? "Connected" : "Not configured"}
         </span>
       </div>
 
       {/* MESSAGE AREA */}
       {isEmpty ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4 text-center">
-          <MessageSquare size={28} className="text-text-muted" />
-          <div>
-            <p className="text-xs text-text-secondary">AI Advisor</p>
-            <p className="text-[10px] text-text-muted mt-1 leading-relaxed max-w-52">
-              Configure LLM in Settings to enable AI trading advisor
-            </p>
-          </div>
-          <p className="text-[9px] text-text-muted">
-            You can still send messages — they will queue until configured.
-          </p>
+          {configured ? (
+            <>
+              <MessageSquare size={28} className="text-text-muted" />
+              <div>
+                <p className="text-xs text-text-secondary">AI Advisor</p>
+                <p className="text-[10px] text-text-muted mt-1 leading-relaxed max-w-52">
+                  Ask about market analysis, options strategies, technical indicators, or portfolio management.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <Settings size={28} className="text-text-muted" />
+              <div>
+                <p className="text-xs text-text-secondary">LLM Not Configured</p>
+                <p className="text-[10px] text-text-muted mt-1 leading-relaxed max-w-56">
+                  Configure your LLM provider in Settings &rarr; AI to enable the AI trading advisor.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-[10px] px-2.5 border-border-default text-text-secondary hover:text-text-primary"
+                onClick={() => {
+                  // Navigate to settings — dispatch a custom event that the shell can listen to
+                  window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/settings" }));
+                }}
+              >
+                Open Settings
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <ScrollArea className="flex-1">
@@ -225,8 +307,9 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
                   <div className="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center shrink-0 mt-0.5">
                     <Bot size={10} className="text-text-secondary" />
                   </div>
-                  <div className="px-2.5 py-1.5 rounded-lg rounded-tl-none bg-surface-card border border-border-default">
-                    <span className="text-[10px] text-text-muted tracking-widest">...</span>
+                  <div className="px-2.5 py-1.5 rounded-lg rounded-tl-none bg-surface-card border border-border-default flex items-center gap-1.5">
+                    <Loader2 size={10} className="text-text-muted animate-spin" />
+                    <span className="text-[10px] text-text-muted">Thinking...</span>
                   </div>
                 </div>
               )}
@@ -243,7 +326,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask the AI advisor..."
+          placeholder={configured ? "Ask the AI advisor..." : "Configure LLM in Settings first..."}
           disabled={sending}
           className="h-7 flex-1 text-xs bg-surface-hover border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-primary/50 disabled:opacity-60"
         />
