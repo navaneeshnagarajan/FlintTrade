@@ -1,16 +1,24 @@
 {
-  "global": {
-    "splitterSize": 4,
-    "tabEnableClose": true,
-    "tabSetEnableMaximize": true
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-empty",
+            "activeView": "",
+            "views": []
+          },
+          "size": 1
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
   },
-  "layout": {
-    "type": "row",
-    "children": [
-      {
-        "type": "tabset",
-        "children": []
-      }
-    ]
-  }
+  "panels": {},
+  "activeGroup": "group-empty"
 }

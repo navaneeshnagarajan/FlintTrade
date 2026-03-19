@@ -1,28 +1,43 @@
 {
-  "global": {
-    "splitterSize": 4,
-    "tabEnableClose": true,
-    "tabSetEnableMaximize": true,
-    "tabSetEnableTabStrip": true
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-main",
+                "activeView": "chart",
+                "views": ["chart"]
+              },
+              "size": 700
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-right",
+                "activeView": "positions",
+                "views": ["positions", "orders"]
+              },
+              "size": 300
+            }
+          ],
+          "size": 1
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
   },
-  "layout": {
-    "type": "row",
-    "children": [
-      {
-        "type": "tabset",
-        "weight": 70,
-        "children": [
-          { "type": "tab", "name": "Chart", "component": "chart" }
-        ]
-      },
-      {
-        "type": "tabset",
-        "weight": 30,
-        "children": [
-          { "type": "tab", "name": "Positions", "component": "positions" },
-          { "type": "tab", "name": "Orders", "component": "orders" }
-        ]
-      }
-    ]
-  }
+  "panels": {
+    "chart": { "id": "chart", "contentComponent": "chart", "title": "Chart" },
+    "positions": { "id": "positions", "contentComponent": "positions", "title": "Positions" },
+    "orders": { "id": "orders", "contentComponent": "orders", "title": "Orders" }
+  },
+  "activeGroup": "group-main"
 }

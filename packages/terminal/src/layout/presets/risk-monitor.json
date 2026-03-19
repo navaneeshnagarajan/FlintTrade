@@ -1,41 +1,54 @@
 {
-  "global": {
-    "splitterSize": 4,
-    "tabEnableClose": true,
-    "tabSetEnableMaximize": true
-  },
-  "layout": {
-    "type": "row",
-    "children": [
-      {
-        "type": "tabset",
-        "weight": 60,
-        "children": [
-          { "type": "tab", "name": "Positions", "component": "positions" },
-          { "type": "tab", "name": "Orders", "component": "orders" },
-          { "type": "tab", "name": "Holdings", "component": "holdings" }
-        ]
-      },
-      {
-        "type": "row",
-        "weight": 40,
-        "children": [
-          {
-            "type": "tabset",
-            "weight": 50,
-            "children": [
-              { "type": "tab", "name": "Dashboard", "component": "dashboard" }
-            ]
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-top",
+            "activeView": "positions",
+            "views": ["positions", "orders", "holdings"]
           },
-          {
-            "type": "tabset",
-            "weight": 50,
-            "children": [
-              { "type": "tab", "name": "Chart", "component": "chart" }
-            ]
-          }
-        ]
-      }
-    ]
-  }
+          "size": 600
+        },
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-bottom-left",
+                "activeView": "dashboard",
+                "views": ["dashboard"]
+              },
+              "size": 500
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-bottom-right",
+                "activeView": "chart",
+                "views": ["chart"]
+              },
+              "size": 500
+            }
+          ],
+          "size": 400
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "positions": { "id": "positions", "contentComponent": "positions", "title": "Positions" },
+    "orders": { "id": "orders", "contentComponent": "orders", "title": "Orders" },
+    "holdings": { "id": "holdings", "contentComponent": "holdings", "title": "Holdings" },
+    "dashboard": { "id": "dashboard", "contentComponent": "dashboard", "title": "Dashboard" },
+    "chart": { "id": "chart", "contentComponent": "chart", "title": "Chart" }
+  },
+  "activeGroup": "group-top"
 }
