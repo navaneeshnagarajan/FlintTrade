@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- FlintTrade Logo — Flint spark + trading chart motif -->
+  <!-- The flame/spark represents the flint strike, the ascending line represents trading growth -->
+
+  <!-- Background circle (optional, transparent by default) -->
+
+  <!-- Flint spark — stylized flame/spark shape -->
+  <path d="M256 48 L320 180 L280 160 L340 320 L290 280 L310 420 L256 340 L202 420 L222 280 L172 320 L232 160 L192 180 Z"
+        fill="url(#flintGrad)" />
+
+  <!-- Trading chart line through the spark -->
+  <path d="M100 360 L180 300 L230 330 L280 240 L330 270 L380 180 L412 140"
+        stroke="url(#chartGrad)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+
+  <!-- Arrow tip on chart line -->
+  <path d="M400 128 L412 140 L398 152"
+        stroke="url(#chartGrad)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="flintGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FF6B35" />
+      <stop offset="50%" stop-color="#F7931A" />
+      <stop offset="100%" stop-color="#FFB800" />
+    </linearGradient>
+    <linearGradient id="chartGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3B82F6" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+  </defs>
+</svg>
