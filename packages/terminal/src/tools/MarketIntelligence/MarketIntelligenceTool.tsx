@@ -1,10 +1,17 @@
 /**
- * MarketIntelligenceTool — Market intelligence dashboard
+ * MarketIntelligenceTool — 10-tab market intelligence dashboard
  * Absorbed patterns from:
- *   - etftracker/Dashboard2_MarketPulse: advances/declines, region grouping, return badges
- *   - etftracker/Dashboard3_SectorRotation: sector-wise sortable performance table
- *   - etftracker/Dashboard4_IndiaSectors: India sectoral heat map with TF toggles
- *   - etftracker/Dashboard6_ETFScreener: search + filter screener pattern
+ *   - etftracker/Dashboard2_MarketPulse: advances/declines, breadth
+ *   - etftracker/Dashboard3_SectorRotation: sector sortable table
+ *   - etftracker/Dashboard4_IndiaSectors: India sectoral heatmap
+ *   - etftracker/Dashboard6_ETFScreener: search + filter screener
+ *   - oipulse/42-fii-capital-market: FII/DII flows table
+ *   - oipulse/44-participant-wise-oi: participant OI breakdown
+ *   - oipulse/40-delivery-data: delivery data table
+ *   - oipulse/47-vix-index: India VIX card
+ *   - oipulse/46-world-indices: global indices table
+ *   - oipulse/38-sector-heatmap: CSS treemap
+ *   - oipulse/41-announcement: corporate announcements feed
  */
 
 import { useState, useMemo } from "react";
@@ -13,25 +20,22 @@ import {
   BarChart3,
   TrendingUp,
   TrendingDown,
-  Search,
   Info,
   ArrowUpDown,
   Globe,
   Activity,
-  SlidersHorizontal,
   Map,
+  Zap,
+  Users,
+  Package,
+  Grid3X3,
+  Megaphone,
+  ChevronRight,
+  ShieldAlert,
 } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -40,10 +44,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ---------------------------------------------------------------------------
-// Types — mirrors etftracker AssetReturn structure
+// Types
 // ---------------------------------------------------------------------------
 
 interface SectorReturn {
@@ -58,6 +61,7 @@ interface SectorReturn {
   returns_1y: number | null;
   current_price: number | null;
   change_pct: number | null;
+  market_cap_cr: number;
 }
 
 interface MarketBreadth {
@@ -70,7 +74,7 @@ interface MarketBreadth {
   label: string;
 }
 
-interface FiiDii {
+interface FiiDiiRow {
   date: string;
   fii_buy: number;
   fii_sell: number;
@@ -80,23 +84,51 @@ interface FiiDii {
   dii_net: number;
 }
 
-interface ScreenerRow {
-  ticker: string;
+interface GlobalIndex {
   name: string;
-  sector: string;
-  price: number;
+  region: string;
+  ltp: number;
+  change: number;
   change_pct: number;
-  volume: number;
-  pe: number | null;
-  marketCap: string;
+  currency: string;
+}
+
+interface ParticipantOI {
+  participant: string;
+  long_index_fut: number;
+  short_index_fut: number;
+  long_index_opt: number;
+  short_index_opt: number;
+  long_stock_fut: number;
+  short_stock_fut: number;
+  net_index_fut: number;
+}
+
+interface DeliveryRow {
+  symbol: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume_lakh: number;
+  delivery_pct: number;
+  series: string;
+}
+
+interface Announcement {
+  symbol: string;
+  exchange: string;
+  subject: string;
+  date: string;
+  category: string;
 }
 
 // ---------------------------------------------------------------------------
-// Static placeholder data — mirrors etftracker data shapes
+// Static placeholder data
 // ---------------------------------------------------------------------------
 
 const TIMEFRAMES = ["1D", "1W", "1M", "3M", "6M", "1Y"] as const;
-type TF = typeof TIMEFRAMES[number];
+type TF = (typeof TIMEFRAMES)[number];
 
 const TF_KEY: Record<TF, keyof SectorReturn> = {
   "1D": "returns_1d",
@@ -108,16 +140,16 @@ const TF_KEY: Record<TF, keyof SectorReturn> = {
 };
 
 const INDIA_SECTORS: SectorReturn[] = [
-  { ticker: "NIFTYBANK", name: "Nifty Bank", category: "Financial", returns_1d: 0.42, returns_1w: 1.2, returns_1m: 3.8, returns_3m: 7.2, returns_6m: 11.4, returns_1y: 18.6, current_price: 48250.5, change_pct: 0.42 },
-  { ticker: "NIFTYIT", name: "Nifty IT", category: "Technology", returns_1d: -0.31, returns_1w: -0.8, returns_1m: 2.1, returns_3m: 5.4, returns_6m: 8.9, returns_1y: 22.1, current_price: 33450.0, change_pct: -0.31 },
-  { ticker: "NIFTYPHARMA", name: "Nifty Pharma", category: "Healthcare", returns_1d: 0.78, returns_1w: 2.1, returns_1m: 5.2, returns_3m: 9.8, returns_6m: 14.2, returns_1y: 26.4, current_price: 19800.0, change_pct: 0.78 },
-  { ticker: "NIFTYAUTO", name: "Nifty Auto", category: "Auto", returns_1d: 1.12, returns_1w: 2.8, returns_1m: 6.4, returns_3m: 12.1, returns_6m: 18.5, returns_1y: 31.2, current_price: 22100.0, change_pct: 1.12 },
-  { ticker: "NIFTYMETAL", name: "Nifty Metal", category: "Materials", returns_1d: -1.24, returns_1w: -2.4, returns_1m: -3.8, returns_3m: 1.2, returns_6m: 4.5, returns_1y: 8.9, current_price: 8640.0, change_pct: -1.24 },
-  { ticker: "NIFTYFMCG", name: "Nifty FMCG", category: "Consumer", returns_1d: 0.18, returns_1w: 0.5, returns_1m: 1.4, returns_3m: 3.2, returns_6m: 5.8, returns_1y: 10.4, current_price: 55200.0, change_pct: 0.18 },
-  { ticker: "NIFTYENERGY", name: "Nifty Energy", category: "Energy", returns_1d: 0.55, returns_1w: 1.4, returns_1m: 4.1, returns_3m: 8.6, returns_6m: 12.8, returns_1y: 20.4, current_price: 40100.0, change_pct: 0.55 },
-  { ticker: "NIFTYREALTY", name: "Nifty Realty", category: "Real Estate", returns_1d: 1.89, returns_1w: 4.2, returns_1m: 9.8, returns_3m: 18.4, returns_6m: 28.2, returns_1y: 48.6, current_price: 980.0, change_pct: 1.89 },
-  { ticker: "NIFTYINFRA", name: "Nifty Infra", category: "Infrastructure", returns_1d: 0.64, returns_1w: 1.6, returns_1m: 4.8, returns_3m: 9.4, returns_6m: 14.8, returns_1y: 24.2, current_price: 8450.0, change_pct: 0.64 },
-  { ticker: "NIFTYMIDCAP", name: "Nifty Midcap 100", category: "Broad Market", returns_1d: 0.98, returns_1w: 2.4, returns_1m: 5.8, returns_3m: 11.2, returns_6m: 17.4, returns_1y: 28.8, current_price: 54200.0, change_pct: 0.98 },
+  { ticker: "NIFTYBANK", name: "Nifty Bank", category: "Financial", returns_1d: 0.42, returns_1w: 1.2, returns_1m: 3.8, returns_3m: 7.2, returns_6m: 11.4, returns_1y: 18.6, current_price: 48250.5, change_pct: 0.42, market_cap_cr: 1420000 },
+  { ticker: "NIFTYIT", name: "Nifty IT", category: "Technology", returns_1d: -0.31, returns_1w: -0.8, returns_1m: 2.1, returns_3m: 5.4, returns_6m: 8.9, returns_1y: 22.1, current_price: 33450.0, change_pct: -0.31, market_cap_cr: 980000 },
+  { ticker: "NIFTYPHARMA", name: "Nifty Pharma", category: "Healthcare", returns_1d: 0.78, returns_1w: 2.1, returns_1m: 5.2, returns_3m: 9.8, returns_6m: 14.2, returns_1y: 26.4, current_price: 19800.0, change_pct: 0.78, market_cap_cr: 620000 },
+  { ticker: "NIFTYAUTO", name: "Nifty Auto", category: "Auto", returns_1d: 1.12, returns_1w: 2.8, returns_1m: 6.4, returns_3m: 12.1, returns_6m: 18.5, returns_1y: 31.2, current_price: 22100.0, change_pct: 1.12, market_cap_cr: 540000 },
+  { ticker: "NIFTYMETAL", name: "Nifty Metal", category: "Materials", returns_1d: -1.24, returns_1w: -2.4, returns_1m: -3.8, returns_3m: 1.2, returns_6m: 4.5, returns_1y: 8.9, current_price: 8640.0, change_pct: -1.24, market_cap_cr: 310000 },
+  { ticker: "NIFTYFMCG", name: "Nifty FMCG", category: "Consumer", returns_1d: 0.18, returns_1w: 0.5, returns_1m: 1.4, returns_3m: 3.2, returns_6m: 5.8, returns_1y: 10.4, current_price: 55200.0, change_pct: 0.18, market_cap_cr: 720000 },
+  { ticker: "NIFTYENERGY", name: "Nifty Energy", category: "Energy", returns_1d: 0.55, returns_1w: 1.4, returns_1m: 4.1, returns_3m: 8.6, returns_6m: 12.8, returns_1y: 20.4, current_price: 40100.0, change_pct: 0.55, market_cap_cr: 890000 },
+  { ticker: "NIFTYREALTY", name: "Nifty Realty", category: "Real Estate", returns_1d: 1.89, returns_1w: 4.2, returns_1m: 9.8, returns_3m: 18.4, returns_6m: 28.2, returns_1y: 48.6, current_price: 980.0, change_pct: 1.89, market_cap_cr: 240000 },
+  { ticker: "NIFTYINFRA", name: "Nifty Infra", category: "Infrastructure", returns_1d: 0.64, returns_1w: 1.6, returns_1m: 4.8, returns_3m: 9.4, returns_6m: 14.8, returns_1y: 24.2, current_price: 8450.0, change_pct: 0.64, market_cap_cr: 480000 },
+  { ticker: "NIFTYMIDCAP", name: "Nifty Midcap 100", category: "Broad Market", returns_1d: 0.98, returns_1w: 2.4, returns_1m: 5.8, returns_3m: 11.2, returns_6m: 17.4, returns_1y: 28.8, current_price: 54200.0, change_pct: 0.98, market_cap_cr: 1100000 },
 ];
 
 const BREADTH_DATA: MarketBreadth[] = [
@@ -126,29 +158,74 @@ const BREADTH_DATA: MarketBreadth[] = [
   { label: "Nifty 50", advances: 32, declines: 17, unchanged: 1, total: 50, newHighs: 6, newLows: 2 },
 ];
 
-const FII_DII_DATA: FiiDii[] = [
+const FII_DII_DATA: FiiDiiRow[] = [
   { date: "2024-12-27", fii_buy: 12450, fii_sell: 9820, fii_net: 2630, dii_buy: 8940, dii_sell: 7120, dii_net: 1820 },
   { date: "2024-12-26", fii_buy: 9840, fii_sell: 11250, fii_net: -1410, dii_buy: 9820, dii_sell: 7840, dii_net: 1980 },
   { date: "2024-12-24", fii_buy: 14820, fii_sell: 10490, fii_net: 4330, dii_buy: 7640, dii_sell: 8120, dii_net: -480 },
   { date: "2024-12-23", fii_buy: 8920, fii_sell: 13450, fii_net: -4530, dii_buy: 10240, dii_sell: 7840, dii_net: 2400 },
   { date: "2024-12-20", fii_buy: 11240, fii_sell: 9870, fii_net: 1370, dii_buy: 8490, dii_sell: 9120, dii_net: -630 },
+  { date: "2024-12-19", fii_buy: 7840, fii_sell: 14280, fii_net: -6440, dii_buy: 11240, dii_sell: 6480, dii_net: 4760 },
+  { date: "2024-12-18", fii_buy: 15640, fii_sell: 8920, fii_net: 6720, dii_buy: 7840, dii_sell: 9120, dii_net: -1280 },
 ];
 
-const SCREENER_DATA: ScreenerRow[] = [
-  { ticker: "RELIANCE", name: "Reliance Industries", sector: "Energy", price: 2482.5, change_pct: 0.84, volume: 8420000, pe: 22.4, marketCap: "16.8L Cr" },
-  { ticker: "TCS", name: "Tata Consultancy Services", sector: "IT", price: 3845.0, change_pct: -0.42, volume: 2140000, pe: 28.6, marketCap: "14.1L Cr" },
-  { ticker: "HDFCBANK", name: "HDFC Bank", sector: "Banking", price: 1684.5, change_pct: 0.61, volume: 12840000, pe: 18.2, marketCap: "12.8L Cr" },
-  { ticker: "INFY", name: "Infosys", sector: "IT", price: 1842.0, change_pct: -0.28, volume: 5640000, pe: 24.8, marketCap: "7.7L Cr" },
-  { ticker: "ICICIBANK", name: "ICICI Bank", sector: "Banking", price: 1082.5, change_pct: 1.14, volume: 18240000, pe: 16.4, marketCap: "7.6L Cr" },
-  { ticker: "SBIN", name: "State Bank of India", sector: "Banking", price: 784.5, change_pct: 0.92, volume: 24800000, pe: 9.8, marketCap: "7.0L Cr" },
-  { ticker: "BAJFINANCE", name: "Bajaj Finance", sector: "NBFC", price: 6840.0, change_pct: 1.42, volume: 2480000, pe: 32.4, marketCap: "4.1L Cr" },
-  { ticker: "MARUTI", name: "Maruti Suzuki", sector: "Auto", price: 10842.0, change_pct: 1.84, volume: 980000, pe: 26.8, marketCap: "3.2L Cr" },
+const GLOBAL_INDICES: GlobalIndex[] = [
+  { name: "S&P 500", region: "USA", ltp: 4782.82, change: 24.18, change_pct: 0.51, currency: "USD" },
+  { name: "NASDAQ 100", region: "USA", ltp: 16832.92, change: -42.14, change_pct: -0.25, currency: "USD" },
+  { name: "Dow Jones", region: "USA", ltp: 37440.67, change: 158.11, change_pct: 0.42, currency: "USD" },
+  { name: "FTSE 100", region: "UK", ltp: 7648.30, change: -18.20, change_pct: -0.24, currency: "GBP" },
+  { name: "Nikkei 225", region: "Japan", ltp: 33431.51, change: 442.80, change_pct: 1.34, currency: "JPY" },
+  { name: "Hang Seng", region: "Hong Kong", ltp: 16524.33, change: -132.60, change_pct: -0.80, currency: "HKD" },
+  { name: "DAX", region: "Germany", ltp: 16751.48, change: 84.20, change_pct: 0.50, currency: "EUR" },
+  { name: "Shanghai Comp.", region: "China", ltp: 2962.28, change: -8.44, change_pct: -0.28, currency: "CNY" },
+  { name: "SGX Nifty", region: "Singapore", ltp: 21842.0, change: 108.5, change_pct: 0.50, currency: "USD" },
 ];
 
-const SECTORS = ["All", "Banking", "IT", "Energy", "Auto", "NBFC", "Healthcare"] as const;
+const PARTICIPANT_OI: ParticipantOI[] = [
+  { participant: "FII", long_index_fut: 284120, short_index_fut: 312480, long_index_opt: 8420180, short_index_opt: 6284200, long_stock_fut: 142840, short_stock_fut: 128640, net_index_fut: -28360 },
+  { participant: "Pro", long_index_fut: 198420, short_index_fut: 184200, long_index_opt: 4284200, short_index_opt: 6420480, long_stock_fut: 84200, short_stock_fut: 92840, net_index_fut: 14220 },
+  { participant: "DII", long_index_fut: 48200, short_index_fut: 24800, long_index_opt: 248200, short_index_opt: 184200, long_stock_fut: 42840, short_stock_fut: 28400, net_index_fut: 23400 },
+  { participant: "Client", long_index_fut: 420840, short_index_fut: 428480, long_index_opt: 2148200, short_index_opt: 2212200, long_stock_fut: 284200, short_stock_fut: 302200, net_index_fut: -7640 },
+];
+
+const DELIVERY_DATA: DeliveryRow[] = [
+  { symbol: "HDFCBANK", open: 1672.0, high: 1698.5, low: 1668.0, close: 1689.5, volume_lakh: 128.4, delivery_pct: 78.4, series: "EQ" },
+  { symbol: "TCS", open: 3840.0, high: 3880.0, low: 3824.0, close: 3848.5, volume_lakh: 24.8, delivery_pct: 72.1, series: "EQ" },
+  { symbol: "RELIANCE", open: 2468.0, high: 2492.0, low: 2456.0, close: 2481.5, volume_lakh: 84.2, delivery_pct: 68.9, series: "EQ" },
+  { symbol: "INFY", open: 1834.0, high: 1858.5, low: 1828.0, close: 1842.0, volume_lakh: 56.4, delivery_pct: 65.3, series: "EQ" },
+  { symbol: "ITC", open: 458.5, high: 465.0, low: 455.0, close: 461.5, volume_lakh: 184.2, delivery_pct: 62.8, series: "EQ" },
+  { symbol: "SBIN", open: 778.0, high: 792.0, low: 774.0, close: 784.5, volume_lakh: 248.0, delivery_pct: 58.4, series: "EQ" },
+  { symbol: "WIPRO", open: 524.0, high: 530.5, low: 519.5, close: 526.0, volume_lakh: 42.8, delivery_pct: 55.2, series: "EQ" },
+  { symbol: "BAJFINANCE", open: 6820.0, high: 6892.0, low: 6810.0, close: 6848.0, volume_lakh: 24.8, delivery_pct: 52.7, series: "EQ" },
+  { symbol: "KOTAKBANK", open: 1748.0, high: 1768.0, low: 1742.0, close: 1754.0, volume_lakh: 38.4, delivery_pct: 48.9, series: "EQ" },
+  { symbol: "AXISBANK", open: 1082.0, high: 1098.0, low: 1078.5, close: 1092.5, volume_lakh: 92.4, delivery_pct: 44.2, series: "EQ" },
+];
+
+const ANNOUNCEMENTS: Announcement[] = [
+  { symbol: "HDFCBANK", exchange: "BSE", subject: "Board Meeting to consider Q3 FY25 financial results on January 22, 2025", date: "2024-12-27", category: "Board Meeting" },
+  { symbol: "TCS", exchange: "NSE", subject: "Outcome of Board Meeting — Declaration of Interim Dividend of ₹10 per share", date: "2024-12-27", category: "Dividend" },
+  { symbol: "RELIANCE", exchange: "BSE", subject: "Allotment of Non-Convertible Debentures under Private Placement", date: "2024-12-26", category: "Debt" },
+  { symbol: "INFY", exchange: "NSE", subject: "Trading Window Closure Notice — Insider Trading Regulations", date: "2024-12-26", category: "Compliance" },
+  { symbol: "SBIN", exchange: "BSE", subject: "Change in Director / Key Managerial Personnel — appointment of MD & CEO", date: "2024-12-24", category: "Appointment" },
+  { symbol: "BAJFINANCE", exchange: "NSE", subject: "Outcome of Board Meeting — Q2 FY25 Results, Rights Issue approval", date: "2024-12-24", category: "Results" },
+  { symbol: "WIPRO", exchange: "BSE", subject: "Buyback of equity shares — record date January 10, 2025", date: "2024-12-23", category: "Buyback" },
+  { symbol: "ICICIBANK", exchange: "NSE", subject: "Credit Rating — reaffirmation of AAA (Stable) by CRISIL", date: "2024-12-23", category: "Rating" },
+  { symbol: "TATAMOTORS", exchange: "BSE", subject: "Preferential Issue — 4.2 crore equity shares at ₹842 per share", date: "2024-12-20", category: "Equity" },
+  { symbol: "LTIM", exchange: "NSE", subject: "Board Meeting to consider Interim Dividend for FY2024-25", date: "2024-12-20", category: "Dividend" },
+];
+
+// Correlation matrix (illustrative — approximate 1-year rolling correlations)
+// Assets: VIX | Nifty | Gold | Crude | USD-INR
+const CORR_ASSETS = ["VIX", "Nifty", "Gold", "Crude", "USD-INR"];
+const CORR_MATRIX: number[][] = [
+  [ 1.00, -0.72,  0.18,  0.12,  0.34],
+  [-0.72,  1.00, -0.08,  0.42, -0.62],
+  [ 0.18, -0.08,  1.00,  0.28,  0.48],
+  [ 0.12,  0.42,  0.28,  1.00, -0.18],
+  [ 0.34, -0.62,  0.48, -0.18,  1.00],
+];
 
 // ---------------------------------------------------------------------------
-// Utility functions — absorbed from etftracker utilities
+// Utility functions
 // ---------------------------------------------------------------------------
 
 function getReturnValue(item: SectorReturn, tf: TF): number | null {
@@ -161,16 +238,13 @@ function formatReturn(v: number | null): string {
 }
 
 function formatCr(v: number): string {
-  if (v >= 10000) return `₹${(v / 10000).toFixed(0)}k Cr`;
-  if (v >= 1000) return `₹${(v / 1000).toFixed(1)}k Cr`;
+  if (Math.abs(v) >= 10000) return `₹${(v / 10000).toFixed(0)}k Cr`;
+  if (Math.abs(v) >= 1000) return `₹${(v / 1000).toFixed(1)}k Cr`;
   return `₹${v.toFixed(0)} Cr`;
 }
 
-function formatVol(v: number): string {
-  if (v >= 10000000) return `${(v / 10000000).toFixed(2)} Cr`;
-  if (v >= 100000) return `${(v / 100000).toFixed(1)} L`;
-  if (v >= 1000) return `${(v / 1000).toFixed(0)} K`;
-  return v.toString();
+function netColor(v: number): string {
+  return v >= 0 ? "text-emerald-400" : "text-red-400";
 }
 
 function ReturnBadge({ value, size = "sm" }: { value: number | null; size?: "sm" | "xs" }) {
@@ -184,148 +258,164 @@ function ReturnBadge({ value, size = "sm" }: { value: number | null; size?: "sm"
   return <span className={cls}>{formatReturn(value)}</span>;
 }
 
-function DataSourceNotice() {
+function DataNotice({ text }: { text?: string }) {
   return (
     <div className="flex items-start gap-2 rounded-md bg-[#1a1a28] border border-[#1e1e2e] p-3 mb-4">
       <Info size={13} className="text-amber-400 mt-0.5 shrink-0" />
       <p className="text-[11px] text-[#9090b0]">
-        Connect a data source in{" "}
-        <span className="text-[#6c8ef0]">Settings</span> for live market
-        intelligence. Showing placeholder data structure.
+        {text ?? (
+          <>
+            Live data available during market hours. Connect a data source in{" "}
+            <span className="text-[#6c8ef0]">Settings</span> for real-time updates.
+            Showing representative data structure.
+          </>
+        )}
       </p>
     </div>
   );
 }
 
+function SectionLabel({ icon: Icon, label }: { icon: typeof Activity; label: string }) {
+  return (
+    <div className="text-[11px] text-[#6b6b8a] mb-2 flex items-center gap-1.5">
+      <Icon size={11} />
+      {label}
+    </div>
+  );
+}
+
+function TfButton({
+  tf,
+  active,
+  onClick,
+}: {
+  tf: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        "text-[11px] px-2 py-0.5 rounded border transition-colors",
+        active
+          ? "bg-[#1e2a4a] text-[#6c8ef0] border-[#2a3a6a]"
+          : "bg-[#12121a] text-[#6b6b8a] border-[#1e1e2e] hover:border-[#3a3a5a]",
+      ].join(" ")}
+    >
+      {tf}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Market Overview Tab
+// Tab 1: Market Breadth
 // ---------------------------------------------------------------------------
 
-function MarketOverviewTab() {
+function MarketBreadthTab() {
+  const totalAdvances = BREADTH_DATA.reduce((a, b) => a + b.advances, 0);
+  const totalDeclines = BREADTH_DATA.reduce((a, b) => a + b.declines, 0);
+  const totalUnchanged = BREADTH_DATA.reduce((a, b) => a + b.unchanged, 0);
+  const totalStocks = BREADTH_DATA.reduce((a, b) => a + b.total, 0);
+
+  const adRatio = totalDeclines > 0 ? (totalAdvances / totalDeclines).toFixed(2) : "--";
+  // Breadth thrust: ratio of advances to (advances+declines), 10-day EMA > 0.615 = bullish signal
+  const breadthThrustRaw =
+    totalAdvances + totalDeclines > 0
+      ? (totalAdvances / (totalAdvances + totalDeclines)) * 100
+      : 0;
+
   return (
     <ScrollArea className="h-full">
       <div className="p-4 space-y-5">
-        <DataSourceNotice />
+        <DataNotice />
 
-        {/* Market breadth */}
+        {/* Summary cards */}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: "Advances", value: totalAdvances, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
+            { label: "Declines", value: totalDeclines, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" },
+            { label: "Unchanged", value: totalUnchanged, color: "text-[#9090b0]", bg: "bg-[#12121a] border-[#1e1e2e]" },
+          ].map((c) => (
+            <Card key={c.label} className={`border ${c.bg}`}>
+              <CardContent className="pt-3 pb-3 px-4">
+                <div className={`text-[22px] font-mono font-bold ${c.color}`}>{c.value}</div>
+                <div className="text-[10px] text-[#6b6b8a] mt-0.5">{c.label} (of {totalStocks})</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* A/D Ratio + Breadth Thrust */}
+        <div className="grid grid-cols-2 gap-2">
+          <Card className="bg-[#12121a] border-[#1e1e2e]">
+            <CardContent className="pt-3 pb-3 px-4">
+              <div className="text-[10px] text-[#6b6b8a] mb-1">A/D Ratio</div>
+              <div className={`text-[20px] font-mono font-bold ${parseFloat(adRatio) >= 1 ? "text-emerald-400" : "text-red-400"}`}>
+                {adRatio}
+              </div>
+              <div className="text-[10px] text-[#6b6b8a] mt-0.5">
+                {parseFloat(adRatio) >= 1.5
+                  ? "Strongly Bullish"
+                  : parseFloat(adRatio) >= 1.0
+                  ? "Mildly Bullish"
+                  : parseFloat(adRatio) >= 0.67
+                  ? "Mildly Bearish"
+                  : "Strongly Bearish"}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-[#12121a] border-[#1e1e2e]">
+            <CardContent className="pt-3 pb-3 px-4">
+              <div className="text-[10px] text-[#6b6b8a] mb-1">Breadth Thrust</div>
+              <div className={`text-[20px] font-mono font-bold ${breadthThrustRaw >= 61.5 ? "text-emerald-400" : breadthThrustRaw >= 40 ? "text-[#9090b0]" : "text-red-400"}`}>
+                {breadthThrustRaw.toFixed(1)}%
+              </div>
+              <div className="text-[10px] text-[#6b6b8a] mt-0.5">
+                {breadthThrustRaw >= 61.5 ? "Bullish signal (>61.5%)" : breadthThrustRaw >= 40 ? "Neutral zone" : "Bearish zone (<40%)"}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Per-index progress bars */}
         <div>
-          <div className="text-[11px] text-[#6b6b8a] mb-2 flex items-center gap-1">
-            <Activity size={11} />
-            Market Breadth
-          </div>
-          <div className="grid grid-cols-1 gap-2">
+          <SectionLabel icon={Activity} label="Index-wise Breadth" />
+          <div className="space-y-2">
             {BREADTH_DATA.map((bd) => {
               const advPct = ((bd.advances / bd.total) * 100).toFixed(0);
               const decPct = ((bd.declines / bd.total) * 100).toFixed(0);
+              const unchPct = (100 - parseInt(advPct) - parseInt(decPct)).toFixed(0);
               return (
                 <Card key={bd.label} className="bg-[#12121a] border-[#1e1e2e]">
                   <CardContent className="pt-3 pb-3 px-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[12px] text-[#e0e0f0] font-medium">
-                        {bd.label}
-                      </span>
-                      <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-[12px] text-[#e0e0f0] font-medium">{bd.label}</span>
+                      <div className="flex items-center gap-3 text-[11px]">
                         <span className="text-emerald-400">
-                          <TrendingUp size={10} className="inline mr-1" />
+                          <TrendingUp size={10} className="inline mr-0.5" />
                           {bd.advances} ({advPct}%)
                         </span>
-                        <span className="text-[#6b6b8a]">—</span>
                         <span className="text-red-400">
-                          <TrendingDown size={10} className="inline mr-1" />
+                          <TrendingDown size={10} className="inline mr-0.5" />
                           {bd.declines} ({decPct}%)
                         </span>
-                        <span className="text-[#6b6b8a]">
-                          {bd.unchanged} Unch
-                        </span>
+                        <span className="text-[#6b6b8a]">{bd.unchanged} Unch</span>
                       </div>
                     </div>
-                    {/* Progress bar */}
-                    <div className="h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden flex">
-                      <div
-                        className="h-full bg-emerald-500 transition-all"
-                        style={{ width: `${advPct}%` }}
-                      />
-                      <div
-                        className="h-full bg-red-500 transition-all"
-                        style={{ width: `${decPct}%` }}
-                      />
+                    <div className="h-2 bg-[#1e1e2e] rounded-full overflow-hidden flex gap-px">
+                      <div className="h-full bg-emerald-500 transition-all" style={{ width: `${advPct}%` }} />
+                      <div className="h-full bg-[#2a2a3a] transition-all" style={{ width: `${unchPct}%` }} />
+                      <div className="h-full bg-red-500 transition-all" style={{ width: `${decPct}%` }} />
                     </div>
                     <div className="flex items-center gap-4 mt-2 text-[10px] text-[#6b6b8a]">
-                      <span>52W High: {bd.newHighs}</span>
-                      <span>52W Low: {bd.newLows}</span>
+                      <span>52W High: <span className="text-emerald-400">{bd.newHighs}</span></span>
+                      <span>52W Low: <span className="text-red-400">{bd.newLows}</span></span>
                     </div>
                   </CardContent>
                 </Card>
               );
             })}
-          </div>
-        </div>
-
-        {/* FII / DII flows */}
-        <div>
-          <div className="text-[11px] text-[#6b6b8a] mb-2 flex items-center gap-1">
-            <Globe size={11} />
-            FII / DII Flows (Cash Segment, ₹ Cr)
-          </div>
-          <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-                  {["Date", "FII Buy", "FII Sell", "FII Net", "DII Buy", "DII Sell", "DII Net"].map(
-                    (h) => (
-                      <TableHead
-                        key={h}
-                        className="text-[10px] text-[#6b6b8a] h-8 px-2"
-                      >
-                        {h}
-                      </TableHead>
-                    )
-                  )}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {FII_DII_DATA.map((row) => (
-                  <TableRow
-                    key={row.date}
-                    className="border-[#1e1e2e] hover:bg-[#12121a] text-[11px]"
-                  >
-                    <TableCell className="px-2 py-1.5 font-mono text-[#9090b0]">
-                      {row.date}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
-                      {formatCr(row.fii_buy)}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
-                      {formatCr(row.fii_sell)}
-                    </TableCell>
-                    <TableCell
-                      className={[
-                        "px-2 py-1.5 font-mono font-semibold",
-                        row.fii_net >= 0 ? "text-emerald-400" : "text-red-400",
-                      ].join(" ")}
-                    >
-                      {row.fii_net >= 0 ? "+" : ""}
-                      {formatCr(Math.abs(row.fii_net))}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
-                      {formatCr(row.dii_buy)}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
-                      {formatCr(row.dii_sell)}
-                    </TableCell>
-                    <TableCell
-                      className={[
-                        "px-2 py-1.5 font-mono font-semibold",
-                        row.dii_net >= 0 ? "text-emerald-400" : "text-red-400",
-                      ].join(" ")}
-                    >
-                      {row.dii_net >= 0 ? "+" : ""}
-                      {formatCr(Math.abs(row.dii_net))}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
           </div>
         </div>
       </div>
@@ -334,7 +424,67 @@ function MarketOverviewTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Sector Rotation Tab — absorbed from etftracker Dashboard3_SectorRotation
+// Tab 2: FII/DII Flows
+// ---------------------------------------------------------------------------
+
+function FiiDiiFlowsTab() {
+  const cashRows = FII_DII_DATA;
+  // Derivative segment placeholder — same structure, different values
+  const derivRows: FiiDiiRow[] = [
+    { date: "2024-12-27", fii_buy: 184200, fii_sell: 168400, fii_net: 15800, dii_buy: 42800, dii_sell: 38400, dii_net: 4400 },
+    { date: "2024-12-26", fii_buy: 152400, fii_sell: 174200, fii_net: -21800, dii_buy: 38400, dii_sell: 29800, dii_net: 8600 },
+    { date: "2024-12-24", fii_buy: 198400, fii_sell: 142000, fii_net: 56400, dii_buy: 28400, dii_sell: 34200, dii_net: -5800 },
+    { date: "2024-12-23", fii_buy: 124800, fii_sell: 198400, fii_net: -73600, dii_buy: 48200, dii_sell: 28800, dii_net: 19400 },
+    { date: "2024-12-20", fii_buy: 168400, fii_sell: 148200, fii_net: 20200, dii_buy: 32800, dii_sell: 42400, dii_net: -9600 },
+  ];
+
+  const FiiDiiTable = ({ rows, title }: { rows: FiiDiiRow[]; title: string }) => (
+    <div className="mb-5">
+      <SectionLabel icon={Globe} label={title} />
+      <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+              {["Date", "FII Buy", "FII Sell", "FII Net", "DII Buy", "DII Sell", "DII Net"].map((h) => (
+                <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-2">{h}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={`${title}-${row.date}`} className="border-[#1e1e2e] hover:bg-[#12121a] text-[11px]">
+                <TableCell className="px-2 py-1.5 font-mono text-[#9090b0]">{row.date}</TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.fii_buy)}</TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.fii_sell)}</TableCell>
+                <TableCell className={`px-2 py-1.5 font-mono font-semibold ${netColor(row.fii_net)}`}>
+                  {row.fii_net >= 0 ? "+" : ""}{formatCr(Math.abs(row.fii_net))}
+                </TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.dii_buy)}</TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.dii_sell)}</TableCell>
+                <TableCell className={`px-2 py-1.5 font-mono font-semibold ${netColor(row.dii_net)}`}>
+                  {row.dii_net >= 0 ? "+" : ""}{formatCr(Math.abs(row.dii_net))}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4">
+        <DataNotice />
+        <FiiDiiTable rows={cashRows} title="Capital Market Segment (₹ Cr)" />
+        <FiiDiiTable rows={derivRows} title="Derivative Segment (₹ Cr)" />
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 3: Sector Rotation
 // ---------------------------------------------------------------------------
 
 function SectorRotationTab() {
@@ -360,24 +510,11 @@ function SectorRotationTab() {
 
   return (
     <div className="p-4">
-      <DataSourceNotice />
-
-      {/* TF sort buttons — absorbed from etftracker rotation-controls pattern */}
+      <DataNotice />
       <div className="flex items-center gap-1.5 mb-3">
         <span className="text-[11px] text-[#6b6b8a]">Sort by:</span>
         {TIMEFRAMES.map((tf) => (
-          <button
-            key={tf}
-            onClick={() => handleTfSort(tf)}
-            className={[
-              "text-[11px] px-2 py-0.5 rounded border transition-colors",
-              sortTf === tf
-                ? "bg-[#1e2a4a] text-[#6c8ef0] border-[#2a3a6a]"
-                : "bg-[#12121a] text-[#6b6b8a] border-[#1e1e2e] hover:border-[#3a3a5a]",
-            ].join(" ")}
-          >
-            {tf}
-          </button>
+          <TfButton key={tf} tf={tf} active={sortTf === tf} onClick={() => handleTfSort(tf)} />
         ))}
         <button
           onClick={() => setSortDir(sortDir === "desc" ? "asc" : "desc")}
@@ -392,45 +529,29 @@ function SectorRotationTab() {
         <Table>
           <TableHeader>
             <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-              <TableHead className="text-[10px] text-[#6b6b8a] h-8 px-3 w-40">
-                Sector
-              </TableHead>
-              <TableHead className="text-[10px] text-[#6b6b8a] h-8 px-2">
-                Price
-              </TableHead>
+              <TableHead className="text-[10px] text-[#6b6b8a] h-8 px-3 w-44">Sector</TableHead>
+              <TableHead className="text-[10px] text-[#6b6b8a] h-8 px-2">Price</TableHead>
               {TIMEFRAMES.map((tf) => (
                 <TableHead
                   key={tf}
-                  className={[
-                    "text-[10px] h-8 px-2 cursor-pointer select-none",
-                    sortTf === tf ? "text-[#6c8ef0]" : "text-[#6b6b8a]",
-                  ].join(" ")}
+                  className={["text-[10px] h-8 px-2 cursor-pointer select-none", sortTf === tf ? "text-[#6c8ef0]" : "text-[#6b6b8a]"].join(" ")}
                   onClick={() => handleTfSort(tf)}
                 >
                   {tf}
-                  {sortTf === tf && (
-                    <ArrowUpDown size={9} className="inline ml-1 opacity-80" />
-                  )}
+                  {sortTf === tf && <ArrowUpDown size={9} className="inline ml-1 opacity-80" />}
                 </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {sorted.map((sector, i) => (
-              <TableRow
-                key={sector.ticker}
-                className="border-[#1e1e2e] hover:bg-[#12121a] text-[12px]"
-              >
+              <TableRow key={sector.ticker} className="border-[#1e1e2e] hover:bg-[#12121a]">
                 <TableCell className="px-3 py-1.5">
-                  <span className="text-[10px] text-[#6b6b8a] mr-2 font-mono">
-                    {i + 1}
-                  </span>
-                  <span className="text-[#e0e0f0]">{sector.name}</span>
+                  <span className="text-[10px] text-[#6b6b8a] mr-2 font-mono">{i + 1}</span>
+                  <span className="text-[12px] text-[#e0e0f0]">{sector.name}</span>
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#9090b0]">
-                  {sector.current_price?.toLocaleString("en-IN", {
-                    maximumFractionDigits: 0,
-                  }) ?? "--"}
+                <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">
+                  {sector.current_price?.toLocaleString("en-IN", { maximumFractionDigits: 0 }) ?? "--"}
                 </TableCell>
                 {TIMEFRAMES.map((tf) => (
                   <TableCell key={tf} className="px-2 py-1.5">
@@ -447,116 +568,236 @@ function SectorRotationTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Heat Map Tab — absorbed from etftracker Dashboard4_IndiaSectors treemap concept
+// Tab 4: Sector Heatmap
 // ---------------------------------------------------------------------------
 
-function HeatMapTab() {
-  const [selectedTf, setSelectedTf] = useState<TF>("1M");
+function SectorHeatmapTab() {
+  const [selectedTf, setSelectedTf] = useState<TF>("1D");
 
-  function getColor(v: number | null): string {
+  function getCellColor(v: number | null): string {
     if (v === null) return "#1e1e2e";
-    if (v >= 10) return "#064e3b";
-    if (v >= 5) return "#065f46";
-    if (v >= 2) return "#047857";
+    if (v >= 3) return "#064e3b";
+    if (v >= 1.5) return "#065f46";
+    if (v >= 0.5) return "#047857";
     if (v >= 0) return "#059669";
-    if (v >= -2) return "#b91c1c";
-    if (v >= -5) return "#991b1b";
-    if (v >= -10) return "#7f1d1d";
+    if (v >= -0.5) return "#991b1b";
+    if (v >= -1.5) return "#7f1d1d";
+    if (v >= -3) return "#6b1212";
     return "#450a0a";
+  }
+
+  function getTextColor(v: number | null): string {
+    if (v === null) return "#6b6b8a";
+    return v >= 0 ? "#a7f3d0" : "#fca5a5";
   }
 
   const sorted = useMemo(
     () =>
       [...INDIA_SECTORS].sort((a, b) => {
-        const av = getReturnValue(a, selectedTf) ?? -Infinity;
-        const bv = getReturnValue(b, selectedTf) ?? -Infinity;
-        return bv - av;
+        return b.market_cap_cr - a.market_cap_cr;
       }),
-    [selectedTf]
+    []
   );
+
+  // Determine cell size by market cap (largest = 2x2, mid = 1x2, small = 1x1)
+  // Use a simple flex wrap with varying widths
+  const totalCap = sorted.reduce((a, b) => a + b.market_cap_cr, 0);
 
   return (
     <div className="p-4">
-      <DataSourceNotice />
-
-      {/* TF toggles */}
+      <DataNotice />
       <div className="flex items-center gap-1.5 mb-4">
         {TIMEFRAMES.map((tf) => (
-          <button
-            key={tf}
-            onClick={() => setSelectedTf(tf)}
-            className={[
-              "text-[11px] px-2.5 py-0.5 rounded border transition-colors",
-              selectedTf === tf
-                ? "bg-[#1e2a4a] text-[#6c8ef0] border-[#2a3a6a]"
-                : "bg-[#12121a] text-[#6b6b8a] border-[#1e1e2e] hover:border-[#3a3a5a]",
-            ].join(" ")}
-          >
-            {tf}
-          </button>
+          <TfButton key={tf} tf={tf} active={selectedTf === tf} onClick={() => setSelectedTf(tf)} />
         ))}
       </div>
 
-      {/* Treemap-style grid — absorbed from etftracker India sectoral heatmap */}
-      <div className="grid grid-cols-4 gap-1.5">
+      {/* CSS treemap-style grid weighted by market cap */}
+      <div className="flex flex-wrap gap-1.5">
         {sorted.map((sector) => {
           const ret = getReturnValue(sector, selectedTf);
-          const isPos = ret !== null && ret >= 0;
+          const capWeight = (sector.market_cap_cr / totalCap) * 100;
+          // Map weight to width percentage: min 12%, max 28%
+          const widthPct = Math.max(12, Math.min(28, capWeight * 0.8));
+          const heightPx = capWeight >= 10 ? 84 : capWeight >= 6 ? 72 : 62;
+
           return (
             <div
               key={sector.ticker}
-              className="rounded-md p-3 flex flex-col justify-between min-h-[70px] cursor-default transition-all hover:opacity-90"
-              style={{ backgroundColor: getColor(ret) }}
+              className="rounded-md flex flex-col justify-between p-2.5 cursor-default transition-opacity hover:opacity-90 shrink-0"
+              style={{
+                backgroundColor: getCellColor(ret),
+                width: `calc(${widthPct}% - 6px)`,
+                height: `${heightPx}px`,
+              }}
               title={`${sector.name}: ${formatReturn(ret)}`}
             >
-              <div className="text-[11px] text-white/80 leading-tight font-medium">
+              <div className="text-[10px] text-white/75 leading-tight font-medium truncate">
                 {sector.name}
               </div>
-              <div
-                className={[
-                  "text-[14px] font-mono font-bold mt-1",
-                  isPos ? "text-emerald-200" : "text-red-200",
-                ].join(" ")}
-              >
-                {formatReturn(ret)}
+              <div className="flex items-end justify-between gap-1">
+                <div
+                  className="text-[13px] font-mono font-bold"
+                  style={{ color: getTextColor(ret) }}
+                >
+                  {formatReturn(ret)}
+                </div>
+                <div className="text-[9px] text-white/40 font-mono">
+                  {(sector.market_cap_cr / 100000).toFixed(1)}L Cr
+                </div>
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-3 flex items-center gap-2 text-[10px] text-[#6b6b8a]">
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-3 mt-4 text-[10px] text-[#6b6b8a]">
         <Map size={10} />
-        Showing Nifty sectoral indices. Connect live data for real-time updates.
+        <span>Cell size = market cap weight</span>
+        <span className="ml-1">Color:</span>
+        {[
+          { label: ">3%", color: "#064e3b" },
+          { label: "1.5-3%", color: "#065f46" },
+          { label: "0-1.5%", color: "#059669" },
+          { label: "0 to -1.5%", color: "#991b1b" },
+          { label: "<-3%", color: "#450a0a" },
+        ].map((l) => (
+          <div key={l.label} className="flex items-center gap-1">
+            <span className="w-3 h-3 rounded" style={{ backgroundColor: l.color }} />
+            <span>{l.label}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Screener Tab — absorbed from etftracker Dashboard6_ETFScreener
+// Tab 5: India VIX
 // ---------------------------------------------------------------------------
 
-function ScreenerTab() {
-  const [search, setSearch] = useState("");
-  const [sector, setSector] = useState("All");
-  const [sortField, setSortField] = useState<keyof ScreenerRow>("marketCap");
+function IndiaVixTab() {
+  // Static representative VIX value — live data via OpenAlgo quotes
+  const vixValue = 14.28;
+  const vixChange = -0.42;
+  const vixChangePct = -2.86;
+
+  function getVixZone(v: number): { label: string; description: string; color: string; bg: string } {
+    if (v < 12) return { label: "Extreme Complacency", description: "Markets are extremely calm. Options are cheap. Consider buying protection.", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" };
+    if (v < 16) return { label: "Low Volatility", description: "Fear is low. Markets are trending. Options premiums are affordable.", color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" };
+    if (v < 20) return { label: "Moderate Volatility", description: "Normal market conditions. Options are fairly priced.", color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" };
+    if (v < 25) return { label: "Elevated Fear", description: "Increased uncertainty. Traders are hedging more aggressively.", color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/20" };
+    if (v < 30) return { label: "High Fear", description: "Significant market stress. Strong sell-off likely in progress.", color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" };
+    return { label: "Panic Zone", description: "Extreme fear and market stress. Historically a contrarian buy signal.", color: "text-red-500", bg: "bg-red-600/20 border-red-600/30" };
+  }
+
+  const zone = getVixZone(vixValue);
+
+  // 52-week range
+  const vix52wLow = 10.84;
+  const vix52wHigh = 28.42;
+  const vixRangePct = ((vixValue - vix52wLow) / (vix52wHigh - vix52wLow)) * 100;
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-4">
+        <DataNotice text="India VIX is the NSE volatility index. Connect OpenAlgo quotes endpoint for live VIX data. Values shown are representative." />
+
+        {/* Main VIX card */}
+        <Card className={`border ${zone.bg}`}>
+          <CardContent className="pt-4 pb-4 px-5">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-[11px] text-[#6b6b8a] mb-1 flex items-center gap-1">
+                  <ShieldAlert size={11} />
+                  India VIX — Volatility Index
+                </div>
+                <div className={`text-[42px] font-mono font-bold leading-none ${zone.color}`}>
+                  {vixValue.toFixed(2)}
+                </div>
+                <div className={`text-[13px] font-mono mt-1 ${vixChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  {vixChange >= 0 ? "+" : ""}{vixChange.toFixed(2)} ({vixChangePct.toFixed(2)}%)
+                </div>
+              </div>
+              <Badge className={`text-[11px] px-2.5 py-1 border ${zone.bg} ${zone.color}`}>
+                {zone.label}
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* 52-week range bar */}
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="pt-4 pb-4 px-5">
+            <div className="text-[11px] text-[#6b6b8a] mb-3">52-Week Range</div>
+            <div className="relative h-2 bg-[#1e1e2e] rounded-full">
+              <div
+                className="absolute top-0 left-0 h-full bg-gradient-to-r from-emerald-600 to-red-600 rounded-full"
+                style={{ width: `${vixRangePct}%` }}
+              />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white border-2 border-[#6c8ef0] shadow"
+                style={{ left: `calc(${vixRangePct}% - 6px)` }}
+              />
+            </div>
+            <div className="flex justify-between mt-2 text-[10px] font-mono">
+              <span className="text-emerald-400">{vix52wLow.toFixed(2)} (52W Low)</span>
+              <span className="text-red-400">{vix52wHigh.toFixed(2)} (52W High)</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* What is India VIX */}
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="pt-4 pb-4 px-5 space-y-3">
+            <div className="text-[12px] font-semibold text-[#e0e0f0]">What is India VIX?</div>
+            <p className="text-[11px] text-[#9090b0] leading-relaxed">
+              India VIX (Volatility Index) is computed by NSE based on the order book of Nifty options.
+              It represents the market&apos;s expectation of volatility over the next 30 calendar days.
+              A higher VIX means higher expected volatility and uncertainty — traders call it the
+              &quot;fear gauge&quot;.
+            </p>
+            <div className="space-y-2">
+              {[
+                { range: "Below 12", meaning: "Extreme complacency — markets at peak confidence", color: "text-blue-400" },
+                { range: "12 – 16", meaning: "Low volatility — trending bull market", color: "text-emerald-400" },
+                { range: "16 – 20", meaning: "Normal volatility — healthy market conditions", color: "text-amber-400" },
+                { range: "20 – 25", meaning: "Elevated fear — watch for trend reversal", color: "text-orange-400" },
+                { range: "25 – 30", meaning: "High fear — significant selling pressure", color: "text-red-400" },
+                { range: "Above 30", meaning: "Panic zone — historically extreme buy signal", color: "text-red-500" },
+              ].map((row) => (
+                <div key={row.range} className="flex items-start gap-2 text-[11px]">
+                  <span className={`font-mono font-medium w-20 shrink-0 ${row.color}`}>{row.range}</span>
+                  <span className="text-[#9090b0]">{row.meaning}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Current interpretation */}
+        <Card className={`border ${zone.bg}`}>
+          <CardContent className="pt-3 pb-3 px-5">
+            <div className={`text-[11px] font-semibold mb-1 ${zone.color}`}>Current Interpretation</div>
+            <p className="text-[11px] text-[#9090b0]">{zone.description}</p>
+          </CardContent>
+        </Card>
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 6: Global Indices
+// ---------------------------------------------------------------------------
+
+function GlobalIndicesTab() {
+  const [sortField, setSortField] = useState<keyof GlobalIndex>("change_pct");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  const filtered = useMemo(() => {
-    let list = SCREENER_DATA;
-    if (sector !== "All") {
-      list = list.filter((r) => r.sector === sector);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (r) =>
-          r.ticker.toLowerCase().includes(q) ||
-          r.name.toLowerCase().includes(q)
-      );
-    }
-    return [...list].sort((a, b) => {
+  const sorted = useMemo(() => {
+    return [...GLOBAL_INDICES].sort((a, b) => {
       const av = a[sortField];
       const bv = b[sortField];
       if (typeof av === "number" && typeof bv === "number") {
@@ -566,9 +807,9 @@ function ScreenerTab() {
         ? String(bv).localeCompare(String(av))
         : String(av).localeCompare(String(bv));
     });
-  }, [search, sector, sortField, sortDir]);
+  }, [sortField, sortDir]);
 
-  const handleSort = (field: keyof ScreenerRow) => {
+  const handleSort = (field: keyof GlobalIndex) => {
     if (sortField === field) {
       setSortDir(sortDir === "asc" ? "desc" : "asc");
     } else {
@@ -577,128 +818,533 @@ function ScreenerTab() {
     }
   };
 
+  const headers: { label: string; field: keyof GlobalIndex }[] = [
+    { label: "Index", field: "name" },
+    { label: "Region", field: "region" },
+    { label: "LTP", field: "ltp" },
+    { label: "Change", field: "change" },
+    { label: "Change %", field: "change_pct" },
+  ];
+
   return (
     <div className="p-4">
-      <DataSourceNotice />
-
-      {/* Toolbar — absorbed from etftracker screener-toolbar pattern */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <div className="relative flex-1 min-w-[160px]">
-          <Search
-            size={12}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#6b6b8a]"
-          />
-          <Input
-            placeholder="Search symbol or name..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-7 h-8 bg-[#12121a] border-[#1e1e2e] text-[12px] placeholder:text-[#404060]"
-          />
-        </div>
-        <div className="flex items-center gap-1">
-          <SlidersHorizontal size={12} className="text-[#6b6b8a]" />
-          <Select value={sector} onValueChange={setSector}>
-            <SelectTrigger className="h-8 bg-[#12121a] border-[#1e1e2e] text-[12px] w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-[#12121a] border-[#1e1e2e]">
-              {SECTORS.map((s) => (
-                <SelectItem key={s} value={s} className="text-[12px]">
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <span className="text-[11px] text-[#6b6b8a]">
-          {filtered.length} of {SCREENER_DATA.length}
-        </span>
-      </div>
+      <DataNotice text="Global indices data requires a market data provider. Showing representative values at close. Live data during market hours requires Settings configuration." />
 
       <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-              {(
-                [
-                  ["Symbol", "ticker"],
-                  ["Name", "name"],
-                  ["Sector", "sector"],
-                  ["Price", "price"],
-                  ["Change %", "change_pct"],
-                  ["Volume", "volume"],
-                  ["P/E", "pe"],
-                  ["Mkt Cap", "marketCap"],
-                ] as [string, keyof ScreenerRow][]
-              ).map(([label, field]) => (
+              {headers.map(({ label, field }) => (
                 <TableHead
                   key={field}
-                  className={[
-                    "text-[10px] h-8 px-2 cursor-pointer select-none",
-                    sortField === field ? "text-[#6c8ef0]" : "text-[#6b6b8a]",
-                  ].join(" ")}
+                  className={["text-[10px] h-8 px-3 cursor-pointer select-none", sortField === field ? "text-[#6c8ef0]" : "text-[#6b6b8a]"].join(" ")}
                   onClick={() => handleSort(field)}
                 >
                   {label}
-                  {sortField === field && (
-                    <ArrowUpDown size={9} className="inline ml-1 opacity-80" />
-                  )}
+                  {sortField === field && <ArrowUpDown size={9} className="inline ml-1 opacity-80" />}
                 </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((row) => (
-              <TableRow
-                key={row.ticker}
-                className="border-[#1e1e2e] hover:bg-[#12121a] text-[12px]"
-              >
-                <TableCell className="px-2 py-1.5 font-mono font-semibold text-[#6c8ef0]">
-                  {row.ticker}
+            {sorted.map((idx) => (
+              <TableRow key={idx.name} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                <TableCell className="px-3 py-2">
+                  <div className="text-[12px] font-semibold text-[#e0e0f0]">{idx.name}</div>
                 </TableCell>
-                <TableCell className="px-2 py-1.5 text-[#e0e0f0] max-w-[120px] truncate">
-                  {row.name}
-                </TableCell>
-                <TableCell className="px-2 py-1.5">
-                  <Badge className="text-[9px] h-4 px-1 bg-[#12121a] text-[#9090b0] border-[#1e1e2e]">
-                    {row.sector}
+                <TableCell className="px-3 py-2">
+                  <Badge className="text-[9px] h-4 px-1.5 bg-[#12121a] text-[#9090b0] border-[#1e1e2e]">
+                    {idx.region}
                   </Badge>
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
-                  {row.price.toLocaleString("en-IN", {
-                    maximumFractionDigits: 2,
-                  })}
+                <TableCell className="px-3 py-2 font-mono text-[12px] text-[#e0e0f0]">
+                  {idx.ltp.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  <span className="text-[9px] text-[#6b6b8a] ml-1">{idx.currency}</span>
                 </TableCell>
-                <TableCell className="px-2 py-1.5">
-                  <ReturnBadge value={row.change_pct} size="xs" />
+                <TableCell className={`px-3 py-2 font-mono text-[12px] ${idx.change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  {idx.change >= 0 ? "+" : ""}{idx.change.toFixed(2)}
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#9090b0]">
-                  {formatVol(row.volume)}
-                </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#9090b0]">
-                  {row.pe !== null ? row.pe.toFixed(1) : "--"}
-                </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#9090b0]">
-                  {row.marketCap}
+                <TableCell className={`px-3 py-2 font-mono text-[12px] font-semibold ${idx.change_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  <span className="flex items-center gap-1">
+                    {idx.change_pct >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                    {idx.change_pct >= 0 ? "+" : ""}{idx.change_pct.toFixed(2)}%
+                  </span>
                 </TableCell>
               </TableRow>
             ))}
-            {filtered.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-8 text-[#6b6b8a] text-[12px]"
-                >
-                  No results found
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
       </div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Tab 7: Participant OI
+// ---------------------------------------------------------------------------
+
+function ParticipantOITab() {
+  function formatOI(v: number): string {
+    if (v >= 10000000) return `${(v / 10000000).toFixed(2)} Cr`;
+    if (v >= 100000) return `${(v / 100000).toFixed(1)} L`;
+    if (v >= 1000) return `${(v / 1000).toFixed(0)} K`;
+    return v.toString();
+  }
+
+  function getInterpretation(net: number): { label: string; color: string } {
+    if (net > 50000) return { label: "Long Build Up", color: "text-emerald-400" };
+    if (net > 10000) return { label: "Mildly Long", color: "text-emerald-400" };
+    if (net > -10000) return { label: "Neutral", color: "text-[#9090b0]" };
+    if (net > -50000) return { label: "Mildly Short", color: "text-red-400" };
+    return { label: "Short Build Up", color: "text-red-400" };
+  }
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-4">
+        <DataNotice text="Participant-wise OI from NSE. Available after market hours. Live data during trading requires F&O data subscription." />
+
+        {/* Index Futures OI */}
+        <div>
+          <SectionLabel icon={Users} label="Participant-wise OI — Index Futures" />
+          <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+                  {["Participant", "Long", "Short", "Net OI", "Interpretation"].map((h) => (
+                    <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-3">{h}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {PARTICIPANT_OI.map((row) => {
+                  const interp = getInterpretation(row.net_index_fut);
+                  return (
+                    <TableRow key={row.participant} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                      <TableCell className="px-3 py-2">
+                        <span className="text-[12px] font-semibold text-[#6c8ef0]">{row.participant}</span>
+                      </TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">
+                        {formatOI(row.long_index_fut)}
+                      </TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">
+                        {formatOI(row.short_index_fut)}
+                      </TableCell>
+                      <TableCell className={`px-3 py-2 font-mono text-[11px] font-semibold ${netColor(row.net_index_fut)}`}>
+                        {row.net_index_fut >= 0 ? "+" : ""}{formatOI(Math.abs(row.net_index_fut))}
+                      </TableCell>
+                      <TableCell className="px-3 py-2">
+                        <Badge className={`text-[10px] h-5 px-2 bg-transparent border ${interp.color === "text-emerald-400" ? "border-emerald-800 text-emerald-400" : interp.color === "text-red-400" ? "border-red-800 text-red-400" : "border-[#1e1e2e] text-[#9090b0]"}`}>
+                          {interp.label}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+        {/* Index Options OI */}
+        <div>
+          <SectionLabel icon={Users} label="Participant-wise OI — Index Options" />
+          <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+                  {["Participant", "Long Calls", "Short Calls", "Long Puts", "Short Puts", "Net"].map((h) => (
+                    <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-3">{h}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {PARTICIPANT_OI.map((row) => {
+                  const net = row.long_index_opt - row.short_index_opt;
+                  return (
+                    <TableRow key={row.participant} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                      <TableCell className="px-3 py-2">
+                        <span className="text-[12px] font-semibold text-[#6c8ef0]">{row.participant}</span>
+                      </TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">{formatOI(row.long_index_opt)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">{formatOI(row.short_index_opt)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">{formatOI(Math.round(row.long_index_opt * 0.48))}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">{formatOI(Math.round(row.short_index_opt * 0.52))}</TableCell>
+                      <TableCell className={`px-3 py-2 font-mono text-[11px] font-semibold ${netColor(net)}`}>
+                        {net >= 0 ? "+" : ""}{formatOI(Math.abs(net))}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+        {/* Stock Futures */}
+        <div>
+          <SectionLabel icon={Users} label="Participant-wise OI — Stock Futures" />
+          <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+                  {["Participant", "Long", "Short", "Net OI"].map((h) => (
+                    <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-3">{h}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {PARTICIPANT_OI.map((row) => {
+                  const net = row.long_stock_fut - row.short_stock_fut;
+                  return (
+                    <TableRow key={row.participant} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                      <TableCell className="px-3 py-2 text-[12px] font-semibold text-[#6c8ef0]">{row.participant}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">{formatOI(row.long_stock_fut)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">{formatOI(row.short_stock_fut)}</TableCell>
+                      <TableCell className={`px-3 py-2 font-mono text-[11px] font-semibold ${netColor(net)}`}>
+                        {net >= 0 ? "+" : ""}{formatOI(Math.abs(net))}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 8: Delivery Data
+// ---------------------------------------------------------------------------
+
+function DeliveryDataTab() {
+  const [sortField, setSortField] = useState<keyof DeliveryRow>("delivery_pct");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const sorted = useMemo(() => {
+    return [...DELIVERY_DATA].sort((a, b) => {
+      const av = a[sortField];
+      const bv = b[sortField];
+      if (typeof av === "number" && typeof bv === "number") {
+        return sortDir === "desc" ? bv - av : av - bv;
+      }
+      return sortDir === "desc"
+        ? String(bv).localeCompare(String(av))
+        : String(av).localeCompare(String(bv));
+    });
+  }, [sortField, sortDir]);
+
+  const handleSort = (field: keyof DeliveryRow) => {
+    if (sortField === field) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("desc"); }
+  };
+
+  const headers: { label: string; field: keyof DeliveryRow }[] = [
+    { label: "Symbol", field: "symbol" },
+    { label: "Open", field: "open" },
+    { label: "High", field: "high" },
+    { label: "Low", field: "low" },
+    { label: "Close", field: "close" },
+    { label: "Volume (L)", field: "volume_lakh" },
+    { label: "Delivery %", field: "delivery_pct" },
+  ];
+
+  return (
+    <div className="p-4">
+      <DataNotice text="Delivery data from NSE bhavcopy. Available after 6 PM on trading days. High delivery % indicates institutional interest and conviction." />
+
+      <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+              {headers.map(({ label, field }) => (
+                <TableHead
+                  key={field}
+                  className={["text-[10px] h-8 px-2 cursor-pointer select-none", sortField === field ? "text-[#6c8ef0]" : "text-[#6b6b8a]"].join(" ")}
+                  onClick={() => handleSort(field)}
+                >
+                  {label}
+                  {sortField === field && <ArrowUpDown size={9} className="inline ml-1 opacity-80" />}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((row) => {
+              const changeAmt = row.close - row.open;
+              const changePct = ((changeAmt / row.open) * 100);
+              const deliveryColor = row.delivery_pct >= 60 ? "text-emerald-400" : row.delivery_pct >= 45 ? "text-amber-400" : "text-[#9090b0]";
+              return (
+                <TableRow key={row.symbol} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                  <TableCell className="px-2 py-1.5">
+                    <div className="text-[12px] font-semibold font-mono text-[#6c8ef0]">{row.symbol}</div>
+                    <div className={`text-[10px] font-mono ${changePct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%
+                    </div>
+                  </TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">{row.open.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-emerald-400">{row.high.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-red-400">{row.low.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#e0e0f0]">{row.close.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">{row.volume_lakh.toFixed(1)}L</TableCell>
+                  <TableCell className="px-2 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${row.delivery_pct}%`,
+                            backgroundColor: row.delivery_pct >= 60 ? "#10b981" : row.delivery_pct >= 45 ? "#f59e0b" : "#6b7280",
+                          }}
+                        />
+                      </div>
+                      <span className={`font-mono text-[11px] font-semibold w-10 text-right ${deliveryColor}`}>
+                        {row.delivery_pct.toFixed(1)}%
+                      </span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="flex items-center gap-4 mt-3 text-[10px]">
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /><span className="text-[#6b6b8a]">High delivery ≥60%</span></div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /><span className="text-[#6b6b8a]">Medium 45–60%</span></div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#6b7280] inline-block" /><span className="text-[#6b6b8a]">Low &lt;45%</span></div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 9: Correlation Matrix
+// ---------------------------------------------------------------------------
+
+function CorrelationMatrixTab() {
+  function getCorrColor(v: number): { bg: string; text: string } {
+    if (v >= 0.7) return { bg: "#064e3b", text: "#a7f3d0" };
+    if (v >= 0.4) return { bg: "#065f46", text: "#6ee7b7" };
+    if (v >= 0.1) return { bg: "#047857", text: "#d1fae5" };
+    if (v >= -0.1) return { bg: "#1e1e2e", text: "#9090b0" };
+    if (v >= -0.4) return { bg: "#7f1d1d", text: "#fca5a5" };
+    if (v >= -0.7) return { bg: "#991b1b", text: "#f87171" };
+    return { bg: "#450a0a", text: "#fca5a5" };
+  }
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-4">
+        <DataNotice text="Correlation computed from approximate 1-year rolling daily returns. Illustrative values — connect data source for live correlations." />
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="text-[10px] text-[#6b6b8a] font-normal px-2 py-1.5 text-left w-20" />
+                {CORR_ASSETS.map((asset) => (
+                  <th key={asset} className="text-[11px] text-[#9090b0] font-medium px-2 py-1.5 text-center">
+                    {asset}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {CORR_MATRIX.map((row, ri) => (
+                <tr key={CORR_ASSETS[ri]}>
+                  <td className="text-[11px] text-[#9090b0] font-medium px-2 py-1 text-right pr-3">
+                    {CORR_ASSETS[ri]}
+                  </td>
+                  {row.map((val, ci) => {
+                    const colors = getCorrColor(val);
+                    return (
+                      <td key={ci} className="px-1 py-1">
+                        <div
+                          className="w-16 h-10 rounded flex items-center justify-center font-mono text-[12px] font-semibold transition-all hover:opacity-90 cursor-default"
+                          style={{ backgroundColor: colors.bg, color: colors.text }}
+                          title={`${CORR_ASSETS[ri]} vs ${CORR_ASSETS[ci]}: ${val.toFixed(2)}`}
+                        >
+                          {val === 1.0 ? "1.00" : val.toFixed(2)}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Legend */}
+        <div className="space-y-2">
+          <div className="text-[11px] text-[#6b6b8a] font-medium">How to read:</div>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            {[
+              { range: "0.7 to 1.0", desc: "Strong positive — move together", bg: "#064e3b", text: "#a7f3d0" },
+              { range: "0.4 to 0.7", desc: "Moderate positive correlation", bg: "#065f46", text: "#6ee7b7" },
+              { range: "0.1 to 0.4", desc: "Weak positive correlation", bg: "#047857", text: "#d1fae5" },
+              { range: "-0.1 to 0.1", desc: "Uncorrelated / neutral", bg: "#1e1e2e", text: "#9090b0" },
+              { range: "-0.4 to -0.1", desc: "Weak negative correlation", bg: "#7f1d1d", text: "#fca5a5" },
+              { range: "-1.0 to -0.4", desc: "Strong negative — move oppositely", bg: "#450a0a", text: "#fca5a5" },
+            ].map((l) => (
+              <div key={l.range} className="flex items-center gap-2">
+                <span
+                  className="w-8 h-5 rounded text-center font-mono text-[9px] flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: l.bg, color: l.text }}
+                >
+                  {l.range.split(" ")[0]}
+                </span>
+                <span className="text-[10px] text-[#6b6b8a]">{l.desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <CardContent className="pt-3 pb-3 px-4 space-y-2">
+            <div className="text-[11px] font-semibold text-[#e0e0f0]">Key Observations</div>
+            <ul className="space-y-1.5 text-[11px] text-[#9090b0]">
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />VIX and Nifty have a strong negative correlation (-0.72). Rising VIX typically signals falling markets.</li>
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />Gold and USD-INR are positively correlated (0.48). Rupee depreciation often drives gold prices higher in INR terms.</li>
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />Nifty and USD-INR are negatively correlated (-0.62). FII outflows weaken the rupee and pressure equities simultaneously.</li>
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />Gold and Crude have a weak positive correlation (0.28), driven by common USD and geopolitical factors.</li>
+            </ul>
+          </CardContent>
+        </Card>
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 10: Announcements
+// ---------------------------------------------------------------------------
+
+const CATEGORY_COLORS: Record<string, string> = {
+  "Board Meeting": "text-[#6c8ef0] border-[#2a3a6a]",
+  "Dividend": "text-emerald-400 border-emerald-800",
+  "Debt": "text-amber-400 border-amber-800",
+  "Compliance": "text-[#9090b0] border-[#2a2a3a]",
+  "Appointment": "text-purple-400 border-purple-800",
+  "Results": "text-cyan-400 border-cyan-800",
+  "Buyback": "text-pink-400 border-pink-800",
+  "Rating": "text-teal-400 border-teal-800",
+  "Equity": "text-orange-400 border-orange-800",
+};
+
+function AnnouncementsTab() {
+  const [filterCat, setFilterCat] = useState<string>("All");
+
+  const categories = ["All", ...Array.from(new Set(ANNOUNCEMENTS.map((a) => a.category)))];
+
+  const filtered = useMemo(() => {
+    if (filterCat === "All") return ANNOUNCEMENTS;
+    return ANNOUNCEMENTS.filter((a) => a.category === filterCat);
+  }, [filterCat]);
+
+  return (
+    <div className="p-4">
+      <DataNotice text="Corporate announcements from NSE/BSE. Live feed via data source. Showing representative structure." />
+
+      {/* Category filter chips */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setFilterCat(cat)}
+            className={[
+              "text-[11px] px-2 py-0.5 rounded border transition-colors",
+              filterCat === cat
+                ? "bg-[#1e2a4a] text-[#6c8ef0] border-[#2a3a6a]"
+                : "bg-[#12121a] text-[#6b6b8a] border-[#1e1e2e] hover:border-[#3a3a5a]",
+            ].join(" ")}
+          >
+            {cat}
+          </button>
+        ))}
+        <span className="text-[11px] text-[#6b6b8a] ml-auto self-center">
+          {filtered.length} of {ANNOUNCEMENTS.length}
+        </span>
+      </div>
+
+      <div className="space-y-2">
+        {filtered.map((ann, i) => {
+          const catCls = CATEGORY_COLORS[ann.category] ?? "text-[#9090b0] border-[#2a2a3a]";
+          return (
+            <Card key={i} className="bg-[#12121a] border-[#1e1e2e] hover:border-[#2a2a4a] transition-colors">
+              <CardContent className="pt-3 pb-3 px-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[12px] font-semibold font-mono text-[#6c8ef0]">{ann.symbol}</span>
+                      <Badge className={`text-[9px] h-4 px-1.5 bg-transparent border ${catCls}`}>
+                        {ann.category}
+                      </Badge>
+                      <Badge className="text-[9px] h-4 px-1.5 bg-[#1e1e2e] text-[#6b6b8a] border-[#2a2a3a]">
+                        {ann.exchange}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-[#9090b0] leading-relaxed line-clamp-2">
+                      {ann.subject}
+                    </p>
+                  </div>
+                  <div className="text-[10px] text-[#6b6b8a] font-mono shrink-0 pt-0.5">
+                    {ann.date}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="text-center py-8 text-[11px] text-[#6b6b8a]">
+            No announcements in this category.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar tab definitions
+// ---------------------------------------------------------------------------
+
+type TabId =
+  | "breadth"
+  | "fiidii"
+  | "sectors"
+  | "heatmap"
+  | "vix"
+  | "global"
+  | "participantoi"
+  | "delivery"
+  | "correlation"
+  | "announcements";
+
+interface TabDef {
+  id: TabId;
+  label: string;
+  icon: typeof Activity;
+}
+
+const TABS: TabDef[] = [
+  { id: "breadth", label: "Market Breadth", icon: Activity },
+  { id: "fiidii", label: "FII/DII Flows", icon: Globe },
+  { id: "sectors", label: "Sector Rotation", icon: ArrowUpDown },
+  { id: "heatmap", label: "Sector Heatmap", icon: Map },
+  { id: "vix", label: "India VIX", icon: ShieldAlert },
+  { id: "global", label: "Global Indices", icon: Zap },
+  { id: "participantoi", label: "Participant OI", icon: Users },
+  { id: "delivery", label: "Delivery Data", icon: Package },
+  { id: "correlation", label: "Correlation Matrix", icon: Grid3X3 },
+  { id: "announcements", label: "Announcements", icon: Megaphone },
+];
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -709,15 +1355,39 @@ interface Props {
 }
 
 export default function MarketIntelligenceTool({ onClose }: Props) {
+  const [activeTab, setActiveTab] = useState<TabId>("breadth");
+
+  const tabContent: Record<TabId, React.ReactNode> = {
+    breadth: <MarketBreadthTab />,
+    fiidii: <FiiDiiFlowsTab />,
+    sectors: <SectorRotationTab />,
+    heatmap: <SectorHeatmapTab />,
+    vix: <IndiaVixTab />,
+    global: <GlobalIndicesTab />,
+    participantoi: <ParticipantOITab />,
+    delivery: <DeliveryDataTab />,
+    correlation: <CorrelationMatrixTab />,
+    announcements: <AnnouncementsTab />,
+  };
+
+  // Tabs that manage their own scroll (use ScrollArea internally)
+  const selfScrollingTabs: TabId[] = ["breadth", "fiidii", "vix", "participantoi", "correlation"];
+
+  const currentTab = TABS.find((t) => t.id === activeTab);
+
   return (
     <div className="h-full flex flex-col bg-[#0a0a0f]">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1e1e2e] bg-[#12121a] shrink-0">
         <div className="flex items-center gap-2">
           <BarChart3 size={16} className="text-[#6c8ef0]" />
-          <span className="text-[13px] font-semibold text-[#e0e0f0]">
-            Market Intelligence
-          </span>
+          <span className="text-[13px] font-semibold text-[#e0e0f0]">Market Intelligence</span>
+          {currentTab && (
+            <>
+              <span className="text-[#2a2a4a]">/</span>
+              <span className="text-[12px] text-[#9090b0]">{currentTab.label}</span>
+            </>
+          )}
         </div>
         <button
           onClick={onClose}
@@ -727,48 +1397,42 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
         </button>
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="overview" className="flex flex-col flex-1 min-h-0">
-        <TabsList className="mx-4 mt-3 mb-0 h-8 bg-[#12121a] border border-[#1e1e2e] shrink-0 rounded-md w-auto self-start">
-          <TabsTrigger
-            value="overview"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0]"
-          >
-            Overview
-          </TabsTrigger>
-          <TabsTrigger
-            value="sectors"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0]"
-          >
-            Sectors
-          </TabsTrigger>
-          <TabsTrigger
-            value="heatmap"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0]"
-          >
-            Heat Map
-          </TabsTrigger>
-          <TabsTrigger
-            value="screener"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0]"
-          >
-            Screener
-          </TabsTrigger>
-        </TabsList>
+      {/* Body: sidebar + content */}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar */}
+        <div className="w-44 border-r border-[#1e1e2e] bg-[#12121a] shrink-0 overflow-y-auto py-1.5">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={[
+                  "w-full flex items-center gap-2 px-3 py-2 text-[12px] transition-colors text-left",
+                  isActive
+                    ? "bg-[#1e2a4a]/60 text-[#6c8ef0] border-r-2 border-[#6c8ef0]"
+                    : "text-[#9090b0] hover:text-[#e0e0f0] hover:bg-[#1a1a28]",
+                ].join(" ")}
+              >
+                <Icon size={13} className="shrink-0" />
+                <span className="truncate">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
 
-        <TabsContent value="overview" className="flex-1 overflow-y-auto mt-0">
-          <MarketOverviewTab />
-        </TabsContent>
-        <TabsContent value="sectors" className="flex-1 overflow-y-auto mt-0">
-          <SectorRotationTab />
-        </TabsContent>
-        <TabsContent value="heatmap" className="flex-1 overflow-y-auto mt-0">
-          <HeatMapTab />
-        </TabsContent>
-        <TabsContent value="screener" className="flex-1 overflow-y-auto mt-0">
-          <ScreenerTab />
-        </TabsContent>
-      </Tabs>
+        {/* Content area */}
+        {selfScrollingTabs.includes(activeTab) ? (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {tabContent[activeTab]}
+          </div>
+        ) : (
+          <ScrollArea className="flex-1">
+            <div>{tabContent[activeTab]}</div>
+          </ScrollArea>
+        )}
+      </div>
     </div>
   );
 }
