@@ -172,7 +172,7 @@ Not needed for beta. Basic content only if time permits in Week 6.
 ## Week 5: Python Upgrades + Strategies — from spec Section 13
 
 ### New Package: packages/indicators/
-- [ ] Create package with TA-Lib (150+ indicators, C speed, batch)
+- [x] Create package — EMA, SMA, DEMA, Supertrend, VWAP, RSI, MACD, Stochastic, Williams %R, ATR, Bollinger Bands, Keltner Channels (pure NumPy, 42 tests)
 - [ ] Add Numba streaming indicators (absorb pyindicators)
 - [ ] Wire into Chart widget for indicator overlays
 
@@ -181,7 +181,7 @@ Not needed for beta. Basic content only if time permits in Week 6.
 - [ ] Start Rust/PyO3 backtest prototype (raptorbt pattern) — proof of concept only
 
 ### Strategy Implementation
-- [ ] Implement user's EMA 20/50 + Supertrend 10/3 + DEMA 15 strategy (with specific SL/target logic)
+- [x] Implement user's EMA 20/50 + Supertrend 10/3 + DEMA 15 strategy (EMASuperTrendDEMA — static→dynamic SL, 5-candle rule, lot sizes, target at DEMA 15)
 - [ ] Absorb 20 highest-priority strategies from AlgoTrading repo (of 59 total; rest in v0.2.0):
   - [ ] Trend strategies (top 5 of 15)
   - [ ] Momentum strategies (top 4 of 11)
