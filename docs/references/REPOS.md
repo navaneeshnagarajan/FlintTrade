@@ -71,7 +71,7 @@
 
 | # | Tool | GitHub URL | What it does | When to use |
 |---|---|---|---|---|
-| 36 | **unsloth** | github.com/unslothai/unsloth | QLoRA fine-tuning, 4-bit, Flash Attention 2 | Future: Week 19+ on Nitro WSL2 CUDA |
+| 36 | **unsloth** | github.com/unslothai/unsloth | QLoRA fine-tuning, 4-bit, Flash Attention 2 | Future: WSL2 CUDA or native Linux |
 | 37 | **GitNexus** | GitHub (10K stars) | Codebase knowledge graph, auto-generates AGENTS.md | Now: index FlintTrade + OpenAlgo |
 | 38 | **CLI-Anything** | github.com/HKUDS/CLI-Anything | Auto-generate CLI from codebase | DROPPED — OpenClaw native skills replace this |
 
@@ -209,13 +209,13 @@
 
 | # | Tool | What | Where |
 |---|---|---|---|
-| 111 | **LM Studio** | Local LLM inference, LM Link for multi-machine sharing | All 3 machines |
-| 112 | **Ollama** | Local LLM inference (ROCm on Ubuntu, CUDA on Nitro) | Custom PC, Nitro |
-| 113 | **WireGuard** | VPN mesh (10.10.10.0/24) | Custom PC = server, Nitro + Mac = clients |
-| 114 | **gunicorn + eventlet** | Production WSGI server for OpenAlgo | Ubuntu only |
+| 111 | **LM Studio** | Local LLM inference, LM Link for multi-machine sharing | All machines |
+| 112 | **Ollama** | Local LLM inference (ROCm or CUDA) | Dev machines |
+| 113 | **WireGuard** | VPN mesh (private subnet) | Server + dev machines as clients |
+| 114 | **gunicorn + eventlet** | Production WSGI server for OpenAlgo | Production server |
 | 115 | **DuckDB** | Analytical database for Historify and data storage | All machines |
-| 116 | **Docker** | Container deployment | Ubuntu |
-| 117 | **fail2ban + UFW** | Security hardening | Ubuntu |
-| 118 | **GitHub Desktop** | Git operations (Mac + Windows) | Mac, Nitro |
-| 119 | **Claude Desktop** | Claude + MCP for live trading operations | Mac |
-| 120 | **VS Code + Claude Code** | Development IDE with AI agent | All 3 machines |
+| 116 | **Docker** | Container deployment | Production server |
+| 117 | **fail2ban + UFW** | Security hardening | Production server |
+| 118 | **GitHub Desktop** | Git operations (Mac + Windows) | Dev machines |
+| 119 | **Claude Desktop** | Claude + MCP for live trading operations | Dev machines |
+| 120 | **VS Code + Claude Code** | Development IDE with AI agent | All machines |

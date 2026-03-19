@@ -1,6 +1,6 @@
-"""EMA 20/50 + Supertrend 10/3 + DEMA 15 — user's personal F&O strategy.
+"""EMA 20/50 + Supertrend 10/3 + DEMA 15 — F&O trend-following strategy.
 
-Strategy specification (from CORE2 conversation):
+Strategy specification:
 
 Entry conditions (all must be true on bar close):
     1. EMA 20 crosses ABOVE EMA 50 (golden cross on the current candle)
@@ -82,7 +82,7 @@ def lot_size_for(symbol: str) -> int:
 
 
 class EMASuperTrendDEMA(BaseStrategy, _BacktestStrategyMixin):
-    """EMA 20/50 + Supertrend 10/3 + DEMA 15 — personal F&O trend strategy.
+    """EMA 20/50 + Supertrend 10/3 + DEMA 15 — F&O trend-following strategy.
 
     Entry: EMA 20 crosses above EMA 50 AND Supertrend is in uptrend.
     Stop-loss: Static at Supertrend value at entry; becomes dynamic (trailing)

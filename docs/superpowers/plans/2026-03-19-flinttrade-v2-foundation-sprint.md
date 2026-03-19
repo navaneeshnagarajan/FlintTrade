@@ -2700,4 +2700,4 @@ Each widget follows the same migration pattern:
 7. **Dockview panels:** Every widget is a Dockview panel — no fixed layouts
 8. **One data path:** Jotai for WS ticks, TanStack Query for REST, Zustand for derived/UI — never duplicate
 9. **Playwright verification:** Screenshot after each major visual change
-10. **Live OpenAlgo test:** After Phase 4, test with Dhan Sandbox during market hours
+10. **Live OpenAlgo test:** After Phase 4, test with broker sandbox during market hours

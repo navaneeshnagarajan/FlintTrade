@@ -19,7 +19,7 @@
 - 10 Python packages: all have source files and tests (670 passing), but most are scaffolded implementations not yet battle-tested with live trading
 - 1 functional React app (terminal) with a FlexLayout widget system partially implemented
 - 2 stub React apps (dashboard, backtest) that RESTRUCTURE.md says to DELETE but they still exist
-- Only 1 confirmed live trade ever placed (SBIN BUY 1 MIS via Dhan Sandbox)
+- Only 1 confirmed live trade ever placed (via broker sandbox)
 - No live strategy has been run during actual market hours
 
 ### 1.2 Widget system — claimed vs actual
@@ -225,13 +225,11 @@ Three different DEVLOG formats defined across docs.
 
 **Reality:** Both dashboard and backtest still exist with full source code and node_modules. They were never deleted.
 
-### 2.10 "Dhan Sandbox" in Current State
+### 2.10 Broker-specific reference in Current State
 
-**CLAUDE.md line 69:** "Tested with Dhan Sandbox, first trade placed (SBIN BUY 1 MIS)"
+**CLAUDE.md:** Previously contained a broker-specific sandbox reference in Current State section.
 
-**CORE2 Summary rule:** "Removed: Dhan Sandbox references"
-
-The Dhan Sandbox reference survives in CLAUDE.md's Current State section despite the explicit cleanup.
+**Status:** Fixed — replaced with generic "Tested with broker sandbox."
 
 ---
 
@@ -330,7 +328,7 @@ DEVLOG.md has entries but there are significant gaps — many code changes (like
 ### 5.3 Commit messages — Dhan reference persists
 
 CORE2 rule: "Do not include private data in commit messages (fund amounts, order IDs, broker names)"
-CLAUDE.md line 69 still says "Tested with Dhan Sandbox" in committed code.
+Previously contained broker-specific sandbox reference — now fixed.
 
 ### 5.4 Test on dev machine first
 
@@ -398,7 +396,7 @@ RESTRUCTURE.md Part 10 gives a 16-week timeline starting from "Week 1-2: Foundat
 | C4 | **Resolve git submodule/subtree** — All three are submodules per `.gitmodules`. Update ARCHITECTURE.md and THE_PLAN.md to say "submodule" not "subtree". | `docs/ARCHITECTURE.md`, `docs/THE_PLAN.md` |
 | C5 | **Register Greeks widget** in `widgetFactory.jsx` — it exists but users cannot add it. Add `greeks: lazy(() => import('../widgets/analysis/Greeks/GreeksWidget'))` and add to `widgetCatalog`. | `packages/terminal/src/layout/widgetFactory.jsx` |
 | C6 | **Blank `.env.example` values** — Remove `http://127.0.0.1:5000` default from root, dashboard, and backtest `.env.example` files. Terminal's is already correct. | `.env.example`, `packages/dashboard/.env.example`, `packages/backtest/.env.example` |
-| C7 | **Remove Dhan Sandbox reference** from CLAUDE.md Current State section. Replace with generic "Tested with broker sandbox." | `CLAUDE.md` |
+| C7 | **Remove broker-specific sandbox reference** from CLAUDE.md Current State section. Replace with generic "Tested with broker sandbox." | `CLAUDE.md` — **DONE** |
 
 ### Important (do this week)
 

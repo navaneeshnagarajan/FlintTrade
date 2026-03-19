@@ -32,7 +32,7 @@
 - [x] Phase 6: New Widgets + Absorption (7 new widgets — SectorMap, Calculator, MTMMonitor, RiskPanel, News, Ticker, AIAdvisor)
 - [x] Phase 7: Tools Build-Out (6 stub tools → functional — TradeJournal, PnLDashboard, StrategyBuilder, BacktestLab, MarketIntelligence, FlowBuilder)
 - [x] Phase 8: Routes (/setup wizard with Quick/Guided/Advanced, /invest with holdings+SIP, /learn placeholder)
-- [x] Phase 9: Python Upgrades (indicators package — 13 indicators, 42 tests; user's EMASuperTrendDEMA strategy)
+- [x] Phase 9: Python Upgrades (indicators package — 13 indicators, 42 tests; EMASuperTrendDEMA strategy)
 - [ ] Phase 10: Testing + Beta Release (live testing, performance, tag v0.1.0-beta)
 
 ---
@@ -182,7 +182,7 @@ Not needed for beta. Basic content only if time permits in Week 6.
 - [ ] Start Rust/PyO3 backtest prototype (raptorbt pattern) — proof of concept only
 
 ### Strategy Implementation
-- [x] Implement user's EMA 20/50 + Supertrend 10/3 + DEMA 15 strategy (EMASuperTrendDEMA — static→dynamic SL, 5-candle rule, lot sizes, target at DEMA 15)
+- [x] Implement EMA 20/50 + Supertrend 10/3 + DEMA 15 strategy (EMASuperTrendDEMA — static→dynamic SL, 5-candle rule, lot sizes, target at DEMA 15)
 - [ ] Absorb 20 highest-priority strategies from AlgoTrading repo (of 59 total; rest in v0.2.0):
   - [ ] Trend strategies (top 5 of 15)
   - [ ] Momentum strategies (top 4 of 11)
@@ -202,7 +202,7 @@ Not needed for beta. Basic content only if time permits in Week 6.
 ## Week 6: Testing + Beta Release — from spec Section 13
 
 ### Testing
-- [ ] Aggressive live testing with Dhan Sandbox during market hours
+- [ ] Aggressive live testing with broker sandbox during market hours
   - [ ] Every widget: Dashboard, Scalper, Positions, Orders, Holdings, TradeBook, OrderPad
   - [ ] Every widget: Chart, OptionChain, OIChart, Straddle, Depth, Greeks, Watchlist
   - [ ] Every new widget: SectorMap, Calculator, MTM Monitor, Risk Panel, News Feed, Ticker, AI Advisor
@@ -357,7 +357,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 - [x] Ditto: account manager, position mirroring, margin calc, trailing SL
 - [x] Infrastructure: Makefile, setup.sh, systemd templates, health-check.sh
 - [x] Git submodules: openalgo, algomirror, openclaw
-- [x] First sandbox trade: SBIN BUY 1 MIS via Dhan Sandbox
+- [x] First sandbox trade placed successfully
 - [x] CI: GitHub Actions (python-tests, node-tests, secrets-check, claude-review)
 - [x] .env.example: 4 blank vars only (root), 3 VITE_ vars (terminal)
 - [x] package-lock.json tracked in git

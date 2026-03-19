@@ -20,9 +20,9 @@ Append to DEVLOG.md:
 
 Examples:
 ```
-## 2026-03-17 19:30 IST | nitro-i5-13420H-RTX5050 | @navaneeshnagarajan | VS Code | Claude Code (claude-opus-4-6) | feature/core-client | Built OpenAlgo REST client
-## 2026-03-18 10:00 IST | mac-m4-16gb | @navaneeshnagarajan | Antigravity | Antigravity/Tester (gemini-2.5-pro) | feature/core-client | Wrote tests for OpenAlgo client
-## 2026-03-18 16:00 IST | ubuntu-i3-9350KF-RX6600XT | @navaneeshnagarajan | Terminal | Manual | main | Deployed v0.1.0
+## 2026-03-17 19:30 IST | nitro-dev | @your-username | VS Code | Claude Code (claude-opus-4-6) | feature/core-client | Built OpenAlgo REST client
+## 2026-03-18 10:00 IST | mac-dev | @your-username | Antigravity | Antigravity/Tester (gemini-2.5-pro) | feature/core-client | Wrote tests for OpenAlgo client
+## 2026-03-18 16:00 IST | ubuntu-server | @your-username | Terminal | Manual | main | Deployed v0.1.0
 ```
 
 ## Versioning
@@ -63,7 +63,7 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 ## Post-release (v1.0.0 onward)
 
 - Branch: `feature/{pkg}-{name}`, `fix/{pkg}-{name}`, `hotfix/{name}`
-- PRs to dev require 1 approval from @navaneeshnagarajan
+- PRs to dev require 1 approval from a maintainer
 - Always squash and merge
 - Run `make test && make lint` before pushing
 - Commits: `feat(terminal): add scalper panel` (conventional commits)

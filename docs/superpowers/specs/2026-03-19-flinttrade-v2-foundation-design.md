@@ -432,7 +432,7 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → FIX → UPDATE → C
 - Start Rust/PyO3 backtest prototype (raptorbt pattern)
 
 ### Week 6: Testing + Beta Release
-- Aggressive live testing with Dhan Sandbox during market hours (every widget, every tool)
+- Aggressive live testing with broker sandbox during market hours (every widget, every tool)
 - Test with Kotak Neo sandbox if available
 - Fix all bugs found during testing
 - Performance optimization (Glide Data Grid for option chain)

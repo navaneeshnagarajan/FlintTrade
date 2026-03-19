@@ -9,7 +9,7 @@ This directory is NOT in the public repo. To sync between machines:
 
 ```bash
 # From Nitro to Ubuntu (via WireGuard VPN):
-rsync -av .reference/ navaneesh@10.10.10.1:~/FlintTrade/.reference/
+rsync -av .reference/ user@your-server:~/FlintTrade/.reference/
 
 # From Nitro to Mac:
 scp -r .reference/ user@mac:~/FlintTrade/.reference/

@@ -23,7 +23,7 @@ Edit `.env` — set `OPENALGO_API_KEY` (get from OpenAlgo web UI after broker lo
 ## 3. Configure OpenAlgo Broker
 
 Edit `infra/openalgo/.env` (copy from `.sample.env` if needed):
-- Set broker name (e.g., `dhan` or `dhan_sandbox` for testing)
+- Set broker name (e.g., your broker or its sandbox variant for testing)
 - Set broker credentials (client ID, API key/secret)
 
 ## 4. Start and Verify
@@ -51,7 +51,7 @@ Read `PLAN.md` at the repo root. Pick the first unchecked task. Build it.
 
 1. Open http://127.0.0.1:5000 in browser
 2. Create account on first run
-3. Select broker (`dhan_sandbox` for testing)
+3. Select broker (use sandbox variant for testing)
 4. Login to broker via OAuth redirect
 5. Go to API Key section, generate key
 6. Put key in FlintTrade `.env` as `OPENALGO_API_KEY`

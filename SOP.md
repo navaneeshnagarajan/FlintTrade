@@ -122,6 +122,7 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → FIX → UPDATE → C
 - Claim work is done without running verification
 - Use mock/placeholder/fake data
 - Hardcode API keys, hostnames, IPs, or personal values
+- Include personal info in commit messages (conversation refs, broker names, personal IPs, machine specs)
 
 ## Available Tools (use actively — target 65-70% utilization)
 

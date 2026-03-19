@@ -171,7 +171,7 @@ No audit doc mentions a first-time setup wizard. The `python -m packages.core.sr
 
 ### 1.23 DDNS auto-update
 
-**Where mentioned:** CORE2 SUMMARY (systemd services on Ubuntu, DDNS watcher), CORE1 SUMMARY (No-IP DDNS: kalamiq.ddns.net).
+**Where mentioned:** CORE2 SUMMARY (systemd services on Ubuntu, DDNS watcher), CORE1 SUMMARY (DDNS service).
 
 **Status:** A DDNS script was rewritten per CORE2 to support multiple providers. It exists in `infra/` somewhere. Not tracked in any audit doc as a feature or infrastructure item. The master plan should mention it under Infrastructure/Deployment.
 
@@ -441,7 +441,7 @@ Cross-referencing the user's explicit checklist from the prompt against all docu
 
 | Document | What to Fix |
 |----------|-------------|
-| **CLAUDE.md** | Remove "13 packages" (should be 11 after deleting stubs), remove Dhan Sandbox reference, update Current State to widget architecture, fix .env.example rule (currently violated) |
+| **CLAUDE.md** | Remove "13 packages" (should be 11 after deleting stubs), remove broker-specific sandbox reference, update Current State to widget architecture, fix .env.example rule (currently violated) |
 | **CONTRIBUTING.md** | Test count 662 -> 670 |
 | **ARCHITECTURE.md** | "git subtree" -> "git submodule", update diagram for single React app |
 | **SEBI_COMPLIANCE.md** | Remove "TOTP auto-login cron in infra/cron/" |

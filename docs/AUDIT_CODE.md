@@ -267,7 +267,7 @@ MACHINE_NAME, MACHINE_ROLE, CONTRIBUTOR_USERNAME
 ### Issues:
 1. **SEVERELY out of sync.** `.env.example` has 4 vars, `.env` has 31+.
 2. **OPENALGO_PORT missing from .env** -- present in `.env.example` but not in `.env`.
-3. **.env contains secrets:** `OPENALGO_API_KEY` has a real 64-char hex key, `OPENALGO_HOST` points to `192.168.8.50` (local network IP). These must never be committed.
+3. **.env contains secrets:** `OPENALGO_API_KEY` has a real hex key, `OPENALGO_HOST` points to a local network IP. These must never be committed.
 4. **.env.example has non-blank values** for `OPENALGO_HOST` and `OPENALGO_PORT` -- CLAUDE.md says "`.env.example` values ALL BLANK" but they have defaults.
 5. **CLAUDE.md says only 4 vars** (`OPENALGO_HOST`, `OPENALGO_PORT`, `OPENALGO_API_KEY`, `OPENALGO_WS_PORT`). The actual `.env` has grown far beyond this without updating `.env.example` or CLAUDE.md.
 

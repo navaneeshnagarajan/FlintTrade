@@ -81,6 +81,10 @@ docs/conversations/memories.json
 docs/conversations/projects.json
 docs/conversations/users.json
 
+# === Conversation summaries (personal context, not public) ===
+docs/conversations/*.md
+!docs/conversations/README.md
+
 # === Playwright MCP (screenshots from browser testing) ===
 .playwright-mcp/
 

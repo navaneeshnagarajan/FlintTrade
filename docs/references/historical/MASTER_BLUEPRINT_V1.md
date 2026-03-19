@@ -1,3 +1,8 @@
+> **HISTORICAL ARCHIVE** — This document is a pre-migration snapshot and contains
+> machine-specific hardware details, broker-specific references, and personal
+> infrastructure descriptions from the original planning phase. It is preserved
+> for historical context only. See PLAN.md for the current roadmap.
+
 # The definitive master blueprint for autonomous Indian F&O trading
 
 **Dhan is the unequivocal primary broker, Ubuntu Server 24.04 LTS powers the 24/7 trading server, and a 20-week phased roadmap transforms three machines — a custom PC, an Acer Nitro laptop, and a MacBook Air M4 — into an institutional-grade autonomous F&O platform built on OpenAlgo v2.** This blueprint covers every hardware component, software subscription, broker API, OS configuration, AI model, trading strategy, data pipeline, safety system, and SEBI compliance requirement. It is designed to serve as the `CLAUDE.md` context file for Claude Code to execute the entire build.
