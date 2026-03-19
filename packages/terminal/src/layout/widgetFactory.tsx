@@ -40,7 +40,7 @@ const lazyWidgets = {
 };
 
 // ---------------------------------------------------------------------------
-// Widget metadata for the picker popup (14 widgets including Greeks)
+// Widget metadata for the picker popup
 // ---------------------------------------------------------------------------
 export const widgetCatalog: WidgetMeta[] = [
   { id: "dashboard", name: "Dashboard", icon: "LayoutDashboard", category: "Trading" },

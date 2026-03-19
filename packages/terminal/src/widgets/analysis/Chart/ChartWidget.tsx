@@ -66,17 +66,6 @@ interface HlineRef {
   _series: ISeriesApi<"Candlestick">;
 }
 
-interface WsTickDetail {
-  symbol: string;
-  exchange: string;
-  ltp: number;
-  open?: number;
-  high?: number;
-  low?: number;
-  change?: number;
-  change_pct?: number;
-}
-
 interface OhlcvBar {
   time: string | number;
   open: number;
@@ -1153,29 +1142,9 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
     };
   }, [symbol, exchange]);
 
-  // --- live tick updates ---------------------------------------------------
-  useEffect(() => {
-    function onTick(e: Event) {
-      const d = (e as CustomEvent<WsTickDetail>).detail;
-      if (!d || d.symbol !== symbol || d.exchange !== exchange) return;
-      if (!d.ltp || !candleRef.current) return;
-
-      const now = Math.floor(Date.now() / 1000) as unknown as Time;
-      candleRef.current.update({
-        time: now,
-        open: d.open ?? d.ltp,
-        high: d.high ?? d.ltp,
-        low: d.low ?? d.ltp,
-        close: d.ltp,
-      });
-
-      setLtp(d.ltp);
-      if (d.change != null) setChange(d.change);
-      if (d.change_pct != null) setChangePct(d.change_pct);
-    }
-    window.addEventListener("ws:tick", onTick);
-    return () => window.removeEventListener("ws:tick", onTick);
-  }, [symbol, exchange]);
+  // Live tick updates are handled by useWsBridge (Jotai atoms) — no direct
+  // window event listener needed. Quote polling in the effect above keeps
+  // the header LTP/change figures refreshed every symbol change.
 
   // --- manage horizontal lines on chart ------------------------------------
   useEffect(() => {

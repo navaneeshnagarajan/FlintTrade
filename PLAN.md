@@ -15,7 +15,7 @@
 - **TypeScript migration:** Complete. Zero JSX/JS files. ~90 TS/TSX files.
 - **Python:** 12 packages (10 original + indicators + strategies sub-package), 712 tests passing
 - **CI:** GitHub Actions green (python-tests + node-tests + secrets-check)
-- **Packages:** 10 Python + 1 React (terminal). Stub packages `dashboard/` and `backtest/` deleted.
+- **Packages:** 11 Python + 1 React (terminal). Stub packages `dashboard/` and `backtest/` deleted.
 - **Dependencies:** All v2 deps installed (Dockview 5.1, Zustand 5, Jotai, TanStack Query 5, Glide Data Grid 6, shadcn/ui, react-hook-form, zod). Old deps removed (FlexLayout, recharts, postcss).
 - **State:** Zustand stores (4), Jotai atoms, TanStack Query hooks (6), WebSocket service with ping/pong — all wired.
 - **Shell:** Dockview canvas, TopBar, TickerBar, WidgetPicker, ToolsDropdown — all TSX + shadcn/ui. 7 layout presets.
@@ -339,8 +339,8 @@ These are tracked, not forgotten. Every one gets built eventually.
 
 ## Previously Completed (pre-v2 migration)
 
-- [x] Monorepo structure (10 Python + 1 React packages)
-- [x] All 10 Python packages: source code + tests (738 passing)
+- [x] Monorepo structure (11 Python + 1 React packages)
+- [x] All 11 Python packages: source code + tests (738 passing)
 - [x] Terminal: professional dark theme, live OpenAlgo API
 - [x] Core: OpenAlgo client with 45+ endpoint wrappers
 - [x] Core: Workspace config system (~/.flinttrade/workspace.json)

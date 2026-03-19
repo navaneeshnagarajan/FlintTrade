@@ -81,9 +81,7 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
     <div className="h-10 bg-surface-card border-b border-border-default flex items-center justify-between px-3 select-none shrink-0">
       {/* Left: Logo + Layout Tabs */}
       <div className="flex items-center gap-3">
-        <span className="text-profit font-bold text-lg tracking-tight leading-none">
-          FT
-        </span>
+        <img src="/logo.svg" alt="FT" className="h-6 w-6" />
 
         <div className="flex items-center gap-1">
           {tabs.map((tab) => (

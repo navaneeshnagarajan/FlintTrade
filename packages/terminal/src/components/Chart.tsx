@@ -11,18 +11,10 @@ interface ChartProps {
   className?: string;
 }
 
-interface WsTickEvent {
-  symbol: string;
-  exchange: string;
-  ltp: number;
-  open?: number;
-  high?: number;
-  low?: number;
-}
-
 /**
  * TradingView Lightweight Charts v5 wrapper.
- * Fetches historical OHLCV via API, streams live ticks via WebSocket events.
+ * Fetches historical OHLCV via API. Live ticks are routed through Jotai
+ * atoms (useWsBridge) — no direct window event listeners needed here.
  */
 export default function Chart({
   symbol = "NIFTY",
@@ -120,27 +112,6 @@ export default function Chart({
       cancelled = true;
     };
   }, [symbol, exchange, interval]);
-
-  // Live tick updates via WebSocket
-  useEffect(() => {
-    const onTick = (e: Event) => {
-      const d = (e as CustomEvent<WsTickEvent>).detail;
-      if (d?.symbol !== symbol || d?.exchange !== exchange) return;
-      if (!d.ltp || !candleRef.current) return;
-
-      const now = Math.floor(Date.now() / 1000) as unknown as import("lightweight-charts").Time;
-      candleRef.current.update({
-        time: now,
-        open: d.open ?? d.ltp,
-        high: d.high ?? d.ltp,
-        low: d.low ?? d.ltp,
-        close: d.ltp,
-      });
-    };
-
-    window.addEventListener("ws:tick", onTick);
-    return () => window.removeEventListener("ws:tick", onTick);
-  }, [symbol, exchange]);
 
   return <div ref={containerRef} className={`w-full ${className}`} />;
 }

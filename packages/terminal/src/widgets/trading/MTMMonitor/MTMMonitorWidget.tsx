@@ -42,6 +42,7 @@ import { Badge } from "@/components/ui/badge";
 import { usePositions } from "@/hooks/usePositions";
 import { useFunds } from "@/hooks/useFunds";
 import { useSettingsStore } from "@/stores/settingsStore";
+import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 
 // ---------------------------------------------------------------------------
@@ -294,9 +295,8 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
   useEffect(() => {
     if (!positions) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rawPnl = (positions as any[]).reduce((sum, p) => {
-      return sum + parseFloat(String(p.pnl ?? p.unrealised_pnl ?? 0));
+    const rawPnl = (positions as Position[]).reduce((sum, p) => {
+      return sum + (p.pnl ?? 0);
     }, 0);
 
     const nowSec = Math.floor(Date.now() / 1000) as UTCTimestamp;

@@ -32,6 +32,8 @@ import { usePositions } from "@/hooks/usePositions";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import type { WidgetProps } from "@/types/widgets";
+// Position type used for .length count below
+import type { Position } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -168,8 +170,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
   const totalBalance = fundsData?.totalBalance ?? (usedMargin + availableCash);
 
   // Position count (each row = 1 lot for simplicity; real lot tracking needs instrument metadata)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const positionCount = (positions as any[] | undefined)?.length ?? 0;
+  const positionCount = (positions as Position[] | undefined)?.length ?? 0;
 
   // Daily PnL vs target/stoploss
   const pnlVsTarget = pct(Math.max(totalPnl, 0), riskLimits.mtmTarget);

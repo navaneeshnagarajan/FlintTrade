@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { usePositions } from "@/hooks/usePositions";
+import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 
 // ---------------------------------------------------------------------------
@@ -288,16 +289,15 @@ export default function SectorMapWidget(_props: WidgetProps) {
       ];
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (positionsData as any[]).map((p) => {
-      const ltp = parseFloat(String(p.ltp ?? 0));
-      const avgPrice = parseFloat(String(p.averagePrice ?? p.average_price ?? 0));
+    return (positionsData as Position[]).map((p) => {
+      const ltp = p.ltp ?? 0;
+      const avgPrice = p.averagePrice ?? 0;
       const change = avgPrice > 0 ? ((ltp - avgPrice) / avgPrice) * 100 : 0;
       return {
-        symbol: String(p.symbol),
+        symbol: p.symbol,
         ltp,
         change,
-        sector: getSector(String(p.symbol)),
+        sector: getSector(p.symbol),
       };
     });
   }, [positionsData]);
