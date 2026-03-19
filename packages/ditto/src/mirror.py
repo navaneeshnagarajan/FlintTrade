@@ -16,7 +16,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from enum import Enum, StrEnum
+from enum import StrEnum
 
 import httpx
 

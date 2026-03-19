@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time as dt_time, timedelta, timezone
-from enum import Enum, StrEnum
+from enum import StrEnum
 
 from packages.core.src.models import Order, Position
 from packages.core.src.openalgo_client import OpenAlgoClient

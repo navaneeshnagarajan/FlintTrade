@@ -21,7 +21,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Any, Callable
 
 logger = logging.getLogger("flinttrade.automation.cron")

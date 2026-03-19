@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum, StrEnum
+from enum import StrEnum
 
 logger = logging.getLogger("flinttrade.ditto.trailing_sl")
 
