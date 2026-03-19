@@ -1,13 +1,53 @@
-// Migrated from modules/Dashboard.jsx — works as a FlexLayout widget
-// Receives { node } prop from FlexLayout but doesn't use it yet
-import { useState, useEffect, useCallback } from "react";
+// Migrated to TSX — Phase 4 Batch 1
+// Replaces direct API calls with TanStack Query hooks (useFunds, usePositions, useOrders).
+// Index cards are driven by Jotai tickAtomFamily (populated by useWsBridge in App.tsx).
+import { useMemo } from "react";
+import { useAtomValue } from "jotai";
 import { TrendingUp, TrendingDown, Wallet, Activity, Clock } from "lucide-react";
-import { getFunds, getPositionbook, getOrderbook, getQuotes } from "../../../services/api";
+import { useFunds } from "@/hooks/useFunds";
+import { usePositions } from "@/hooks/usePositions";
+import { useOrders } from "@/hooks/useOrders";
+import { tickAtomFamily } from "@/atoms/marketAtoms";
+import type { WsTick } from "@/types/api";
+import type { WidgetProps } from "@/types/widgets";
 
+// ─── OpenAlgo runtime shapes (snake_case) ────────────────────────────────────
+// The typed api.ts interfaces use camelCase but OpenAlgo REST returns snake_case.
+// These raw interfaces reflect what we actually receive.
+interface RawPosition {
+  symbol: string;
+  pnl?: string | number;
+  average_price?: string | number;
+  ltp?: string | number;
+  quantity?: string | number;
+}
+
+interface RawOrder {
+  symbol: string;
+  action?: string;
+  quantity?: string | number;
+  price?: string | number;
+  order_status?: string;
+  status?: string;
+  timestamp?: string;
+}
+
+interface RawFunds {
+  availablecash?: string | number;
+  utiliseddebits?: string | number;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 const INR0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-const INDICES = [
+interface IndexDef {
+  symbol: string;
+  exchange: string;
+  name: string;
+}
+
+const INDICES: IndexDef[] = [
   { symbol: "NIFTY", exchange: "NSE_INDEX", name: "NIFTY 50" },
   { symbol: "BANKNIFTY", exchange: "NSE_INDEX", name: "BANK NIFTY" },
   { symbol: "SENSEX", exchange: "BSE_INDEX", name: "SENSEX" },
@@ -15,17 +55,16 @@ const INDICES = [
   { symbol: "INDIA VIX", exchange: "NSE_INDEX", name: "VIX" },
 ];
 
-function isRefreshWindow() {
-  const now = new Date();
-  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const mins = ist.getHours() * 60 + ist.getMinutes();
-  const day = ist.getDay();
-  if (day === 0 || day === 6) return false;
-  return mins >= 540 && mins <= 945;
+// ─── IndexCard ────────────────────────────────────────────────────────────────
+interface IndexCardProps {
+  atomKey: string;
+  name: string;
 }
 
-function IndexCard({ data, name }) {
-  if (!data) {
+function IndexCard({ atomKey, name }: IndexCardProps) {
+  const tick: WsTick | null = useAtomValue(tickAtomFamily(atomKey));
+
+  if (!tick) {
     return (
       <div className="bg-surface-card rounded border border-border-default p-2">
         <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">{name}</div>
@@ -34,8 +73,8 @@ function IndexCard({ data, name }) {
     );
   }
 
-  const ltp = data.ltp ?? 0;
-  const prevClose = data.prev_close ?? data.close ?? 0;
+  const ltp = tick.ltp ?? 0;
+  const prevClose = tick.close ?? 0;
   const change = prevClose > 0 ? ltp - prevClose : 0;
   const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
   const up = change >= 0;
@@ -57,61 +96,40 @@ function IndexCard({ data, name }) {
   );
 }
 
-export default function DashboardWidget({ node }) {
-  const [indices, setIndices] = useState({});
-  const [funds, setFunds] = useState(null);
-  const [positions, setPositions] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [orderStats, setOrderStats] = useState(null);
-  const [lastFetch, setLastFetch] = useState(null);
+// ─── Main widget ──────────────────────────────────────────────────────────────
+export default function DashboardWidget(_props: WidgetProps) {
+  const { data: fundsData, dataUpdatedAt } = useFunds();
+  const { data: positionsData } = usePositions();
+  const { data: ordersData } = useOrders();
 
-  const fetchAll = useCallback(async () => {
-    const promises = INDICES.map(async (idx) => {
-      try {
-        const data = await getQuotes(idx.symbol, idx.exchange);
-        setIndices((prev) => ({ ...prev, [`${idx.exchange}:${idx.symbol}`]: data }));
-      } catch { /* API unreachable */ }
-    });
-    await Promise.allSettled(promises);
+  const funds = fundsData as RawFunds | undefined;
+  const positions = (positionsData ?? []) as RawPosition[];
+  const orders = (ordersData ?? []) as RawOrder[];
 
-    try {
-      const f = await getFunds();
-      setFunds(f);
-    } catch { /* */ }
+  const availableCash = parseFloat(String(funds?.availablecash ?? 0));
+  const usedMargin = parseFloat(String(funds?.utiliseddebits ?? 0));
 
-    try {
-      const p = await getPositionbook();
-      setPositions(Array.isArray(p) ? p : []);
-    } catch { setPositions([]); }
+  const totalPnl = useMemo(
+    () => positions.reduce((s, p) => s + parseFloat(String(p.pnl ?? 0)), 0),
+    [positions],
+  );
 
-    try {
-      const ob = await getOrderbook();
-      setOrders(ob?.orders || []);
-      setOrderStats(ob?.statistics || null);
-    } catch { setOrders([]); }
-
-    setLastFetch(new Date());
-  }, []);
-
-  useEffect(() => {
-    fetchAll();
-    const interval = isRefreshWindow() ? 5000 : 60000;
-    const id = setInterval(fetchAll, interval);
-    return () => clearInterval(id);
-  }, [fetchAll]);
-
-  const availableCash = parseFloat(funds?.availablecash || 0);
-  const usedMargin = parseFloat(funds?.utiliseddebits || 0);
-  const totalPnl = positions.reduce((s, p) => s + parseFloat(p.pnl || 0), 0);
+  const lastFetch = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
   return (
     <div className="h-full overflow-auto p-3 space-y-3">
+      {/* Index strip */}
       <div className="grid grid-cols-5 gap-2">
         {INDICES.map((idx) => (
-          <IndexCard key={idx.symbol} data={indices[`${idx.exchange}:${idx.symbol}`]} name={idx.name} />
+          <IndexCard
+            key={idx.symbol}
+            atomKey={`${idx.exchange}:${idx.symbol}`}
+            name={idx.name}
+          />
         ))}
       </div>
 
+      {/* Summary cards */}
       <div className="grid grid-cols-3 gap-2">
         <div className="bg-surface-card rounded border border-border-default p-2">
           <div className="flex items-center gap-1 text-[10px] text-text-muted uppercase tracking-wider mb-1">
@@ -141,6 +159,7 @@ export default function DashboardWidget({ node }) {
         </div>
       </div>
 
+      {/* Positions table */}
       <div className="bg-surface-card rounded border border-border-default">
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default">
           <h3 className="text-[10px] text-text-muted uppercase tracking-wider">Positions</h3>
@@ -167,10 +186,10 @@ export default function DashboardWidget({ node }) {
             </thead>
             <tbody>
               {positions.map((p, i) => {
-                const pnl = parseFloat(p.pnl || 0);
-                const avg = parseFloat(p.average_price || 0);
-                const ltp = parseFloat(p.ltp || 0);
-                const qty = parseInt(p.quantity || 0, 10);
+                const pnl = parseFloat(String(p.pnl ?? 0));
+                const avg = parseFloat(String(p.average_price ?? 0));
+                const ltp = parseFloat(String(p.ltp ?? 0));
+                const qty = parseInt(String(p.quantity ?? 0), 10);
                 const pnlPct = avg > 0 && qty !== 0 ? (pnl / (avg * Math.abs(qty))) * 100 : 0;
                 return (
                   <tr key={i} className="border-t border-border-subtle hover:bg-surface-hover/50">
@@ -192,11 +211,10 @@ export default function DashboardWidget({ node }) {
         )}
       </div>
 
+      {/* Orders table */}
       <div className="bg-surface-card rounded border border-border-default">
         <div className="px-3 py-1.5 border-b border-border-default">
-          <h3 className="text-[10px] text-text-muted uppercase tracking-wider">
-            Orders{orderStats ? ` — ${orderStats.total_completed_orders || 0} filled, ${orderStats.total_open_orders || 0} open` : ""}
-          </h3>
+          <h3 className="text-[10px] text-text-muted uppercase tracking-wider">Orders</h3>
         </div>
         {orders.length === 0 ? (
           <div className="px-3 py-6 text-center text-text-muted text-xs">No orders today</div>
@@ -215,17 +233,17 @@ export default function DashboardWidget({ node }) {
             <tbody>
               {orders.map((o, i) => (
                 <tr key={i} className="border-t border-border-subtle hover:bg-surface-hover/50">
-                  <td className="px-3 py-1 text-text-muted font-mono">{o.timestamp || "—"}</td>
+                  <td className="px-3 py-1 text-text-muted font-mono">{o.timestamp ?? "—"}</td>
                   <td className="px-3 py-1 font-medium font-mono">{o.symbol}</td>
                   <td className={`px-3 py-1 text-center font-medium ${o.action === "BUY" ? "text-profit" : "text-loss"}`}>{o.action}</td>
-                  <td className="px-3 py-1 text-right font-mono">{o.quantity}</td>
-                  <td className="px-3 py-1 text-right font-mono">{o.price || "MKT"}</td>
+                  <td className="px-3 py-1 text-right font-mono">{String(o.quantity ?? "")}</td>
+                  <td className="px-3 py-1 text-right font-mono">{o.price ? String(o.price) : "MKT"}</td>
                   <td className="px-3 py-1 text-center">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                       o.order_status === "complete" ? "bg-profit/10 text-profit" :
                       o.order_status === "rejected" ? "bg-loss/10 text-loss" :
                       "bg-warning/10 text-warning"
-                    }`}>{o.order_status || o.status || "—"}</span>
+                    }`}>{o.order_status ?? o.status ?? "—"}</span>
                   </td>
                 </tr>
               ))}
