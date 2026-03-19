@@ -28,8 +28,12 @@ OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 # Setup
 # ======================================================================
 
-setup: ## First-time setup — install all dependencies
+setup: check-python ## First-time setup — install all dependencies
 	@bash infra/scripts/setup.sh
+
+check-python: ## Verify Python >= 3.11 (required for StrEnum)
+	@$(PYTHON) -c "import sys; v=sys.version_info; exit(0 if v >= (3,11) else 1)" 2>/dev/null || \
+	  (echo -e "$(RED)Error: Python 3.11+ required (StrEnum support). Found: $$($(PYTHON) --version)$(RESET)"; exit 1)
 
 # ======================================================================
 # Service management
@@ -51,17 +55,13 @@ status: ## Show service status
 health: ## Run health check
 	@bash infra/scripts/health-check.sh
 
-dev: ## Start React dev servers + backend
+dev: ## Start terminal dev server + OpenAlgo
 	@echo -e "$(CYAN)=== FlintTrade Dev Mode ===$(RESET)"
-	@echo "  Terminal:  http://localhost:3001"
-	@echo "  Dashboard: http://localhost:3000"
-	@echo "  Backtest:  http://localhost:3002"
+	@echo "  Terminal:  http://localhost:5173"
 	@echo "  OpenAlgo:  http://localhost:$(OPENALGO_PORT)"
 	@echo ""
 	@if [ -n "$(NPM)" ]; then \
 	  cd packages/terminal && npm run dev & \
-	  cd packages/dashboard && npm run dev & \
-	  cd packages/backtest && npm run dev & \
 	fi
 	@bash infra/scripts/start-openalgo.sh
 

@@ -16,6 +16,7 @@ export class WebSocketService {
   private connected = false;
   private shouldConnect = false;
   private tickCallbacks = new Set<TickCallback>();
+  private depthCallbacks = new Set<(data: Record<string, unknown>) => void>();
   private statusCallbacks = new Set<StatusCallback>();
 
   constructor(private url: string) {}
@@ -25,6 +26,11 @@ export class WebSocketService {
   onTick(cb: TickCallback): () => void {
     this.tickCallbacks.add(cb);
     return () => this.tickCallbacks.delete(cb);
+  }
+
+  onDepth(cb: (data: Record<string, unknown>) => void): () => void {
+    this.depthCallbacks.add(cb);
+    return () => this.depthCallbacks.delete(cb);
   }
 
   onStatus(cb: StatusCallback): () => void {
@@ -114,11 +120,18 @@ export class WebSocketService {
 
         // Validate required fields before propagating
         const symbol = data["symbol"];
-        const ltp = data["ltp"];
         if (typeof symbol !== "string" || symbol.length === 0) {
           console.warn("[WS] Malformed message: missing or invalid symbol", data);
           return;
         }
+
+        // Depth mode (mode 3) sends bids/asks without ltp — handle separately
+        if (Array.isArray(data["bids"]) || Array.isArray(data["asks"])) {
+          this.depthCallbacks.forEach((cb) => cb(data));
+          return;
+        }
+
+        const ltp = data["ltp"];
         if (typeof ltp !== "number") {
           console.warn("[WS] Malformed message: ltp is not a number", data);
           return;

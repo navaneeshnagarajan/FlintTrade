@@ -74,6 +74,9 @@ async function post<T>(endpoint: string, extra: Record<string, unknown> = {}): P
 }
 
 async function get<T>(endpoint: string): Promise<T> {
+  if (!generalLimiter.tryConsume()) {
+    throw new Error(`Rate limit exceeded for GET ${endpoint}`);
+  }
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`);
   if (!resp.ok) throw new Error(`API ${endpoint}: HTTP ${resp.status}`);
   const json = await resp.json();

@@ -25,16 +25,25 @@ logger = logging.getLogger("flinttrade.ai.llm")
 
 
 class LLMProvider(StrEnum):
+    """Supported LLM providers.
+
+    Local: LM Studio, Ollama (user's hardware, no internet needed)
+    Cloud: Any provider with an API (user brings their own key)
+    Custom: Any OpenAI-compatible endpoint (user provides host URL)
+    """
+
     LMSTUDIO = "lmstudio"
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     GEMINI = "gemini"
     DEEPSEEK = "deepseek"
-    GROQ = "groq"
+    GROQ = "groq"       # Groq — fast LPU inference (groq.com)
+    GROK = "grok"       # Grok — xAI's model (x.ai)
     MISTRAL = "mistral"
     TOGETHER = "together"
-    CUSTOM = "custom"  # Any OpenAI-compatible endpoint
+    OPENROUTER = "openrouter"  # Routes to 100+ models
+    CUSTOM = "custom"    # Any OpenAI-compatible endpoint
 
 
 @dataclass
@@ -72,14 +81,16 @@ class LLMConfig:
             host=host,
             model=model,
             api_key=(
-                os.getenv("OPENAI_API_KEY", "")
+                os.getenv("LLM_API_KEY", "")  # Generic — works for any provider
+                or os.getenv("OPENAI_API_KEY", "")
                 or os.getenv("ANTHROPIC_API_KEY", "")
                 or os.getenv("GEMINI_API_KEY", "")
                 or os.getenv("DEEPSEEK_API_KEY", "")
                 or os.getenv("GROQ_API_KEY", "")
+                or os.getenv("GROK_API_KEY", "")
                 or os.getenv("MISTRAL_API_KEY", "")
                 or os.getenv("TOGETHER_API_KEY", "")
-                or os.getenv("LLM_API_KEY", "")  # Generic fallback
+                or os.getenv("OPENROUTER_API_KEY", "")
             ),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
         )
@@ -111,19 +122,25 @@ class LLMResponse:
         return bool(self.content) and not self.error
 
 
-# Provider-specific base URLs for the OpenAI-compatible chat endpoint
-# Most providers use the OpenAI-compatible API format.
-# "custom" uses {host}/v1/chat/completions for any compatible endpoint.
+# Provider-specific base URLs for the OpenAI-compatible chat endpoint.
+# Most cloud providers offer OpenAI-compatible APIs.
+# Local providers use {host} placeholder resolved at runtime.
+# "custom" and "openrouter" let users connect ANY endpoint.
 _PROVIDER_URLS: dict[str, str] = {
+    # Local (no internet needed)
     "lmstudio": "{host}/v1/chat/completions",
     "ollama": "{host}/v1/chat/completions",
+    # Cloud (user provides API key)
     "openai": "https://api.openai.com/v1/chat/completions",
     "anthropic": "https://api.anthropic.com/v1/messages",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     "deepseek": "https://api.deepseek.com/v1/chat/completions",
     "groq": "https://api.groq.com/openai/v1/chat/completions",
+    "grok": "https://api.x.ai/v1/chat/completions",
     "mistral": "https://api.mistral.ai/v1/chat/completions",
     "together": "https://api.together.xyz/v1/chat/completions",
+    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    # Custom (any OpenAI-compatible endpoint)
     "custom": "{host}/v1/chat/completions",
 }
 
