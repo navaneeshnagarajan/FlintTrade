@@ -1,3 +1,6 @@
+> **HISTORICAL SNAPSHOT** — Conducted 2026-03-19. Test counts and architecture references
+> reflect the pre-migration state. Current state is in PLAN.md.
+
 # FlintTrade — FINAL SWEEP: Complete Cross-Reference Audit
 
 > **Date:** 2026-03-19

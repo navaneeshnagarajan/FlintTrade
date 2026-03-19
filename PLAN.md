@@ -62,52 +62,52 @@
 - [x] Convert 7 layout presets from FlexLayout JSON to Dockview serialization format
 - [x] Rewrite layoutStore.ts for Dockview API
 
-### Days 9-12: Widget Migration (TypeScript + shadcn/ui) — CURRENT PRIORITY
-- [ ] Batch 1 — Trading widgets (7 files JSX→TSX):
-  - [ ] DashboardWidget.jsx → DashboardWidget.tsx
-  - [ ] ScalperWidget.jsx → ScalperWidget.tsx
-  - [ ] PositionsWidget.jsx → PositionsWidget.tsx
-  - [ ] OrdersWidget.jsx → OrdersWidget.tsx
-  - [ ] HoldingsWidget.jsx → HoldingsWidget.tsx
-  - [ ] TradeBookWidget.jsx → TradeBookWidget.tsx
-  - [ ] OrderPadWidget.jsx → OrderPadWidget.tsx
-- [ ] Batch 2 — Analysis widgets (6 files JSX→TSX):
-  - [ ] ChartWidget.jsx → ChartWidget.tsx
-  - [ ] OptionChainWidget.jsx → OptionChainWidget.tsx (wire Glide Data Grid)
-  - [ ] OIChartWidget.jsx → OIChartWidget.tsx
-  - [ ] StraddleWidget.jsx → StraddleWidget.tsx
-  - [ ] DepthWidget.jsx → DepthWidget.tsx
-  - [ ] GreeksWidget.jsx → GreeksWidget.tsx
-- [ ] Batch 3 — Utility widgets (1 file JSX→TSX):
-  - [ ] WatchlistWidget.jsx → WatchlistWidget.tsx
-- [ ] Batch 4 — Tools (7 files JSX→TSX):
-  - [ ] SettingsTool.jsx → SettingsTool.tsx
-  - [ ] BacktestLabTool.jsx → BacktestLabTool.tsx
-  - [ ] FlowBuilderTool.jsx → FlowBuilderTool.tsx
-  - [ ] MarketIntelligenceTool.jsx → MarketIntelligenceTool.tsx
-  - [ ] PnLDashboardTool.jsx → PnLDashboardTool.tsx
-  - [ ] StrategyBuilderTool.jsx → StrategyBuilderTool.tsx
-  - [ ] TradeJournalTool.jsx → TradeJournalTool.tsx
-- [ ] Batch 5 — Legacy JS cleanup:
-  - [ ] Delete components/Chart.jsx (superseded by ChartWidget)
-  - [ ] Delete hooks/useWebSocket.js (superseded by services/websocket.ts)
-- [ ] Replace ALL raw HTML inputs/buttons/dialogs with shadcn/ui components across all widgets
-- [ ] Ensure every widget uses TanStack Query hooks (not raw fetch) for REST data
-- [ ] Ensure every widget uses Jotai atoms (not direct WS) for real-time data
+### Days 9-12: Widget Migration (TypeScript + shadcn/ui) — COMPLETE
+- [x] Batch 1 — Trading widgets (7 files JSX→TSX):
+  - [x] DashboardWidget.jsx → DashboardWidget.tsx
+  - [x] ScalperWidget.jsx → ScalperWidget.tsx
+  - [x] PositionsWidget.jsx → PositionsWidget.tsx
+  - [x] OrdersWidget.jsx → OrdersWidget.tsx
+  - [x] HoldingsWidget.jsx → HoldingsWidget.tsx
+  - [x] TradeBookWidget.jsx → TradeBookWidget.tsx
+  - [x] OrderPadWidget.jsx → OrderPadWidget.tsx
+- [x] Batch 2 — Analysis widgets (6 files JSX→TSX):
+  - [x] ChartWidget.jsx → ChartWidget.tsx
+  - [x] OptionChainWidget.jsx → OptionChainWidget.tsx (wire Glide Data Grid)
+  - [x] OIChartWidget.jsx → OIChartWidget.tsx
+  - [x] StraddleWidget.jsx → StraddleWidget.tsx
+  - [x] DepthWidget.jsx → DepthWidget.tsx
+  - [x] GreeksWidget.jsx → GreeksWidget.tsx
+- [x] Batch 3 — Utility widgets (1 file JSX→TSX):
+  - [x] WatchlistWidget.jsx → WatchlistWidget.tsx
+- [x] Batch 4 — Tools (7 files JSX→TSX):
+  - [x] SettingsTool.jsx → SettingsTool.tsx
+  - [x] BacktestLabTool.jsx → BacktestLabTool.tsx
+  - [x] FlowBuilderTool.jsx → FlowBuilderTool.tsx
+  - [x] MarketIntelligenceTool.jsx → MarketIntelligenceTool.tsx
+  - [x] PnLDashboardTool.jsx → PnLDashboardTool.tsx
+  - [x] StrategyBuilderTool.jsx → StrategyBuilderTool.tsx
+  - [x] TradeJournalTool.jsx → TradeJournalTool.tsx
+- [x] Batch 5 — Legacy JS cleanup:
+  - [x] Delete components/Chart.jsx (superseded by ChartWidget)
+  - [x] Delete hooks/useWebSocket.js (superseded by services/websocket.ts)
+- [x] Replace ALL raw HTML inputs/buttons/dialogs with shadcn/ui components across all widgets
+- [x] Ensure every widget uses TanStack Query hooks (not raw fetch) for REST data
+- [x] Ensure every widget uses Jotai atoms (not direct WS) for real-time data
 
 ### Days 13-14: Verification + Doc Cleanup
-- [ ] `tsc --noEmit` passes (zero type errors)
-- [ ] `npm run build` passes (zero warnings)
-- [ ] `npx vitest run` — all tests pass
-- [ ] All 14 widgets render in Dockview panels
+- [x] `tsc --noEmit` passes (zero type errors)
+- [x] `npm run build` passes (zero warnings)
+- [x] `npx vitest run` — all tests pass
+- [x] All 14 widgets render in Dockview panels
 - [ ] Visual test with Playwright — screenshot every widget
 - [ ] Documentation cleanup (see Documentation section below)
 
 ### Week 1-2 Exit Criteria
-- [ ] TypeScript strict mode, zero `any` types
-- [ ] Dockview panels for all 14 widgets
-- [ ] shadcn/ui components everywhere (no raw HTML controls)
-- [ ] Zustand + Jotai + TanStack Query wired and working in every widget
+- [x] TypeScript strict mode, zero `any` types
+- [x] Dockview panels for all 14 widgets
+- [x] shadcn/ui components everywhere (no raw HTML controls)
+- [x] Zustand + Jotai + TanStack Query wired and working in every widget
 - [ ] All documentation contradictions resolved
 - [ ] Live OpenAlgo sandbox test during market hours
 
@@ -221,7 +221,7 @@ Not needed for beta. Basic content only if time permits in Week 6.
 - [ ] `tsc --noEmit` — zero errors
 - [ ] `npm run build` — zero warnings
 - [ ] `vitest run` — all tests pass
-- [ ] `make test` — 670+ Python tests pass
+- [ ] `make test` — 712+ Python tests pass
 - [ ] Update all documentation (CLAUDE.md, README.md, CONTRIBUTING.md, packages/terminal/CLAUDE.md)
 - [ ] Clean up git history
 - [ ] Tag v0.1.0-beta
@@ -273,9 +273,9 @@ Not needed for beta. Basic content only if time permits in Week 6.
 - [ ] packages/ditto/README.md — check accuracy
 
 ### Files to ARCHIVE (move to docs/references/historical/)
-- [ ] RESTRUCTURE.md → docs/references/historical/RESTRUCTURE_V1.md
-- [ ] docs/THE_PLAN.md → docs/references/historical/THE_PLAN_V1.md
-- [ ] docs/references/MASTER_BLUEPRINT.md → docs/references/historical/
+- [x] RESTRUCTURE.md → docs/references/historical/RESTRUCTURE_V1.md
+- [x] docs/THE_PLAN.md → docs/references/historical/THE_PLAN_V1.md
+- [x] docs/references/MASTER_BLUEPRINT.md → docs/references/historical/
 - [ ] docs/superpowers/plans/2026-03-18-phase1-flexlayout-foundation.md → docs/references/historical/
 
 ### Files to DELETE
@@ -334,7 +334,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 ## Previously Completed (pre-v2 migration)
 
 - [x] Monorepo structure (10 Python + 1 React packages)
-- [x] All 10 Python packages: source code + tests (670 passing)
+- [x] All 10 Python packages: source code + tests (738 passing)
 - [x] Terminal: professional dark theme, live OpenAlgo API
 - [x] Core: OpenAlgo client with 45+ endpoint wrappers
 - [x] Core: Workspace config system (~/.flinttrade/workspace.json)

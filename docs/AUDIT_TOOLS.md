@@ -1,3 +1,6 @@
+> **HISTORICAL SNAPSHOT** — This audit was conducted before the 2026-03-19 v2 migration.
+> All issues listed here have been addressed. See PLAN.md for current status.
+
 # FlintTrade — Tools, Skills, Plugins & MCP Audit
 
 > Generated: 2026-03-19 by Claude Code (Opus 4.6)

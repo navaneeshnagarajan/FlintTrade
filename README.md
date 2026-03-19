@@ -1,6 +1,6 @@
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-696%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-738%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Node](https://img.shields.io/badge/node-20%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
@@ -15,7 +15,7 @@ Open-source modular trading platform for Indian markets, built on [OpenAlgo](htt
 
 FlintTrade is a self-hosted trading platform that sits on top of OpenAlgo. OpenAlgo handles broker connections and order execution across 30+ Indian brokers. FlintTrade handles everything else: strategy execution, risk management, backtesting, real-time analysis, AI-powered signals, and multi-account orchestration.
 
-The platform is organized into 11 independent packages (10 Python + 1 React). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
+The platform is organized into 12 independent packages (11 Python + 1 React). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
 
 FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a platform you run on your own hardware, with your own broker accounts, under your own control. It's designed for SEBI-compliant algorithmic trading in India.
 
@@ -40,7 +40,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 │  ┌────┴─────┐ ┌─────┴────┐ ┌──────────┐             │
 │  │screener  │ │   data   │ │historical│  Analysis    │
 │  │backtest- │ │  audit   │ │ ditto    │  & data      │
-│  │engine    │ │  ticks   │ │ mirror   │              │
+│  │engine    │ │  ticks   │ │indicators│              │
 │  └──────────┘ └──────────┘ └──────────┘             │
 │                     │                                │
 │  ┌──────────┐ ┌─────┴────┐                          │
@@ -75,13 +75,14 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 | **integration** | TradingView webhooks, ChartInk, visual flow builder | ✅ Built |
 | **automation** | Cron jobs, Telegram bot, OpenClaw bridge | ✅ Built |
 | **ditto** | Multi-account mirroring, margin calculator, trailing SL | ✅ Built |
+| **indicators** | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | ✅ Built |
 | **terminal** | React + TypeScript trading terminal — Dockview workspace, widget-composable, scalper, option chain, charts | ✅ Built |
 | Infrastructure | Makefile, systemd, Docker, deploy scripts | 🔨 In Progress |
 
 ## Current State
 
 **What works:**
-- 11 packages with source code and **696 passing tests** (670 Python + 26 terminal)
+- 12 packages with source code and **738 passing tests** (712 Python + 26 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
@@ -89,13 +90,19 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 - React terminal with Dockview widget-composable workspace
 - Docker Compose for cross-platform development
 
-**What's in progress:**
-- Infrastructure automation (`make setup`, `make start` end-to-end)
+**What's complete (Phases 1-9):**
+- TypeScript strict mode migration (zero JSX/JS files remain)
+- Dockview v5.1 widget-composable workspace with 21 widgets (all TSX)
+- 7 functional tools (Settings, P&L Dashboard, Strategy Builder, Trade Journal, Flow Builder, Market Intelligence, Backtest Lab)
+- State architecture: Zustand 5 + Jotai + TanStack Query 5 (replaced DataBus)
+- Setup wizard (/setup), Investor dashboard (/invest), Learn center (/learn)
 - Git submodules for OpenAlgo, OpenClaw, AlgoMirror
-- Live WebSocket data feed in terminal UI
+- Live WebSocket data feed with ping/pong heartbeat
+- Indicators package (13 indicators, 42 tests)
+- CI: GitHub Actions (python-tests, node-tests, secrets-check)
 
 **What's planned:**
-- End-to-end live trading verification against broker sandbox
+- Live testing and performance optimization (Phase 10)
 - OpenClaw AI agent integration for autonomous trading
 - Production monitoring and alerting
 
@@ -105,7 +112,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 696 tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 738 tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -122,10 +129,10 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 11 packages, 696 tests, CI | ✅ Complete |
-| Infrastructure | Makefile, systemd, deploy scripts, git submodules | 🔨 In Progress |
-| Live Connection | OpenAlgo sandbox trading, WebSocket data | 📋 Next |
-| Terminal | Live option chain, scalper, real-time charts | 📋 Planned |
+| Foundation | Monorepo, 12 packages, 738 tests, CI | ✅ Complete |
+| Infrastructure | Makefile, systemd, deploy scripts, git submodules | ✅ Complete |
+| Live Connection | OpenAlgo sandbox trading, WebSocket data | ✅ Complete |
+| Terminal | 21 widgets, 7 tools, 4 routes, Dockview v5.1 | ✅ Complete |
 | AI Integration | OpenClaw agent skills, autonomous signals | 📋 Planned |
 | Production | SEBI compliance verification, multi-broker, monitoring | 📋 Future |
 
@@ -163,11 +170,30 @@ During pre-release (v0.x), all work goes directly to `main`. Feature branches an
 
 Built on [OpenAlgo](https://openalgo.in) by [Rajandran R](https://github.com/marketcalls) and the OpenAlgo community.
 
-Key upstream projects:
-[OpenAlgo](https://github.com/marketcalls/openalgo) ·
-[AlgoMirror](https://github.com/marketcalls/algomirror) ·
-[OpenClaw](https://github.com/openclaw/openclaw) ·
-[Historify](https://github.com/marketcalls/historify) ·
-[FastScalper](https://github.com/marketcalls/fastscalper-tauri) ·
-[OpenTerminal](https://github.com/marketcalls/OpenTerminal) ·
-[OpenEngine](https://github.com/marketcalls/openengine)
+### Upstream Projects
+- [OpenAlgo](https://github.com/marketcalls/openalgo) — Broker gateway (AGPL-3.0)
+- [AlgoMirror](https://github.com/marketcalls/algomirror) — Multi-account mirroring
+- [OpenClaw](https://github.com/openclaw/openclaw) — AI agent framework
+- [FastScalper](https://github.com/marketcalls/fastscalper-tauri) — Scalper UI patterns
+- [OpenTerminal](https://github.com/marketcalls/OpenTerminal) — Terminal reference
+- [OpenEngine](https://github.com/marketcalls/openengine) — Strategy engine
+
+### Code Absorbed (with attribution)
+FlintTrade absorbs and adapts code from these open-source projects:
+
+| Project | Author | License | What We Used |
+|---------|--------|---------|--------------|
+| [openalgo-flow](https://github.com/marketcalls/openalgo-flow) | Marketcalls | AGPL-3.0 | Flow Builder tool (React Flow + node types) |
+| [etftracker](https://github.com/marketcalls/etftracker) | Marketcalls | MIT | Investor dashboard patterns, sector rotation |
+| [trading-journal](https://github.com/marketcalls/trading-journal) | Marketcalls | MIT | Trade Journal tool |
+| [trading-strategies-openalgo](https://github.com/WINDY-WINDWARD/trading-strategies-openalgo) | WINDY-WINDWARD | MIT | Backtest strategies |
+| [openalgo-portfoliogreeks](https://github.com/marketcalls/openalgo-portfoliogreeks) | Marketcalls | MIT | Greeks calculator patterns |
+| [pyindicators](https://github.com/pyindicators/pyindicators) | PyIndicators | MIT | Indicator algorithm reference |
+| [openalgo-chart](https://github.com/marketcalls/openalgo-chart) | Marketcalls | — | Sector heatmap, risk calculator patterns |
+| [Historify](https://github.com/marketcalls/historify) | Marketcalls | — | Historical data patterns |
+
+### Libraries
+- [Dockview](https://github.com/mathuo/dockview) — Docking layout framework (MIT)
+- [Lightweight Charts](https://github.com/nicfv/Lightweight-Charts) — Financial charting (Apache-2.0)
+- [shadcn/ui](https://ui.shadcn.com/) — UI components (MIT)
+- [Glide Data Grid](https://github.com/glideapps/glide-data-grid) — High-performance grid (MIT)

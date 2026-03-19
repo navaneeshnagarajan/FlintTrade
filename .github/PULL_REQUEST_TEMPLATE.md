@@ -16,5 +16,5 @@
 
 ## DEVLOG entry
 ```
-## YYYY-MM-DD HH:MM IST | machine | @username | agent | branch | summary
+## YYYY-MM-DD HH:MM IST | Machine | @username | IDE/Tool | AI Model/Agent | Branch | Summary
 ```

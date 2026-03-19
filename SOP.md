@@ -49,7 +49,7 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → FIX → UPDATE → C
 
 ### Step 6: TEST
 - `npx vitest run` — all tests must pass
-- `make test` — all Python tests must pass (670+)
+- `make test` — all Python tests must pass (712+)
 - Spec compliance review after each task group
 - Code quality review after each task group
 - Use `/simplify` after completing features

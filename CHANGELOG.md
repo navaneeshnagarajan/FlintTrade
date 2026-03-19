@@ -6,16 +6,29 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — v2 Migration (2026-03-19)
+- TypeScript strict mode migration — zero JSX/JS files remain
+- Dockview v5.1 widget-composable workspace (replaced FlexLayout)
+- State architecture: Zustand 5 + Jotai + TanStack Query 5 (replaced DataBus)
+- 21 widgets (all TSX): 14 migrated + 7 new (SectorMap, Calculator, MTMMonitor, RiskPanel, NewsFeed, Ticker, AIAdvisor)
+- 7 functional tools (zero stubs): Settings, P&L Dashboard, Strategy Builder, Trade Journal, Flow Builder, Market Intelligence, Backtest Lab
+- 4 routes: /terminal, /setup (wizard), /invest (dashboard), /learn (placeholder)
+- indicators package: 13 indicators, 42 tests (EMA, SMA, DEMA, Supertrend, VWAP, RSI, MACD, etc.)
+- User's EMASuperTrendDEMA strategy implementation
+- CI: GitHub Actions (python-tests, node-tests, secrets-check)
+- shadcn/ui components throughout (no raw HTML controls)
+- 738 total tests (712 Python + 26 terminal)
+
 ## [0.1.0-alpha] — 2026-03-16
 
-First pre-release. All 11 packages built, 696 tests passing, Docker support.
+First pre-release. All 12 packages built, 738 tests passing, Docker support.
 
 ### Added — Core
 - async OpenAlgo client — 45+ endpoints, rate limiting (10 OPS orders,
   2 OPS smart, 50 OPS general), exponential backoff retry
 - Pydantic models — Order, Position, Quote, Fund, OptionGreek, etc.
 - Settings.from_env(), exceptions hierarchy
-- FlintTradeApp entry point — wires all 13 packages into single startup
+- FlintTradeApp entry point — wires all 12 packages into single startup
 
 ### Added — Engine
 - 5-layer SafetySystem (OrderValidation, PositionLimits, PortfolioRisk,
@@ -60,7 +73,7 @@ First pre-release. All 11 packages built, 696 tests passing, Docker support.
 ## [0.0.1-dev] — 2026-03-14
 
 ### Added
-- Monorepo — 13 packages with per-package CLAUDE.md + AGENTS.md
+- Monorepo — 12 packages with per-package CLAUDE.md + AGENTS.md
 - CI/CD — GitHub Actions (pytest, ruff, secrets check)
 - SEBI compliance framework — rate limits, kill switch architecture, audit
 - Infrastructure — nginx, systemd, WireGuard, fail2ban, deploy scripts

@@ -1,0 +1,37 @@
+# NOTICE
+
+FlintTrade
+Copyright 2026 Navaneesh Nagarajan
+
+This product includes software developed by:
+
+- OpenAlgo (https://openalgo.in) — AGPL-3.0
+  Copyright 2024-2026 Rajandran R and OpenAlgo contributors
+
+- openalgo-flow — AGPL-3.0
+  Copyright 2025-2026 Marketcalls
+
+- etftracker — MIT License
+  Copyright 2026 Marketcalls
+
+- trading-journal — MIT License
+  Copyright 2025 Trade Journal Application
+
+- trading-strategies-openalgo — MIT License
+  Copyright 2025 WINDY-WINDWARD
+
+- openalgo-portfoliogreeks — MIT License
+  Copyright 2025 Marketcalls
+
+- pyindicators — MIT License
+  Copyright 2024 PyIndicators
+
+This product uses the following open-source libraries:
+- React (MIT) — Meta Platforms, Inc.
+- Dockview (MIT) — mathuo
+- Lightweight Charts (Apache-2.0) — TradingView
+- shadcn/ui (MIT) — shadcn
+- Glide Data Grid (MIT) — Glide
+- TanStack Query (MIT) — Tanner Linsley
+- Zustand (MIT) — pmndrs
+- Jotai (MIT) — pmndrs

@@ -304,7 +304,7 @@
 | **marketcalls/openalgo-pinets** | TradingView charts + PineTS indicators | terminal (reference) |
 | **marketcalls/openalgo-node** | Node.js SDK | core (reference) |
 | **marketcalls/openalgo-chart** | Chart integration | terminal (reference) |
-| **marketcalls/openalgo-mobile** | Mobile UI (Flutter) | dashboard (reference) |
+| **marketcalls/openalgo-mobile** | Mobile UI (Flutter) | terminal (reference) |
 | **marketcalls/openalgo-chrome** | Chrome extension | integration (future) |
 | **marketcalls/OpenAlgo-Excel** | Excel add-in | integration (future) |
 | **marketcalls/OpenAlgoPlugin** | Amibroker plugin | integration (future) |
@@ -350,8 +350,8 @@
 | **fyers-websockets** | 50-level DOM analyzer with Fyers TBT tick-by-tick data, order flow analytics | terminal, data |
 | **vectorbt-backtesting-skills** | 12 strategy templates, agentic coding skills for 40+ AI agents, TA-Lib, QuantStats | backtest-engine |
 | **openchart** | Free NSE/NFO historical data library (pip install openchart, no broker API needed) | historical |
-| **stock-market-dashboard** | React + Flask market dashboard with Yahoo Finance data | dashboard (reference) |
-| **trading-dashboard** | Simple React trading dashboard | dashboard (reference) |
+| **stock-market-dashboard** | React + Flask market dashboard with Yahoo Finance data | terminal (reference) |
+| **trading-dashboard** | Simple React trading dashboard | terminal (reference) |
 | **tradingview-yahoo-finance** | TradingView Lightweight Charts with Yahoo Finance data | terminal (reference) |
 | **openalgo-portfoliogreeks** | Portfolio-level Black-Scholes Greeks calculator | screener |
 | **openquest** | Real-time tick aggregation into QuestDB with TradingView streaming charts | data |

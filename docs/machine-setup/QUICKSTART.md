@@ -31,7 +31,7 @@ Edit `infra/openalgo/.env` (copy from `.sample.env` if needed):
 ```bash
 make start       # Starts OpenAlgo on port 5000
 make status      # Verify API responding
-make test        # 670+ tests pass
+make test        # 712+ tests pass
 ```
 
 ## 5. Run Terminal
@@ -68,7 +68,7 @@ VITE_OPENALGO_WS=ws://127.0.0.1:8765
 VITE_OPENALGO_API_KEY=your_key_here
 ```
 
-Or use Vite proxy (already configured in `vite.config.js` for `/api` routes).
+Or use Vite proxy (already configured in `vite.config.ts` for `/api` routes).
 
 ## Claude Code Skills & Plugins
 

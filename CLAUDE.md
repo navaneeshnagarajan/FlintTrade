@@ -6,7 +6,7 @@
 ## What This Is
 
 Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
-Built on OpenAlgo (30+ broker gateway). 11 packages, monorepo, AGPL-3.0.
+Built on OpenAlgo (30+ broker gateway). 12 packages (11 Python + 1 React), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
 Serves three personas from a single application:
@@ -75,7 +75,7 @@ Each route lazy-loads its own module. No cross-route code in the initial bundle.
 | Models | pydantic |
 | Storage | DuckDB (analytics), QuestDB (ticks, future) |
 | AI/ML | LM Studio + ChromaDB + LightGBM |
-| Indicators | TA-Lib (batch) + Numba (streaming) — planned `indicators` package |
+| Indicators | TA-Lib (batch) + Numba (streaming) — `indicators` package |
 | Backtesting | VectorBT (exploration) + Rust/PyO3 (tick-level, future) |
 | Linting | ruff |
 | Testing | pytest (importlib mode) |
@@ -129,7 +129,7 @@ Two-tier config. No exceptions.
 
 ## Monorepo Structure
 
-### Python packages (10)
+### Python packages (11)
 
 | Package | Description |
 |---|---|
@@ -143,11 +143,6 @@ Two-tier config. No exceptions.
 | `integration` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
 | `automation` | Cron manager, Telegram bot with kill switch, OpenClaw bridge, post-market analysis |
 | `ditto` | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager |
-
-### Planned Python package
-
-| Package | Description |
-|---|---|
 | `indicators` | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) |
 
 ### React package (1)
@@ -160,59 +155,59 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Terminal — Widgets
 
-### Existing (14 widgets, JSX — migration to TSX in progress)
+### Existing (21 widgets, all TSX)
 
 **Trading (7):**
 
 | Widget | Status |
 |--------|--------|
-| Dashboard | Built (JSX) — account overview, indices, P&L |
-| Scalper | Built (JSX) — 3-panel CE/Spot/PE + order buttons |
-| Order Pad | Built (JSX) — full order entry form |
-| Positions | Built (JSX) — live positions + P&L |
-| Orders | Built (JSX) — order book |
-| Holdings | Built (JSX) — delivery holdings |
-| Trade Book | Built (JSX) — trade history |
+| Dashboard | Built (TSX) — account overview, indices, P&L |
+| Scalper | Built (TSX) — 3-panel CE/Spot/PE + order buttons |
+| Order Pad | Built (TSX) — full order entry form |
+| Positions | Built (TSX) — live positions + P&L |
+| Orders | Built (TSX) — order book |
+| Holdings | Built (TSX) — delivery holdings |
+| Trade Book | Built (TSX) — trade history |
 
 **Analysis (6):**
 
 | Widget | Status |
 |--------|--------|
-| Chart | Built (JSX) — LWC v5, indicators, drawing tools |
-| Option Chain | Built (JSX) — full chain, OI/LTP/Greeks |
-| OI Chart | Built (JSX) — horizontal OI bars, PCR, S/R |
-| Straddle | Built (JSX) — ATM tracking, overlays |
-| Depth | Built (JSX) — 5-level bid/ask |
-| Greeks | Built (JSX) — portfolio Delta/Gamma/Theta/Vega |
+| Chart | Built (TSX) — LWC v5, indicators, drawing tools |
+| Option Chain | Built (TSX) — full chain, OI/LTP/Greeks |
+| OI Chart | Built (TSX) — horizontal OI bars, PCR, S/R |
+| Straddle | Built (TSX) — ATM tracking, overlays |
+| Depth | Built (TSX) — 5-level bid/ask |
+| Greeks | Built (TSX) — portfolio Delta/Gamma/Theta/Vega |
 
 **Utility (1):**
 
 | Widget | Status |
 |--------|--------|
-| Watchlist | Built (JSX) — live quotes, sparklines, search |
+| Watchlist | Built (TSX) — live quotes, sparklines, search |
 
-### Planned (7 new widgets)
+**New (7):**
 
-| Widget | Source |
+| Widget | Status |
 |--------|--------|
-| Sector Map | Absorb from openalgo-chart SectorHeatmapModal |
-| News Feed | Absorb from finnews-ai, sentiment-tagged |
-| Calculator | Absorb from openalgo-chart RiskCalculatorPanel |
-| Ticker | Build — customizable scrolling prices |
-| MTM Monitor | Absorb from algo_trading_strategies_india |
-| Risk Panel | Build — max position, margin usage, daily limits |
-| AI Advisor | Absorb from openalgo-chatbot + voice |
+| Sector Map | Built (TSX) — absorbed from openalgo-chart SectorHeatmapModal |
+| News Feed | Built (TSX) — absorbed from finnews-ai, sentiment-tagged |
+| Calculator | Built (TSX) — absorbed from openalgo-chart RiskCalculatorPanel |
+| Ticker | Built (TSX) — customizable scrolling prices |
+| MTM Monitor | Built (TSX) — absorbed from algo_trading_strategies_india |
+| Risk Panel | Built (TSX) — max position, margin usage, daily limits |
+| AI Advisor | Built (TSX) — absorbed from openalgo-chatbot + voice |
 
 ### Tools (7 full-page views)
 
 | Tool | Status |
 |------|--------|
-| P&L Dashboard | Planned — calendar heatmap, trade stats (absorb etftracker) |
-| Strategy Builder | Planned — multi-leg, payoff chart, Greeks (absorb Algomirror) |
-| Flow Builder | Planned — 54 node types, visual automation (absorb openalgo-flow) |
-| Market Intelligence | Planned — FII/DII, sector rotation, RRG (absorb etftracker) |
-| Backtest Lab | Planned — tick-level options backtesting (VectorBT) |
-| Trade Journal | Planned — analytics, screenshots, review (absorb trading-journal) |
+| P&L Dashboard | Built — calendar heatmap, trade stats (absorbed etftracker) |
+| Strategy Builder | Built — multi-leg, payoff chart, Greeks (absorbed Algomirror) |
+| Flow Builder | Built — 54 node types, visual automation (absorbed openalgo-flow) |
+| Market Intelligence | Built — FII/DII, sector rotation, RRG (absorbed etftracker) |
+| Backtest Lab | Built — tick-level options backtesting (VectorBT) |
+| Trade Journal | Built — analytics, screenshots, review (absorbed trading-journal) |
 | Settings | Built — in-app config, restart button |
 
 ### Layout Presets (7)
@@ -222,13 +217,12 @@ Start Fresh, Scalper Zone, Volatility Trading, Market Watch, Options Desk, Inves
 ## Current State
 
 - **Version:** 0.1.0-alpha
-- **v2 migration in progress:** TypeScript 5.9, Dockview 5.1, Zustand 5, Jotai, TanStack Query 5
-- **Phase 1-3 complete:** Foundation deps, state architecture (stores/atoms/hooks), Dockview shell + chrome
-- **Phase 4-5 remaining:** Widget migration (JSX to TSX + shadcn/ui), verification
-- **Tests:** 26 terminal (Vitest) + 670 Python (pytest) = 696 total
+- **Phases 1-9 complete:** Foundation, state architecture, shell, widget migration, verification, new widgets, tools, routes, Python upgrades
+- **Tests:** 26 terminal (Vitest) + 712 Python (pytest) = 738 total
+- **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes in Dockview v5.1 shell
+- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
 - **3 critical bugs fixed:** ping GET (was POST), closePosition body, optionchain expiry param
-- **OpenAlgo:** Tested with Dhan Sandbox, first trade placed (SBIN BUY 1 MIS)
-- **Terminal:** Dockview workspace with TopBar, TickerBar, WidgetPicker, ToolsDropdown (all TSX + shadcn/ui). 14 widgets in JSX pending migration. 16 shadcn/ui components installed.
+- **OpenAlgo:** Tested with broker sandbox, first trade placed
 - **Shell components (TSX):** TopBar, TickerBar, WidgetPicker, ToolsDropdown, widgetFactory
 - **State layer (TS):** 4 Zustand stores, Jotai market atoms, 6 TanStack Query hooks, WebSocket service with ping/pong
 - **Infrastructure:** Makefile (setup/start/stop/test/status), setup.sh, systemd templates, health-check.sh
@@ -328,7 +322,7 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 3. Check `docs/REPO_FEATURE_MAP.md` — absorb before building
 4. Use `/brainstorm` and `/write-plan` for non-trivial tasks
 5. Implement — full permissions: create, edit, delete, refactor as needed
-6. Run: `make test` (must pass 670+ Python) and `npx vitest run` in terminal (must pass 26+)
+6. Run: `make test` (must pass 712+ Python) and `npx vitest run` in terminal (must pass 26+)
 7. For React: `npm run build` in `packages/terminal` (must build clean)
 8. Mark task done in PLAN.md
 9. Update DEVLOG.md with entry
@@ -351,7 +345,7 @@ To set up a new machine:
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
 4. Configure `infra/openalgo/.env` with broker credentials
 5. `make start` (starts OpenAlgo)
-6. `make test` (verify 670+ pass)
+6. `make test` (verify 712+ pass)
 7. `cd packages/terminal && npm install && npm run build` (verify clean build)
 8. Read PLAN.md, pick a task, start building
 
