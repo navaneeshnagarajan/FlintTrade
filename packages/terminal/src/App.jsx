@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import { Model } from "flexlayout-react";
-import { startDataConnector, stopDataConnector } from "./services/dataConnector";
+// DataConnector removed in v2 — WebSocket bridge is now useWsBridge hook
 import TopBar from "./chrome/TopBar";
 import TickerBar from "./chrome/TickerBar";
 import WidgetPicker from "./chrome/WidgetPicker";
@@ -110,11 +110,7 @@ export default function App() {
     setActiveTool(toolId);
   }, []);
 
-  // Start DataBus connector (WebSocket + API polling)
-  useEffect(() => {
-    startDataConnector();
-    return () => stopDataConnector();
-  }, []);
+  // DataConnector removed in v2 — WS bridge now handled by useWsBridge hook
 
   // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
   useGlobalKeys({
