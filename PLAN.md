@@ -11,10 +11,10 @@
 ## Current State (updated 2026-03-20)
 
 - **Version:** 0.1.0-alpha → beta pending user verification
-- **Tests:** 26 terminal (Vitest) + 918 Python (pytest, 3 skipped) = 944 total
+- **Tests:** 26 terminal (Vitest) + 921 Python (pytest, 3 skipped) = 947 total
 - **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes in Dockview v5 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, zero `any` types.
-- **Python:** 11 packages, 918 tests passing (918 passed, 3 skipped — vectorbt absent)
+- **Python:** 11 packages, 921 tests passing (921 passed, 3 skipped — vectorbt absent)
 - **CI:** GitHub Actions green (python-tests + node-tests + secrets-check)
 - **Packages:** 11 Python + 1 React (terminal). Stub packages `dashboard/` and `backtest/` deleted.
 - **Dependencies:** All v2 deps installed (Dockview 5.1, Zustand 5, Jotai, TanStack Query 5, Glide Data Grid 6, shadcn/ui, react-hook-form, zod). Old deps removed (FlexLayout, recharts, postcss).
