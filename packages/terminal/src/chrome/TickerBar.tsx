@@ -14,7 +14,7 @@ function IndexChip({ name, data }: IndexChipProps) {
   const isUp = change >= 0;
 
   return (
-    <div className="flex items-center gap-2 px-4 shrink-0 border-r border-border-default last:border-r-0 h-full">
+    <div className="flex items-center gap-2 px-3 shrink-0 border-r border-border-default last:border-r-0 h-full">
       <span className="text-xs text-text-muted">{name}</span>
       <span className="text-xs font-mono text-text-primary tabular-nums">
         {ltp !== null
@@ -24,15 +24,15 @@ function IndexChip({ name, data }: IndexChipProps) {
             })
           : "\u2014"}
       </span>
-      <span
-        className={`text-xs font-mono tabular-nums ${
-          ltp === null ? "text-text-muted" : isUp ? "text-profit" : "text-loss"
-        }`}
-      >
-        {ltp !== null
-          ? `${isUp ? "\u25b2" : "\u25bc"}${Math.abs(pct).toFixed(2)}%`
-          : ""}
-      </span>
+      {ltp !== null && (
+        <span
+          className={`text-xs font-mono tabular-nums rounded px-1 ${
+            isUp ? "bg-bullish-bg text-bullish-text" : "bg-bearish-bg text-bearish-text"
+          }`}
+        >
+          {isUp ? "\u25b2" : "\u25bc"}{Math.abs(pct).toFixed(2)}%
+        </span>
+      )}
     </div>
   );
 }

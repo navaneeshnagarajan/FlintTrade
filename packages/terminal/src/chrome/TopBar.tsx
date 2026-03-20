@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Wrench, Grid3x3, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { LogoIcon } from "@/components/brand/Logo";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useLayoutStore } from "@/stores/layoutStore";
@@ -81,14 +82,14 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
     <div className="h-10 bg-surface-card border-b border-border-default flex items-center justify-between px-3 select-none shrink-0">
       {/* Left: Logo + Layout Tabs */}
       <div className="flex items-center gap-3">
-        <img src="/logo.svg" alt="FT" className="h-6 w-6" />
+        <LogoIcon size={20} />
 
         <div className="flex items-center gap-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
+              className={`px-3 py-1 text-xs font-heading rounded transition-colors ${
                 tab.id === activeTabId
                   ? "bg-surface-hover text-text-primary"
                   : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
@@ -114,7 +115,7 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
           <span className={`font-mono text-xs tabular-nums ${pnlColor}`}>
             {pnlSign}{totalPnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          <Badge variant="secondary" className="text-xxs px-1.5 py-0">
             {positionCount} pos
           </Badge>
         </div>
@@ -144,8 +145,8 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
 
         <div className="flex items-center gap-1.5">
           <div
-            className={`w-1.5 h-1.5 rounded-full transition-colors ${
-              connected ? "bg-profit" : "bg-loss"
+            className={`w-2 h-2 rounded-full transition-colors ${
+              connected ? "bg-profit ring-2 ring-profit/20" : "bg-loss"
             }`}
           />
           <span className="text-xs text-text-secondary">

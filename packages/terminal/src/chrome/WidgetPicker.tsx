@@ -108,7 +108,7 @@ export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
             );
             return (
               <div key={category}>
-                <h3 className="text-xs font-medium text-text-muted uppercase tracking-widest mb-3">
+                <h3 className="text-xs font-heading font-medium text-text-muted uppercase tracking-widest mb-3">
                   {category}
                 </h3>
                 <div className="grid grid-cols-4 gap-2">
@@ -124,7 +124,7 @@ export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
                           size={22}
                           className="text-text-secondary group-hover:text-text-primary transition-colors"
                         />
-                        <span className="text-xs text-text-secondary group-hover:text-text-primary transition-colors text-center leading-tight">
+                        <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors text-center leading-tight">
                           {widget.name}
                         </span>
                       </button>
