@@ -26,9 +26,9 @@ Always check per-commodity expiry via OpenAlgo's /api/v1/expiry endpoint.
 | Segment | Old Rate | New Rate | Change |
 |---|---|---|---|
 | Futures (sell side) | 0.02% | 0.05% | +150% |
-| Options (sell side) | 0.10% | 0.15% | +50% |
+| Options (buy side)  | 0.10% | 0.15% | +50% |
 
-These rates apply to sell-side turnover. Factor into strategy P&L calculations and backtest cost models.
+Futures STT applies on sell-side turnover. Options STT (0.15%) applies on buy-side premium turnover. Factor both into strategy P&L calculations and backtest cost models.
 
 ## Crypto (Delta Exchange)
 - Delta Exchange is FIU-India registered (AML/KYC compliant)

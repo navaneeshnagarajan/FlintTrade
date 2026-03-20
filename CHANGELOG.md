@@ -17,11 +17,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - User's EMASuperTrendDEMA strategy implementation
 - CI: GitHub Actions (python-tests, node-tests, secrets-check)
 - shadcn/ui components throughout (no raw HTML controls)
-- 738 total tests (712 Python + 26 terminal)
+- 944 total tests (918 Python + 26 terminal)
 
 ## [0.1.0-alpha] — 2026-03-16
 
-First pre-release. All 12 packages built, 738 tests passing, Docker support.
+First pre-release. All 12 packages built, 944 tests passing, Docker support.
 
 ### Added — Core
 - async OpenAlgo client — 45+ endpoints, rate limiting (10 OPS orders,

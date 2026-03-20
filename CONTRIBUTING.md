@@ -20,7 +20,7 @@ Append to DEVLOG.md:
 
 Examples:
 ```
-## 2026-03-17 19:30 IST | nitro-dev | @your-username | VS Code | Claude Code (claude-opus-4-6) | feature/core-client | Built OpenAlgo REST client
+## 2026-03-17 19:30 IST | nitro-i5-13420H-RTX5050 | @your-username | VS Code | Claude Code (claude-opus-4-6) | main | Built OpenAlgo REST client
 ## 2026-03-18 10:00 IST | mac-dev | @your-username | Antigravity | Antigravity/Tester (gemini-2.5-pro) | feature/core-client | Wrote tests for OpenAlgo client
 ## 2026-03-18 16:00 IST | ubuntu-server | @your-username | Terminal | Manual | main | Deployed v0.1.0
 ```
@@ -32,7 +32,7 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | Version | Status | Meaning |
 |---|---|---|
 | 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
-| 0.1.0-alpha | **CURRENT** | All 12 packages (11 Python + 1 React) built, 738 tests passing, Docker |
+| 0.1.0-alpha | **CURRENT** | All 12 packages (11 Python + 1 React) built, 944 tests passing, Docker |
 | 0.1.0-beta | Next (deadline March 30, 2026) | All packages verified end-to-end, live trading tested |
 | 0.1.0-rc.1 | Planned | Release candidate — community feedback incorporated |
 | 0.1.0 | Planned | First stable release |

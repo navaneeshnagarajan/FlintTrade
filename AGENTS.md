@@ -31,7 +31,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-alpha
 
 ## Current State
 
-- 738 tests passing (712 Python + 26 terminal)
+- 944 tests passing (918 Python + 26 terminal)
 - Terminal: 21 widgets (TSX), 7 tools (all functional), Dockview v5.1 layout, dark theme
 - 4 routes: /terminal, /setup, /invest, /learn
 - Read PLAN.md for next tasks

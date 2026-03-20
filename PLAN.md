@@ -240,63 +240,63 @@
 
 ### Files to REWRITE completely (5)
 - [x] PLAN.md — this file (rewritten)
-- [ ] README.md — fix: 662→696 tests, 3 React apps→1, remove TOTP, fix architecture diagram
-- [ ] packages/terminal/CLAUDE.md — fix: port 3001→5173, F1-F9→Dockview widgets, TradePulse→removed
-- [ ] docs/ARCHITECTURE.md — fix: subtree→submodule, FlexLayout→Dockview, DataBus→Zustand/Jotai/TanStack
-- [ ] docs/references/TOOLS_AND_DEPS.md — add: dockview, shadcn, zustand, jotai, tanstack, glide-data-grid
+- [x] README.md — fix: 662→696 tests, 3 React apps→1, remove TOTP, fix architecture diagram
+- [x] packages/terminal/CLAUDE.md — fix: port 3001→5173, F1-F9→Dockview widgets, TradePulse→removed
+- [x] docs/ARCHITECTURE.md — already correct (submodule, Dockview, Zustand/Jotai/TanStack)
+- [x] docs/references/TOOLS_AND_DEPS.md — already has all new deps
 
 ### Files to UPDATE (18)
-- [ ] CLAUDE.md — fix: widget arch, 11 packages not 13, test count, 4 .env vars
-- [ ] AGENTS.md — remove F-key/TOTP references
-- [ ] CHANGELOG.md — remove TOTP claims
-- [ ] CONTRIBUTING.md — test count 662→696, canonical DEVLOG format
-- [ ] REPOS.md (root) — sync with docs/references/REPOS.md
-- [ ] docs/OPERATIONS_GUIDE.md — check for stale references
-- [ ] docs/SEBI_COMPLIANCE.md — remove TOTP cron ref, add April 2026 STT rates
-- [ ] docs/references/REPOS.md — sync with root REPOS.md
-- [ ] docs/references/OPENALGO_API.md — check for accuracy
-- [ ] docs/machine-setup/QUICKSTART.md — remove F1-F8, update for Dockview/TS
-- [ ] docs/setup/linux.md — remove old module references
-- [ ] docs/setup/macos.md — remove old module references
-- [ ] docs/setup/windows.md — fix port 3000 reference
-- [ ] docs/setup/raspberry-pi.md — remove old module references
-- [ ] infra/cron/README.md — remove TOTP login_job reference
-- [ ] flint.toml — remove TOTP from automation description
-- [ ] .env.example — verify 4 blank vars only (root: done, terminal: has 3 VITE_ vars)
-- [ ] .github/ISSUE_TEMPLATE/*.md — check templates are current
+- [x] CLAUDE.md — already accurate (11 packages, correct test count, 4 .env vars)
+- [x] AGENTS.md — test count updated to 944
+- [x] CHANGELOG.md — test count updated to 944
+- [x] CONTRIBUTING.md — test count 944, DEVLOG machine name fixed
+- [x] REPOS.md (root) — identical to docs/references/REPOS.md, already in sync
+- [x] docs/OPERATIONS_GUIDE.md — already clean
+- [x] docs/SEBI_COMPLIANCE.md — Options STT buy side, April 2026 rates updated
+- [x] docs/references/REPOS.md — already in sync with root
+- [x] docs/references/OPENALGO_API.md — ping POST, WS auth format, 4 endpoint paths fixed
+- [x] docs/machine-setup/QUICKSTART.md — already clean
+- [x] docs/setup/linux.md — already clean
+- [x] docs/setup/macos.md — already clean
+- [x] docs/setup/windows.md — already clean
+- [x] docs/setup/raspberry-pi.md — already clean
+- [x] infra/cron/README.md — already clean (no TOTP login_job)
+- [x] flint.toml — already clean
+- [x] .env.example — root correct (4 blank); terminal fixed to 3 canonical VITE_ vars
+- [x] .github/ISSUE_TEMPLATE/*.md — already clean
 
 ### Package READMEs to CHECK (10)
-- [ ] packages/core/README.md — check for TOTP references
-- [ ] packages/engine/README.md — check for stale module references
-- [ ] packages/data/README.md — check accuracy
-- [ ] packages/historical/README.md — check accuracy
-- [ ] packages/screener/README.md — check accuracy
-- [ ] packages/backtest-engine/README.md — check accuracy
-- [ ] packages/ai/README.md — check accuracy
-- [ ] packages/integration/README.md — check accuracy
-- [ ] packages/automation/README.md — check for TOTP reference (known)
-- [ ] packages/ditto/README.md — check accuracy
+- [x] packages/core/README.md — clean
+- [x] packages/engine/README.md — clean
+- [x] packages/data/README.md — clean
+- [x] packages/historical/README.md — clean
+- [x] packages/screener/README.md — clean
+- [x] packages/backtest-engine/README.md — updated (VectorBTRunner + Monte Carlo)
+- [x] packages/ai/README.md — clean
+- [x] packages/integration/README.md — clean
+- [x] packages/automation/README.md — clean (no TOTP present)
+- [x] packages/ditto/README.md — updated (AllocationMode.MULTIPLIER + BrokerCostMetadata)
 
 ### Files to ARCHIVE (move to docs/references/historical/)
 - [x] RESTRUCTURE.md → docs/references/historical/RESTRUCTURE_V1.md
 - [x] docs/THE_PLAN.md → docs/references/historical/THE_PLAN_V1.md
 - [x] docs/references/MASTER_BLUEPRINT.md → docs/references/historical/
-- [ ] docs/superpowers/plans/2026-03-18-phase1-flexlayout-foundation.md → docs/references/historical/
+- [x] docs/superpowers/plans/2026-03-18-phase1-flexlayout-foundation.md → docs/references/historical/
 
 ### Files to DELETE
-- [ ] findings.md (temp file from planning-with-files skill)
-- [ ] task_plan.md (temp file from planning-with-files skill)
-- [ ] progress.md (temp file from planning-with-files skill)
+- [x] findings.md (temp file from planning-with-files skill)
+- [x] task_plan.md (temp file from planning-with-files skill)
+- [x] progress.md (temp file from planning-with-files skill)
 
 ### Files to MARK as absorbed
-- [ ] docs/references/ENHANCEMENT_BLUEPRINT.md — add header "Absorbed into v2 spec"
+- [x] docs/references/ENHANCEMENT_BLUEPRINT.md — add header "Absorbed into v2 spec"
 
 ### TOTP Cleanup
-- [ ] Remove ALL TOTP references across 9+ non-submodule files (CLAUDE.md, AGENTS.md, CHANGELOG.md, automation/cron_manager.py, etc.)
+- [x] Remove ALL TOTP references across 9+ non-submodule files (CLAUDE.md, AGENTS.md, CHANGELOG.md, automation/cron_manager.py, etc.)
 - [ ] Do NOT touch infra/openalgo/ or infra/openclaw/ (submodules)
 
 ### CI/CD Update
-- [ ] Update GitHub Actions to include `tsc --noEmit` step for TypeScript
+- [x] Update GitHub Actions to include `tsc --noEmit` step for TypeScript
 
 ---
 

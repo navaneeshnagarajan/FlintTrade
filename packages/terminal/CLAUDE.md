@@ -33,6 +33,7 @@ Boundary rule: data enters through ONE path only, never duplicated across stores
 
 ## Vite Proxy (dev mode)
 - `/api` → OpenAlgo REST (port 5000)
+- `/ft-api` → FlintTrade Python backend (port 5001)
 - `/ws` → OpenAlgo WebSocket (port 8765)
 - `api.ts` uses empty base in dev (relative paths hit proxy), full host in production
 

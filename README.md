@@ -4,7 +4,7 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-738%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-944%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
@@ -86,7 +86,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 ## Current State
 
 **What works:**
-- 12 packages with source code and **738 passing tests** (712 Python + 26 terminal)
+- 11 Python + 1 React packages with source code and **944 passing tests** (918 Python + 26 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
@@ -102,7 +102,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 - Setup wizard (/setup), Investor dashboard (/invest), Learn center (/learn)
 - Git submodules for OpenAlgo, OpenClaw, AlgoMirror
 - Live WebSocket data feed with ping/pong heartbeat
-- Indicators package (13 indicators, 42 tests)
+- Indicators package (31 indicators, 150+ tests — EMA, RSI, MACD, Supertrend, Ichimoku, OBV, and more)
 - CI: GitHub Actions (python-tests, node-tests, secrets-check)
 
 **What's planned:**
@@ -116,7 +116,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 738 tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 918 tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -133,7 +133,7 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 12 packages, 738 tests, CI | ✅ Complete |
+| Foundation | Monorepo, 11 Python + 1 React packages, 944 tests, CI | ✅ Complete |
 | Infrastructure | Makefile, systemd, deploy scripts, git submodules | ✅ Complete |
 | Live Connection | OpenAlgo sandbox trading, WebSocket data | ✅ Complete |
 | Terminal | 21 widgets, 7 tools, 4 routes, Dockview v5.1 | ✅ Complete |

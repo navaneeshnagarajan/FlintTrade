@@ -201,7 +201,7 @@ POST /api/v1/holdings      {"apikey": "key"}
 ## Utility APIs
 
 ```
-GET  /api/v1/ping                                          // health check
+POST /api/v1/ping  {"apikey": "key"}                      // health check
 GET  /api/v1/holidays                                      // market holidays
 GET  /api/v1/timings                                       // market timings
 POST /api/v1/telegram      {"apikey": "key", "message": "text"}
@@ -217,29 +217,31 @@ POST /api/v1/analyzer/toggle  {"apikey": "key"}
 ```javascript
 const ws = new WebSocket('ws://host:8765');
 
-// Subscribe LTP
+// 1. Authenticate
 ws.send(JSON.stringify({
-  action: 'subscribe_ltp',
-  instruments: [
-    { exchange: 'NSE', symbol: 'NIFTY' },
-    { exchange: 'NFO', symbol: 'NIFTY26MAR2524000CE' }
-  ]
+  action: 'authenticate',
+  api_key: 'your_openalgo_api_key'
 }));
 
-// Subscribe Quote (LTP + bid/ask + volume + OI)
+// 2. Subscribe — mode: LTP | Quote | Depth
 ws.send(JSON.stringify({
-  action: 'subscribe_quote',
-  instruments: [{ exchange: 'NSE', symbol: 'RELIANCE' }]
+  action: 'subscribe',
+  symbols: [
+    { symbol: 'NIFTY',               exchange: 'NSE_INDEX' },
+    { symbol: 'NIFTY26MAR2524000CE', exchange: 'NFO' }
+  ],
+  mode: 'LTP'   // LTP | Quote | Depth
 }));
 
-// Subscribe Depth (full order book)
-ws.send(JSON.stringify({
-  action: 'subscribe_depth',
-  instruments: [{ exchange: 'NSE', symbol: 'RELIANCE' }]
-}));
+// Tick data arrives as:
+// { "type": "market_data", "data": { "ltp": ..., "symbol": ..., "exchange": ... } }
 
 // Unsubscribe
-ws.send(JSON.stringify({ action: 'unsubscribe_ltp', instruments: [...] }));
+ws.send(JSON.stringify({
+  action: 'unsubscribe',
+  symbols: [{ symbol: 'NIFTY', exchange: 'NSE_INDEX' }],
+  mode: 'LTP'
+}));
 ```
 
 Max: 5000 instruments per connection, 5 connections.
@@ -285,28 +287,28 @@ GET /api/v1/health
 
 ### Gamma Exposure Dashboard (GEX)
 ```
-POST /api/v1/data/gex
+POST /api/v1/gex
 {"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
 → Per-strike gamma exposure data for charting
 ```
 
 ### IV Smile
 ```
-POST /api/v1/data/ivsmile
+POST /api/v1/iv_smile
 {"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
 → Implied volatility by strike for smile/skew visualization
 ```
 
 ### OI Profile
 ```
-POST /api/v1/data/oiprofile
+POST /api/v1/oi_profile
 {"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
 → Open interest distribution across strikes
 ```
 
 ### Max Pain
 ```
-POST /api/v1/data/maxpain
+POST /api/v1/max_pain
 {"apikey": "key", "symbol": "NIFTY", "expiry": "260326"}
 → Max pain strike price calculation
 ```

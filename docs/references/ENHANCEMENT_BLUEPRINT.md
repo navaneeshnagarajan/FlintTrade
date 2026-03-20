@@ -1,4 +1,8 @@
-> **Status:** Absorbed into v2 spec (2026-03-19). Retained for reference.
+> **Status: Absorbed into v2 spec (2026-03-20)**
+> All patterns from this document have been integrated into `docs/superpowers/specs/2026-03-19-flinttrade-v2-foundation-design.md`.
+> This file is kept for historical reference only.
+
+---
 
 # Autonomous Indian F&O Platform: Enhancement Blueprint
 
