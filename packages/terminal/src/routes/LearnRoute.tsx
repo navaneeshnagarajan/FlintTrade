@@ -150,8 +150,8 @@ function BasicsTab() {
   return (
     <div className="space-y-6">
       {BASICS_SECTIONS.map((section) => (
-        <Card key={section.title} className="p-5 bg-surface-card border-border-default">
-          <h3 className="text-base font-semibold text-text-primary mb-2">{section.title}</h3>
+        <Card key={section.title} className="bg-surface-card border border-border-default rounded-lg p-6">
+          <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">{section.title}</h3>
           <p className="text-sm text-text-secondary leading-relaxed">{section.content}</p>
         </Card>
       ))}
@@ -180,8 +180,8 @@ function GlossaryTab() {
       </div>
       <div className="space-y-2">
         {filtered.map((entry) => (
-          <div key={entry.term} className="flex gap-3 p-3 rounded-lg bg-surface-card border border-border-default">
-            <span className="text-sm font-mono font-semibold text-accent-primary shrink-0 w-24">
+          <div key={entry.term} className="flex gap-3 p-3 rounded-lg bg-surface-card border border-border-default shadow-sm">
+            <span className="text-sm font-mono font-semibold text-accent shrink-0 w-24">
               {entry.term}
             </span>
             <span className="text-sm text-text-secondary">{entry.definition}</span>
@@ -222,7 +222,7 @@ function StrategiesTab() {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {filtered.map((s) => (
-          <Card key={s.name} className="p-4 bg-surface-card border-border-default">
+          <Card key={s.name} className="bg-surface-card border border-border-default rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-sm font-semibold text-text-primary">{s.name}</h4>
               <Badge className={`text-xs ${difficultyColor(s.difficulty)}`}>{s.difficulty}</Badge>
@@ -239,14 +239,14 @@ function StrategiesTab() {
 function PaperTradingTab() {
   return (
     <div className="space-y-6">
-      <Card className="p-6 bg-surface-card border-border-default">
-        <h3 className="text-base font-semibold text-text-primary mb-3">What is Paper Trading?</h3>
+      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
+        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">What is Paper Trading?</h3>
         <p className="text-sm text-text-secondary leading-relaxed mb-4">
           Paper trading lets you practice trading with virtual money. You execute the same strategies,
           see the same market data, but don&apos;t risk real capital. It&apos;s the best way to learn
           before going live.
         </p>
-        <h4 className="text-sm font-semibold text-text-primary mb-2">How to Paper Trade with FlintTrade:</h4>
+        <h4 className="font-heading font-semibold text-sm text-text-primary mb-2">How to Paper Trade with FlintTrade:</h4>
         <ol className="space-y-2 text-sm text-text-secondary list-decimal list-inside">
           <li>Set up OpenAlgo with your broker&apos;s <strong>Sandbox mode</strong> (Dhan Sandbox provides ₹10L virtual capital)</li>
           <li>Connect FlintTrade to the sandbox instance</li>
@@ -255,8 +255,8 @@ function PaperTradingTab() {
           <li>When confident, switch to your real broker credentials</li>
         </ol>
       </Card>
-      <Card className="p-6 bg-surface-card border-border-default">
-        <h3 className="text-base font-semibold text-text-primary mb-3">Supported Sandboxes</h3>
+      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
+        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">Supported Sandboxes</h3>
         <div className="space-y-3">
           <div className="flex items-center gap-3">
             <Badge className="bg-green-500/20 text-green-400">Active</Badge>
@@ -285,7 +285,7 @@ function VideoHubTab() {
           rel="noopener noreferrer"
           className="block"
         >
-          <Card className="p-4 bg-surface-card border-border-default hover:border-accent-primary transition-colors cursor-pointer">
+          <Card className="bg-surface-card border border-border-default rounded-lg p-4 hover:border-accent/40 transition-colors cursor-pointer">
             <div className="flex items-start gap-3">
               <PlayCircle className="w-8 h-8 text-red-500 shrink-0 mt-0.5" />
               <div className="min-w-0">
@@ -324,10 +324,10 @@ export default function LearnRoute() {
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 py-4">
         <div className="flex items-center gap-3">
-          <GraduationCap className="w-6 h-6 text-accent-primary" />
+          <GraduationCap className="w-6 h-6 text-accent" />
           <div>
-            <h1 className="text-lg font-bold text-text-primary">Learning Center</h1>
-            <p className="text-xs text-text-muted">Market basics, strategies, and paper trading guides</p>
+            <h1 className="font-heading font-bold text-lg text-text-primary">Learning Center</h1>
+            <p className="text-xxs text-text-muted">Market basics, strategies, and paper trading guides</p>
           </div>
         </div>
       </div>
@@ -342,9 +342,9 @@ export default function LearnRoute() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors ${
                   isActive
-                    ? "bg-accent-primary/10 text-accent-primary border-r-2 border-accent-primary"
+                    ? "text-accent bg-accent/10 border-l-2 border-accent"
                     : "text-text-secondary hover:text-text-primary hover:bg-surface-base"
                 }`}
               >

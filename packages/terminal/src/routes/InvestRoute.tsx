@@ -114,18 +114,18 @@ function PlaceholderTab({
   return (
     <div className="flex flex-col items-center justify-center h-full min-h-100 px-8 text-center gap-6">
       <div className="w-16 h-16 rounded-2xl bg-surface-card border border-border-default flex items-center justify-center">
-        <Icon className="w-8 h-8 text-accent-primary" />
+        <Icon className="w-8 h-8 text-accent" />
       </div>
 
       <div className="space-y-2 max-w-md">
-        <h2 className="text-base font-semibold text-text-primary">{title}</h2>
+        <h2 className="font-heading font-semibold text-lg text-text-primary">{title}</h2>
         <p className="text-sm text-text-secondary leading-relaxed">{description}</p>
       </div>
 
       <ul className="space-y-2 text-left max-w-sm w-full">
         {bullets.map((b) => (
           <li key={b} className="flex items-start gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent-primary mt-1.5 shrink-0" />
+            <span className="w-1.5 h-1.5 rounded-full bg-accent mt-1.5 shrink-0" />
             <span className="text-xs text-text-secondary">{b}</span>
           </li>
         ))}
@@ -171,7 +171,7 @@ function AllocationBar({ bands }: { bands: AllocationBand[] }) {
           <div key={b.label} className="flex items-center gap-1.5">
             <span className={cn("size-2 rounded-full", b.bg)} />
             <span className={cn("text-xs", b.color)}>{b.label}</span>
-            <span className="text-xs text-zinc-500 font-mono">
+            <span className="text-xs text-text-muted font-mono tabular-nums">
               {total > 0 ? `${((b.value / total) * 100).toFixed(1)}%` : "—"}
             </span>
           </div>
@@ -214,9 +214,9 @@ function OverviewTab({
   );
 
   const bands: AllocationBand[] = [
-    { label: "Equity", value: equityValue, color: "text-blue-400", bg: "bg-blue-600" },
-    { label: "Commodity", value: commodityValue, color: "text-amber-400", bg: "bg-amber-500" },
-    { label: "Cash", value: availableCash, color: "text-emerald-400", bg: "bg-emerald-600" },
+    { label: "Equity", value: equityValue, color: "text-neutral-text", bg: "bg-neutral-text" },
+    { label: "Commodity", value: commodityValue, color: "text-warning", bg: "bg-warning" },
+    { label: "Cash", value: availableCash, color: "text-profit", bg: "bg-profit" },
   ].filter((b) => b.value > 0);
 
   const metrics = [
@@ -226,8 +226,8 @@ function OverviewTab({
       sub: "Holdings + Cash",
       positive: null as boolean | null,
       icon: Wallet,
-      iconColor: "text-blue-400",
-      iconBg: "bg-blue-600/20",
+      iconColor: "text-neutral-text",
+      iconBg: "bg-neutral-bg",
     },
     {
       label: "Invested",
@@ -235,8 +235,8 @@ function OverviewTab({
       sub: "Cost basis",
       positive: null as boolean | null,
       icon: DollarSign,
-      iconColor: "text-zinc-400",
-      iconBg: "bg-zinc-700/40",
+      iconColor: "text-text-secondary",
+      iconBg: "bg-surface-elevated",
     },
     {
       label: "Current Value",
@@ -244,8 +244,8 @@ function OverviewTab({
       sub: "Holdings MTM",
       positive: null as boolean | null,
       icon: TrendingUp,
-      iconColor: "text-zinc-400",
-      iconBg: "bg-zinc-700/40",
+      iconColor: "text-text-secondary",
+      iconBg: "bg-surface-elevated",
     },
     {
       label: "Total P&L",
@@ -253,8 +253,8 @@ function OverviewTab({
       sub: isLoading ? "" : formatPercent(totalPnlPercent),
       positive: totalPnl >= 0,
       icon: totalPnl >= 0 ? TrendingUp : TrendingDown,
-      iconColor: totalPnl >= 0 ? "text-emerald-400" : "text-red-400",
-      iconBg: totalPnl >= 0 ? "bg-emerald-600/20" : "bg-red-600/20",
+      iconColor: totalPnl >= 0 ? "text-profit" : "text-loss",
+      iconBg: totalPnl >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
     },
     {
       label: "Available Cash",
@@ -262,14 +262,14 @@ function OverviewTab({
       sub: "Withdrawable",
       positive: null as boolean | null,
       icon: Wallet,
-      iconColor: "text-emerald-400",
-      iconBg: "bg-emerald-600/20",
+      iconColor: "text-profit",
+      iconBg: "bg-bullish-bg",
     },
   ];
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3 text-zinc-500">
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
         <RefreshCw className="size-5 animate-spin" />
         <span className="text-sm">Loading portfolio data...</span>
       </div>
@@ -291,14 +291,14 @@ function OverviewTab({
                 <div className={cn("size-7 rounded-lg flex items-center justify-center", m.iconBg)}>
                   <Icon className={cn("size-3.5", m.iconColor)} />
                 </div>
-                <span className="text-xs text-zinc-500 uppercase tracking-wide">{m.label}</span>
+                <span className="text-xxs text-text-muted uppercase tracking-wider">{m.label}</span>
               </div>
               <div
                 className={cn(
-                  "font-mono text-sm font-semibold",
-                  m.positive === true && "text-emerald-400",
-                  m.positive === false && "text-red-400",
-                  m.positive === null && "text-zinc-100",
+                  "text-2xl font-mono font-bold tabular-nums",
+                  m.positive === true && "text-profit",
+                  m.positive === false && "text-loss",
+                  m.positive === null && "text-text-primary",
                 )}
               >
                 {m.value}
@@ -306,10 +306,10 @@ function OverviewTab({
               {m.sub && (
                 <div
                   className={cn(
-                    "text-xs",
-                    m.positive === true && "text-emerald-500",
-                    m.positive === false && "text-red-500",
-                    m.positive === null && "text-zinc-600",
+                    "text-xs font-mono tabular-nums",
+                    m.positive === true && "text-profit",
+                    m.positive === false && "text-loss",
+                    m.positive === null && "text-text-muted",
                   )}
                 >
                   {m.sub}
@@ -323,8 +323,8 @@ function OverviewTab({
       {/* Allocation breakdown */}
       <Card className="p-5 bg-surface-card border-border-default space-y-4">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-200">Asset Allocation</h3>
-          <p className="text-xs text-zinc-500 mt-0.5">
+          <h3 className="font-heading font-semibold text-sm text-text-primary">Asset Allocation</h3>
+          <p className="text-xs text-text-muted mt-0.5">
             Derived from live holdings and available cash. Debt / MF requires NAV data source.
           </p>
         </div>
@@ -334,9 +334,9 @@ function OverviewTab({
             <AllocationBar bands={bands} />
             <div className="grid grid-cols-1 gap-2">
               {[
-                { label: "Equity", value: equityValue, color: "text-blue-400" },
-                { label: "Commodity", value: commodityValue, color: "text-amber-400" },
-                { label: "Cash", value: availableCash, color: "text-emerald-400" },
+                { label: "Equity", value: equityValue, color: "text-neutral-text" },
+                { label: "Commodity", value: commodityValue, color: "text-warning" },
+                { label: "Cash", value: availableCash, color: "text-profit" },
               ]
                 .filter((r) => r.value > 0)
                 .map((r) => (
@@ -345,19 +345,19 @@ function OverviewTab({
                     className="flex justify-between items-center text-xs"
                   >
                     <span className={cn("font-medium", r.color)}>{r.label}</span>
-                    <span className="font-mono text-zinc-300">{formatINR(r.value)}</span>
+                    <span className="font-mono tabular-nums text-text-primary">{formatINR(r.value)}</span>
                   </div>
                 ))}
             </div>
           </>
         ) : (
-          <div className="text-center py-6 text-zinc-600 text-xs">
+          <div className="text-center py-6 text-text-muted text-xs">
             No holdings or cash data available. Connect to OpenAlgo to see allocation.
           </div>
         )}
       </Card>
 
-      <p className="text-xs text-zinc-600">
+      <p className="text-xs text-text-muted">
         Holdings refresh every 60s. Cash refreshes every 30s from OpenAlgo.
       </p>
     </div>
@@ -369,9 +369,9 @@ function OverviewTab({
 function PnLCell({ value, percent }: { value: number; percent: number }) {
   const pos = value >= 0;
   return (
-    <div className={cn("text-right", pos ? "text-emerald-400" : "text-red-400")}>
-      <div className="font-mono text-xs font-semibold">{formatINR(value)}</div>
-      <div className="font-mono text-xs opacity-75">{formatPercent(percent)}</div>
+    <div className={cn("text-right", pos ? "text-profit" : "text-loss")}>
+      <div className="font-mono tabular-nums text-xs font-semibold">{formatINR(value)}</div>
+      <div className="font-mono tabular-nums text-xs opacity-75">{formatPercent(percent)}</div>
     </div>
   );
 }
@@ -396,10 +396,10 @@ function HoldingsTab({
         header: "Symbol",
         cell: ({ row }) => (
           <div>
-            <div className="text-xs font-semibold text-zinc-100 font-mono">
+            <div className="text-xs font-semibold text-text-primary font-mono">
               {row.original.symbol}
             </div>
-            <div className="text-xs text-zinc-500">{row.original.exchange}</div>
+            <div className="text-xs text-text-muted">{row.original.exchange}</div>
           </div>
         ),
       },
@@ -407,7 +407,7 @@ function HoldingsTab({
         accessorKey: "quantity",
         header: () => <span className="block text-right">Qty</span>,
         cell: ({ getValue }) => (
-          <div className="text-right font-mono text-xs text-zinc-200">
+          <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
             {(getValue() as number).toLocaleString("en-IN")}
           </div>
         ),
@@ -416,7 +416,7 @@ function HoldingsTab({
         accessorKey: "averagePrice",
         header: () => <span className="block text-right">Avg Price</span>,
         cell: ({ getValue }) => (
-          <div className="text-right font-mono text-xs text-zinc-200">
+          <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
             {formatINR(getValue() as number)}
           </div>
         ),
@@ -425,7 +425,7 @@ function HoldingsTab({
         accessorKey: "ltp",
         header: () => <span className="block text-right">LTP</span>,
         cell: ({ getValue }) => (
-          <div className="text-right font-mono text-xs text-zinc-100 font-semibold">
+          <div className="text-right font-mono tabular-nums text-xs text-text-primary font-semibold">
             {formatINR(getValue() as number)}
           </div>
         ),
@@ -435,7 +435,7 @@ function HoldingsTab({
         header: () => <span className="block text-right">Invested</span>,
         accessorFn: (row) => row.averagePrice * row.quantity,
         cell: ({ getValue }) => (
-          <div className="text-right font-mono text-xs text-zinc-400">
+          <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
             {formatINR(getValue() as number)}
           </div>
         ),
@@ -476,7 +476,7 @@ function HoldingsTab({
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3 text-zinc-500">
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
         <RefreshCw className="size-5 animate-spin" />
         <span className="text-sm">Fetching holdings from OpenAlgo...</span>
       </div>
@@ -485,8 +485,8 @@ function HoldingsTab({
 
   if (isError) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3 text-zinc-500">
-        <AlertCircle className="size-5 text-red-500" />
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+        <AlertCircle className="size-5 text-loss" />
         <span className="text-sm">Failed to load holdings.</span>
         <Button variant="outline" size="sm" onClick={refetch} className="text-xs">
           Retry
@@ -497,10 +497,10 @@ function HoldingsTab({
 
   if (holdings.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3 text-zinc-500">
-        <BarChart3 className="size-8 text-zinc-700" />
-        <span className="text-sm font-medium text-zinc-400">No holdings found</span>
-        <span className="text-xs text-zinc-600 max-w-sm text-center">
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+        <BarChart3 className="size-8 text-text-disabled" />
+        <span className="text-sm font-medium text-text-secondary">No holdings found</span>
+        <span className="text-xs text-text-muted max-w-sm text-center">
           Buy equities via your broker (via OpenAlgo) and they will appear here after settlement.
         </span>
       </div>
@@ -510,14 +510,14 @@ function HoldingsTab({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between px-2 py-2 border-b border-border-default">
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-text-muted">
           {holdings.length} stock{holdings.length !== 1 ? "s" : ""}
         </span>
         <Button
           variant="ghost"
           size="sm"
           onClick={refetch}
-          className="text-xs text-zinc-500 h-6 px-2 gap-1"
+          className="text-xs text-text-muted h-6 px-2 gap-1"
         >
           <RefreshCw className="size-3" />
           Refresh
@@ -532,7 +532,7 @@ function HoldingsTab({
                 {hg.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    className="h-8 text-xs font-medium text-zinc-500 uppercase tracking-wide cursor-pointer select-none"
+                    className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider cursor-pointer select-none"
                     onClick={header.column.getToggleSortingHandler()}
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
@@ -561,13 +561,13 @@ function HoldingsTab({
       </div>
 
       {/* Totals row */}
-      <div className="border-t border-border-default bg-surface-card px-4 py-2 grid grid-cols-6 gap-2 text-xs font-mono">
-        <span className="text-zinc-400 font-semibold col-span-1">Total</span>
-        <span className="text-right text-zinc-500" />
-        <span className="text-right text-zinc-500" />
-        <span className="text-right text-zinc-500" />
-        <span className="text-right text-zinc-400">{formatINR(totalInvested)}</span>
-        <div className={cn("text-right", totalPnl >= 0 ? "text-emerald-400" : "text-red-400")}>
+      <div className="border-t border-border-default bg-surface-card px-4 py-2 grid grid-cols-6 gap-2 text-xs font-mono tabular-nums">
+        <span className="text-text-secondary font-semibold col-span-1">Total</span>
+        <span className="text-right text-text-muted" />
+        <span className="text-right text-text-muted" />
+        <span className="text-right text-text-muted" />
+        <span className="text-right text-text-secondary">{formatINR(totalInvested)}</span>
+        <div className={cn("text-right", totalPnl >= 0 ? "text-profit" : "text-loss")}>
           <div className="font-semibold">{formatINR(totalPnl)}</div>
           <div className="text-xs opacity-75">
             {formatPercent(totalPnlPct)} on {formatINR(totalCurrent)}
@@ -642,8 +642,8 @@ function NetWorthTab({
   return (
     <div className="space-y-5 max-w-lg">
       <div>
-        <h3 className="text-sm font-semibold text-zinc-200">Net Worth Breakdown</h3>
-        <p className="text-xs text-zinc-500 mt-0.5">
+        <h3 className="font-heading font-semibold text-sm text-text-primary">Net Worth Breakdown</h3>
+        <p className="text-xs text-text-muted mt-0.5">
           Live equity and cash from OpenAlgo. Other asset classes require additional data sources
           or manual entry.
         </p>
@@ -651,13 +651,13 @@ function NetWorthTab({
 
       {/* Known total */}
       <Card className="p-5 bg-surface-card border-border-default">
-        <div className="text-xs text-zinc-500 uppercase tracking-wide mb-1">
+        <div className="text-xxs text-text-muted uppercase tracking-wider mb-1">
           Known Total (Equity + Cash)
         </div>
         <div
           className={cn(
-            "font-mono text-xl font-bold",
-            isLoading ? "text-zinc-500" : "text-zinc-100",
+            "font-mono text-2xl font-bold tabular-nums",
+            isLoading ? "text-text-muted" : "text-text-primary",
           )}
         >
           {isLoading ? "—" : formatINR(knownTotal)}
@@ -665,8 +665,8 @@ function NetWorthTab({
         {!isLoading && (
           <div
             className={cn(
-              "text-sm font-mono mt-1",
-              totalPnl >= 0 ? "text-emerald-400" : "text-red-400",
+              "text-sm font-mono tabular-nums mt-1",
+              totalPnl >= 0 ? "text-profit" : "text-loss",
             )}
           >
             {formatINR(totalPnl)}{" "}
@@ -693,18 +693,18 @@ function NetWorthTab({
                 <Icon className={cn("size-4", cat.color)} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-zinc-200">{cat.label}</div>
-                <div className="text-xs text-zinc-500">{cat.note}</div>
+                <div className="text-xs font-semibold text-text-primary">{cat.label}</div>
+                <div className="text-xs text-text-muted">{cat.note}</div>
               </div>
               <div className="text-right shrink-0">
                 {cat.value !== null ? (
-                  <span className="font-mono text-xs text-zinc-100">
+                  <span className="font-mono tabular-nums text-xs text-text-primary">
                     {formatINR(cat.value)}
                   </span>
                 ) : (
                   <Badge
                     variant="outline"
-                    className="text-xs border-border-default text-zinc-600"
+                    className="text-xs border-border-default text-text-muted"
                   >
                     —
                   </Badge>
@@ -772,8 +772,8 @@ function MutualFundsTab() {
       <div className="flex items-start gap-3 bg-surface-card border border-border-default rounded-lg p-4">
         <AlertCircle className="size-4 text-amber-400 mt-0.5 shrink-0" />
         <div className="space-y-1">
-          <p className="text-xs font-medium text-zinc-200">Live NAV not connected</p>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs font-medium text-text-primary">Live NAV not connected</p>
+          <p className="text-xs text-text-muted">
             Connect a NAV data source in{" "}
             <span className="text-amber-400 font-mono">Settings → Data Sources</span> to see
             portfolio NAV, returns, and folios. jugaad-data or mftool can be configured as the
@@ -783,8 +783,8 @@ function MutualFundsTab() {
       </div>
 
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-zinc-200">SEBI-Defined MF Categories</h3>
-        <p className="text-xs text-zinc-500">
+        <h3 className="font-heading font-semibold text-sm text-text-primary">SEBI-Defined MF Categories</h3>
+        <p className="text-xs text-text-muted">
           Risk ratings are indicative based on SEBI&apos;s product labelling guidelines.
         </p>
       </div>
@@ -804,7 +804,7 @@ function MutualFundsTab() {
                 {cat.risk} risk
               </Badge>
             </div>
-            <p className="text-xs text-zinc-500 leading-relaxed">{cat.desc}</p>
+            <p className="text-xs text-text-muted leading-relaxed">{cat.desc}</p>
           </div>
         ))}
       </div>
@@ -842,26 +842,26 @@ function SipCalculatorTab() {
   return (
     <div className="max-w-xl space-y-6">
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-zinc-200">SIP Calculator</h3>
-        <p className="text-xs text-zinc-500">
+        <h3 className="font-heading font-semibold text-sm text-text-primary">SIP Calculator</h3>
+        <p className="text-xs text-text-muted">
           Estimate future corpus from regular monthly investments using compound interest.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="space-y-1.5">
-          <Label className="text-xs text-zinc-400">Monthly SIP (INR)</Label>
+          <Label className="text-xxs text-text-muted uppercase tracking-wider">Monthly SIP (INR)</Label>
           <Input
             type="number"
             value={monthly}
             onChange={(e) => setMonthly(e.target.value)}
             min="100"
             step="500"
-            className="bg-surface-card border-border-default text-zinc-100 font-mono text-sm h-9"
+            className="h-9 text-sm bg-surface-card border-border-default text-text-primary font-mono"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs text-zinc-400">Expected Return (%/yr)</Label>
+          <Label className="text-xxs text-text-muted uppercase tracking-wider">Expected Return (%/yr)</Label>
           <Input
             type="number"
             value={rate}
@@ -869,11 +869,11 @@ function SipCalculatorTab() {
             min="1"
             max="30"
             step="0.5"
-            className="bg-surface-card border-border-default text-zinc-100 font-mono text-sm h-9"
+            className="h-9 text-sm bg-surface-card border-border-default text-text-primary font-mono"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs text-zinc-400">Duration (years)</Label>
+          <Label className="text-xxs text-text-muted uppercase tracking-wider">Duration (years)</Label>
           <Input
             type="number"
             value={years}
@@ -881,7 +881,7 @@ function SipCalculatorTab() {
             min="1"
             max="40"
             step="1"
-            className="bg-surface-card border-border-default text-zinc-100 font-mono text-sm h-9"
+            className="h-9 text-sm bg-surface-card border-border-default text-text-primary font-mono"
           />
         </div>
       </div>
@@ -890,26 +890,26 @@ function SipCalculatorTab() {
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-px bg-border-default rounded-lg overflow-hidden">
             <div className="bg-surface-card p-4 space-y-1">
-              <span className="text-xs text-zinc-500 uppercase tracking-wide">
+              <span className="text-xxs text-text-muted uppercase tracking-wider">
                 Total Invested
               </span>
-              <div className="font-mono text-sm font-semibold text-zinc-100">
+              <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
                 {formatINR(result.invested)}
               </div>
             </div>
             <div className="bg-surface-card p-4 space-y-1">
-              <span className="text-xs text-zinc-500 uppercase tracking-wide">
+              <span className="text-xxs text-text-muted uppercase tracking-wider">
                 Est. Returns
               </span>
-              <div className="font-mono text-sm font-semibold text-emerald-400">
+              <div className="text-2xl font-mono font-bold tabular-nums text-profit">
                 {formatINR(result.returns)}
               </div>
             </div>
             <div className="bg-surface-card p-4 space-y-1">
-              <span className="text-xs text-zinc-500 uppercase tracking-wide">
+              <span className="text-xxs text-text-muted uppercase tracking-wider">
                 Maturity Value
               </span>
-              <div className="font-mono text-sm font-semibold text-zinc-100">
+              <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
                 {formatINR(result.maturity)}
               </div>
             </div>
@@ -917,7 +917,7 @@ function SipCalculatorTab() {
 
           {/* Stacked bar */}
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-zinc-500">
+            <div className="flex justify-between text-xs text-text-muted">
               <span>Principal</span>
               <span>Estimated returns</span>
             </div>
@@ -932,21 +932,21 @@ function SipCalculatorTab() {
               />
             </div>
             <div className="flex justify-between text-xs">
-              <span className="text-blue-400">
+              <span className="text-neutral-text font-mono tabular-nums">
                 {(100 - result.progress).toFixed(1)}% principal
               </span>
-              <span className="text-emerald-400">{result.progress.toFixed(1)}% gains</span>
+              <span className="text-profit font-mono tabular-nums">{result.progress.toFixed(1)}% gains</span>
             </div>
           </div>
 
-          <p className="text-xs text-zinc-600 leading-relaxed">
+          <p className="text-xs text-text-muted leading-relaxed">
             Investing {formatINR(parseFloat(monthly) || 0)}/month for {years} years at {rate}%
             p.a. compounds to {formatINR(result.maturity)}. Actual MF returns vary; this is an
             illustrative projection only.
           </p>
         </div>
       ) : (
-        <div className="text-center py-8 text-zinc-600 text-xs">
+        <div className="text-center py-8 text-text-muted text-xs">
           Enter values above to calculate.
         </div>
       )}
@@ -1000,7 +1000,7 @@ function returnColor(r: number): string {
   if (r >= 40) return "bg-emerald-400 text-emerald-950";
   if (r >= 20) return "bg-emerald-600 text-emerald-100";
   if (r >= 10) return "bg-emerald-800 text-emerald-200";
-  if (r >= 0) return "bg-zinc-700 text-zinc-200";
+  if (r >= 0) return "bg-surface-elevated text-text-secondary";
   if (r >= -10) return "bg-red-900 text-red-300";
   return "bg-red-700 text-red-100";
 }
@@ -1017,8 +1017,8 @@ function AssetQuiltTab() {
   return (
     <div className="space-y-5 max-w-3xl">
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-zinc-200">Asset Quilt — Annual Returns</h3>
-        <p className="text-xs text-zinc-500">
+        <h3 className="font-heading font-semibold text-sm text-text-primary">Asset Quilt — Annual Returns</h3>
+        <p className="text-xs text-text-muted">
           Calendar-year returns ranked from best (top) to worst (bottom). Illustrative data
           based on approximate index returns. Connect a data source for live NAV-based returns.
         </p>
@@ -1034,7 +1034,7 @@ function AssetQuiltTab() {
           {QUILT_YEARS.map((y) => (
             <div
               key={y}
-              className="text-center text-xs font-semibold text-zinc-400 pb-1 border-b border-border-default"
+              className="text-center text-xs font-semibold text-text-secondary pb-1 border-b border-border-default"
             >
               {y}
             </div>
@@ -1055,7 +1055,7 @@ function AssetQuiltTab() {
                   <div className="text-xs font-semibold leading-tight truncate">
                     {asset.name}
                   </div>
-                  <div className="font-mono text-xs font-bold">
+                  <div className="font-mono tabular-nums text-xs font-bold">
                     {ret !== undefined
                       ? `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`
                       : "—"}
@@ -1067,7 +1067,7 @@ function AssetQuiltTab() {
         </div>
       </div>
 
-      <p className="text-xs text-zinc-600 leading-relaxed">
+      <p className="text-xs text-text-muted leading-relaxed">
         Data is approximate and illustrative. NIFTY returns are index-only (no dividends).
         REIT data available from 2021 onwards. Connect jugaad-data or mftool in Settings for
         live NAV-based quilt.
@@ -1079,13 +1079,13 @@ function AssetQuiltTab() {
           { label: "≥40%", cls: "bg-emerald-400" },
           { label: "20–40%", cls: "bg-emerald-600" },
           { label: "10–20%", cls: "bg-emerald-800" },
-          { label: "0–10%", cls: "bg-zinc-700" },
+          { label: "0–10%", cls: "bg-surface-elevated" },
           { label: "-10–0%", cls: "bg-red-900" },
           { label: "<-10%", cls: "bg-red-700" },
         ].map((l) => (
           <div key={l.label} className="flex items-center gap-1.5">
             <span className={cn("size-3 rounded", l.cls)} />
-            <span className="text-xs text-zinc-500">{l.label}</span>
+            <span className="text-xs text-text-muted">{l.label}</span>
           </div>
         ))}
       </div>
@@ -1253,20 +1253,20 @@ export default function InvestRoute() {
       <div className="border-b border-border-default bg-surface-card px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <TrendingUp className="w-6 h-6 text-emerald-400" />
+            <TrendingUp className="w-6 h-6 text-profit" />
             <div>
-              <h1 className="text-lg font-bold text-text-primary">Investor Dashboard</h1>
-              <p className="text-xs text-text-muted">
+              <h1 className="font-heading font-bold text-lg text-text-primary">Investor Dashboard</h1>
+              <p className="text-xxs text-text-muted">
                 Portfolio, holdings, net worth, and investment tools
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isLoading && <RefreshCw className="size-3 text-zinc-500 animate-spin" />}
+            {isLoading && <RefreshCw className="size-3 text-text-muted animate-spin" />}
             {!isLoading && (
               <Badge
                 variant="outline"
-                className="text-xs h-5 border-border-default text-zinc-500"
+                className="text-xxs h-5 border-border-default text-text-muted"
               >
                 {holdings.length} holdings
               </Badge>
@@ -1286,9 +1286,9 @@ export default function InvestRoute() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors ${
                   isActive
-                    ? "bg-accent-primary/10 text-accent-primary border-r-2 border-accent-primary"
+                    ? "text-accent bg-accent/10 border-l-2 border-accent"
                     : "text-text-secondary hover:text-text-primary hover:bg-surface-base"
                 }`}
               >

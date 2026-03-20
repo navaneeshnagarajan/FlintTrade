@@ -114,16 +114,16 @@ interface StepIndicatorProps {
 
 function StepIndicator({ total, current }: StepIndicatorProps) {
   return (
-    <div className="flex items-center gap-2 justify-center">
+    <div className="flex items-center gap-2 justify-center font-mono text-xs">
       {Array.from({ length: total }, (_, i) => (
         <div
           key={i}
           className={[
             "h-1.5 rounded-full transition-all duration-300",
             i < current
-              ? "w-6 bg-green-500"
+              ? "w-6 bg-profit"
               : i === current
-                ? "w-6 bg-blue-500"
+                ? "w-6 bg-primary"
                 : "w-4 bg-border-default",
           ].join(" ")}
         />
@@ -148,23 +148,23 @@ interface ModeCardProps {
 function ModeCard({ title, subtitle, description, badge, icon, onClick }: ModeCardProps) {
   return (
     <Card
-      className="bg-surface-card border-border-default cursor-pointer hover:border-blue-500/60 hover:bg-surface-card/80 transition-all duration-200 group"
+      className="bg-surface-card border border-border-default rounded-lg p-6 shadow-sm cursor-pointer hover:border-accent/40 hover:bg-surface-hover transition-all duration-200 group"
       onClick={onClick}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between mb-2">
-          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 group-hover:bg-blue-500/20 transition-colors">
+          <div className="p-2 rounded-lg bg-accent/15 text-accent group-hover:bg-accent/20 transition-colors">
             {icon}
           </div>
-          <Badge variant="outline" className="text-xs text-text-muted border-border-default">
+          <Badge variant="outline" className="text-xxs text-text-muted bg-surface-elevated px-2 py-0.5 rounded border-border-default">
             {badge}
           </Badge>
         </div>
-        <CardTitle className="text-text-primary text-lg">{title}</CardTitle>
-        <CardDescription className="text-text-secondary text-xs">{subtitle}</CardDescription>
+        <CardTitle className="font-heading font-bold text-lg text-text-primary">{title}</CardTitle>
+        <CardDescription className="text-sm text-text-muted">{subtitle}</CardDescription>
       </CardHeader>
       <CardContent>
-        <p className="text-text-muted text-sm leading-relaxed">{description}</p>
+        <p className="text-sm text-text-muted leading-relaxed">{description}</p>
       </CardContent>
     </Card>
   );
@@ -223,7 +223,7 @@ function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
         <Input
           id="host"
           placeholder="http://localhost:5000"
-          className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
           {...register("host")}
         />
         {errors.host && (
@@ -239,7 +239,7 @@ function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
           id="apiKey"
           type="password"
           placeholder="Your OpenAlgo API key"
-          className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
           {...register("apiKey")}
         />
         {errors.apiKey && (
@@ -254,7 +254,7 @@ function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
         <Input
           id="wsPort"
           placeholder="8765"
-          className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
           {...register("wsPort")}
         />
         {errors.wsPort && (
@@ -294,7 +294,7 @@ function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
 
       <Button
         type="submit"
-        className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
       >
         Continue
         <ArrowRight className="size-4 ml-2" />
@@ -344,8 +344,8 @@ function PersonaPicker({ selected, onSelect }: PersonaPickerProps) {
           className={[
             "w-full text-left rounded-lg border p-4 transition-all duration-150",
             selected === opt.value
-              ? "border-blue-500 bg-blue-500/10"
-              : "border-border-default bg-surface-base hover:border-blue-500/40",
+              ? "border-accent/40 bg-accent/15"
+              : "border-border-default bg-surface-base hover:border-accent/40",
           ].join(" ")}
         >
           <div className="flex items-center justify-between">
@@ -354,7 +354,7 @@ function PersonaPicker({ selected, onSelect }: PersonaPickerProps) {
               variant="outline"
               className={[
                 "text-xs border-border-default",
-                selected === opt.value ? "border-blue-500/60 text-blue-400" : "text-text-muted",
+                selected === opt.value ? "border-accent/40 text-accent" : "text-text-muted",
               ].join(" ")}
             >
               {opt.description}
@@ -393,8 +393,8 @@ function ExperiencePicker({ selected, onSelect }: ExperiencePickerProps) {
           className={[
             "w-full text-left rounded-lg border p-4 transition-all duration-150",
             selected === opt.value
-              ? "border-blue-500 bg-blue-500/10"
-              : "border-border-default bg-surface-base hover:border-blue-500/40",
+              ? "border-accent/40 bg-accent/15"
+              : "border-border-default bg-surface-base hover:border-accent/40",
           ].join(" ")}
         >
           <span className="text-text-primary font-medium text-sm block">{opt.label}</span>
@@ -492,7 +492,7 @@ function TradingDefaultsStep({ onComplete, defaultValues }: TradingDefaultsStepP
           type="number"
           min={1}
           max={9999}
-          className="bg-surface-base border-border-default text-text-primary font-mono"
+          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
           {...register("defaultQty", { valueAsNumber: true })}
         />
         {errors.defaultQty && (
@@ -500,7 +500,7 @@ function TradingDefaultsStep({ onComplete, defaultValues }: TradingDefaultsStepP
         )}
       </div>
 
-      <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white">
+      <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
         Continue
         <ArrowRight className="size-4 ml-2" />
       </Button>
@@ -543,7 +543,7 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
             id="maxPositionLots"
             type="number"
             min={1}
-            className="bg-surface-base border-border-default text-text-primary font-mono"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("maxPositionLots", { valueAsNumber: true })}
           />
           {errors.maxPositionLots && (
@@ -559,7 +559,7 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
             id="maxOrdersPerMin"
             type="number"
             min={1}
-            className="bg-surface-base border-border-default text-text-primary font-mono"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("maxOrdersPerMin", { valueAsNumber: true })}
           />
           {errors.maxOrdersPerMin && (
@@ -575,7 +575,7 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
             id="mtmStoploss"
             type="number"
             min={0}
-            className="bg-surface-base border-border-default text-text-primary font-mono"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("mtmStoploss", { valueAsNumber: true })}
           />
           {errors.mtmStoploss && (
@@ -591,7 +591,7 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
             id="mtmTarget"
             type="number"
             min={0}
-            className="bg-surface-base border-border-default text-text-primary font-mono"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("mtmTarget", { valueAsNumber: true })}
           />
           {errors.mtmTarget && (
@@ -604,7 +604,7 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
         Risk limits are enforced by the safety engine. You can change them later in Settings.
       </p>
 
-      <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white">
+      <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
         Continue
         <ArrowRight className="size-4 ml-2" />
       </Button>
@@ -666,7 +666,7 @@ function LlmStep({ onComplete }: LlmStepProps) {
                 ? "claude-3-5-haiku-20241022"
                 : "gpt-4o-mini"
           }
-          className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
           {...register("model")}
         />
         {errors.model && <p className="text-red-400 text-xs">{errors.model.message}</p>}
@@ -680,7 +680,7 @@ function LlmStep({ onComplete }: LlmStepProps) {
           <Input
             id="llmHost"
             placeholder={provider === "lmstudio" ? "http://localhost:1234" : "http://localhost:11434"}
-            className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("host")}
           />
         </div>
@@ -690,7 +690,7 @@ function LlmStep({ onComplete }: LlmStepProps) {
         API keys are stored in your workspace config (~/.flinttrade/workspace.json), never in this app.
       </p>
 
-      <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white">
+      <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
         Continue
         <ArrowRight className="size-4 ml-2" />
       </Button>
@@ -720,20 +720,20 @@ function DoneScreen({ persona, onGo }: DoneScreenProps) {
 
   return (
     <div className="text-center space-y-6 py-4">
-      <div className="inline-flex items-center justify-center size-16 rounded-full bg-green-500/15 border border-green-500/30">
-        <CheckCircle className="size-8 text-green-400" />
+      <div className="inline-flex items-center justify-center size-16 rounded-full bg-profit/15 border border-profit/30">
+        <CheckCircle className="size-8 text-profit" />
       </div>
       <div className="space-y-2">
-        <h3 className="text-text-primary text-xl font-semibold">Setup Complete</h3>
-        <p className="text-text-secondary text-sm">
+        <h3 className="font-heading font-bold text-lg text-text-primary">Setup Complete</h3>
+        <p className="text-sm text-text-secondary">
           Your workspace is configured for{" "}
-          <span className="text-blue-400 font-medium">{personaLabel}</span>.
+          <span className="text-accent font-medium">{personaLabel}</span>.
         </p>
-        <p className="text-text-muted text-xs">Opening {destination}</p>
+        <p className="text-text-muted text-xxs">Opening {destination}</p>
       </div>
       <Button
         onClick={onGo}
-        className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
         size="lg"
       >
         Launch FlintTrade
@@ -845,13 +845,13 @@ export default function SetupRoute() {
       <div className="min-h-screen bg-surface-base flex items-center justify-center p-4">
         <div className="max-w-3xl w-full space-y-8">
           <div className="text-center space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 text-xs font-medium mb-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/40 bg-accent/15 text-accent text-xxs font-medium mb-2">
               First Time Setup
             </div>
-            <h1 className="text-3xl font-bold text-text-primary tracking-tight">
+            <h1 className="font-heading font-bold text-2xl text-text-primary tracking-tight">
               Welcome to FlintTrade
             </h1>
-            <p className="text-text-secondary text-sm max-w-md mx-auto">
+            <p className="text-sm text-text-secondary max-w-md mx-auto">
               Connect to OpenAlgo and configure your workspace. Takes under two minutes.
             </p>
           </div>
@@ -886,7 +886,7 @@ export default function SetupRoute() {
           <div className="text-center">
             <Button
               variant="ghost"
-              className="text-text-muted hover:text-text-secondary"
+              className="text-sm text-text-muted hover:text-text-primary"
               onClick={() => navigate("/terminal")}
             >
               Skip setup — use defaults
@@ -925,7 +925,7 @@ export default function SetupRoute() {
               onSelect={(p) => setWizard((w) => ({ ...w, persona: p }))}
             />
             <Button
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               disabled={!wizard.persona}
               onClick={() => applyAndNavigate(wizard)}
             >
@@ -947,7 +947,7 @@ export default function SetupRoute() {
               onSelect={(p) => setWizard((w) => ({ ...w, persona: p }))}
             />
             <Button
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               disabled={!wizard.persona}
               onClick={next}
             >
@@ -976,7 +976,7 @@ export default function SetupRoute() {
               onSelect={(e) => setWizard((w) => ({ ...w, experience: e }))}
             />
             <Button
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               disabled={!wizard.experience}
               onClick={next}
             >
@@ -1018,7 +1018,7 @@ export default function SetupRoute() {
               onSelect={(p) => setWizard((w) => ({ ...w, persona: p }))}
             />
             <Button
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               disabled={!wizard.persona}
               onClick={next}
             >
@@ -1047,7 +1047,7 @@ export default function SetupRoute() {
               onSelect={(e) => setWizard((w) => ({ ...w, experience: e }))}
             />
             <Button
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               disabled={!wizard.experience}
               onClick={next}
             >
@@ -1111,8 +1111,8 @@ export default function SetupRoute() {
       <div className="max-w-lg w-full space-y-6">
         {/* Header */}
         <div className="text-center space-y-1">
-          <p className="text-text-muted text-xs uppercase tracking-widest">FlintTrade Setup</p>
-          <h2 className="text-text-primary text-xl font-semibold">{stepLabel}</h2>
+          <p className="text-text-muted text-xxs uppercase tracking-widest">FlintTrade Setup</p>
+          <h2 className="font-heading font-bold text-lg text-text-primary">{stepLabel}</h2>
         </div>
 
         {/* Progress */}
@@ -1132,13 +1132,13 @@ export default function SetupRoute() {
               variant="ghost"
               size="sm"
               onClick={back}
-              className="text-text-muted hover:text-text-secondary"
+              className="text-sm text-text-muted hover:text-text-primary"
             >
               <ArrowLeft className="size-3.5 mr-1.5" />
               {step === 0 ? "Change mode" : "Back"}
             </Button>
 
-            <span className="text-text-muted text-xs">
+            <span className="font-mono text-xs text-text-muted">
               {step + 1} / {totalSteps}
             </span>
           </div>
