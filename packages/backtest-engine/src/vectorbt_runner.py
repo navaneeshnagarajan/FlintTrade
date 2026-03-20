@@ -220,9 +220,6 @@ class VectorBTRunner:
         win_count = _safe(
             lambda: (trades.records_readable["PnL"] > 0).sum()
         )
-        loss_count = _safe(
-            lambda: (trades.records_readable["PnL"] < 0).sum()
-        )
         win_rate = (win_count / total_trades * 100) if total_trades > 0 else float("nan")
 
         avg_win = _safe(
