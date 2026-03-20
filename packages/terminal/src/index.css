@@ -1,35 +1,54 @@
 @import "tailwindcss";
 
+/* ---------- Geist font (variable, from geist npm package) ---------- */
+@font-face {
+  font-family: 'Geist';
+  src: url('../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- text-xxs utility (Tailwind v4) ---------- */
+@utility text-xxs {
+  font-size: 10px;
+  line-height: 14px;
+}
+
+/* ---------- Base variables (shadcn/ui compat) ---------- */
 @layer base {
   :root {
     --radius: 0.5rem;
     --background: 240 10% 3.9%;
     --foreground: 240 5% 89%;
-    --card: 240 10% 7%;
+    --card: 240 8% 8.5%;
     --card-foreground: 240 5% 89%;
-    --popover: 240 10% 7%;
+    --popover: 240 8% 11%;
     --popover-foreground: 240 5% 89%;
     --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
     --secondary: 240 5% 15%;
     --secondary-foreground: 240 5% 89%;
     --muted: 240 5% 15%;
-    --muted-foreground: 240 5% 45%;
+    --muted-foreground: 240 4% 46%;
     --accent: 240 5% 15%;
     --accent-foreground: 240 5% 89%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 6% 17%;
-    --input: 240 6% 17%;
+    --border: 240 8% 18%;
+    --input: 240 8% 18%;
     --ring: 217 91% 60%;
     --chart-1: 217 91% 60%;
     --chart-2: 142 71% 45%;
     --chart-3: 0 84% 60%;
     --chart-4: 48 96% 53%;
     --chart-5: 280 65% 60%;
+    --text-2xl: clamp(20px, 2vw, 24px);
+    --text-lg: clamp(16px, 1.5vw, 18px);
   }
 }
 
+/* ---------- Theme tokens ---------- */
 @theme inline {
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
@@ -60,31 +79,72 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  /* FlintTrade trading-specific colors */
+  /* --- Fonts (3-tier: heading / body / data) --- */
+  --font-heading: 'Geist', system-ui, sans-serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* --- Surface colors --- */
+  --color-surface-base: #0a0a0f;
+  --color-surface-card: #16161f;
+  --color-surface-elevated: #1e1e28;
+  --color-surface-hover: #24242e;
+  --color-surface-active: #2e2e3a;
+  --color-surface-stripe: #0e0e16;
+
+  /* --- Border colors --- */
+  --color-border-default: #2a2a3a;
+  --color-border-subtle: #1e1e2e;
+  --color-border-strong: #3a3a4a;
+
+  /* --- Text colors --- */
+  --color-text-primary: #e4e4e7;
+  --color-text-secondary: #8b8b95;
+  --color-text-muted: #6b6b78;
+  --color-text-disabled: #45454f;
+
+  /* --- Trading semantic colors --- */
   --color-profit: #22c55e;
   --color-loss: #ef4444;
   --color-warning: #eab308;
-  --color-surface-base: #0a0a0f;
-  --color-surface-card: #12121a;
-  --color-surface-hover: #1a1a26;
-  --color-border-default: #1e1e2e;
-  --color-border-subtle: #16161f;
-  --color-text-primary: #e4e4e7;
-  --color-text-secondary: #71717a;
-  --color-text-muted: #52525b;
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-bullish-bg: rgba(34, 197, 94, 0.10);
+  --color-bullish-border: rgba(34, 197, 94, 0.30);
+  --color-bullish-text: #22c55e;
+
+  --color-bearish-bg: rgba(239, 68, 68, 0.10);
+  --color-bearish-border: rgba(239, 68, 68, 0.30);
+  --color-bearish-text: #ef4444;
+
+  --color-atm-bg: rgba(234, 179, 8, 0.08);
+  --color-atm-border: rgba(234, 179, 8, 0.30);
+  --color-atm-text: #eab308;
+
+  --color-neutral-bg: rgba(59, 130, 246, 0.10);
+  --color-neutral-border: rgba(59, 130, 246, 0.30);
+  --color-neutral-text: #3b82f6;
+
+  --color-itm-text: #22c55e;
+  --color-otm-text: #f97315;
 }
 
+/* ---------- Responsive breakpoints ---------- */
+@media (max-width: 1279px) {
+  html { --card-padding: 12px; --widget-padding: 12px; }
+}
+@media (min-width: 1920px) {
+  html { --widget-padding: 24px; }
+}
+
+/* ---------- Global resets ---------- */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #1e1e2e transparent;
+  scrollbar-color: var(--color-border-default) transparent;
 }
-
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #1e1e2e; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #2e2e3e; }
+::-webkit-scrollbar-thumb { background: var(--color-border-default); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); }
 
 body {
   margin: 0;
@@ -94,18 +154,38 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Dockview theme overrides */
+/* ---------- Density modes ---------- */
+html, html.density-comfortable {
+  --table-cell-px: 12px;
+  --table-cell-py: 10px;
+  --card-padding: 16px;
+  --widget-padding: 16px;
+  --input-height: 36px;
+  --button-height: 36px;
+}
+
+html.density-compact {
+  --table-cell-px: 8px;
+  --table-cell-py: 6px;
+  --card-padding: 12px;
+  --widget-padding: 12px;
+  --input-height: 32px;
+  --button-height: 32px;
+}
+
+/* ---------- Dockview theme overrides ---------- */
 .dockview-theme-dark {
-  --dv-activegroup-visiblepanel-tab-background-color: #12121a;
-  --dv-activegroup-hiddenpanel-tab-background-color: #0a0a0f;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #12121a;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: #0a0a0f;
-  --dv-tab-divider-color: #1e1e2e;
-  --dv-activegroup-visiblepanel-tab-color: #e4e4e7;
-  --dv-activegroup-hiddenpanel-tab-color: #71717a;
-  --dv-inactivegroup-visiblepanel-tab-color: #a1a1aa;
-  --dv-inactivegroup-hiddenpanel-tab-color: #71717a;
-  --dv-separator-border: #1e1e2e;
-  --dv-paneview-header-border-color: #1e1e2e;
-  --dv-background-color: #0a0a0f;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-surface-base);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-card);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-surface-base);
+  --dv-tab-divider-color: var(--color-border-subtle);
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-secondary);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-separator-border: var(--color-border-default);
+  --dv-paneview-header-border-color: var(--color-border-default);
+  --dv-background-color: var(--color-surface-base);
+  --dv-group-view-background-color: var(--color-surface-base);
 }
