@@ -8,20 +8,24 @@
 
 ---
 
-## Current State (updated 2026-03-20)
+## Current State (updated 2026-03-20 — post full sprint)
 
 - **Version:** 0.1.0-alpha → beta pending user verification
-- **Tests:** 26 terminal (Vitest) + 921 Python (pytest, 3 skipped) = 947 total
+- **Tests:** 26 terminal (Vitest) + 966 Python (pytest, 3 skipped) = 992 total
 - **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes in Dockview v5 shell
-- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, zero `any` types.
-- **Python:** 11 packages, 921 tests passing (921 passed, 3 skipped — vectorbt absent)
+- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, zero `any` types. tsc: 0 errors.
+- **Python:** 12 packages (11 + tick-engine Rust/PyO3), 966 tests passing (966 passed, 3 skipped — vectorbt absent)
 - **CI:** GitHub Actions green (python-tests + node-tests + secrets-check)
-- **Packages:** 11 Python + 1 React (terminal). Stub packages `dashboard/` and `backtest/` deleted.
-- **Dependencies:** All v2 deps installed (Dockview 5.1, Zustand 5, Jotai, TanStack Query 5, Glide Data Grid 6, shadcn/ui, react-hook-form, zod). Old deps removed (FlexLayout, recharts, postcss).
+- **Packages:** 12 Python + 1 React (terminal). tick-engine: new Rust/PyO3 wheel installed.
+- **Dependencies:** All v2 deps installed + Glide Data Grid 6 (lodash added), @glideapps/glide-data-grid v6.0.3. WinLibs GCC 15.2 + GNU Rust toolchain on Nitro.
 - **State:** Zustand stores (4), Jotai atoms, TanStack Query hooks (6), WebSocket service with ping/pong — all wired.
-- **Shell:** Dockview canvas, TopBar, TickerBar (8 instruments incl. MCX), WidgetPicker, ToolsDropdown — all TSX + shadcn/ui. 7 layout presets.
-- **Performance:** TerminalRoute 1,251KB → 19KB. Largest chunk 343KB. All chunks < 500KB.
-- **Beta sprint:** 23/24 tasks complete. Task 10 (beta tag) awaiting user verification.
+- **Shell:** Dockview canvas, TopBar, TickerBar (8 instruments incl. MCX GOLD/SILVER/CRUDEOIL/NATURALGAS), WidgetPicker, ToolsDropdown — all TSX + shadcn/ui. 7 layout presets.
+- **Performance:** TerminalRoute 1,251KB → 19KB. vendor-glide 196KB. All chunks < 500KB.
+- **Option Chain:** Glide DataGrid canvas-rendered (replaced DOM table). 3 tabs: LTP/OI/GREEKS. ATM highlight, basket actions, OI bars.
+- **Chart:** 23 indicators total (15 from prior sprint + 8 new: Williams %R, CCI, DEMA, Hull MA, Parabolic SAR, OBV, Keltner, VWMA). 7 drawing tools.
+- **Python indicators API:** POST /api/v1/indicators/compute (23 tests). NaN→null, per-indicator error isolation.
+- **Rust tick-engine:** packages/tick-engine/ — TickSimulator + EMA crossover + Sharpe/drawdown metrics (25 tests, maturin abi3-py312 wheel).
+- **Beta sprint:** 24/24 tasks complete + 3 additional (Glide, 8 indicators, Rust). Task 10 (beta tag) awaiting user verification.
 
 ---
 

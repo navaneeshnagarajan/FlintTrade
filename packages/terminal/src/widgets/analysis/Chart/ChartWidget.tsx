@@ -33,6 +33,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -109,6 +110,27 @@ interface IndicatorState {
   showOBV: boolean;
   showKeltner: boolean;
   showVWMA: boolean;
+}
+
+interface IndicatorPeriods {
+  ema1: number;
+  ema2: number;
+  sma: number;
+  wma: number;
+  bbPeriod: number;
+  bbMult: number;
+  stPeriod: number;
+  stFactor: number;
+  rsi: number;
+  cci: number;
+  dema: number;
+  hull: number;
+  wr: number;
+  keltner: number;
+  keltnerMult: number;
+  vwma: number;
+  atr: number;
+  adx: number;
 }
 
 // Drawing tool types
@@ -312,6 +334,15 @@ const DEFAULT_INDICATORS: IndicatorState = {
   showOBV: false,
   showKeltner: false,
   showVWMA: false,
+};
+
+const DEFAULT_PERIODS: IndicatorPeriods = {
+  ema1: 20, ema2: 50, sma: 20, wma: 20,
+  bbPeriod: 20, bbMult: 2,
+  stPeriod: 10, stFactor: 3,
+  rsi: 14, cci: 20, dema: 20, hull: 20, wr: 14,
+  keltner: 20, keltnerMult: 2.0, vwma: 20,
+  atr: 14, adx: 14,
 };
 
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
@@ -1392,6 +1423,32 @@ function TextInputOverlay({ onConfirm, onCancel }: TextInputOverlayProps) {
   );
 }
 
+// --- period input helper -----------------------------------------------------
+
+function PeriodInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <Input
+      type="number"
+      min={2}
+      max={500}
+      value={value}
+      className="w-11 h-5 text-[10px] text-center px-1 py-0 ml-auto bg-transparent border-border-default"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        const v = parseInt(e.target.value, 10);
+        if (!isNaN(v) && v >= 2 && v <= 500) onChange(v);
+      }}
+    />
+  );
+}
+
 // --- main component ----------------------------------------------------------
 
 interface ChartWidgetProps {
@@ -1423,6 +1480,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
 
   // indicator toggles
   const [indicators, setIndicators] = useState<IndicatorState>(DEFAULT_INDICATORS);
+  const [periods, setPeriods] = useState<IndicatorPeriods>(DEFAULT_PERIODS);
 
   // raw OHLCV data store for indicator recalculation
   const barsRef = useRef<OhlcvBar[]>([]);
@@ -1766,10 +1824,11 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.ema20) {
         ind.ema20 = chart.addSeries(LineSeries, {
           color: "#3b82f6", lineWidth: 1, priceScaleId: "right",
-          title: "EMA20", lastValueVisible: false, priceLineVisible: false,
+          title: `EMA${periods.ema1}`, lastValueVisible: false, priceLineVisible: false,
         });
       }
-      ind.ema20.setData(buildLineData(times, calcEMA(closes, 20)));
+      ind.ema20.applyOptions({ title: `EMA${periods.ema1}` });
+      ind.ema20.setData(buildLineData(times, calcEMA(closes, periods.ema1)));
     } else if (ind.ema20) {
       removeSeries(ind.ema20); ind.ema20 = null;
     }
@@ -1779,43 +1838,46 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.ema50) {
         ind.ema50 = chart.addSeries(LineSeries, {
           color: "#f59e0b", lineWidth: 1, priceScaleId: "right",
-          title: "EMA50", lastValueVisible: false, priceLineVisible: false,
+          title: `EMA${periods.ema2}`, lastValueVisible: false, priceLineVisible: false,
         });
       }
-      ind.ema50.setData(buildLineData(times, calcEMA(closes, 50)));
+      ind.ema50.applyOptions({ title: `EMA${periods.ema2}` });
+      ind.ema50.setData(buildLineData(times, calcEMA(closes, periods.ema2)));
     } else if (ind.ema50) {
       removeSeries(ind.ema50); ind.ema50 = null;
     }
 
-    // --- SMA 20 ---
+    // --- SMA ---
     if (indicators.showSMA) {
       if (!ind.sma) {
         ind.sma = chart.addSeries(LineSeries, {
           color: "#06b6d4", lineWidth: 1, priceScaleId: "right",
-          title: "SMA20", lastValueVisible: false, priceLineVisible: false,
+          title: `SMA${periods.sma}`, lastValueVisible: false, priceLineVisible: false,
         });
       }
-      ind.sma.setData(buildLineData(times, calcSMA(closes, 20)));
+      ind.sma.applyOptions({ title: `SMA${periods.sma}` });
+      ind.sma.setData(buildLineData(times, calcSMA(closes, periods.sma)));
     } else if (ind.sma) {
       removeSeries(ind.sma); ind.sma = null;
     }
 
-    // --- WMA 20 ---
+    // --- WMA ---
     if (indicators.showWMA) {
       if (!ind.wma) {
         ind.wma = chart.addSeries(LineSeries, {
           color: "#84cc16", lineWidth: 1, priceScaleId: "right",
-          title: "WMA20", lastValueVisible: false, priceLineVisible: false,
+          title: `WMA${periods.wma}`, lastValueVisible: false, priceLineVisible: false,
         });
       }
-      ind.wma.setData(buildLineData(times, calcWMA(closes, 20)));
+      ind.wma.applyOptions({ title: `WMA${periods.wma}` });
+      ind.wma.setData(buildLineData(times, calcWMA(closes, periods.wma)));
     } else if (ind.wma) {
       removeSeries(ind.wma); ind.wma = null;
     }
 
     // --- Bollinger Bands ---
     if (indicators.showBB) {
-      const bb = calcBollingerBands(closes);
+      const bb = calcBollingerBands(closes, periods.bbPeriod, periods.bbMult);
       if (!ind.bbUpper) {
         ind.bbUpper = chart.addSeries(LineSeries, {
           color: "#ef4444", lineWidth: 1, lineStyle: 2, priceScaleId: "right",
@@ -1845,7 +1907,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
 
     // --- Supertrend ---
     if (indicators.showSupertrend) {
-      const st = calcSupertrend(highs, lows, closes);
+      const st = calcSupertrend(highs, lows, closes, periods.stPeriod, periods.stFactor);
       if (!ind.stUp) {
         ind.stUp = chart.addSeries(LineSeries, {
           color: "#22c55e", lineWidth: 2, priceScaleId: "right",
@@ -1981,11 +2043,12 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.rsi) {
         ind.rsi = chart.addSeries(LineSeries, {
           color: "#a855f7", lineWidth: 1, priceScaleId: "rsi",
-          title: "RSI(14)", lastValueVisible: true, priceLineVisible: false,
+          title: `RSI(${periods.rsi})`, lastValueVisible: true, priceLineVisible: false,
         });
         chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.05 } });
       }
-      ind.rsi.setData(buildLineData(times, calcRSI(closes).values));
+      ind.rsi.applyOptions({ title: `RSI(${periods.rsi})` });
+      ind.rsi.setData(buildLineData(times, calcRSI(closes, periods.rsi).values));
     } else if (ind.rsi) {
       removeSeries(ind.rsi); ind.rsi = null;
     }
@@ -2050,18 +2113,19 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.atr) {
         ind.atr = chart.addSeries(LineSeries, {
           color: "#fb923c", lineWidth: 1, priceScaleId: "atr",
-          title: "ATR(14)", lastValueVisible: true, priceLineVisible: false,
+          title: `ATR(${periods.atr})`, lastValueVisible: true, priceLineVisible: false,
         });
         chart.priceScale("atr").applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
       }
-      ind.atr.setData(buildLineData(times, calcATR(highs, lows, closes).values));
+      ind.atr.applyOptions({ title: `ATR(${periods.atr})` });
+      ind.atr.setData(buildLineData(times, calcATR(highs, lows, closes, periods.atr).values));
     } else if (ind.atr) {
       removeSeries(ind.atr); ind.atr = null;
     }
 
     // --- ADX ---
     if (indicators.showADX) {
-      const adxData = calcADX(highs, lows, closes);
+      const adxData = calcADX(highs, lows, closes, periods.adx);
       if (!ind.adx) {
         ind.adx = chart.addSeries(LineSeries, {
           color: "#fbbf24", lineWidth: 1, priceScaleId: "adx",
@@ -2095,11 +2159,12 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.williamsR) {
         ind.williamsR = chart.addSeries(LineSeries, {
           color: "#f472b6", lineWidth: 1, priceScaleId: "wr",
-          title: "W%R(14)", lastValueVisible: true, priceLineVisible: false,
+          title: `W%R(${periods.wr})`, lastValueVisible: true, priceLineVisible: false,
         });
         chart.priceScale("wr").applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
       }
-      ind.williamsR.setData(buildLineData(times, calcWilliamsR(highs, lows, closes)));
+      ind.williamsR.applyOptions({ title: `W%R(${periods.wr})` });
+      ind.williamsR.setData(buildLineData(times, calcWilliamsR(highs, lows, closes, periods.wr)));
     } else if (ind.williamsR) {
       removeSeries(ind.williamsR); ind.williamsR = null;
     }
@@ -2109,11 +2174,12 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.cci) {
         ind.cci = chart.addSeries(LineSeries, {
           color: "#38bdf8", lineWidth: 1, priceScaleId: "cci",
-          title: "CCI(20)", lastValueVisible: true, priceLineVisible: false,
+          title: `CCI(${periods.cci})`, lastValueVisible: true, priceLineVisible: false,
         });
         chart.priceScale("cci").applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
       }
-      ind.cci.setData(buildLineData(times, calcCCI(highs, lows, closes)));
+      ind.cci.applyOptions({ title: `CCI(${periods.cci})` });
+      ind.cci.setData(buildLineData(times, calcCCI(highs, lows, closes, periods.cci)));
     } else if (ind.cci) {
       removeSeries(ind.cci); ind.cci = null;
     }
@@ -2123,10 +2189,11 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.dema) {
         ind.dema = chart.addSeries(LineSeries, {
           color: "#f97316", lineWidth: 1, priceScaleId: "right",
-          title: "DEMA20", lastValueVisible: false, priceLineVisible: false,
+          title: `DEMA${periods.dema}`, lastValueVisible: false, priceLineVisible: false,
         });
       }
-      ind.dema.setData(buildLineData(times, calcDEMA(closes, 20)));
+      ind.dema.applyOptions({ title: `DEMA${periods.dema}` });
+      ind.dema.setData(buildLineData(times, calcDEMA(closes, periods.dema)));
     } else if (ind.dema) {
       removeSeries(ind.dema); ind.dema = null;
     }
@@ -2136,10 +2203,11 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.hullMA) {
         ind.hullMA = chart.addSeries(LineSeries, {
           color: "#a855f7", lineWidth: 1, priceScaleId: "right",
-          title: "HMA20", lastValueVisible: false, priceLineVisible: false,
+          title: `HMA${periods.hull}`, lastValueVisible: false, priceLineVisible: false,
         });
       }
-      ind.hullMA.setData(buildLineData(times, calcHullMA(closes, 20)));
+      ind.hullMA.applyOptions({ title: `HMA${periods.hull}` });
+      ind.hullMA.setData(buildLineData(times, calcHullMA(closes, periods.hull)));
     } else if (ind.hullMA) {
       removeSeries(ind.hullMA); ind.hullMA = null;
     }
@@ -2175,7 +2243,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
 
     // --- Keltner Channels ---
     if (indicators.showKeltner) {
-      const kc = calcKeltnerChannels(bars, 20, 2.0);
+      const kc = calcKeltnerChannels(bars, periods.keltner, periods.keltnerMult);
       if (!ind.keltnerUpper) {
         ind.keltnerUpper = chart.addSeries(LineSeries, {
           color: "rgba(249,115,22,0.4)", lineWidth: 1, lineStyle: 2, priceScaleId: "right",
@@ -2208,14 +2276,15 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
       if (!ind.vwma) {
         ind.vwma = chart.addSeries(LineSeries, {
           color: "#2dd4bf", lineWidth: 1, priceScaleId: "right",
-          title: "VWMA20", lastValueVisible: false, priceLineVisible: false,
+          title: `VWMA${periods.vwma}`, lastValueVisible: false, priceLineVisible: false,
         });
       }
-      ind.vwma.setData(buildLineData(times, calcVWMA(bars, 20)));
+      ind.vwma.applyOptions({ title: `VWMA${periods.vwma}` });
+      ind.vwma.setData(buildLineData(times, calcVWMA(bars, periods.vwma)));
     } else if (ind.vwma) {
       removeSeries(ind.vwma); ind.vwma = null;
     }
-  }, [indicators]);
+  }, [indicators, periods]);
 
   // Refresh indicators whenever bars or indicator config changes
   useEffect(() => {
@@ -2629,7 +2698,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#3b82f6] inline-block shrink-0" />
-              EMA (20)
+              EMA
+              <PeriodInput value={periods.ema1} onChange={(v) => setPeriods((p) => ({ ...p, ema1: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showEMA50}
@@ -2637,7 +2707,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#f59e0b] inline-block shrink-0" />
-              EMA (50)
+              EMA
+              <PeriodInput value={periods.ema2} onChange={(v) => setPeriods((p) => ({ ...p, ema2: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showSMA}
@@ -2645,7 +2716,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#06b6d4] inline-block shrink-0" />
-              SMA (20)
+              SMA
+              <PeriodInput value={periods.sma} onChange={(v) => setPeriods((p) => ({ ...p, sma: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showWMA}
@@ -2653,7 +2725,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#84cc16] inline-block shrink-0" />
-              WMA (20)
+              WMA
+              <PeriodInput value={periods.wma} onChange={(v) => setPeriods((p) => ({ ...p, wma: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showBB}
@@ -2661,7 +2734,9 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#94a3b8] inline-block shrink-0" />
-              Bollinger Bands (20, 2)
+              BB
+              <PeriodInput value={periods.bbPeriod} onChange={(v) => setPeriods((p) => ({ ...p, bbPeriod: v }))} />
+              <PeriodInput value={periods.bbMult} onChange={(v) => setPeriods((p) => ({ ...p, bbMult: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showSupertrend}
@@ -2669,7 +2744,9 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-profit inline-block shrink-0" />
-              Supertrend (10, 3)
+              Supertrend
+              <PeriodInput value={periods.stPeriod} onChange={(v) => setPeriods((p) => ({ ...p, stPeriod: v }))} />
+              <PeriodInput value={periods.stFactor} onChange={(v) => setPeriods((p) => ({ ...p, stFactor: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showVWAP}
@@ -2701,7 +2778,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#f97316] inline-block shrink-0" />
-              DEMA (20)
+              DEMA
+              <PeriodInput value={periods.dema} onChange={(v) => setPeriods((p) => ({ ...p, dema: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showHullMA}
@@ -2709,7 +2787,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#a855f7] inline-block shrink-0" />
-              Hull MA (20)
+              Hull MA
+              <PeriodInput value={periods.hull} onChange={(v) => setPeriods((p) => ({ ...p, hull: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showParabolicSAR}
@@ -2725,7 +2804,9 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#f97316] inline-block shrink-0" />
-              Keltner Channels (20, 2)
+              Keltner
+              <PeriodInput value={periods.keltner} onChange={(v) => setPeriods((p) => ({ ...p, keltner: v }))} />
+              <PeriodInput value={periods.keltnerMult} onChange={(v) => setPeriods((p) => ({ ...p, keltnerMult: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showVWMA}
@@ -2733,7 +2814,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#2dd4bf] inline-block shrink-0" />
-              VWMA (20)
+              VWMA
+              <PeriodInput value={periods.vwma} onChange={(v) => setPeriods((p) => ({ ...p, vwma: v }))} />
             </DropdownMenuCheckboxItem>
 
             <DropdownMenuSeparator className="bg-border-default" />
@@ -2769,7 +2851,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#a855f7] inline-block shrink-0" />
-              RSI (14)
+              RSI
+              <PeriodInput value={periods.rsi} onChange={(v) => setPeriods((p) => ({ ...p, rsi: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showMACD}
@@ -2793,7 +2876,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#fb923c] inline-block shrink-0" />
-              ATR (14)
+              ATR
+              <PeriodInput value={periods.atr} onChange={(v) => setPeriods((p) => ({ ...p, atr: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showADX}
@@ -2801,7 +2885,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#fbbf24] inline-block shrink-0" />
-              ADX (14)
+              ADX
+              <PeriodInput value={periods.adx} onChange={(v) => setPeriods((p) => ({ ...p, adx: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showWilliamsR}
@@ -2809,7 +2894,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#f472b6] inline-block shrink-0" />
-              Williams %R (14)
+              Williams %R
+              <PeriodInput value={periods.wr} onChange={(v) => setPeriods((p) => ({ ...p, wr: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showCCI}
@@ -2817,7 +2903,8 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               className="text-[11px] gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-[#38bdf8] inline-block shrink-0" />
-              CCI (20)
+              CCI
+              <PeriodInput value={periods.cci} onChange={(v) => setPeriods((p) => ({ ...p, cci: v }))} />
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
