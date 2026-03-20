@@ -229,24 +229,24 @@ function PriceHeadline({ straddlePrice, cePrice, pePrice }: PriceHeadlineProps) 
   return (
     <div className="flex items-stretch gap-px bg-border-default">
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
-        <span className="text-xs text-text-muted uppercase tracking-wider">Straddle</span>
-        <span className="font-mono text-xl font-bold text-text-primary leading-none">
+        <span className="text-xxs text-text-muted uppercase tracking-wider">Straddle</span>
+        <span className="font-mono tabular-nums text-xl font-bold text-text-primary leading-none">
           {straddlePrice != null ? fmtPrice(straddlePrice) : "—"}
         </span>
         <span className="text-xxs text-text-muted font-normal">CE + PE</span>
       </div>
 
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
-        <span className="text-xs text-text-muted uppercase tracking-wider">CE</span>
-        <span className="font-mono text-base font-semibold text-loss leading-none">
+        <span className="text-xxs text-text-muted uppercase tracking-wider">CE</span>
+        <span className="font-mono tabular-nums text-base font-semibold text-loss leading-none">
           {cePrice != null ? fmtPrice(cePrice) : "—"}
         </span>
         <span className="text-xxs text-loss/60">Call</span>
       </div>
 
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
-        <span className="text-xs text-text-muted uppercase tracking-wider">PE</span>
-        <span className="font-mono text-base font-semibold text-profit leading-none">
+        <span className="text-xxs text-text-muted uppercase tracking-wider">PE</span>
+        <span className="font-mono tabular-nums text-base font-semibold text-profit leading-none">
           {pePrice != null ? fmtPrice(pePrice) : "—"}
         </span>
         <span className="text-xxs text-profit/60">Put</span>
@@ -622,7 +622,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
           <div className="flex-1" />
 
           {atmStrike != null && (
-            <span className="px-2 py-0.5 text-xs font-mono font-semibold text-accent bg-accent/10 border border-accent/30 rounded">
+            <span className="px-2 py-0.5 text-xs font-mono tabular-nums font-semibold text-accent bg-accent/10 border border-accent/30 rounded">
               ATM {NUM0.format(atmStrike)}
             </span>
           )}
@@ -642,11 +642,11 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
           {spotLtp != null ? (
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-text-muted uppercase tracking-wide">Spot</span>
-              <span className="font-mono text-sm font-semibold text-text-primary">
+              <span className="font-mono tabular-nums text-sm font-semibold text-text-primary">
                 {NUM.format(spotLtp)}
               </span>
               {spotChange != null && (
-                <span className={`flex items-center gap-0.5 text-xs font-mono ${spotUp ? "text-profit" : "text-loss"}`}>
+                <span className={`flex items-center gap-0.5 text-xs font-mono tabular-nums ${spotUp ? "text-profit" : "text-loss"}`}>
                   {spotUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
                   {spotChange >= 0 ? "+" : ""}{spotChange.toFixed(1)}
                 </span>
@@ -657,7 +657,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
           )}
 
           {pnl != null && (
-            <div className={`flex items-center gap-1 ml-2 px-2 py-0.5 rounded border text-xs font-mono font-semibold ${
+            <div className={`flex items-center gap-1 ml-2 px-2 py-0.5 rounded border text-xs font-mono tabular-nums font-semibold ${
               pnl >= 0
                 ? "text-profit bg-profit/10 border-profit/30"
                 : "text-loss bg-loss/10 border-loss/30"

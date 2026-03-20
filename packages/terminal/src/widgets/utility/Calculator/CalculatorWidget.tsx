@@ -216,12 +216,12 @@ function ResultRow({
     highlight === "profit"
       ? "text-profit"
       : highlight === "loss"
-      ? "text-destructive"
-      : "text-white/80";
+      ? "text-loss"
+      : "text-text-primary";
   return (
     <div className="flex justify-between items-center py-0.5">
-      <span className="text-white/40 text-xs">{label}</span>
-      <span className={`font-mono text-xs font-medium ${color}`}>{value}</span>
+      <span className="text-text-muted text-xs">{label}</span>
+      <span className={`font-mono tabular-nums text-xs font-medium ${color}`}>{value}</span>
     </div>
   );
 }
@@ -277,8 +277,8 @@ function RiskCalcTab() {
   };
 
   const fieldCls = (err?: { message?: string }) =>
-    `h-6 text-xs bg-surface-card border-border-default text-white font-mono px-1.5 ${
-      err ? "border-red-800" : ""
+    `h-6 text-xs bg-surface-card border-border-default text-text-primary font-mono px-1.5 ${
+      err ? "border-loss" : ""
     }`;
 
   return (
@@ -288,7 +288,7 @@ function RiskCalcTab() {
         {TEMPLATES.map((t) => (
           <button
             key={t.label}
-            className="text-xs px-2 py-0.5 rounded border border-border-default text-white/50 hover:text-white hover:border-white/20 transition-colors flex-1"
+            className="text-xs px-2 py-0.5 rounded border border-border-default text-text-muted hover:text-text-primary hover:border-border-strong transition-colors flex-1"
             onClick={() => applyTemplate(t)}
             type="button"
           >
@@ -300,19 +300,19 @@ function RiskCalcTab() {
       {/* Form grid */}
       <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
         <div>
-          <Label className="text-xs text-white/40">Capital (₹)</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Capital (₹)</Label>
           <Input {...register("capital")} className={fieldCls(errors.capital)} placeholder="200000" />
-          {errors.capital && <p className="text-red-400 text-xxs mt-0.5">{errors.capital.message}</p>}
+          {errors.capital && <p className="text-loss text-xxs mt-0.5">{errors.capital.message}</p>}
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Risk %</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Risk %</Label>
           <Input {...register("riskPercent")} className={fieldCls(errors.riskPercent)} placeholder="2" step="0.1" type="number" />
-          {errors.riskPercent && <p className="text-red-400 text-xxs mt-0.5">{errors.riskPercent.message}</p>}
+          {errors.riskPercent && <p className="text-loss text-xxs mt-0.5">{errors.riskPercent.message}</p>}
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Side</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Side</Label>
           <Controller
             name="side"
             control={control}
@@ -331,7 +331,7 @@ function RiskCalcTab() {
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">R:R Ratio</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">R:R Ratio</Label>
           <Controller
             name="riskRewardRatio"
             control={control}
@@ -351,17 +351,17 @@ function RiskCalcTab() {
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Entry Price</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Entry Price</Label>
           <Input {...register("entryPrice")} className={fieldCls(errors.entryPrice)} placeholder="0.00" step="0.05" type="number" />
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Stop Loss</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Stop Loss</Label>
           <Input {...register("stopLossPrice")} className={fieldCls(errors.stopLossPrice)} placeholder="0.00" step="0.05" type="number" />
         </div>
 
         <div className="col-span-2">
-          <Label className="text-xs text-white/40">Target Price (optional)</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Target Price (optional)</Label>
           <Input {...register("targetPrice")} className={fieldCls()} placeholder="Leave empty for auto" step="0.05" type="number" />
         </div>
       </div>
@@ -369,7 +369,7 @@ function RiskCalcTab() {
       {/* Results */}
       {result ? (
         <div className="border border-border-default rounded p-2 bg-surface-card space-y-0.5">
-          <p className="text-xs text-white/30 uppercase tracking-wider mb-1">Results</p>
+          <p className="text-xxs text-text-muted uppercase tracking-wider mb-1">Results</p>
           <ResultRow label="Quantity" value={`${result.quantity.toLocaleString("en-IN")} shares`} highlight="neutral" />
           <ResultRow label="Position Value" value={formatINR(result.positionValue)} />
           <ResultRow label="Risk Amount" value={formatINR(result.riskAmount)} highlight="loss" />
@@ -386,7 +386,7 @@ function RiskCalcTab() {
           />
         </div>
       ) : (
-        <div className="text-xs text-white/20 text-center py-2">
+        <div className="text-xs text-text-disabled text-center py-2">
           Enter entry and stop loss prices to calculate
         </div>
       )}
@@ -430,20 +430,20 @@ function BrokerageCalcTab() {
   }, [values]);
 
   const fieldCls = (err?: { message?: string }) =>
-    `h-6 text-xs bg-surface-card border-border-default text-white font-mono px-1.5 ${
-      err ? "border-red-800" : ""
+    `h-6 text-xs bg-surface-card border-border-default text-text-primary font-mono px-1.5 ${
+      err ? "border-loss" : ""
     }`;
 
   return (
     <div className="flex flex-col gap-2 overflow-auto h-full p-3">
       {/* Note about new STT rates */}
-      <div className="text-xs text-amber-400/70 bg-amber-900/10 border border-amber-800/30 rounded px-2 py-1 leading-tight">
+      <div className="text-xs text-warning/70 bg-warning/10 border border-warning/30 rounded px-2 py-1 leading-tight">
         STT rates from Apr 1 2026 — Futures: 0.05%, Options: 0.15% (on premium)
       </div>
 
       <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
         <div>
-          <Label className="text-xs text-white/40">Instrument</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Instrument</Label>
           <Controller
             name="type"
             control={control}
@@ -462,7 +462,7 @@ function BrokerageCalcTab() {
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Side</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Side</Label>
           <Controller
             name="side"
             control={control}
@@ -482,30 +482,30 @@ function BrokerageCalcTab() {
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Lot Size</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Lot Size</Label>
           <Input {...register("lotSize")} className={fieldCls(errors.lotSize)} type="number" placeholder="25" />
-          {errors.lotSize && <p className="text-red-400 text-xxs">{errors.lotSize.message}</p>}
+          {errors.lotSize && <p className="text-loss text-xxs">{errors.lotSize.message}</p>}
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Lots</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Lots</Label>
           <Input {...register("lots")} className={fieldCls(errors.lots)} type="number" placeholder="1" />
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Price (₹)</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Price (₹)</Label>
           <Input {...register("price")} className={fieldCls(errors.price)} type="number" step="0.05" placeholder="100" />
         </div>
 
         <div>
-          <Label className="text-xs text-white/40">Flat Brokerage (₹)</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Flat Brokerage (₹)</Label>
           <Input {...register("flatBrokerage")} className={fieldCls()} type="number" step="1" placeholder="20" />
         </div>
       </div>
 
       {/* Results */}
       <div className="border border-border-default rounded p-2 bg-surface-card space-y-0.5">
-        <p className="text-xs text-white/30 uppercase tracking-wider mb-1">Charges Breakdown</p>
+        <p className="text-xxs text-text-muted uppercase tracking-wider mb-1">Charges Breakdown</p>
         <ResultRow label="Brokerage" value={formatINR(result.brokerage)} />
         <ResultRow label="STT" value={formatINR(result.stt)} />
         <ResultRow label="Exchange Txn" value={formatINR(result.exchangeTxn)} />
@@ -532,8 +532,8 @@ export default function CalculatorWidget(_props: WidgetProps) {
     <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default shrink-0">
-        <Calculator size={11} className="text-white/40" />
-        <span className="text-white/60 uppercase tracking-wider text-xs">Calculator</span>
+        <Calculator size={11} className="text-text-muted" />
+        <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Calculator</span>
       </div>
 
       {/* Tabs */}
@@ -541,14 +541,14 @@ export default function CalculatorWidget(_props: WidgetProps) {
         <TabsList className="shrink-0 h-7 bg-surface-card rounded-none border-b border-border-default px-2 gap-1 justify-start">
           <TabsTrigger
             value="risk"
-            className="text-xs h-5 px-2 data-[state=active]:bg-surface-elevated data-[state=active]:text-white text-white/40 rounded"
+            className="text-xs h-5 px-2 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted rounded"
           >
             <TrendingUp size={9} className="mr-1" />
             Risk / Reward
           </TabsTrigger>
           <TabsTrigger
             value="brokerage"
-            className="text-xs h-5 px-2 data-[state=active]:bg-surface-elevated data-[state=active]:text-white text-white/40 rounded"
+            className="text-xs h-5 px-2 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted rounded"
           >
             Brokerage
           </TabsTrigger>

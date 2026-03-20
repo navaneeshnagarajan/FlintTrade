@@ -197,7 +197,7 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
                 : "rgba(239,68,68,0.12)",
           }}
         />
-        <span className={`relative z-10 font-mono ${isMaxCall ? "text-loss font-semibold" : "text-text-secondary"}`}>
+        <span className={`relative z-10 font-mono tabular-nums ${isMaxCall ? "text-loss font-semibold" : "text-text-secondary"}`}>
           {fmtOI(callOI)}
         </span>
         {isMaxCall && (
@@ -209,7 +209,7 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
 
       {/* Strike label */}
       <div
-        className={`flex-none w-18 text-center font-mono font-semibold border-x px-1 h-full flex flex-col items-center justify-center ${
+        className={`flex-none w-18 text-center font-mono tabular-nums font-semibold border-x px-1 h-full flex flex-col items-center justify-center ${
           isAtm
             ? "text-accent border-accent/40 bg-accent/10"
             : "text-text-primary border-border-default"
@@ -244,7 +244,7 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
             S
           </span>
         )}
-        <span className={`relative z-10 font-mono ${isMaxPut ? "text-profit font-semibold" : "text-text-secondary"}`}>
+        <span className={`relative z-10 font-mono tabular-nums ${isMaxPut ? "text-profit font-semibold" : "text-text-secondary"}`}>
           {fmtOI(putOI)}
         </span>
       </div>
@@ -494,7 +494,7 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
           {spotLtp != null ? (
             <div className="flex items-center gap-1">
               <span className="text-xs text-text-muted uppercase tracking-wide">Spot</span>
-              <span className="font-mono text-sm font-semibold text-text-primary">
+              <span className="font-mono tabular-nums text-sm font-semibold text-text-primary">
                 {spotLtp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
               </span>
             </div>
@@ -505,7 +505,7 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
           {pcr != null && (
             <div className="flex items-center gap-1">
               <span className="text-xs text-text-muted uppercase tracking-wide">PCR</span>
-              <span className={`font-mono text-xs font-semibold px-1.5 py-0.5 rounded border ${
+              <span className={`font-mono tabular-nums text-xs font-semibold px-1.5 py-0.5 rounded border ${
                 Number(pcr) >= 1.2
                   ? "text-profit bg-profit/10 border-profit/30"
                   : Number(pcr) <= 0.8
@@ -564,14 +564,14 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
       )}
 
       {/* Column header row */}
-      <div className="flex-none flex items-center text-xs text-text-muted bg-surface-card border-b border-border-default h-5.5 px-0">
-        <div className="flex-1 text-right pr-2 uppercase tracking-wide text-loss/70">
+      <div className="flex-none flex items-center text-xxs text-text-muted bg-surface-card border-b border-border-default h-5.5 px-0">
+        <div className="flex-1 text-right pr-2 uppercase tracking-wider text-loss/70">
           Call OI
         </div>
-        <div className="flex-none w-18 text-center uppercase tracking-wide text-accent/70 border-x border-border-default">
+        <div className="flex-none w-18 text-center uppercase tracking-wider text-accent/70 border-x border-border-default">
           Strike
         </div>
-        <div className="flex-1 text-left pl-2 uppercase tracking-wide text-profit/70">
+        <div className="flex-1 text-left pl-2 uppercase tracking-wider text-profit/70">
           Put OI
         </div>
       </div>
@@ -614,8 +614,8 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
       {chain && rows.length > 0 && (
         <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-xs">
           <span className="text-text-muted uppercase tracking-wide">Total</span>
-          <span className="text-loss font-mono">CE {fmtOI(totalCallOI)}</span>
-          <span className="text-profit font-mono">PE {fmtOI(totalPutOI)}</span>
+          <span className="text-loss font-mono tabular-nums">CE {fmtOI(totalCallOI)}</span>
+          <span className="text-profit font-mono tabular-nums">PE {fmtOI(totalPutOI)}</span>
           {atmStrike != null && (
             <span className="text-text-muted ml-1">
               ATM: <span className="font-mono text-accent">{NUM0.format(atmStrike)}</span>

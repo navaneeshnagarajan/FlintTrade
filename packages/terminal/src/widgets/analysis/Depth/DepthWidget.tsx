@@ -128,12 +128,12 @@ function DepthRow({ bidOrders, bidQty, bidPrice, askPrice, askQty, askOrders, ma
   return (
     <tr className={`border-b border-border-subtle ${isFirst ? "border-b-border-default" : ""}`}>
       {/* Bid: Orders */}
-      <td className="px-2 py-1 text-right font-mono text-xs text-text-secondary w-12">
+      <td className="px-2 py-1 text-right font-mono tabular-nums text-xs text-text-secondary w-12">
         {bidOrders > 0 ? bidOrders : "—"}
       </td>
 
       {/* Bid: Qty with background bar */}
-      <td className="px-2 py-1 text-right font-mono text-xs text-profit relative w-24">
+      <td className="px-2 py-1 text-right font-mono tabular-nums text-xs text-profit relative w-24">
         <span
           className="absolute right-0 inset-y-0 bg-profit/8 rounded-l pointer-events-none"
           style={{ width: `${bidPct}%` }}
@@ -142,7 +142,7 @@ function DepthRow({ bidOrders, bidQty, bidPrice, askPrice, askQty, askOrders, ma
       </td>
 
       {/* Bid: Price */}
-      <td className={`px-2 py-1 text-right font-mono text-xs font-semibold w-20 ${isFirst ? "text-profit" : "text-profit/80"}`}>
+      <td className={`px-2 py-1 text-right font-mono tabular-nums text-xs font-semibold w-20 ${isFirst ? "text-profit" : "text-profit/80"}`}>
         {fmtPrice(bidPrice)}
       </td>
 
@@ -150,12 +150,12 @@ function DepthRow({ bidOrders, bidQty, bidPrice, askPrice, askQty, askOrders, ma
       <td className="w-2 bg-surface-card border-x border-border-default" />
 
       {/* Ask: Price */}
-      <td className={`px-2 py-1 text-left font-mono text-xs font-semibold w-20 ${isFirst ? "text-loss" : "text-loss/80"}`}>
+      <td className={`px-2 py-1 text-left font-mono tabular-nums text-xs font-semibold w-20 ${isFirst ? "text-loss" : "text-loss/80"}`}>
         {fmtPrice(askPrice)}
       </td>
 
       {/* Ask: Qty with background bar */}
-      <td className="px-2 py-1 text-left font-mono text-xs text-loss relative w-24">
+      <td className="px-2 py-1 text-left font-mono tabular-nums text-xs text-loss relative w-24">
         <span
           className="absolute left-0 inset-y-0 bg-loss/8 rounded-r pointer-events-none"
           style={{ width: `${askPct}%` }}
@@ -164,7 +164,7 @@ function DepthRow({ bidOrders, bidQty, bidPrice, askPrice, askQty, askOrders, ma
       </td>
 
       {/* Ask: Orders */}
-      <td className="px-2 py-1 text-left font-mono text-xs text-text-secondary w-12">
+      <td className="px-2 py-1 text-left font-mono tabular-nums text-xs text-text-secondary w-12">
         {askOrders > 0 ? askOrders : "—"}
       </td>
     </tr>
@@ -257,7 +257,7 @@ export default function DepthWidget({ node: _node }: DepthWidgetProps) {
         {/* Row 1 */}
         <div className="flex items-center gap-2">
           <Layers size={12} className="text-accent shrink-0" />
-          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Depth</span>
+          <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Depth</span>
 
           <div className="flex-1" />
 
@@ -301,19 +301,19 @@ export default function DepthWidget({ node: _node }: DepthWidgetProps) {
             {spread != null && (
               <div className="flex items-center gap-1">
                 <span className="text-xs text-text-muted">Spread</span>
-                <span className="font-mono text-xs text-warning">{fmtPrice(spread)}</span>
+                <span className="font-mono tabular-nums text-xs text-warning">{fmtPrice(spread)}</span>
               </div>
             )}
             {bestBid != null && (
               <div className="flex items-center gap-1">
                 <span className="text-xs text-text-muted">Bid</span>
-                <span className="font-mono text-xs text-profit font-semibold">{fmtPrice(bestBid)}</span>
+                <span className="font-mono tabular-nums text-xs text-profit font-semibold">{fmtPrice(bestBid)}</span>
               </div>
             )}
             {bestAsk != null && (
               <div className="flex items-center gap-1">
                 <span className="text-xs text-text-muted">Ask</span>
-                <span className="font-mono text-xs text-loss font-semibold">{fmtPrice(bestAsk)}</span>
+                <span className="font-mono tabular-nums text-xs text-loss font-semibold">{fmtPrice(bestAsk)}</span>
               </div>
             )}
             <div className="flex-1" />
@@ -351,15 +351,15 @@ export default function DepthWidget({ node: _node }: DepthWidgetProps) {
           <table className="w-full border-separate border-spacing-0">
             <thead className="sticky top-0 z-10 bg-surface-card border-b border-border-default">
               <tr>
-                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wide font-medium">Ord</th>
-                <th className="px-2 py-1 text-right text-xs text-profit uppercase tracking-wide font-medium">Qty</th>
-                <th className="px-2 py-1 text-right text-xs text-profit uppercase tracking-wide font-medium">Bid</th>
+                <th className="px-2 py-1 text-right text-xxs text-text-muted uppercase tracking-wider font-medium">Ord</th>
+                <th className="px-2 py-1 text-right text-xxs text-profit uppercase tracking-wider font-medium">Qty</th>
+                <th className="px-2 py-1 text-right text-xxs text-profit uppercase tracking-wider font-medium">Bid</th>
 
                 <th className="w-2 bg-surface-card border-x border-border-default" />
 
-                <th className="px-2 py-1 text-left text-xs text-loss uppercase tracking-wide font-medium">Ask</th>
-                <th className="px-2 py-1 text-left text-xs text-loss uppercase tracking-wide font-medium">Qty</th>
-                <th className="px-2 py-1 text-left text-xs text-text-muted uppercase tracking-wide font-medium">Ord</th>
+                <th className="px-2 py-1 text-left text-xxs text-loss uppercase tracking-wider font-medium">Ask</th>
+                <th className="px-2 py-1 text-left text-xxs text-loss uppercase tracking-wider font-medium">Qty</th>
+                <th className="px-2 py-1 text-left text-xxs text-text-muted uppercase tracking-wider font-medium">Ord</th>
               </tr>
             </thead>
 
@@ -386,7 +386,7 @@ export default function DepthWidget({ node: _node }: DepthWidgetProps) {
               <tfoot>
                 <tr className="border-t border-border-default bg-surface-card">
                   <td colSpan={2} className="px-2 py-1 text-right">
-                    <span className="font-mono text-xs font-semibold text-profit">{fmtQty(totalBidQty)}</span>
+                    <span className="font-mono tabular-nums text-xs font-semibold text-profit">{fmtQty(totalBidQty)}</span>
                   </td>
                   <td className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wide">Total</td>
 
@@ -394,7 +394,7 @@ export default function DepthWidget({ node: _node }: DepthWidgetProps) {
 
                   <td className="px-2 py-1 text-left text-xs text-text-muted uppercase tracking-wide">Total</td>
                   <td colSpan={2} className="px-2 py-1 text-left">
-                    <span className="font-mono text-xs font-semibold text-loss">{fmtQty(totalAskQty)}</span>
+                    <span className="font-mono tabular-nums text-xs font-semibold text-loss">{fmtQty(totalAskQty)}</span>
                   </td>
                 </tr>
               </tfoot>
@@ -417,7 +417,7 @@ export default function DepthWidget({ node: _node }: DepthWidgetProps) {
             <div className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-profit inline-block" />
               <span className="text-text-muted">Bid</span>
-              <span className="font-mono text-profit font-semibold">{bidDomPct.toFixed(1)}%</span>
+              <span className="font-mono tabular-nums text-profit font-semibold">{bidDomPct.toFixed(1)}%</span>
             </div>
 
             <div className="text-text-muted text-center">
@@ -425,7 +425,7 @@ export default function DepthWidget({ node: _node }: DepthWidgetProps) {
             </div>
 
             <div className="flex items-center gap-1">
-              <span className="font-mono text-loss font-semibold">{(100 - bidDomPct).toFixed(1)}%</span>
+              <span className="font-mono tabular-nums text-loss font-semibold">{(100 - bidDomPct).toFixed(1)}%</span>
               <span className="text-text-muted">Ask</span>
               <span className="w-1.5 h-1.5 rounded-full bg-loss inline-block" />
             </div>

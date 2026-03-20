@@ -236,7 +236,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
       {/* HEADER */}
       <div className="flex items-center gap-2 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
         <Bot size={11} className="text-text-muted shrink-0" />
-        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+        <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
           AI Advisor
         </span>
         <div className="flex-1" />

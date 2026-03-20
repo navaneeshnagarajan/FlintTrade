@@ -379,10 +379,10 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
 
       {/* Price block */}
       <div className="flex flex-col items-end shrink-0 min-w-16">
-        <span className="text-xs font-mono font-semibold text-text-primary leading-tight">
+        <span className="text-xs font-mono tabular-nums font-semibold text-text-primary leading-tight">
           {fmtPrice(ltp)}
         </span>
-        <span className={`text-xxs font-mono leading-tight ${changeColor}`}>
+        <span className={`text-xxs font-mono tabular-nums leading-tight ${changeColor}`}>
           {chgPct != null ? fmtPct(chgPct) : "—"}
         </span>
       </div>
@@ -583,7 +583,7 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
 
       {/* HEADER */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
-        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+        <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
           Watchlist
         </span>
 

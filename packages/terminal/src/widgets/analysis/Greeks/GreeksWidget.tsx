@@ -156,8 +156,8 @@ function GreekCard({ label, value, colorScheme, description }: GreekCardProps) {
 
   return (
     <div className="flex-1 min-w-0 bg-surface-card border border-border-default rounded px-3 py-2">
-      <div className="text-xs text-text-muted uppercase tracking-wider mb-1">{label}</div>
-      <div className={`font-mono text-base font-semibold leading-tight ${valueColor}`}>
+      <div className="text-xxs text-text-muted uppercase tracking-wider mb-1">{label}</div>
+      <div className={`font-mono tabular-nums text-base font-semibold leading-tight ${valueColor}`}>
         {displayValue}
       </div>
       {description && (
@@ -312,7 +312,7 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
       <div className="flex-none flex items-center justify-between px-3 py-1.5 bg-surface-card border-b border-border-default">
         <div className="flex items-center gap-1.5">
           <Activity size={12} className="text-accent" />
-          <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">
+          <span className="font-heading font-semibold text-sm text-text-primary uppercase tracking-wider">
             Portfolio Greeks
           </span>
           {fnoPositions.length > 0 && (
@@ -391,14 +391,14 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
           <table className="w-full border-separate border-spacing-0">
             <thead className="sticky top-0 z-10 bg-surface-card">
               <tr>
-                <th className="px-2 py-1 text-left text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Symbol</th>
-                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Qty</th>
-                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">LTP</th>
-                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Delta</th>
-                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Gamma</th>
-                <th className="px-2 py-1 text-right text-xs text-loss/80 uppercase tracking-wider border-b border-border-default">Theta</th>
-                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Vega</th>
-                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">IV</th>
+                <th className="px-2 py-1 text-left text-xxs text-text-muted uppercase tracking-wider border-b border-border-default">Symbol</th>
+                <th className="px-2 py-1 text-right text-xxs text-text-muted uppercase tracking-wider border-b border-border-default">Qty</th>
+                <th className="px-2 py-1 text-right text-xxs text-text-muted uppercase tracking-wider border-b border-border-default">LTP</th>
+                <th className="px-2 py-1 text-right text-xxs text-text-muted uppercase tracking-wider border-b border-border-default">Delta</th>
+                <th className="px-2 py-1 text-right text-xxs text-text-muted uppercase tracking-wider border-b border-border-default">Gamma</th>
+                <th className="px-2 py-1 text-right text-xxs text-loss/80 uppercase tracking-wider border-b border-border-default">Theta</th>
+                <th className="px-2 py-1 text-right text-xxs text-text-muted uppercase tracking-wider border-b border-border-default">Vega</th>
+                <th className="px-2 py-1 text-right text-xxs text-text-muted uppercase tracking-wider border-b border-border-default">IV</th>
               </tr>
             </thead>
             <tbody>
@@ -411,28 +411,28 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
 
                 return (
                   <tr key={row.symbol} className="border-b border-border-subtle hover:bg-surface-hover/40 transition-colors">
-                    <td className="px-2 py-1 font-mono font-medium text-text-primary truncate max-w-[140px]" title={row.symbol}>
+                    <td className="px-2 py-1 font-mono font-medium text-text-primary truncate max-w-35" title={row.symbol}>
                       {row.symbol}
                     </td>
-                    <td className={`px-2 py-1 text-right font-mono ${qtyColor}`}>
+                    <td className={`px-2 py-1 text-right font-mono tabular-nums ${qtyColor}`}>
                       {row.qty > 0 ? `+${row.qty}` : row.qty}
                     </td>
-                    <td className="px-2 py-1 text-right font-mono text-text-secondary">
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-text-secondary">
                       {fmtLtp(row.ltp)}
                     </td>
-                    <td className={`px-2 py-1 text-right font-mono ${deltaColor}`}>
+                    <td className={`px-2 py-1 text-right font-mono tabular-nums ${deltaColor}`}>
                       {fmt4(row.delta)}
                     </td>
-                    <td className="px-2 py-1 text-right font-mono text-accent">
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-accent">
                       {fmt4(row.gamma)}
                     </td>
-                    <td className="px-2 py-1 text-right font-mono text-loss">
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-loss">
                       {fmt4(row.theta)}
                     </td>
-                    <td className="px-2 py-1 text-right font-mono text-accent">
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-accent">
                       {fmt4(row.vega)}
                     </td>
-                    <td className="px-2 py-1 text-right font-mono text-text-secondary">
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-text-secondary">
                       {fmtIV(row.iv)}
                     </td>
                   </tr>
@@ -446,18 +446,18 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
                   <td colSpan={3} className="px-2 py-1 text-xs text-text-muted uppercase tracking-wider font-semibold">
                     Total ({rows.length} legs)
                   </td>
-                  <td className={`px-2 py-1 text-right font-mono font-semibold text-xs ${
+                  <td className={`px-2 py-1 text-right font-mono tabular-nums font-semibold text-xs ${
                     totals.delta >= 0 ? "text-profit" : "text-loss"
                   }`}>
                     {fmt2(totals.delta)}
                   </td>
-                  <td className="px-2 py-1 text-right font-mono font-semibold text-xs text-accent">
+                  <td className="px-2 py-1 text-right font-mono tabular-nums font-semibold text-xs text-accent">
                     {fmt2(totals.gamma)}
                   </td>
-                  <td className="px-2 py-1 text-right font-mono font-semibold text-xs text-loss">
+                  <td className="px-2 py-1 text-right font-mono tabular-nums font-semibold text-xs text-loss">
                     {fmt2(totals.theta)}
                   </td>
-                  <td className="px-2 py-1 text-right font-mono font-semibold text-xs text-accent">
+                  <td className="px-2 py-1 text-right font-mono tabular-nums font-semibold text-xs text-accent">
                     {fmt2(totals.vega)}
                   </td>
                   <td className="px-2 py-1 text-right text-text-muted">—</td>

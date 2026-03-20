@@ -416,7 +416,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
                 borderBottom: `1px solid ${getChangeColor(sector.avgChange)}30`,
               }}
             >
-              <span className="font-bold uppercase tracking-wide text-white/80 truncate">
+              <span className="font-bold uppercase tracking-wide text-text-primary truncate">
                 {sector.sector}
               </span>
               {sector.width > 80 && (
@@ -453,19 +453,19 @@ export default function SectorMapWidget(_props: WidgetProps) {
                 {showContent && (
                   <div className="text-center w-full px-0.5">
                     <span
-                      className="block font-bold text-white truncate leading-tight"
+                      className="block font-bold text-text-primary truncate leading-tight"
                       style={{ fontSize: Math.min(stock.width / 5, 12) }}
                     >
                       {stock.symbol}
                     </span>
                     <span
-                      className="block font-semibold text-white/90"
+                      className="block font-semibold text-text-primary/90"
                       style={{ fontSize: Math.min(stock.width / 6, 10) }}
                     >
                       {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(2)}%
                     </span>
                     {showPrice && (
-                      <span className="block text-white/70" style={{ fontSize: 9 }}>
+                      <span className="block text-text-secondary" style={{ fontSize: 9 }}>
                         {"\u20B9"}{formatPrice(stock.ltp)}
                       </span>
                     )}
@@ -489,7 +489,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
           }}
         >
           <div className="flex items-center justify-between px-2 py-1 border-b border-border-default">
-            <span className="font-mono font-bold text-white">{hoveredStock.symbol}</span>
+            <span className="font-mono font-bold text-text-primary">{hoveredStock.symbol}</span>
             <span
               className="font-mono font-bold ml-2"
               style={{ color: getChangeColor(hoveredStock.change) }}
@@ -499,12 +499,12 @@ export default function SectorMapWidget(_props: WidgetProps) {
           </div>
           <div className="px-2 py-1 space-y-0.5 text-xs">
             <div className="flex justify-between gap-4">
-              <span className="text-white/50">LTP</span>
-              <span className="font-mono text-white">{"\u20B9"}{formatPrice(hoveredStock.ltp)}</span>
+              <span className="text-text-muted">LTP</span>
+              <span className="font-mono text-text-primary">{"\u20B9"}{formatPrice(hoveredStock.ltp)}</span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-white/50">Sector</span>
-              <span className="text-white">{hoveredStock.sector}</span>
+              <span className="text-text-muted">Sector</span>
+              <span className="text-text-primary">{hoveredStock.sector}</span>
             </div>
           </div>
         </div>
@@ -522,13 +522,13 @@ export default function SectorMapWidget(_props: WidgetProps) {
             className="flex flex-col items-center justify-center rounded p-1 cursor-pointer min-h-[60px]"
             style={{ backgroundColor: getChangeColor(stock.change) }}
           >
-            <span className="font-mono font-bold text-white text-xs text-center leading-tight truncate w-full">
+            <span className="font-mono font-bold text-text-primary text-xs text-center leading-tight truncate w-full">
               {stock.symbol}
             </span>
-            <span className="font-semibold text-white/90 text-xs">
+            <span className="font-semibold text-text-primary/90 text-xs">
               {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(2)}%
             </span>
-            <span className="text-white/70 text-xxs font-mono">{"\u20B9"}{formatPrice(stock.ltp)}</span>
+            <span className="text-text-secondary text-xxs font-mono tabular-nums">{"\u20B9"}{formatPrice(stock.ltp)}</span>
           </div>
         ))}
       </div>
@@ -542,17 +542,17 @@ export default function SectorMapWidget(_props: WidgetProps) {
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-surface-card">
             <tr>
-              <th className="text-left px-2 py-1 text-white/40 font-medium uppercase tracking-wider">Sector</th>
-              <th className="text-right px-2 py-1 text-white/40 font-medium uppercase tracking-wider">Stocks</th>
-              <th className="text-right px-2 py-1 text-white/40 font-medium uppercase tracking-wider">Avg Chg</th>
-              <th className="px-2 py-1 text-white/40 font-medium uppercase tracking-wider">Bar</th>
+              <th className="text-left px-2 py-1 text-text-muted font-medium text-xxs uppercase tracking-wider">Sector</th>
+              <th className="text-right px-2 py-1 text-text-muted font-medium text-xxs uppercase tracking-wider">Stocks</th>
+              <th className="text-right px-2 py-1 text-text-muted font-medium text-xxs uppercase tracking-wider">Avg Chg</th>
+              <th className="px-2 py-1 text-text-muted font-medium text-xxs uppercase tracking-wider">Bar</th>
             </tr>
           </thead>
           <tbody>
             {sectorData.map((item) => (
               <tr
                 key={item.sector}
-                className="border-t border-border-default hover:bg-white/5 cursor-pointer"
+                className="border-t border-border-default hover:bg-surface-hover cursor-pointer"
                 onClick={() => handleSectorClick(item.sector)}
               >
                 <td className="px-2 py-1">
@@ -561,10 +561,10 @@ export default function SectorMapWidget(_props: WidgetProps) {
                       className="w-2 h-2 rounded-full shrink-0"
                       style={{ backgroundColor: getChangeColor(item.avgChange) }}
                     />
-                    <span className="text-white/80">{item.sector}</span>
+                    <span className="text-text-primary">{item.sector}</span>
                   </div>
                 </td>
-                <td className="px-2 py-1 text-right font-mono text-white/60">{item.stockCount}</td>
+                <td className="px-2 py-1 text-right font-mono tabular-nums text-text-secondary">{item.stockCount}</td>
                 <td
                   className="px-2 py-1 text-right font-mono font-medium"
                   style={{ color: getChangeColor(item.avgChange) }}
@@ -572,7 +572,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
                   {item.avgChange >= 0 ? "+" : ""}{item.avgChange.toFixed(2)}%
                 </td>
                 <td className="px-2 py-1">
-                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden w-full">
+                  <div className="h-1.5 rounded-full bg-surface-hover overflow-hidden w-full">
                     <div
                       className="h-full rounded-full transition-all"
                       style={{
@@ -591,9 +591,9 @@ export default function SectorMapWidget(_props: WidgetProps) {
   };
 
   const renderEmpty = () => (
-    <div className="flex flex-col items-center justify-center h-full text-white/30 gap-2">
-      <Grid3X3 size={36} strokeWidth={1} />
-      <p className="text-sm">No stock data available</p>
+    <div className="flex flex-col items-center justify-center h-full text-text-muted gap-2">
+      <Grid3X3 size={36} strokeWidth={1} className="text-text-disabled" />
+      <p className="text-sm text-text-muted">No stock data available</p>
     </div>
   );
 
@@ -604,25 +604,25 @@ export default function SectorMapWidget(_props: WidgetProps) {
         <div className="flex items-center gap-2">
           {selectedSector && (
             <button
-              className="text-white/50 hover:text-white transition-colors"
+              className="text-text-muted hover:text-text-primary transition-colors"
               onClick={() => setSelectedSector(null)}
               title="Back to all sectors"
             >
               <LayoutGrid size={13} />
             </button>
           )}
-          <span className="text-white/60 uppercase tracking-wider text-xs">
+          <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
             {selectedSector ? selectedSector : "Sector Map"}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           {/* Stats badges */}
-          <Badge variant="outline" className="text-xs px-1 py-0 border-green-800 text-green-400 gap-0.5">
+          <Badge variant="outline" className="text-xs px-1 py-0 border-profit/30 text-profit gap-0.5">
             <TrendingUp size={9} />
             {stats.gainers}
           </Badge>
-          <Badge variant="outline" className="text-xs px-1 py-0 border-red-900 text-red-400 gap-0.5">
+          <Badge variant="outline" className="text-xs px-1 py-0 border-loss/30 text-loss gap-0.5">
             <TrendingDown size={9} />
             {stats.losers}
           </Badge>
@@ -639,7 +639,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
               value={sizingMode}
               onValueChange={(v) => setSizingMode(v as SizingMode)}
             >
-              <SelectTrigger className="h-7 text-xs px-1.5 border-border-default bg-surface-card text-white/60 w-16">
+              <SelectTrigger className="h-7 text-xs px-1.5 border-border-default bg-surface-card text-text-secondary w-16">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-surface-card border-border-default text-xs">
@@ -657,8 +657,8 @@ export default function SectorMapWidget(_props: WidgetProps) {
                 title={label}
                 className={`flex items-center justify-center w-6 h-7 transition-colors ${
                   activeMode === id
-                    ? "bg-surface-elevated text-white"
-                    : "text-white/40 hover:text-white/70"
+                    ? "bg-surface-elevated text-text-primary"
+                    : "text-text-muted hover:text-text-secondary"
                 }`}
                 onClick={() => setActiveMode(id)}
               >
@@ -685,10 +685,10 @@ export default function SectorMapWidget(_props: WidgetProps) {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
             <div className="h-1.5 w-6 rounded" style={{ background: "linear-gradient(to right,#8B3030,#3D8B80,#00C853)" }} />
-            <span className="text-xxs text-white/30">-4% → +4%</span>
+            <span className="text-xxs text-text-disabled">-4% → +4%</span>
           </div>
         </div>
-        <span className="text-xxs text-white/20">
+        <span className="text-xxs text-text-disabled">
           {activeMode === "treemap" ? "Tile = equal weight · Color = change %" : "Color = change %"}
         </span>
       </div>
