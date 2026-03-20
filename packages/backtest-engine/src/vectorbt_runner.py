@@ -310,7 +310,6 @@ class VectorBTRunner:
                 or all rows have NaN for that metric.
         """
         _require_vbt()
-        import pandas as pd
 
         # Resolve convenience aliases
         _aliases: dict[str, str] = {
