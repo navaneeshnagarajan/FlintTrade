@@ -2,16 +2,18 @@
  * OptionChainWidget — production-grade option chain for FlintTrade terminal.
  *
  * Features:
- *   - Symbol + Exchange selectors, first-5 expiry buttons
- *   - Spot LTP, change, change% (green/red arrow), PCR badge (computed from OI)
+ *   - Searchable symbol combobox (cmdk) — type to find any F&O stock
+ *   - Exchange selector, first-5 expiry buttons, view tabs
+ *   - Spot LTP, change, change% (green/red arrow), PCR badge (bullish/bearish/neutral)
  *   - Three view tabs: LTP | OI | GREEKS (Delta/Gamma/Theta/Vega/IV)
  *   - OI interpretation badges: Long Build Up / Short Covering / Long Unwinding / Short Build Up
- *   - Scrollable chain table: 10 strikes above ATM, ATM row highlighted, 10 below
+ *   - Scrollable chain table: 10 strikes above ATM, ATM row highlighted (gold tint), 10 below
  *   - Buy/Sell mini buttons per strike (calls + puts)
  *   - BASKET toggle — select strikes, badge count, basket panel
  *   - Color-coded change%, OI bars, ATM accent border
  *   - Auto-refresh: 3 s market hours, 30 s off-hours
  *   - Dense layout: text-xs data, text-xs headers, font-mono numbers
+ *   - Glide theme uses design token hex values (surface/border/text tokens)
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -31,10 +33,26 @@ import {
   TrendingDown,
   AlertCircle,
   ShoppingBasket,
+  Search,
   X,
+  Loader2,
 } from "lucide-react";
-import { getExpiry, getOptionChain, getQuotes, placeOrder } from "../../../services/api";
+import { getExpiry, getOptionChain, getQuotes, placeOrder, searchSymbol } from "../../../services/api";
 import type { Quote } from "../../../types/api";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +67,11 @@ interface SymbolDef {
   exchange: string;
   spotSymbol: string;
   spotExchange: string;
+}
+
+interface SymbolSearchResult {
+  symbol: string;
+  exchange: string;
 }
 
 type ViewType = "LTP" | "OI" | "GREEKS";
@@ -263,14 +286,196 @@ function oiSignalShort(signal: OISignal): string {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-interface SelectorProps {
-  value: string;
-  options: string[];
-  onChange: (val: string) => void;
-  className?: string;
+/** Debounce hook for search input */
+function useDebounce(value: string, delay: number): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
 }
 
-function Selector({ value, options, onChange, className = "" }: SelectorProps) {
+/** Map exchange from search API to option chain exchange */
+function mapToOptionExchange(exchange: string): string {
+  if (exchange === "NSE" || exchange === "NFO") return "NFO";
+  if (exchange === "BSE" || exchange === "BFO") return "BFO";
+  if (exchange === "MCX") return "MCX";
+  if (exchange === "CDS") return "CDS";
+  return "NFO";
+}
+
+/** Map exchange to spot exchange for quotes */
+function mapToSpotExchange(exchange: string): string {
+  if (exchange === "NFO" || exchange === "NSE") return "NSE";
+  if (exchange === "BFO" || exchange === "BSE") return "BSE";
+  if (exchange === "MCX") return "MCX";
+  if (exchange === "CDS") return "CDS";
+  return "NSE";
+}
+
+/** Searchable symbol combobox — Popover + Command (cmdk) */
+function SymbolSearchCombobox({
+  activeSymbol,
+  onSelect,
+}: {
+  activeSymbol: SymbolDef;
+  onSelect: (sym: SymbolDef) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SymbolSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const debouncedQuery = useDebounce(query, 300);
+
+  // Search API when query changes (2+ chars)
+  useEffect(() => {
+    if (debouncedQuery.length < 2) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    (async () => {
+      try {
+        const raw = await searchSymbol(debouncedQuery.trim());
+        if (cancelled) return;
+        const list = Array.isArray(raw)
+          ? raw
+          : ((raw as unknown as { data?: SymbolSearchResult[] })?.data ?? []);
+        setSearchResults(list.slice(0, 15));
+      } catch {
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [debouncedQuery]);
+
+  function handleSelectPopular(sym: SymbolDef) {
+    onSelect(sym);
+    setOpen(false);
+    setQuery("");
+    setSearchResults([]);
+  }
+
+  function handleSelectSearch(result: SymbolSearchResult) {
+    const optExchange = mapToOptionExchange(result.exchange);
+    const spotExchange = mapToSpotExchange(result.exchange);
+    onSelect({
+      label: result.symbol,
+      exchange: optExchange,
+      spotSymbol: result.symbol,
+      spotExchange,
+    });
+    setOpen(false);
+    setQuery("");
+    setSearchResults([]);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-text-primary bg-surface-hover border border-border-default rounded hover:border-accent/50 transition-colors"
+          aria-label="Select symbol"
+        >
+          <Search size={10} className="text-text-muted" />
+          {activeSymbol.label}
+          <ChevronDown size={10} className={`text-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0 bg-surface-card border-border-default" align="start" sideOffset={4}>
+        <Command shouldFilter={false} className="bg-surface-card">
+          <CommandInput
+            placeholder="Search symbol..."
+            value={query}
+            onValueChange={setQuery}
+            className="text-xs"
+          />
+          <CommandList className="max-h-64">
+            {/* Search results — shown when typing */}
+            {debouncedQuery.length >= 2 && (
+              <CommandGroup heading={searching ? "Searching..." : `Results for "${debouncedQuery}"`}>
+                {searching && (
+                  <div className="flex items-center justify-center py-2">
+                    <Loader2 size={14} className="animate-spin text-text-muted" />
+                  </div>
+                )}
+                {!searching && searchResults.length === 0 && debouncedQuery.length >= 2 && (
+                  <CommandEmpty>No symbols found</CommandEmpty>
+                )}
+                {!searching && searchResults.map((r) => (
+                  <CommandItem
+                    key={`${r.symbol}-${r.exchange}`}
+                    value={`${r.symbol}-${r.exchange}`}
+                    onSelect={() => handleSelectSearch(r)}
+                    className="text-xs cursor-pointer"
+                  >
+                    <span className="font-semibold text-text-primary">{r.symbol}</span>
+                    <span className="ml-auto text-xxs text-text-muted">{r.exchange}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+
+            {/* Popular symbols — always shown */}
+            {debouncedQuery.length < 2 && (
+              <>
+                <CommandGroup heading="Popular">
+                  {SYMBOLS.map((sym) => (
+                    <CommandItem
+                      key={`${sym.label}-${sym.exchange}`}
+                      value={`${sym.label}-${sym.exchange}`}
+                      onSelect={() => handleSelectPopular(sym)}
+                      className={`text-xs cursor-pointer ${
+                        sym.label === activeSymbol.label ? "bg-accent/10 text-accent" : ""
+                      }`}
+                    >
+                      <span className="font-semibold">{sym.label}</span>
+                      <span className="ml-auto text-xxs text-text-muted">{sym.exchange}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+
+            {/* Separator between search and popular when both could show */}
+            {debouncedQuery.length >= 2 && searchResults.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading="Popular">
+                  {SYMBOLS.slice(0, 5).map((sym) => (
+                    <CommandItem
+                      key={`pop-${sym.label}-${sym.exchange}`}
+                      value={`pop-${sym.label}-${sym.exchange}`}
+                      onSelect={() => handleSelectPopular(sym)}
+                      className="text-xs cursor-pointer"
+                    >
+                      <span className="font-semibold">{sym.label}</span>
+                      <span className="ml-auto text-xxs text-text-muted">{sym.exchange}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Compact exchange selector dropdown */
+function ExchangeSelector({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -283,17 +488,17 @@ function Selector({ value, options, onChange, className = "" }: SelectorProps) {
   }, []);
 
   return (
-    <div ref={ref} className={`relative ${className}`}>
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((p) => !p)}
         className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-text-primary bg-surface-hover border border-border-default rounded hover:border-accent/50 transition-colors"
       >
         {value}
-        <ChevronDown size={10} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown size={10} className={`text-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <div className="absolute top-full left-0 mt-0.5 z-50 bg-surface-card border border-border-default rounded shadow-lg min-w-full">
-          {options.map((opt) => (
+          {EXCHANGES.map((opt) => (
             <button
               key={opt}
               onClick={() => { onChange(opt); setOpen(false); }}
@@ -319,7 +524,7 @@ interface OptionChainWidgetProps {
 }
 
 export default function OptionChainWidget({ node: _node }: OptionChainWidgetProps) {
-  const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
+  const [symDef, setSymDef] = useState<SymbolDef>(SYMBOLS[0]);
   const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
@@ -337,7 +542,6 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
   const [basket, setBasket] = useState<BasketItem[]>([]);
   const [basketOpen, setBasketOpen] = useState(false);
 
-  const symDef   = SYMBOLS[activeSymbolIdx];
   const exchange = exchangeOverride ?? symDef.exchange;
 
   const gridRef = useRef<DataEditorRef>(null);
@@ -368,7 +572,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     })();
 
     return () => { cancelled = true; };
-  }, [activeSymbolIdx, exchange, symDef.label]);
+  }, [symDef.label, exchange]);
 
   // fetch chain + spot
   const fetchData = useCallback(async () => {
@@ -541,18 +745,23 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
   // ---------------------------------------------------------------------------
 
   const glideTheme: Partial<Theme> = useMemo(() => ({
-    bgCell: "#0a0a0f",
-    bgCellMedium: "#12121a",
-    bgHeader: "#12121a",
-    bgHeaderHasFocus: "#1e1e2e",
-    bgHeaderHovered: "#1a1a2e",
-    textDark: "#e5e5e5",
-    textMedium: "#a0a0b0",
-    textLight: "#606070",
-    textHeader: "#a0a0b0",
+    // Surface tokens (raw hex — Glide needs literal values)
+    bgCell: "#0a0a0f",           // surface-base
+    bgCellMedium: "#16161f",     // surface-card
+    bgHeader: "#16161f",         // surface-card
+    bgHeaderHasFocus: "#24242e", // surface-hover
+    bgHeaderHovered: "#24242e",  // surface-hover
+    // Text tokens
+    textDark: "#e4e4e7",         // text-primary
+    textMedium: "#8b8b95",       // text-secondary
+    textLight: "#6b6b78",        // text-muted
+    textHeader: "#8b8b95",       // text-secondary
+    // Accent
     accentColor: "#6366f1",
     accentFg: "#ffffff",
-    borderColor: "#1e1e2e",
+    // Border token
+    borderColor: "#2a2a3a",      // border-default
+    // Typography
     fontFamily: "JetBrains Mono, monospace",
     baseFontStyle: "11px",
     headerFontStyle: "500 10px",
@@ -677,7 +886,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
         displayData: isAtm ? `▶ ${NUM0.format(strike)}` : NUM0.format(strike),
         allowOverlay: false,
         themeOverride: isAtm
-          ? { textDark: "#818cf8", baseFontStyle: "bold 11px" }
+          ? { textDark: "#eab308", baseFontStyle: "bold 11px" }  // ATM gold/amber
           : undefined,
         readonly: true,
       };
@@ -800,21 +1009,18 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
       {/* Top bar */}
       <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5 space-y-1.5">
 
-        {/* Row 1 */}
+        {/* Row 1: Symbol + Exchange + Expiry + View + Basket + Refresh — all in one line */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <Selector
-            value={symDef.label}
-            options={SYMBOLS.map((s) => s.label)}
-            onChange={(val) => {
-              const idx = SYMBOLS.findIndex((s) => s.label === val);
-              setActiveSymbolIdx(idx);
+          <SymbolSearchCombobox
+            activeSymbol={symDef}
+            onSelect={(newSym) => {
+              setSymDef(newSym);
               setExchangeOverride(null);
             }}
           />
 
-          <Selector
+          <ExchangeSelector
             value={exchange}
-            options={EXCHANGES}
             onChange={setExchangeOverride}
           />
 
@@ -911,14 +1117,14 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             <span className="text-xs text-text-muted">Spot: —</span>
           )}
 
-          {/* PCR badge — color-coded */}
+          {/* PCR badge — bullish/bearish/neutral token colors */}
           {pcr != null && (
             <div className={`flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold font-mono ${
               Number(pcr) >= 1.2
-                ? "bg-profit/10 border-profit/30 text-profit"
+                ? "bg-bullish-bg border-bullish-border text-bullish-text"
                 : Number(pcr) <= 0.8
-                  ? "bg-loss/10 border-loss/30 text-loss"
-                  : "bg-warning/10 border-warning/30 text-warning"
+                  ? "bg-bearish-bg border-bearish-border text-bearish-text"
+                  : "bg-atm-bg border-atm-border text-atm-text"
             }`}>
               <span className="font-sans font-medium text-text-muted mr-0.5">PCR</span>
               {Number(pcr).toFixed(2)}
@@ -1082,8 +1288,9 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
               getRowThemeOverride: (row: number) => {
                 const s = strikes[row];
                 if (!s) return undefined;
+                // ATM row: gold/amber tint background
                 return s.strike === atmStrike
-                  ? { bgCell: "#131326", bgCellMedium: "#1a1a36" }
+                  ? { bgCell: "#eab30812", bgCellMedium: "#eab30818" }
                   : undefined;
               },
             } as object)}
@@ -1094,16 +1301,16 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
       {/* Footer */}
       {chain && strikes.length > 0 && (
         <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-xs">
-          <span className="text-text-muted uppercase tracking-wide">Total OI</span>
-          <span className="text-loss font-mono">
+          <span className="text-text-muted uppercase tracking-wide font-medium">Total OI</span>
+          <span className="text-loss font-mono font-semibold">
             CE: {fmtOI(strikes.reduce((s, r) => s + Number(r.call?.oi ?? r.call?.open_interest ?? 0), 0))}
           </span>
-          <span className="text-profit font-mono">
+          <span className="text-profit font-mono font-semibold">
             PE: {fmtOI(strikes.reduce((s, r) => s + Number(r.put?.oi  ?? r.put?.open_interest  ?? 0), 0))}
           </span>
           {atmStrike != null && (
-            <span className="text-text-muted ml-2">
-              ATM: <span className="font-mono text-accent font-semibold">{NUM0.format(atmStrike)}</span>
+            <span className="text-text-muted">
+              ATM: <span className="font-mono text-atm-text font-semibold">{NUM0.format(atmStrike)}</span>
             </span>
           )}
           {basket.length > 0 && (
@@ -1111,8 +1318,9 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
               Basket: {basket.length} leg{basket.length > 1 ? "s" : ""}
             </span>
           )}
-          <span className="ml-auto text-text-muted">
-            {isMarketHours() ? "Live · 3s" : "Closed · 30s"}
+          <span className="ml-auto text-text-muted flex items-center gap-1.5">
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${isMarketHours() ? "bg-profit" : "bg-text-muted"}`} />
+            {isMarketHours() ? "Live" : "Closed"} · {isMarketHours() ? "3s" : "30s"}
           </span>
         </div>
       )}
