@@ -2,7 +2,7 @@
 // Replaces direct getTradebook() call with useTradebook() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table + shadcn Badge for BUY/SELL side badges.
 import { useMemo, useState } from "react";
-import { Clock, RefreshCw } from "lucide-react";
+import { Clock, RefreshCw, ArrowRightLeft } from "lucide-react";
 import {
   type ColumnDef,
   flexRender,
@@ -155,7 +155,7 @@ export default function TradeBookWidget(_props: WidgetProps) {
         accessorKey: "timeDisplay",
         header: "Time",
         cell: ({ row }) => (
-          <span className="font-mono text-text-muted whitespace-nowrap">{row.original.timeDisplay}</span>
+          <span className="font-mono tabular-nums text-text-muted whitespace-nowrap">{row.original.timeDisplay}</span>
         ),
       },
       {
@@ -185,21 +185,21 @@ export default function TradeBookWidget(_props: WidgetProps) {
         accessorKey: "qty",
         header: "Qty",
         cell: ({ row }) => (
-          <span className="font-mono">{row.original.qty}</span>
+          <span className="font-mono tabular-nums">{row.original.qty}</span>
         ),
       },
       {
         accessorKey: "price",
         header: "Price",
         cell: ({ row }) => (
-          <span className="font-mono text-text-primary">{INR.format(row.original.price)}</span>
+          <span className="font-mono tabular-nums text-text-primary">{INR.format(row.original.price)}</span>
         ),
       },
       {
         accessorKey: "value",
         header: "Value",
         cell: ({ row }) => (
-          <span className="font-mono text-text-secondary">{INR.format(row.original.value)}</span>
+          <span className="font-mono tabular-nums text-text-secondary">{INR.format(row.original.value)}</span>
         ),
       },
     ],
@@ -216,16 +216,16 @@ export default function TradeBookWidget(_props: WidgetProps) {
   });
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs">
+    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0 gap-2 flex-wrap">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="text-text-muted uppercase tracking-wider text-xs">TRADES</span>
-          <span className="text-xs text-text-secondary font-mono">({counts.all})</span>
+          <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">Trades</span>
+          <span className="text-xxs text-text-secondary font-mono tabular-nums">({counts.all})</span>
         </div>
         <div className="flex items-center gap-2">
           {lastFetch && (
-            <span className="text-xs text-text-muted flex items-center gap-0.5">
+            <span className="text-xxs text-text-muted flex items-center gap-0.5">
               <Clock size={8} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
@@ -243,7 +243,7 @@ export default function TradeBookWidget(_props: WidgetProps) {
       </div>
 
       {/* Filter pills */}
-      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default shrink-0">
+      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-border-default shrink-0">
         <FilterPill value={FILTER_ALL} label="All" count={counts.all} activeFilter={filter} onClick={setFilter} />
         <FilterPill value={FILTER_BUY} label="Buy" count={counts.buy} activeFilter={filter} onClick={setFilter} />
         <FilterPill value={FILTER_SELL} label="Sell" count={counts.sell} activeFilter={filter} onClick={setFilter} />
@@ -251,7 +251,10 @@ export default function TradeBookWidget(_props: WidgetProps) {
 
       {/* Body */}
       {filteredRows.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-text-muted">No trades today</div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
+          <ArrowRightLeft size={24} className="text-text-disabled" />
+          <span className="text-sm">No trades today</span>
+        </div>
       ) : (
         <div className="flex-1 overflow-auto">
           <Table>
@@ -261,7 +264,9 @@ export default function TradeBookWidget(_props: WidgetProps) {
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className="text-xs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
+                      className={`text-xxs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1 ${
+                        header.id === "qty" || header.id === "price" || header.id === "value" ? "text-right" : ""
+                      }`}
                       onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}
@@ -276,13 +281,20 @@ export default function TradeBookWidget(_props: WidgetProps) {
               ))}
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map((row) => (
+              {table.getRowModel().rows.map((row, idx) => (
                 <TableRow
                   key={row.id}
-                  className="border-t border-border-subtle hover:bg-surface-hover/50"
+                  className={`border-t border-border-subtle hover:bg-surface-hover/50 ${
+                    idx % 2 === 1 ? "bg-surface-stripe" : ""
+                  }`}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="px-2 py-1">
+                    <TableCell
+                      key={cell.id}
+                      className={`px-2 py-1 ${
+                        cell.column.id === "qty" || cell.column.id === "price" || cell.column.id === "value" ? "text-right" : ""
+                      }`}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}

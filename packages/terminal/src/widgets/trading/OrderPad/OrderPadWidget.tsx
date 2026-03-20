@@ -94,7 +94,7 @@ function PillGroup({ value, options, onChange, className = "" }: PillGroupProps)
           key={opt}
           type="button"
           onClick={() => onChange(opt)}
-          className={`flex-1 h-6 text-xs font-medium transition-colors ${
+          className={`flex-1 h-8 text-xs font-medium transition-colors ${
             value === opt
               ? "bg-accent text-white"
               : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
@@ -137,13 +137,13 @@ function StepInput({
 
   return (
     <div className="flex flex-col gap-0.5">
-      <label className="text-xs text-text-muted uppercase tracking-wider">{label}</label>
-      <div className="flex items-stretch h-7">
+      <label className="text-xxs text-text-muted uppercase tracking-wider">{label}</label>
+      <div className="flex items-stretch h-8">
         <button
           type="button"
           onClick={dec}
           disabled={disabled}
-          className="w-7 flex items-center justify-center bg-surface-hover border border-r-0 border-border-default rounded-l text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-8 flex items-center justify-center bg-surface-hover border border-r-0 border-border-default rounded-l text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Minus size={10} />
         </button>
@@ -155,13 +155,13 @@ function StepInput({
           min={min}
           step={step}
           placeholder={placeholder}
-          className="flex-1 min-w-0 bg-surface-hover border-y border-x-0 border-border-default rounded-none px-2 text-xs font-mono text-text-primary text-center focus-visible:ring-0 focus-visible:border-accent disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-text-muted h-7"
+          className="flex-1 min-w-0 bg-surface-hover border-y border-x-0 border-border-default rounded-none px-2 text-xs font-mono tabular-nums text-text-primary text-center focus-visible:ring-0 focus-visible:border-accent disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-text-muted h-8"
         />
         <button
           type="button"
           onClick={inc}
           disabled={disabled}
-          className="w-7 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-8 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus size={10} />
         </button>
@@ -181,14 +181,14 @@ interface NumFieldProps {
 function NumField({ label, value, onChange, disabled = false, placeholder = "" }: NumFieldProps) {
   return (
     <div className="flex flex-col gap-0.5">
-      <label className="text-xs text-text-muted uppercase tracking-wider">{label}</label>
+      <label className="text-xxs text-text-muted uppercase tracking-wider">{label}</label>
       <Input
         type="number"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         placeholder={placeholder}
-        className="h-7 w-full bg-surface-hover border border-border-default rounded px-2 text-xs font-mono text-text-primary focus-visible:ring-0 focus-visible:border-accent disabled:opacity-30 disabled:cursor-not-allowed placeholder:text-text-muted"
+        className="h-8 w-full bg-surface-hover border border-border-default rounded px-2 text-xs font-mono tabular-nums text-text-primary focus-visible:ring-0 focus-visible:border-accent disabled:opacity-30 disabled:cursor-not-allowed placeholder:text-text-muted"
       />
     </div>
   );
@@ -387,7 +387,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
       {/* Header */}
       <div className="flex-none bg-surface-card border-b border-border-default px-3 py-2 flex items-center gap-2">
         <FileEdit size={13} className="text-accent shrink-0" />
-        <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">
+        <span className="font-heading font-semibold text-sm text-text-primary uppercase tracking-wider">
           Order Pad
         </span>
         {isMarketHours() && (
@@ -404,9 +404,9 @@ export default function OrderPadWidget(_props: WidgetProps) {
       >
         {/* Symbol search */}
         <div className="flex flex-col gap-0.5" ref={searchRef}>
-          <label className="text-xs text-text-muted uppercase tracking-wider">Symbol</label>
+          <label className="text-xxs text-text-muted uppercase tracking-wider">Symbol</label>
           <div className="relative">
-            <div className="flex items-center gap-1.5 h-8 bg-surface-hover border border-border-default rounded px-2 focus-within:border-accent transition-colors">
+            <div className="flex items-center gap-1.5 h-9 bg-surface-hover border border-border-default rounded px-2 focus-within:border-accent transition-colors">
               <Search size={12} className="text-text-muted shrink-0" />
               <input
                 type="text"
@@ -471,9 +471,9 @@ export default function OrderPadWidget(_props: WidgetProps) {
               <button
                 type="button"
                 onClick={() => field.onChange("BUY")}
-                className={`flex-1 h-8 rounded font-semibold text-sm transition-colors border ${
+                className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
                   field.value === "BUY"
-                    ? "bg-profit/15 border-profit/50 text-profit"
+                    ? "bg-bullish-bg border-bullish-border text-profit"
                     : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary"
                 }`}
               >
@@ -482,9 +482,9 @@ export default function OrderPadWidget(_props: WidgetProps) {
               <button
                 type="button"
                 onClick={() => field.onChange("SELL")}
-                className={`flex-1 h-8 rounded font-semibold text-sm transition-colors border ${
+                className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
                   field.value === "SELL"
-                    ? "bg-loss/15 border-loss/50 text-loss"
+                    ? "bg-bearish-bg border-bearish-border text-loss"
                     : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary"
                 }`}
               >
@@ -496,7 +496,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
 
         {/* Order type */}
         <div className="flex flex-col gap-0.5">
-          <label className="text-xs text-text-muted uppercase tracking-wider">Order Type</label>
+          <label className="text-xxs text-text-muted uppercase tracking-wider">Order Type</label>
           <Controller
             control={control}
             name="orderType"
@@ -512,7 +512,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
 
         {/* Product type */}
         <div className="flex flex-col gap-0.5">
-          <label className="text-xs text-text-muted uppercase tracking-wider">Product</label>
+          <label className="text-xxs text-text-muted uppercase tracking-wider">Product</label>
           <Controller
             control={control}
             name="product"
@@ -586,10 +586,10 @@ export default function OrderPadWidget(_props: WidgetProps) {
         </div>
 
         {/* Order summary preview */}
-        <div className="rounded border border-border-default bg-surface-card px-3 py-2 space-y-1">
+        <div className="rounded border border-border-subtle bg-surface-card px-3 py-2 space-y-1">
           <div className="flex justify-between text-xs">
             <span className="text-text-muted">Symbol</span>
-            <span className="font-mono text-text-primary font-semibold">{symbol}</span>
+            <span className="font-mono tabular-nums text-text-primary font-semibold">{symbol}</span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-text-muted">Exchange</span>
@@ -601,7 +601,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-text-muted">Qty / Product</span>
-            <span className="font-mono text-text-primary">
+            <span className="font-mono tabular-nums text-text-primary">
               {qty} · {product}
             </span>
           </div>
@@ -612,13 +612,13 @@ export default function OrderPadWidget(_props: WidgetProps) {
           {priceEnabled && price != null && price > 0 && (
             <div className="flex justify-between text-xs">
               <span className="text-text-muted">Price</span>
-              <span className="font-mono text-text-primary">{price}</span>
+              <span className="font-mono tabular-nums text-text-primary">{price}</span>
             </div>
           )}
           {triggerEnabled && trigPrice != null && trigPrice > 0 && (
             <div className="flex justify-between text-xs">
               <span className="text-text-muted">Trigger</span>
-              <span className="font-mono text-text-primary">{trigPrice}</span>
+              <span className="font-mono tabular-nums text-text-primary">{trigPrice}</span>
             </div>
           )}
         </div>

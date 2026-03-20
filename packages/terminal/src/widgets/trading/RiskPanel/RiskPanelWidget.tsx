@@ -55,17 +55,17 @@ const LEVEL_COLORS: Record<RiskLevel, { bar: string; text: string; badge: string
   safe: {
     bar: "bg-profit",
     text: "text-profit",
-    badge: "bg-green-900/30 text-green-400 border-green-800",
+    badge: "bg-bullish-bg text-profit border-bullish-border",
   },
   warning: {
-    bar: "bg-amber-400",
-    text: "text-amber-400",
-    badge: "bg-amber-900/30 text-amber-400 border-amber-800",
+    bar: "bg-warning",
+    text: "text-warning",
+    badge: "bg-atm-bg text-warning border-atm-border",
   },
   danger: {
     bar: "bg-loss",
-    text: "text-destructive",
-    badge: "bg-red-900/30 text-red-400 border-red-800",
+    text: "text-loss",
+    badge: "bg-bearish-bg text-loss border-bearish-border",
   },
 };
 
@@ -92,12 +92,12 @@ function ProgressRow({
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <span className="text-white/30">{icon}</span>
-          <span className="text-xs text-white/50">{label}</span>
+          <span className="text-text-disabled">{icon}</span>
+          <span className="text-xs text-text-secondary">{label}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`font-mono text-xs font-medium ${colors.text}`}>{usedLabel}</span>
-          <span className="text-xs text-white/20">/ {maxLabel}</span>
+          <span className={`font-mono tabular-nums text-xs font-medium ${colors.text}`}>{usedLabel}</span>
+          <span className="text-xs text-text-disabled">/ {maxLabel}</span>
           <Badge
             className={`text-xxs px-1 py-0 border ${colors.badge}`}
           >
@@ -105,7 +105,7 @@ function ProgressRow({
           </Badge>
         </div>
       </div>
-      <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+      <div className="h-1 rounded-full bg-surface-hover overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${colors.bar}`}
           style={{ width: `${usagePct}%` }}
@@ -131,11 +131,11 @@ function SummaryBadge({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="flex items-center gap-1 text-white/30">
+      <div className="flex items-center gap-1 text-text-disabled">
         {icon}
         <span className="text-xxs uppercase tracking-wider">{label}</span>
       </div>
-      <span className={`font-mono text-xs font-bold ${color}`}>{value}</span>
+      <span className={`font-mono tabular-nums text-xs font-bold ${color}`}>{value}</span>
     </div>
   );
 }
@@ -203,10 +203,10 @@ export default function RiskPanelWidget(_props: WidgetProps) {
   return (
     <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0">
         <div className="flex items-center gap-1.5">
-          <ShieldAlert size={11} className="text-white/40" />
-          <span className="text-white/60 uppercase tracking-wider text-xs">Risk Panel</span>
+          <ShieldAlert size={11} className="text-text-muted" />
+          <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">Risk Panel</span>
         </div>
         <Badge className={`text-xxs px-1.5 py-0 border ${overallColors.badge}`}>
           {overallLabel}
@@ -221,13 +221,13 @@ export default function RiskPanelWidget(_props: WidgetProps) {
               <SummaryBadge
                 label="Available"
                 value={formatINR(availableCash)}
-                color="text-white/80"
+                color="text-text-primary"
                 icon={<Banknote size={9} />}
               />
               <SummaryBadge
                 label="Daily PnL"
                 value={formatINR(totalPnl)}
-                color={totalPnl >= 0 ? "text-profit" : "text-destructive"}
+                color={totalPnl >= 0 ? "text-profit" : "text-loss"}
                 icon={<TrendingDown size={9} />}
               />
               <SummaryBadge
@@ -290,7 +290,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
         {/* Limits reference */}
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-2">
-            <p className="text-xxs text-white/20 uppercase tracking-wider mb-1.5">Configured Limits</p>
+            <p className="text-xxs text-text-disabled uppercase tracking-wider mb-1.5">Configured Limits</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
               {[
                 ["Max Lots", riskLimits.maxPositionLots],
@@ -299,8 +299,8 @@ export default function RiskPanelWidget(_props: WidgetProps) {
                 ["Orders/Min", riskLimits.maxOrdersPerMin],
               ].map(([label, value]) => (
                 <div key={String(label)} className="flex justify-between">
-                  <span className="text-xs text-white/30">{label}</span>
-                  <span className="font-mono text-xs text-white/60">{value}</span>
+                  <span className="text-xs text-text-muted">{label}</span>
+                  <span className="font-mono tabular-nums text-xs text-text-secondary">{value}</span>
                 </div>
               ))}
             </div>

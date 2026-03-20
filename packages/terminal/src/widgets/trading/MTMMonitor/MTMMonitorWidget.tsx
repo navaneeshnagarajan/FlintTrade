@@ -97,11 +97,11 @@ function StatCard({
     <Card className="bg-surface-card border-border-default flex-1 min-w-0">
       <CardContent className="p-2">
         <div className="flex items-center gap-1 mb-0.5">
-          <span className="text-white/30">{icon}</span>
-          <span className="text-xxs text-white/30 uppercase tracking-wider">{label}</span>
+          <span className="text-text-disabled">{icon}</span>
+          <span className="text-xxs text-text-muted uppercase tracking-wider">{label}</span>
         </div>
-        <div className={`font-mono font-bold text-sm leading-tight ${color}`}>{value}</div>
-        {sub && <div className="text-xs text-white/30 mt-0.5">{sub}</div>}
+        <div className={`font-mono tabular-nums font-bold text-sm leading-tight ${color}`}>{value}</div>
+        {sub && <div className="text-xxs text-text-muted mt-0.5 font-mono tabular-nums">{sub}</div>}
       </CardContent>
     </Card>
   );
@@ -356,20 +356,20 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
 
   // Derived status badge
   const status = useMemo(() => {
-    if (currentMtm >= riskLimits.mtmTarget) return { label: "Target Hit", color: "bg-green-900/50 text-green-400 border-green-800" };
-    if (currentMtm <= -Math.abs(riskLimits.mtmStoploss)) return { label: "SL Hit", color: "bg-red-900/50 text-red-400 border-red-800" };
+    if (currentMtm >= riskLimits.mtmTarget) return { label: "Target Hit", color: "bg-bullish-bg text-profit border-bullish-border" };
+    if (currentMtm <= -Math.abs(riskLimits.mtmStoploss)) return { label: "SL Hit", color: "bg-bearish-bg text-loss border-bearish-border" };
     if (currentMtm < 0 && Math.abs(currentMtm) >= Math.abs(riskLimits.mtmStoploss) * 0.8)
-      return { label: "Near SL", color: "bg-amber-900/50 text-amber-400 border-amber-800" };
-    return { label: "Active", color: "bg-white/5 text-white/40 border-white/10" };
+      return { label: "Near SL", color: "bg-atm-bg text-warning border-atm-border" };
+    return { label: "Active", color: "bg-surface-hover text-text-muted border-border-default" };
   }, [currentMtm, riskLimits]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0">
-        <span className="text-white/60 uppercase tracking-wider text-xs">MTM Monitor</span>
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0">
+        <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">MTM Monitor</span>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-white/30">
+          <span className="text-xxs text-text-muted font-mono tabular-nums">
             Target {formatINR(riskLimits.mtmTarget)} / SL {formatINR(riskLimits.mtmStoploss)}
           </span>
           <Badge className={`text-xxs px-1.5 py-0 border ${status.color}`}>
@@ -383,7 +383,7 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
         <StatCard
           label="Current MTM"
           value={formatINR(currentMtm)}
-          color={currentMtm >= 0 ? "text-profit" : "text-destructive"}
+          color={currentMtm >= 0 ? "text-profit" : "text-loss"}
           icon={<TrendingUp size={10} />}
         />
         <StatCard
@@ -397,13 +397,13 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
           label="Min MTM"
           value={formatINR(minMtm)}
           sub={`at ${minMtmTime}`}
-          color="text-destructive"
+          color="text-loss"
           icon={<TrendingDown size={10} />}
         />
         <StatCard
           label="Max DD"
           value={formatINR(Math.abs(maxDrawdown))}
-          color="text-amber-400"
+          color="text-warning"
           icon={<AlertTriangle size={10} />}
         />
       </div>
@@ -414,21 +414,21 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-3 px-2 pb-1 shrink-0">
-        <span className="flex items-center gap-1 text-xs text-white/30">
+      <div className="flex items-center gap-3 px-3 pb-1 shrink-0">
+        <span className="flex items-center gap-1 text-xxs text-text-muted">
           <span className="inline-block w-2.5 h-0.5 bg-purple-600 rounded" />
           MTM PnL
         </span>
-        <span className="flex items-center gap-1 text-xs text-white/30">
+        <span className="flex items-center gap-1 text-xxs text-text-muted">
           <span className="inline-block w-2.5 h-0.5 bg-loss rounded" />
           Drawdown
         </span>
-        <span className="flex items-center gap-1 text-xs text-white/30">
-          <span className="inline-block w-2.5 h-[1px] border-t border-dashed border-profit" />
+        <span className="flex items-center gap-1 text-xxs text-text-muted">
+          <span className="inline-block w-2.5 h-px border-t border-dashed border-profit" />
           Target
         </span>
-        <span className="flex items-center gap-1 text-xs text-white/30">
-          <span className="inline-block w-2.5 h-[1px] border-t border-dashed border-loss" />
+        <span className="flex items-center gap-1 text-xxs text-text-muted">
+          <span className="inline-block w-2.5 h-px border-t border-dashed border-loss" />
           SL
         </span>
       </div>

@@ -2,7 +2,7 @@
 // Replaces direct getPositionbook() call with usePositions() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table for sortable positions grid.
 import { useMemo, useState } from "react";
-import { Clock } from "lucide-react";
+import { Clock, Layers } from "lucide-react";
 import {
   type ColumnDef,
   flexRender,
@@ -76,12 +76,12 @@ export default function PositionsWidget(_props: WidgetProps) {
         header: "Qty",
         cell: ({ row }) => (
           <span
-            className={`font-mono ${
+            className={`font-mono tabular-nums ${
               row.original.qty > 0
                 ? "text-profit"
                 : row.original.qty < 0
                   ? "text-loss"
-                  : ""
+                  : "text-text-secondary"
             }`}
           >
             {row.original.qty}
@@ -92,7 +92,7 @@ export default function PositionsWidget(_props: WidgetProps) {
         accessorKey: "ltp",
         header: "LTP",
         cell: ({ row }) => (
-          <span className="font-mono text-text-secondary">{INR.format(row.original.ltp)}</span>
+          <span className="font-mono tabular-nums text-text-secondary">{INR.format(row.original.ltp)}</span>
         ),
       },
       {
@@ -100,7 +100,7 @@ export default function PositionsWidget(_props: WidgetProps) {
         header: "P&L",
         cell: ({ row }) => (
           <span
-            className={`font-mono font-medium ${
+            className={`font-mono tabular-nums font-medium ${
               row.original.pnl >= 0 ? "text-profit" : "text-loss"
             }`}
           >
@@ -122,18 +122,18 @@ export default function PositionsWidget(_props: WidgetProps) {
   });
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs">
+    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0">
-        <span className="text-text-muted uppercase tracking-wider text-xs">
-          {rows.length} position{rows.length !== 1 ? "s" : ""}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0">
+        <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">
+          Positions{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>
         <div className="flex items-center gap-2">
-          <span className={`font-mono font-medium ${totalPnl >= 0 ? "text-profit" : "text-loss"}`}>
+          <span className={`font-mono tabular-nums font-medium ${totalPnl >= 0 ? "text-profit" : "text-loss"}`}>
             P&L: {formatPnl(totalPnl)}
           </span>
           {lastFetch && (
-            <span className="text-xs text-text-muted flex items-center gap-0.5">
+            <span className="text-xxs text-text-muted flex items-center gap-0.5">
               <Clock size={8} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
@@ -143,17 +143,22 @@ export default function PositionsWidget(_props: WidgetProps) {
 
       {/* Body */}
       {rows.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-text-muted">No positions</div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
+          <Layers size={24} className="text-text-disabled" />
+          <span className="text-sm">No open positions</span>
+        </div>
       ) : (
         <div className="flex-1 overflow-auto">
           <Table>
-            <TableHeader className="sticky top-0 bg-surface-card">
+            <TableHeader className="sticky top-0 bg-surface-card z-10">
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id}>
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className="text-xs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
+                      className={`text-xxs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1 ${
+                        header.id !== "symbol" ? "text-right" : ""
+                      }`}
                       onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}
@@ -168,13 +173,18 @@ export default function PositionsWidget(_props: WidgetProps) {
               ))}
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map((row) => (
+              {table.getRowModel().rows.map((row, idx) => (
                 <TableRow
                   key={row.id}
-                  className="border-t border-border-subtle hover:bg-surface-hover/50"
+                  className={`border-t border-border-subtle hover:bg-surface-hover/50 ${
+                    idx % 2 === 1 ? "bg-surface-stripe" : ""
+                  }`}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="px-2 py-1">
+                    <TableCell
+                      key={cell.id}
+                      className={`px-2 py-1 ${cell.column.id !== "symbol" ? "text-right" : ""}`}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
