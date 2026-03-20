@@ -1259,7 +1259,7 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
 
   return (
     <div className="relative flex items-center">
-      <div className="flex items-center gap-1 bg-surface-card border border-border-default rounded px-2 py-1 w-52 focus-within:border-accent transition-colors">
+      <div className="flex items-center gap-1 h-8 bg-surface-card border border-border-default rounded-md px-2 py-1 w-52 focus-within:border-accent transition-colors">
         <Search size={12} className="text-text-muted shrink-0" />
         <input
           ref={inputRef}
@@ -1268,7 +1268,7 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setOpen(true)}
           placeholder="Search symbol..."
-          className="bg-transparent text-xs text-text-primary placeholder-text-muted outline-none w-full font-mono"
+          className="bg-transparent text-sm text-text-primary placeholder-text-muted outline-none w-full font-sans"
           spellCheck={false}
         />
         {loading && (
@@ -1342,10 +1342,10 @@ function IntervalPills({ intervals, active, onSelect }: IntervalPillsProps) {
         <button
           key={iv.value}
           onClick={() => onSelect(iv.value)}
-          className={`px-2 py-0.5 text-xs font-mono rounded transition-colors ${
+          className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
             active === iv.value
-              ? "bg-accent text-white"
-              : "text-text-secondary hover:text-text-primary hover:bg-border-default"
+              ? "bg-accent/15 text-accent border border-accent/40"
+              : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
           }`}
         >
           {iv.label}
@@ -1369,10 +1369,10 @@ function DrawToolBtn({ toolId, active, onClick, title, children }: DrawToolBtnPr
     <button
       onClick={() => onClick(toolId)}
       title={title}
-      className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
+      className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${
         active === toolId
-          ? "bg-accent text-white"
-          : "text-text-secondary hover:text-text-primary hover:bg-border-default"
+          ? "bg-accent/15 text-accent"
+          : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
       }`}
     >
       {children}
@@ -1438,7 +1438,7 @@ function PeriodInput({
       min={2}
       max={500}
       value={value}
-      className="w-11 h-7 text-xs text-center px-1 py-0 ml-auto bg-transparent border-border-default"
+      className="w-11 h-6 text-xs font-mono text-center px-1 py-0 ml-auto bg-surface-card border-border-default rounded"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       onChange={(e) => {
@@ -2563,12 +2563,6 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
         ? "text-profit"
         : "text-loss";
 
-  const legendColor = legend
-    ? legend.bull
-      ? "text-profit"
-      : "text-loss"
-    : "text-text-primary";
-
   // Count active indicators for badge (excludes volume as it's always "baseline")
   const activeIndicatorCount = (Object.keys(indicators) as (keyof IndicatorState)[])
     .filter((k) => k !== "showVolume" && indicators[k])
@@ -2590,14 +2584,14 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
           <SymbolSearch onSelect={handleSymbolSelect} />
 
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-xs font-mono font-bold text-text-primary leading-none whitespace-nowrap">
+            <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">
               {symbol}
             </span>
-            <span className="text-xs font-mono text-text-muted whitespace-nowrap">
+            <span className="text-xs text-text-muted whitespace-nowrap">
               {exchange}
             </span>
             {ltp != null && (
-              <span className="text-sm font-mono font-bold text-text-primary leading-none whitespace-nowrap">
+              <span className="text-lg font-mono font-bold text-text-primary leading-none whitespace-nowrap">
                 {formatPrice(ltp)}
               </span>
             )}
@@ -2620,39 +2614,31 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
         <div className="flex items-center gap-3 shrink-0">
           {legend && (
             <div
-              className={`flex items-center gap-2 text-xs font-mono ${legendColor}`}
+              className="flex items-center gap-2 bg-surface-card rounded px-2 py-0.5"
             >
-              <span>
-                O{" "}
-                <span className="text-text-primary">
-                  {formatPrice(legend.open)}
-                </span>
+              <span className="text-xxs text-text-muted uppercase">O</span>
+              <span className="text-xs font-mono text-text-primary">
+                {formatPrice(legend.open)}
               </span>
-              <span>
-                H{" "}
-                <span className="text-profit">
-                  {formatPrice(legend.high)}
-                </span>
+              <span className="text-xxs text-text-muted uppercase">H</span>
+              <span className="text-xs font-mono text-text-primary">
+                {formatPrice(legend.high)}
               </span>
-              <span>
-                L{" "}
-                <span className="text-loss">
-                  {formatPrice(legend.low)}
-                </span>
+              <span className="text-xxs text-text-muted uppercase">L</span>
+              <span className="text-xs font-mono text-text-primary">
+                {formatPrice(legend.low)}
               </span>
-              <span>
-                C{" "}
-                <span className="text-text-primary">
-                  {formatPrice(legend.close)}
-                </span>
+              <span className="text-xxs text-text-muted uppercase">C</span>
+              <span className="text-xs font-mono text-text-primary">
+                {formatPrice(legend.close)}
               </span>
               {legend.volume != null && (
-                <span>
-                  V{" "}
-                  <span className="text-text-secondary">
+                <>
+                  <span className="text-xxs text-text-muted uppercase">V</span>
+                  <span className="text-xs font-mono text-text-primary">
                     {formatVolume(legend.volume)}
                   </span>
-                </span>
+                </>
               )}
             </div>
           )}
@@ -2673,12 +2659,12 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 text-xs gap-1 text-text-secondary hover:text-text-primary"
+              className="h-6 px-2 text-xs font-sans gap-1 text-text-secondary hover:text-text-primary"
             >
               <BarChart2 size={11} />
               Indicators
               {activeIndicatorCount > 0 && (
-                <span className="ml-0.5 bg-accent text-white rounded-full px-1 text-xxs leading-none py-0.5">
+                <span className="ml-0.5 bg-accent text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center text-xxs leading-none">
                   {activeIndicatorCount}
                 </span>
               )}
@@ -2957,7 +2943,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <button
               onClick={undoLastDrawing}
               title="Undo last drawing"
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-text-secondary hover:text-loss hover:bg-border-default transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors"
             >
               <X size={10} />
               <span>Undo</span>
@@ -2966,7 +2952,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               <button
                 onClick={clearAllDrawings}
                 title="Clear all drawings"
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-text-secondary hover:text-loss hover:bg-border-default transition-colors"
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors"
               >
                 <Trash2 size={10} />
                 <span>Clear</span>
