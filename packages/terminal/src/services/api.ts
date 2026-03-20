@@ -121,7 +121,8 @@ export const getOptionChain = (symbol: string, exchange = "NFO", expiry?: string
   post<OptionChainData>("optionchain", {
     underlying: symbol, // OpenAlgo v2 uses 'underlying' not 'symbol'
     exchange,
-    ...(expiry ? { expiry_date: expiry } : {}), // OpenAlgo v2 uses 'expiry_date' not 'expiry'
+    // OpenAlgo expiry format: "24MAR26" (no dashes). Expiry API returns "24-MAR-26".
+    ...(expiry ? { expiry_date: expiry.replace(/-/g, "") } : {}),
   });
 export const getOptionGreeks = (symbol: string, exchange = "NFO") =>
   post<Greeks>("optiongreeks", { symbol, exchange });

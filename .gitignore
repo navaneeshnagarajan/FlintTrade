@@ -1,3 +1,6 @@
+# === BRAINSTORM / VISUAL COMPANION ===
+.superpowers/
+
 # === SECRETS (NEVER COMMIT) ===
 .env
 .env.*

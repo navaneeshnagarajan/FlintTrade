@@ -72,12 +72,23 @@ interface RawOptionRow {
   implied_volatility?: number;
 }
 
-/** OpenAlgo optionchain raw API shape */
+/** OpenAlgo v2 chain entry: { strike, ce: {...}, pe: {...} } */
+interface ChainEntry {
+  strike: number;
+  ce: RawOptionRow | null;
+  pe: RawOptionRow | null;
+}
+
+/** OpenAlgo optionchain raw API shape (v2 format) */
 interface RawOptionChain {
+  chain?: ChainEntry[];
+  atm_strike?: number;
+  underlying_ltp?: number;
+  underlying_prev_close?: number;
+  pcr?: number;
+  // Legacy v1 format (kept for backwards compat)
   calls?: RawOptionRow[];
   puts?: RawOptionRow[];
-  atm_strike?: number;
-  pcr?: number;
 }
 
 interface StrikeRow {
@@ -121,14 +132,29 @@ interface BasketItem {
 // ---------------------------------------------------------------------------
 
 const SYMBOLS: SymbolDef[] = [
-  { label: "NIFTY",      exchange: "NFO", spotSymbol: "NIFTY",      spotExchange: "NSE_INDEX" },
-  { label: "BANKNIFTY",  exchange: "NFO", spotSymbol: "BANKNIFTY",  spotExchange: "NSE_INDEX" },
-  { label: "FINNIFTY",   exchange: "NFO", spotSymbol: "FINNIFTY",   spotExchange: "NSE_INDEX" },
-  { label: "MIDCPNIFTY", exchange: "NFO", spotSymbol: "MIDCPNIFTY", spotExchange: "NSE_INDEX" },
-  { label: "SENSEX",     exchange: "BFO", spotSymbol: "SENSEX",     spotExchange: "BSE_INDEX" },
+  // NSE Index Options (NFO)
+  { label: "NIFTY",       exchange: "NFO", spotSymbol: "NIFTY",       spotExchange: "NSE_INDEX" },
+  { label: "BANKNIFTY",   exchange: "NFO", spotSymbol: "BANKNIFTY",   spotExchange: "NSE_INDEX" },
+  { label: "FINNIFTY",    exchange: "NFO", spotSymbol: "FINNIFTY",    spotExchange: "NSE_INDEX" },
+  { label: "MIDCPNIFTY",  exchange: "NFO", spotSymbol: "MIDCPNIFTY",  spotExchange: "NSE_INDEX" },
+  { label: "NIFTYNXT50",  exchange: "NFO", spotSymbol: "NIFTYNXT50",  spotExchange: "NSE_INDEX" },
+  // BSE Index Options (BFO)
+  { label: "SENSEX",      exchange: "BFO", spotSymbol: "SENSEX",      spotExchange: "BSE_INDEX" },
+  { label: "BANKEX",      exchange: "BFO", spotSymbol: "BANKEX",      spotExchange: "BSE_INDEX" },
+  // MCX Commodity Options
+  { label: "GOLD",        exchange: "MCX", spotSymbol: "GOLD",        spotExchange: "MCX" },
+  { label: "SILVER",      exchange: "MCX", spotSymbol: "SILVER",      spotExchange: "MCX" },
+  { label: "CRUDEOIL",    exchange: "MCX", spotSymbol: "CRUDEOIL",    spotExchange: "MCX" },
+  { label: "NATURALGAS",  exchange: "MCX", spotSymbol: "NATURALGAS",  spotExchange: "MCX" },
+  { label: "COPPER",      exchange: "MCX", spotSymbol: "COPPER",      spotExchange: "MCX" },
+  // Currency Options (CDS)
+  { label: "USDINR",      exchange: "CDS", spotSymbol: "USDINR",      spotExchange: "CDS" },
+  { label: "EURINR",      exchange: "CDS", spotSymbol: "EURINR",      spotExchange: "CDS" },
+  { label: "GBPINR",      exchange: "CDS", spotSymbol: "GBPINR",      spotExchange: "CDS" },
+  { label: "JPYINR",      exchange: "CDS", spotSymbol: "JPYINR",      spotExchange: "CDS" },
 ];
 
-const EXCHANGES = ["NFO", "BFO"];
+const EXCHANGES = ["NFO", "BFO", "MCX", "CDS"];
 const VIEWS: ViewType[] = ["LTP", "OI", "GREEKS"];
 const STRIKES_AROUND_ATM = 10;
 
@@ -316,6 +342,10 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
 
   const gridRef = useRef<DataEditorRef>(null);
 
+  // Track the current symbol key to detect stale fetches
+  const symbolKeyRef = useRef(`${symDef.label}:${exchange}`);
+  symbolKeyRef.current = `${symDef.label}:${exchange}`;
+
   // fetch expiries when symbol/exchange changes
   useEffect(() => {
     setExpiries([]);
@@ -323,11 +353,12 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     setChain(null);
     setError(null);
 
+    const currentKey = `${symDef.label}:${exchange}`;
     let cancelled = false;
     (async () => {
       try {
         const data = await getExpiry(symDef.label, exchange);
-        if (cancelled) return;
+        if (cancelled || symbolKeyRef.current !== currentKey) return;
         const list = Array.isArray(data) ? data as string[] : ((data as { expiry?: string[] })?.expiry ?? []);
         setExpiries(list);
         if (list.length > 0) setSelectedExpiry(list[0]);
@@ -341,7 +372,10 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
 
   // fetch chain + spot
   const fetchData = useCallback(async () => {
-    if (!selectedExpiry) return;
+    if (!selectedExpiry || expiries.length === 0) return;
+    if (!expiries.includes(selectedExpiry)) return;
+
+    const currentKey = `${symDef.label}:${exchange}`;
     setLoading(true);
     setError(null);
 
@@ -351,8 +385,12 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
         getQuotes(symDef.spotSymbol, symDef.spotExchange),
       ]);
 
+      // Bail out if symbol changed while we were fetching
+      if (symbolKeyRef.current !== currentKey) return;
+
       if (chainData.status === "fulfilled") {
         setChain(chainData.value as unknown as RawOptionChain);
+        setError(null); // Clear any stale error from a previous fetch
       } else {
         setError(`Chain error: ${(chainData.reason as Error)?.message}`);
       }
@@ -364,7 +402,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
       setLoading(false);
       setLastRefresh(new Date());
     }
-  }, [selectedExpiry, symDef, exchange]);
+  }, [selectedExpiry, symDef, exchange, expiries]);
 
   // auto-refresh
   useEffect(() => {
@@ -399,8 +437,17 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     const callMap: Record<number, RawOptionRow> = {};
     const putMap:  Record<number, RawOptionRow> = {};
 
-    (chain.calls ?? []).forEach((c) => { callMap[c.strike_price ?? c.strike ?? 0] = c; });
-    (chain.puts  ?? []).forEach((p) => { putMap[p.strike_price  ?? p.strike  ?? 0] = p; });
+    if (chain.chain && chain.chain.length > 0) {
+      // OpenAlgo v2 format: chain[].strike, chain[].ce, chain[].pe
+      for (const entry of chain.chain) {
+        if (entry.ce) callMap[entry.strike] = { ...entry.ce, strike: entry.strike };
+        if (entry.pe) putMap[entry.strike]  = { ...entry.pe, strike: entry.strike };
+      }
+    } else {
+      // Legacy v1 format: separate calls[] and puts[] arrays
+      (chain.calls ?? []).forEach((c) => { callMap[c.strike_price ?? c.strike ?? 0] = c; });
+      (chain.puts  ?? []).forEach((p) => { putMap[p.strike_price  ?? p.strike  ?? 0] = p; });
+    }
 
     const allStrikes = Array.from(
       new Set([
