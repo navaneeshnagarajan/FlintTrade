@@ -178,7 +178,7 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
 
   return (
     <div
-      className={`flex items-center text-[10px] h-6.5 border-b transition-colors ${
+      className={`flex items-center text-xs h-6.5 border-b transition-colors ${
         isAtm
           ? "border-b-accent/40 bg-accent/6"
           : "border-border-subtle hover:bg-surface-hover/30"
@@ -201,7 +201,7 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
           {fmtOI(callOI)}
         </span>
         {isMaxCall && (
-          <span className="relative z-10 ml-1 text-[8px] text-loss/80 font-medium leading-none px-0.5 py-0.5 rounded bg-loss/10 border border-loss/20">
+          <span className="relative z-10 ml-1 text-xxs text-loss/80 font-medium leading-none px-0.5 py-0.5 rounded bg-loss/10 border border-loss/20">
             R
           </span>
         )}
@@ -216,11 +216,11 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
         }`}
       >
         {isAtm && (
-          <span className="text-[8px] text-accent/70 leading-none">ATM</span>
+          <span className="text-xxs text-accent/70 leading-none">ATM</span>
         )}
         {NUM0.format(strike)}
         {isAtm && spotLtp != null && (
-          <span className="text-[8px] text-text-muted font-normal font-sans leading-none">
+          <span className="text-xxs text-text-muted font-normal font-sans leading-none">
             {spotLtp.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
           </span>
         )}
@@ -240,7 +240,7 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
           }}
         />
         {isMaxPut && (
-          <span className="relative z-10 mr-1 text-[8px] text-profit/80 font-medium leading-none px-0.5 py-0.5 rounded bg-profit/10 border border-profit/20">
+          <span className="relative z-10 mr-1 text-xxs text-profit/80 font-medium leading-none px-0.5 py-0.5 rounded bg-profit/10 border border-profit/20">
             S
           </span>
         )}
@@ -454,19 +454,19 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
             }}
           />
 
-          <span className="px-2 py-1 text-[10px] font-medium text-text-muted bg-surface-base border border-border-default rounded">
+          <span className="px-2 py-1 text-xs font-medium text-text-muted bg-surface-base border border-border-default rounded">
             {exchange}
           </span>
 
           <div className="flex items-center gap-1">
             {expiryButtons.length === 0 && !loading && (
-              <span className="text-[10px] text-text-muted px-1">No expiries</span>
+              <span className="text-xs text-text-muted px-1">No expiries</span>
             )}
             {expiryButtons.map((exp) => (
               <button
                 key={exp}
                 onClick={() => setSelectedExpiry(exp)}
-                className={`px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${
+                className={`px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
                   exp === selectedExpiry
                     ? "bg-accent/15 border-accent/60 text-accent"
                     : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary hover:border-accent/30"
@@ -493,18 +493,18 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
         <div className="flex items-center gap-2 flex-wrap">
           {spotLtp != null ? (
             <div className="flex items-center gap-1">
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">Spot</span>
+              <span className="text-xs text-text-muted uppercase tracking-wide">Spot</span>
               <span className="font-mono text-sm font-semibold text-text-primary">
                 {spotLtp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
               </span>
             </div>
           ) : (
-            <span className="text-[10px] text-text-muted">Spot: —</span>
+            <span className="text-xs text-text-muted">Spot: —</span>
           )}
 
           {pcr != null && (
             <div className="flex items-center gap-1">
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">PCR</span>
+              <span className="text-xs text-text-muted uppercase tracking-wide">PCR</span>
               <span className={`font-mono text-xs font-semibold px-1.5 py-0.5 rounded border ${
                 Number(pcr) >= 1.2
                   ? "text-profit bg-profit/10 border-profit/30"
@@ -513,7 +513,7 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
                     : "text-warning bg-warning/10 border-warning/30"
               }`}>
                 {Number(pcr).toFixed(2)}
-                <span className="ml-1 font-normal text-[9px]">
+                <span className="ml-1 font-normal text-xxs">
                   {Number(pcr) >= 1.2 ? "Bullish" : Number(pcr) <= 0.8 ? "Bearish" : "Neutral"}
                 </span>
               </span>
@@ -522,14 +522,14 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
 
           {maxPutStrike != null && (
             <div className="flex items-center gap-1">
-              <span className="text-[8px] text-profit/80 bg-profit/10 border border-profit/20 rounded px-1 py-0.5 font-mono">
+              <span className="text-xxs text-profit/80 bg-profit/10 border border-profit/20 rounded px-1 py-0.5 font-mono">
                 S {NUM0.format(maxPutStrike)}
               </span>
             </div>
           )}
           {maxCallStrike != null && (
             <div className="flex items-center gap-1">
-              <span className="text-[8px] text-loss/80 bg-loss/10 border border-loss/20 rounded px-1 py-0.5 font-mono">
+              <span className="text-xxs text-loss/80 bg-loss/10 border border-loss/20 rounded px-1 py-0.5 font-mono">
                 R {NUM0.format(maxCallStrike)}
               </span>
             </div>
@@ -542,7 +542,7 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                className={`px-2 py-0.5 text-xs font-medium transition-colors ${
                   f === filter
                     ? "bg-accent/15 text-accent"
                     : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -564,7 +564,7 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
       )}
 
       {/* Column header row */}
-      <div className="flex-none flex items-center text-[10px] text-text-muted bg-surface-card border-b border-border-default h-5.5 px-0">
+      <div className="flex-none flex items-center text-xs text-text-muted bg-surface-card border-b border-border-default h-5.5 px-0">
         <div className="flex-1 text-right pr-2 uppercase tracking-wide text-loss/70">
           Call OI
         </div>
@@ -612,7 +612,7 @@ export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
 
       {/* Footer */}
       {chain && rows.length > 0 && (
-        <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-[10px]">
+        <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-xs">
           <span className="text-text-muted uppercase tracking-wide">Total</span>
           <span className="text-loss font-mono">CE {fmtOI(totalCallOI)}</span>
           <span className="text-profit font-mono">PE {fmtOI(totalPutOI)}</span>

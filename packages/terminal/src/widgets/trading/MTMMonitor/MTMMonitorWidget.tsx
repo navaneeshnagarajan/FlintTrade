@@ -94,14 +94,14 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <Card className="bg-[#12121a] border-[#1e1e2e] flex-1 min-w-0">
+    <Card className="bg-surface-card border-border-default flex-1 min-w-0">
       <CardContent className="p-2">
         <div className="flex items-center gap-1 mb-0.5">
           <span className="text-white/30">{icon}</span>
-          <span className="text-[9px] text-white/30 uppercase tracking-wider">{label}</span>
+          <span className="text-xxs text-white/30 uppercase tracking-wider">{label}</span>
         </div>
-        <div className={`font-mono font-bold text-[13px] leading-tight ${color}`}>{value}</div>
-        {sub && <div className="text-[10px] text-white/30 mt-0.5">{sub}</div>}
+        <div className={`font-mono font-bold text-sm leading-tight ${color}`}>{value}</div>
+        {sub && <div className="text-xs text-white/30 mt-0.5">{sub}</div>}
       </CardContent>
     </Card>
   );
@@ -364,15 +364,15 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
   }, [currentMtm, riskLimits]);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs bg-[#0a0a0f]">
+    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-[#1e1e2e] shrink-0">
-        <span className="text-white/60 uppercase tracking-wider text-[10px]">MTM Monitor</span>
+      <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0">
+        <span className="text-white/60 uppercase tracking-wider text-xs">MTM Monitor</span>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-white/30">
+          <span className="text-xs text-white/30">
             Target {formatINR(riskLimits.mtmTarget)} / SL {formatINR(riskLimits.mtmStoploss)}
           </span>
-          <Badge className={`text-[9px] px-1.5 py-0 border ${status.color}`}>
+          <Badge className={`text-xxs px-1.5 py-0 border ${status.color}`}>
             {status.label}
           </Badge>
         </div>
@@ -383,21 +383,21 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
         <StatCard
           label="Current MTM"
           value={formatINR(currentMtm)}
-          color={currentMtm >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}
+          color={currentMtm >= 0 ? "text-profit" : "text-destructive"}
           icon={<TrendingUp size={10} />}
         />
         <StatCard
           label="Max MTM"
           value={formatINR(maxMtm)}
           sub={`at ${maxMtmTime}`}
-          color="text-[#22C55E]"
+          color="text-profit"
           icon={<Target size={10} />}
         />
         <StatCard
           label="Min MTM"
           value={formatINR(minMtm)}
           sub={`at ${minMtmTime}`}
-          color="text-[#EF4444]"
+          color="text-destructive"
           icon={<TrendingDown size={10} />}
         />
         <StatCard
@@ -415,20 +415,20 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
 
       {/* Legend */}
       <div className="flex items-center gap-3 px-2 pb-1 shrink-0">
-        <span className="flex items-center gap-1 text-[10px] text-white/30">
-          <span className="inline-block w-2.5 h-0.5 bg-[#7C3AED] rounded" />
+        <span className="flex items-center gap-1 text-xs text-white/30">
+          <span className="inline-block w-2.5 h-0.5 bg-purple-600 rounded" />
           MTM PnL
         </span>
-        <span className="flex items-center gap-1 text-[10px] text-white/30">
-          <span className="inline-block w-2.5 h-0.5 bg-[#EF4444] rounded" />
+        <span className="flex items-center gap-1 text-xs text-white/30">
+          <span className="inline-block w-2.5 h-0.5 bg-loss rounded" />
           Drawdown
         </span>
-        <span className="flex items-center gap-1 text-[10px] text-white/30">
-          <span className="inline-block w-2.5 h-[1px] border-t border-dashed border-[#22C55E]" />
+        <span className="flex items-center gap-1 text-xs text-white/30">
+          <span className="inline-block w-2.5 h-[1px] border-t border-dashed border-profit" />
           Target
         </span>
-        <span className="flex items-center gap-1 text-[10px] text-white/30">
-          <span className="inline-block w-2.5 h-[1px] border-t border-dashed border-[#EF4444]" />
+        <span className="flex items-center gap-1 text-xs text-white/30">
+          <span className="inline-block w-2.5 h-[1px] border-t border-dashed border-loss" />
           SL
         </span>
       </div>

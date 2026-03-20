@@ -53,8 +53,8 @@ function riskLevel(usage: number): RiskLevel {
 
 const LEVEL_COLORS: Record<RiskLevel, { bar: string; text: string; badge: string }> = {
   safe: {
-    bar: "bg-[#22C55E]",
-    text: "text-[#22C55E]",
+    bar: "bg-profit",
+    text: "text-profit",
     badge: "bg-green-900/30 text-green-400 border-green-800",
   },
   warning: {
@@ -63,8 +63,8 @@ const LEVEL_COLORS: Record<RiskLevel, { bar: string; text: string; badge: string
     badge: "bg-amber-900/30 text-amber-400 border-amber-800",
   },
   danger: {
-    bar: "bg-[#EF4444]",
-    text: "text-[#EF4444]",
+    bar: "bg-loss",
+    text: "text-destructive",
     badge: "bg-red-900/30 text-red-400 border-red-800",
   },
 };
@@ -93,13 +93,13 @@ function ProgressRow({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <span className="text-white/30">{icon}</span>
-          <span className="text-[10px] text-white/50">{label}</span>
+          <span className="text-xs text-white/50">{label}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`font-mono text-[11px] font-medium ${colors.text}`}>{usedLabel}</span>
-          <span className="text-[10px] text-white/20">/ {maxLabel}</span>
+          <span className={`font-mono text-xs font-medium ${colors.text}`}>{usedLabel}</span>
+          <span className="text-xs text-white/20">/ {maxLabel}</span>
           <Badge
-            className={`text-[9px] px-1 py-0 border ${colors.badge}`}
+            className={`text-xxs px-1 py-0 border ${colors.badge}`}
           >
             {usagePct.toFixed(0)}%
           </Badge>
@@ -133,9 +133,9 @@ function SummaryBadge({
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center gap-1 text-white/30">
         {icon}
-        <span className="text-[9px] uppercase tracking-wider">{label}</span>
+        <span className="text-xxs uppercase tracking-wider">{label}</span>
       </div>
-      <span className={`font-mono text-[12px] font-bold ${color}`}>{value}</span>
+      <span className={`font-mono text-xs font-bold ${color}`}>{value}</span>
     </div>
   );
 }
@@ -201,21 +201,21 @@ export default function RiskPanelWidget(_props: WidgetProps) {
   const overallLabel = overallLevel === "danger" ? "High Risk" : overallLevel === "warning" ? "Caution" : "Safe";
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs bg-[#0a0a0f]">
+    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-[#1e1e2e] shrink-0">
+      <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0">
         <div className="flex items-center gap-1.5">
           <ShieldAlert size={11} className="text-white/40" />
-          <span className="text-white/60 uppercase tracking-wider text-[10px]">Risk Panel</span>
+          <span className="text-white/60 uppercase tracking-wider text-xs">Risk Panel</span>
         </div>
-        <Badge className={`text-[9px] px-1.5 py-0 border ${overallColors.badge}`}>
+        <Badge className={`text-xxs px-1.5 py-0 border ${overallColors.badge}`}>
           {overallLabel}
         </Badge>
       </div>
 
-      <div className="flex-1 overflow-auto p-2 space-y-3">
+      <div className="flex-1 overflow-auto p-3 space-y-3">
         {/* Summary row */}
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-2">
             <div className="grid grid-cols-3 gap-2">
               <SummaryBadge
@@ -227,7 +227,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
               <SummaryBadge
                 label="Daily PnL"
                 value={formatINR(totalPnl)}
-                color={totalPnl >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}
+                color={totalPnl >= 0 ? "text-profit" : "text-destructive"}
                 icon={<TrendingDown size={9} />}
               />
               <SummaryBadge
@@ -241,7 +241,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
         </Card>
 
         {/* Progress bars */}
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-2 space-y-3">
             <ProgressRow
               label="Margin Used"
@@ -267,7 +267,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
               icon={<Zap size={9} />}
             />
 
-            <div className="border-t border-[#1e1e2e] pt-2 space-y-3">
+            <div className="border-t border-border-default pt-2 space-y-3">
               <ProgressRow
                 label="Daily Target"
                 usedLabel={totalPnl > 0 ? formatINR(totalPnl) : formatINR(0)}
@@ -288,9 +288,9 @@ export default function RiskPanelWidget(_props: WidgetProps) {
         </Card>
 
         {/* Limits reference */}
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-2">
-            <p className="text-[9px] text-white/20 uppercase tracking-wider mb-1.5">Configured Limits</p>
+            <p className="text-xxs text-white/20 uppercase tracking-wider mb-1.5">Configured Limits</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
               {[
                 ["Max Lots", riskLimits.maxPositionLots],
@@ -299,8 +299,8 @@ export default function RiskPanelWidget(_props: WidgetProps) {
                 ["Orders/Min", riskLimits.maxOrdersPerMin],
               ].map(([label, value]) => (
                 <div key={String(label)} className="flex justify-between">
-                  <span className="text-[10px] text-white/30">{label}</span>
-                  <span className="font-mono text-[10px] text-white/60">{value}</span>
+                  <span className="text-xs text-white/30">{label}</span>
+                  <span className="font-mono text-xs text-white/60">{value}</span>
                 </div>
               ))}
             </div>

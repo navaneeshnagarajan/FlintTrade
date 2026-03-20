@@ -260,7 +260,7 @@ function SentimentBadge({ sentiment }: SentimentBadgeProps) {
   if (sentiment === "bullish") {
     return (
       <Badge
-        className="flex items-center gap-0.5 px-1.5 py-0 text-[9px] font-medium bg-profit/15 text-profit border-profit/30 rounded shrink-0"
+        className="flex items-center gap-0.5 px-1.5 py-0 text-xxs font-medium bg-profit/15 text-profit border-profit/30 rounded shrink-0"
         variant="outline"
       >
         <TrendingUp size={8} />
@@ -271,7 +271,7 @@ function SentimentBadge({ sentiment }: SentimentBadgeProps) {
   if (sentiment === "bearish") {
     return (
       <Badge
-        className="flex items-center gap-0.5 px-1.5 py-0 text-[9px] font-medium bg-loss/15 text-loss border-loss/30 rounded shrink-0"
+        className="flex items-center gap-0.5 px-1.5 py-0 text-xxs font-medium bg-loss/15 text-loss border-loss/30 rounded shrink-0"
         variant="outline"
       >
         <TrendingDown size={8} />
@@ -281,7 +281,7 @@ function SentimentBadge({ sentiment }: SentimentBadgeProps) {
   }
   return (
     <Badge
-      className="flex items-center gap-0.5 px-1.5 py-0 text-[9px] font-medium bg-text-muted/10 text-text-muted border-border-default rounded shrink-0"
+      className="flex items-center gap-0.5 px-1.5 py-0 text-xxs font-medium bg-text-muted/10 text-text-muted border-border-default rounded shrink-0"
       variant="outline"
     >
       <Minus size={8} />
@@ -297,7 +297,7 @@ interface SourceBadgeProps {
 function SourceBadge({ source }: SourceBadgeProps) {
   return (
     <Badge
-      className="px-1.5 py-0 text-[8px] font-medium bg-surface-hover border-border-subtle text-text-muted rounded shrink-0"
+      className="px-1.5 py-0 text-xxs font-medium bg-surface-hover border-border-subtle text-text-muted rounded shrink-0"
       variant="outline"
     >
       {source}
@@ -336,7 +336,7 @@ function NewsRow({ item }: NewsRowProps) {
       </div>
       <div className="flex items-center gap-1.5">
         <SourceBadge source={item.source} />
-        <span className="ml-auto text-[9px] text-text-muted">
+        <span className="ml-auto text-xxs text-text-muted">
           {fmtTimeAgo(item.timestamp)}
         </span>
       </div>
@@ -446,7 +446,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
       {/* HEADER */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
         <Newspaper size={11} className="text-text-muted shrink-0" />
-        <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider">
+        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
           News
         </span>
 
@@ -456,7 +456,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
         )}
 
         {lastUpdated !== null && !isLoading && (
-          <span className="text-[9px] text-text-muted">
+          <span className="text-xxs text-text-muted">
             {fmtTimeAgo(lastUpdated)}
           </span>
         )}
@@ -488,7 +488,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
               key={f.value}
               onClick={() => setFilter(f.value)}
               className={[
-                "flex items-center gap-1 px-2 py-0.5 text-[9px] font-medium rounded transition-colors",
+                "flex items-center gap-1 px-2 py-0.5 text-xxs font-medium rounded transition-colors",
                 filter === f.value
                   ? "bg-primary/20 text-primary border border-primary/40"
                   : "text-text-muted hover:text-text-secondary hover:bg-surface-hover border border-transparent",
@@ -515,7 +515,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search headlines, sources..."
-            className="h-6 pl-6 pr-2 text-[10px] bg-surface-hover border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-primary/50"
+            className="h-6 pl-6 pr-2 text-xs bg-surface-hover border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-primary/50"
           />
         </div>
       </div>
@@ -527,7 +527,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
           <AlertCircle size={24} className="text-loss" />
           <div>
             <p className="text-xs text-text-secondary">Unable to fetch news</p>
-            <p className="text-[10px] text-text-muted mt-1 leading-relaxed max-w-52">
+            <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-52">
               {errorMsg || "Could not reach RSS feeds. Check your internet connection."}
             </p>
           </div>
@@ -536,7 +536,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
             size="xs"
             onClick={() => void load()}
             disabled={isLoading}
-            className="text-[10px] h-6"
+            className="text-xs h-6"
           >
             <RefreshCw size={9} className={isLoading ? "animate-spin" : ""} />
             Retry
@@ -546,7 +546,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
         // First-load skeleton
         <div className="flex-1 flex flex-col items-center justify-center gap-2">
           <RefreshCw size={20} className="text-text-muted animate-spin" />
-          <p className="text-[10px] text-text-muted">Loading news...</p>
+          <p className="text-xs text-text-muted">Loading news...</p>
         </div>
       ) : filtered.length === 0 ? (
         // Empty filtered state
@@ -554,7 +554,7 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
           <Newspaper size={24} className="text-text-muted" />
           <div>
             <p className="text-xs text-text-secondary">No news to display</p>
-            <p className="text-[10px] text-text-muted mt-1 max-w-48 leading-relaxed">
+            <p className="text-xs text-text-muted mt-1 max-w-48 leading-relaxed">
               {query.trim()
                 ? `No results for "${query}"`
                 : "No articles match the selected filter"}

@@ -352,7 +352,7 @@ function FieldRow({ label, hint, children }: { label: string; hint?: string; chi
     <div className="space-y-1">
       <FieldLabel>{label}</FieldLabel>
       {children}
-      {hint && <p className="text-[10px] text-text-muted mt-0.5">{hint}</p>}
+      {hint && <p className="text-xs text-text-muted mt-0.5">{hint}</p>}
     </div>
   );
 }
@@ -614,7 +614,7 @@ function RiskSection({ settings, onChange }: RiskSectionProps) {
     <div className="space-y-5">
       <SectionTitle>Risk Limits</SectionTitle>
 
-      <div className="p-3 rounded bg-warning/5 border border-warning/20 text-[11px] text-warning/80">
+      <div className="p-3 rounded bg-warning/5 border border-warning/20 text-xs text-warning/80">
         Risk limits are enforced client-side only. They do NOT replace broker-level risk controls.
         Always configure limits at the broker or OpenAlgo level as your primary protection.
       </div>
@@ -686,11 +686,11 @@ function ShortcutRow({ keys, action }: ShortcutRowProps) {
       <div className="flex items-center gap-1">
         {keys.map((k, i) => (
           <span key={i}>
-            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-medium bg-surface-base border border-border-default rounded text-text-primary">
+            <kbd className="px-1.5 py-0.5 text-xs font-mono font-medium bg-surface-base border border-border-default rounded text-text-primary">
               {k}
             </kbd>
             {i < keys.length - 1 && (
-              <span className="text-[10px] text-text-muted mx-0.5">+</span>
+              <span className="text-xs text-text-muted mx-0.5">+</span>
             )}
           </span>
         ))}
@@ -704,12 +704,12 @@ function KeyboardSection() {
     <div className="space-y-5">
       <SectionTitle>Keyboard Shortcuts</SectionTitle>
 
-      <div className="p-3 rounded bg-surface-card border border-border-default text-[11px] text-text-muted">
+      <div className="p-3 rounded bg-surface-card border border-border-default text-xs text-text-muted">
         Shortcut customisation is coming in a future release. These defaults are active now.
       </div>
 
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">Scalper — Order Placement</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Scalper — Order Placement</p>
         <div className="rounded border border-border-default overflow-hidden px-3">
           <ShortcutRow keys={["Shift", "↑"]} action="Buy CE (call option)" />
           <ShortcutRow keys={["Shift", "↓"]} action="Buy PE (put option)"  />
@@ -719,7 +719,7 @@ function KeyboardSection() {
       </div>
 
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">Scalper — Position Management</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Scalper — Position Management</p>
         <div className="rounded border border-border-default overflow-hidden px-3">
           <ShortcutRow keys={["F6"]} action="Close All Positions"  />
           <ShortcutRow keys={["F7"]} action="Cancel All Orders"    />
@@ -727,7 +727,7 @@ function KeyboardSection() {
       </div>
 
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">Widget Navigation</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Widget Navigation</p>
         <div className="rounded border border-border-default overflow-hidden px-3">
           <ShortcutRow keys={["Ctrl", "W"]} action="Add widget"       />
           <ShortcutRow keys={["Ctrl", "/"]} action="Open command bar" />
@@ -866,7 +866,7 @@ function TelegramSection({ settings, onChangeField }: TelegramSectionProps) {
       </FieldRow>
 
       {settings.enabled && (
-        <div className="p-3 rounded bg-accent/5 border border-accent/20 text-[11px] text-text-secondary space-y-1">
+        <div className="p-3 rounded bg-accent/5 border border-accent/20 text-xs text-text-secondary space-y-1">
           <p className="font-medium text-text-primary">Telegram alerts include:</p>
           <ul className="list-disc list-inside space-y-0.5 text-text-muted">
             <li>Order placed / modified / cancelled</li>
@@ -895,7 +895,7 @@ function DataPathsSection({ settings, onChange }: DataPathsSectionProps) {
     <div className="space-y-5">
       <SectionTitle>Data Paths</SectionTitle>
 
-      <div className="p-3 rounded bg-surface-card border border-border-default text-[11px] text-text-muted">
+      <div className="p-3 rounded bg-surface-card border border-border-default text-xs text-text-muted">
         Storage paths are read by the Python backend on startup. Changes take effect after restarting services.
         Leave blank to use the default path (<code className="font-mono text-text-secondary">~/.flinttrade/</code>).
       </div>
@@ -945,7 +945,7 @@ function AboutSection() {
       </div>
 
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Description</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Description</p>
         <p className="text-xs text-text-secondary leading-relaxed">
           Open-source modular trading and investment platform for Indian F&amp;O, commodities, and crypto.
           Built on OpenAlgo (30+ broker gateway). Monorepo with 12 packages (11 Python + 1 React).
@@ -953,7 +953,7 @@ function AboutSection() {
       </div>
 
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Links</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Links</p>
         <div className="space-y-1.5">
           <a
             href="https://github.com/navaneeshnagarajan/FlintTrade"
@@ -989,7 +989,7 @@ function AboutSection() {
       </div>
 
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Build Info</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Build Info</p>
         <div className="rounded border border-border-default overflow-hidden">
           <table className="w-full text-xs">
             <tbody>
@@ -1223,14 +1223,14 @@ export default function SettingsTool({ onClose }: Props) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-profit" />
-            <span className="text-[10px] text-text-muted">Changes saved automatically</span>
+            <span className="text-xs text-text-muted">Changes saved automatically</span>
           </div>
 
           <button
             type="button"
             onClick={handleRestart}
             disabled={restarting}
-            className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded bg-surface-base border border-border-default text-text-secondary hover:text-text-primary hover:border-accent/40 hover:bg-accent/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-surface-base border border-border-default text-text-secondary hover:text-text-primary hover:border-accent/40 hover:bg-accent/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw size={11} className={restarting ? "animate-spin" : ""} />
             {restarting ? "Restarting…" : "Restart Services"}

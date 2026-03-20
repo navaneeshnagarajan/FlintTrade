@@ -123,12 +123,12 @@ function LtpBlock({ label, symbol, exchange, ticks, className = "" }: LtpBlockPr
 
   return (
     <div className={`flex items-baseline gap-1.5 ${className}`}>
-      <span className="text-[10px] text-text-muted uppercase tracking-wider">{label}</span>
+      <span className="text-xs text-text-muted uppercase tracking-wider">{label}</span>
       <span className="font-mono text-xs font-semibold text-text-primary">
         {ltp != null ? fmtInt(ltp) : "—"}
       </span>
       {chg != null && (
-        <span className={`font-mono text-[10px] ${up ? "text-profit" : "text-loss"}`}>
+        <span className={`font-mono text-xs ${up ? "text-profit" : "text-loss"}`}>
           {up ? "+" : ""}{fmt2(chg)} ({up ? "+" : ""}{fmt2(pct)}%)
         </span>
       )}
@@ -147,21 +147,21 @@ interface StepperProps {
 function Stepper({ label, value, onDec, onInc, className = "" }: StepperProps) {
   return (
     <div className={`flex items-center gap-0 ${className}`}>
-      <span className="text-[10px] text-text-muted mr-1 uppercase tracking-wider">{label}</span>
+      <span className="text-xs text-text-muted mr-1 uppercase tracking-wider">{label}</span>
       <button
         type="button"
         onClick={onDec}
-        className="w-4 h-5 flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-hover border border-border-default rounded-l hover:bg-surface-card transition-colors"
+        className="w-4 h-6 flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-hover border border-border-default rounded-l hover:bg-surface-card transition-colors"
       >
         <Minus size={8} />
       </button>
-      <span className="font-mono text-[10px] text-text-primary bg-surface-hover border-y border-border-default px-1.5 h-5 flex items-center min-w-11 justify-center">
+      <span className="font-mono text-xs text-text-primary bg-surface-hover border-y border-border-default px-1.5 h-6 flex items-center min-w-11 justify-center">
         {value}
       </span>
       <button
         type="button"
         onClick={onInc}
-        className="w-4 h-5 flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-hover border border-border-default rounded-r hover:bg-surface-card transition-colors"
+        className="w-4 h-6 flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-hover border border-border-default rounded-r hover:bg-surface-card transition-colors"
       >
         <Plus size={8} />
       </button>
@@ -188,7 +188,7 @@ function NumberInput({
 }: NumberInputProps) {
   return (
     <div className={`flex items-center gap-1 ${className}`}>
-      <span className="text-[10px] text-text-muted uppercase tracking-wider whitespace-nowrap">
+      <span className="text-xs text-text-muted uppercase tracking-wider whitespace-nowrap">
         {label}
       </span>
       <input
@@ -197,7 +197,7 @@ function NumberInput({
         onChange={(e) => onChange(e.target.value)}
         min={min}
         placeholder={placeholder}
-        className="w-14 h-5 bg-surface-hover border border-border-default rounded px-1.5 text-[10px] font-mono text-text-primary focus:outline-none focus:border-accent placeholder:text-text-muted"
+        className="w-14 h-7 bg-surface-hover border border-border-default rounded px-1.5 text-xs font-mono text-text-primary focus:outline-none focus:border-accent placeholder:text-text-muted"
       />
     </div>
   );
@@ -218,7 +218,7 @@ function ToggleGroup({ value, options, onChange, className = "" }: ToggleGroupPr
           key={opt}
           type="button"
           onClick={() => onChange(opt)}
-          className={`px-2 h-5 text-[10px] font-medium transition-colors ${
+          className={`px-2 h-6 text-xs font-medium transition-colors ${
             value === opt
               ? "bg-accent text-white"
               : "bg-surface-hover text-text-secondary hover:text-text-primary"
@@ -246,7 +246,7 @@ function StatusPill({ message, type = "idle" }: StatusPillProps) {
   };
   return (
     <span
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${colors[type]}`}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-mono ${colors[type]}`}
     >
       {type === "pending" && <RefreshCw size={8} className="animate-spin" />}
       {type === "error" && <AlertTriangle size={8} />}
@@ -481,11 +481,11 @@ export default function ScalperWidget(_props: WidgetProps) {
         <div className="flex items-center gap-2 px-2 py-1 flex-wrap">
           {/* Symbol */}
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider">Index</span>
+            <span className="text-xs text-text-muted uppercase tracking-wider">Index</span>
             <select
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
-              className="h-5 bg-surface-hover border border-border-default rounded px-1 text-[10px] font-mono text-text-primary focus:outline-none focus:border-accent"
+              className="h-7 bg-surface-hover border border-border-default rounded px-1 text-xs font-mono text-text-primary focus:outline-none focus:border-accent"
             >
               {SYMBOLS.map((s) => (
                 <option key={s} value={s}>{s}</option>
@@ -495,11 +495,11 @@ export default function ScalperWidget(_props: WidgetProps) {
 
           {/* Expiry */}
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider">Exp</span>
+            <span className="text-xs text-text-muted uppercase tracking-wider">Exp</span>
             <select
               value={expiry}
               onChange={(e) => setExpiry(e.target.value)}
-              className="h-5 bg-surface-hover border border-border-default rounded px-1 text-[10px] font-mono text-text-primary focus:outline-none focus:border-accent"
+              className="h-7 bg-surface-hover border border-border-default rounded px-1 text-xs font-mono text-text-primary focus:outline-none focus:border-accent"
             >
               {expiries.length === 0 ? (
                 <option value="">loading…</option>
@@ -531,7 +531,7 @@ export default function ScalperWidget(_props: WidgetProps) {
           <StatusPill message={status.message} type={status.type} />
 
           {focused && (
-            <span className="text-[9px] text-text-muted border border-border-subtle rounded px-1 py-0.5 hidden lg:block">
+            <span className="text-xxs text-text-muted border border-border-subtle rounded px-1 py-0.5 hidden lg:block">
               Shift+↑↓←→ to trade
             </span>
           )}
@@ -573,7 +573,7 @@ export default function ScalperWidget(_props: WidgetProps) {
             type="button"
             onClick={() => setOneClick((v) => !v)}
             title={oneClick ? "One-click ON — click to disable" : "One-click OFF — click to enable"}
-            className={`flex items-center gap-1 px-2 h-5 rounded border text-[10px] font-medium transition-colors ${
+            className={`flex items-center gap-1 px-2 h-6 rounded border text-xs font-medium transition-colors ${
               oneClick
                 ? "bg-warning/20 border-warning/60 text-warning"
                 : "bg-surface-hover border-border-default text-text-muted hover:text-text-primary"
@@ -594,10 +594,10 @@ export default function ScalperWidget(_props: WidgetProps) {
         >
           <div className="shrink-0 px-2 py-1 bg-surface-card border-b border-border-subtle">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono text-text-muted uppercase tracking-wider">
+              <span className="text-xs font-mono text-text-muted uppercase tracking-wider">
                 {ceSymbol ?? `${symbol} CE`}
               </span>
-              <span className="text-[9px] text-text-muted">CALL</span>
+              <span className="text-xxs text-text-muted">CALL</span>
             </div>
             <LtpBlock
               label="LTP"
@@ -617,7 +617,7 @@ export default function ScalperWidget(_props: WidgetProps) {
                 className="h-full"
               />
             ) : (
-              <div className="h-full flex items-center justify-center text-[10px] text-text-muted">
+              <div className="h-full flex items-center justify-center text-xs text-text-muted">
                 Select expiry
               </div>
             )}
@@ -629,22 +629,22 @@ export default function ScalperWidget(_props: WidgetProps) {
               onClick={() => handleOrder(ceSymbol, optExch, "SELL")}
               disabled={!ceSymbol}
               title="Sell CE (Shift+←)"
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-loss/10 hover:bg-loss/20 text-loss text-[11px] font-semibold border-r border-border-subtle transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-loss/10 hover:bg-loss/20 text-loss text-xs font-semibold border-r border-border-subtle transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <TrendingDown size={11} />
               Sell CE
-              <span className="text-[9px] opacity-60 ml-0.5">S+←</span>
+              <span className="text-xxs opacity-60 ml-0.5">S+←</span>
             </button>
             <button
               type="button"
               onClick={() => handleOrder(ceSymbol, optExch, "BUY")}
               disabled={!ceSymbol}
               title="Buy CE (Shift+↑)"
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-profit/10 hover:bg-profit/20 text-profit text-[11px] font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-profit/10 hover:bg-profit/20 text-profit text-xs font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <TrendingUp size={11} />
               Buy CE
-              <span className="text-[9px] opacity-60 ml-0.5">S+↑</span>
+              <span className="text-xxs opacity-60 ml-0.5">S+↑</span>
             </button>
           </div>
         </div>
@@ -653,16 +653,16 @@ export default function ScalperWidget(_props: WidgetProps) {
         <div className="flex flex-col" style={{ width: "44%", minWidth: 0 }}>
           <div className="shrink-0 px-2 py-1 bg-surface-card border-b border-border-subtle">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono font-semibold text-text-primary uppercase tracking-wider">
+              <span className="text-xs font-mono font-semibold text-text-primary uppercase tracking-wider">
                 {symbol}
               </span>
-              <span className="text-[9px] text-text-muted">{spotExch}</span>
+              <span className="text-xxs text-text-muted">{spotExch}</span>
             </div>
             <LtpBlock label="SPOT" symbol={symbol} exchange={spotExch} ticks={ticks} />
             {atmStrike != null && (
               <div className="flex items-center gap-1 mt-0.5">
-                <span className="text-[9px] text-text-muted">ATM</span>
-                <span className="font-mono text-[10px] text-accent">{fmtInt(atmStrike)}</span>
+                <span className="text-xxs text-text-muted">ATM</span>
+                <span className="font-mono text-xs text-accent">{fmtInt(atmStrike)}</span>
               </div>
             )}
           </div>
@@ -682,21 +682,21 @@ export default function ScalperWidget(_props: WidgetProps) {
               type="button"
               onClick={() => void handleCloseAll()}
               title="Close all positions (F6)"
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-warning/10 hover:bg-warning/20 text-warning text-[11px] font-semibold border-r border-border-subtle transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-warning/10 hover:bg-warning/20 text-warning text-xs font-semibold border-r border-border-subtle transition-colors"
             >
               <X size={11} />
               Close All
-              <span className="text-[9px] opacity-60 ml-0.5">F6</span>
+              <span className="text-xxs opacity-60 ml-0.5">F6</span>
             </button>
             <button
               type="button"
               onClick={() => void handleCancelAll()}
               title="Cancel all orders (F7)"
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-surface-hover hover:bg-surface-card text-text-secondary text-[11px] font-semibold transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-surface-hover hover:bg-surface-card text-text-secondary text-xs font-semibold transition-colors"
             >
               <RefreshCw size={11} />
               Cancel All
-              <span className="text-[9px] opacity-60 ml-0.5">F7</span>
+              <span className="text-xxs opacity-60 ml-0.5">F7</span>
             </button>
           </div>
         </div>
@@ -708,10 +708,10 @@ export default function ScalperWidget(_props: WidgetProps) {
         >
           <div className="shrink-0 px-2 py-1 bg-surface-card border-b border-border-subtle">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono text-text-muted uppercase tracking-wider">
+              <span className="text-xs font-mono text-text-muted uppercase tracking-wider">
                 {peSymbol ?? `${symbol} PE`}
               </span>
-              <span className="text-[9px] text-text-muted">PUT</span>
+              <span className="text-xxs text-text-muted">PUT</span>
             </div>
             <LtpBlock
               label="LTP"
@@ -731,7 +731,7 @@ export default function ScalperWidget(_props: WidgetProps) {
                 className="h-full"
               />
             ) : (
-              <div className="h-full flex items-center justify-center text-[10px] text-text-muted">
+              <div className="h-full flex items-center justify-center text-xs text-text-muted">
                 Select expiry
               </div>
             )}
@@ -743,22 +743,22 @@ export default function ScalperWidget(_props: WidgetProps) {
               onClick={() => handleOrder(peSymbol, optExch, "BUY")}
               disabled={!peSymbol}
               title="Buy Put (Shift+↓)"
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-profit/10 hover:bg-profit/20 text-profit text-[11px] font-semibold border-r border-border-subtle transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-profit/10 hover:bg-profit/20 text-profit text-xs font-semibold border-r border-border-subtle transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <TrendingUp size={11} />
               Buy PE
-              <span className="text-[9px] opacity-60 ml-0.5">S+↓</span>
+              <span className="text-xxs opacity-60 ml-0.5">S+↓</span>
             </button>
             <button
               type="button"
               onClick={() => handleOrder(peSymbol, optExch, "SELL")}
               disabled={!peSymbol}
               title="Sell Put (Shift+→)"
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-loss/10 hover:bg-loss/20 text-loss text-[11px] font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-loss/10 hover:bg-loss/20 text-loss text-xs font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <TrendingDown size={11} />
               Sell PE
-              <span className="text-[9px] opacity-60 ml-0.5">S+→</span>
+              <span className="text-xxs opacity-60 ml-0.5">S+→</span>
             </button>
           </div>
         </div>
@@ -770,11 +770,11 @@ export default function ScalperWidget(_props: WidgetProps) {
           <div className="bg-surface-card border border-border-default rounded-lg p-4 min-w-60 shadow-2xl">
             <div className="text-xs font-semibold text-text-primary mb-3">Confirm Order</div>
             <div className="space-y-1 mb-4">
-              <div className="flex justify-between text-[11px]">
+              <div className="flex justify-between text-xs">
                 <span className="text-text-muted">Symbol</span>
                 <span className="font-mono text-text-primary">{pendingOrder.sym}</span>
               </div>
-              <div className="flex justify-between text-[11px]">
+              <div className="flex justify-between text-xs">
                 <span className="text-text-muted">Action</span>
                 <span
                   className={`font-semibold ${
@@ -784,26 +784,26 @@ export default function ScalperWidget(_props: WidgetProps) {
                   {pendingOrder.action}
                 </span>
               </div>
-              <div className="flex justify-between text-[11px]">
+              <div className="flex justify-between text-xs">
                 <span className="text-text-muted">Qty</span>
                 <span className="font-mono text-text-primary">
                   {lots * lotSize} ({lots} lot{lots > 1 ? "s" : ""})
                 </span>
               </div>
-              <div className="flex justify-between text-[11px]">
+              <div className="flex justify-between text-xs">
                 <span className="text-text-muted">Product</span>
                 <span className="font-mono text-text-primary">
                   {product} · {orderType}
                 </span>
               </div>
               {sl && (
-                <div className="flex justify-between text-[11px]">
+                <div className="flex justify-between text-xs">
                   <span className="text-text-muted">SL</span>
                   <span className="font-mono text-loss">{sl} pts</span>
                 </div>
               )}
               {target && (
-                <div className="flex justify-between text-[11px]">
+                <div className="flex justify-between text-xs">
                   <span className="text-text-muted">Target</span>
                   <span className="font-mono text-profit">{target} pts</span>
                 </div>
@@ -813,7 +813,7 @@ export default function ScalperWidget(_props: WidgetProps) {
               <button
                 type="button"
                 onClick={confirmOrder}
-                className={`flex-1 py-1.5 rounded text-[11px] font-semibold transition-colors ${
+                className={`flex-1 py-1.5 rounded text-xs font-semibold transition-colors ${
                   pendingOrder.action === "BUY"
                     ? "bg-profit hover:bg-profit/80 text-white"
                     : "bg-loss hover:bg-loss/80 text-white"
@@ -824,7 +824,7 @@ export default function ScalperWidget(_props: WidgetProps) {
               <button
                 type="button"
                 onClick={() => setPendingOrder(null)}
-                className="flex-1 py-1.5 rounded text-[11px] font-medium bg-surface-hover hover:bg-surface-card text-text-secondary border border-border-default transition-colors"
+                className="flex-1 py-1.5 rounded text-xs font-medium bg-surface-hover hover:bg-surface-card text-text-secondary border border-border-default transition-colors"
               >
                 Cancel (Esc)
               </button>

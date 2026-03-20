@@ -496,23 +496,23 @@ function StatusIcon({ status }: { status: FlowStatus }) {
     case "active":
       return <CheckCircle2 size={12} className="text-emerald-400" />;
     case "running":
-      return <Play size={12} className="text-[#6c8ef0] animate-pulse" />;
+      return <Play size={12} className="text-primary animate-pulse" />;
     case "error":
       return <XCircle size={12} className="text-red-400" />;
     case "inactive":
     default:
-      return <Pause size={12} className="text-[#6b6b8a]" />;
+      return <Pause size={12} className="text-text-muted" />;
   }
 }
 
 function DifficultyBadge({ level }: { level: FlowTemplate["difficulty"] }) {
   const map = {
-    Beginner: "bg-[#0a2a1a] text-emerald-400 border-[#1a3a2a]",
-    Intermediate: "bg-[#1a1a2a] text-[#818cf8] border-[#2a2a4a]",
-    Advanced: "bg-[#2a1a0a] text-amber-400 border-[#3a2a1a]",
+    Beginner: "bg-bullish-bg text-emerald-400 border-bullish-border",
+    Intermediate: "bg-surface-elevated text-primary border-border-default",
+    Advanced: "bg-atm-bg text-amber-400 border-atm-border",
   };
   return (
-    <Badge className={`text-[9px] h-4 px-1.5 ${map[level]}`}>{level}</Badge>
+    <Badge className={`text-xxs h-4 px-1.5 ${map[level]}`}>{level}</Badge>
   );
 }
 
@@ -819,7 +819,7 @@ function ConfigPanel({ node, onChange, onLabelChange, onDelete, onClose }: Confi
             <Button
               size="sm"
               variant="ghost"
-              className="w-full h-7 text-red-400 hover:text-red-300 hover:bg-red-950 text-[11px] gap-1.5 justify-start"
+              className="w-full h-7 text-red-400 hover:text-red-300 hover:bg-red-950 text-xs gap-1.5 justify-start"
               onClick={() => onDelete(node.id)}
             >
               <Trash2 size={11} />
@@ -1318,7 +1318,7 @@ function EditorView({ flow, onSave, onBack }: EditorViewProps) {
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 px-2 text-[11px] text-[#6b6b8a] hover:text-[#e0e0f0] gap-1"
+            className="h-6 px-2 text-xs text-text-muted hover:text-text-primary gap-1"
             onClick={handleClearCanvas}
             title="Clear canvas"
           >
@@ -1328,7 +1328,7 @@ function EditorView({ flow, onSave, onBack }: EditorViewProps) {
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 px-2 text-[11px] text-amber-400 hover:text-amber-300 gap-1"
+            className="h-6 px-2 text-xs text-amber-400 hover:text-amber-300 gap-1"
             onClick={() => setShowRunNote((v) => !v)}
           >
             <Terminal size={11} />
@@ -1337,7 +1337,7 @@ function EditorView({ flow, onSave, onBack }: EditorViewProps) {
 
           <Button
             size="sm"
-            className="h-6 px-3 bg-[#3b5bdb] hover:bg-[#4c6ef5] text-white text-[11px] gap-1"
+            className="h-6 px-3 bg-primary hover:bg-primary/90 text-white text-xs gap-1"
             onClick={handleSave}
             disabled={saved}
           >
@@ -1397,12 +1397,12 @@ function FlowsTab({ flows, onNew, onOpen, onDelete, onFromTemplate }: FlowsTabPr
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4">
-        <span className="text-[12px] text-[#9090b0]">{saved.length} flow{saved.length !== 1 ? "s" : ""} saved</span>
+        <span className="text-xs text-text-secondary">{saved.length} flow{saved.length !== 1 ? "s" : ""} saved</span>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
             variant="outline"
-            className="h-7 bg-surface-card border-border-default text-[#9090b0] hover:text-[#e0e0f0] text-[11px] gap-1"
+            className="h-7 bg-surface-card border-border-default text-text-secondary hover:text-text-primary text-xs gap-1"
             onClick={onFromTemplate}
           >
             <Package size={11} />
@@ -1410,7 +1410,7 @@ function FlowsTab({ flows, onNew, onOpen, onDelete, onFromTemplate }: FlowsTabPr
           </Button>
           <Button
             size="sm"
-            className="h-7 bg-[#3b5bdb] hover:bg-[#4c6ef5] text-white text-[11px] gap-1"
+            className="h-7 bg-primary hover:bg-primary/90 text-white text-xs gap-1"
             onClick={onNew}
           >
             <Plus size={11} />
@@ -1422,16 +1422,16 @@ function FlowsTab({ flows, onNew, onOpen, onDelete, onFromTemplate }: FlowsTabPr
       {saved.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-14 text-center">
           <div className="w-14 h-14 rounded-full bg-surface-card border border-border-default flex items-center justify-center mb-4">
-            <Workflow size={20} className="text-[#6b6b8a]" />
+            <Workflow size={20} className="text-text-muted" />
           </div>
-          <h3 className="text-[14px] font-medium text-[#e0e0f0] mb-1">No flows yet</h3>
-          <p className="text-[12px] text-[#6b6b8a] mb-5 max-w-xs">
+          <h3 className="text-sm font-medium text-text-primary mb-1">No flows yet</h3>
+          <p className="text-xs text-text-muted mb-5 max-w-xs">
             Create your first automation flow. Start from a template or build from scratch using 54 pre-built nodes.
           </p>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              className="h-8 bg-[#3b5bdb] hover:bg-[#4c6ef5] text-white text-[12px] gap-1"
+              className="h-8 bg-primary hover:bg-primary/90 text-white text-xs gap-1"
               onClick={onNew}
             >
               <Plus size={13} />
@@ -1440,7 +1440,7 @@ function FlowsTab({ flows, onNew, onOpen, onDelete, onFromTemplate }: FlowsTabPr
             <Button
               size="sm"
               variant="outline"
-              className="h-8 bg-surface-card border-border-default text-[#9090b0] hover:text-[#e0e0f0] text-[12px] gap-1"
+              className="h-8 bg-surface-card border-border-default text-text-secondary hover:text-text-primary text-xs gap-1"
               onClick={onFromTemplate}
             >
               <Package size={13} />
@@ -1453,17 +1453,17 @@ function FlowsTab({ flows, onNew, onOpen, onDelete, onFromTemplate }: FlowsTabPr
           {saved.map((flow) => (
             <Card
               key={flow.id}
-              className="bg-surface-card border-border-default hover:border-[#2a2a4a] transition-colors cursor-default"
+              className="bg-surface-card border-border-default hover:border-border-default transition-colors cursor-default"
             >
               <CardContent className="p-3">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2">
                     <StatusIcon status={flow.status} />
-                    <span className="text-[13px] font-medium text-[#e0e0f0]">{flow.name}</span>
+                    <span className="text-sm font-medium text-text-primary">{flow.name}</span>
                   </div>
-                  <span className="text-[10px] text-[#6b6b8a]">{flow.updatedAt}</span>
+                  <span className="text-xs text-text-muted">{flow.updatedAt}</span>
                 </div>
-                <div className="flex items-center gap-3 mt-2 ml-5 text-[10px] text-[#6b6b8a]">
+                <div className="flex items-center gap-3 mt-2 ml-5 text-xs text-text-muted">
                   <span>{flow.nodeCount} nodes</span>
                   <span>{flow.edgeCount} edges</span>
                 </div>
@@ -1471,7 +1471,7 @@ function FlowsTab({ flows, onNew, onOpen, onDelete, onFromTemplate }: FlowsTabPr
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-2 text-[11px] text-[#6c8ef0] hover:text-white gap-1"
+                    className="h-6 px-2 text-xs text-primary hover:text-white gap-1"
                     onClick={() => onOpen(flow.id)}
                   >
                     <FolderOpen size={11} />
@@ -1480,7 +1480,7 @@ function FlowsTab({ flows, onNew, onOpen, onDelete, onFromTemplate }: FlowsTabPr
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-2 text-[11px] text-red-400 hover:text-red-300 gap-1"
+                    className="h-6 px-2 text-xs text-red-400 hover:text-red-300 gap-1"
                     onClick={() => onDelete(flow.id)}
                   >
                     <Trash2 size={11} />
@@ -1522,10 +1522,10 @@ function TemplatesTab({ onUse }: TemplatesTabProps) {
             key={cat}
             onClick={() => setActiveCategory(cat)}
             className={[
-              "text-[11px] px-2.5 py-0.5 rounded-full border transition-colors",
+              "text-xs px-2.5 py-0.5 rounded-full border transition-colors",
               activeCategory === cat
-                ? "bg-[#1e2a4a] text-[#6c8ef0] border-[#2a3a6a]"
-                : "bg-surface-card text-[#6b6b8a] border-border-default hover:border-[#3a3a5a]",
+                ? "bg-neutral-bg text-primary border-neutral-border"
+                : "bg-surface-card text-text-muted border-border-default hover:border-border-strong",
             ].join(" ")}
           >
             {cat}
@@ -1537,11 +1537,11 @@ function TemplatesTab({ onUse }: TemplatesTabProps) {
         {filtered.map((tmpl) => (
           <Card
             key={tmpl.id}
-            className="bg-surface-card border-border-default hover:border-[#2a2a4a] transition-colors"
+            className="bg-surface-card border-border-default hover:border-border-default transition-colors"
           >
             <CardHeader className="pt-3 pb-1 px-3">
               <div className="flex items-start justify-between gap-2">
-                <CardTitle className="text-[13px] font-medium text-[#e0e0f0] leading-tight">
+                <CardTitle className="text-sm font-medium text-text-primary leading-tight">
                   {tmpl.name}
                 </CardTitle>
                 <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
@@ -1550,20 +1550,20 @@ function TemplatesTab({ onUse }: TemplatesTabProps) {
               </div>
             </CardHeader>
             <CardContent className="px-3 pb-3">
-              <p className="text-[11px] text-[#6b6b8a] mb-2 leading-relaxed">{tmpl.description}</p>
+              <p className="text-xs text-text-muted mb-2 leading-relaxed">{tmpl.description}</p>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {tmpl.tags.slice(0, 3).map((tag) => (
-                    <Badge key={tag} className="text-[9px] h-4 px-1.5 bg-border-default text-[#9090b0] border-[#2a2a3a]">
+                    <Badge key={tag} className="text-xxs h-4 px-1.5 bg-border-default text-text-secondary border-border-default">
                       {tag}
                     </Badge>
                   ))}
-                  <span className="text-[10px] text-[#6b6b8a]">{tmpl.nodeCount} nodes</span>
+                  <span className="text-xs text-text-muted">{tmpl.nodeCount} nodes</span>
                 </div>
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-6 px-2 text-[11px] text-[#6b6b8a] hover:text-[#e0e0f0] gap-1"
+                  className="h-6 px-2 text-xs text-text-muted hover:text-text-primary gap-1"
                   onClick={() => onUse(tmpl)}
                   disabled={tmpl.workflow.nodes.length === 0 && tmpl.id !== "simple_market_order" && tmpl.id !== "price_alert_order" && tmpl.id !== "intraday_time_strategy"}
                 >
@@ -1593,12 +1593,12 @@ function HowItWorksTab() {
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <Package size={14} className="text-[#6c8ef0]" />
-              <span className="text-[13px] font-medium text-[#e0e0f0]">
+              <Package size={14} className="text-primary" />
+              <span className="text-sm font-medium text-text-primary">
                 {totalNodes}-Node Flow Builder
               </span>
             </div>
-            <p className="text-[12px] text-[#9090b0] leading-relaxed">
+            <p className="text-xs text-text-secondary leading-relaxed">
               FlowBuilder is a visual no-code workflow engine for OpenAlgo. Connect nodes on a
               drag-and-drop canvas to create trading automations — from simple TradingView webhooks
               to complex multi-leg options strategies. Flows run on the FlintTrade Python backend
@@ -1607,8 +1607,8 @@ function HowItWorksTab() {
             <div className="mt-3 grid grid-cols-4 gap-2 text-center">
               {[["4", "Triggers"], ["10", "Actions"], ["5", "Conditions"], ["3", "Logic"]].map(([count, label]) => (
                 <div key={label} className="rounded-md bg-surface-base p-2">
-                  <div className="text-[16px] font-mono font-bold text-[#6c8ef0]">{count}</div>
-                  <div className="text-[10px] text-[#6b6b8a]">{label}</div>
+                  <div className="text-base font-mono font-bold text-primary">{count}</div>
+                  <div className="text-xs text-text-muted">{label}</div>
                 </div>
               ))}
             </div>
@@ -1618,7 +1618,7 @@ function HowItWorksTab() {
         {/* Canvas usage tips */}
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[11px] font-semibold text-[#e0e0f0] mb-2">Canvas Controls</div>
+            <div className="text-xs font-semibold text-text-primary mb-2">Canvas Controls</div>
             <div className="grid gap-1">
               {[
                 ["Drag from palette", "Drop a node onto the canvas"],
@@ -1630,9 +1630,9 @@ function HowItWorksTab() {
                 ["Drag blank area", "Pan the canvas"],
                 ["Delete in config panel", "Remove the selected node"],
               ].map(([k, v]) => (
-                <div key={k} className="flex items-start gap-2 text-[10px] py-1 border-b border-border-default last:border-none">
-                  <span className="text-[#6c8ef0] font-mono shrink-0 w-36">{k}</span>
-                  <span className="text-[#9090b0]">{v}</span>
+                <div key={k} className="flex items-start gap-2 text-xs py-1 border-b border-border-default last:border-none">
+                  <span className="text-primary font-mono shrink-0 w-36">{k}</span>
+                  <span className="text-text-secondary">{v}</span>
                 </div>
               ))}
             </div>
@@ -1644,8 +1644,8 @@ function HowItWorksTab() {
           <div key={cat.id}>
             <div className="flex items-center gap-2 mb-2" style={{ color: cat.color }}>
               {cat.icon}
-              <span className="text-[12px] font-semibold">{cat.label}</span>
-              <Badge className="text-[9px] h-4 px-1.5 bg-surface-card text-[#6b6b8a] border-border-default">
+              <span className="text-xs font-semibold">{cat.label}</span>
+              <Badge className="text-xxs h-4 px-1.5 bg-surface-card text-text-muted border-border-default">
                 {cat.nodes.length} nodes
               </Badge>
             </div>
@@ -1657,8 +1657,8 @@ function HowItWorksTab() {
                 >
                   <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: cat.color }} />
                   <div>
-                    <span className="text-[12px] text-[#e0e0f0] font-medium">{node.label}</span>
-                    <span className="text-[11px] text-[#6b6b8a] ml-2">{node.description}</span>
+                    <span className="text-xs text-text-primary font-medium">{node.label}</span>
+                    <span className="text-xs text-text-muted ml-2">{node.description}</span>
                   </div>
                 </div>
               ))}
@@ -1667,10 +1667,10 @@ function HowItWorksTab() {
         ))}
 
         {/* Backend note */}
-        <Card className="bg-[#1a1a0a] border-[#2a2a1a]">
+        <Card className="bg-atm-bg border-atm-border">
           <CardContent className="p-3 flex items-start gap-2">
             <Info size={13} className="text-amber-400 mt-0.5 shrink-0" />
-            <p className="text-[11px] text-[#9090b0]">
+            <p className="text-xs text-text-secondary">
               Execution requires the FlintTrade Python backend (
               <span className="font-mono text-amber-400">packages/automation</span>). The canvas
               editor is fully functional — save flows as JSON and load them into the runner when
@@ -1780,15 +1780,15 @@ export default function FlowBuilderTool({ onClose }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
-          <Workflow size={16} className="text-[#6c8ef0]" />
-          <span className="text-[13px] font-semibold text-[#e0e0f0]">Flow Builder</span>
-          <Badge className="text-[9px] h-4 px-1.5 bg-[#1a2a0a] text-emerald-400 border-[#2a3a1a]">
+          <Workflow size={16} className="text-primary" />
+          <span className="text-sm font-semibold text-text-primary">Flow Builder</span>
+          <Badge className="text-xxs h-4 px-1.5 bg-bullish-bg text-emerald-400 border-bullish-border">
             54 nodes
           </Badge>
         </div>
         <button
           onClick={onClose}
-          className="text-[#6b6b8a] hover:text-[#e0e0f0] transition-colors"
+          className="text-text-muted hover:text-text-primary transition-colors"
         >
           <X size={15} />
         </button>
@@ -1799,19 +1799,19 @@ export default function FlowBuilderTool({ onClose }: Props) {
         <TabsList className="mx-4 mt-3 mb-0 h-8 bg-surface-card border border-border-default shrink-0 rounded-md w-auto self-start">
           <TabsTrigger
             value="flows"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-[#e0e0f0]"
+            className="text-xs h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-text-primary"
           >
             Flows
           </TabsTrigger>
           <TabsTrigger
             value="templates"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-[#e0e0f0]"
+            className="text-xs h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-text-primary"
           >
             Templates
           </TabsTrigger>
           <TabsTrigger
             value="how"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-[#e0e0f0]"
+            className="text-xs h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-text-primary"
           >
             How It Works
           </TabsTrigger>

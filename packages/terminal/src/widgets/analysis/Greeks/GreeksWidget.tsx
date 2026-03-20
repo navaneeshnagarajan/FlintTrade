@@ -156,12 +156,12 @@ function GreekCard({ label, value, colorScheme, description }: GreekCardProps) {
 
   return (
     <div className="flex-1 min-w-0 bg-surface-card border border-border-default rounded px-3 py-2">
-      <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-xs text-text-muted uppercase tracking-wider mb-1">{label}</div>
       <div className={`font-mono text-base font-semibold leading-tight ${valueColor}`}>
         {displayValue}
       </div>
       {description && (
-        <div className="text-[10px] text-text-muted mt-0.5 truncate">{description}</div>
+        <div className="text-xs text-text-muted mt-0.5 truncate">{description}</div>
       )}
     </div>
   );
@@ -312,18 +312,18 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
       <div className="flex-none flex items-center justify-between px-3 py-1.5 bg-surface-card border-b border-border-default">
         <div className="flex items-center gap-1.5">
           <Activity size={12} className="text-accent" />
-          <span className="text-[10px] font-semibold text-text-primary uppercase tracking-wider">
+          <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">
             Portfolio Greeks
           </span>
           {fnoPositions.length > 0 && (
-            <span className="text-[10px] text-text-muted">
+            <span className="text-xs text-text-muted">
               · {fnoPositions.length} F&amp;O position{fnoPositions.length !== 1 ? "s" : ""}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {lastRefresh && (
-            <span className="text-[10px] text-text-muted font-mono">
+            <span className="text-xs text-text-muted font-mono">
               {lastRefresh.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
@@ -340,7 +340,7 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
 
       {/* Error banner */}
       {error && (
-        <div className="flex-none flex items-center gap-2 px-3 py-1 bg-loss/10 border-b border-loss/20 text-loss text-[10px]">
+        <div className="flex-none flex items-center gap-2 px-3 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
           <AlertCircle size={11} />
           <span>{error}</span>
         </div>
@@ -385,20 +385,20 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
           <div className="h-full flex flex-col items-center justify-center gap-2 text-text-muted">
             <TrendingDown size={28} className="opacity-30" />
             <span className="text-sm">No F&amp;O positions</span>
-            <span className="text-[10px]">Open options or futures positions to see portfolio Greeks</span>
+            <span className="text-xs">Open options or futures positions to see portfolio Greeks</span>
           </div>
         ) : (
           <table className="w-full border-separate border-spacing-0">
             <thead className="sticky top-0 z-10 bg-surface-card">
               <tr>
-                <th className="px-2 py-1 text-left text-[10px] text-text-muted uppercase tracking-wider border-b border-border-default">Symbol</th>
-                <th className="px-2 py-1 text-right text-[10px] text-text-muted uppercase tracking-wider border-b border-border-default">Qty</th>
-                <th className="px-2 py-1 text-right text-[10px] text-text-muted uppercase tracking-wider border-b border-border-default">LTP</th>
-                <th className="px-2 py-1 text-right text-[10px] text-text-muted uppercase tracking-wider border-b border-border-default">Delta</th>
-                <th className="px-2 py-1 text-right text-[10px] text-text-muted uppercase tracking-wider border-b border-border-default">Gamma</th>
-                <th className="px-2 py-1 text-right text-[10px] text-loss/80 uppercase tracking-wider border-b border-border-default">Theta</th>
-                <th className="px-2 py-1 text-right text-[10px] text-text-muted uppercase tracking-wider border-b border-border-default">Vega</th>
-                <th className="px-2 py-1 text-right text-[10px] text-text-muted uppercase tracking-wider border-b border-border-default">IV</th>
+                <th className="px-2 py-1 text-left text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Symbol</th>
+                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Qty</th>
+                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">LTP</th>
+                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Delta</th>
+                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Gamma</th>
+                <th className="px-2 py-1 text-right text-xs text-loss/80 uppercase tracking-wider border-b border-border-default">Theta</th>
+                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">Vega</th>
+                <th className="px-2 py-1 text-right text-xs text-text-muted uppercase tracking-wider border-b border-border-default">IV</th>
               </tr>
             </thead>
             <tbody>
@@ -443,7 +443,7 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
             {rows.length > 1 && (
               <tfoot>
                 <tr className="bg-surface-card border-t-2 border-border-default">
-                  <td colSpan={3} className="px-2 py-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+                  <td colSpan={3} className="px-2 py-1 text-xs text-text-muted uppercase tracking-wider font-semibold">
                     Total ({rows.length} legs)
                   </td>
                   <td className={`px-2 py-1 text-right font-mono font-semibold text-xs ${
@@ -470,10 +470,10 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
 
       {/* Footer */}
       <div className="flex-none flex items-center justify-between px-3 py-1 bg-surface-card border-t border-border-default">
-        <span className="text-[10px] text-text-muted">
+        <span className="text-xs text-text-muted">
           {isMarketHours() ? "Live · 10s refresh" : "Market closed · 60s refresh"}
         </span>
-        <span className="text-[10px] text-text-muted">
+        <span className="text-xs text-text-muted">
           Greeks = per-leg × qty
         </span>
       </div>

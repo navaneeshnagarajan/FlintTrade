@@ -186,9 +186,9 @@ const MOCK_TRADES: MockTrade[] = [
 
 function MetricCard({ metric }: { metric: BacktestMetric }) {
   return (
-    <Card className="bg-[#12121a] border-[#1e1e2e]">
+    <Card className="bg-surface-card border-border-default">
       <CardContent className="pt-4 pb-3 px-4">
-        <div className="text-[11px] text-[#6b6b8a] mb-1">{metric.label}</div>
+        <div className="text-xs text-text-muted mb-1">{metric.label}</div>
         <div
           className={[
             "font-mono text-lg font-semibold leading-none",
@@ -196,13 +196,13 @@ function MetricCard({ metric }: { metric: BacktestMetric }) {
               ? "text-emerald-400"
               : metric.positive === false
               ? "text-red-400"
-              : "text-[#e0e0f0]",
+              : "text-text-primary",
           ].join(" ")}
         >
           {metric.value}
         </div>
         {metric.sub && (
-          <div className="text-[10px] text-[#6b6b8a] mt-1">{metric.sub}</div>
+          <div className="text-xs text-text-muted mt-1">{metric.sub}</div>
         )}
       </CardContent>
     </Card>
@@ -220,7 +220,7 @@ function EquityCurvePlaceholder() {
     .join(" ");
 
   return (
-    <div className="relative w-full h-[140px] bg-[#0d0d16] rounded-md border border-[#1e1e2e] flex items-center justify-center overflow-hidden">
+    <div className="relative w-full h-[140px] bg-surface-base rounded-md border border-border-default flex items-center justify-center overflow-hidden">
       <svg
         className="absolute inset-0 w-full h-full opacity-40"
         viewBox={`0 0 ${w} ${h}`}
@@ -243,7 +243,7 @@ function EquityCurvePlaceholder() {
           fill="url(#eqGrad)"
         />
       </svg>
-      <div className="relative text-[11px] text-[#6b6b8a] text-center">
+      <div className="relative text-xs text-text-muted text-center">
         <BarChart2 size={20} className="mx-auto mb-1 opacity-40" />
         Equity curve renders here when backtest-engine API is connected
       </div>
@@ -289,23 +289,23 @@ function ConfigureTab({
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 p-4">
       {/* Strategy selector */}
       <div className="space-y-1.5">
-        <Label className="text-[11px] text-[#9090b0]">Strategy</Label>
+        <Label className="text-xs text-text-secondary">Strategy</Label>
         <Controller
           name="strategy"
           control={control}
           render={({ field }) => (
             <Select onValueChange={field.onChange} value={field.value}>
-              <SelectTrigger className="bg-[#12121a] border-[#1e1e2e] text-[13px] h-8">
+              <SelectTrigger className="bg-surface-card border-border-default text-sm h-8">
                 <SelectValue placeholder="Select strategy..." />
               </SelectTrigger>
-              <SelectContent className="bg-[#12121a] border-[#1e1e2e]">
+              <SelectContent className="bg-surface-card border-border-default">
                 {STRATEGIES.map((s) => (
-                  <SelectItem key={s.id} value={s.id} className="text-[13px]">
+                  <SelectItem key={s.id} value={s.id} className="text-sm">
                     <span className="flex items-center gap-2">
                       {s.name}
                       <Badge
                         variant="secondary"
-                        className="text-[10px] h-4 px-1 bg-[#1e1e2e] text-[#9090b0]"
+                        className="text-xs h-4 px-1 bg-surface-elevated text-text-secondary"
                       >
                         {s.category}
                       </Badge>
@@ -317,39 +317,39 @@ function ConfigureTab({
           )}
         />
         {stratDef && (
-          <p className="text-[11px] text-[#6b6b8a]">{stratDef.description}</p>
+          <p className="text-xs text-text-muted">{stratDef.description}</p>
         )}
         {errors.strategy && (
-          <p className="text-[11px] text-red-400">{errors.strategy.message}</p>
+          <p className="text-xs text-red-400">{errors.strategy.message}</p>
         )}
       </div>
 
       {/* Symbol + Exchange row */}
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label className="text-[11px] text-[#9090b0]">Symbol</Label>
+          <Label className="text-xs text-text-secondary">Symbol</Label>
           <Input
             {...register("symbol")}
             placeholder="RELIANCE"
-            className="bg-[#12121a] border-[#1e1e2e] font-mono text-[13px] h-8 uppercase"
+            className="bg-surface-card border-border-default font-mono text-sm h-8 uppercase"
           />
           {errors.symbol && (
-            <p className="text-[11px] text-red-400">{errors.symbol.message}</p>
+            <p className="text-xs text-red-400">{errors.symbol.message}</p>
           )}
         </div>
         <div className="space-y-1.5">
-          <Label className="text-[11px] text-[#9090b0]">Exchange</Label>
+          <Label className="text-xs text-text-secondary">Exchange</Label>
           <Controller
             name="exchange"
             control={control}
             render={({ field }) => (
               <Select onValueChange={field.onChange} value={field.value}>
-                <SelectTrigger className="bg-[#12121a] border-[#1e1e2e] text-[13px] h-8">
+                <SelectTrigger className="bg-surface-card border-border-default text-sm h-8">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#12121a] border-[#1e1e2e]">
+                <SelectContent className="bg-surface-card border-border-default">
                   {EXCHANGES.map((ex) => (
-                    <SelectItem key={ex} value={ex} className="text-[13px]">
+                    <SelectItem key={ex} value={ex} className="text-sm">
                       {ex}
                     </SelectItem>
                   ))}
@@ -363,34 +363,34 @@ function ConfigureTab({
       {/* Date range + Timeframe */}
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
-          <Label className="text-[11px] text-[#9090b0]">From</Label>
+          <Label className="text-xs text-text-secondary">From</Label>
           <Input
             {...register("fromDate")}
             type="date"
-            className="bg-[#12121a] border-[#1e1e2e] text-[13px] h-8"
+            className="bg-surface-card border-border-default text-sm h-8"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-[11px] text-[#9090b0]">To</Label>
+          <Label className="text-xs text-text-secondary">To</Label>
           <Input
             {...register("toDate")}
             type="date"
-            className="bg-[#12121a] border-[#1e1e2e] text-[13px] h-8"
+            className="bg-surface-card border-border-default text-sm h-8"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-[11px] text-[#9090b0]">Timeframe</Label>
+          <Label className="text-xs text-text-secondary">Timeframe</Label>
           <Controller
             name="timeframe"
             control={control}
             render={({ field }) => (
               <Select onValueChange={field.onChange} value={field.value}>
-                <SelectTrigger className="bg-[#12121a] border-[#1e1e2e] text-[13px] h-8">
+                <SelectTrigger className="bg-surface-card border-border-default text-sm h-8">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#12121a] border-[#1e1e2e]">
+                <SelectContent className="bg-surface-card border-border-default">
                   {TIMEFRAMES.map((tf) => (
-                    <SelectItem key={tf} value={tf} className="text-[13px]">
+                    <SelectItem key={tf} value={tf} className="text-sm">
                       {tf}
                     </SelectItem>
                   ))}
@@ -403,14 +403,14 @@ function ConfigureTab({
 
       {/* Capital */}
       <div className="space-y-1.5">
-        <Label className="text-[11px] text-[#9090b0]">Initial Capital (₹)</Label>
+        <Label className="text-xs text-text-secondary">Initial Capital (₹)</Label>
         <Input
           {...register("capital")}
           placeholder="1000000"
-          className="bg-[#12121a] border-[#1e1e2e] font-mono text-[13px] h-8"
+          className="bg-surface-card border-border-default font-mono text-sm h-8"
         />
         {errors.capital && (
-          <p className="text-[11px] text-red-400">{errors.capital.message}</p>
+          <p className="text-xs text-red-400">{errors.capital.message}</p>
         )}
       </div>
 
@@ -418,36 +418,36 @@ function ConfigureTab({
       {stratDef && stratDef.params.includes("fastPeriod") && (
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label className="text-[11px] text-[#9090b0]">Fast EMA Period</Label>
+            <Label className="text-xs text-text-secondary">Fast EMA Period</Label>
             <Input
               {...register("fastPeriod")}
-              className="bg-[#12121a] border-[#1e1e2e] font-mono text-[13px] h-8"
+              className="bg-surface-card border-border-default font-mono text-sm h-8"
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-[11px] text-[#9090b0]">Slow EMA Period</Label>
+            <Label className="text-xs text-text-secondary">Slow EMA Period</Label>
             <Input
               {...register("slowPeriod")}
-              className="bg-[#12121a] border-[#1e1e2e] font-mono text-[13px] h-8"
+              className="bg-surface-card border-border-default font-mono text-sm h-8"
             />
           </div>
         </div>
       )}
       {stratDef && stratDef.params.includes("atrMultiplier") && (
         <div className="space-y-1.5">
-          <Label className="text-[11px] text-[#9090b0]">ATR Multiplier</Label>
+          <Label className="text-xs text-text-secondary">ATR Multiplier</Label>
           <Input
             {...register("atrMultiplier")}
-            className="bg-[#12121a] border-[#1e1e2e] font-mono text-[13px] h-8"
+            className="bg-surface-card border-border-default font-mono text-sm h-8"
           />
         </div>
       )}
       {stratDef && stratDef.params.includes("gridLevels") && (
         <div className="space-y-1.5">
-          <Label className="text-[11px] text-[#9090b0]">Grid Levels</Label>
+          <Label className="text-xs text-text-secondary">Grid Levels</Label>
           <Input
             {...register("gridLevels")}
-            className="bg-[#12121a] border-[#1e1e2e] font-mono text-[13px] h-8"
+            className="bg-surface-card border-border-default font-mono text-sm h-8"
           />
         </div>
       )}
@@ -455,7 +455,7 @@ function ConfigureTab({
       {/* Run button */}
       <Button
         type="submit"
-        className="w-full h-9 bg-[#3b5bdb] hover:bg-[#4c6ef5] text-white text-[13px] font-medium mt-2"
+        className="w-full h-9 bg-primary hover:bg-primary/90 text-white text-sm font-medium mt-2"
       >
         <Play size={14} className="mr-2" />
         Run Backtest
@@ -472,8 +472,8 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
   if (!hasRun) {
     return (
       <div className="flex flex-col items-center justify-center h-40 text-center px-4 gap-2 mt-6">
-        <FlaskConical size={28} className="text-[#4040608] opacity-40" />
-        <p className="text-[12px] text-[#6b6b8a]">
+        <FlaskConical size={28} className="text-text-disabled opacity-40" />
+        <p className="text-xs text-text-muted">
           Configure and run a backtest to see results here.
         </p>
       </div>
@@ -484,18 +484,18 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
     <ScrollArea className="h-full">
       <div className="p-4 space-y-5">
         {/* Backend notice */}
-        <div className="flex items-start gap-2 rounded-md bg-[#1a1a28] border border-[#1e1e2e] p-3">
+        <div className="flex items-start gap-2 rounded-md bg-surface-elevated border border-border-default p-3">
           <AlertCircle size={14} className="text-amber-400 mt-0.5 shrink-0" />
-          <p className="text-[11px] text-[#9090b0]">
+          <p className="text-xs text-text-secondary">
             Backend not connected. Configure the backtest engine in{" "}
-            <span className="text-[#6c8ef0]">Settings</span>.
+            <span className="text-primary">Settings</span>.
             Showing mock results structure for when the API is ready.
           </p>
         </div>
 
         {/* Equity curve placeholder */}
         <div>
-          <div className="text-[11px] text-[#6b6b8a] mb-2 flex items-center gap-1">
+          <div className="text-xs text-text-muted mb-2 flex items-center gap-1">
             <TrendingUp size={12} />
             Equity Curve
           </div>
@@ -504,7 +504,7 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
 
         {/* Return metrics */}
         <div>
-          <div className="text-[11px] text-[#6b6b8a] mb-2">Return Metrics</div>
+          <div className="text-xs text-text-muted mb-2">Return Metrics</div>
           <div className="grid grid-cols-2 gap-2">
             {MOCK_RETURN_METRICS.map((m) => (
               <MetricCard key={m.label} metric={m} />
@@ -514,7 +514,7 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
 
         {/* Risk metrics */}
         <div>
-          <div className="text-[11px] text-[#6b6b8a] mb-2">Risk Metrics</div>
+          <div className="text-xs text-text-muted mb-2">Risk Metrics</div>
           <div className="grid grid-cols-2 gap-2">
             {MOCK_RISK_METRICS.map((m) => (
               <MetricCard key={m.label} metric={m} />
@@ -524,7 +524,7 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
 
         {/* Trade metrics */}
         <div>
-          <div className="text-[11px] text-[#6b6b8a] mb-2">Trade Metrics</div>
+          <div className="text-xs text-text-muted mb-2">Trade Metrics</div>
           <div className="grid grid-cols-2 gap-2">
             {MOCK_TRADE_METRICS.map((m) => (
               <MetricCard key={m.label} metric={m} />
@@ -547,8 +547,8 @@ function TradesTab({ hasRun }: { hasRun: boolean }) {
   if (!hasRun) {
     return (
       <div className="flex flex-col items-center justify-center h-40 text-center px-4 gap-2 mt-6">
-        <ArrowUpDown size={24} className="text-[#404060] opacity-40" />
-        <p className="text-[12px] text-[#6b6b8a]">
+        <ArrowUpDown size={24} className="text-text-disabled opacity-40" />
+        <p className="text-xs text-text-muted">
           Run a backtest to view the trade log.
         </p>
       </div>
@@ -577,33 +577,33 @@ function TradesTab({ hasRun }: { hasRun: boolean }) {
 
   const SortIcon = ({ field }: { field: keyof MockTrade }) =>
     sortField === field ? (
-      <ArrowUpDown size={10} className="text-[#6c8ef0] ml-1 inline" />
+      <ArrowUpDown size={10} className="text-primary ml-1 inline" />
     ) : (
-      <ArrowUpDown size={10} className="text-[#404060] ml-1 inline opacity-40" />
+      <ArrowUpDown size={10} className="text-text-disabled ml-1 inline opacity-40" />
     );
 
   return (
     <div className="p-4">
       {/* Summary badges */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <Badge className="bg-[#1a2a1a] text-emerald-400 border-[#2a3a2a] text-[11px]">
+        <Badge className="bg-bullish-bg text-emerald-400 border-bullish-border text-xs">
           <CheckCircle2 size={10} className="mr-1" />
           {MOCK_TRADES.filter((t) => t.pnl > 0).length} Winners
         </Badge>
-        <Badge className="bg-[#2a1a1a] text-red-400 border-[#3a2a2a] text-[11px]">
+        <Badge className="bg-bearish-bg text-red-400 border-bearish-border text-xs">
           <TrendingDown size={10} className="mr-1" />
           {MOCK_TRADES.filter((t) => t.pnl < 0).length} Losers
         </Badge>
-        <Badge className="bg-[#12121a] text-[#9090b0] border-[#1e1e2e] text-[11px]">
+        <Badge className="bg-surface-card text-text-secondary border-border-default text-xs">
           <Clock size={10} className="mr-1" />
           {MOCK_TRADES.length} Total Trades
         </Badge>
       </div>
 
-      <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+      <div className="rounded-md border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+            <TableRow className="border-border-default hover:bg-transparent">
               {(
                 [
                   ["#", "id"],
@@ -621,7 +621,7 @@ function TradesTab({ hasRun }: { hasRun: boolean }) {
               ).map(([label, field]) => (
                 <TableHead
                   key={field}
-                  className="text-[10px] text-[#6b6b8a] cursor-pointer select-none h-8 px-2"
+                  className="text-xs text-text-muted cursor-pointer select-none h-8 px-2"
                   onClick={() => handleSort(field)}
                 >
                   {label}
@@ -634,39 +634,39 @@ function TradesTab({ hasRun }: { hasRun: boolean }) {
             {sorted.map((trade) => (
               <TableRow
                 key={trade.id}
-                className="border-[#1e1e2e] hover:bg-[#12121a] text-[12px]"
+                className="border-border-default hover:bg-surface-card text-xs"
               >
-                <TableCell className="px-2 py-1.5 text-[#6b6b8a] font-mono">
+                <TableCell className="px-2 py-1.5 text-text-muted font-mono">
                   {trade.id}
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono font-medium text-[#e0e0f0]">
+                <TableCell className="px-2 py-1.5 font-mono font-medium text-text-primary">
                   {trade.symbol}
                 </TableCell>
                 <TableCell className="px-2 py-1.5">
                   <Badge
                     className={[
-                      "text-[10px] px-1.5 py-0",
+                      "text-xs px-1.5 py-0",
                       trade.side === "BUY"
-                        ? "bg-[#0e2a1e] text-emerald-400 border-[#1a3a2a]"
-                        : "bg-[#2a0e0e] text-red-400 border-[#3a1a1a]",
+                        ? "bg-bullish-bg text-emerald-400 border-bullish-border"
+                        : "bg-bearish-bg text-red-400 border-bearish-border",
                     ].join(" ")}
                   >
                     {trade.side}
                   </Badge>
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">
+                <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
                   {trade.entryDate}
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">
+                <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
                   {trade.exitDate}
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
+                <TableCell className="px-2 py-1.5 font-mono text-text-primary">
                   {trade.entryPrice.toLocaleString("en-IN")}
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
+                <TableCell className="px-2 py-1.5 font-mono text-text-primary">
                   {trade.exitPrice.toLocaleString("en-IN")}
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">
+                <TableCell className="px-2 py-1.5 font-mono text-text-primary">
                   {trade.qty}
                 </TableCell>
                 <TableCell
@@ -687,7 +687,7 @@ function TradesTab({ hasRun }: { hasRun: boolean }) {
                   {trade.pnlPct >= 0 ? "+" : ""}
                   {trade.pnlPct.toFixed(2)}%
                 </TableCell>
-                <TableCell className="px-2 py-1.5 text-[#6b6b8a]">
+                <TableCell className="px-2 py-1.5 text-text-muted">
                   {trade.holdingPeriod}
                 </TableCell>
               </TableRow>
@@ -717,23 +717,23 @@ export default function BacktestLabTool({ onClose }: Props) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
+    <div className="h-full flex flex-col bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1e1e2e] bg-[#12121a] shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
-          <FlaskConical size={16} className="text-[#6c8ef0]" />
-          <span className="text-[13px] font-semibold text-[#e0e0f0]">
+          <FlaskConical size={16} className="text-primary" />
+          <span className="text-sm font-semibold text-text-primary">
             Backtest Lab
           </span>
           {hasRun && (
-            <Badge className="text-[10px] h-4 px-1.5 bg-[#1a2a4a] text-[#6c8ef0] border-[#2a3a6a]">
+            <Badge className="text-xs h-4 px-1.5 bg-neutral-bg text-primary border-neutral-border">
               Mock data
             </Badge>
           )}
         </div>
         <button
           onClick={onClose}
-          className="text-[#6b6b8a] hover:text-[#e0e0f0] transition-colors"
+          className="text-text-muted hover:text-text-primary transition-colors"
         >
           <X size={15} />
         </button>
@@ -745,22 +745,22 @@ export default function BacktestLabTool({ onClose }: Props) {
         onValueChange={setActiveTab}
         className="flex flex-col flex-1 min-h-0"
       >
-        <TabsList className="mx-4 mt-3 mb-0 h-8 bg-[#12121a] border border-[#1e1e2e] shrink-0 rounded-md w-auto self-start">
+        <TabsList className="mx-4 mt-3 mb-0 h-8 bg-surface-card border border-border-default shrink-0 rounded-md w-auto self-start">
           <TabsTrigger
             value="configure"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0]"
+            className="text-xs h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Configure
           </TabsTrigger>
           <TabsTrigger
             value="results"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0]"
+            className="text-xs h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Results
           </TabsTrigger>
           <TabsTrigger
             value="trades"
-            className="text-[12px] h-6 px-3 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0]"
+            className="text-xs h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Trades
           </TabsTrigger>

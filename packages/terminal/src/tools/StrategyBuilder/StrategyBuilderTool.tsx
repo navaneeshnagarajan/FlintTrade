@@ -213,20 +213,20 @@ function LegsTab({
       {/* Config bar */}
       <div className="flex items-center gap-2 px-3 pt-2 flex-wrap">
         <Select value={underlying.symbol} onValueChange={onUnderlyingChange}>
-          <SelectTrigger className="w-28 h-7 text-xs bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0]">
+          <SelectTrigger className="w-28 h-7 text-xs bg-surface-base border-border-default text-text-primary">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-[#12121a] border-[#1e1e2e] text-[#e0e0f0]">
+          <SelectContent className="bg-surface-card border-border-default text-text-primary">
             {UNDERLYINGS.map((u) => (
-              <SelectItem key={u.symbol} value={u.symbol} className="text-xs hover:bg-[#1e1e2e]">{u.symbol}</SelectItem>
+              <SelectItem key={u.symbol} value={u.symbol} className="text-xs hover:bg-surface-elevated">{u.symbol}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
         <div className="flex items-center gap-1">
-          <span className="text-[10px] text-[#6666a0]">ATM</span>
+          <span className="text-xs text-text-muted">ATM</span>
           <Input
-            className="w-20 h-7 text-xs bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0] font-mono"
+            className="w-20 h-7 text-xs bg-surface-base border-border-default text-text-primary font-mono"
             type="number"
             value={atm}
             onChange={(e) => onAtmChange(Number(e.target.value))}
@@ -234,9 +234,9 @@ function LegsTab({
         </div>
 
         <div className="flex items-center gap-1">
-          <span className="text-[10px] text-[#6666a0]">Gap</span>
+          <span className="text-xs text-text-muted">Gap</span>
           <Input
-            className="w-16 h-7 text-xs bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0] font-mono"
+            className="w-16 h-7 text-xs bg-surface-base border-border-default text-text-primary font-mono"
             type="number"
             value={strikeGap}
             onChange={(e) => onStrikeGapChange(Number(e.target.value))}
@@ -246,7 +246,7 @@ function LegsTab({
         {legs.length > 0 && (
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 border-0 font-mono ml-auto ${isDebit ? "bg-red-900/40 text-red-400" : "bg-emerald-900/40 text-emerald-400"}`}
+            className={`text-xxs px-1.5 border-0 font-mono ml-auto ${isDebit ? "bg-red-900/40 text-red-400" : "bg-emerald-900/40 text-emerald-400"}`}
           >
             {isDebit ? "Debit" : "Credit"} {formatINR(Math.abs(netPremium))}
           </Badge>
@@ -260,7 +260,7 @@ function LegsTab({
             key={key}
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[10px] text-[#6666a0] hover:text-[#e0e0f0] hover:bg-[#1e1e2e] border border-[#1e1e2e]"
+            className="h-6 px-2 text-xs text-text-muted hover:text-text-primary hover:bg-surface-elevated border border-border-default"
             onClick={() => onTemplate(key)}
             title={tmpl.description}
           >
@@ -272,41 +272,41 @@ function LegsTab({
       {/* Legs table */}
       <div className="flex-1 overflow-auto px-3">
         {legs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 gap-2 text-[#4a4a6a]">
+          <div className="flex flex-col items-center justify-center h-32 gap-2 text-text-muted">
             <Brain size={32} />
             <p className="text-xs">Click a template or add legs manually</p>
           </div>
         ) : (
           <Table>
             <TableHeader>
-              <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">#</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Action</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Type</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal text-right">Strike</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal text-right">Lots</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal text-right">Premium</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal text-right">Net</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal" />
+              <TableRow className="border-border-default hover:bg-transparent">
+                <TableHead className="text-xs text-text-muted h-7 font-normal">#</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal">Action</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal">Type</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal text-right">Strike</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal text-right">Lots</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal text-right">Premium</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal text-right">Net</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {legs.map((leg, idx) => {
                 const net = (leg.action === "BUY" ? 1 : -1) * leg.lots * leg.premium;
                 return (
-                  <TableRow key={leg.id} className="border-[#1a1a28] hover:bg-[#0d0d14]">
-                    <TableCell className="py-1 text-[10px] text-[#4a4a6a]">{idx + 1}</TableCell>
+                  <TableRow key={leg.id} className="border-border-subtle hover:bg-surface-base">
+                    <TableCell className="py-1 text-xs text-text-muted">{idx + 1}</TableCell>
                     <TableCell className="py-1">
                       <Select
                         value={leg.action}
                         onValueChange={(v) => onChange(leg.id, "action", v as Direction)}
                       >
-                        <SelectTrigger className={`w-16 h-6 text-[10px] border-0 font-medium ${leg.action === "BUY" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}>
+                        <SelectTrigger className={`w-16 h-6 text-xs border-0 font-medium ${leg.action === "BUY" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}>
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent className="bg-[#12121a] border-[#1e1e2e] text-[#e0e0f0]">
-                          <SelectItem value="BUY" className="text-xs hover:bg-[#1e1e2e] text-emerald-400">BUY</SelectItem>
-                          <SelectItem value="SELL" className="text-xs hover:bg-[#1e1e2e] text-red-400">SELL</SelectItem>
+                        <SelectContent className="bg-surface-card border-border-default text-text-primary">
+                          <SelectItem value="BUY" className="text-xs hover:bg-surface-elevated text-emerald-400">BUY</SelectItem>
+                          <SelectItem value="SELL" className="text-xs hover:bg-surface-elevated text-red-400">SELL</SelectItem>
                         </SelectContent>
                       </Select>
                     </TableCell>
@@ -315,18 +315,18 @@ function LegsTab({
                         value={leg.optionType}
                         onValueChange={(v) => onChange(leg.id, "optionType", v as OptionType)}
                       >
-                        <SelectTrigger className="w-14 h-6 text-[10px] bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0]">
+                        <SelectTrigger className="w-14 h-6 text-xs bg-surface-base border-border-default text-text-primary">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent className="bg-[#12121a] border-[#1e1e2e] text-[#e0e0f0]">
-                          <SelectItem value="CE" className="text-xs hover:bg-[#1e1e2e]">CE</SelectItem>
-                          <SelectItem value="PE" className="text-xs hover:bg-[#1e1e2e]">PE</SelectItem>
+                        <SelectContent className="bg-surface-card border-border-default text-text-primary">
+                          <SelectItem value="CE" className="text-xs hover:bg-surface-elevated">CE</SelectItem>
+                          <SelectItem value="PE" className="text-xs hover:bg-surface-elevated">PE</SelectItem>
                         </SelectContent>
                       </Select>
                     </TableCell>
                     <TableCell className="py-1">
                       <Input
-                        className="w-20 h-6 text-[10px] text-right bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0] font-mono"
+                        className="w-20 h-6 text-xs text-right bg-surface-base border-border-default text-text-primary font-mono"
                         type="number"
                         value={leg.strike}
                         onChange={(e) => onChange(leg.id, "strike", Number(e.target.value))}
@@ -334,7 +334,7 @@ function LegsTab({
                     </TableCell>
                     <TableCell className="py-1">
                       <Input
-                        className="w-14 h-6 text-[10px] text-right bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0] font-mono"
+                        className="w-14 h-6 text-xs text-right bg-surface-base border-border-default text-text-primary font-mono"
                         type="number"
                         min={1}
                         value={leg.lots}
@@ -343,7 +343,7 @@ function LegsTab({
                     </TableCell>
                     <TableCell className="py-1">
                       <Input
-                        className="w-20 h-6 text-[10px] text-right bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0] font-mono"
+                        className="w-20 h-6 text-xs text-right bg-surface-base border-border-default text-text-primary font-mono"
                         type="number"
                         min={0}
                         step={0.05}
@@ -351,14 +351,14 @@ function LegsTab({
                         onChange={(e) => onChange(leg.id, "premium", Math.max(0, Number(e.target.value)))}
                       />
                     </TableCell>
-                    <TableCell className={`py-1 text-[10px] font-mono text-right ${net >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    <TableCell className={`py-1 text-xs font-mono text-right ${net >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                       {net >= 0 ? "+" : ""}{net.toFixed(2)}
                     </TableCell>
                     <TableCell className="py-1">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 text-[#4a4a6a] hover:text-red-400"
+                        className="h-6 w-6 p-0 text-text-muted hover:text-red-400"
                         onClick={() => onRemove(leg.id)}
                       >
                         <Trash2 size={11} />
@@ -377,14 +377,14 @@ function LegsTab({
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 text-xs border border-[#1e1e2e] text-[#6666a0] hover:text-[#e0e0f0] hover:bg-[#1e1e2e]"
+          className="h-7 text-xs border border-border-default text-text-muted hover:text-text-primary hover:bg-surface-elevated"
           onClick={onAdd}
           disabled={legs.length >= 6}
         >
           <Plus size={12} className="mr-1" />Add Leg
         </Button>
         {!valid && error && (
-          <span className="text-[10px] text-red-400 flex items-center gap-1">
+          <span className="text-xs text-red-400 flex items-center gap-1">
             <AlertCircle size={10} />{error}
           </span>
         )}
@@ -417,7 +417,7 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
 
   if (!valid || legs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-[#4a4a6a]">
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted">
         <TrendingUp size={40} />
         <p className="text-xs">Add valid legs to see payoff diagram</p>
       </div>
@@ -428,35 +428,35 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
     <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
       {/* Summary */}
       <div className="grid grid-cols-4 gap-2">
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Max Profit</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Profit</div>
             <div className={`text-base font-bold font-mono ${maxPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {maxPnl === Infinity ? "Unlimited" : formatINR(maxPnl * underlying.lotSize)}
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Max Loss</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Loss</div>
             <div className={`text-base font-bold font-mono ${minPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {minPnl === -Infinity ? "Unlimited" : formatINR(minPnl * underlying.lotSize)}
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Net Premium</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Net Premium</div>
             <div className={`text-base font-bold font-mono ${netPremium <= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {formatINR(netPremium)}
             </div>
-            <div className="text-[9px] text-[#6666a0]">{netPremium <= 0 ? "Credit" : "Debit"}</div>
+            <div className="text-xxs text-text-muted">{netPremium <= 0 ? "Credit" : "Debit"}</div>
           </CardContent>
         </Card>
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">BEP(s)</div>
-            <div className="text-sm font-mono text-[#e0e0f0]">
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">BEP(s)</div>
+            <div className="text-sm font-mono text-text-primary">
               {bepPoints.length === 0 ? "None" : bepPoints.map((b) => b.toFixed(0)).join(", ")}
             </div>
           </CardContent>
@@ -464,14 +464,14 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
       </div>
 
       {/* Visual payoff chart */}
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Payoff at Expiry</CardTitle>
+          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Payoff at Expiry</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
           <div className="relative h-40 flex items-center">
             {/* Zero axis */}
-            <div className="absolute left-0 right-0 h-px bg-[#2a2a3d]" style={{ top: `${((maxPnl) / (range * 2)) * 100 + 50}%` }} />
+            <div className="absolute left-0 right-0 h-px bg-surface-active" style={{ top: `${((maxPnl) / (range * 2)) * 100 + 50}%` }} />
             {/* Bars */}
             <div className="w-full h-full flex items-center gap-px">
               {points.map((pt, i) => {
@@ -508,26 +508,26 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
           </div>
           {/* x-axis labels */}
           <div className="flex justify-between mt-1">
-            <span className="text-[9px] text-[#4a4a6a]">{points[0]?.price.toFixed(0)}</span>
-            <span className="text-[9px] text-[#3b82f6]">ATM {spotPrice}</span>
-            <span className="text-[9px] text-[#4a4a6a]">{points[points.length - 1]?.price.toFixed(0)}</span>
+            <span className="text-xxs text-text-muted">{points[0]?.price.toFixed(0)}</span>
+            <span className="text-xxs text-primary">ATM {spotPrice}</span>
+            <span className="text-xxs text-text-muted">{points[points.length - 1]?.price.toFixed(0)}</span>
           </div>
         </CardContent>
       </Card>
 
       {/* Payoff table */}
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Payoff Table (per lot)</CardTitle>
+          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Payoff Table (per lot)</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-auto max-h-48">
             <Table>
               <TableHeader>
-                <TableRow className="border-[#1e1e2e] hover:bg-transparent sticky top-0 bg-[#12121a]">
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 pl-3 font-normal">Price</TableHead>
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">P&L (1 lot)</TableHead>
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right pr-3 font-normal">% of Margin</TableHead>
+                <TableRow className="border-border-default hover:bg-transparent sticky top-0 bg-surface-card">
+                  <TableHead className="text-xs text-text-muted h-7 pl-3 font-normal">Price</TableHead>
+                  <TableHead className="text-xs text-text-muted h-7 text-right font-normal">P&L (1 lot)</TableHead>
+                  <TableHead className="text-xs text-text-muted h-7 text-right pr-3 font-normal">% of Margin</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -539,11 +539,11 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
                   return (
                     <TableRow
                       key={i}
-                      className={`border-[#1a1a28] hover:bg-[#0d0d14] ${isAtm ? "bg-[#1a1a2e]" : ""}`}
+                      className={`border-border-subtle hover:bg-surface-base ${isAtm ? "bg-surface-elevated" : ""}`}
                     >
-                      <TableCell className={`py-1 pl-3 text-xs font-mono ${isAtm ? "text-[#3b82f6] font-medium" : "text-[#8888a0]"}`}>
+                      <TableCell className={`py-1 pl-3 text-xs font-mono ${isAtm ? "text-primary font-medium" : "text-text-secondary"}`}>
                         {pt.price.toFixed(0)}
-                        {isAtm && <span className="text-[9px] ml-1 text-[#3b82f6]">ATM</span>}
+                        {isAtm && <span className="text-xxs ml-1 text-primary">ATM</span>}
                       </TableCell>
                       <TableCell className={`py-1 text-xs font-mono text-right ${pnlLot >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                         {pnlLot >= 0 ? "+" : ""}{formatINR(pnlLot)}
@@ -573,7 +573,7 @@ function MarginTab({ legs, underlying }: { legs: Leg[]; underlying: typeof UNDER
 
   if (!valid || legs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-[#4a4a6a]">
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted">
         <Zap size={40} />
         <p className="text-xs">Add valid legs to see margin estimate</p>
       </div>
@@ -583,36 +583,36 @@ function MarginTab({ legs, underlying }: { legs: Leg[]; underlying: typeof UNDER
   return (
     <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
       <div className="grid grid-cols-2 gap-2">
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">SPAN Margin (est.)</div>
-            <div className="text-xl font-bold font-mono text-[#e0e0f0]">{formatINR(margin)}</div>
-            <div className="text-[10px] text-[#6666a0] mt-0.5">Selling positions only</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">SPAN Margin (est.)</div>
+            <div className="text-xl font-bold font-mono text-text-primary">{formatINR(margin)}</div>
+            <div className="text-xs text-text-muted mt-0.5">Selling positions only</div>
           </CardContent>
         </Card>
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Effective Margin</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Effective Margin</div>
             <div className="text-xl font-bold font-mono text-emerald-400">{formatINR(effectiveMargin)}</div>
-            <div className="text-[10px] text-[#6666a0] mt-0.5">After premium credit/debit</div>
+            <div className="text-xs text-text-muted mt-0.5">After premium credit/debit</div>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Leg-wise Breakdown</CardTitle>
+          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Leg-wise Breakdown</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-                <TableHead className="text-[10px] text-[#6666a0] h-7 pl-3 font-normal">Leg</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Action</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Type</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">Strike</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">Lots</TableHead>
-                <TableHead className="text-[10px] text-[#6666a0] h-7 text-right pr-3 font-normal">Margin</TableHead>
+              <TableRow className="border-border-default hover:bg-transparent">
+                <TableHead className="text-xs text-text-muted h-7 pl-3 font-normal">Leg</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal">Action</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 font-normal">Type</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 text-right font-normal">Strike</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 text-right font-normal">Lots</TableHead>
+                <TableHead className="text-xs text-text-muted h-7 text-right pr-3 font-normal">Margin</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -621,20 +621,20 @@ function MarginTab({ legs, underlying }: { legs: Leg[]; underlying: typeof UNDER
                   ? 0.15 * 20000 * leg.lots * underlying.lotSize
                   : leg.premium * leg.lots * underlying.lotSize;
                 return (
-                  <TableRow key={leg.id} className="border-[#1a1a28] hover:bg-[#0d0d14]">
-                    <TableCell className="py-1 pl-3 text-[10px] text-[#6666a0]">{idx + 1}</TableCell>
+                  <TableRow key={leg.id} className="border-border-subtle hover:bg-surface-base">
+                    <TableCell className="py-1 pl-3 text-xs text-text-muted">{idx + 1}</TableCell>
                     <TableCell className="py-1">
                       <Badge
                         variant="outline"
-                        className={`text-[9px] px-1.5 py-0 border-0 ${leg.action === "BUY" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
+                        className={`text-xxs px-1.5 py-0 border-0 ${leg.action === "BUY" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
                       >
                         {leg.action}
                       </Badge>
                     </TableCell>
-                    <TableCell className="py-1 text-xs text-[#8888a0]">{leg.optionType}</TableCell>
-                    <TableCell className="py-1 text-xs font-mono text-[#a0a0c0] text-right">{leg.strike}</TableCell>
-                    <TableCell className="py-1 text-xs font-mono text-[#a0a0c0] text-right">{leg.lots}</TableCell>
-                    <TableCell className="py-1 text-xs font-mono text-right pr-3 text-[#e0e0f0]">{formatINR(legMargin)}</TableCell>
+                    <TableCell className="py-1 text-xs text-text-secondary">{leg.optionType}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-text-secondary text-right">{leg.strike}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-text-secondary text-right">{leg.lots}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-right pr-3 text-text-primary">{formatINR(legMargin)}</TableCell>
                   </TableRow>
                 );
               })}
@@ -643,24 +643,24 @@ function MarginTab({ legs, underlying }: { legs: Leg[]; underlying: typeof UNDER
         </CardContent>
       </Card>
 
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardContent className="p-3 space-y-1.5">
           {[
             { label: "Premium Paid", value: formatINR(premiumPaid), color: "text-red-400" },
             { label: "Premium Collected", value: formatINR(premiumCollected), color: "text-emerald-400" },
-            { label: "Lot Size", value: String(underlying.lotSize), color: "text-[#e0e0f0]" },
-            { label: "Total Lots", value: String(legs.reduce((s, l) => s + l.lots, 0)), color: "text-[#e0e0f0]" },
+            { label: "Lot Size", value: String(underlying.lotSize), color: "text-text-primary" },
+            { label: "Total Lots", value: String(legs.reduce((s, l) => s + l.lots, 0)), color: "text-text-primary" },
           ].map(({ label, value, color }) => (
             <div key={label} className="flex justify-between items-center">
-              <span className="text-xs text-[#6666a0]">{label}</span>
+              <span className="text-xs text-text-muted">{label}</span>
               <span className={`text-xs font-mono font-medium ${color}`}>{value}</span>
             </div>
           ))}
-          <div className="border-t border-[#1e1e2e] pt-1.5 flex justify-between items-center">
-            <span className="text-xs text-[#8888a0] font-medium">Total Capital Required</span>
-            <span className="text-sm font-mono font-bold text-[#e0e0f0]">{formatINR(effectiveMargin)}</span>
+          <div className="border-t border-border-default pt-1.5 flex justify-between items-center">
+            <span className="text-xs text-text-secondary font-medium">Total Capital Required</span>
+            <span className="text-sm font-mono font-bold text-text-primary">{formatINR(effectiveMargin)}</span>
           </div>
-          <p className="text-[9px] text-[#4a4a6a] mt-1">
+          <p className="text-xxs text-text-muted mt-1">
             Estimate only. Actual SPAN margin may differ. Use broker margin calculator for exact values.
           </p>
         </CardContent>
@@ -718,39 +718,39 @@ export default function StrategyBuilderTool({ onClose }: Props) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
+    <div className="h-full flex flex-col bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1e1e2e] bg-[#12121a] shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
-          <Brain size={16} className="text-[#3b82f6]" />
-          <h1 className="text-sm font-semibold text-[#e0e0f0]">Strategy Builder</h1>
-          <Badge variant="outline" className="text-[9px] border-[#1e1e2e] text-[#6666a0] font-normal">
+          <Brain size={16} className="text-primary" />
+          <h1 className="text-sm font-semibold text-text-primary">Strategy Builder</h1>
+          <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
             {underlying.symbol}
           </Badge>
           {legs.length > 0 && (
             <Badge
               variant="outline"
-              className={`text-[9px] px-1.5 border-0 font-mono ${netPremium <= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
+              className={`text-xxs px-1.5 border-0 font-mono ${netPremium <= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
             >
               {netPremium <= 0 ? "Credit" : "Debit"} {formatINR(Math.abs(netPremium))}
             </Badge>
           )}
         </div>
-        <button onClick={onClose} className="text-[#4a4a6a] hover:text-[#e0e0f0] transition-colors">
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
           <X size={15} />
         </button>
       </div>
 
       {/* Tabs */}
       <Tabs defaultValue="legs" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="shrink-0 rounded-none bg-[#0d0d14] border-b border-[#1e1e2e] justify-start px-3 h-8 gap-1">
-          <TabsTrigger value="legs" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+        <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
+          <TabsTrigger value="legs" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <Brain size={11} className="mr-1" />Strategy Legs
           </TabsTrigger>
-          <TabsTrigger value="payoff" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+          <TabsTrigger value="payoff" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <TrendingUp size={11} className="mr-1" />Payoff
           </TabsTrigger>
-          <TabsTrigger value="margin" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+          <TabsTrigger value="margin" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <Zap size={11} className="mr-1" />Margin
           </TabsTrigger>
         </TabsList>

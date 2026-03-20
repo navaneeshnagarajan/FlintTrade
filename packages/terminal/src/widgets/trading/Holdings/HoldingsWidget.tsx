@@ -179,25 +179,25 @@ export default function HoldingsWidget(_props: WidgetProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="text-text-muted uppercase tracking-wider text-[10px]">HOLDINGS</span>
-          <span className="text-[10px] text-text-secondary font-mono">({rows.length})</span>
+          <span className="text-text-muted uppercase tracking-wider text-xs">HOLDINGS</span>
+          <span className="text-xs text-text-secondary font-mono">({rows.length})</span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="font-mono text-[10px] text-text-secondary">
+          <span className="font-mono text-xs text-text-secondary">
             Inv: ₹{INR.format(totals.invested)}
           </span>
-          <span className="font-mono text-[10px] text-text-secondary">
+          <span className="font-mono text-xs text-text-secondary">
             Val: ₹{INR.format(totals.currentVal)}
           </span>
           <span
-            className={`font-mono text-[10px] font-medium ${
+            className={`font-mono text-xs font-medium ${
               totals.pnl >= 0 ? "text-profit" : "text-loss"
             }`}
           >
             P&L: {formatPnl(totals.pnl)}
           </span>
           {lastFetch && (
-            <span className="text-[10px] text-text-muted flex items-center gap-0.5">
+            <span className="text-xs text-text-muted flex items-center gap-0.5">
               <Clock size={8} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
@@ -241,7 +241,7 @@ export default function HoldingsWidget(_props: WidgetProps) {
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className="text-[10px] text-text-muted uppercase tracking-wider cursor-pointer select-none whitespace-nowrap px-2 py-1"
+                      className="text-xs text-text-muted uppercase tracking-wider cursor-pointer select-none whitespace-nowrap px-2 py-1"
                       onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}

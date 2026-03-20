@@ -170,8 +170,8 @@ function AllocationBar({ bands }: { bands: AllocationBand[] }) {
         {bands.map((b) => (
           <div key={b.label} className="flex items-center gap-1.5">
             <span className={cn("size-2 rounded-full", b.bg)} />
-            <span className={cn("text-[11px]", b.color)}>{b.label}</span>
-            <span className="text-[11px] text-zinc-500 font-mono">
+            <span className={cn("text-xs", b.color)}>{b.label}</span>
+            <span className="text-xs text-zinc-500 font-mono">
               {total > 0 ? `${((b.value / total) * 100).toFixed(1)}%` : "—"}
             </span>
           </div>
@@ -291,7 +291,7 @@ function OverviewTab({
                 <div className={cn("size-7 rounded-lg flex items-center justify-center", m.iconBg)}>
                   <Icon className={cn("size-3.5", m.iconColor)} />
                 </div>
-                <span className="text-[11px] text-zinc-500 uppercase tracking-wide">{m.label}</span>
+                <span className="text-xs text-zinc-500 uppercase tracking-wide">{m.label}</span>
               </div>
               <div
                 className={cn(
@@ -306,7 +306,7 @@ function OverviewTab({
               {m.sub && (
                 <div
                   className={cn(
-                    "text-[11px]",
+                    "text-xs",
                     m.positive === true && "text-emerald-500",
                     m.positive === false && "text-red-500",
                     m.positive === null && "text-zinc-600",
@@ -324,7 +324,7 @@ function OverviewTab({
       <Card className="p-5 bg-surface-card border-border-default space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-zinc-200">Asset Allocation</h3>
-          <p className="text-[11px] text-zinc-500 mt-0.5">
+          <p className="text-xs text-zinc-500 mt-0.5">
             Derived from live holdings and available cash. Debt / MF requires NAV data source.
           </p>
         </div>
@@ -357,7 +357,7 @@ function OverviewTab({
         )}
       </Card>
 
-      <p className="text-[11px] text-zinc-600">
+      <p className="text-xs text-zinc-600">
         Holdings refresh every 60s. Cash refreshes every 30s from OpenAlgo.
       </p>
     </div>
@@ -371,7 +371,7 @@ function PnLCell({ value, percent }: { value: number; percent: number }) {
   return (
     <div className={cn("text-right", pos ? "text-emerald-400" : "text-red-400")}>
       <div className="font-mono text-xs font-semibold">{formatINR(value)}</div>
-      <div className="font-mono text-[10px] opacity-75">{formatPercent(percent)}</div>
+      <div className="font-mono text-xs opacity-75">{formatPercent(percent)}</div>
     </div>
   );
 }
@@ -399,7 +399,7 @@ function HoldingsTab({
             <div className="text-xs font-semibold text-zinc-100 font-mono">
               {row.original.symbol}
             </div>
-            <div className="text-[10px] text-zinc-500">{row.original.exchange}</div>
+            <div className="text-xs text-zinc-500">{row.original.exchange}</div>
           </div>
         ),
       },
@@ -532,7 +532,7 @@ function HoldingsTab({
                 {hg.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    className="h-8 text-[11px] font-medium text-zinc-500 uppercase tracking-wide cursor-pointer select-none"
+                    className="h-8 text-xs font-medium text-zinc-500 uppercase tracking-wide cursor-pointer select-none"
                     onClick={header.column.getToggleSortingHandler()}
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
@@ -569,7 +569,7 @@ function HoldingsTab({
         <span className="text-right text-zinc-400">{formatINR(totalInvested)}</span>
         <div className={cn("text-right", totalPnl >= 0 ? "text-emerald-400" : "text-red-400")}>
           <div className="font-semibold">{formatINR(totalPnl)}</div>
-          <div className="text-[10px] opacity-75">
+          <div className="text-xs opacity-75">
             {formatPercent(totalPnlPct)} on {formatINR(totalCurrent)}
           </div>
         </div>
@@ -651,7 +651,7 @@ function NetWorthTab({
 
       {/* Known total */}
       <Card className="p-5 bg-surface-card border-border-default">
-        <div className="text-[11px] text-zinc-500 uppercase tracking-wide mb-1">
+        <div className="text-xs text-zinc-500 uppercase tracking-wide mb-1">
           Known Total (Equity + Cash)
         </div>
         <div
@@ -694,7 +694,7 @@ function NetWorthTab({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-zinc-200">{cat.label}</div>
-                <div className="text-[11px] text-zinc-500">{cat.note}</div>
+                <div className="text-xs text-zinc-500">{cat.note}</div>
               </div>
               <div className="text-right shrink-0">
                 {cat.value !== null ? (
@@ -704,7 +704,7 @@ function NetWorthTab({
                 ) : (
                   <Badge
                     variant="outline"
-                    className="text-[10px] border-border-default text-zinc-600"
+                    className="text-xs border-border-default text-zinc-600"
                   >
                     —
                   </Badge>
@@ -799,12 +799,12 @@ function MutualFundsTab() {
               <span className={cn("text-sm font-semibold", cat.color)}>{cat.name}</span>
               <Badge
                 variant="outline"
-                className={cn("text-[10px] h-5", RISK_COLOR[cat.risk])}
+                className={cn("text-xs h-5", RISK_COLOR[cat.risk])}
               >
                 {cat.risk} risk
               </Badge>
             </div>
-            <p className="text-[11px] text-zinc-500 leading-relaxed">{cat.desc}</p>
+            <p className="text-xs text-zinc-500 leading-relaxed">{cat.desc}</p>
           </div>
         ))}
       </div>
@@ -890,7 +890,7 @@ function SipCalculatorTab() {
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-px bg-border-default rounded-lg overflow-hidden">
             <div className="bg-surface-card p-4 space-y-1">
-              <span className="text-[11px] text-zinc-500 uppercase tracking-wide">
+              <span className="text-xs text-zinc-500 uppercase tracking-wide">
                 Total Invested
               </span>
               <div className="font-mono text-sm font-semibold text-zinc-100">
@@ -898,7 +898,7 @@ function SipCalculatorTab() {
               </div>
             </div>
             <div className="bg-surface-card p-4 space-y-1">
-              <span className="text-[11px] text-zinc-500 uppercase tracking-wide">
+              <span className="text-xs text-zinc-500 uppercase tracking-wide">
                 Est. Returns
               </span>
               <div className="font-mono text-sm font-semibold text-emerald-400">
@@ -906,7 +906,7 @@ function SipCalculatorTab() {
               </div>
             </div>
             <div className="bg-surface-card p-4 space-y-1">
-              <span className="text-[11px] text-zinc-500 uppercase tracking-wide">
+              <span className="text-xs text-zinc-500 uppercase tracking-wide">
                 Maturity Value
               </span>
               <div className="font-mono text-sm font-semibold text-zinc-100">
@@ -917,7 +917,7 @@ function SipCalculatorTab() {
 
           {/* Stacked bar */}
           <div className="space-y-1.5">
-            <div className="flex justify-between text-[11px] text-zinc-500">
+            <div className="flex justify-between text-xs text-zinc-500">
               <span>Principal</span>
               <span>Estimated returns</span>
             </div>
@@ -931,7 +931,7 @@ function SipCalculatorTab() {
                 style={{ width: `${result.progress}%` }}
               />
             </div>
-            <div className="flex justify-between text-[11px]">
+            <div className="flex justify-between text-xs">
               <span className="text-blue-400">
                 {(100 - result.progress).toFixed(1)}% principal
               </span>
@@ -939,7 +939,7 @@ function SipCalculatorTab() {
             </div>
           </div>
 
-          <p className="text-[11px] text-zinc-600 leading-relaxed">
+          <p className="text-xs text-zinc-600 leading-relaxed">
             Investing {formatINR(parseFloat(monthly) || 0)}/month for {years} years at {rate}%
             p.a. compounds to {formatINR(result.maturity)}. Actual MF returns vary; this is an
             illustrative projection only.
@@ -1034,7 +1034,7 @@ function AssetQuiltTab() {
           {QUILT_YEARS.map((y) => (
             <div
               key={y}
-              className="text-center text-[11px] font-semibold text-zinc-400 pb-1 border-b border-border-default"
+              className="text-center text-xs font-semibold text-zinc-400 pb-1 border-b border-border-default"
             >
               {y}
             </div>
@@ -1052,10 +1052,10 @@ function AssetQuiltTab() {
                     returnColor(ret ?? 0),
                   )}
                 >
-                  <div className="text-[10px] font-semibold leading-tight truncate">
+                  <div className="text-xs font-semibold leading-tight truncate">
                     {asset.name}
                   </div>
-                  <div className="font-mono text-[11px] font-bold">
+                  <div className="font-mono text-xs font-bold">
                     {ret !== undefined
                       ? `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`
                       : "—"}
@@ -1067,7 +1067,7 @@ function AssetQuiltTab() {
         </div>
       </div>
 
-      <p className="text-[11px] text-zinc-600 leading-relaxed">
+      <p className="text-xs text-zinc-600 leading-relaxed">
         Data is approximate and illustrative. NIFTY returns are index-only (no dividends).
         REIT data available from 2021 onwards. Connect jugaad-data or mftool in Settings for
         live NAV-based quilt.
@@ -1085,7 +1085,7 @@ function AssetQuiltTab() {
         ].map((l) => (
           <div key={l.label} className="flex items-center gap-1.5">
             <span className={cn("size-3 rounded", l.cls)} />
-            <span className="text-[11px] text-zinc-500">{l.label}</span>
+            <span className="text-xs text-zinc-500">{l.label}</span>
           </div>
         ))}
       </div>
@@ -1266,7 +1266,7 @@ export default function InvestRoute() {
             {!isLoading && (
               <Badge
                 variant="outline"
-                className="text-[10px] h-5 border-border-default text-zinc-500"
+                className="text-xs h-5 border-border-default text-zinc-500"
               >
                 {holdings.length} holdings
               </Badge>

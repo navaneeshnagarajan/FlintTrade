@@ -88,7 +88,7 @@ function FilterPill({ value, label, count, activeFilter, onClick }: FilterPillPr
   return (
     <button
       onClick={() => onClick(value)}
-      className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
         active
           ? value === FILTER_BUY
             ? "bg-profit/20 text-profit border border-profit/40"
@@ -171,7 +171,7 @@ export default function TradeBookWidget(_props: WidgetProps) {
         cell: ({ row }) => (
           <Badge
             variant={row.original.side === "BUY" ? "default" : "destructive"}
-            className={`text-[10px] font-semibold ${
+            className={`text-xs font-semibold ${
               row.original.side === "BUY"
                 ? "bg-profit/15 text-profit border border-profit/30"
                 : "bg-loss/15 text-loss border border-loss/30"
@@ -220,12 +220,12 @@ export default function TradeBookWidget(_props: WidgetProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="text-text-muted uppercase tracking-wider text-[10px]">TRADES</span>
-          <span className="text-[10px] text-text-secondary font-mono">({counts.all})</span>
+          <span className="text-text-muted uppercase tracking-wider text-xs">TRADES</span>
+          <span className="text-xs text-text-secondary font-mono">({counts.all})</span>
         </div>
         <div className="flex items-center gap-2">
           {lastFetch && (
-            <span className="text-[10px] text-text-muted flex items-center gap-0.5">
+            <span className="text-xs text-text-muted flex items-center gap-0.5">
               <Clock size={8} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
@@ -261,7 +261,7 @@ export default function TradeBookWidget(_props: WidgetProps) {
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className="text-[10px] text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
+                      className="text-xs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
                       onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}

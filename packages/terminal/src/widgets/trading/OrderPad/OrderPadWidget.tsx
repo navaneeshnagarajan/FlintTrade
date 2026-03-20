@@ -94,7 +94,7 @@ function PillGroup({ value, options, onChange, className = "" }: PillGroupProps)
           key={opt}
           type="button"
           onClick={() => onChange(opt)}
-          className={`flex-1 h-6 text-[11px] font-medium transition-colors ${
+          className={`flex-1 h-6 text-xs font-medium transition-colors ${
             value === opt
               ? "bg-accent text-white"
               : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
@@ -137,7 +137,7 @@ function StepInput({
 
   return (
     <div className="flex flex-col gap-0.5">
-      <label className="text-[10px] text-text-muted uppercase tracking-wider">{label}</label>
+      <label className="text-xs text-text-muted uppercase tracking-wider">{label}</label>
       <div className="flex items-stretch h-7">
         <button
           type="button"
@@ -155,7 +155,7 @@ function StepInput({
           min={min}
           step={step}
           placeholder={placeholder}
-          className="flex-1 min-w-0 bg-surface-hover border-y border-x-0 border-border-default rounded-none px-2 text-[12px] font-mono text-text-primary text-center focus-visible:ring-0 focus-visible:border-accent disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-text-muted h-7"
+          className="flex-1 min-w-0 bg-surface-hover border-y border-x-0 border-border-default rounded-none px-2 text-xs font-mono text-text-primary text-center focus-visible:ring-0 focus-visible:border-accent disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-text-muted h-7"
         />
         <button
           type="button"
@@ -181,14 +181,14 @@ interface NumFieldProps {
 function NumField({ label, value, onChange, disabled = false, placeholder = "" }: NumFieldProps) {
   return (
     <div className="flex flex-col gap-0.5">
-      <label className="text-[10px] text-text-muted uppercase tracking-wider">{label}</label>
+      <label className="text-xs text-text-muted uppercase tracking-wider">{label}</label>
       <Input
         type="number"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         placeholder={placeholder}
-        className="h-7 w-full bg-surface-hover border border-border-default rounded px-2 text-[12px] font-mono text-text-primary focus-visible:ring-0 focus-visible:border-accent disabled:opacity-30 disabled:cursor-not-allowed placeholder:text-text-muted"
+        className="h-7 w-full bg-surface-hover border border-border-default rounded px-2 text-xs font-mono text-text-primary focus-visible:ring-0 focus-visible:border-accent disabled:opacity-30 disabled:cursor-not-allowed placeholder:text-text-muted"
       />
     </div>
   );
@@ -196,7 +196,7 @@ function NumField({ label, value, onChange, disabled = false, placeholder = "" }
 
 function ExchangeBadge({ exchange }: { exchange: string }) {
   return (
-    <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-accent/10 border border-accent/20 text-accent uppercase tracking-wider">
+    <span className="px-1.5 py-0.5 text-xxs font-semibold rounded bg-accent/10 border border-accent/20 text-accent uppercase tracking-wider">
       {exchange}
     </span>
   );
@@ -391,7 +391,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
           Order Pad
         </span>
         {isMarketHours() && (
-          <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium">
+          <span className="ml-auto text-xxs px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium">
             MARKET OPEN
           </span>
         )}
@@ -404,7 +404,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
       >
         {/* Symbol search */}
         <div className="flex flex-col gap-0.5" ref={searchRef}>
-          <label className="text-[10px] text-text-muted uppercase tracking-wider">Symbol</label>
+          <label className="text-xs text-text-muted uppercase tracking-wider">Symbol</label>
           <div className="relative">
             <div className="flex items-center gap-1.5 h-8 bg-surface-hover border border-border-default rounded px-2 focus-within:border-accent transition-colors">
               <Search size={12} className="text-text-muted shrink-0" />
@@ -416,7 +416,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
                   if (query !== symbol && suggestions.length > 0) setSearchOpen(true);
                 }}
                 placeholder="Search symbol…"
-                className="flex-1 bg-transparent text-[12px] font-mono text-text-primary focus:outline-none placeholder:text-text-muted"
+                className="flex-1 bg-transparent text-xs font-mono text-text-primary focus:outline-none placeholder:text-text-muted"
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -452,7 +452,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
                       <span className="font-mono text-xs text-text-primary font-medium">{sym}</span>
                       {exch && <ExchangeBadge exchange={exch} />}
                       {name && (
-                        <span className="text-[10px] text-text-muted truncate">{name}</span>
+                        <span className="text-xs text-text-muted truncate">{name}</span>
                       )}
                     </button>
                   );
@@ -496,7 +496,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
 
         {/* Order type */}
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-text-muted uppercase tracking-wider">Order Type</label>
+          <label className="text-xs text-text-muted uppercase tracking-wider">Order Type</label>
           <Controller
             control={control}
             name="orderType"
@@ -512,7 +512,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
 
         {/* Product type */}
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-text-muted uppercase tracking-wider">Product</label>
+          <label className="text-xs text-text-muted uppercase tracking-wider">Product</label>
           <Controller
             control={control}
             name="product"
@@ -587,36 +587,36 @@ export default function OrderPadWidget(_props: WidgetProps) {
 
         {/* Order summary preview */}
         <div className="rounded border border-border-default bg-surface-card px-3 py-2 space-y-1">
-          <div className="flex justify-between text-[11px]">
+          <div className="flex justify-between text-xs">
             <span className="text-text-muted">Symbol</span>
             <span className="font-mono text-text-primary font-semibold">{symbol}</span>
           </div>
-          <div className="flex justify-between text-[11px]">
+          <div className="flex justify-between text-xs">
             <span className="text-text-muted">Exchange</span>
             <span className="font-mono text-text-primary">{exchange}</span>
           </div>
-          <div className="flex justify-between text-[11px]">
+          <div className="flex justify-between text-xs">
             <span className="text-text-muted">Action</span>
             <span className={`font-semibold ${isBuy ? "text-profit" : "text-loss"}`}>{action}</span>
           </div>
-          <div className="flex justify-between text-[11px]">
+          <div className="flex justify-between text-xs">
             <span className="text-text-muted">Qty / Product</span>
             <span className="font-mono text-text-primary">
               {qty} · {product}
             </span>
           </div>
-          <div className="flex justify-between text-[11px]">
+          <div className="flex justify-between text-xs">
             <span className="text-text-muted">Type</span>
             <span className="font-mono text-text-primary">{orderType}</span>
           </div>
           {priceEnabled && price != null && price > 0 && (
-            <div className="flex justify-between text-[11px]">
+            <div className="flex justify-between text-xs">
               <span className="text-text-muted">Price</span>
               <span className="font-mono text-text-primary">{price}</span>
             </div>
           )}
           {triggerEnabled && trigPrice != null && trigPrice > 0 && (
-            <div className="flex justify-between text-[11px]">
+            <div className="flex justify-between text-xs">
               <span className="text-text-muted">Trigger</span>
               <span className="font-mono text-text-primary">{trigPrice}</span>
             </div>

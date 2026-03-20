@@ -248,11 +248,11 @@ function netColor(v: number): string {
 }
 
 function ReturnBadge({ value, size = "sm" }: { value: number | null; size?: "sm" | "xs" }) {
-  if (value === null) return <span className="text-[#6b6b8a]">--</span>;
+  if (value === null) return <span className="text-text-muted">--</span>;
   const isPos = value >= 0;
   const cls = [
     "font-mono font-medium",
-    size === "xs" ? "text-[10px]" : "text-[11px]",
+    size === "xs" ? "text-xs" : "text-xs",
     isPos ? "text-emerald-400" : "text-red-400",
   ].join(" ");
   return <span className={cls}>{formatReturn(value)}</span>;
@@ -260,13 +260,13 @@ function ReturnBadge({ value, size = "sm" }: { value: number | null; size?: "sm"
 
 function DataNotice({ text }: { text?: string }) {
   return (
-    <div className="flex items-start gap-2 rounded-md bg-[#1a1a28] border border-[#1e1e2e] p-3 mb-4">
+    <div className="flex items-start gap-2 rounded-md bg-surface-elevated border border-border-default p-3 mb-4">
       <Info size={13} className="text-amber-400 mt-0.5 shrink-0" />
-      <p className="text-[11px] text-[#9090b0]">
+      <p className="text-xs text-text-secondary">
         {text ?? (
           <>
             Live data available during market hours. Connect a data source in{" "}
-            <span className="text-[#6c8ef0]">Settings</span> for real-time updates.
+            <span className="text-primary">Settings</span> for real-time updates.
             Showing representative data structure.
           </>
         )}
@@ -277,7 +277,7 @@ function DataNotice({ text }: { text?: string }) {
 
 function SectionLabel({ icon: Icon, label }: { icon: typeof Activity; label: string }) {
   return (
-    <div className="text-[11px] text-[#6b6b8a] mb-2 flex items-center gap-1.5">
+    <div className="text-xs text-text-muted mb-2 flex items-center gap-1.5">
       <Icon size={11} />
       {label}
     </div>
@@ -297,10 +297,10 @@ function TfButton({
     <button
       onClick={onClick}
       className={[
-        "text-[11px] px-2 py-0.5 rounded border transition-colors",
+        "text-xs px-2 py-0.5 rounded border transition-colors",
         active
-          ? "bg-[#1e2a4a] text-[#6c8ef0] border-[#2a3a6a]"
-          : "bg-[#12121a] text-[#6b6b8a] border-[#1e1e2e] hover:border-[#3a3a5a]",
+          ? "bg-neutral-bg text-primary border-neutral-border"
+          : "bg-surface-card text-text-muted border-border-default hover:border-border-strong",
       ].join(" ")}
     >
       {tf}
@@ -335,12 +335,12 @@ function MarketBreadthTab() {
           {[
             { label: "Advances", value: totalAdvances, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
             { label: "Declines", value: totalDeclines, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" },
-            { label: "Unchanged", value: totalUnchanged, color: "text-[#9090b0]", bg: "bg-[#12121a] border-[#1e1e2e]" },
+            { label: "Unchanged", value: totalUnchanged, color: "text-text-secondary", bg: "bg-surface-card border-border-default" },
           ].map((c) => (
             <Card key={c.label} className={`border ${c.bg}`}>
               <CardContent className="pt-3 pb-3 px-4">
-                <div className={`text-[22px] font-mono font-bold ${c.color}`}>{c.value}</div>
-                <div className="text-[10px] text-[#6b6b8a] mt-0.5">{c.label} (of {totalStocks})</div>
+                <div className={`text-xl font-mono font-bold ${c.color}`}>{c.value}</div>
+                <div className="text-xs text-text-muted mt-0.5">{c.label} (of {totalStocks})</div>
               </CardContent>
             </Card>
           ))}
@@ -348,13 +348,13 @@ function MarketBreadthTab() {
 
         {/* A/D Ratio + Breadth Thrust */}
         <div className="grid grid-cols-2 gap-2">
-          <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <Card className="bg-surface-card border-border-default">
             <CardContent className="pt-3 pb-3 px-4">
-              <div className="text-[10px] text-[#6b6b8a] mb-1">A/D Ratio</div>
-              <div className={`text-[20px] font-mono font-bold ${parseFloat(adRatio) >= 1 ? "text-emerald-400" : "text-red-400"}`}>
+              <div className="text-xs text-text-muted mb-1">A/D Ratio</div>
+              <div className={`text-xl font-mono font-bold ${parseFloat(adRatio) >= 1 ? "text-emerald-400" : "text-red-400"}`}>
                 {adRatio}
               </div>
-              <div className="text-[10px] text-[#6b6b8a] mt-0.5">
+              <div className="text-xs text-text-muted mt-0.5">
                 {parseFloat(adRatio) >= 1.5
                   ? "Strongly Bullish"
                   : parseFloat(adRatio) >= 1.0
@@ -365,13 +365,13 @@ function MarketBreadthTab() {
               </div>
             </CardContent>
           </Card>
-          <Card className="bg-[#12121a] border-[#1e1e2e]">
+          <Card className="bg-surface-card border-border-default">
             <CardContent className="pt-3 pb-3 px-4">
-              <div className="text-[10px] text-[#6b6b8a] mb-1">Breadth Thrust</div>
-              <div className={`text-[20px] font-mono font-bold ${breadthThrustRaw >= 61.5 ? "text-emerald-400" : breadthThrustRaw >= 40 ? "text-[#9090b0]" : "text-red-400"}`}>
+              <div className="text-xs text-text-muted mb-1">Breadth Thrust</div>
+              <div className={`text-xl font-mono font-bold ${breadthThrustRaw >= 61.5 ? "text-emerald-400" : breadthThrustRaw >= 40 ? "text-text-secondary" : "text-red-400"}`}>
                 {breadthThrustRaw.toFixed(1)}%
               </div>
-              <div className="text-[10px] text-[#6b6b8a] mt-0.5">
+              <div className="text-xs text-text-muted mt-0.5">
                 {breadthThrustRaw >= 61.5 ? "Bullish signal (>61.5%)" : breadthThrustRaw >= 40 ? "Neutral zone" : "Bearish zone (<40%)"}
               </div>
             </CardContent>
@@ -387,11 +387,11 @@ function MarketBreadthTab() {
               const decPct = ((bd.declines / bd.total) * 100).toFixed(0);
               const unchPct = (100 - parseInt(advPct) - parseInt(decPct)).toFixed(0);
               return (
-                <Card key={bd.label} className="bg-[#12121a] border-[#1e1e2e]">
+                <Card key={bd.label} className="bg-surface-card border-border-default">
                   <CardContent className="pt-3 pb-3 px-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[12px] text-[#e0e0f0] font-medium">{bd.label}</span>
-                      <div className="flex items-center gap-3 text-[11px]">
+                      <span className="text-xs text-text-primary font-medium">{bd.label}</span>
+                      <div className="flex items-center gap-3 text-xs">
                         <span className="text-emerald-400">
                           <TrendingUp size={10} className="inline mr-0.5" />
                           {bd.advances} ({advPct}%)
@@ -400,15 +400,15 @@ function MarketBreadthTab() {
                           <TrendingDown size={10} className="inline mr-0.5" />
                           {bd.declines} ({decPct}%)
                         </span>
-                        <span className="text-[#6b6b8a]">{bd.unchanged} Unch</span>
+                        <span className="text-text-muted">{bd.unchanged} Unch</span>
                       </div>
                     </div>
-                    <div className="h-2 bg-[#1e1e2e] rounded-full overflow-hidden flex gap-px">
+                    <div className="h-2 bg-surface-elevated rounded-full overflow-hidden flex gap-px">
                       <div className="h-full bg-emerald-500 transition-all" style={{ width: `${advPct}%` }} />
-                      <div className="h-full bg-[#2a2a3a] transition-all" style={{ width: `${unchPct}%` }} />
+                      <div className="h-full bg-surface-active transition-all" style={{ width: `${unchPct}%` }} />
                       <div className="h-full bg-red-500 transition-all" style={{ width: `${decPct}%` }} />
                     </div>
-                    <div className="flex items-center gap-4 mt-2 text-[10px] text-[#6b6b8a]">
+                    <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
                       <span>52W High: <span className="text-emerald-400">{bd.newHighs}</span></span>
                       <span>52W Low: <span className="text-red-400">{bd.newLows}</span></span>
                     </div>
@@ -441,26 +441,26 @@ function FiiDiiFlowsTab() {
   const FiiDiiTable = ({ rows, title }: { rows: FiiDiiRow[]; title: string }) => (
     <div className="mb-5">
       <SectionLabel icon={Globe} label={title} />
-      <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+      <div className="rounded-md border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+            <TableRow className="border-border-default hover:bg-transparent">
               {["Date", "FII Buy", "FII Sell", "FII Net", "DII Buy", "DII Sell", "DII Net"].map((h) => (
-                <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-2">{h}</TableHead>
+                <TableHead key={h} className="text-xs text-text-muted h-8 px-2">{h}</TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={`${title}-${row.date}`} className="border-[#1e1e2e] hover:bg-[#12121a] text-[11px]">
-                <TableCell className="px-2 py-1.5 font-mono text-[#9090b0]">{row.date}</TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.fii_buy)}</TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.fii_sell)}</TableCell>
+              <TableRow key={`${title}-${row.date}`} className="border-border-default hover:bg-surface-card text-xs">
+                <TableCell className="px-2 py-1.5 font-mono text-text-secondary">{row.date}</TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-text-primary">{formatCr(row.fii_buy)}</TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-text-primary">{formatCr(row.fii_sell)}</TableCell>
                 <TableCell className={`px-2 py-1.5 font-mono font-semibold ${netColor(row.fii_net)}`}>
                   {row.fii_net >= 0 ? "+" : ""}{formatCr(Math.abs(row.fii_net))}
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.dii_buy)}</TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[#e0e0f0]">{formatCr(row.dii_sell)}</TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-text-primary">{formatCr(row.dii_buy)}</TableCell>
+                <TableCell className="px-2 py-1.5 font-mono text-text-primary">{formatCr(row.dii_sell)}</TableCell>
                 <TableCell className={`px-2 py-1.5 font-mono font-semibold ${netColor(row.dii_net)}`}>
                   {row.dii_net >= 0 ? "+" : ""}{formatCr(Math.abs(row.dii_net))}
                 </TableCell>
@@ -512,29 +512,29 @@ function SectorRotationTab() {
     <div className="p-4">
       <DataNotice />
       <div className="flex items-center gap-1.5 mb-3">
-        <span className="text-[11px] text-[#6b6b8a]">Sort by:</span>
+        <span className="text-xs text-text-muted">Sort by:</span>
         {TIMEFRAMES.map((tf) => (
           <TfButton key={tf} tf={tf} active={sortTf === tf} onClick={() => handleTfSort(tf)} />
         ))}
         <button
           onClick={() => setSortDir(sortDir === "desc" ? "asc" : "desc")}
-          className="ml-auto text-[11px] px-2 py-0.5 rounded border bg-[#12121a] text-[#6b6b8a] border-[#1e1e2e] hover:border-[#3a3a5a] flex items-center gap-1"
+          className="ml-auto text-xs px-2 py-0.5 rounded border bg-surface-card text-text-muted border-border-default hover:border-border-strong flex items-center gap-1"
         >
           <ArrowUpDown size={10} />
           {sortDir === "desc" ? "High to Low" : "Low to High"}
         </button>
       </div>
 
-      <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+      <div className="rounded-md border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-              <TableHead className="text-[10px] text-[#6b6b8a] h-8 px-3 w-44">Sector</TableHead>
-              <TableHead className="text-[10px] text-[#6b6b8a] h-8 px-2">Price</TableHead>
+            <TableRow className="border-border-default hover:bg-transparent">
+              <TableHead className="text-xs text-text-muted h-8 px-3 w-44">Sector</TableHead>
+              <TableHead className="text-xs text-text-muted h-8 px-2">Price</TableHead>
               {TIMEFRAMES.map((tf) => (
                 <TableHead
                   key={tf}
-                  className={["text-[10px] h-8 px-2 cursor-pointer select-none", sortTf === tf ? "text-[#6c8ef0]" : "text-[#6b6b8a]"].join(" ")}
+                  className={["text-xs h-8 px-2 cursor-pointer select-none", sortTf === tf ? "text-primary" : "text-text-muted"].join(" ")}
                   onClick={() => handleTfSort(tf)}
                 >
                   {tf}
@@ -545,12 +545,12 @@ function SectorRotationTab() {
           </TableHeader>
           <TableBody>
             {sorted.map((sector, i) => (
-              <TableRow key={sector.ticker} className="border-[#1e1e2e] hover:bg-[#12121a]">
+              <TableRow key={sector.ticker} className="border-border-default hover:bg-surface-card">
                 <TableCell className="px-3 py-1.5">
-                  <span className="text-[10px] text-[#6b6b8a] mr-2 font-mono">{i + 1}</span>
-                  <span className="text-[12px] text-[#e0e0f0]">{sector.name}</span>
+                  <span className="text-xs text-text-muted mr-2 font-mono">{i + 1}</span>
+                  <span className="text-xs text-text-primary">{sector.name}</span>
                 </TableCell>
-                <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">
+                <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
                   {sector.current_price?.toLocaleString("en-IN", { maximumFractionDigits: 0 }) ?? "--"}
                 </TableCell>
                 {TIMEFRAMES.map((tf) => (
@@ -632,17 +632,17 @@ function SectorHeatmapTab() {
               }}
               title={`${sector.name}: ${formatReturn(ret)}`}
             >
-              <div className="text-[10px] text-white/75 leading-tight font-medium truncate">
+              <div className="text-xs text-white/75 leading-tight font-medium truncate">
                 {sector.name}
               </div>
               <div className="flex items-end justify-between gap-1">
                 <div
-                  className="text-[13px] font-mono font-bold"
+                  className="text-sm font-mono font-bold"
                   style={{ color: getTextColor(ret) }}
                 >
                   {formatReturn(ret)}
                 </div>
-                <div className="text-[9px] text-white/40 font-mono">
+                <div className="text-xxs text-white/40 font-mono">
                   {(sector.market_cap_cr / 100000).toFixed(1)}L Cr
                 </div>
               </div>
@@ -652,7 +652,7 @@ function SectorHeatmapTab() {
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-3 mt-4 text-[10px] text-[#6b6b8a]">
+      <div className="flex flex-wrap items-center gap-3 mt-4 text-xs text-text-muted">
         <Map size={10} />
         <span>Cell size = market cap weight</span>
         <span className="ml-1">Color:</span>
@@ -709,18 +709,18 @@ function IndiaVixTab() {
           <CardContent className="pt-4 pb-4 px-5">
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-[11px] text-[#6b6b8a] mb-1 flex items-center gap-1">
+                <div className="text-xs text-text-muted mb-1 flex items-center gap-1">
                   <ShieldAlert size={11} />
                   India VIX — Volatility Index
                 </div>
-                <div className={`text-[42px] font-mono font-bold leading-none ${zone.color}`}>
+                <div className={`text-4xl font-mono font-bold leading-none ${zone.color}`}>
                   {vixValue.toFixed(2)}
                 </div>
-                <div className={`text-[13px] font-mono mt-1 ${vixChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                <div className={`text-sm font-mono mt-1 ${vixChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                   {vixChange >= 0 ? "+" : ""}{vixChange.toFixed(2)} ({vixChangePct.toFixed(2)}%)
                 </div>
               </div>
-              <Badge className={`text-[11px] px-2.5 py-1 border ${zone.bg} ${zone.color}`}>
+              <Badge className={`text-xs px-2.5 py-1 border ${zone.bg} ${zone.color}`}>
                 {zone.label}
               </Badge>
             </div>
@@ -728,20 +728,20 @@ function IndiaVixTab() {
         </Card>
 
         {/* 52-week range bar */}
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="pt-4 pb-4 px-5">
-            <div className="text-[11px] text-[#6b6b8a] mb-3">52-Week Range</div>
-            <div className="relative h-2 bg-[#1e1e2e] rounded-full">
+            <div className="text-xs text-text-muted mb-3">52-Week Range</div>
+            <div className="relative h-2 bg-surface-elevated rounded-full">
               <div
                 className="absolute top-0 left-0 h-full bg-gradient-to-r from-emerald-600 to-red-600 rounded-full"
                 style={{ width: `${vixRangePct}%` }}
               />
               <div
-                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white border-2 border-[#6c8ef0] shadow"
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white border-2 border-primary shadow"
                 style={{ left: `calc(${vixRangePct}% - 6px)` }}
               />
             </div>
-            <div className="flex justify-between mt-2 text-[10px] font-mono">
+            <div className="flex justify-between mt-2 text-xs font-mono">
               <span className="text-emerald-400">{vix52wLow.toFixed(2)} (52W Low)</span>
               <span className="text-red-400">{vix52wHigh.toFixed(2)} (52W High)</span>
             </div>
@@ -749,10 +749,10 @@ function IndiaVixTab() {
         </Card>
 
         {/* What is India VIX */}
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="pt-4 pb-4 px-5 space-y-3">
-            <div className="text-[12px] font-semibold text-[#e0e0f0]">What is India VIX?</div>
-            <p className="text-[11px] text-[#9090b0] leading-relaxed">
+            <div className="text-xs font-semibold text-text-primary">What is India VIX?</div>
+            <p className="text-xs text-text-secondary leading-relaxed">
               India VIX (Volatility Index) is computed by NSE based on the order book of Nifty options.
               It represents the market&apos;s expectation of volatility over the next 30 calendar days.
               A higher VIX means higher expected volatility and uncertainty — traders call it the
@@ -767,9 +767,9 @@ function IndiaVixTab() {
                 { range: "25 – 30", meaning: "High fear — significant selling pressure", color: "text-red-400" },
                 { range: "Above 30", meaning: "Panic zone — historically extreme buy signal", color: "text-red-500" },
               ].map((row) => (
-                <div key={row.range} className="flex items-start gap-2 text-[11px]">
+                <div key={row.range} className="flex items-start gap-2 text-xs">
                   <span className={`font-mono font-medium w-20 shrink-0 ${row.color}`}>{row.range}</span>
-                  <span className="text-[#9090b0]">{row.meaning}</span>
+                  <span className="text-text-secondary">{row.meaning}</span>
                 </div>
               ))}
             </div>
@@ -779,8 +779,8 @@ function IndiaVixTab() {
         {/* Current interpretation */}
         <Card className={`border ${zone.bg}`}>
           <CardContent className="pt-3 pb-3 px-5">
-            <div className={`text-[11px] font-semibold mb-1 ${zone.color}`}>Current Interpretation</div>
-            <p className="text-[11px] text-[#9090b0]">{zone.description}</p>
+            <div className={`text-xs font-semibold mb-1 ${zone.color}`}>Current Interpretation</div>
+            <p className="text-xs text-text-secondary">{zone.description}</p>
           </CardContent>
         </Card>
       </div>
@@ -830,14 +830,14 @@ function GlobalIndicesTab() {
     <div className="p-4">
       <DataNotice text="Global indices data requires a market data provider. Showing representative values at close. Live data during market hours requires Settings configuration." />
 
-      <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+      <div className="rounded-md border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+            <TableRow className="border-border-default hover:bg-transparent">
               {headers.map(({ label, field }) => (
                 <TableHead
                   key={field}
-                  className={["text-[10px] h-8 px-3 cursor-pointer select-none", sortField === field ? "text-[#6c8ef0]" : "text-[#6b6b8a]"].join(" ")}
+                  className={["text-xs h-8 px-3 cursor-pointer select-none", sortField === field ? "text-primary" : "text-text-muted"].join(" ")}
                   onClick={() => handleSort(field)}
                 >
                   {label}
@@ -848,23 +848,23 @@ function GlobalIndicesTab() {
           </TableHeader>
           <TableBody>
             {sorted.map((idx) => (
-              <TableRow key={idx.name} className="border-[#1e1e2e] hover:bg-[#12121a]">
+              <TableRow key={idx.name} className="border-border-default hover:bg-surface-card">
                 <TableCell className="px-3 py-2">
-                  <div className="text-[12px] font-semibold text-[#e0e0f0]">{idx.name}</div>
+                  <div className="text-xs font-semibold text-text-primary">{idx.name}</div>
                 </TableCell>
                 <TableCell className="px-3 py-2">
-                  <Badge className="text-[9px] h-4 px-1.5 bg-[#12121a] text-[#9090b0] border-[#1e1e2e]">
+                  <Badge className="text-xxs h-4 px-1.5 bg-surface-card text-text-secondary border-border-default">
                     {idx.region}
                   </Badge>
                 </TableCell>
-                <TableCell className="px-3 py-2 font-mono text-[12px] text-[#e0e0f0]">
+                <TableCell className="px-3 py-2 font-mono text-xs text-text-primary">
                   {idx.ltp.toLocaleString("en-US", { maximumFractionDigits: 2 })}
-                  <span className="text-[9px] text-[#6b6b8a] ml-1">{idx.currency}</span>
+                  <span className="text-xxs text-text-muted ml-1">{idx.currency}</span>
                 </TableCell>
-                <TableCell className={`px-3 py-2 font-mono text-[12px] ${idx.change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                <TableCell className={`px-3 py-2 font-mono text-xs ${idx.change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                   {idx.change >= 0 ? "+" : ""}{idx.change.toFixed(2)}
                 </TableCell>
-                <TableCell className={`px-3 py-2 font-mono text-[12px] font-semibold ${idx.change_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${idx.change_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                   <span className="flex items-center gap-1">
                     {idx.change_pct >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
                     {idx.change_pct >= 0 ? "+" : ""}{idx.change_pct.toFixed(2)}%
@@ -894,7 +894,7 @@ function ParticipantOITab() {
   function getInterpretation(net: number): { label: string; color: string } {
     if (net > 50000) return { label: "Long Build Up", color: "text-emerald-400" };
     if (net > 10000) return { label: "Mildly Long", color: "text-emerald-400" };
-    if (net > -10000) return { label: "Neutral", color: "text-[#9090b0]" };
+    if (net > -10000) return { label: "Neutral", color: "text-text-secondary" };
     if (net > -50000) return { label: "Mildly Short", color: "text-red-400" };
     return { label: "Short Build Up", color: "text-red-400" };
   }
@@ -907,12 +907,12 @@ function ParticipantOITab() {
         {/* Index Futures OI */}
         <div>
           <SectionLabel icon={Users} label="Participant-wise OI — Index Futures" />
-          <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+          <div className="rounded-md border border-border-default overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+                <TableRow className="border-border-default hover:bg-transparent">
                   {["Participant", "Long", "Short", "Net OI", "Interpretation"].map((h) => (
-                    <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-3">{h}</TableHead>
+                    <TableHead key={h} className="text-xs text-text-muted h-8 px-3">{h}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -920,21 +920,21 @@ function ParticipantOITab() {
                 {PARTICIPANT_OI.map((row) => {
                   const interp = getInterpretation(row.net_index_fut);
                   return (
-                    <TableRow key={row.participant} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                    <TableRow key={row.participant} className="border-border-default hover:bg-surface-card">
                       <TableCell className="px-3 py-2">
-                        <span className="text-[12px] font-semibold text-[#6c8ef0]">{row.participant}</span>
+                        <span className="text-xs font-semibold text-primary">{row.participant}</span>
                       </TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">
+                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">
                         {formatOI(row.long_index_fut)}
                       </TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">
+                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">
                         {formatOI(row.short_index_fut)}
                       </TableCell>
-                      <TableCell className={`px-3 py-2 font-mono text-[11px] font-semibold ${netColor(row.net_index_fut)}`}>
+                      <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${netColor(row.net_index_fut)}`}>
                         {row.net_index_fut >= 0 ? "+" : ""}{formatOI(Math.abs(row.net_index_fut))}
                       </TableCell>
                       <TableCell className="px-3 py-2">
-                        <Badge className={`text-[10px] h-5 px-2 bg-transparent border ${interp.color === "text-emerald-400" ? "border-emerald-800 text-emerald-400" : interp.color === "text-red-400" ? "border-red-800 text-red-400" : "border-[#1e1e2e] text-[#9090b0]"}`}>
+                        <Badge className={`text-xs h-5 px-2 bg-transparent border ${interp.color === "text-emerald-400" ? "border-emerald-800 text-emerald-400" : interp.color === "text-red-400" ? "border-red-800 text-red-400" : "border-border-default text-text-secondary"}`}>
                           {interp.label}
                         </Badge>
                       </TableCell>
@@ -949,12 +949,12 @@ function ParticipantOITab() {
         {/* Index Options OI */}
         <div>
           <SectionLabel icon={Users} label="Participant-wise OI — Index Options" />
-          <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+          <div className="rounded-md border border-border-default overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+                <TableRow className="border-border-default hover:bg-transparent">
                   {["Participant", "Long Calls", "Short Calls", "Long Puts", "Short Puts", "Net"].map((h) => (
-                    <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-3">{h}</TableHead>
+                    <TableHead key={h} className="text-xs text-text-muted h-8 px-3">{h}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -962,15 +962,15 @@ function ParticipantOITab() {
                 {PARTICIPANT_OI.map((row) => {
                   const net = row.long_index_opt - row.short_index_opt;
                   return (
-                    <TableRow key={row.participant} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                    <TableRow key={row.participant} className="border-border-default hover:bg-surface-card">
                       <TableCell className="px-3 py-2">
-                        <span className="text-[12px] font-semibold text-[#6c8ef0]">{row.participant}</span>
+                        <span className="text-xs font-semibold text-primary">{row.participant}</span>
                       </TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">{formatOI(row.long_index_opt)}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">{formatOI(row.short_index_opt)}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">{formatOI(Math.round(row.long_index_opt * 0.48))}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">{formatOI(Math.round(row.short_index_opt * 0.52))}</TableCell>
-                      <TableCell className={`px-3 py-2 font-mono text-[11px] font-semibold ${netColor(net)}`}>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">{formatOI(row.long_index_opt)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">{formatOI(row.short_index_opt)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">{formatOI(Math.round(row.long_index_opt * 0.48))}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">{formatOI(Math.round(row.short_index_opt * 0.52))}</TableCell>
+                      <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${netColor(net)}`}>
                         {net >= 0 ? "+" : ""}{formatOI(Math.abs(net))}
                       </TableCell>
                     </TableRow>
@@ -984,12 +984,12 @@ function ParticipantOITab() {
         {/* Stock Futures */}
         <div>
           <SectionLabel icon={Users} label="Participant-wise OI — Stock Futures" />
-          <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+          <div className="rounded-md border border-border-default overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+                <TableRow className="border-border-default hover:bg-transparent">
                   {["Participant", "Long", "Short", "Net OI"].map((h) => (
-                    <TableHead key={h} className="text-[10px] text-[#6b6b8a] h-8 px-3">{h}</TableHead>
+                    <TableHead key={h} className="text-xs text-text-muted h-8 px-3">{h}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -997,11 +997,11 @@ function ParticipantOITab() {
                 {PARTICIPANT_OI.map((row) => {
                   const net = row.long_stock_fut - row.short_stock_fut;
                   return (
-                    <TableRow key={row.participant} className="border-[#1e1e2e] hover:bg-[#12121a]">
-                      <TableCell className="px-3 py-2 text-[12px] font-semibold text-[#6c8ef0]">{row.participant}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-emerald-400">{formatOI(row.long_stock_fut)}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-[11px] text-red-400">{formatOI(row.short_stock_fut)}</TableCell>
-                      <TableCell className={`px-3 py-2 font-mono text-[11px] font-semibold ${netColor(net)}`}>
+                    <TableRow key={row.participant} className="border-border-default hover:bg-surface-card">
+                      <TableCell className="px-3 py-2 text-xs font-semibold text-primary">{row.participant}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">{formatOI(row.long_stock_fut)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">{formatOI(row.short_stock_fut)}</TableCell>
+                      <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${netColor(net)}`}>
                         {net >= 0 ? "+" : ""}{formatOI(Math.abs(net))}
                       </TableCell>
                     </TableRow>
@@ -1056,14 +1056,14 @@ function DeliveryDataTab() {
     <div className="p-4">
       <DataNotice text="Delivery data from NSE bhavcopy. Available after 6 PM on trading days. High delivery % indicates institutional interest and conviction." />
 
-      <div className="rounded-md border border-[#1e1e2e] overflow-hidden">
+      <div className="rounded-md border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
+            <TableRow className="border-border-default hover:bg-transparent">
               {headers.map(({ label, field }) => (
                 <TableHead
                   key={field}
-                  className={["text-[10px] h-8 px-2 cursor-pointer select-none", sortField === field ? "text-[#6c8ef0]" : "text-[#6b6b8a]"].join(" ")}
+                  className={["text-xs h-8 px-2 cursor-pointer select-none", sortField === field ? "text-primary" : "text-text-muted"].join(" ")}
                   onClick={() => handleSort(field)}
                 >
                   {label}
@@ -1076,23 +1076,23 @@ function DeliveryDataTab() {
             {sorted.map((row) => {
               const changeAmt = row.close - row.open;
               const changePct = ((changeAmt / row.open) * 100);
-              const deliveryColor = row.delivery_pct >= 60 ? "text-emerald-400" : row.delivery_pct >= 45 ? "text-amber-400" : "text-[#9090b0]";
+              const deliveryColor = row.delivery_pct >= 60 ? "text-emerald-400" : row.delivery_pct >= 45 ? "text-amber-400" : "text-text-secondary";
               return (
-                <TableRow key={row.symbol} className="border-[#1e1e2e] hover:bg-[#12121a]">
+                <TableRow key={row.symbol} className="border-border-default hover:bg-surface-card">
                   <TableCell className="px-2 py-1.5">
-                    <div className="text-[12px] font-semibold font-mono text-[#6c8ef0]">{row.symbol}</div>
-                    <div className={`text-[10px] font-mono ${changePct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    <div className="text-xs font-semibold font-mono text-primary">{row.symbol}</div>
+                    <div className={`text-xs font-mono ${changePct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                       {changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%
                     </div>
                   </TableCell>
-                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">{row.open.toFixed(1)}</TableCell>
-                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-emerald-400">{row.high.toFixed(1)}</TableCell>
-                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-red-400">{row.low.toFixed(1)}</TableCell>
-                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#e0e0f0]">{row.close.toFixed(1)}</TableCell>
-                  <TableCell className="px-2 py-1.5 font-mono text-[11px] text-[#9090b0]">{row.volume_lakh.toFixed(1)}L</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{row.open.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">{row.high.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">{row.low.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-xs text-text-primary">{row.close.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{row.volume_lakh.toFixed(1)}L</TableCell>
                   <TableCell className="px-2 py-1.5">
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden">
+                      <div className="flex-1 h-1.5 bg-surface-elevated rounded-full overflow-hidden">
                         <div
                           className="h-full rounded-full transition-all"
                           style={{
@@ -1101,7 +1101,7 @@ function DeliveryDataTab() {
                           }}
                         />
                       </div>
-                      <span className={`font-mono text-[11px] font-semibold w-10 text-right ${deliveryColor}`}>
+                      <span className={`font-mono text-xs font-semibold w-10 text-right ${deliveryColor}`}>
                         {row.delivery_pct.toFixed(1)}%
                       </span>
                     </div>
@@ -1113,10 +1113,10 @@ function DeliveryDataTab() {
         </Table>
       </div>
 
-      <div className="flex items-center gap-4 mt-3 text-[10px]">
-        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /><span className="text-[#6b6b8a]">High delivery ≥60%</span></div>
-        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /><span className="text-[#6b6b8a]">Medium 45–60%</span></div>
-        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#6b7280] inline-block" /><span className="text-[#6b6b8a]">Low &lt;45%</span></div>
+      <div className="flex items-center gap-4 mt-3 text-xs">
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /><span className="text-text-muted">High delivery ≥60%</span></div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /><span className="text-text-muted">Medium 45–60%</span></div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-500 inline-block" /><span className="text-text-muted">Low &lt;45%</span></div>
       </div>
     </div>
   );
@@ -1146,9 +1146,9 @@ function CorrelationMatrixTab() {
           <table className="w-full">
             <thead>
               <tr>
-                <th className="text-[10px] text-[#6b6b8a] font-normal px-2 py-1.5 text-left w-20" />
+                <th className="text-xs text-text-muted font-normal px-2 py-1.5 text-left w-20" />
                 {CORR_ASSETS.map((asset) => (
-                  <th key={asset} className="text-[11px] text-[#9090b0] font-medium px-2 py-1.5 text-center">
+                  <th key={asset} className="text-xs text-text-secondary font-medium px-2 py-1.5 text-center">
                     {asset}
                   </th>
                 ))}
@@ -1157,7 +1157,7 @@ function CorrelationMatrixTab() {
             <tbody>
               {CORR_MATRIX.map((row, ri) => (
                 <tr key={CORR_ASSETS[ri]}>
-                  <td className="text-[11px] text-[#9090b0] font-medium px-2 py-1 text-right pr-3">
+                  <td className="text-xs text-text-secondary font-medium px-2 py-1 text-right pr-3">
                     {CORR_ASSETS[ri]}
                   </td>
                   {row.map((val, ci) => {
@@ -1165,7 +1165,7 @@ function CorrelationMatrixTab() {
                     return (
                       <td key={ci} className="px-1 py-1">
                         <div
-                          className="w-16 h-10 rounded flex items-center justify-center font-mono text-[12px] font-semibold transition-all hover:opacity-90 cursor-default"
+                          className="w-16 h-10 rounded flex items-center justify-center font-mono text-xs font-semibold transition-all hover:opacity-90 cursor-default"
                           style={{ backgroundColor: colors.bg, color: colors.text }}
                           title={`${CORR_ASSETS[ri]} vs ${CORR_ASSETS[ci]}: ${val.toFixed(2)}`}
                         >
@@ -1182,8 +1182,8 @@ function CorrelationMatrixTab() {
 
         {/* Legend */}
         <div className="space-y-2">
-          <div className="text-[11px] text-[#6b6b8a] font-medium">How to read:</div>
-          <div className="grid grid-cols-2 gap-2 text-[11px]">
+          <div className="text-xs text-text-muted font-medium">How to read:</div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
             {[
               { range: "0.7 to 1.0", desc: "Strong positive — move together", bg: "#064e3b", text: "#a7f3d0" },
               { range: "0.4 to 0.7", desc: "Moderate positive correlation", bg: "#065f46", text: "#6ee7b7" },
@@ -1194,25 +1194,25 @@ function CorrelationMatrixTab() {
             ].map((l) => (
               <div key={l.range} className="flex items-center gap-2">
                 <span
-                  className="w-8 h-5 rounded text-center font-mono text-[9px] flex items-center justify-center shrink-0"
+                  className="w-8 h-5 rounded text-center font-mono text-xxs flex items-center justify-center shrink-0"
                   style={{ backgroundColor: l.bg, color: l.text }}
                 >
                   {l.range.split(" ")[0]}
                 </span>
-                <span className="text-[10px] text-[#6b6b8a]">{l.desc}</span>
+                <span className="text-xs text-text-muted">{l.desc}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="pt-3 pb-3 px-4 space-y-2">
-            <div className="text-[11px] font-semibold text-[#e0e0f0]">Key Observations</div>
-            <ul className="space-y-1.5 text-[11px] text-[#9090b0]">
-              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />VIX and Nifty have a strong negative correlation (-0.72). Rising VIX typically signals falling markets.</li>
-              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />Gold and USD-INR are positively correlated (0.48). Rupee depreciation often drives gold prices higher in INR terms.</li>
-              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />Nifty and USD-INR are negatively correlated (-0.62). FII outflows weaken the rupee and pressure equities simultaneously.</li>
-              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-[#6c8ef0] mt-0.5 shrink-0" />Gold and Crude have a weak positive correlation (0.28), driven by common USD and geopolitical factors.</li>
+            <div className="text-xs font-semibold text-text-primary">Key Observations</div>
+            <ul className="space-y-1.5 text-xs text-text-secondary">
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-primary mt-0.5 shrink-0" />VIX and Nifty have a strong negative correlation (-0.72). Rising VIX typically signals falling markets.</li>
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-primary mt-0.5 shrink-0" />Gold and USD-INR are positively correlated (0.48). Rupee depreciation often drives gold prices higher in INR terms.</li>
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-primary mt-0.5 shrink-0" />Nifty and USD-INR are negatively correlated (-0.62). FII outflows weaken the rupee and pressure equities simultaneously.</li>
+              <li className="flex items-start gap-2"><ChevronRight size={11} className="text-primary mt-0.5 shrink-0" />Gold and Crude have a weak positive correlation (0.28), driven by common USD and geopolitical factors.</li>
             </ul>
           </CardContent>
         </Card>
@@ -1226,10 +1226,10 @@ function CorrelationMatrixTab() {
 // ---------------------------------------------------------------------------
 
 const CATEGORY_COLORS: Record<string, string> = {
-  "Board Meeting": "text-[#6c8ef0] border-[#2a3a6a]",
+  "Board Meeting": "text-primary border-neutral-border",
   "Dividend": "text-emerald-400 border-emerald-800",
   "Debt": "text-amber-400 border-amber-800",
-  "Compliance": "text-[#9090b0] border-[#2a2a3a]",
+  "Compliance": "text-text-secondary border-border-default",
   "Appointment": "text-purple-400 border-purple-800",
   "Results": "text-cyan-400 border-cyan-800",
   "Buyback": "text-pink-400 border-pink-800",
@@ -1258,42 +1258,42 @@ function AnnouncementsTab() {
             key={cat}
             onClick={() => setFilterCat(cat)}
             className={[
-              "text-[11px] px-2 py-0.5 rounded border transition-colors",
+              "text-xs px-2 py-0.5 rounded border transition-colors",
               filterCat === cat
-                ? "bg-[#1e2a4a] text-[#6c8ef0] border-[#2a3a6a]"
-                : "bg-[#12121a] text-[#6b6b8a] border-[#1e1e2e] hover:border-[#3a3a5a]",
+                ? "bg-neutral-bg text-primary border-neutral-border"
+                : "bg-surface-card text-text-muted border-border-default hover:border-border-strong",
             ].join(" ")}
           >
             {cat}
           </button>
         ))}
-        <span className="text-[11px] text-[#6b6b8a] ml-auto self-center">
+        <span className="text-xs text-text-muted ml-auto self-center">
           {filtered.length} of {ANNOUNCEMENTS.length}
         </span>
       </div>
 
       <div className="space-y-2">
         {filtered.map((ann, i) => {
-          const catCls = CATEGORY_COLORS[ann.category] ?? "text-[#9090b0] border-[#2a2a3a]";
+          const catCls = CATEGORY_COLORS[ann.category] ?? "text-text-secondary border-border-default";
           return (
-            <Card key={i} className="bg-[#12121a] border-[#1e1e2e] hover:border-[#2a2a4a] transition-colors">
+            <Card key={i} className="bg-surface-card border-border-default hover:border-border-default transition-colors">
               <CardContent className="pt-3 pb-3 px-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[12px] font-semibold font-mono text-[#6c8ef0]">{ann.symbol}</span>
-                      <Badge className={`text-[9px] h-4 px-1.5 bg-transparent border ${catCls}`}>
+                      <span className="text-xs font-semibold font-mono text-primary">{ann.symbol}</span>
+                      <Badge className={`text-xxs h-4 px-1.5 bg-transparent border ${catCls}`}>
                         {ann.category}
                       </Badge>
-                      <Badge className="text-[9px] h-4 px-1.5 bg-[#1e1e2e] text-[#6b6b8a] border-[#2a2a3a]">
+                      <Badge className="text-xxs h-4 px-1.5 bg-surface-elevated text-text-muted border-border-default">
                         {ann.exchange}
                       </Badge>
                     </div>
-                    <p className="text-[11px] text-[#9090b0] leading-relaxed line-clamp-2">
+                    <p className="text-xs text-text-secondary leading-relaxed line-clamp-2">
                       {ann.subject}
                     </p>
                   </div>
-                  <div className="text-[10px] text-[#6b6b8a] font-mono shrink-0 pt-0.5">
+                  <div className="text-xs text-text-muted font-mono shrink-0 pt-0.5">
                     {ann.date}
                   </div>
                 </div>
@@ -1302,7 +1302,7 @@ function AnnouncementsTab() {
           );
         })}
         {filtered.length === 0 && (
-          <div className="text-center py-8 text-[11px] text-[#6b6b8a]">
+          <div className="text-center py-8 text-xs text-text-muted">
             No announcements in this category.
           </div>
         )}
@@ -1376,22 +1376,22 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
   const currentTab = TABS.find((t) => t.id === activeTab);
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
+    <div className="h-full flex flex-col bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1e1e2e] bg-[#12121a] shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
-          <BarChart3 size={16} className="text-[#6c8ef0]" />
-          <span className="text-[13px] font-semibold text-[#e0e0f0]">Market Intelligence</span>
+          <BarChart3 size={16} className="text-primary" />
+          <span className="text-sm font-semibold text-text-primary">Market Intelligence</span>
           {currentTab && (
             <>
-              <span className="text-[#2a2a4a]">/</span>
-              <span className="text-[12px] text-[#9090b0]">{currentTab.label}</span>
+              <span className="text-text-disabled">/</span>
+              <span className="text-xs text-text-secondary">{currentTab.label}</span>
             </>
           )}
         </div>
         <button
           onClick={onClose}
-          className="text-[#6b6b8a] hover:text-[#e0e0f0] transition-colors"
+          className="text-text-muted hover:text-text-primary transition-colors"
         >
           <X size={15} />
         </button>
@@ -1400,7 +1400,7 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
       {/* Body: sidebar + content */}
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
-        <div className="w-44 border-r border-[#1e1e2e] bg-[#12121a] shrink-0 overflow-y-auto py-1.5">
+        <div className="w-44 border-r border-border-default bg-surface-card shrink-0 overflow-y-auto py-1.5">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -1409,10 +1409,10 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={[
-                  "w-full flex items-center gap-2 px-3 py-2 text-[12px] transition-colors text-left",
+                  "w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors text-left",
                   isActive
-                    ? "bg-[#1e2a4a]/60 text-[#6c8ef0] border-r-2 border-[#6c8ef0]"
-                    : "text-[#9090b0] hover:text-[#e0e0f0] hover:bg-[#1a1a28]",
+                    ? "bg-neutral-bg/60 text-primary border-r-2 border-primary"
+                    : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated",
                 ].join(" ")}
               >
                 <Icon size={13} className="shrink-0" />

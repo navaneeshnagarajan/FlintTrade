@@ -11,7 +11,7 @@
  *   - BASKET toggle — select strikes, badge count, basket panel
  *   - Color-coded change%, OI bars, ATM accent border
  *   - Auto-refresh: 3 s market hours, 30 s off-hours
- *   - Dense layout: text-xs data, text-[10px] headers, font-mono numbers
+ *   - Dense layout: text-xs data, text-xs headers, font-mono numbers
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -820,13 +820,13 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
 
           <div className="flex items-center gap-1">
             {expiryButtons.length === 0 && !loading && (
-              <span className="text-[10px] text-text-muted px-1">No expiries</span>
+              <span className="text-xs text-text-muted px-1">No expiries</span>
             )}
             {expiryButtons.map((exp) => (
               <button
                 key={exp}
                 onClick={() => setSelectedExpiry(exp)}
-                className={`px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${
+                className={`px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
                   exp === selectedExpiry
                     ? "bg-accent/15 border-accent/60 text-accent"
                     : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary hover:border-accent/30"
@@ -845,7 +845,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
               <button
                 key={v}
                 onClick={() => setView(v)}
-                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                className={`px-2 py-0.5 text-xs font-medium transition-colors ${
                   v === view
                     ? "bg-accent/15 text-accent"
                     : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -859,7 +859,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
           {/* Basket button */}
           <button
             onClick={() => setBasketOpen((p) => !p)}
-            className={`relative flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${
+            className={`relative flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
               basketOpen
                 ? "bg-accent/15 border-accent/50 text-accent"
                 : "bg-surface-hover border-border-default text-text-muted hover:text-text-primary hover:border-accent/30"
@@ -868,7 +868,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
           >
             <ShoppingBasket size={11} />
             {basket.length > 0 && (
-              <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 text-[8px] font-bold rounded-full bg-accent text-white leading-none">
+              <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 text-xxs font-bold rounded-full bg-accent text-white leading-none">
                 {basket.length}
               </span>
             )}
@@ -889,7 +889,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
           {spotLtp != null ? (
             <>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-text-muted uppercase tracking-wide">Spot</span>
+                <span className="text-xs text-text-muted uppercase tracking-wide">Spot</span>
                 <span className="font-mono text-sm font-bold text-text-primary">
                   {NUM.format(spotLtp)}
                 </span>
@@ -900,7 +900,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
                       : <TrendingDown size={12} strokeWidth={2.5} />
                     }
                     <span>{spotChange >= 0 ? "+" : ""}{spotChange.toFixed(2)}</span>
-                    <span className="text-[11px] opacity-80">
+                    <span className="text-xs opacity-80">
                       ({spotChangePct != null && spotChangePct >= 0 ? "+" : ""}{spotChangePct?.toFixed(2)}%)
                     </span>
                   </div>
@@ -908,12 +908,12 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
               </div>
             </>
           ) : (
-            <span className="text-[10px] text-text-muted">Spot: —</span>
+            <span className="text-xs text-text-muted">Spot: —</span>
           )}
 
           {/* PCR badge — color-coded */}
           {pcr != null && (
-            <div className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-semibold font-mono ${
+            <div className={`flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold font-mono ${
               Number(pcr) >= 1.2
                 ? "bg-profit/10 border-profit/30 text-profit"
                 : Number(pcr) <= 0.8
@@ -922,14 +922,14 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             }`}>
               <span className="font-sans font-medium text-text-muted mr-0.5">PCR</span>
               {Number(pcr).toFixed(2)}
-              <span className="ml-1 font-sans font-normal text-[9px] opacity-70">
+              <span className="ml-1 font-sans font-normal text-xxs opacity-70">
                 {Number(pcr) >= 1.2 ? "Bullish" : Number(pcr) <= 0.8 ? "Bearish" : "Neutral"}
               </span>
             </div>
           )}
 
           {lastRefresh && (
-            <div className="flex items-center gap-1 ml-auto text-[10px] text-text-muted">
+            <div className="flex items-center gap-1 ml-auto text-xs text-text-muted">
               <RefreshCw size={9} />
               {lastRefresh.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </div>
@@ -942,7 +942,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             {(["Long Build Up", "Short Covering", "Long Unwinding", "Short Build Up"] as OISignal[]).map((sig) => (
               <span
                 key={sig}
-                className={`inline-flex items-center gap-1 px-1 py-0 text-[9px] font-medium rounded border ${oiSignalStyle(sig)}`}
+                className={`inline-flex items-center gap-1 px-1 py-0 text-xxs font-medium rounded border ${oiSignalStyle(sig)}`}
               >
                 <span className="font-bold">{oiSignalShort(sig)}</span>
                 <span className="opacity-70">{sig}</span>
@@ -976,20 +976,20 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
         <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5">
           <div className="flex items-center gap-2 mb-1">
             <ShoppingBasket size={11} className="text-accent" />
-            <span className="text-[10px] font-semibold text-text-primary uppercase tracking-wide">
+            <span className="text-xs font-semibold text-text-primary uppercase tracking-wide">
               Basket ({basket.length})
             </span>
             {basket.length > 0 && (
               <button
                 onClick={() => setBasket([])}
-                className="ml-auto text-[9px] text-text-muted hover:text-loss transition-colors"
+                className="ml-auto text-xxs text-text-muted hover:text-loss transition-colors"
               >
                 Clear all
               </button>
             )}
           </div>
           {basket.length === 0 ? (
-            <p className="text-[10px] text-text-muted">
+            <p className="text-xs text-text-muted">
               Click +B on any strike to add it here.
             </p>
           ) : (
@@ -998,7 +998,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
                 {basket.map((item) => (
                   <div
                     key={`${item.strike}-${item.optionType}`}
-                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-mono ${
                       item.optionType === "CE"
                         ? "bg-loss/10 border-loss/30 text-loss"
                         : "bg-profit/10 border-profit/30 text-profit"
@@ -1025,7 +1025,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
                       handleOrder({ symbol: symDef.label, exchange, strike: item.strike, optionType: item.optionType, expiry: item.expiry, action: "B", ltp: item.ltp })
                     )
                   }
-                  className="px-3 py-0.5 text-[10px] font-semibold rounded bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors"
+                  className="px-3 py-0.5 text-xs font-semibold rounded bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors"
                 >
                   Buy All
                 </button>
@@ -1035,7 +1035,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
                       handleOrder({ symbol: symDef.label, exchange, strike: item.strike, optionType: item.optionType, expiry: item.expiry, action: "S", ltp: item.ltp })
                     )
                   }
-                  className="px-3 py-0.5 text-[10px] font-semibold rounded bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors"
+                  className="px-3 py-0.5 text-xs font-semibold rounded bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors"
                 >
                   Sell All
                 </button>
@@ -1093,7 +1093,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
 
       {/* Footer */}
       {chain && strikes.length > 0 && (
-        <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-[10px]">
+        <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-xs">
           <span className="text-text-muted uppercase tracking-wide">Total OI</span>
           <span className="text-loss font-mono">
             CE: {fmtOI(strikes.reduce((s, r) => s + Number(r.call?.oi ?? r.call?.open_interest ?? 0), 0))}

@@ -1268,11 +1268,11 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setOpen(true)}
           placeholder="Search symbol..."
-          className="bg-transparent text-[11px] text-text-primary placeholder-text-muted outline-none w-full font-mono"
+          className="bg-transparent text-xs text-text-primary placeholder-text-muted outline-none w-full font-mono"
           spellCheck={false}
         />
         {loading && (
-          <span className="text-text-muted text-[10px] shrink-0 animate-pulse">
+          <span className="text-text-muted text-xs shrink-0 animate-pulse">
             ...
           </span>
         )}
@@ -1298,25 +1298,25 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
               className={`w-full flex items-center justify-between px-3 py-2 text-left transition-colors ${
                 idx === activeIdx
                   ? "bg-border-default text-text-primary"
-                  : "text-[#a1a1aa] hover:bg-surface-hover hover:text-text-primary"
+                  : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
               }`}
             >
               <span className="flex flex-col gap-0.5">
-                <span className="text-[12px] font-mono font-semibold text-text-primary">
+                <span className="text-xs font-mono font-semibold text-text-primary">
                   {item.symbol}
                 </span>
                 {item.name && (
-                  <span className="text-[10px] text-text-muted truncate max-w-40">
+                  <span className="text-xs text-text-muted truncate max-w-40">
                     {item.name}
                   </span>
                 )}
               </span>
               <span className="flex flex-col items-end gap-0.5">
-                <span className="text-[10px] font-mono text-accent">
+                <span className="text-xs font-mono text-accent">
                   {item.exchange}
                 </span>
                 {item.instrument_type && (
-                  <span className="text-[9px] text-text-muted uppercase">
+                  <span className="text-xxs text-text-muted uppercase">
                     {item.instrument_type}
                   </span>
                 )}
@@ -1342,7 +1342,7 @@ function IntervalPills({ intervals, active, onSelect }: IntervalPillsProps) {
         <button
           key={iv.value}
           onClick={() => onSelect(iv.value)}
-          className={`px-2 py-0.5 text-[10px] font-mono rounded transition-colors ${
+          className={`px-2 py-0.5 text-xs font-mono rounded transition-colors ${
             active === iv.value
               ? "bg-accent text-white"
               : "text-text-secondary hover:text-text-primary hover:bg-border-default"
@@ -1369,7 +1369,7 @@ function DrawToolBtn({ toolId, active, onClick, title, children }: DrawToolBtnPr
     <button
       onClick={() => onClick(toolId)}
       title={title}
-      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors ${
+      className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
         active === toolId
           ? "bg-accent text-white"
           : "text-text-secondary hover:text-text-primary hover:bg-border-default"
@@ -1405,17 +1405,17 @@ function TextInputOverlay({ onConfirm, onCancel }: TextInputOverlayProps) {
           if (e.key === "Escape") onCancel();
         }}
         placeholder="Enter annotation text..."
-        className="bg-transparent text-[11px] font-mono text-text-primary outline-none w-48 placeholder-text-muted"
+        className="bg-transparent text-xs font-mono text-text-primary outline-none w-48 placeholder-text-muted"
       />
       <button
         onClick={() => val.trim() && onConfirm(val.trim())}
-        className="text-[10px] bg-accent text-white px-2 py-0.5 rounded"
+        className="text-xs bg-accent text-white px-2 py-0.5 rounded"
       >
         Place
       </button>
       <button
         onClick={onCancel}
-        className="text-[10px] text-text-muted hover:text-loss px-1"
+        className="text-xs text-text-muted hover:text-loss px-1"
       >
         <X size={11} />
       </button>
@@ -1438,7 +1438,7 @@ function PeriodInput({
       min={2}
       max={500}
       value={value}
-      className="w-11 h-5 text-[10px] text-center px-1 py-0 ml-auto bg-transparent border-border-default"
+      className="w-11 h-7 text-xs text-center px-1 py-0 ml-auto bg-transparent border-border-default"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       onChange={(e) => {
@@ -2590,20 +2590,20 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
           <SymbolSearch onSelect={handleSymbolSelect} />
 
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[12px] font-mono font-bold text-text-primary leading-none whitespace-nowrap">
+            <span className="text-xs font-mono font-bold text-text-primary leading-none whitespace-nowrap">
               {symbol}
             </span>
-            <span className="text-[10px] font-mono text-text-muted whitespace-nowrap">
+            <span className="text-xs font-mono text-text-muted whitespace-nowrap">
               {exchange}
             </span>
             {ltp != null && (
-              <span className="text-[13px] font-mono font-bold text-text-primary leading-none whitespace-nowrap">
+              <span className="text-sm font-mono font-bold text-text-primary leading-none whitespace-nowrap">
                 {formatPrice(ltp)}
               </span>
             )}
             {change != null && (
               <span
-                className={`flex items-center gap-0.5 text-[11px] font-mono whitespace-nowrap ${changeColor}`}
+                className={`flex items-center gap-0.5 text-xs font-mono whitespace-nowrap ${changeColor}`}
               >
                 {isPositive ? (
                   <TrendingUp size={11} />
@@ -2620,7 +2620,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
         <div className="flex items-center gap-3 shrink-0">
           {legend && (
             <div
-              className={`flex items-center gap-2 text-[10px] font-mono ${legendColor}`}
+              className={`flex items-center gap-2 text-xs font-mono ${legendColor}`}
             >
               <span>
                 O{" "}
@@ -2673,12 +2673,12 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 text-[10px] gap-1 text-text-secondary hover:text-text-primary"
+              className="h-6 px-2 text-xs gap-1 text-text-secondary hover:text-text-primary"
             >
               <BarChart2 size={11} />
               Indicators
               {activeIndicatorCount > 0 && (
-                <span className="ml-0.5 bg-accent text-white rounded-full px-1 text-[9px] leading-none py-0.5">
+                <span className="ml-0.5 bg-accent text-white rounded-full px-1 text-xxs leading-none py-0.5">
                   {activeIndicatorCount}
                 </span>
               )}
@@ -2689,51 +2689,51 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             className="w-56 bg-surface-card border-border-default text-text-primary"
           >
             {/* Overlays */}
-            <DropdownMenuLabel className="text-[10px] text-text-muted uppercase tracking-wider px-2 py-1">
+            <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">
               Overlays
             </DropdownMenuLabel>
             <DropdownMenuCheckboxItem
               checked={indicators.showEMA20}
               onCheckedChange={(v) => toggleIndicator("showEMA20", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#3b82f6] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />
               EMA
               <PeriodInput value={periods.ema1} onChange={(v) => setPeriods((p) => ({ ...p, ema1: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showEMA50}
               onCheckedChange={(v) => toggleIndicator("showEMA50", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#f59e0b] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block shrink-0" />
               EMA
               <PeriodInput value={periods.ema2} onChange={(v) => setPeriods((p) => ({ ...p, ema2: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showSMA}
               onCheckedChange={(v) => toggleIndicator("showSMA", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#06b6d4] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block shrink-0" />
               SMA
               <PeriodInput value={periods.sma} onChange={(v) => setPeriods((p) => ({ ...p, sma: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showWMA}
               onCheckedChange={(v) => toggleIndicator("showWMA", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#84cc16] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-lime-500 inline-block shrink-0" />
               WMA
               <PeriodInput value={periods.wma} onChange={(v) => setPeriods((p) => ({ ...p, wma: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showBB}
               onCheckedChange={(v) => toggleIndicator("showBB", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#94a3b8] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />
               BB
               <PeriodInput value={periods.bbPeriod} onChange={(v) => setPeriods((p) => ({ ...p, bbPeriod: v }))} />
               <PeriodInput value={periods.bbMult} onChange={(v) => setPeriods((p) => ({ ...p, bbMult: v }))} />
@@ -2741,7 +2741,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <DropdownMenuCheckboxItem
               checked={indicators.showSupertrend}
               onCheckedChange={(v) => toggleIndicator("showSupertrend", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-profit inline-block shrink-0" />
               Supertrend
@@ -2751,15 +2751,15 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <DropdownMenuCheckboxItem
               checked={indicators.showVWAP}
               onCheckedChange={(v) => toggleIndicator("showVWAP", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#e879f9] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 inline-block shrink-0" />
               VWAP
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showIchimoku}
               onCheckedChange={(v) => toggleIndicator("showIchimoku", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
               <span className="w-2 h-2 rounded-full bg-profit inline-block shrink-0" />
               Ichimoku Cloud
@@ -2767,43 +2767,43 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <DropdownMenuCheckboxItem
               checked={indicators.showPivot}
               onCheckedChange={(v) => toggleIndicator("showPivot", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#94a3b8] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />
               Pivot Points
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showDEMA}
               onCheckedChange={(v) => toggleIndicator("showDEMA", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#f97316] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />
               DEMA
               <PeriodInput value={periods.dema} onChange={(v) => setPeriods((p) => ({ ...p, dema: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showHullMA}
               onCheckedChange={(v) => toggleIndicator("showHullMA", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#a855f7] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block shrink-0" />
               Hull MA
               <PeriodInput value={periods.hull} onChange={(v) => setPeriods((p) => ({ ...p, hull: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showParabolicSAR}
               onCheckedChange={(v) => toggleIndicator("showParabolicSAR", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#facc15] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block shrink-0" />
               Parabolic SAR
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showKeltner}
               onCheckedChange={(v) => toggleIndicator("showKeltner", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#f97316] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />
               Keltner
               <PeriodInput value={periods.keltner} onChange={(v) => setPeriods((p) => ({ ...p, keltner: v }))} />
               <PeriodInput value={periods.keltnerMult} onChange={(v) => setPeriods((p) => ({ ...p, keltnerMult: v }))} />
@@ -2811,98 +2811,98 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <DropdownMenuCheckboxItem
               checked={indicators.showVWMA}
               onCheckedChange={(v) => toggleIndicator("showVWMA", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#2dd4bf] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-teal-400 inline-block shrink-0" />
               VWMA
               <PeriodInput value={periods.vwma} onChange={(v) => setPeriods((p) => ({ ...p, vwma: v }))} />
             </DropdownMenuCheckboxItem>
 
             <DropdownMenuSeparator className="bg-border-default" />
             {/* Volume */}
-            <DropdownMenuLabel className="text-[10px] text-text-muted uppercase tracking-wider px-2 py-1">
+            <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">
               Volume
             </DropdownMenuLabel>
             <DropdownMenuCheckboxItem
               checked={indicators.showVolume}
               onCheckedChange={(v) => toggleIndicator("showVolume", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#64748b] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-slate-500 inline-block shrink-0" />
               Volume
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showOBV}
               onCheckedChange={(v) => toggleIndicator("showOBV", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#94a3b8] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />
               OBV
             </DropdownMenuCheckboxItem>
 
             <DropdownMenuSeparator className="bg-border-default" />
             {/* Oscillators */}
-            <DropdownMenuLabel className="text-[10px] text-text-muted uppercase tracking-wider px-2 py-1">
+            <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">
               Oscillators
             </DropdownMenuLabel>
             <DropdownMenuCheckboxItem
               checked={indicators.showRSI}
               onCheckedChange={(v) => toggleIndicator("showRSI", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#a855f7] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block shrink-0" />
               RSI
               <PeriodInput value={periods.rsi} onChange={(v) => setPeriods((p) => ({ ...p, rsi: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showMACD}
               onCheckedChange={(v) => toggleIndicator("showMACD", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#3b82f6] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />
               MACD (12, 26, 9)
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showStoch}
               onCheckedChange={(v) => toggleIndicator("showStoch", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#f97316] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />
               Stochastic (14, 3, 3)
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showATR}
               onCheckedChange={(v) => toggleIndicator("showATR", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#fb923c] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block shrink-0" />
               ATR
               <PeriodInput value={periods.atr} onChange={(v) => setPeriods((p) => ({ ...p, atr: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showADX}
               onCheckedChange={(v) => toggleIndicator("showADX", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#fbbf24] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block shrink-0" />
               ADX
               <PeriodInput value={periods.adx} onChange={(v) => setPeriods((p) => ({ ...p, adx: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showWilliamsR}
               onCheckedChange={(v) => toggleIndicator("showWilliamsR", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#f472b6] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-pink-400 inline-block shrink-0" />
               Williams %R
               <PeriodInput value={periods.wr} onChange={(v) => setPeriods((p) => ({ ...p, wr: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={indicators.showCCI}
               onCheckedChange={(v) => toggleIndicator("showCCI", v)}
-              className="text-[11px] gap-2"
+              className="text-xs gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-[#38bdf8] inline-block shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />
               CCI
               <PeriodInput value={periods.cci} onChange={(v) => setPeriods((p) => ({ ...p, cci: v }))} />
             </DropdownMenuCheckboxItem>
@@ -2912,7 +2912,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
         <div className="w-px h-4 bg-border-default mx-0.5" />
 
         {/* Draw tools */}
-        <span className="text-[9px] text-text-muted uppercase tracking-wider mr-0.5">
+        <span className="text-xxs text-text-muted uppercase tracking-wider mr-0.5">
           Draw
         </span>
 
@@ -2957,7 +2957,7 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             <button
               onClick={undoLastDrawing}
               title="Undo last drawing"
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-text-secondary hover:text-loss hover:bg-border-default transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-text-secondary hover:text-loss hover:bg-border-default transition-colors"
             >
               <X size={10} />
               <span>Undo</span>
@@ -2966,13 +2966,13 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               <button
                 onClick={clearAllDrawings}
                 title="Clear all drawings"
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-text-secondary hover:text-loss hover:bg-border-default transition-colors"
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-text-secondary hover:text-loss hover:bg-border-default transition-colors"
               >
                 <Trash2 size={10} />
                 <span>Clear</span>
               </button>
             )}
-            <span className="text-[9px] text-text-muted ml-auto">
+            <span className="text-xxs text-text-muted ml-auto">
               {drawingCount} drawing{drawingCount !== 1 ? "s" : ""}
             </span>
           </>
@@ -2980,22 +2980,22 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
 
         {/* Status hints */}
         {drawMode !== null && !isTwoClickMode && (
-          <span className="text-[9px] text-accent ml-1 animate-pulse">
+          <span className="text-xxs text-accent ml-1 animate-pulse">
             Click chart to place
           </span>
         )}
         {isTwoClickMode && pendingPoint === null && (
-          <span className="text-[9px] text-accent ml-1 animate-pulse">
+          <span className="text-xxs text-accent ml-1 animate-pulse">
             Click first point
           </span>
         )}
         {isTwoClickMode && pendingPoint !== null && (
-          <span className="text-[9px] text-accent ml-1 animate-pulse">
+          <span className="text-xxs text-accent ml-1 animate-pulse">
             Click second point
           </span>
         )}
         {drawMode === "text" && awaitingText !== null && (
-          <span className="text-[9px] text-accent ml-1 animate-pulse">
+          <span className="text-xxs text-accent ml-1 animate-pulse">
             Type text below
           </span>
         )}

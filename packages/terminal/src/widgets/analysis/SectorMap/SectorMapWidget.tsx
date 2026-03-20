@@ -480,7 +480,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
       {/* Tooltip (absorbed from SectorHeatmapModal) */}
       {hoveredStock && (
         <div
-          className="fixed z-50 pointer-events-none rounded border border-[#1e1e2e] bg-[#12121a] text-xs shadow-lg"
+          className="fixed z-50 pointer-events-none rounded border border-border-default bg-surface-card text-xs shadow-lg"
           style={{
             left: tooltipPos.x,
             top: tooltipPos.y + 16,
@@ -488,7 +488,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
             minWidth: 140,
           }}
         >
-          <div className="flex items-center justify-between px-2 py-1 border-b border-[#1e1e2e]">
+          <div className="flex items-center justify-between px-2 py-1 border-b border-border-default">
             <span className="font-mono font-bold text-white">{hoveredStock.symbol}</span>
             <span
               className="font-mono font-bold ml-2"
@@ -497,7 +497,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
               {hoveredStock.change >= 0 ? "+" : ""}{hoveredStock.change.toFixed(2)}%
             </span>
           </div>
-          <div className="px-2 py-1 space-y-0.5 text-[11px]">
+          <div className="px-2 py-1 space-y-0.5 text-xs">
             <div className="flex justify-between gap-4">
               <span className="text-white/50">LTP</span>
               <span className="font-mono text-white">{"\u20B9"}{formatPrice(hoveredStock.ltp)}</span>
@@ -522,13 +522,13 @@ export default function SectorMapWidget(_props: WidgetProps) {
             className="flex flex-col items-center justify-center rounded p-1 cursor-pointer min-h-[60px]"
             style={{ backgroundColor: getChangeColor(stock.change) }}
           >
-            <span className="font-mono font-bold text-white text-[11px] text-center leading-tight truncate w-full">
+            <span className="font-mono font-bold text-white text-xs text-center leading-tight truncate w-full">
               {stock.symbol}
             </span>
-            <span className="font-semibold text-white/90 text-[10px]">
+            <span className="font-semibold text-white/90 text-xs">
               {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(2)}%
             </span>
-            <span className="text-white/70 text-[9px] font-mono">{"\u20B9"}{formatPrice(stock.ltp)}</span>
+            <span className="text-white/70 text-xxs font-mono">{"\u20B9"}{formatPrice(stock.ltp)}</span>
           </div>
         ))}
       </div>
@@ -540,7 +540,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
     return (
       <div className="overflow-auto h-full">
         <table className="w-full text-xs">
-          <thead className="sticky top-0 bg-[#12121a]">
+          <thead className="sticky top-0 bg-surface-card">
             <tr>
               <th className="text-left px-2 py-1 text-white/40 font-medium uppercase tracking-wider">Sector</th>
               <th className="text-right px-2 py-1 text-white/40 font-medium uppercase tracking-wider">Stocks</th>
@@ -552,7 +552,7 @@ export default function SectorMapWidget(_props: WidgetProps) {
             {sectorData.map((item) => (
               <tr
                 key={item.sector}
-                className="border-t border-[#1e1e2e] hover:bg-white/5 cursor-pointer"
+                className="border-t border-border-default hover:bg-white/5 cursor-pointer"
                 onClick={() => handleSectorClick(item.sector)}
               >
                 <td className="px-2 py-1">
@@ -598,9 +598,9 @@ export default function SectorMapWidget(_props: WidgetProps) {
   );
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs bg-[#0a0a0f]">
+    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header toolbar */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-[#1e1e2e] shrink-0 gap-2">
+      <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0 gap-2">
         <div className="flex items-center gap-2">
           {selectedSector && (
             <button
@@ -611,23 +611,23 @@ export default function SectorMapWidget(_props: WidgetProps) {
               <LayoutGrid size={13} />
             </button>
           )}
-          <span className="text-white/60 uppercase tracking-wider text-[10px]">
+          <span className="text-white/60 uppercase tracking-wider text-xs">
             {selectedSector ? selectedSector : "Sector Map"}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           {/* Stats badges */}
-          <Badge variant="outline" className="text-[10px] px-1 py-0 border-green-800 text-green-400 gap-0.5">
+          <Badge variant="outline" className="text-xs px-1 py-0 border-green-800 text-green-400 gap-0.5">
             <TrendingUp size={9} />
             {stats.gainers}
           </Badge>
-          <Badge variant="outline" className="text-[10px] px-1 py-0 border-red-900 text-red-400 gap-0.5">
+          <Badge variant="outline" className="text-xs px-1 py-0 border-red-900 text-red-400 gap-0.5">
             <TrendingDown size={9} />
             {stats.losers}
           </Badge>
           <span
-            className="font-mono text-[10px] font-semibold"
+            className="font-mono text-xs font-semibold"
             style={{ color: getChangeColor(stats.avgChange) }}
           >
             {stats.avgChange >= 0 ? "+" : ""}{stats.avgChange.toFixed(2)}%
@@ -639,10 +639,10 @@ export default function SectorMapWidget(_props: WidgetProps) {
               value={sizingMode}
               onValueChange={(v) => setSizingMode(v as SizingMode)}
             >
-              <SelectTrigger className="h-5 text-[10px] px-1.5 border-[#1e1e2e] bg-[#12121a] text-white/60 w-16">
+              <SelectTrigger className="h-7 text-xs px-1.5 border-border-default bg-surface-card text-white/60 w-16">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-[#12121a] border-[#1e1e2e] text-xs">
+              <SelectContent className="bg-surface-card border-border-default text-xs">
                 <SelectItem value="equal">Equal</SelectItem>
                 <SelectItem value="value">Value</SelectItem>
               </SelectContent>
@@ -650,14 +650,14 @@ export default function SectorMapWidget(_props: WidgetProps) {
           )}
 
           {/* Mode tabs */}
-          <div className="flex items-center border border-[#1e1e2e] rounded overflow-hidden">
+          <div className="flex items-center border border-border-default rounded overflow-hidden">
             {HEATMAP_MODES.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 title={label}
-                className={`flex items-center justify-center w-6 h-5 transition-colors ${
+                className={`flex items-center justify-center w-6 h-7 transition-colors ${
                   activeMode === id
-                    ? "bg-[#1e1e2e] text-white"
+                    ? "bg-surface-elevated text-white"
                     : "text-white/40 hover:text-white/70"
                 }`}
                 onClick={() => setActiveMode(id)}
@@ -681,14 +681,14 @@ export default function SectorMapWidget(_props: WidgetProps) {
       </div>
 
       {/* Legend footer */}
-      <div className="flex items-center justify-between px-2 py-0.5 border-t border-[#1e1e2e] shrink-0">
+      <div className="flex items-center justify-between px-2 py-0.5 border-t border-border-default shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
             <div className="h-1.5 w-6 rounded" style={{ background: "linear-gradient(to right,#8B3030,#3D8B80,#00C853)" }} />
-            <span className="text-[9px] text-white/30">-4% → +4%</span>
+            <span className="text-xxs text-white/30">-4% → +4%</span>
           </div>
         </div>
-        <span className="text-[9px] text-white/20">
+        <span className="text-xxs text-white/20">
           {activeMode === "treemap" ? "Tile = equal weight · Color = change %" : "Color = change %"}
         </span>
       </div>

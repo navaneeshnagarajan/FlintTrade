@@ -229,27 +229,27 @@ function PriceHeadline({ straddlePrice, cePrice, pePrice }: PriceHeadlineProps) 
   return (
     <div className="flex items-stretch gap-px bg-border-default">
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
-        <span className="text-[10px] text-text-muted uppercase tracking-wider">Straddle</span>
+        <span className="text-xs text-text-muted uppercase tracking-wider">Straddle</span>
         <span className="font-mono text-xl font-bold text-text-primary leading-none">
           {straddlePrice != null ? fmtPrice(straddlePrice) : "—"}
         </span>
-        <span className="text-[9px] text-text-muted font-normal">CE + PE</span>
+        <span className="text-xxs text-text-muted font-normal">CE + PE</span>
       </div>
 
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
-        <span className="text-[10px] text-text-muted uppercase tracking-wider">CE</span>
+        <span className="text-xs text-text-muted uppercase tracking-wider">CE</span>
         <span className="font-mono text-base font-semibold text-loss leading-none">
           {cePrice != null ? fmtPrice(cePrice) : "—"}
         </span>
-        <span className="text-[9px] text-loss/60">Call</span>
+        <span className="text-xxs text-loss/60">Call</span>
       </div>
 
       <div className="flex-1 bg-surface-card px-3 py-2 flex flex-col items-center justify-center gap-0.5">
-        <span className="text-[10px] text-text-muted uppercase tracking-wider">PE</span>
+        <span className="text-xs text-text-muted uppercase tracking-wider">PE</span>
         <span className="font-mono text-base font-semibold text-profit leading-none">
           {pePrice != null ? fmtPrice(pePrice) : "—"}
         </span>
-        <span className="text-[9px] text-profit/60">Put</span>
+        <span className="text-xxs text-profit/60">Put</span>
       </div>
     </div>
   );
@@ -602,13 +602,13 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
 
           <div className="flex items-center gap-1">
             {expiryButtons.length === 0 && !loading && (
-              <span className="text-[10px] text-text-muted px-1">No expiries</span>
+              <span className="text-xs text-text-muted px-1">No expiries</span>
             )}
             {expiryButtons.map((exp) => (
               <button
                 key={exp}
                 onClick={() => setSelectedExpiry(exp)}
-                className={`px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${
+                className={`px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
                   exp === selectedExpiry
                     ? "bg-accent/15 border-accent/60 text-accent"
                     : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary hover:border-accent/30"
@@ -622,7 +622,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
           <div className="flex-1" />
 
           {atmStrike != null && (
-            <span className="px-2 py-0.5 text-[10px] font-mono font-semibold text-accent bg-accent/10 border border-accent/30 rounded">
+            <span className="px-2 py-0.5 text-xs font-mono font-semibold text-accent bg-accent/10 border border-accent/30 rounded">
               ATM {NUM0.format(atmStrike)}
             </span>
           )}
@@ -641,7 +641,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
         <div className="flex items-center gap-3 flex-wrap">
           {spotLtp != null ? (
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">Spot</span>
+              <span className="text-xs text-text-muted uppercase tracking-wide">Spot</span>
               <span className="font-mono text-sm font-semibold text-text-primary">
                 {NUM.format(spotLtp)}
               </span>
@@ -653,7 +653,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
               )}
             </div>
           ) : (
-            <span className="text-[10px] text-text-muted">Spot: —</span>
+            <span className="text-xs text-text-muted">Spot: —</span>
           )}
 
           {pnl != null && (
@@ -667,7 +667,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
           )}
 
           {lastRefresh && (
-            <div className="flex items-center gap-1 ml-auto text-[10px] text-text-muted">
+            <div className="flex items-center gap-1 ml-auto text-xs text-text-muted">
               <Activity size={9} />
               {lastRefresh.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
               <span className="ml-1">{isMarketHours() ? "· 3s" : "· 30s"}</span>
@@ -695,7 +695,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
 
       {/* Overlay toggles */}
       <div className="flex-none flex items-center gap-1 px-2 py-1 bg-surface-card border-b border-border-default">
-        <span className="text-[10px] text-text-muted mr-1">Overlay</span>
+        <span className="text-xs text-text-muted mr-1">Overlay</span>
         {OVERLAYS.map((name) => {
           const color = name === "Straddle" ? "#3b82f6" : name === "Spot" ? "#eab308" : "#a78bfa";
           const active = activeOverlays.includes(name);
@@ -703,7 +703,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
             <button
               key={name}
               onClick={() => toggleOverlay(name)}
-              className={`px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${
+              className={`px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
                 active
                   ? "bg-surface-hover border-border-default text-text-primary"
                   : "border-transparent text-text-muted hover:text-text-secondary"
@@ -736,7 +736,7 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
           <div className="h-full flex flex-col items-center justify-center text-text-muted text-xs gap-2">
             <Activity size={20} className="text-accent/40" />
             <span>Live tracking will start on next tick</span>
-            <span className="text-[10px] text-text-muted/60">
+            <span className="text-xs text-text-muted/60">
               Straddle price will accumulate here during market hours
             </span>
           </div>

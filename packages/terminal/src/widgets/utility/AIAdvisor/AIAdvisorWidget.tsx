@@ -149,7 +149,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
         >
           {message.content}
         </div>
-        <span className="text-[9px] text-text-muted px-0.5">
+        <span className="text-xxs text-text-muted px-0.5">
           {fmtTime(message.timestamp)}
         </span>
       </div>
@@ -236,13 +236,13 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
       {/* HEADER */}
       <div className="flex items-center gap-2 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
         <Bot size={11} className="text-text-muted shrink-0" />
-        <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider">
+        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
           AI Advisor
         </span>
         <div className="flex-1" />
         <span
           className={[
-            "text-[9px] font-medium px-1.5 py-0.5 rounded border",
+            "text-xxs font-medium px-1.5 py-0.5 rounded border",
             configured
               ? "text-profit bg-profit/10 border-profit/30"
               : "text-text-muted bg-surface-hover border-border-default",
@@ -260,7 +260,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
               <MessageSquare size={28} className="text-text-muted" />
               <div>
                 <p className="text-xs text-text-secondary">AI Advisor</p>
-                <p className="text-[10px] text-text-muted mt-1 leading-relaxed max-w-52">
+                <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-52">
                   Ask about market analysis, options strategies, technical indicators, or portfolio management.
                 </p>
               </div>
@@ -270,14 +270,14 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
               <Settings size={28} className="text-text-muted" />
               <div>
                 <p className="text-xs text-text-secondary">LLM Not Configured</p>
-                <p className="text-[10px] text-text-muted mt-1 leading-relaxed max-w-56">
+                <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-56">
                   Configure your LLM provider in Settings &rarr; AI to enable the AI trading advisor.
                 </p>
               </div>
               <Button
                 size="sm"
                 variant="outline"
-                className="h-6 text-[10px] px-2.5 border-border-default text-text-secondary hover:text-text-primary"
+                className="h-6 text-xs px-2.5 border-border-default text-text-secondary hover:text-text-primary"
                 onClick={() => {
                   // Navigate to settings — dispatch a custom event that the shell can listen to
                   window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/settings" }));
@@ -309,7 +309,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
                   </div>
                   <div className="px-2.5 py-1.5 rounded-lg rounded-tl-none bg-surface-card border border-border-default flex items-center gap-1.5">
                     <Loader2 size={10} className="text-text-muted animate-spin" />
-                    <span className="text-[10px] text-text-muted">Thinking...</span>
+                    <span className="text-xs text-text-muted">Thinking...</span>
                   </div>
                 </div>
               )}

@@ -60,7 +60,7 @@ function formatTime(ts: string): string {
 function pnlColor(value: number): string {
   if (value > 0) return "text-emerald-400";
   if (value < 0) return "text-red-400";
-  return "text-[#8888a0]";
+  return "text-text-secondary";
 }
 
 // Analytics computed from tradebook (pairing BUY→SELL by symbol, intraday)
@@ -191,13 +191,13 @@ const NOTES_KEY = "flinttrade_journal_notes";
 
 function StatCard({ label, value, sub, positive }: { label: string; value: string; sub?: string; positive?: boolean }) {
   return (
-    <Card className="bg-[#12121a] border-[#1e1e2e]">
+    <Card className="bg-surface-card border-border-default">
       <CardContent className="p-3">
-        <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">{label}</div>
-        <div className={`text-lg font-bold font-mono ${positive === undefined ? "text-[#e0e0f0]" : positive ? "text-emerald-400" : "text-red-400"}`}>
+        <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">{label}</div>
+        <div className={`text-lg font-bold font-mono ${positive === undefined ? "text-text-primary" : positive ? "text-emerald-400" : "text-red-400"}`}>
           {value}
         </div>
-        {sub && <div className="text-[10px] text-[#6666a0] mt-0.5">{sub}</div>}
+        {sub && <div className="text-xs text-text-muted mt-0.5">{sub}</div>}
       </CardContent>
     </Card>
   );
@@ -217,7 +217,7 @@ function TradeLogTab({ trades }: { trades: Trade[] }) {
 
   if (trades.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-[#4a4a6a]">
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted">
         <BookOpen size={40} />
         <p className="text-sm">No trades in tradebook today</p>
       </div>
@@ -229,9 +229,9 @@ function TradeLogTab({ trades }: { trades: Trade[] }) {
       {/* Filters */}
       <div className="flex items-center gap-2 px-3 pt-2">
         <div className="relative flex-1 max-w-[220px]">
-          <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-[#4a4a6a]" />
+          <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
           <Input
-            className="pl-7 h-7 text-xs bg-[#0d0d14] border-[#1e1e2e] text-[#e0e0f0] placeholder:text-[#4a4a6a]"
+            className="pl-7 h-7 text-xs bg-surface-base border-border-default text-text-primary placeholder:text-text-muted"
             placeholder="Search symbol..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -243,38 +243,38 @@ function TradeLogTab({ trades }: { trades: Trade[] }) {
               key={v}
               variant="ghost"
               size="sm"
-              className={`h-7 px-2 text-xs ${filterAction === v ? "bg-[#1e1e2e] text-[#e0e0f0]" : "text-[#6666a0] hover:text-[#e0e0f0]"}`}
+              className={`h-7 px-2 text-xs ${filterAction === v ? "bg-surface-elevated text-text-primary" : "text-text-muted hover:text-text-primary"}`}
               onClick={() => setFilterAction(v)}
             >
               {v}
             </Button>
           ))}
         </div>
-        <span className="text-[10px] text-[#4a4a6a] ml-auto">{filtered.length} trades</span>
+        <span className="text-xs text-text-muted ml-auto">{filtered.length} trades</span>
       </div>
 
       {/* Table */}
       <div className="flex-1 overflow-auto px-3 pb-2">
         <Table>
           <TableHeader>
-            <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-              <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Symbol</TableHead>
-              <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Action</TableHead>
-              <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal text-right">Qty</TableHead>
-              <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal text-right">Price</TableHead>
-              <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Date</TableHead>
-              <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Time</TableHead>
-              <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Exchange</TableHead>
+            <TableRow className="border-border-default hover:bg-transparent">
+              <TableHead className="text-xs text-text-muted h-7 font-normal">Symbol</TableHead>
+              <TableHead className="text-xs text-text-muted h-7 font-normal">Action</TableHead>
+              <TableHead className="text-xs text-text-muted h-7 font-normal text-right">Qty</TableHead>
+              <TableHead className="text-xs text-text-muted h-7 font-normal text-right">Price</TableHead>
+              <TableHead className="text-xs text-text-muted h-7 font-normal">Date</TableHead>
+              <TableHead className="text-xs text-text-muted h-7 font-normal">Time</TableHead>
+              <TableHead className="text-xs text-text-muted h-7 font-normal">Exchange</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.map((trade, idx) => (
-              <TableRow key={trade.tradeId || idx} className="border-[#1a1a28] hover:bg-[#12121a]">
-                <TableCell className="py-1 text-xs font-mono text-[#c8c8e0] font-medium">{trade.symbol}</TableCell>
+              <TableRow key={trade.tradeId || idx} className="border-border-subtle hover:bg-surface-card">
+                <TableCell className="py-1 text-xs font-mono text-text-primary font-medium">{trade.symbol}</TableCell>
                 <TableCell className="py-1">
                   <Badge
                     variant="outline"
-                    className={`text-[9px] px-1.5 py-0 border-0 font-medium ${
+                    className={`text-xxs px-1.5 py-0 border-0 font-medium ${
                       trade.action === "BUY"
                         ? "bg-emerald-900/40 text-emerald-400"
                         : "bg-red-900/40 text-red-400"
@@ -283,13 +283,13 @@ function TradeLogTab({ trades }: { trades: Trade[] }) {
                     {trade.action}
                   </Badge>
                 </TableCell>
-                <TableCell className="py-1 text-xs font-mono text-[#a0a0c0] text-right">{trade.quantity}</TableCell>
-                <TableCell className="py-1 text-xs font-mono text-[#e0e0f0] text-right">
+                <TableCell className="py-1 text-xs font-mono text-text-secondary text-right">{trade.quantity}</TableCell>
+                <TableCell className="py-1 text-xs font-mono text-text-primary text-right">
                   {trade.price.toFixed(2)}
                 </TableCell>
-                <TableCell className="py-1 text-xs text-[#8888a0]">{formatDate(trade.timestamp)}</TableCell>
-                <TableCell className="py-1 text-xs text-[#8888a0]">{formatTime(trade.timestamp)}</TableCell>
-                <TableCell className="py-1 text-xs text-[#6666a0]">{trade.exchange}</TableCell>
+                <TableCell className="py-1 text-xs text-text-secondary">{formatDate(trade.timestamp)}</TableCell>
+                <TableCell className="py-1 text-xs text-text-secondary">{formatTime(trade.timestamp)}</TableCell>
+                <TableCell className="py-1 text-xs text-text-muted">{trade.exchange}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -304,7 +304,7 @@ function AnalyticsTab({ trades }: { trades: Trade[] }) {
 
   if (trades.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-[#4a4a6a]">
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted">
         <BarChart2 size={40} />
         <p className="text-sm">No trade data for analytics</p>
       </div>
@@ -333,10 +333,10 @@ function AnalyticsTab({ trades }: { trades: Trade[] }) {
 
       {/* Streak */}
       {a.streakType !== "none" && (
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3 flex items-center gap-2">
             <Trophy size={14} className={a.streakType === "win" ? "text-emerald-400" : "text-red-400"} />
-            <span className="text-xs text-[#8888a0]">Current streak:</span>
+            <span className="text-xs text-text-secondary">Current streak:</span>
             <span className={`text-sm font-bold font-mono ${a.streakType === "win" ? "text-emerald-400" : "text-red-400"}`}>
               {a.currentStreak} {a.streakType === "win" ? "wins" : "losses"}
             </span>
@@ -345,9 +345,9 @@ function AnalyticsTab({ trades }: { trades: Trade[] }) {
       )}
 
       {/* P&L by Day of Week — absorbed from trading-journal bar chart concept */}
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">P&L by Day of Week</CardTitle>
+          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">P&L by Day of Week</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
           <div className="flex items-end gap-2 h-16">
@@ -362,7 +362,7 @@ function AnalyticsTab({ trades }: { trades: Trade[] }) {
                       title={`${day}: ${formatINR(pnl)} (${count} trades)`}
                     />
                   </div>
-                  <span className="text-[9px] text-[#6666a0]">{day}</span>
+                  <span className="text-xxs text-text-muted">{day}</span>
                 </div>
               );
             })}
@@ -372,24 +372,24 @@ function AnalyticsTab({ trades }: { trades: Trade[] }) {
 
       {/* P&L by Symbol */}
       {a.bySymbol.length > 0 && (
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardHeader className="p-3 pb-1">
-            <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">P&L by Symbol</CardTitle>
+            <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">P&L by Symbol</CardTitle>
           </CardHeader>
           <CardContent className="p-3 pt-1 space-y-1.5">
             {a.bySymbol.map(({ symbol, pnl, trades }) => {
               const w = maxSymAbs > 0 ? (Math.abs(pnl) / maxSymAbs) * 100 : 0;
               return (
                 <div key={symbol} className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-[#c8c8e0] w-24 shrink-0 truncate">{symbol}</span>
-                  <div className="flex-1 h-4 bg-[#0d0d14] rounded overflow-hidden">
+                  <span className="text-xs font-mono text-text-primary w-24 shrink-0 truncate">{symbol}</span>
+                  <div className="flex-1 h-4 bg-surface-base rounded overflow-hidden">
                     <div
                       className={`h-full rounded transition-all ${pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"}`}
                       style={{ width: `${w}%` }}
                     />
                   </div>
                   <span className={`text-xs font-mono w-20 text-right shrink-0 ${pnlColor(pnl)}`}>{formatINR(pnl)}</span>
-                  <span className="text-[10px] text-[#4a4a6a] w-14 text-right shrink-0">{trades}t</span>
+                  <span className="text-xs text-text-muted w-14 text-right shrink-0">{trades}t</span>
                 </div>
               );
             })}
@@ -417,8 +417,8 @@ function NotesTab() {
   return (
     <div className="flex flex-col gap-2 p-3 h-full">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-[#6666a0]">Daily notes — {today}</span>
-        <span className="text-[10px] text-[#4a4a6a]">{wordCount} words · auto-saved</span>
+        <span className="text-xs text-text-muted">Daily notes — {today}</span>
+        <span className="text-xs text-text-muted">{wordCount} words · auto-saved</span>
       </div>
       <Textarea
         className="flex-1 text-sm leading-relaxed"
@@ -430,7 +430,7 @@ function NotesTab() {
         <Button
           variant="ghost"
           size="sm"
-          className="self-end text-[10px] text-[#4a4a6a] hover:text-red-400 h-6"
+          className="self-end text-xs text-text-muted hover:text-red-400 h-6"
           onClick={() => save("")}
         >
           Clear
@@ -446,35 +446,35 @@ export default function TradeJournalTool({ onClose }: Props) {
   const { data: trades = [], isLoading, isError } = useTradebook();
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
+    <div className="h-full flex flex-col bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1e1e2e] bg-[#12121a] shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
-          <BookOpen size={16} className="text-[#3b82f6]" />
-          <h1 className="text-sm font-semibold text-[#e0e0f0]">Trade Journal</h1>
-          {isLoading && <span className="text-[10px] text-[#4a4a6a]">Loading...</span>}
+          <BookOpen size={16} className="text-primary" />
+          <h1 className="text-sm font-semibold text-text-primary">Trade Journal</h1>
+          {isLoading && <span className="text-xs text-text-muted">Loading...</span>}
           {isError && <AlertCircle size={12} className="text-red-400" />}
           {!isLoading && !isError && (
-            <Badge variant="outline" className="text-[9px] border-[#1e1e2e] text-[#6666a0] font-normal">
+            <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
               {trades.length} trades today
             </Badge>
           )}
         </div>
-        <button onClick={onClose} className="text-[#4a4a6a] hover:text-[#e0e0f0] transition-colors">
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
           <X size={15} />
         </button>
       </div>
 
       {/* Tabs */}
       <Tabs defaultValue="log" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="shrink-0 rounded-none bg-[#0d0d14] border-b border-[#1e1e2e] justify-start px-3 h-8 gap-1">
-          <TabsTrigger value="log" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+        <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
+          <TabsTrigger value="log" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <BookOpen size={11} className="mr-1" />Trade Log
           </TabsTrigger>
-          <TabsTrigger value="analytics" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+          <TabsTrigger value="analytics" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <BarChart2 size={11} className="mr-1" />Analytics
           </TabsTrigger>
-          <TabsTrigger value="notes" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+          <TabsTrigger value="notes" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <FileText size={11} className="mr-1" />Notes
           </TabsTrigger>
         </TabsList>

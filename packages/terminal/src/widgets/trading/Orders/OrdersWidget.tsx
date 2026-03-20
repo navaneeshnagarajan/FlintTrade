@@ -107,7 +107,7 @@ export default function OrdersWidget(_props: WidgetProps) {
         cell: ({ row }) => (
           <Badge
             variant={statusVariant(row.original.orderStatus)}
-            className="text-[10px] font-medium"
+            className="text-xs font-medium"
           >
             {row.original.orderStatus}
           </Badge>
@@ -130,7 +130,7 @@ export default function OrdersWidget(_props: WidgetProps) {
     <div className="h-full flex flex-col overflow-hidden text-xs">
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0">
-        <span className="text-text-muted uppercase tracking-wider text-[10px]">
+        <span className="text-text-muted uppercase tracking-wider text-xs">
           Orders{rows.length > 0 ? ` — ${rows.length}` : ""}
         </span>
         <button
@@ -156,7 +156,7 @@ export default function OrdersWidget(_props: WidgetProps) {
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className="text-[10px] text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
+                      className="text-xs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
                       onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}

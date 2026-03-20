@@ -84,18 +84,18 @@ function PriceChip({ instrument }: PriceChipProps) {
   return (
     <div className="flex items-center gap-1.5 px-3 py-0 shrink-0 border-r border-border-subtle last:border-r-0">
       {/* Label */}
-      <span className="text-[10px] text-text-muted font-medium uppercase tracking-wide whitespace-nowrap">
+      <span className="text-xs text-text-muted font-medium uppercase tracking-wide whitespace-nowrap">
         {instrument.label}
       </span>
 
       {/* LTP */}
-      <span className={`text-[11px] font-mono font-semibold whitespace-nowrap ${priceColor}`}>
+      <span className={`text-xs font-mono font-semibold whitespace-nowrap ${priceColor}`}>
         {fmtPrice(ltp)}
       </span>
 
       {/* Change% with icon */}
       {pct != null && (
-        <span className={`flex items-center gap-0.5 text-[9px] font-mono whitespace-nowrap ${priceColor}`}>
+        <span className={`flex items-center gap-0.5 text-xxs font-mono whitespace-nowrap ${priceColor}`}>
           {isUp === true ? (
             <TrendingUp size={8} />
           ) : (
@@ -107,7 +107,7 @@ function PriceChip({ instrument }: PriceChipProps) {
 
       {/* No data indicator */}
       {ltp == null && (
-        <span className="text-[9px] text-text-muted">–</span>
+        <span className="text-xxs text-text-muted">–</span>
       )}
     </div>
   );
@@ -163,7 +163,7 @@ export default function TickerWidget({ node: _node }: TickerWidgetProps) {
 
         {/* HEADER */}
         <div className="flex items-center gap-2 px-2 py-0.5 border-b border-border-default bg-surface-card shrink-0">
-          <span className="text-[9px] font-semibold text-text-muted uppercase tracking-widest">
+          <span className="text-xxs font-semibold text-text-muted uppercase tracking-widest">
             Live Prices
           </span>
         </div>

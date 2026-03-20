@@ -132,7 +132,7 @@ function Sparkline({ prices, positive }: SparklineProps) {
       <div className="w-10 h-4 flex items-center justify-center">
         {positive === true  && <TrendingUp  size={10} className="text-profit" />}
         {positive === false && <TrendingDown size={10} className="text-loss"  />}
-        {positive == null  && <span className="text-[8px] text-text-muted">—</span>}
+        {positive == null  && <span className="text-xxs text-text-muted">—</span>}
       </div>
     );
   }
@@ -254,16 +254,16 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
       {/* Results */}
       <div className="flex-1 overflow-auto">
         {loading && (
-          <div className="px-3 py-2 text-[10px] text-text-muted">Searching…</div>
+          <div className="px-3 py-2 text-xs text-text-muted">Searching…</div>
         )}
         {error && !loading && (
-          <div className="px-3 py-2 text-[10px] text-loss">{error}</div>
+          <div className="px-3 py-2 text-xs text-loss">{error}</div>
         )}
         {!loading && !error && results.length === 0 && query.trim() && (
-          <div className="px-3 py-2 text-[10px] text-text-muted">No results for "{query}"</div>
+          <div className="px-3 py-2 text-xs text-text-muted">No results for "{query}"</div>
         )}
         {!loading && !error && results.length === 0 && !query.trim() && (
-          <div className="px-3 py-2 text-[10px] text-text-muted">Type to search symbols</div>
+          <div className="px-3 py-2 text-xs text-text-muted">Type to search symbols</div>
         )}
         {results.map((item, idx) => (
           <button
@@ -276,10 +276,10 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
                 {item.symbol}
               </span>
               {item.name && (
-                <span className="text-[10px] text-text-muted truncate">{item.name}</span>
+                <span className="text-xs text-text-muted truncate">{item.name}</span>
               )}
             </div>
-            <span className="text-[10px] text-text-muted ml-2 shrink-0 font-mono">
+            <span className="text-xs text-text-muted ml-2 shrink-0 font-mono">
               {item.exchange}
             </span>
           </button>
@@ -323,11 +323,11 @@ function ContextMenu({ x, y, symbol, onRemove, onClose }: ContextMenuProps) {
       style={{ top: y, left: x }}
     >
       <div className="px-3 py-1 border-b border-border-subtle mb-1">
-        <span className="text-[10px] text-text-muted font-mono">{symbol}</span>
+        <span className="text-xs text-text-muted font-mono">{symbol}</span>
       </div>
       <button
         onClick={onRemove}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-loss hover:bg-loss/10 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 transition-colors"
       >
         <Trash2 size={10} />
         Remove
@@ -371,7 +371,7 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
         <span className="text-xs font-medium text-text-primary font-mono leading-tight truncate">
           {item.symbol}
         </span>
-        <span className="text-[9px] text-text-muted leading-tight">{item.exchange}</span>
+        <span className="text-xxs text-text-muted leading-tight">{item.exchange}</span>
       </div>
 
       {/* Sparkline */}
@@ -382,7 +382,7 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
         <span className="text-xs font-mono font-semibold text-text-primary leading-tight">
           {fmtPrice(ltp)}
         </span>
-        <span className={`text-[9px] font-mono leading-tight ${changeColor}`}>
+        <span className={`text-xxs font-mono leading-tight ${changeColor}`}>
           {chgPct != null ? fmtPct(chgPct) : "—"}
         </span>
       </div>
@@ -583,12 +583,12 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
 
       {/* HEADER */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
-        <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider">
+        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
           Watchlist
         </span>
 
         {count > 0 && (
-          <span className="text-[9px] font-mono bg-surface-hover text-text-muted border border-border-default rounded px-1 leading-4">
+          <span className="text-xxs font-mono bg-surface-hover text-text-muted border border-border-default rounded px-1 leading-4">
             {count}
           </span>
         )}
@@ -625,14 +625,14 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
             <div className="absolute right-0 top-6 z-40 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-40">
               <button
                 onClick={() => { setShowSearch(true); setShowMenu(false); }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
               >
                 <Plus size={10} />
                 Add symbol
               </button>
               <button
                 onClick={handleResetDefaults}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
               >
                 <TrendingUp size={10} />
                 Reset to defaults
@@ -640,7 +640,7 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
               <div className="border-t border-border-subtle my-1" />
               <button
                 onClick={handleClearAll}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-loss hover:bg-loss/10 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 transition-colors"
               >
                 <Trash2 size={10} />
                 Clear all
@@ -657,7 +657,7 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
             <TrendingUp size={24} className="text-text-muted" />
             <div className="text-center">
               <p className="text-xs text-text-secondary">Add symbols to your watchlist</p>
-              <p className="text-[10px] text-text-muted mt-0.5">Track prices in real-time</p>
+              <p className="text-xs text-text-muted mt-0.5">Track prices in real-time</p>
             </div>
             <button
               onClick={() => setShowSearch(true)}

@@ -38,12 +38,12 @@ function formatINR(value: number): string {
 function pnlClass(v: number) {
   if (v > 0) return "text-emerald-400";
   if (v < 0) return "text-red-400";
-  return "text-[#8888a0]";
+  return "text-text-secondary";
 }
 
 // Calendar heatmap cell color (absorbed from etftracker heatmap colorscale concept)
 function heatmapColor(pnl: number, maxAbs: number): string {
-  if (maxAbs === 0) return "bg-[#1a1a28]";
+  if (maxAbs === 0) return "bg-surface-elevated";
   const ratio = Math.abs(pnl) / maxAbs;
   if (pnl > 0) {
     if (ratio > 0.75) return "bg-emerald-600";
@@ -55,7 +55,7 @@ function heatmapColor(pnl: number, maxAbs: number): string {
     if (ratio > 0.4) return "bg-red-700/80";
     return "bg-red-900/60";
   }
-  return "bg-[#1e1e2e]";
+  return "bg-surface-elevated";
 }
 
 // Derive daily P&L series from tradebook
@@ -139,25 +139,25 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
     <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-2">
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">MTM P&L</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">MTM P&L</div>
             <div className={`text-xl font-bold font-mono ${pnlClass(totalPnl)}`}>{formatINR(totalPnl)}</div>
-            <div className="text-[10px] text-[#6666a0] mt-0.5">{positions.length} open positions</div>
+            <div className="text-xs text-text-muted mt-0.5">{positions.length} open positions</div>
           </CardContent>
         </Card>
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Available Margin</div>
-            <div className="text-xl font-bold font-mono text-[#e0e0f0]">{formatINR(funds?.availableCash ?? 0)}</div>
-            <div className="text-[10px] text-[#6666a0] mt-0.5">Used: {formatINR(funds?.usedMargin ?? 0)}</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Available Margin</div>
+            <div className="text-xl font-bold font-mono text-text-primary">{formatINR(funds?.availableCash ?? 0)}</div>
+            <div className="text-xs text-text-muted mt-0.5">Used: {formatINR(funds?.usedMargin ?? 0)}</div>
           </CardContent>
         </Card>
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Total Balance</div>
-            <div className="text-xl font-bold font-mono text-[#e0e0f0]">{formatINR(funds?.totalBalance ?? 0)}</div>
-            <div className="text-[10px] text-[#6666a0] mt-0.5">
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Total Balance</div>
+            <div className="text-xl font-bold font-mono text-text-primary">{formatINR(funds?.totalBalance ?? 0)}</div>
+            <div className="text-xs text-text-muted mt-0.5">
               {positivePos.length}P / {negativePos.length}N positions
             </div>
           </CardContent>
@@ -165,36 +165,36 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
       </div>
 
       {/* Positions breakdown */}
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Open Positions</CardTitle>
+          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Open Positions</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {positions.length === 0 ? (
-            <div className="text-center py-6 text-[#4a4a6a] text-xs">No open positions</div>
+            <div className="text-center py-6 text-text-muted text-xs">No open positions</div>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow className="border-[#1e1e2e] hover:bg-transparent">
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 pl-3 font-normal">Symbol</TableHead>
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 font-normal">Product</TableHead>
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">Qty</TableHead>
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">Avg</TableHead>
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right font-normal">LTP</TableHead>
-                  <TableHead className="text-[10px] text-[#6666a0] h-7 text-right pr-3 font-normal">P&L</TableHead>
+                <TableRow className="border-border-default hover:bg-transparent">
+                  <TableHead className="text-xs text-text-muted h-7 pl-3 font-normal">Symbol</TableHead>
+                  <TableHead className="text-xs text-text-muted h-7 font-normal">Product</TableHead>
+                  <TableHead className="text-xs text-text-muted h-7 text-right font-normal">Qty</TableHead>
+                  <TableHead className="text-xs text-text-muted h-7 text-right font-normal">Avg</TableHead>
+                  <TableHead className="text-xs text-text-muted h-7 text-right font-normal">LTP</TableHead>
+                  <TableHead className="text-xs text-text-muted h-7 text-right pr-3 font-normal">P&L</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {positions.map((pos, i) => (
-                  <TableRow key={`${pos.symbol}-${i}`} className="border-[#1a1a28] hover:bg-[#0d0d14]">
-                    <TableCell className="py-1 pl-3 text-xs font-mono text-[#c8c8e0] font-medium">{pos.symbol}</TableCell>
-                    <TableCell className="py-1 text-xs text-[#6666a0]">{pos.product}</TableCell>
-                    <TableCell className="py-1 text-xs font-mono text-[#a0a0c0] text-right">{pos.quantity}</TableCell>
-                    <TableCell className="py-1 text-xs font-mono text-[#8888a0] text-right">{pos.averagePrice.toFixed(2)}</TableCell>
-                    <TableCell className="py-1 text-xs font-mono text-[#e0e0f0] text-right">{pos.ltp.toFixed(2)}</TableCell>
+                  <TableRow key={`${pos.symbol}-${i}`} className="border-border-subtle hover:bg-surface-base">
+                    <TableCell className="py-1 pl-3 text-xs font-mono text-text-primary font-medium">{pos.symbol}</TableCell>
+                    <TableCell className="py-1 text-xs text-text-muted">{pos.product}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-text-secondary text-right">{pos.quantity}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-text-secondary text-right">{pos.averagePrice.toFixed(2)}</TableCell>
+                    <TableCell className="py-1 text-xs font-mono text-text-primary text-right">{pos.ltp.toFixed(2)}</TableCell>
                     <TableCell className={`py-1 text-xs font-mono text-right pr-3 ${pnlClass(pos.pnl)}`}>
                       {formatINR(pos.pnl)}
-                      <span className={`text-[9px] ml-1 ${pnlClass(pos.pnlPercent)}`}>
+                      <span className={`text-xxs ml-1 ${pnlClass(pos.pnlPercent)}`}>
                         ({pos.pnlPercent >= 0 ? "+" : ""}{pos.pnlPercent.toFixed(2)}%)
                       </span>
                     </TableCell>
@@ -208,9 +208,9 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
 
       {/* Instrument P&L breakdown — absorbed from analytics BarChart pattern */}
       {positions.length > 0 && (
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardHeader className="p-3 pb-1">
-            <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">P&L by Instrument</CardTitle>
+            <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">P&L by Instrument</CardTitle>
           </CardHeader>
           <CardContent className="p-3 pt-1 space-y-1.5">
             {computeSymbolBreakdown(positions).map(({ symbol, pnl }) => {
@@ -218,8 +218,8 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
               const w = (Math.abs(pnl) / maxAbs) * 100;
               return (
                 <div key={symbol} className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-[#c8c8e0] w-24 shrink-0 truncate">{symbol}</span>
-                  <div className="flex-1 h-4 bg-[#0d0d14] rounded overflow-hidden">
+                  <span className="text-xs font-mono text-text-primary w-24 shrink-0 truncate">{symbol}</span>
+                  <div className="flex-1 h-4 bg-surface-base rounded overflow-hidden">
                     <div
                       className={`h-full rounded transition-all ${pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"}`}
                       style={{ width: `${w}%` }}
@@ -274,10 +274,10 @@ function CalendarTab({ trades }: { trades: Trade[] }) {
           { label: "Green Days", value: String(greenDays), pos: true },
           { label: "Red Days", value: String(redDays), pos: redDays === 0 },
         ].map(({ label, value, pos }) => (
-          <Card key={label} className="bg-[#12121a] border-[#1e1e2e]">
+          <Card key={label} className="bg-surface-card border-border-default">
             <CardContent className="p-3">
-              <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">{label}</div>
-              <div className={`text-base font-bold font-mono ${pos === undefined ? "text-[#e0e0f0]" : pos ? "text-emerald-400" : "text-red-400"}`}>{value}</div>
+              <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">{label}</div>
+              <div className={`text-base font-bold font-mono ${pos === undefined ? "text-text-primary" : pos ? "text-emerald-400" : "text-red-400"}`}>{value}</div>
             </CardContent>
           </Card>
         ))}
@@ -296,15 +296,15 @@ function CalendarTab({ trades }: { trades: Trade[] }) {
         while (cells.length % 7 !== 0) cells.push(null);
 
         return (
-          <Card key={`${year}-${month}`} className="bg-[#12121a] border-[#1e1e2e]">
+          <Card key={`${year}-${month}`} className="bg-surface-card border-border-default">
             <CardHeader className="p-3 pb-1">
-              <CardTitle className="text-xs font-medium text-[#8888a0]">{label}</CardTitle>
+              <CardTitle className="text-xs font-medium text-text-secondary">{label}</CardTitle>
             </CardHeader>
             <CardContent className="p-3 pt-0">
               {/* Day-of-week header */}
               <div className="grid grid-cols-7 gap-1 mb-1">
                 {DOW_LABELS.map((l, i) => (
-                  <div key={i} className="text-center text-[9px] text-[#4a4a6a]">{l}</div>
+                  <div key={i} className="text-center text-xxs text-text-muted">{l}</div>
                 ))}
               </div>
               {/* Weeks */}
@@ -320,11 +320,11 @@ function CalendarTab({ trades }: { trades: Trade[] }) {
                       <div
                         key={di}
                         title={pnl !== undefined ? `${dateStr}: ${formatINR(pnl)}` : dateStr}
-                        className={`h-7 rounded flex items-center justify-center text-[9px] font-mono cursor-default transition-colors
-                          ${isFuture ? "bg-[#0d0d14] text-[#3a3a5a]" :
+                        className={`h-7 rounded flex items-center justify-center text-xxs font-mono cursor-default transition-colors
+                          ${isFuture ? "bg-surface-base text-text-disabled" :
                             pnl !== undefined ? `${heatmapColor(pnl, maxAbs)} text-white/80` :
-                            "bg-[#1a1a28] text-[#4a4a6a]"}
-                          ${isToday ? "ring-1 ring-[#3b82f6]" : ""}`}
+                            "bg-surface-elevated text-text-muted"}
+                          ${isToday ? "ring-1 ring-ring" : ""}`}
                       >
                         {day}
                       </div>
@@ -351,7 +351,7 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
 
   if (daily.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-[#4a4a6a]">
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted">
         <BarChart2 size={40} />
         <p className="text-sm">No historical trade data</p>
       </div>
@@ -365,17 +365,17 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
   return (
     <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
       <div className="grid grid-cols-2 gap-2">
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Max Drawdown</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Drawdown</div>
             <div className={`text-xl font-bold font-mono ${maxDrawdown < 0 ? "text-red-400" : "text-emerald-400"}`}>
               {maxDrawdown.toFixed(2)}%
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-[#12121a] border-[#1e1e2e]">
+        <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
-            <div className="text-[10px] text-[#8888a0] uppercase tracking-wider mb-1">Net Cumulative P&L</div>
+            <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Net Cumulative P&L</div>
             <div className={`text-xl font-bold font-mono ${pnlClass(cumulativeSeries[cumulativeSeries.length - 1]?.cum ?? 0)}`}>
               {formatINR(cumulativeSeries[cumulativeSeries.length - 1]?.cum ?? 0)}
             </div>
@@ -384,9 +384,9 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
       </div>
 
       {/* Equity curve */}
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Equity Curve</CardTitle>
+          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Equity Curve</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
           <div className="relative h-32 flex items-end gap-0.5">
@@ -404,21 +404,21 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
             })}
             {/* Zero line */}
             <div
-              className="absolute left-0 right-0 h-px bg-[#2a2a3d]"
+              className="absolute left-0 right-0 h-px bg-surface-active"
               style={{ bottom: `${(-minCum / range) * 100}%` }}
             />
           </div>
           <div className="flex justify-between mt-1">
-            <span className="text-[9px] text-[#4a4a6a]">{cumulativeSeries[0]?.date ?? ""}</span>
-            <span className="text-[9px] text-[#4a4a6a]">{cumulativeSeries[cumulativeSeries.length - 1]?.date ?? ""}</span>
+            <span className="text-xxs text-text-muted">{cumulativeSeries[0]?.date ?? ""}</span>
+            <span className="text-xxs text-text-muted">{cumulativeSeries[cumulativeSeries.length - 1]?.date ?? ""}</span>
           </div>
         </CardContent>
       </Card>
 
       {/* Drawdown chart */}
-      <Card className="bg-[#12121a] border-[#1e1e2e]">
+      <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-[#8888a0] uppercase tracking-wider">Drawdown (%)</CardTitle>
+          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Drawdown (%)</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
           <div className="relative h-20 flex items-start gap-0.5">
@@ -453,39 +453,39 @@ export default function PnLDashboardTool({ onClose }: Props) {
   const totalPnl = positions.reduce((s, p) => s + p.pnl, 0);
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
+    <div className="h-full flex flex-col bg-surface-base">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1e1e2e] bg-[#12121a] shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
-          <PieChart size={16} className="text-[#3b82f6]" />
-          <h1 className="text-sm font-semibold text-[#e0e0f0]">P&L Dashboard</h1>
-          {isLoading && <span className="text-[10px] text-[#4a4a6a]">Loading...</span>}
+          <PieChart size={16} className="text-primary" />
+          <h1 className="text-sm font-semibold text-text-primary">P&L Dashboard</h1>
+          {isLoading && <span className="text-xs text-text-muted">Loading...</span>}
           {isError && <AlertCircle size={12} className="text-red-400" />}
           {!isLoading && !isError && (
             <Badge
               variant="outline"
-              className={`text-[9px] px-1.5 py-0 border-0 font-mono font-medium ${totalPnl >= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
+              className={`text-xxs px-1.5 py-0 border-0 font-mono font-medium ${totalPnl >= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
             >
               {totalPnl >= 0 ? <TrendingUp size={9} className="inline mr-0.5" /> : <TrendingDown size={9} className="inline mr-0.5" />}
               {formatINR(totalPnl)}
             </Badge>
           )}
         </div>
-        <button onClick={onClose} className="text-[#4a4a6a] hover:text-[#e0e0f0] transition-colors">
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
           <X size={15} />
         </button>
       </div>
 
       {/* Tabs */}
       <Tabs defaultValue="summary" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="shrink-0 rounded-none bg-[#0d0d14] border-b border-[#1e1e2e] justify-start px-3 h-8 gap-1">
-          <TabsTrigger value="summary" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+        <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
+          <TabsTrigger value="summary" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <Wallet size={11} className="mr-1" />Summary
           </TabsTrigger>
-          <TabsTrigger value="calendar" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+          <TabsTrigger value="calendar" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <Calendar size={11} className="mr-1" />Calendar
           </TabsTrigger>
-          <TabsTrigger value="drawdown" className="text-xs h-6 data-[state=active]:bg-[#1e1e2e] data-[state=active]:text-[#e0e0f0] text-[#6666a0]">
+          <TabsTrigger value="drawdown" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <BarChart2 size={11} className="mr-1" />Drawdown
           </TabsTrigger>
         </TabsList>

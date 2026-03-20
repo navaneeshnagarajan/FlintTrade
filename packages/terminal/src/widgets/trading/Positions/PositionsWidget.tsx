@@ -125,7 +125,7 @@ export default function PositionsWidget(_props: WidgetProps) {
     <div className="h-full flex flex-col overflow-hidden text-xs">
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-border-default shrink-0">
-        <span className="text-text-muted uppercase tracking-wider text-[10px]">
+        <span className="text-text-muted uppercase tracking-wider text-xs">
           {rows.length} position{rows.length !== 1 ? "s" : ""}
         </span>
         <div className="flex items-center gap-2">
@@ -133,7 +133,7 @@ export default function PositionsWidget(_props: WidgetProps) {
             P&L: {formatPnl(totalPnl)}
           </span>
           {lastFetch && (
-            <span className="text-[10px] text-text-muted flex items-center gap-0.5">
+            <span className="text-xs text-text-muted flex items-center gap-0.5">
               <Clock size={8} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
@@ -153,7 +153,7 @@ export default function PositionsWidget(_props: WidgetProps) {
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className="text-[10px] text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
+                      className="text-xs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1"
                       onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}

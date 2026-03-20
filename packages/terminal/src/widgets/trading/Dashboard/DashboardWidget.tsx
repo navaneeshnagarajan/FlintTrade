@@ -69,7 +69,7 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
   if (!tick) {
     return (
       <div className="bg-surface-card rounded border border-border-default p-2">
-        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">{name}</div>
+        <div className="text-xs text-text-muted uppercase tracking-wider mb-1">{name}</div>
         <div className="text-lg font-semibold font-mono text-text-muted">&mdash;</div>
       </div>
     );
@@ -85,14 +85,14 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
 
   return (
     <div className={`bg-surface-card rounded border p-2 ${vixHigh ? "border-loss/40" : "border-border-default"}`}>
-      <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">{name}</div>
+      <div className="text-xs text-text-muted uppercase tracking-wider mb-1">{name}</div>
       <div className="text-lg font-semibold font-mono text-text-primary">
         {ltp > 0 ? INR.format(ltp) : "—"}
       </div>
       <div className={`flex items-center gap-1 text-xs mt-0.5 ${up ? "text-profit" : "text-loss"}`}>
         {up ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
         <span className="font-mono">{change >= 0 ? "+" : ""}{change.toFixed(2)}</span>
-        <span className="font-mono text-[10px]">({changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%)</span>
+        <span className="font-mono text-xs">({changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%)</span>
       </div>
     </div>
   );
@@ -134,7 +134,7 @@ export default function DashboardWidget(_props: WidgetProps) {
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-2">
         <div className="bg-surface-card rounded border border-border-default p-2">
-          <div className="flex items-center gap-1 text-[10px] text-text-muted uppercase tracking-wider mb-1">
+          <div className="flex items-center gap-1 text-xs text-text-muted uppercase tracking-wider mb-1">
             <Wallet size={11} /> Funds
           </div>
           <div className="text-xl font-semibold font-mono text-profit">
@@ -142,7 +142,7 @@ export default function DashboardWidget(_props: WidgetProps) {
           </div>
         </div>
         <div className="bg-surface-card rounded border border-border-default p-2">
-          <div className="flex items-center gap-1 text-[10px] text-text-muted uppercase tracking-wider mb-1">
+          <div className="flex items-center gap-1 text-xs text-text-muted uppercase tracking-wider mb-1">
             <Activity size={11} /> Margin Used
           </div>
           <div className="text-xl font-semibold font-mono text-warning">
@@ -150,7 +150,7 @@ export default function DashboardWidget(_props: WidgetProps) {
           </div>
         </div>
         <div className="bg-surface-card rounded border border-border-default p-2">
-          <div className="flex items-center gap-1 text-[10px] text-text-muted uppercase tracking-wider mb-1">
+          <div className="flex items-center gap-1 text-xs text-text-muted uppercase tracking-wider mb-1">
             <TrendingUp size={11} /> Day P&L
           </div>
           <div className={`text-xl font-semibold font-mono ${totalPnl >= 0 ? "text-profit" : "text-loss"}`}>
@@ -164,9 +164,9 @@ export default function DashboardWidget(_props: WidgetProps) {
       {/* Positions table */}
       <div className="bg-surface-card rounded border border-border-default">
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default">
-          <h3 className="text-[10px] text-text-muted uppercase tracking-wider">Positions</h3>
+          <h3 className="text-xs text-text-muted uppercase tracking-wider">Positions</h3>
           {lastFetch && (
-            <div className="flex items-center gap-1 text-[10px] text-text-muted">
+            <div className="flex items-center gap-1 text-xs text-text-muted">
               <Clock size={9} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </div>
@@ -177,7 +177,7 @@ export default function DashboardWidget(_props: WidgetProps) {
         ) : (
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-[10px] text-text-muted uppercase tracking-wider">
+              <tr className="text-xs text-text-muted uppercase tracking-wider">
                 <th className="px-3 py-1.5 text-left">Symbol</th>
                 <th className="px-3 py-1.5 text-right">Qty</th>
                 <th className="px-3 py-1.5 text-right">Avg</th>
@@ -202,7 +202,7 @@ export default function DashboardWidget(_props: WidgetProps) {
                     <td className={`px-3 py-1 text-right font-mono font-medium ${pnl >= 0 ? "text-profit" : "text-loss"}`}>
                       {pnl >= 0 ? "+" : ""}₹{INR0.format(Math.abs(pnl))}
                     </td>
-                    <td className={`px-3 py-1 text-right font-mono text-[10px] ${pnlPct >= 0 ? "text-profit" : "text-loss"}`}>
+                    <td className={`px-3 py-1 text-right font-mono text-xs ${pnlPct >= 0 ? "text-profit" : "text-loss"}`}>
                       {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
                     </td>
                   </tr>
@@ -216,14 +216,14 @@ export default function DashboardWidget(_props: WidgetProps) {
       {/* Orders table */}
       <div className="bg-surface-card rounded border border-border-default">
         <div className="px-3 py-1.5 border-b border-border-default">
-          <h3 className="text-[10px] text-text-muted uppercase tracking-wider">Orders</h3>
+          <h3 className="text-xs text-text-muted uppercase tracking-wider">Orders</h3>
         </div>
         {orders.length === 0 ? (
           <div className="px-3 py-6 text-center text-text-muted text-xs">No orders today</div>
         ) : (
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-[10px] text-text-muted uppercase tracking-wider">
+              <tr className="text-xs text-text-muted uppercase tracking-wider">
                 <th className="px-3 py-1.5 text-left">Time</th>
                 <th className="px-3 py-1.5 text-left">Symbol</th>
                 <th className="px-3 py-1.5 text-center">Action</th>
@@ -241,7 +241,7 @@ export default function DashboardWidget(_props: WidgetProps) {
                   <td className="px-3 py-1 text-right font-mono">{String(o.quantity ?? "")}</td>
                   <td className="px-3 py-1 text-right font-mono">{o.price ? String(o.price) : "MKT"}</td>
                   <td className="px-3 py-1 text-center">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
                       o.order_status === "complete" ? "bg-profit/10 text-profit" :
                       o.order_status === "rejected" ? "bg-loss/10 text-loss" :
                       "bg-warning/10 text-warning"
