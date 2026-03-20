@@ -191,7 +191,7 @@ function MetricCard({ metric }: { metric: BacktestMetric }) {
         <div className="text-xs text-text-muted mb-1">{metric.label}</div>
         <div
           className={[
-            "font-mono text-lg font-semibold leading-none",
+            "font-mono tabular-nums text-lg font-semibold leading-none",
             metric.positive === true
               ? "text-emerald-400"
               : metric.positive === false
@@ -220,7 +220,7 @@ function EquityCurvePlaceholder() {
     .join(" ");
 
   return (
-    <div className="relative w-full h-[140px] bg-surface-base rounded-md border border-border-default flex items-center justify-center overflow-hidden">
+    <div className="relative w-full h-35 bg-surface-base rounded-md border border-border-default flex items-center justify-center overflow-hidden">
       <svg
         className="absolute inset-0 w-full h-full opacity-40"
         viewBox={`0 0 ${w} ${h}`}
@@ -295,7 +295,7 @@ function ConfigureTab({
           control={control}
           render={({ field }) => (
             <Select onValueChange={field.onChange} value={field.value}>
-              <SelectTrigger className="bg-surface-card border-border-default text-sm h-8">
+              <SelectTrigger className="bg-surface-card border-border-default text-sm h-9">
                 <SelectValue placeholder="Select strategy..." />
               </SelectTrigger>
               <SelectContent className="bg-surface-card border-border-default">
@@ -331,7 +331,7 @@ function ConfigureTab({
           <Input
             {...register("symbol")}
             placeholder="RELIANCE"
-            className="bg-surface-card border-border-default font-mono text-sm h-8 uppercase"
+            className="bg-surface-card border-border-default font-mono text-sm h-9 uppercase"
           />
           {errors.symbol && (
             <p className="text-xs text-red-400">{errors.symbol.message}</p>
@@ -344,7 +344,7 @@ function ConfigureTab({
             control={control}
             render={({ field }) => (
               <Select onValueChange={field.onChange} value={field.value}>
-                <SelectTrigger className="bg-surface-card border-border-default text-sm h-8">
+                <SelectTrigger className="bg-surface-card border-border-default text-sm h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-surface-card border-border-default">
@@ -367,7 +367,7 @@ function ConfigureTab({
           <Input
             {...register("fromDate")}
             type="date"
-            className="bg-surface-card border-border-default text-sm h-8"
+            className="bg-surface-card border-border-default text-sm h-9"
           />
         </div>
         <div className="space-y-1.5">
@@ -375,7 +375,7 @@ function ConfigureTab({
           <Input
             {...register("toDate")}
             type="date"
-            className="bg-surface-card border-border-default text-sm h-8"
+            className="bg-surface-card border-border-default text-sm h-9"
           />
         </div>
         <div className="space-y-1.5">
@@ -385,7 +385,7 @@ function ConfigureTab({
             control={control}
             render={({ field }) => (
               <Select onValueChange={field.onChange} value={field.value}>
-                <SelectTrigger className="bg-surface-card border-border-default text-sm h-8">
+                <SelectTrigger className="bg-surface-card border-border-default text-sm h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-surface-card border-border-default">
@@ -407,7 +407,7 @@ function ConfigureTab({
         <Input
           {...register("capital")}
           placeholder="1000000"
-          className="bg-surface-card border-border-default font-mono text-sm h-8"
+          className="bg-surface-card border-border-default font-mono text-sm h-9"
         />
         {errors.capital && (
           <p className="text-xs text-red-400">{errors.capital.message}</p>
@@ -421,14 +421,14 @@ function ConfigureTab({
             <Label className="text-xs text-text-secondary">Fast EMA Period</Label>
             <Input
               {...register("fastPeriod")}
-              className="bg-surface-card border-border-default font-mono text-sm h-8"
+              className="bg-surface-card border-border-default font-mono text-sm h-9"
             />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-text-secondary">Slow EMA Period</Label>
             <Input
               {...register("slowPeriod")}
-              className="bg-surface-card border-border-default font-mono text-sm h-8"
+              className="bg-surface-card border-border-default font-mono text-sm h-9"
             />
           </div>
         </div>
@@ -438,7 +438,7 @@ function ConfigureTab({
           <Label className="text-xs text-text-secondary">ATR Multiplier</Label>
           <Input
             {...register("atrMultiplier")}
-            className="bg-surface-card border-border-default font-mono text-sm h-8"
+            className="bg-surface-card border-border-default font-mono text-sm h-9"
           />
         </div>
       )}
@@ -447,7 +447,7 @@ function ConfigureTab({
           <Label className="text-xs text-text-secondary">Grid Levels</Label>
           <Input
             {...register("gridLevels")}
-            className="bg-surface-card border-border-default font-mono text-sm h-8"
+            className="bg-surface-card border-border-default font-mono text-sm h-9"
           />
         </div>
       )}
@@ -504,7 +504,7 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
 
         {/* Return metrics */}
         <div>
-          <div className="text-xs text-text-muted mb-2">Return Metrics</div>
+          <div className="font-heading font-semibold text-sm text-text-muted mb-2">Return Metrics</div>
           <div className="grid grid-cols-2 gap-2">
             {MOCK_RETURN_METRICS.map((m) => (
               <MetricCard key={m.label} metric={m} />
@@ -514,7 +514,7 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
 
         {/* Risk metrics */}
         <div>
-          <div className="text-xs text-text-muted mb-2">Risk Metrics</div>
+          <div className="font-heading font-semibold text-sm text-text-muted mb-2">Risk Metrics</div>
           <div className="grid grid-cols-2 gap-2">
             {MOCK_RISK_METRICS.map((m) => (
               <MetricCard key={m.label} metric={m} />
@@ -524,7 +524,7 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
 
         {/* Trade metrics */}
         <div>
-          <div className="text-xs text-text-muted mb-2">Trade Metrics</div>
+          <div className="font-heading font-semibold text-sm text-text-muted mb-2">Trade Metrics</div>
           <div className="grid grid-cols-2 gap-2">
             {MOCK_TRADE_METRICS.map((m) => (
               <MetricCard key={m.label} metric={m} />
@@ -722,7 +722,7 @@ export default function BacktestLabTool({ onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
           <FlaskConical size={16} className="text-primary" />
-          <span className="text-sm font-semibold text-text-primary">
+          <span className="font-heading font-bold text-lg text-text-primary">
             Backtest Lab
           </span>
           {hasRun && (
@@ -748,19 +748,19 @@ export default function BacktestLabTool({ onClose }: Props) {
         <TabsList className="mx-4 mt-3 mb-0 h-8 bg-surface-card border border-border-default shrink-0 rounded-md w-auto self-start">
           <TabsTrigger
             value="configure"
-            className="text-xs h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
+            className="text-xs font-medium h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Configure
           </TabsTrigger>
           <TabsTrigger
             value="results"
-            className="text-xs h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
+            className="text-xs font-medium h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Results
           </TabsTrigger>
           <TabsTrigger
             value="trades"
-            className="text-xs h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
+            className="text-xs font-medium h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Trades
           </TabsTrigger>

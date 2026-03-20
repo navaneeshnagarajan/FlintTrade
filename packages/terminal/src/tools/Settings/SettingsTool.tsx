@@ -359,7 +359,7 @@ function FieldRow({ label, hint, children }: { label: string; hint?: string; chi
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="text-sm font-semibold text-text-primary mb-4 pb-2 border-b border-border-default">
+    <h2 className="font-heading font-semibold text-sm text-text-primary mb-4 pb-2 border-b border-border-default">
       {children}
     </h2>
   );
@@ -1166,7 +1166,7 @@ export default function SettingsTool({ onClose }: Props) {
       <div className="flex-none flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card">
         <div className="flex items-center gap-2">
           <Settings size={14} className="text-accent" />
-          <span className="text-sm font-semibold text-text-primary">Settings</span>
+          <span className="font-heading font-bold text-lg text-text-primary">Settings</span>
         </div>
         {onClose && (
           <button
@@ -1193,7 +1193,7 @@ export default function SettingsTool({ onClose }: Props) {
                 key={section.id}
                 type="button"
                 onClick={() => setActiveSection(section.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors text-left ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2 font-sans text-sm transition-colors text-left ${
                   isActive
                     ? "bg-accent/10 text-accent border-r-2 border-accent"
                     : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"

@@ -339,7 +339,7 @@ function MarketBreadthTab() {
           ].map((c) => (
             <Card key={c.label} className={`border ${c.bg}`}>
               <CardContent className="pt-3 pb-3 px-4">
-                <div className={`text-xl font-mono font-bold ${c.color}`}>{c.value}</div>
+                <div className={`text-xl font-mono font-bold tabular-nums ${c.color}`}>{c.value}</div>
                 <div className="text-xs text-text-muted mt-0.5">{c.label} (of {totalStocks})</div>
               </CardContent>
             </Card>
@@ -351,7 +351,7 @@ function MarketBreadthTab() {
           <Card className="bg-surface-card border-border-default">
             <CardContent className="pt-3 pb-3 px-4">
               <div className="text-xs text-text-muted mb-1">A/D Ratio</div>
-              <div className={`text-xl font-mono font-bold ${parseFloat(adRatio) >= 1 ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`text-xl font-mono font-bold tabular-nums ${parseFloat(adRatio) >= 1 ? "text-emerald-400" : "text-red-400"}`}>
                 {adRatio}
               </div>
               <div className="text-xs text-text-muted mt-0.5">
@@ -368,7 +368,7 @@ function MarketBreadthTab() {
           <Card className="bg-surface-card border-border-default">
             <CardContent className="pt-3 pb-3 px-4">
               <div className="text-xs text-text-muted mb-1">Breadth Thrust</div>
-              <div className={`text-xl font-mono font-bold ${breadthThrustRaw >= 61.5 ? "text-emerald-400" : breadthThrustRaw >= 40 ? "text-text-secondary" : "text-red-400"}`}>
+              <div className={`text-xl font-mono font-bold tabular-nums ${breadthThrustRaw >= 61.5 ? "text-emerald-400" : breadthThrustRaw >= 40 ? "text-text-secondary" : "text-red-400"}`}>
                 {breadthThrustRaw.toFixed(1)}%
               </div>
               <div className="text-xs text-text-muted mt-0.5">
@@ -713,10 +713,10 @@ function IndiaVixTab() {
                   <ShieldAlert size={11} />
                   India VIX — Volatility Index
                 </div>
-                <div className={`text-4xl font-mono font-bold leading-none ${zone.color}`}>
+                <div className={`text-4xl font-mono font-bold tabular-nums leading-none ${zone.color}`}>
                   {vixValue.toFixed(2)}
                 </div>
-                <div className={`text-sm font-mono mt-1 ${vixChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                <div className={`text-sm font-mono tabular-nums mt-1 ${vixChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                   {vixChange >= 0 ? "+" : ""}{vixChange.toFixed(2)} ({vixChangePct.toFixed(2)}%)
                 </div>
               </div>
@@ -1381,7 +1381,7 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
           <BarChart3 size={16} className="text-primary" />
-          <span className="text-sm font-semibold text-text-primary">Market Intelligence</span>
+          <span className="font-heading font-bold text-lg text-text-primary">Market Intelligence</span>
           {currentTab && (
             <>
               <span className="text-text-disabled">/</span>
@@ -1409,7 +1409,7 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={[
-                  "w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors text-left",
+                  "w-full flex items-center gap-2 px-3 py-2 font-heading font-medium text-xs transition-colors text-left",
                   isActive
                     ? "bg-neutral-bg/60 text-primary border-r-2 border-primary"
                     : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated",

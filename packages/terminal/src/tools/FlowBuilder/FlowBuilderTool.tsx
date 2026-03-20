@@ -1781,7 +1781,7 @@ export default function FlowBuilderTool({ onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
           <Workflow size={16} className="text-primary" />
-          <span className="text-sm font-semibold text-text-primary">Flow Builder</span>
+          <span className="font-heading font-bold text-lg text-text-primary">Flow Builder</span>
           <Badge className="text-xxs h-4 px-1.5 bg-bullish-bg text-emerald-400 border-bullish-border">
             54 nodes
           </Badge>
@@ -1799,19 +1799,19 @@ export default function FlowBuilderTool({ onClose }: Props) {
         <TabsList className="mx-4 mt-3 mb-0 h-8 bg-surface-card border border-border-default shrink-0 rounded-md w-auto self-start">
           <TabsTrigger
             value="flows"
-            className="text-xs h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-text-primary"
+            className="text-xs font-medium h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Flows
           </TabsTrigger>
           <TabsTrigger
             value="templates"
-            className="text-xs h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-text-primary"
+            className="text-xs font-medium h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             Templates
           </TabsTrigger>
           <TabsTrigger
             value="how"
-            className="text-xs h-6 px-3 data-[state=active]:bg-border-default data-[state=active]:text-text-primary"
+            className="text-xs font-medium h-6 px-3 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary"
           >
             How It Works
           </TabsTrigger>

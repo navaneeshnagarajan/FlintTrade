@@ -194,7 +194,7 @@ function StatCard({ label, value, sub, positive }: { label: string; value: strin
     <Card className="bg-surface-card border-border-default">
       <CardContent className="p-3">
         <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">{label}</div>
-        <div className={`text-lg font-bold font-mono ${positive === undefined ? "text-text-primary" : positive ? "text-emerald-400" : "text-red-400"}`}>
+        <div className={`text-lg font-bold font-mono tabular-nums ${positive === undefined ? "text-text-primary" : positive ? "text-emerald-400" : "text-red-400"}`}>
           {value}
         </div>
         {sub && <div className="text-xs text-text-muted mt-0.5">{sub}</div>}
@@ -228,7 +228,7 @@ function TradeLogTab({ trades }: { trades: Trade[] }) {
     <div className="flex flex-col h-full gap-2">
       {/* Filters */}
       <div className="flex items-center gap-2 px-3 pt-2">
-        <div className="relative flex-1 max-w-[220px]">
+        <div className="relative flex-1 max-w-55">
           <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
           <Input
             className="pl-7 h-7 text-xs bg-surface-base border-border-default text-text-primary placeholder:text-text-muted"
@@ -347,7 +347,7 @@ function AnalyticsTab({ trades }: { trades: Trade[] }) {
       {/* P&L by Day of Week — absorbed from trading-journal bar chart concept */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">P&L by Day of Week</CardTitle>
+          <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">P&L by Day of Week</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
           <div className="flex items-end gap-2 h-16">
@@ -374,7 +374,7 @@ function AnalyticsTab({ trades }: { trades: Trade[] }) {
       {a.bySymbol.length > 0 && (
         <Card className="bg-surface-card border-border-default">
           <CardHeader className="p-3 pb-1">
-            <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">P&L by Symbol</CardTitle>
+            <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">P&L by Symbol</CardTitle>
           </CardHeader>
           <CardContent className="p-3 pt-1 space-y-1.5">
             {a.bySymbol.map(({ symbol, pnl, trades }) => {
@@ -451,7 +451,7 @@ export default function TradeJournalTool({ onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
           <BookOpen size={16} className="text-primary" />
-          <h1 className="text-sm font-semibold text-text-primary">Trade Journal</h1>
+          <h1 className="font-heading font-bold text-lg text-text-primary">Trade Journal</h1>
           {isLoading && <span className="text-xs text-text-muted">Loading...</span>}
           {isError && <AlertCircle size={12} className="text-red-400" />}
           {!isLoading && !isError && (
@@ -468,13 +468,13 @@ export default function TradeJournalTool({ onClose }: Props) {
       {/* Tabs */}
       <Tabs defaultValue="log" className="flex-1 flex flex-col min-h-0">
         <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
-          <TabsTrigger value="log" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
+          <TabsTrigger value="log" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <BookOpen size={11} className="mr-1" />Trade Log
           </TabsTrigger>
-          <TabsTrigger value="analytics" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
+          <TabsTrigger value="analytics" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <BarChart2 size={11} className="mr-1" />Analytics
           </TabsTrigger>
-          <TabsTrigger value="notes" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
+          <TabsTrigger value="notes" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <FileText size={11} className="mr-1" />Notes
           </TabsTrigger>
         </TabsList>

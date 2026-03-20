@@ -431,7 +431,7 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Profit</div>
-            <div className={`text-base font-bold font-mono ${maxPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            <div className={`text-base font-bold font-mono tabular-nums ${maxPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {maxPnl === Infinity ? "Unlimited" : formatINR(maxPnl * underlying.lotSize)}
             </div>
           </CardContent>
@@ -439,7 +439,7 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Loss</div>
-            <div className={`text-base font-bold font-mono ${minPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            <div className={`text-base font-bold font-mono tabular-nums ${minPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {minPnl === -Infinity ? "Unlimited" : formatINR(minPnl * underlying.lotSize)}
             </div>
           </CardContent>
@@ -447,7 +447,7 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Net Premium</div>
-            <div className={`text-base font-bold font-mono ${netPremium <= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            <div className={`text-base font-bold font-mono tabular-nums ${netPremium <= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {formatINR(netPremium)}
             </div>
             <div className="text-xxs text-text-muted">{netPremium <= 0 ? "Credit" : "Debit"}</div>
@@ -466,7 +466,7 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
       {/* Visual payoff chart */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Payoff at Expiry</CardTitle>
+          <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Payoff at Expiry</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
           <div className="relative h-40 flex items-center">
@@ -518,7 +518,7 @@ function PayoffTab({ legs, atm, underlying }: { legs: Leg[]; atm: number; underl
       {/* Payoff table */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Payoff Table (per lot)</CardTitle>
+          <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Payoff Table (per lot)</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-auto max-h-48">
@@ -586,14 +586,14 @@ function MarginTab({ legs, underlying }: { legs: Leg[]; underlying: typeof UNDER
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">SPAN Margin (est.)</div>
-            <div className="text-xl font-bold font-mono text-text-primary">{formatINR(margin)}</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-text-primary">{formatINR(margin)}</div>
             <div className="text-xs text-text-muted mt-0.5">Selling positions only</div>
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Effective Margin</div>
-            <div className="text-xl font-bold font-mono text-emerald-400">{formatINR(effectiveMargin)}</div>
+            <div className="text-xl font-bold font-mono tabular-nums text-emerald-400">{formatINR(effectiveMargin)}</div>
             <div className="text-xs text-text-muted mt-0.5">After premium credit/debit</div>
           </CardContent>
         </Card>
@@ -601,7 +601,7 @@ function MarginTab({ legs, underlying }: { legs: Leg[]; underlying: typeof UNDER
 
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-xs font-medium text-text-secondary uppercase tracking-wider">Leg-wise Breakdown</CardTitle>
+          <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Leg-wise Breakdown</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -723,7 +723,7 @@ export default function StrategyBuilderTool({ onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-surface-card shrink-0">
         <div className="flex items-center gap-2">
           <Brain size={16} className="text-primary" />
-          <h1 className="text-sm font-semibold text-text-primary">Strategy Builder</h1>
+          <h1 className="font-heading font-bold text-lg text-text-primary">Strategy Builder</h1>
           <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
             {underlying.symbol}
           </Badge>
@@ -744,13 +744,13 @@ export default function StrategyBuilderTool({ onClose }: Props) {
       {/* Tabs */}
       <Tabs defaultValue="legs" className="flex-1 flex flex-col min-h-0">
         <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
-          <TabsTrigger value="legs" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
+          <TabsTrigger value="legs" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <Brain size={11} className="mr-1" />Strategy Legs
           </TabsTrigger>
-          <TabsTrigger value="payoff" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
+          <TabsTrigger value="payoff" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <TrendingUp size={11} className="mr-1" />Payoff
           </TabsTrigger>
-          <TabsTrigger value="margin" className="text-xs h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
+          <TabsTrigger value="margin" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <Zap size={11} className="mr-1" />Margin
           </TabsTrigger>
         </TabsList>
