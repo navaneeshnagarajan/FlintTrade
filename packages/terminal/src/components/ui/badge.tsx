@@ -18,6 +18,10 @@ const badgeVariants = cva(
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
+        bullish: "rounded bg-bullish-bg border-bullish-border text-bullish-text",
+        bearish: "rounded bg-bearish-bg border-bearish-border text-bearish-text",
+        atm: "rounded bg-atm-bg border-atm-border text-atm-text",
+        neutral: "rounded bg-neutral-bg border-neutral-border text-neutral-text",
       },
     },
     defaultVariants: {
