@@ -1,0 +1,5 @@
+# Cargo config for tick-engine — uses WinLibs GCC as linker
+# This avoids requiring MSVC Build Tools on Windows machines.
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"

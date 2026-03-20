@@ -100,6 +100,15 @@ interface IndicatorState {
   showStoch: boolean;
   showATR: boolean;
   showADX: boolean;
+  // New indicators
+  showWilliamsR: boolean;
+  showCCI: boolean;
+  showDEMA: boolean;
+  showHullMA: boolean;
+  showParabolicSAR: boolean;
+  showOBV: boolean;
+  showKeltner: boolean;
+  showVWMA: boolean;
 }
 
 // Drawing tool types
@@ -195,6 +204,17 @@ interface IndicatorSeriesRefs {
   adx: ISeriesApi<"Line"> | null;
   adxPlus: ISeriesApi<"Line"> | null;
   adxMinus: ISeriesApi<"Line"> | null;
+  // New indicators
+  williamsR: ISeriesApi<"Line"> | null;
+  cci: ISeriesApi<"Line"> | null;
+  dema: ISeriesApi<"Line"> | null;
+  hullMA: ISeriesApi<"Line"> | null;
+  parSar: ISeriesApi<"Line"> | null;
+  obv: ISeriesApi<"Line"> | null;
+  keltnerUpper: ISeriesApi<"Line"> | null;
+  keltnerMiddle: ISeriesApi<"Line"> | null;
+  keltnerLower: ISeriesApi<"Line"> | null;
+  vwma: ISeriesApi<"Line"> | null;
 }
 
 // Pivot price lines ref
@@ -283,6 +303,15 @@ const DEFAULT_INDICATORS: IndicatorState = {
   showStoch: false,
   showATR: false,
   showADX: false,
+  // New indicators
+  showWilliamsR: false,
+  showCCI: false,
+  showDEMA: false,
+  showHullMA: false,
+  showParabolicSAR: false,
+  showOBV: false,
+  showKeltner: false,
+  showVWMA: false,
 };
 
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
@@ -825,6 +854,211 @@ function calcPivotPoints(bars: OhlcvBar[]): PivotResult | null {
   return { pp, r1, r2, r3, s1, s2, s3 };
 }
 
+// --- new indicator calculation functions ------------------------------------
+
+function calcWilliamsR(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 14,
+): (number | null)[] {
+  const n = closes.length;
+  const result: (number | null)[] = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i++) {
+    const sliceH = highs.slice(i - period + 1, i + 1);
+    const sliceL = lows.slice(i - period + 1, i + 1);
+    const hh = Math.max(...sliceH);
+    const ll = Math.min(...sliceL);
+    const range = hh - ll;
+    result[i] = range === 0 ? 0 : ((hh - closes[i]) / range) * -100;
+  }
+  return result;
+}
+
+function calcCCI(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 20,
+): (number | null)[] {
+  const n = closes.length;
+  const result: (number | null)[] = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i++) {
+    let sumTP = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      sumTP += (highs[j] + lows[j] + closes[j]) / 3;
+    }
+    const meanTP = sumTP / period;
+    let meanDev = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      meanDev += Math.abs((highs[j] + lows[j] + closes[j]) / 3 - meanTP);
+    }
+    meanDev /= period;
+    const tp = (highs[i] + lows[i] + closes[i]) / 3;
+    result[i] = meanDev === 0 ? 0 : (tp - meanTP) / (0.015 * meanDev);
+  }
+  return result;
+}
+
+function calcDEMA(closes: number[], period = 20): (number | null)[] {
+  const ema1 = calcEMA(closes, period);
+  // EMA of EMA — only over the non-null portion
+  const ema1Vals: number[] = [];
+  const ema1Idx: number[] = [];
+  for (let i = 0; i < ema1.length; i++) {
+    if (ema1[i] !== null) { ema1Vals.push(ema1[i]!); ema1Idx.push(i); }
+  }
+  const ema2Inner = calcEMA(ema1Vals, period);
+  const n = closes.length;
+  const ema2: (number | null)[] = new Array(n).fill(null);
+  for (let j = 0; j < ema1Idx.length; j++) {
+    ema2[ema1Idx[j]] = ema2Inner[j];
+  }
+  const result: (number | null)[] = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    if (ema1[i] !== null && ema2[i] !== null) {
+      result[i] = 2 * ema1[i]! - ema2[i]!;
+    }
+  }
+  return result;
+}
+
+function calcHullMA(closes: number[], period = 20): (number | null)[] {
+  const half = Math.floor(period / 2);
+  const sqrtP = Math.round(Math.sqrt(period));
+  const wmaFull = calcWMA(closes, period);
+  const wmaHalf = calcWMA(closes, half);
+  // 2 * WMA(n/2) - WMA(n)
+  const n = closes.length;
+  const diff: (number | null)[] = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    if (wmaHalf[i] !== null && wmaFull[i] !== null) {
+      diff[i] = 2 * wmaHalf[i]! - wmaFull[i]!;
+    }
+  }
+  // WMA of diff with sqrt(n) period — only over non-null diff values
+  const diffVals: number[] = [];
+  const diffIdx: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (diff[i] !== null) { diffVals.push(diff[i]!); diffIdx.push(i); }
+  }
+  const hmaInner = calcWMA(diffVals, sqrtP);
+  const result: (number | null)[] = new Array(n).fill(null);
+  for (let j = 0; j < diffIdx.length; j++) {
+    result[diffIdx[j]] = hmaInner[j];
+  }
+  return result;
+}
+
+function calcParabolicSAR(
+  highs: number[],
+  lows: number[],
+  af = 0.02,
+  maxAf = 0.2,
+): (number | null)[] {
+  const n = highs.length;
+  const result: (number | null)[] = new Array(n).fill(null);
+  if (n < 2) return result;
+
+  let isRising = true;
+  let sar = lows[0];
+  let ep = highs[0];
+  let currentAf = af;
+
+  for (let i = 1; i < n; i++) {
+    const prevSar = sar;
+    sar = prevSar + currentAf * (ep - prevSar);
+
+    if (isRising) {
+      sar = Math.min(sar, lows[i - 1]);
+      if (i >= 2) sar = Math.min(sar, lows[i - 2]);
+      if (highs[i] > ep) {
+        ep = highs[i];
+        currentAf = Math.min(currentAf + af, maxAf);
+      }
+      if (lows[i] < sar) {
+        isRising = false;
+        sar = ep;
+        ep = lows[i];
+        currentAf = af;
+      }
+    } else {
+      sar = Math.max(sar, highs[i - 1]);
+      if (i >= 2) sar = Math.max(sar, highs[i - 2]);
+      if (lows[i] < ep) {
+        ep = lows[i];
+        currentAf = Math.min(currentAf + af, maxAf);
+      }
+      if (highs[i] > sar) {
+        isRising = true;
+        sar = ep;
+        ep = highs[i];
+        currentAf = af;
+      }
+    }
+    result[i] = sar;
+  }
+  return result;
+}
+
+function calcOBV(closes: number[], volumes: number[]): (number | null)[] {
+  const n = closes.length;
+  const result: (number | null)[] = new Array(n).fill(null);
+  if (n === 0) return result;
+  result[0] = 0;
+  for (let i = 1; i < n; i++) {
+    const prev = result[i - 1]!;
+    if (closes[i] > closes[i - 1]) result[i] = prev + volumes[i];
+    else if (closes[i] < closes[i - 1]) result[i] = prev - volumes[i];
+    else result[i] = prev;
+  }
+  return result;
+}
+
+interface KeltnerResult {
+  upper: (number | null)[];
+  middle: (number | null)[];
+  lower: (number | null)[];
+}
+
+function calcKeltnerChannels(
+  bars: OhlcvBar[],
+  period = 20,
+  mult = 2.0,
+): KeltnerResult {
+  const n = bars.length;
+  const highs = bars.map((b) => b.high);
+  const lows = bars.map((b) => b.low);
+  const closes = bars.map((b) => b.close);
+  const middle = calcEMA(closes, period);
+  const atrVals = calcATR(highs, lows, closes).values;
+  const upper: (number | null)[] = new Array(n).fill(null);
+  const lower: (number | null)[] = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    if (middle[i] !== null && atrVals[i] !== null) {
+      upper[i] = middle[i]! + mult * atrVals[i]!;
+      lower[i] = middle[i]! - mult * atrVals[i]!;
+    }
+  }
+  return { upper, middle, lower };
+}
+
+function calcVWMA(bars: OhlcvBar[], period = 20): (number | null)[] {
+  const n = bars.length;
+  const result: (number | null)[] = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i++) {
+    let sumCV = 0;
+    let sumV = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const vol = bars[j].volume ?? 1;
+      sumCV += bars[j].close * vol;
+      sumV += vol;
+    }
+    result[i] = sumV > 0 ? sumCV / sumV : null;
+  }
+  return result;
+}
+
 // Build LineData array from parallel arrays of time and values
 function buildLineData(
   times: Time[],
@@ -1228,6 +1462,16 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
     adx: null,
     adxPlus: null,
     adxMinus: null,
+    williamsR: null,
+    cci: null,
+    dema: null,
+    hullMA: null,
+    parSar: null,
+    obv: null,
+    keltnerUpper: null,
+    keltnerMiddle: null,
+    keltnerLower: null,
+    vwma: null,
   });
 
   // pivot price lines
@@ -1359,6 +1603,10 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
         stochK: null, stochD: null,
         atr: null,
         adx: null, adxPlus: null, adxMinus: null,
+        williamsR: null, cci: null, dema: null, hullMA: null,
+        parSar: null, obv: null,
+        keltnerUpper: null, keltnerMiddle: null, keltnerLower: null,
+        vwma: null,
       };
       pivotRef.current = { lines: [], series: null };
     };
@@ -1841,6 +2089,132 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
         if (ind[key]) { removeSeries(ind[key]!); ind[key] = null; }
       }
     }
+
+    // --- Williams %R ---
+    if (indicators.showWilliamsR) {
+      if (!ind.williamsR) {
+        ind.williamsR = chart.addSeries(LineSeries, {
+          color: "#f472b6", lineWidth: 1, priceScaleId: "wr",
+          title: "W%R(14)", lastValueVisible: true, priceLineVisible: false,
+        });
+        chart.priceScale("wr").applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
+      }
+      ind.williamsR.setData(buildLineData(times, calcWilliamsR(highs, lows, closes)));
+    } else if (ind.williamsR) {
+      removeSeries(ind.williamsR); ind.williamsR = null;
+    }
+
+    // --- CCI ---
+    if (indicators.showCCI) {
+      if (!ind.cci) {
+        ind.cci = chart.addSeries(LineSeries, {
+          color: "#38bdf8", lineWidth: 1, priceScaleId: "cci",
+          title: "CCI(20)", lastValueVisible: true, priceLineVisible: false,
+        });
+        chart.priceScale("cci").applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
+      }
+      ind.cci.setData(buildLineData(times, calcCCI(highs, lows, closes)));
+    } else if (ind.cci) {
+      removeSeries(ind.cci); ind.cci = null;
+    }
+
+    // --- DEMA ---
+    if (indicators.showDEMA) {
+      if (!ind.dema) {
+        ind.dema = chart.addSeries(LineSeries, {
+          color: "#f97316", lineWidth: 1, priceScaleId: "right",
+          title: "DEMA20", lastValueVisible: false, priceLineVisible: false,
+        });
+      }
+      ind.dema.setData(buildLineData(times, calcDEMA(closes, 20)));
+    } else if (ind.dema) {
+      removeSeries(ind.dema); ind.dema = null;
+    }
+
+    // --- Hull MA ---
+    if (indicators.showHullMA) {
+      if (!ind.hullMA) {
+        ind.hullMA = chart.addSeries(LineSeries, {
+          color: "#a855f7", lineWidth: 1, priceScaleId: "right",
+          title: "HMA20", lastValueVisible: false, priceLineVisible: false,
+        });
+      }
+      ind.hullMA.setData(buildLineData(times, calcHullMA(closes, 20)));
+    } else if (ind.hullMA) {
+      removeSeries(ind.hullMA); ind.hullMA = null;
+    }
+
+    // --- Parabolic SAR ---
+    if (indicators.showParabolicSAR) {
+      if (!ind.parSar) {
+        ind.parSar = chart.addSeries(LineSeries, {
+          color: "#facc15", lineWidth: 1, priceScaleId: "right",
+          title: "SAR", lastValueVisible: false, priceLineVisible: false,
+          pointMarkersVisible: true,
+        });
+      }
+      ind.parSar.setData(buildLineData(times, calcParabolicSAR(highs, lows)));
+    } else if (ind.parSar) {
+      removeSeries(ind.parSar); ind.parSar = null;
+    }
+
+    // --- OBV ---
+    if (indicators.showOBV) {
+      const volumes = bars.map((b) => b.volume ?? 0);
+      if (!ind.obv) {
+        ind.obv = chart.addSeries(LineSeries, {
+          color: "#94a3b8", lineWidth: 1, priceScaleId: "obv",
+          title: "OBV", lastValueVisible: true, priceLineVisible: false,
+        });
+        chart.priceScale("obv").applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
+      }
+      ind.obv.setData(buildLineData(times, calcOBV(closes, volumes)));
+    } else if (ind.obv) {
+      removeSeries(ind.obv); ind.obv = null;
+    }
+
+    // --- Keltner Channels ---
+    if (indicators.showKeltner) {
+      const kc = calcKeltnerChannels(bars, 20, 2.0);
+      if (!ind.keltnerUpper) {
+        ind.keltnerUpper = chart.addSeries(LineSeries, {
+          color: "rgba(249,115,22,0.4)", lineWidth: 1, lineStyle: 2, priceScaleId: "right",
+          title: "KC Upper", lastValueVisible: false, priceLineVisible: false,
+        });
+      }
+      if (!ind.keltnerMiddle) {
+        ind.keltnerMiddle = chart.addSeries(LineSeries, {
+          color: "#f97316", lineWidth: 1, priceScaleId: "right",
+          title: "KC Mid", lastValueVisible: false, priceLineVisible: false,
+        });
+      }
+      if (!ind.keltnerLower) {
+        ind.keltnerLower = chart.addSeries(LineSeries, {
+          color: "rgba(249,115,22,0.4)", lineWidth: 1, lineStyle: 2, priceScaleId: "right",
+          title: "KC Lower", lastValueVisible: false, priceLineVisible: false,
+        });
+      }
+      ind.keltnerUpper.setData(buildLineData(times, kc.upper));
+      ind.keltnerMiddle.setData(buildLineData(times, kc.middle));
+      ind.keltnerLower.setData(buildLineData(times, kc.lower));
+    } else {
+      for (const key of ["keltnerUpper", "keltnerMiddle", "keltnerLower"] as const) {
+        if (ind[key]) { removeSeries(ind[key]!); ind[key] = null; }
+      }
+    }
+
+    // --- VWMA ---
+    if (indicators.showVWMA) {
+      if (!ind.vwma) {
+        ind.vwma = chart.addSeries(LineSeries, {
+          color: "#2dd4bf", lineWidth: 1, priceScaleId: "right",
+          title: "VWMA20", lastValueVisible: false, priceLineVisible: false,
+        });
+      }
+      ind.vwma.setData(buildLineData(times, calcVWMA(bars, 20)));
+    } else if (ind.vwma) {
+      removeSeries(ind.vwma); ind.vwma = null;
+    }
   }, [indicators]);
 
   // Refresh indicators whenever bars or indicator config changes
@@ -2321,6 +2695,46 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
               <span className="w-2 h-2 rounded-full bg-[#94a3b8] inline-block shrink-0" />
               Pivot Points
             </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showDEMA}
+              onCheckedChange={(v) => toggleIndicator("showDEMA", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#f97316] inline-block shrink-0" />
+              DEMA (20)
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showHullMA}
+              onCheckedChange={(v) => toggleIndicator("showHullMA", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#a855f7] inline-block shrink-0" />
+              Hull MA (20)
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showParabolicSAR}
+              onCheckedChange={(v) => toggleIndicator("showParabolicSAR", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#facc15] inline-block shrink-0" />
+              Parabolic SAR
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showKeltner}
+              onCheckedChange={(v) => toggleIndicator("showKeltner", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#f97316] inline-block shrink-0" />
+              Keltner Channels (20, 2)
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showVWMA}
+              onCheckedChange={(v) => toggleIndicator("showVWMA", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#2dd4bf] inline-block shrink-0" />
+              VWMA (20)
+            </DropdownMenuCheckboxItem>
 
             <DropdownMenuSeparator className="bg-border-default" />
             {/* Volume */}
@@ -2334,6 +2748,14 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             >
               <span className="w-2 h-2 rounded-full bg-[#64748b] inline-block shrink-0" />
               Volume
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showOBV}
+              onCheckedChange={(v) => toggleIndicator("showOBV", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#94a3b8] inline-block shrink-0" />
+              OBV
             </DropdownMenuCheckboxItem>
 
             <DropdownMenuSeparator className="bg-border-default" />
@@ -2380,6 +2802,22 @@ export default function ChartWidget({ node: _node }: ChartWidgetProps) {
             >
               <span className="w-2 h-2 rounded-full bg-[#fbbf24] inline-block shrink-0" />
               ADX (14)
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showWilliamsR}
+              onCheckedChange={(v) => toggleIndicator("showWilliamsR", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#f472b6] inline-block shrink-0" />
+              Williams %R (14)
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={indicators.showCCI}
+              onCheckedChange={(v) => toggleIndicator("showCCI", v)}
+              className="text-[11px] gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#38bdf8] inline-block shrink-0" />
+              CCI (20)
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>

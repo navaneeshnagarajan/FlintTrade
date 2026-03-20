@@ -36,7 +36,7 @@
 - [x] Phase 7: Tools Build-Out (6 stub tools → functional — TradeJournal, PnLDashboard, StrategyBuilder, BacktestLab, MarketIntelligence, FlowBuilder)
 - [x] Phase 8: Routes (/setup wizard with Quick/Guided/Advanced, /invest with holdings+SIP, /learn placeholder)
 - [x] Phase 9: Python Upgrades (indicators package — 13 indicators, 42 tests; EMASuperTrendDEMA strategy)
-- [ ] Phase 10: Testing + Beta Release (918 tests green, perf clean — tag v0.1.0-beta pending user verification)
+- [ ] Phase 10: Testing + Beta Release (966 tests green, Glide DataGrid + indicators wired + Rust tick-engine — tag v0.1.0-beta pending user verification)
 
 ---
 
@@ -180,11 +180,11 @@
 ### New Package: packages/indicators/
 - [x] Create package — EMA, SMA, DEMA, Supertrend, VWAP, RSI, MACD, Stochastic, Williams %R, ATR, Bollinger Bands, Keltner Channels (pure NumPy, 42 tests)
 - [x] Add Numba streaming indicators (absorbed pyindicators patterns, 31 total) (absorb pyindicators)
-- [ ] Wire into Chart widget for indicator overlays (v0.2.0 — deferred)
+- [x] Wire into Chart widget for indicator overlays — 8 new indicators (Williams %R, CCI, DEMA, Hull MA, Parabolic SAR, OBV, Keltner, VWMA) + POST /api/v1/indicators/compute Python API (23 tests)
 
 ### Backtest Engine Upgrade
 - [x] Integrate VectorBT for parameter sweeps and exploration — VectorBTRunner, tearsheet, optimize
-- [ ] Start Rust/PyO3 backtest prototype (raptorbt pattern) — deferred to v0.2.0
+- [x] Start Rust/PyO3 backtest prototype (raptorbt pattern) — tick-engine package: TickSimulator, EMA crossover built-in, Sharpe/drawdown metrics, 25/25 tests, maturin wheel installed
 
 ### Strategy Implementation
 - [x] Implement EMA 20/50 + Supertrend 10/3 + DEMA 15 strategy (EMASuperTrendDEMA — static→dynamic SL, 5-candle rule, lot sizes, target at DEMA 15)
@@ -215,7 +215,7 @@
   - [ ] Every route: /terminal, /setup, /invest
 - [ ] Test with Kotak Neo sandbox if available
 - [ ] Fix all bugs found during testing
-- [ ] Performance optimization — Glide Data Grid for option chain (canvas-rendered, 100K+ updates/sec)
+- [x] Performance optimization — Glide Data Grid for option chain (canvas-rendered, 100K+ updates/sec) — DataEditor replaces custom table, ATM row highlight, action cells, scrollTo ATM
 - [ ] /learn route — basic content only (Market Basics, Glossary, Strategy Library browse)
 
 ### Beta Release Checklist

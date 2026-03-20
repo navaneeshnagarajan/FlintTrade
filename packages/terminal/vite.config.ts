@@ -35,6 +35,11 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      // Glide Data Grid v6 has optional peer deps we don't use. Externalize them
+      // to suppress "unresolved import" build errors without installing them.
+      //   react-responsive-carousel — image overlay editor (unused)
+      //   marked — markdown cell renderer (unused)
+      external: ["react-responsive-carousel", "marked"],
       output: {
         manualChunks: (id: string) => {
           // React core — smallest possible initial payload
