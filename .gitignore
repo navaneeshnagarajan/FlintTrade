@@ -71,9 +71,10 @@ chroma_data/
 .gitnexus/
 
 # === Reference (cloned repos, screenshots, captured code — local only) ===
-.reference/repos/
-.reference/screenshots/
-.reference/CAPTURE_STATUS.md
+# === DEV-ONLY (never in public repo) ===
+.reference/
+.claude/
+bugs/
 
 # === Firecrawl scrape cache ===
 .firecrawl/
