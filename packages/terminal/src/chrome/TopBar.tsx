@@ -167,7 +167,7 @@ export default function TopBar() {
   const pnlSign = totalPnl >= 0 ? "+" : "";
 
   return (
-    <div className="h-10 bg-surface-card border-b border-border-default flex items-center justify-between px-3 select-none shrink-0">
+    <div className="h-10 bg-surface-card border-b border-border-default flex items-center justify-between px-3 select-none shrink-0 animate-fade-in">
       {/* Left: Logo + Route Tabs + Separator + Workspace Tabs */}
       <div className="flex items-center gap-3">
         <LogoIcon size={20} />
@@ -302,7 +302,7 @@ export default function TopBar() {
         <div className="flex items-center gap-1.5">
           <div
             className={`w-2 h-2 rounded-full transition-colors ${
-              connected ? "bg-profit ring-2 ring-profit/20" : "bg-loss"
+              connected ? "bg-profit ring-2 ring-profit/20 animate-[pulse-glow_2s_ease-in-out_infinite]" : "bg-loss"
             }`}
           />
           <span className="text-xs text-text-secondary">

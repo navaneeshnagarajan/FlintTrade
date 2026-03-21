@@ -1386,7 +1386,7 @@ export default function SetupRoute() {
 
         {/* Card */}
         <Card className="bg-surface-card border-border-default">
-          <CardContent className="pt-6 pb-6 px-6">
+          <CardContent key={step} className="pt-6 pb-6 px-6 animate-fade-in-up">
             {renderStep()}
           </CardContent>
         </Card>

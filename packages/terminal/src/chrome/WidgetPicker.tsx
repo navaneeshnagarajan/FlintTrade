@@ -93,7 +93,7 @@ export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-130 max-h-[80vh] flex flex-col bg-surface-card border-border-default p-0">
+      <DialogContent className="sm:max-w-130 max-h-[80vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default">
           <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
             Add Widget
