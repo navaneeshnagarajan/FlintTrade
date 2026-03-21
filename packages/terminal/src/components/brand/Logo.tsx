@@ -5,7 +5,7 @@
  * Wordmark: "FlintTrade" text in Geist font, weight 700.
  * Full: Icon + wordmark side by side.
  *
- * Works on dark backgrounds (#0a0a0f). Recognizable from 16px to 64px+.
+ * Works on any background (F uses currentColor). Recognizable from 16px to 64px+.
  */
 
 interface LogoProps {
@@ -42,11 +42,11 @@ export function LogoIcon({
       aria-label="FlintTrade icon"
     >
       {/* Vertical bar — left stem of F */}
-      <rect x="4" y="4" width="5" height="24" rx="1.5" fill="#e4e4e7" />
+      <rect x="4" y="4" width="5" height="24" rx="1.5" fill="currentColor" />
       {/* Top horizontal bar */}
-      <rect x="4" y="4" width="18" height="5" rx="1.5" fill="#e4e4e7" />
+      <rect x="4" y="4" width="18" height="5" rx="1.5" fill="currentColor" />
       {/* Middle horizontal bar */}
-      <rect x="4" y="13" width="14" height="5" rx="1.5" fill="#e4e4e7" />
+      <rect x="4" y="13" width="14" height="5" rx="1.5" fill="currentColor" />
       {/* Spark / flint — angular diamond pointing up-right at ~45 degrees */}
       <path
         d="M23 2 L27 6 L23 10 L21 8 L24 5 L21 4 Z"
