@@ -266,36 +266,58 @@ html.density-compact {
   }
 }
 
-/* ---------- Dockview theme overrides ---------- */
+/* ---------- Dockview theme overrides — compact, content-first ---------- */
 .dockview-theme-dark {
+  /* Slim tab bar — less chrome, more content */
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tab-font-size: 11px;
+
+  /* Tab colors — subtle, not attention-grabbing */
   --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-surface-base);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-card);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-surface-base);
-  --dv-tab-divider-color: var(--color-border-subtle);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-secondary);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
-  --dv-separator-border: var(--color-border-default);
-  --dv-paneview-header-border-color: var(--color-border-default);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+
+  /* Clean separators */
+  --dv-separator-border: var(--color-border-subtle);
+  --dv-paneview-header-border-color: var(--color-border-subtle);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--color-border-strong);
+
+  /* Backgrounds */
   --dv-background-color: var(--color-surface-base);
   --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* Hide close buttons on tabs — less visual noise */
+.dockview-theme-dark .dv-default-tab-action {
+  display: none;
+}
+
+/* Show close button only on hover of active tab */
+.dockview-theme-dark .dv-tab.dv-active-tab:hover .dv-default-tab-action {
+  display: flex;
 }
 
 /* ---------- Dockview light theme overrides ---------- */
 html.theme-light .dockview-theme-dark {
   --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
-  --dv-activegroup-hiddenpanel-tab-background-color: #f8f9fa;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #ffffff;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: #f8f9fa;
-  --dv-tab-divider-color: #e0e5f0;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #f0f2f5;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: #1a1a2a;
-  --dv-activegroup-hiddenpanel-tab-color: #888898;
-  --dv-inactivegroup-visiblepanel-tab-color: #555570;
-  --dv-inactivegroup-hiddenpanel-tab-color: #888898;
-  --dv-separator-border: #d0d5e0;
-  --dv-paneview-header-border-color: #d0d5e0;
+  --dv-activegroup-hiddenpanel-tab-color: #aaa;
+  --dv-inactivegroup-visiblepanel-tab-color: #666;
+  --dv-inactivegroup-hiddenpanel-tab-color: #aaa;
+  --dv-separator-border: #e8eaf0;
+  --dv-paneview-header-border-color: #e8eaf0;
   --dv-background-color: #f8f9fa;
   --dv-group-view-background-color: #f8f9fa;
 }

@@ -105,6 +105,7 @@ export default function TerminalRoute() {
             className="dockview-theme-dark"
             onReady={onDockviewReady}
             components={widgetComponents}
+            singleTabMode="fullwidth"
           />
         </div>
       )}

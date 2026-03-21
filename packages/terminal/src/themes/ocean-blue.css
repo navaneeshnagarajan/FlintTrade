@@ -1,17 +1,17 @@
 html.theme-ocean-blue {
-  --color-surface-base: #0a0f18;
-  --color-surface-card: #141c28;
-  --color-surface-elevated: #1a2a3a;
-  --color-surface-hover: #202a3a;
-  --color-surface-active: #2a3a4a;
+  --color-surface-base: #0b0f16;
+  --color-surface-card: #131a24;
+  --color-surface-elevated: #1a2430;
+  --color-surface-hover: #1f2c3a;
+  --color-surface-active: #283844;
   --color-surface-stripe: #0d1218;
-  --color-border-default: #1a3a5a;
-  --color-border-subtle: #142a4a;
-  --color-border-strong: #2a5a8a;
-  --color-text-primary: #d0e8ff;
-  --color-text-secondary: #7a9aaa;
-  --color-text-muted: #5a7a8a;
-  --color-text-disabled: #3a5a6a;
-  --primary: 210 100% 60%;
-  --ring: 210 100% 60%;
+  --color-border-default: #223040;
+  --color-border-subtle: #1a2838;
+  --color-border-strong: #325068;
+  --color-text-primary: #d4e4f0;
+  --color-text-secondary: #7a98b0;
+  --color-text-muted: #5a7a90;
+  --color-text-disabled: #3a5568;
+  --primary: 210 90% 58%;
+  --ring: 210 90% 58%;
 }

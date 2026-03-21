@@ -132,7 +132,7 @@ export default function WelcomeRoute() {
   const [step, setStep] = useState(0);
   const theme = useSettingsStore((s) => s.theme);
 
-  // Pillar click — set minimal persona + navigate to route
+  // Pillar click — set persona preference (don't navigate, let CTA handle it)
   const handlePillarClick = useCallback(
     (pillar: Pillar) => {
       const store = useSettingsStore.getState();
@@ -144,9 +144,10 @@ export default function WelcomeRoute() {
             : "trader",
       );
       store.setInterests([pillar.title.toLowerCase()]);
-      navigate(pillar.route);
+      // Don't navigate — user picks their path via CTA buttons below
+      setStep(5);
     },
-    [navigate],
+    [],
   );
 
   // Skip handler — jump straight to CTAs
@@ -396,7 +397,7 @@ export default function WelcomeRoute() {
                 </ShimmerButton>
                 <button
                   type="button"
-                  onClick={() => navigate("/trade")}
+                  onClick={() => navigate("/explore")}
                   className="border border-border-default text-text-primary px-8 py-3 rounded-lg text-lg hover:bg-surface-hover transition-colors duration-200 cursor-pointer"
                 >
                   Explore First

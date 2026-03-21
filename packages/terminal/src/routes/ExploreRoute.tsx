@@ -498,12 +498,11 @@ export default function ExploreRoute() {
     (route: string, title: string) => {
       setToast({
         visible: true,
-        message: `Connect OpenAlgo in Settings for live ${title} data.`,
+        message: `Opening ${title} — connect OpenAlgo in Settings for live data.`,
       });
-      // Small delay so user sees the toast before the route transition
       setTimeout(() => {
         navigate(route);
-      }, 600);
+      }, 800);
     },
     [navigate],
   );

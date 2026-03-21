@@ -1,17 +1,17 @@
 html.theme-obsidian {
-  --color-surface-base: #000000;
-  --color-surface-card: #0d0d15;
-  --color-surface-elevated: #161620;
-  --color-surface-hover: #1a1a24;
-  --color-surface-active: #252535;
-  --color-surface-stripe: #080812;
-  --color-border-default: #1f1f2e;
-  --color-border-subtle: #141420;
-  --color-border-strong: #3a3a4a;
-  --color-text-primary: #f5f5fa;
-  --color-text-secondary: #a0a0ab;
-  --color-text-muted: #7a7a88;
-  --color-text-disabled: #555560;
-  --primary: 217 95% 65%;
-  --ring: 217 95% 65%;
+  --color-surface-base: #09090b;
+  --color-surface-card: #111114;
+  --color-surface-elevated: #19191e;
+  --color-surface-hover: #1f1f25;
+  --color-surface-active: #28282f;
+  --color-surface-stripe: #0c0c10;
+  --color-border-default: #222228;
+  --color-border-subtle: #18181e;
+  --color-border-strong: #38383f;
+  --color-text-primary: #ebebef;
+  --color-text-secondary: #9898a0;
+  --color-text-muted: #6b6b75;
+  --color-text-disabled: #454550;
+  --primary: 220 90% 60%;
+  --ring: 220 90% 60%;
 }
