@@ -102,6 +102,8 @@ export const modifyOrder = (params: Record<string, unknown>) =>
   post<void>("modifyorder", params);
 export const orderStatus = (strategy: string, orderid: string) =>
   post<Order>("orderstatus", { strategy, orderid });
+export const openPosition = (params: PlaceOrderParams) =>
+  post<Record<string, unknown>>("openposition", params as unknown as Record<string, unknown>);
 
 // --- Data ---
 export const getQuotes = (symbol: string, exchange = "NSE") =>
@@ -140,9 +142,35 @@ export function searchSymbol(query: string): Promise<Array<{ symbol: string; exc
   return post<Array<{ symbol: string; exchange: string }>>("search", { query: sanitized });
 }
 export const getIntervals = () => get<string[]>("intervals");
+export const getMultiOptionGreeks = (symbols: Array<{ symbol: string; exchange: string }>) =>
+  post<Record<string, unknown>[]>("multioptiongreeks", { symbols });
+export const getOptionSymbol = (
+  underlying: string,
+  exchange: string,
+  expiry_date: string,
+  option_type: string,
+  offset: string,
+) => post<Record<string, unknown>>("optionsymbol", { underlying, exchange, expiry_date, option_type, offset });
+export const getSymbol = (symbol: string, exchange: string) =>
+  post<Record<string, unknown>>("symbol", { symbol, exchange });
+export const getSyntheticFuture = (symbol: string, exchange: string, expiry_date?: string) =>
+  post<Record<string, unknown>>("syntheticfuture", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) });
+export const getTicker = (symbol: string, exchange: string) =>
+  post<Record<string, unknown>>("ticker", { symbol, exchange });
+export const getInstruments = () => get<Record<string, unknown>[]>("instruments");
+export const getGex = (symbol: string, exchange: string, expiry_date?: string) =>
+  post<Record<string, unknown>>("gex", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) });
+export const getIVSmile = (symbol: string, exchange: string, expiry_date?: string) =>
+  post<Record<string, unknown>>("iv_smile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) });
+export const getMaxPain = (symbol: string, exchange: string, expiry_date?: string) =>
+  post<Record<string, unknown>>("max_pain", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) });
+export const getOIProfile = (symbol: string, exchange: string, expiry_date?: string) =>
+  post<Record<string, unknown>>("oi_profile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) });
 
 // --- Account ---
 export const getFunds = () => post<Funds>("funds");
+export const getMargin = (symbol: string, exchange: string, qty: number, product: string, action: string) =>
+  post<Record<string, unknown>>("margin", { symbol, exchange, qty, product, action });
 
 // OpenAlgo wraps list responses: { data: { orders: [...], statistics: {...} } }
 // post() unwraps json.data, so we receive { orders: [...], statistics: {...} }.
@@ -176,3 +204,7 @@ export const getHoldings = async (): Promise<Holding[]> => {
 export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
 export const analyzerStatus = () => get<{ enabled: boolean }>("analyzer/status");
 export const analyzerToggle = () => post<void>("analyzer/toggle");
+export const getHolidays = () => get<Record<string, unknown>[]>("holidays");
+export const getTimings = () => get<Record<string, unknown>>("timings");
+export const sendTelegram = (message: string) =>
+  post<Record<string, unknown>>("telegram", { message });
