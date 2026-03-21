@@ -23,9 +23,9 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[3])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-import math
+import math  # noqa: E402
 
-import numpy as np
+import numpy as np  # noqa: E402
 from flask import Flask, jsonify, request  # noqa: E402
 
 from packages.core.src.config import Settings  # noqa: E402
@@ -151,7 +151,7 @@ def create_flask_app() -> Flask:
             volumes = np.array(
                 [float(b.get("volume", 0) or 0) for b in raw_bars], dtype=np.float64
             )
-            times_int = [int(b["time"]) for b in raw_bars]
+            _ = [int(b["time"]) for b in raw_bars]  # validate time field exists
         except (KeyError, TypeError, ValueError) as exc:
             return jsonify({
                 "status": "error",
