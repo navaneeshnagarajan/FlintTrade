@@ -1,47 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <!-- FlintTrade Logo v2 — Sharp angular flint spark + upward trading line -->
-  <!-- Flint spark: sharp diamond/arrowhead shape (angular, not soft flame) -->
-  <!-- Trading line: clean ascending chart line with arrow -->
+  <!-- FlintTrade Logo — Geometric "F" letterform with green spark accent -->
+  <!-- Matches the LogoIcon component in packages/terminal/src/components/brand/Logo.tsx -->
+  <!-- Scaled from 32x32 viewBox to 512x512 for high-res display -->
 
-  <defs>
-    <linearGradient id="spark" x1="0.3" y1="0" x2="0.7" y2="1">
-      <stop offset="0%" stop-color="#FF8C42" />
-      <stop offset="60%" stop-color="#F7931A" />
-      <stop offset="100%" stop-color="#E8720C" />
-    </linearGradient>
-    <linearGradient id="line" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0%" stop-color="#2563EB" />
-      <stop offset="100%" stop-color="#10B981" />
-    </linearGradient>
-    <linearGradient id="glow" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#FF8C42" stop-opacity="0.3" />
-      <stop offset="100%" stop-color="#FF8C42" stop-opacity="0" />
-    </linearGradient>
-  </defs>
+  <!-- Vertical bar — left stem of F -->
+  <rect x="64" y="64" width="80" height="384" rx="24" fill="#e4e4e7" />
+  <!-- Top horizontal bar -->
+  <rect x="64" y="64" width="288" height="80" rx="24" fill="#e4e4e7" />
+  <!-- Middle horizontal bar -->
+  <rect x="64" y="208" width="224" height="80" rx="24" fill="#e4e4e7" />
 
-  <!-- Subtle glow behind spark -->
-  <ellipse cx="256" cy="220" rx="80" ry="120" fill="url(#glow)" />
-
-  <!-- Flint spark — sharp angular diamond/crystal shape -->
-  <path d="M256 56 L310 170 L288 190 L330 300 L256 370 L182 300 L224 190 L202 170 Z"
-        fill="url(#spark)" />
-
-  <!-- Inner highlight facet (gives crystal/flint look) -->
-  <path d="M256 90 L290 175 L272 192 L300 280 L256 330 L212 280 L240 192 L222 175 Z"
-        fill="none" stroke="#FFB86C" stroke-width="1.5" opacity="0.4" />
-
-  <!-- Small spark particles -->
-  <circle cx="320" cy="140" r="3" fill="#FFB86C" opacity="0.7" />
-  <circle cx="340" cy="165" r="2" fill="#FFB86C" opacity="0.5" />
-  <circle cx="192" cy="150" r="2.5" fill="#FFB86C" opacity="0.6" />
-  <circle cx="178" cy="175" r="1.5" fill="#FFB86C" opacity="0.4" />
-
-  <!-- Trading chart line — clean upward trend through the spark -->
-  <path d="M80 400 L160 360 L220 380 L280 290 L340 310 L400 210 L440 170"
-        stroke="url(#line)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none" />
-
-  <!-- Arrow tip on chart line -->
-  <path d="M430 158 L440 170 L428 180"
-        stroke="url(#line)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none" />
-
+  <!-- Spark / flint — angular diamond pointing up-right -->
+  <path
+    d="M368 32 L432 96 L368 160 L336 128 L384 80 L336 64 Z"
+    fill="#22c55e"
+  />
 </svg>
