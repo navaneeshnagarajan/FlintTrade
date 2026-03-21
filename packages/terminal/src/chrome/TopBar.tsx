@@ -1,8 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Wrench, Grid3x3, Plus } from "lucide-react";
+import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { LogoIcon } from "@/components/brand/Logo";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -64,11 +71,80 @@ export default function TopBar() {
   const activeTabId = useLayoutStore((s) => s.activeTabId);
   const setActiveTab = useLayoutStore((s) => s.setActiveTab);
   const addTab = useLayoutStore((s) => s.addTab);
+  const removeTab = useLayoutStore((s) => s.removeTab);
+  const renameTab = useLayoutStore((s) => s.renameTab);
+  const saveTabLayout = useLayoutStore((s) => s.saveTabLayout);
+  const getTabLayout = useLayoutStore((s) => s.getTabLayout);
   const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
   const setToolsMenuOpen = useLayoutStore((s) => s.setToolsMenuOpen);
   const toolsMenuOpen = useLayoutStore((s) => s.toolsMenuOpen);
 
+  const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+
   const connected = status === "connected";
+
+  const handleNewBlank = useCallback(() => {
+    addTab();
+  }, [addTab]);
+
+  const handleCloneCurrent = useCallback(() => {
+    const currentTab = tabs.find((t) => t.id === activeTabId);
+    if (!currentTab) return;
+    const layout = getTabLayout(activeTabId);
+    addTab(`${currentTab.name} (Copy)`);
+    // After addTab, the new tab becomes active. Save the cloned layout to it.
+    const newTabs = useLayoutStore.getState().tabs;
+    const newTab = newTabs[newTabs.length - 1];
+    if (newTab && layout) {
+      saveTabLayout(newTab.id, layout);
+    }
+  }, [tabs, activeTabId, addTab, getTabLayout, saveTabLayout]);
+
+  const handleTabContextMenu = useCallback(
+    (e: React.MouseEvent, tabId: string) => {
+      e.preventDefault();
+      setContextMenu({ tabId, x: e.clientX, y: e.clientY });
+    },
+    [],
+  );
+
+  const handleRenameTab = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const newName = window.prompt("Rename workspace:", tab.name);
+      if (newName && newName.trim()) {
+        renameTab(tabId, newName.trim());
+      }
+      setContextMenu(null);
+    },
+    [tabs, renameTab],
+  );
+
+  const handleDeleteTab = useCallback(
+    (tabId: string) => {
+      if (tabs.length <= 1) {
+        setContextMenu(null);
+        return;
+      }
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const confirmed = window.confirm(`Delete workspace "${tab.name}"?`);
+      if (confirmed) {
+        removeTab(tabId);
+      }
+      setContextMenu(null);
+    },
+    [tabs, removeTab],
+  );
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, [contextMenu]);
 
   // Ping OpenAlgo every 10s to check connection
   useEffect(() => {
@@ -123,6 +199,7 @@ export default function TopBar() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
+                  onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
                   className={`px-3 py-1 text-xs font-heading rounded transition-colors ${
                     tab.id === activeTabId
                       ? "bg-surface-hover text-text-primary"
@@ -133,14 +210,57 @@ export default function TopBar() {
                 </button>
               ))}
 
-              <button
-                onClick={() => addTab()}
-                title="New layout"
-                className="px-2 py-1 text-xs text-text-muted hover:text-text-primary transition-colors"
-              >
-                <Plus size={12} />
-              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    title="New workspace"
+                    className="px-2 py-1 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded transition-colors"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-48">
+                  <DropdownMenuItem onClick={handleNewBlank}>
+                    <LayoutGrid size={14} className="mr-2" />
+                    New Blank Workspace
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleCloneCurrent}>
+                    <Copy size={14} className="mr-2" />
+                    Clone Current
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => { /* TODO: show preset picker */ }}>
+                    <Layers size={14} className="mr-2" />
+                    New from Template...
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
+
+            {/* Right-click context menu for workspace tabs */}
+            {contextMenu && (
+              <div
+                className="fixed z-50 min-w-32 bg-popover border border-border rounded-md p-1 shadow-md"
+                style={{ top: contextMenu.y, left: contextMenu.x }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => handleRenameTab(contextMenu.tabId)}
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-popover-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                >
+                  <Pencil size={14} />
+                  Rename
+                </button>
+                <button
+                  onClick={() => handleDeleteTab(contextMenu.tabId)}
+                  disabled={tabs.length <= 1}
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  <Trash2 size={14} />
+                  Delete
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
