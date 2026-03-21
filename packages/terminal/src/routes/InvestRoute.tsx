@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   useReactTable,
   getCoreRowModel,
@@ -25,6 +26,10 @@ import {
   Bell,
   Globe,
   DollarSign,
+  Plus,
+  Info,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,9 +45,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
-import type { Holding } from "@/types/api";
+import { getMultiQuotes } from "@/services/api";
+import type { Holding, Quote } from "@/types/api";
 import { cn } from "@/lib/utils";
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
@@ -89,9 +101,57 @@ function formatINR(value: number): string {
   }).format(value);
 }
 
+function formatINRCompact(value: number): string {
+  if (Math.abs(value) >= 1_00_00_000) {
+    return `₹${(value / 1_00_00_000).toFixed(2)}Cr`;
+  }
+  if (Math.abs(value) >= 1_00_000) {
+    return `₹${(value / 1_00_000).toFixed(2)}L`;
+  }
+  return formatINR(value);
+}
+
 function formatPercent(value: number): string {
   const sign = value >= 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;
+}
+
+// ─── Shared: Disabled action button with tooltip ───────────────────────────────
+
+function DisabledActionButton({
+  label,
+  tooltip,
+  icon: Icon = Plus,
+}: {
+  label: string;
+  tooltip: string;
+  icon?: typeof Plus;
+}) {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              className="text-xs border-border-default text-text-muted gap-1 cursor-not-allowed opacity-60"
+            >
+              <Icon className="size-3" />
+              {label}
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          className="bg-surface-card border-border-default text-text-secondary text-xs max-w-52"
+        >
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 // ─── Placeholder card (shared by coming-soon tabs) ────────────────────────────
@@ -580,6 +640,95 @@ function HoldingsTab({
 
 // ─── 3. Net Worth ─────────────────────────────────────────────────────────────
 
+// CSS donut chart — pure div rings
+function DonutSegment({
+  percentage,
+  color,
+  offset,
+  radius = 48,
+}: {
+  percentage: number;
+  color: string;
+  offset: number;
+  radius?: number;
+}) {
+  const circumference = 2 * Math.PI * radius;
+  const dasharray = (percentage / 100) * circumference;
+  const dashoffset = circumference * (1 - offset / 100);
+  return (
+    <circle
+      cx="60"
+      cy="60"
+      r={radius}
+      fill="none"
+      stroke={color}
+      strokeWidth="14"
+      strokeDasharray={`${dasharray} ${circumference - dasharray}`}
+      strokeDashoffset={dashoffset}
+      strokeLinecap="butt"
+      style={{ transition: "stroke-dasharray 0.6s ease" }}
+    />
+  );
+}
+
+interface AssetCategory {
+  label: string;
+  value: number | null;
+  note: string;
+  hexColor: string;
+  tailwindBg: string;
+  tailwindText: string;
+  icon: typeof TrendingUp;
+  addLabel: string;
+  addTooltip: string;
+}
+
+// Approximate monthly equity value trend from holdings — uses current value
+// as baseline and back-fills 5 months with illustrative relative fluctuations.
+// Real historical values will come from trade history in v0.2.0.
+function buildEquityTrend(currentValue: number): { month: string; value: number }[] {
+  const months = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+  // Synthetic growth: each prior month is ~2–5% less than next (simple illustrative)
+  const factors = [0.88, 0.91, 0.94, 0.96, 0.98, 1.0];
+  return months.map((month, i) => ({
+    month,
+    value: currentValue * factors[i],
+  }));
+}
+
+function NetWorthMonthlyBar({ trend }: { trend: { month: string; value: number }[] }) {
+  const max = Math.max(...trend.map((t) => t.value), 1);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-end gap-2 h-20">
+        {trend.map((t) => {
+          const heightPct = (t.value / max) * 100;
+          const isLast = t.month === trend[trend.length - 1].month;
+          return (
+            <div key={t.month} className="flex-1 flex flex-col items-center gap-1">
+              <div
+                className={cn(
+                  "w-full rounded-t transition-all duration-700",
+                  isLast ? "bg-profit" : "bg-surface-elevated",
+                )}
+                style={{ height: `${heightPct}%` }}
+                title={formatINRCompact(t.value)}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-2">
+        {trend.map((t) => (
+          <div key={t.month} className="flex-1 text-center text-xxs text-text-muted">
+            {t.month}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function NetWorthTab({
   currentValue,
   availableCash,
@@ -593,90 +742,193 @@ function NetWorthTab({
   totalPnlPercent: number;
   isLoading: boolean;
 }) {
-  // Equity from live data, others are placeholders pending data sources
-  const categories = [
+  const knownTotal = currentValue + availableCash;
+  const trend = useMemo(() => buildEquityTrend(currentValue), [currentValue]);
+
+  const categories: AssetCategory[] = [
     {
       label: "Equity Holdings",
       value: isLoading ? null : currentValue,
       note: "Live from OpenAlgo",
-      color: "text-blue-400",
-      bg: "bg-blue-600/20",
+      hexColor: "#3b82f6",
+      tailwindBg: "bg-blue-500",
+      tailwindText: "text-blue-400",
       icon: TrendingUp,
+      addLabel: "Add Equity",
+      addTooltip: "Buy via your broker through OpenAlgo — holdings sync automatically.",
     },
     {
       label: "Available Cash",
       value: isLoading ? null : availableCash,
       note: "Live from OpenAlgo",
-      color: "text-emerald-400",
-      bg: "bg-emerald-600/20",
+      hexColor: "#22c55e",
+      tailwindBg: "bg-emerald-500",
+      tailwindText: "text-emerald-400",
       icon: Wallet,
+      addLabel: "Add Cash",
+      addTooltip: "Deposit funds via your broker — balance syncs from OpenAlgo.",
     },
     {
       label: "Mutual Funds",
       value: null,
-      note: "Connect NAV source in Settings",
-      color: "text-purple-400",
-      bg: "bg-purple-600/20",
+      note: "Connect NAV source — Settings → Data Sources",
+      hexColor: "#a855f7",
+      tailwindBg: "bg-purple-500",
+      tailwindText: "text-purple-400",
       icon: BarChart3,
+      addLabel: "Add MF",
+      addTooltip: "Connect a NAV provider (jugaad-data / mftool) in Settings to track MF folios.",
     },
     {
       label: "Gold",
       value: null,
-      note: "Manual entry — coming v0.2.0",
-      color: "text-amber-400",
-      bg: "bg-amber-600/20",
+      note: "Manual entry available in v0.2.0",
+      hexColor: "#f59e0b",
+      tailwindBg: "bg-amber-500",
+      tailwindText: "text-amber-400",
       icon: Globe,
+      addLabel: "Add Gold",
+      addTooltip: "Manual gold tracking (sovereign bonds, physical, ETF) coming in v0.2.0.",
     },
     {
       label: "Fixed Deposits",
       value: null,
-      note: "Manual entry — coming v0.2.0",
-      color: "text-cyan-400",
-      bg: "bg-cyan-600/20",
+      note: "Manual entry available in v0.2.0",
+      hexColor: "#06b6d4",
+      tailwindBg: "bg-cyan-500",
+      tailwindText: "text-cyan-400",
       icon: DollarSign,
+      addLabel: "Add FD",
+      addTooltip: "Track fixed deposits with maturity dates and interest tracking — v0.2.0.",
     },
   ];
 
-  const knownTotal = (isLoading ? 0 : currentValue) + (isLoading ? 0 : availableCash);
+  // Build donut segments — only from known values
+  const knownCategories = categories.filter((c) => c.value !== null && c.value > 0);
+  const donutTotal = knownCategories.reduce((acc, c) => acc + (c.value ?? 0), 0);
+  let segmentOffset = 25; // start at top (12 o'clock = 25% offset on svg circle convention)
+  const donutSegments = knownCategories.map((cat) => {
+    const pct = donutTotal > 0 ? ((cat.value ?? 0) / donutTotal) * 100 : 0;
+    const seg = { cat, pct, offset: segmentOffset };
+    segmentOffset += pct;
+    return seg;
+  });
 
   return (
-    <div className="space-y-5 max-w-lg">
+    <div className="space-y-6 max-w-2xl">
+      {/* Header */}
       <div>
         <h3 className="font-heading font-semibold text-sm text-text-primary">Net Worth Breakdown</h3>
         <p className="text-xs text-text-muted mt-0.5">
-          Live equity and cash from OpenAlgo. Other asset classes require additional data sources
-          or manual entry.
+          Live equity and cash from OpenAlgo. Other asset classes require additional data sources.
         </p>
       </div>
 
-      {/* Known total */}
-      <Card className="p-5 bg-surface-card border-border-default">
-        <div className="text-xxs text-text-muted uppercase tracking-wider mb-1">
-          Known Total (Equity + Cash)
-        </div>
-        <div
-          className={cn(
-            "font-mono text-2xl font-bold tabular-nums",
-            isLoading ? "text-text-muted" : "text-text-primary",
-          )}
-        >
-          {isLoading ? "—" : formatINR(knownTotal)}
-        </div>
-        {!isLoading && (
+      {/* Known total + donut side by side */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Known total card */}
+        <Card className="p-5 bg-surface-card border-border-default flex flex-col justify-between gap-3">
+          <div className="text-xxs text-text-muted uppercase tracking-wider">
+            Known Total (Equity + Cash)
+          </div>
           <div
             className={cn(
-              "text-sm font-mono tabular-nums mt-1",
-              totalPnl >= 0 ? "text-profit" : "text-loss",
+              "font-mono text-2xl font-bold tabular-nums",
+              isLoading ? "text-text-muted" : "text-text-primary",
             )}
           >
-            {formatINR(totalPnl)}{" "}
-            <span className="text-xs opacity-75">({formatPercent(totalPnlPercent)} unrealised)</span>
+            {isLoading ? "—" : formatINRCompact(knownTotal)}
           </div>
-        )}
-      </Card>
+          {!isLoading && (
+            <div
+              className={cn(
+                "text-sm font-mono tabular-nums",
+                totalPnl >= 0 ? "text-profit" : "text-loss",
+              )}
+            >
+              {formatINRCompact(totalPnl)}{" "}
+              <span className="text-xs opacity-75">({formatPercent(totalPnlPercent)} unrealised)</span>
+            </div>
+          )}
+
+          {/* Monthly equity trend */}
+          {!isLoading && currentValue > 0 && (
+            <div className="pt-2 border-t border-border-default">
+              <div className="text-xxs text-text-muted mb-2 uppercase tracking-wider">
+                Equity trend (6M illustrative)
+              </div>
+              <NetWorthMonthlyBar trend={trend} />
+              <p className="text-xxs text-text-muted mt-1">
+                Historical values from trade journal available in v0.2.0.
+              </p>
+            </div>
+          )}
+        </Card>
+
+        {/* CSS donut */}
+        <Card className="p-5 bg-surface-card border-border-default flex flex-col items-center gap-4">
+          <div className="text-xxs text-text-muted uppercase tracking-wider self-start">
+            Allocation (live assets only)
+          </div>
+          {knownCategories.length > 0 ? (
+            <>
+              <div className="relative w-32 h-32 shrink-0">
+                <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
+                  {/* Track */}
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="48"
+                    fill="none"
+                    stroke="var(--color-border-default, #2a2a3a)"
+                    strokeWidth="14"
+                  />
+                  {donutSegments.map(({ cat, pct, offset }) => (
+                    <DonutSegment
+                      key={cat.label}
+                      percentage={pct}
+                      color={cat.hexColor}
+                      offset={offset}
+                    />
+                  ))}
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-xxs text-text-muted">tracked</span>
+                  <span className="font-mono text-xs font-bold text-text-primary tabular-nums">
+                    {isLoading ? "—" : formatINRCompact(knownTotal)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Legend */}
+              <div className="w-full space-y-1.5">
+                {knownCategories.map((cat) => {
+                  const pct = donutTotal > 0 ? ((cat.value ?? 0) / donutTotal) * 100 : 0;
+                  return (
+                    <div key={cat.label} className="flex items-center gap-2 text-xs">
+                      <span className={cn("size-2.5 rounded-sm shrink-0", cat.tailwindBg)} />
+                      <span className="text-text-secondary flex-1">{cat.label}</span>
+                      <span className="font-mono tabular-nums text-text-primary">
+                        {pct.toFixed(1)}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center">
+              Connect to OpenAlgo to see allocation chart.
+            </div>
+          )}
+        </Card>
+      </div>
 
       {/* Per-category cards */}
-      <div className="space-y-3">
+      <div className="space-y-2">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+          All Asset Classes
+        </h4>
         {categories.map((cat) => {
           const Icon = cat.icon;
           return (
@@ -686,29 +938,35 @@ function NetWorthTab({
             >
               <div
                 className={cn(
-                  "size-8 rounded-lg flex items-center justify-center shrink-0",
-                  cat.bg,
+                  "size-8 rounded-lg flex items-center justify-center shrink-0 opacity-80",
+                  cat.tailwindBg.replace("bg-", "bg-") + "/20",
                 )}
+                style={{ backgroundColor: cat.hexColor + "20" }}
               >
-                <Icon className={cn("size-4", cat.color)} />
+                <Icon className={cn("size-4", cat.tailwindText)} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-text-primary">{cat.label}</div>
                 <div className="text-xs text-text-muted">{cat.note}</div>
               </div>
-              <div className="text-right shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {cat.value !== null ? (
                   <span className="font-mono tabular-nums text-xs text-text-primary">
-                    {formatINR(cat.value)}
+                    {formatINRCompact(cat.value)}
                   </span>
                 ) : (
                   <Badge
                     variant="outline"
                     className="text-xs border-border-default text-text-muted"
                   >
-                    —
+                    Not connected
                   </Badge>
                 )}
+                <DisabledActionButton
+                  label={cat.addLabel}
+                  tooltip={cat.addTooltip}
+                  icon={Plus}
+                />
               </div>
             </div>
           );
@@ -720,42 +978,79 @@ function NetWorthTab({
 
 // ─── 4. Mutual Funds ──────────────────────────────────────────────────────────
 
-const MF_CATEGORIES = [
+interface MfCategory {
+  name: string;
+  risk: string;
+  desc: string;
+  returnRange: string;
+  horizon: string;
+  color: string;
+}
+
+const MF_CATEGORIES: MfCategory[] = [
   {
     name: "Large Cap",
     risk: "Low",
-    desc: "Top 100 companies by market cap. Stable, lower volatility. Suited for conservative investors.",
+    desc: "Top 100 companies by market cap. Stable, lower volatility.",
+    returnRange: "10–14% p.a.",
+    horizon: "3+ years",
     color: "text-blue-400",
   },
   {
     name: "Mid Cap",
     risk: "Medium",
-    desc: "101–250 by market cap. Higher growth potential with moderate risk over 5+ year horizon.",
+    desc: "101–250 by market cap. Higher growth potential with moderate risk.",
+    returnRange: "12–18% p.a.",
+    horizon: "5+ years",
     color: "text-amber-400",
   },
   {
     name: "Small Cap",
     risk: "High",
-    desc: "251+ by market cap. Aggressive growth potential, higher drawdown risk. Long horizon only.",
+    desc: "251+ by market cap. Aggressive growth, higher drawdown risk.",
+    returnRange: "15–25% p.a.",
+    horizon: "7+ years",
     color: "text-red-400",
+  },
+  {
+    name: "Flexi Cap",
+    risk: "Medium",
+    desc: "Fund manager freely allocates across large, mid, and small cap based on market conditions.",
+    returnRange: "12–18% p.a.",
+    horizon: "5+ years",
+    color: "text-orange-400",
   },
   {
     name: "ELSS",
     risk: "Medium",
-    desc: "Equity Linked Savings Scheme. 3-year lock-in, eligible for 80C tax deduction up to ₹1.5L.",
+    desc: "Equity Linked Savings Scheme. 3-year lock-in, 80C deduction up to ₹1.5L.",
+    returnRange: "12–18% p.a.",
+    horizon: "3 yr lock-in",
     color: "text-purple-400",
   },
   {
     name: "Debt / Liquid",
     risk: "Low",
-    desc: "Government bonds, T-bills, corporate debt. Capital preservation, short investment horizon.",
+    desc: "Government bonds, T-bills, corporate debt. Capital preservation focus.",
+    returnRange: "6–8% p.a.",
+    horizon: "< 1 year",
     color: "text-emerald-400",
   },
   {
     name: "Hybrid / Balanced",
     risk: "Low–Med",
-    desc: "Mix of equity and debt. Suited for moderate risk appetite, automatic rebalancing.",
+    desc: "Mix of equity and debt. Automatic rebalancing by fund manager.",
+    returnRange: "9–13% p.a.",
+    horizon: "3–5 years",
     color: "text-cyan-400",
+  },
+  {
+    name: "Index Funds",
+    risk: "Low–Med",
+    desc: "Passively track NIFTY 50, NIFTY Next 50, or Sensex. Lowest expense ratios.",
+    returnRange: "10–14% p.a.",
+    horizon: "5+ years",
+    color: "text-teal-400",
   },
 ];
 
@@ -766,26 +1061,74 @@ const RISK_COLOR: Record<string, string> = {
   "Low–Med": "bg-cyan-900/40 text-cyan-400 border-cyan-800",
 };
 
+// Placeholder AMC logos as text badges
+const AMC_NAMES = [
+  "SBI MF",
+  "HDFC MF",
+  "ICICI Pru",
+  "Nippon India",
+  "Axis MF",
+  "Mirae Asset",
+  "Kotak MF",
+  "DSP MF",
+  "Franklin",
+  "UTI MF",
+  "Canara Robeco",
+  "Invesco",
+];
+
 function MutualFundsTab() {
   return (
     <div className="space-y-5 max-w-2xl">
+      {/* Status banner */}
       <div className="flex items-start gap-3 bg-surface-card border border-border-default rounded-lg p-4">
         <AlertCircle className="size-4 text-amber-400 mt-0.5 shrink-0" />
         <div className="space-y-1">
-          <p className="text-xs font-medium text-text-primary">Live NAV not connected</p>
+          <p className="text-xs font-medium text-text-primary">NAV data source not connected</p>
           <p className="text-xs text-text-muted">
-            Connect a NAV data source in{" "}
-            <span className="text-amber-400 font-mono">Settings → Data Sources</span> to see
-            portfolio NAV, returns, and folios. jugaad-data or mftool can be configured as the
-            source in v0.2.0.
+            Connect a NAV feed in{" "}
+            <span className="text-amber-400 font-mono">Settings → Data Sources</span> to see live
+            NAV, folio balances, and returns. Integration with jugaad-data and mftool is planned
+            for v0.2.0.
           </p>
         </div>
       </div>
 
+      {/* Search — disabled */}
+      <div className="space-y-1.5">
+        <Label className="text-xxs text-text-muted uppercase tracking-wider">Search Mutual Funds</Label>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-text-muted" />
+          <Input
+            disabled
+            placeholder="Search by fund name or AMC — requires NAV feed (v0.2.0)"
+            className="pl-8 h-9 text-xs bg-surface-card border-border-default text-text-muted cursor-not-allowed opacity-60"
+          />
+        </div>
+      </div>
+
+      {/* AMC placeholder row */}
+      <div className="space-y-2">
+        <p className="text-xs text-text-muted font-medium">Supported AMCs (after NAV feed is connected)</p>
+        <div className="flex flex-wrap gap-2">
+          {AMC_NAMES.map((name) => (
+            <Badge
+              key={name}
+              variant="outline"
+              className="text-xxs border-border-default text-text-muted opacity-60"
+            >
+              {name}
+            </Badge>
+          ))}
+        </div>
+      </div>
+
+      {/* Category grid */}
       <div className="space-y-1">
         <h3 className="font-heading font-semibold text-sm text-text-primary">SEBI-Defined MF Categories</h3>
         <p className="text-xs text-text-muted">
-          Risk ratings are indicative based on SEBI&apos;s product labelling guidelines.
+          Risk ratings and return ranges are indicative based on SEBI product labelling guidelines
+          and historical index data. Actual fund returns vary.
         </p>
       </div>
 
@@ -793,7 +1136,7 @@ function MutualFundsTab() {
         {MF_CATEGORIES.map((cat) => (
           <div
             key={cat.name}
-            className="bg-surface-card border border-border-default rounded-lg p-4 space-y-2"
+            className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3"
           >
             <div className="flex items-center justify-between">
               <span className={cn("text-sm font-semibold", cat.color)}>{cat.name}</span>
@@ -805,6 +1148,20 @@ function MutualFundsTab() {
               </Badge>
             </div>
             <p className="text-xs text-text-muted leading-relaxed">{cat.desc}</p>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="text-xxs text-text-muted uppercase tracking-wider">Typical returns</div>
+                <div className="text-xs font-mono text-text-secondary">{cat.returnRange}</div>
+              </div>
+              <div className="space-y-0.5 text-right">
+                <div className="text-xxs text-text-muted uppercase tracking-wider">Horizon</div>
+                <div className="text-xs font-mono text-text-secondary">{cat.horizon}</div>
+              </div>
+            </div>
+            <DisabledActionButton
+              label="Track Fund"
+              tooltip="Connect a NAV data source in Settings to track individual funds and folios."
+            />
           </div>
         ))}
       </div>
@@ -812,7 +1169,7 @@ function MutualFundsTab() {
       <div className="flex items-center justify-center pt-2">
         <Badge className="bg-amber-500/20 text-amber-400 border-amber-700/50 text-xs gap-1">
           <Bell className="w-3 h-3" />
-          Full MF dashboard coming in v0.2.0
+          Full MF dashboard with folio sync coming in v0.2.0
         </Badge>
       </div>
     </div>
@@ -820,6 +1177,9 @@ function MutualFundsTab() {
 }
 
 // ─── 5. SIP Calculator ────────────────────────────────────────────────────────
+
+// Empty placeholder row for SIP tracking table
+const SIP_TABLE_COLUMNS = ["Fund Name", "Monthly (₹)", "Start Date", "Duration", "Expected Return", "Maturity", "Status"];
 
 function SipCalculatorTab() {
   const [monthly, setMonthly] = useState<string>("5000");
@@ -836,15 +1196,18 @@ function SipCalculatorTab() {
       r > 0 ? P * ((Math.pow(1 + r, n) - 1) / r) * (1 + r) : invested;
     const returns = maturity - invested;
     const progress = invested > 0 ? Math.min((returns / maturity) * 100, 100) : 0;
-    return { invested, maturity, returns, progress };
+    // Wealth ratio: maturity / invested
+    const wealthRatio = invested > 0 ? maturity / invested : 0;
+    return { invested, maturity, returns, progress, wealthRatio };
   }, [monthly, rate, years]);
 
   return (
     <div className="max-w-xl space-y-6">
+      {/* Calculator */}
       <div className="space-y-1">
         <h3 className="font-heading font-semibold text-sm text-text-primary">SIP Calculator</h3>
         <p className="text-xs text-text-muted">
-          Estimate future corpus from regular monthly investments using compound interest.
+          Estimate future corpus from regular monthly investments using compound interest (CAGR).
         </p>
       </div>
 
@@ -893,26 +1256,37 @@ function SipCalculatorTab() {
               <span className="text-xxs text-text-muted uppercase tracking-wider">
                 Total Invested
               </span>
-              <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-                {formatINR(result.invested)}
+              <div className="text-xl font-mono font-bold tabular-nums text-text-primary">
+                {formatINRCompact(result.invested)}
               </div>
             </div>
             <div className="bg-surface-card p-4 space-y-1">
               <span className="text-xxs text-text-muted uppercase tracking-wider">
                 Est. Returns
               </span>
-              <div className="text-2xl font-mono font-bold tabular-nums text-profit">
-                {formatINR(result.returns)}
+              <div className="text-xl font-mono font-bold tabular-nums text-profit">
+                {formatINRCompact(result.returns)}
               </div>
             </div>
             <div className="bg-surface-card p-4 space-y-1">
               <span className="text-xxs text-text-muted uppercase tracking-wider">
                 Maturity Value
               </span>
-              <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-                {formatINR(result.maturity)}
+              <div className="text-xl font-mono font-bold tabular-nums text-text-primary">
+                {formatINRCompact(result.maturity)}
               </div>
             </div>
+          </div>
+
+          {/* Wealth ratio pill */}
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-text-muted">Wealth ratio:</span>
+            <span className="font-mono font-semibold text-profit">
+              {result.wealthRatio.toFixed(2)}x
+            </span>
+            <span className="text-text-muted">
+              — your money multiplies {result.wealthRatio.toFixed(2)} times over {years} years
+            </span>
           </div>
 
           {/* Stacked bar */}
@@ -941,8 +1315,8 @@ function SipCalculatorTab() {
 
           <p className="text-xs text-text-muted leading-relaxed">
             Investing {formatINR(parseFloat(monthly) || 0)}/month for {years} years at {rate}%
-            p.a. compounds to {formatINR(result.maturity)}. Actual MF returns vary; this is an
-            illustrative projection only.
+            p.a. compounds to {formatINRCompact(result.maturity)}. Actual MF returns vary; this is
+            an illustrative projection only.
           </p>
         </div>
       ) : (
@@ -950,6 +1324,59 @@ function SipCalculatorTab() {
           Enter values above to calculate.
         </div>
       )}
+
+      {/* SIP Tracking section */}
+      <div className="pt-4 border-t border-border-default space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="font-heading font-semibold text-sm text-text-primary">Active SIPs</h4>
+            <p className="text-xs text-text-muted mt-0.5">
+              Track your running SIP mandates. Requires NAV feed connection to sync auto.
+            </p>
+          </div>
+          <DisabledActionButton
+            label="Add SIP"
+            tooltip="Connect a NAV data source (Settings → Data Sources) to add and track SIP mandates."
+            icon={Plus}
+          />
+        </div>
+
+        {/* Empty table */}
+        <div className="border border-border-default rounded-lg overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border-default hover:bg-transparent">
+                {SIP_TABLE_COLUMNS.map((col) => (
+                  <TableHead
+                    key={col}
+                    className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider"
+                  >
+                    {col}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow className="border-none hover:bg-transparent">
+                <TableCell
+                  colSpan={SIP_TABLE_COLUMNS.length}
+                  className="h-20 text-center text-xs text-text-muted"
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <Info className="size-4 text-text-disabled" />
+                    No SIPs tracked yet. Connect NAV provider to add SIP mandates.
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <p className="text-xs text-text-muted leading-relaxed">
+          After connecting a NAV feed, FlintTrade will sync your SIP dates, invested amounts, and
+          current NAV to show running XIRR alongside this calculator.
+        </p>
+      </div>
     </div>
   );
 }
@@ -1019,8 +1446,9 @@ function AssetQuiltTab() {
       <div className="space-y-1">
         <h3 className="font-heading font-semibold text-sm text-text-primary">Asset Quilt — Annual Returns</h3>
         <p className="text-xs text-text-muted">
-          Calendar-year returns ranked from best (top) to worst (bottom). Illustrative data
-          based on approximate index returns. Connect a data source for live NAV-based returns.
+          Calendar-year returns ranked from best (top) to worst (bottom). Each column is one year;
+          assets are sorted by that year&apos;s return. Illustrative data based on approximate
+          index returns. Connect a data source for live NAV-based returns.
         </p>
       </div>
 
@@ -1068,9 +1496,8 @@ function AssetQuiltTab() {
       </div>
 
       <p className="text-xs text-text-muted leading-relaxed">
-        Data is approximate and illustrative. NIFTY returns are index-only (no dividends).
-        REIT data available from 2021 onwards. Connect jugaad-data or mftool in Settings for
-        live NAV-based quilt.
+        Data is approximate and illustrative. NIFTY returns are index-only (no dividends). REIT
+        data available from 2021. Connect jugaad-data or mftool in Settings for live NAV-based quilt.
       </p>
 
       {/* Legend */}
@@ -1079,7 +1506,7 @@ function AssetQuiltTab() {
           { label: "≥40%", cls: "bg-emerald-400" },
           { label: "20–40%", cls: "bg-emerald-600" },
           { label: "10–20%", cls: "bg-emerald-800" },
-          { label: "0–10%", cls: "bg-surface-elevated" },
+          { label: "0–10%", cls: "bg-surface-elevated border border-border-default" },
           { label: "-10–0%", cls: "bg-red-900" },
           { label: "<-10%", cls: "bg-red-700" },
         ].map((l) => (
@@ -1093,67 +1520,822 @@ function AssetQuiltTab() {
   );
 }
 
-// ─── 7–10. Placeholder tabs ───────────────────────────────────────────────────
+// ─── 7. Sector Rotation ───────────────────────────────────────────────────────
 
-function SectorRotationTab() {
+interface SectorDef {
+  label: string;
+  symbol: string;
+  exchange: string;
+  description: string;
+}
+
+const SECTOR_INDICES: SectorDef[] = [
+  { label: "Bank Nifty", symbol: "NIFTYBANK", exchange: "NSE_INDEX", description: "Banking sector" },
+  { label: "Nifty IT", symbol: "NIFTYIT", exchange: "NSE_INDEX", description: "Information Technology" },
+  { label: "Nifty Pharma", symbol: "NIFTYPHARMA", exchange: "NSE_INDEX", description: "Pharmaceuticals" },
+  { label: "Nifty FMCG", symbol: "NIFTYFMCG", exchange: "NSE_INDEX", description: "Fast-moving consumer goods" },
+  { label: "Nifty Auto", symbol: "NIFTYAUTO", exchange: "NSE_INDEX", description: "Automobiles" },
+  { label: "Nifty Metal", symbol: "NIFTYMETAL", exchange: "NSE_INDEX", description: "Metals & Mining" },
+  { label: "Nifty Realty", symbol: "NIFTYREALTY", exchange: "NSE_INDEX", description: "Real Estate" },
+  { label: "Nifty Energy", symbol: "NIFTYENERGY", exchange: "NSE_INDEX", description: "Energy & Power" },
+  { label: "Nifty Infra", symbol: "NIFTYINFRA", exchange: "NSE_INDEX", description: "Infrastructure" },
+  { label: "Nifty Media", symbol: "NIFTYMEDIA", exchange: "NSE_INDEX", description: "Media & Entertainment" },
+  { label: "Nifty PSU Bank", symbol: "NIFTYPSUBANK", exchange: "NSE_INDEX", description: "Public sector banks" },
+  { label: "Nifty Private Bank", symbol: "NIFTYPVTBANK", exchange: "NSE_INDEX", description: "Private sector banks" },
+  { label: "Financial Services", symbol: "NIFTYFINSERV", exchange: "NSE_INDEX", description: "NBFCs & Fin Services" },
+];
+
+function SectorChangeCell({ change, pct }: { change?: number; pct?: number }) {
+  if (change === undefined && pct === undefined) {
+    return <span className="text-text-muted font-mono tabular-nums text-xs">—</span>;
+  }
+  const positive = (pct ?? change ?? 0) >= 0;
+  const Icon = positive ? ArrowUpRight : ArrowDownRight;
   return (
-    <PlaceholderTab
-      icon={RotateCcw}
-      title="Sector Rotation (RRG)"
-      version="v0.2.0"
-      description="Relative Rotation Graph (RRG) shows the momentum and strength of NIFTY sectors relative
-      to the benchmark. Sectors cycle through Leading, Weakening, Lagging, and Improving quadrants
-      — helping you identify rotation opportunities before they play out."
-      bullets={[
-        "RRG chart: all 13 NSE sectors plotted on momentum vs. relative strength axes",
-        "Quadrant view: Leading / Weakening / Lagging / Improving with tail trails",
-        "Configurable look-back: 1D, 1W, 2W, 1M relative strength window",
-        "Top performing sectors ranked by absolute and relative returns",
-        "Data source: OpenAlgo + jugaad-data OHLCV (no external API required)",
-      ]}
-    />
+    <div className={cn("flex items-center gap-1 justify-end", positive ? "text-profit" : "text-loss")}>
+      <Icon className="size-3 shrink-0" />
+      <span className="font-mono tabular-nums text-xs font-semibold">
+        {pct !== undefined ? formatPercent(pct) : formatPercent(change ?? 0)}
+      </span>
+    </div>
   );
 }
+
+function SectorRotationTab() {
+  const symbols = SECTOR_INDICES.map((s) => ({ symbol: s.symbol, exchange: s.exchange }));
+
+  const { data: quotes, isLoading, isError, refetch } = useQuery<Quote[]>({
+    queryKey: ["sector-quotes"],
+    queryFn: () => getMultiQuotes(symbols),
+    refetchInterval: 60_000,
+    retry: 1,
+  });
+
+  // Build a lookup map from symbol → quote
+  const quoteMap = useMemo(() => {
+    const map = new Map<string, Quote>();
+    if (quotes) {
+      for (const q of quotes) {
+        map.set(q.symbol, q);
+      }
+    }
+    return map;
+  }, [quotes]);
+
+  const rows = useMemo(() =>
+    SECTOR_INDICES.map((s) => ({
+      ...s,
+      quote: quoteMap.get(s.symbol),
+    })),
+    [quoteMap],
+  );
+
+  // Sort by day pct change descending (strongest first)
+  const sortedRows = useMemo(
+    () =>
+      [...rows].sort((a, b) => {
+        const ap = a.quote?.pct ?? a.quote?.change ?? 0;
+        const bp = b.quote?.pct ?? b.quote?.change ?? 0;
+        return bp - ap;
+      }),
+    [rows],
+  );
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h3 className="font-heading font-semibold text-sm text-text-primary">Sector Performance</h3>
+          <p className="text-xs text-text-muted">
+            Live quotes for NSE sector indices via OpenAlgo. Sorted by day change, strongest first.
+            RRG analysis (momentum × relative-strength) coming in v0.2.0.
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void refetch()}
+          className="text-xs text-text-muted h-7 px-2 gap-1 shrink-0"
+        >
+          <RefreshCw className={cn("size-3", isLoading && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+
+      {isError && (
+        <div className="flex items-start gap-3 bg-surface-card border border-border-default rounded-lg p-4">
+          <AlertCircle className="size-4 text-amber-400 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-text-primary">Could not fetch sector data</p>
+            <p className="text-xs text-text-muted">
+              Ensure OpenAlgo is running and the NSE_INDEX exchange is supported by your broker.
+              Symbol names may differ — check OpenAlgo instruments list.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="border border-border-default rounded-lg overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-border-default hover:bg-transparent">
+              <TableHead className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider">
+                Sector
+              </TableHead>
+              <TableHead className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider text-right">
+                LTP
+              </TableHead>
+              <TableHead className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider text-right">
+                Day Change
+              </TableHead>
+              <TableHead className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider text-right">
+                Open
+              </TableHead>
+              <TableHead className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider text-right">
+                High / Low
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={i} className="border-border-default">
+                    <TableCell colSpan={5} className="py-2">
+                      <div className="h-5 bg-surface-elevated rounded animate-pulse" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              : sortedRows.map((row) => (
+                  <TableRow
+                    key={row.symbol}
+                    className="border-border-default hover:bg-surface-card transition-colors"
+                  >
+                    <TableCell className="py-2">
+                      <div className="text-xs font-semibold text-text-primary">{row.label}</div>
+                      <div className="text-xxs text-text-muted">{row.description}</div>
+                    </TableCell>
+                    <TableCell className="py-2 text-right">
+                      <span className="font-mono tabular-nums text-xs text-text-primary font-semibold">
+                        {row.quote ? formatINR(row.quote.ltp) : "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-2 text-right">
+                      <SectorChangeCell
+                        change={row.quote?.change}
+                        pct={row.quote?.pct}
+                      />
+                    </TableCell>
+                    <TableCell className="py-2 text-right">
+                      <span className="font-mono tabular-nums text-xs text-text-secondary">
+                        {row.quote ? formatINR(row.quote.open) : "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-2 text-right">
+                      {row.quote ? (
+                        <div className="text-right">
+                          <div className="font-mono tabular-nums text-xxs text-profit">
+                            H: {formatINR(row.quote.high)}
+                          </div>
+                          <div className="font-mono tabular-nums text-xxs text-loss">
+                            L: {formatINR(row.quote.low)}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-text-muted text-xs font-mono">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* RRG placeholder */}
+      <div className="rounded-lg border border-border-default bg-surface-card p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <RotateCcw className="size-4 text-accent" />
+          <h4 className="font-heading font-semibold text-sm text-text-primary">
+            Relative Rotation Graph (RRG) — v0.2.0
+          </h4>
+        </div>
+        <p className="text-xs text-text-muted leading-relaxed">
+          RRG plots each sector on Relative Strength vs. Momentum axes. Sectors cycle
+          through four quadrants: <span className="text-profit">Leading</span> →{" "}
+          <span className="text-amber-400">Weakening</span> →{" "}
+          <span className="text-loss">Lagging</span> →{" "}
+          <span className="text-blue-400">Improving</span>. Tail trails show momentum direction.
+          Configurable look-back: 1D, 1W, 2W, 1M. Requires OHLCV history from OpenAlgo or
+          jugaad-data.
+        </p>
+        <div className="flex items-center gap-2">
+          <Badge className="bg-amber-500/20 text-amber-400 border-amber-700/50 text-xs">
+            Coming in v0.2.0
+          </Badge>
+        </div>
+      </div>
+
+      <p className="text-xs text-text-muted">
+        Quotes refresh every 60s. Symbol names must match your broker&apos;s instrument list in OpenAlgo.
+      </p>
+    </div>
+  );
+}
+
+// ─── 8. ETF Screener ─────────────────────────────────────────────────────────
+
+interface EtfInfo {
+  name: string;
+  nseSymbol: string;
+  trackingIndex: string;
+  expenseRatio: string;
+  aum: string;
+  category: string;
+  color: string;
+}
+
+const POPULAR_ETFS: EtfInfo[] = [
+  {
+    name: "Nippon India ETF Nifty BeES",
+    nseSymbol: "NIFTYBEES",
+    trackingIndex: "NIFTY 50",
+    expenseRatio: "0.04%",
+    aum: "~₹24,000 Cr",
+    category: "Large Cap",
+    color: "text-blue-400",
+  },
+  {
+    name: "Nippon India ETF Bank BeES",
+    nseSymbol: "BANKBEES",
+    trackingIndex: "NIFTY Bank",
+    expenseRatio: "0.18%",
+    aum: "~₹8,500 Cr",
+    category: "Sectoral",
+    color: "text-purple-400",
+  },
+  {
+    name: "Nippon India ETF Gold BeES",
+    nseSymbol: "GOLDBEES",
+    trackingIndex: "Domestic Gold Price",
+    expenseRatio: "0.59%",
+    aum: "~₹9,000 Cr",
+    category: "Commodity",
+    color: "text-amber-400",
+  },
+  {
+    name: "Nippon India ETF Liquid BeES",
+    nseSymbol: "LIQUIDBEES",
+    trackingIndex: "Overnight MIBOR",
+    expenseRatio: "0.25%",
+    aum: "~₹14,000 Cr",
+    category: "Liquid / Debt",
+    color: "text-emerald-400",
+  },
+  {
+    name: "Mirae Asset NYSE FANG+ ETF",
+    nseSymbol: "MAFANG",
+    trackingIndex: "NYSE FANG+",
+    expenseRatio: "0.50%",
+    aum: "~₹1,800 Cr",
+    category: "International",
+    color: "text-cyan-400",
+  },
+  {
+    name: "SBI ETF Nifty Next 50",
+    nseSymbol: "NEXT50",
+    trackingIndex: "NIFTY Next 50",
+    expenseRatio: "0.10%",
+    aum: "~₹3,200 Cr",
+    category: "Large Cap",
+    color: "text-blue-400",
+  },
+  {
+    name: "CPSE ETF",
+    nseSymbol: "CPSEETF",
+    trackingIndex: "CPSE Index (PSU stocks)",
+    expenseRatio: "0.01%",
+    aum: "~₹28,000 Cr",
+    category: "Thematic / PSU",
+    color: "text-orange-400",
+  },
+  {
+    name: "Motilal Oswal NASDAQ 100 ETF",
+    nseSymbol: "MOM100",
+    trackingIndex: "NASDAQ 100",
+    expenseRatio: "0.50%",
+    aum: "~₹6,800 Cr",
+    category: "International",
+    color: "text-cyan-400",
+  },
+];
+
+const ETF_CATEGORY_COLOR: Record<string, string> = {
+  "Large Cap": "bg-blue-900/40 text-blue-400 border-blue-800",
+  "Sectoral": "bg-purple-900/40 text-purple-400 border-purple-800",
+  "Commodity": "bg-amber-900/40 text-amber-400 border-amber-800",
+  "Liquid / Debt": "bg-emerald-900/40 text-emerald-400 border-emerald-800",
+  "International": "bg-cyan-900/40 text-cyan-400 border-cyan-800",
+  "Thematic / PSU": "bg-orange-900/40 text-orange-400 border-orange-800",
+};
 
 function EtfScreenerTab() {
   return (
-    <PlaceholderTab
-      icon={Filter}
-      title="ETF Screener"
-      version="v0.2.0"
-      description="Screen and compare Indian ETFs (NSE/BSE) across expense ratio, AUM, tracking error,
-      1Y/3Y/5Y returns, and liquidity. Filter by category — equity, debt, gold, international,
-      or thematic — to find the best ETF for your portfolio."
-      bullets={[
-        "Filterable table: category, AUM, expense ratio, volume, tracking error",
-        "Returns comparison: 1M / 3M / 6M / 1Y / 3Y / 5Y vs. benchmark",
-        "Holdings drill-down: top 10 holdings, sector weights for equity ETFs",
-        "Liquidity gauge: average daily volume and bid-ask spread indicator",
-        "Data from NSE/BSE instrument list + jugaad-data NAV pipeline",
-      ]}
-    />
+    <div className="space-y-5 max-w-2xl">
+      <div className="space-y-1">
+        <h3 className="font-heading font-semibold text-sm text-text-primary">Popular ETFs</h3>
+        <p className="text-xs text-text-muted">
+          Commonly traded ETFs on NSE. Expense ratios and AUM are approximate. Live NAV, tracking
+          error, and returns screening require jugaad-data or BSE/NSE instrument feed (v0.2.0).
+        </p>
+      </div>
+
+      {/* Status banner */}
+      <div className="flex items-start gap-3 bg-surface-card border border-border-default rounded-lg p-4">
+        <Info className="size-4 text-blue-400 mt-0.5 shrink-0" />
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-text-primary">Live NAV not connected</p>
+          <p className="text-xs text-text-muted">
+            Once connected, the screener will show 1M / 1Y / 3Y returns, tracking error, bid-ask
+            spread, and average daily volume alongside each ETF. You can filter, compare, and open
+            any ETF directly in the Chart widget.
+          </p>
+        </div>
+      </div>
+
+      {/* ETF grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {POPULAR_ETFS.map((etf) => (
+          <div
+            key={etf.nseSymbol}
+            className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className={cn("text-xs font-semibold font-mono", etf.color)}>
+                  {etf.nseSymbol}
+                </div>
+                <div className="text-xxs text-text-secondary mt-0.5 leading-tight">
+                  {etf.name}
+                </div>
+              </div>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xxs h-5 shrink-0",
+                  ETF_CATEGORY_COLOR[etf.category] ?? "bg-surface-elevated text-text-muted border-border-default",
+                )}
+              >
+                {etf.category}
+              </Badge>
+            </div>
+
+            <div className="space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-text-muted">Tracks</span>
+                <span className="text-text-secondary font-mono text-xxs text-right max-w-32 truncate">
+                  {etf.trackingIndex}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Expense Ratio</span>
+                <span className="text-text-primary font-mono tabular-nums">{etf.expenseRatio}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">AUM (approx)</span>
+                <span className="text-text-secondary font-mono tabular-nums">{etf.aum}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">1Y / 3Y return</span>
+                <span className="text-text-muted font-mono tabular-nums text-xxs">
+                  — / — (NAV feed needed)
+                </span>
+              </div>
+            </div>
+
+            <DisabledActionButton
+              label="Track ETF"
+              tooltip="Connect a NAV data source in Settings to track this ETF, see live NAV and historical returns."
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* ETF vs Index concept */}
+      <Card className="p-5 bg-surface-card border-border-default space-y-3">
+        <div className="flex items-center gap-2">
+          <Filter className="size-4 text-accent" />
+          <h4 className="font-heading font-semibold text-sm text-text-primary">
+            Full ETF Screener — v0.2.0
+          </h4>
+        </div>
+        <p className="text-xs text-text-muted leading-relaxed">
+          Filter 200+ NSE/BSE listed ETFs by category, AUM threshold, expense ratio range,
+          tracking error, liquidity (average daily volume), and time-based returns. Compare any
+          two ETFs against each other and against their benchmark index. Drill into top holdings
+          and sector weights for equity ETFs. Export filtered lists to CSV.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {["Equity ETFs", "Debt ETFs", "Gold ETFs", "International ETFs", "Thematic ETFs", "Factor ETFs"].map((cat) => (
+            <Badge
+              key={cat}
+              variant="outline"
+              className="text-xxs border-border-default text-text-muted opacity-60"
+            >
+              {cat}
+            </Badge>
+          ))}
+        </div>
+      </Card>
+
+      <p className="text-xs text-text-muted">
+        AUM and expense ratio data sourced from publicly available fund factsheets (as of 2024).
+        Always verify current figures before investing.
+      </p>
+    </div>
   );
 }
 
-function StockScreenerTab() {
+// ─── 9. Stocks Tab ────────────────────────────────────────────────────────────
+
+// Calculate CAGR: ((currentValue / investedValue) ^ (1/years)) - 1
+function calcCAGR(invested: number, current: number, yearsHeld: number): number | null {
+  if (invested <= 0 || current <= 0 || yearsHeld <= 0) return null;
+  return (Math.pow(current / invested, 1 / yearsHeld) - 1) * 100;
+}
+
+// Group holdings by a simple sector heuristic based on symbol suffix / name patterns.
+// Real sector data requires NSE master file or screener package integration.
+function inferSector(symbol: string): string {
+  const s = symbol.toUpperCase();
+  if (/BANK|HDFC|ICICI|AXIS|SBI|KOTAK|INDUS|FEDERAL|RBL|BANDHAN/.test(s)) return "Banking";
+  if (/TCS|INFY|WIPRO|HCL|TECH|LTI|MPHASIS|COFORGE/.test(s)) return "IT";
+  if (/PHARMA|CIPLA|DRRD|SUN|LUPIN|BIOCON|ALKEM|IPCA/.test(s)) return "Pharma";
+  if (/AUTO|MARUTI|TATA.*MOTORS|BAJAJ.*AUTO|HERO|EICHER|M&M/.test(s)) return "Auto";
+  if (/RELIANCE|ONGC|BPCL|IOC|GAIL|NTPC|POWERGRID/.test(s)) return "Energy";
+  if (/HIND.*UNILEVER|NESTLE|ITC|BRITANNIA|DABUR/.test(s)) return "FMCG";
+  if (/METAL|STEEL|TATA.*STEEL|HINDALCO|SAIL|JINDAL/.test(s)) return "Metals";
+  return "Other";
+}
+
+function StocksTab({
+  holdings,
+  isLoading,
+  isError,
+  refetch,
+}: {
+  holdings: Holding[];
+  isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
+}) {
+  // Assume average holding duration of 2 years for CAGR illustration.
+  // Real buy dates will come from trade history in v0.2.0.
+  const ASSUMED_YEARS = 2;
+
+  const enrichedHoldings = useMemo(
+    () =>
+      holdings.map((h) => {
+        const invested = h.averagePrice * h.quantity;
+        const current = h.ltp * h.quantity;
+        const cagr = calcCAGR(invested, current, ASSUMED_YEARS);
+        const sector = inferSector(h.symbol);
+        return { ...h, invested, current, cagr, sector };
+      }),
+    [holdings],
+  );
+
+  // Sector breakdown
+  const sectorMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const h of enrichedHoldings) {
+      map.set(h.sector, (map.get(h.sector) ?? 0) + h.current);
+    }
+    return map;
+  }, [enrichedHoldings]);
+
+  const totalCurrent = useMemo(
+    () => enrichedHoldings.reduce((acc, h) => acc + h.current, 0),
+    [enrichedHoldings],
+  );
+
+  const sectorEntries = useMemo(
+    () =>
+      [...sectorMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([sector, value]) => ({
+          sector,
+          value,
+          pct: totalCurrent > 0 ? (value / totalCurrent) * 100 : 0,
+        })),
+    [sectorMap, totalCurrent],
+  );
+
+  const SECTOR_COLORS = [
+    "bg-blue-500", "bg-purple-500", "bg-cyan-500", "bg-amber-500",
+    "bg-emerald-500", "bg-orange-500", "bg-red-500", "bg-pink-500",
+  ];
+
+  const [sorting, setSorting] = useState<SortingState>([{ id: "current", desc: true }]);
+
+  const columns: ColumnDef<typeof enrichedHoldings[number]>[] = useMemo(
+    () => [
+      {
+        accessorKey: "symbol",
+        header: "Symbol",
+        cell: ({ row }) => (
+          <div>
+            <div className="text-xs font-semibold font-mono text-text-primary">{row.original.symbol}</div>
+            <div className="text-xxs text-text-muted">{row.original.sector}</div>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "quantity",
+        header: () => <span className="block text-right">Qty</span>,
+        cell: ({ getValue }) => (
+          <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
+            {(getValue() as number).toLocaleString("en-IN")}
+          </div>
+        ),
+      },
+      {
+        id: "invested",
+        header: () => <span className="block text-right">Invested</span>,
+        accessorFn: (row) => row.invested,
+        cell: ({ getValue }) => (
+          <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
+            {formatINRCompact(getValue() as number)}
+          </div>
+        ),
+      },
+      {
+        id: "current",
+        header: () => <span className="block text-right">Current</span>,
+        accessorFn: (row) => row.current,
+        cell: ({ getValue }) => (
+          <div className="text-right font-mono tabular-nums text-xs text-text-primary font-semibold">
+            {formatINRCompact(getValue() as number)}
+          </div>
+        ),
+      },
+      {
+        accessorKey: "pnl",
+        header: () => <span className="block text-right">P&amp;L</span>,
+        cell: ({ row }) => (
+          <PnLCell value={row.original.pnl} percent={row.original.pnlPercent} />
+        ),
+      },
+      {
+        accessorKey: "cagr",
+        header: () => (
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="block text-right cursor-help underline decoration-dashed decoration-text-muted">
+                  CAGR
+                </span>
+              </TooltipTrigger>
+              <TooltipContent
+                side="top"
+                className="bg-surface-card border-border-default text-text-secondary text-xs max-w-52"
+              >
+                Illustrative CAGR assumes {ASSUMED_YEARS}-year hold. Actual buy date from trade
+                history available in v0.2.0.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ),
+        cell: ({ getValue }) => {
+          const cagr = getValue() as number | null;
+          if (cagr === null) return <span className="text-text-muted font-mono text-xs block text-right">—</span>;
+          return (
+            <div
+              className={cn(
+                "text-right font-mono tabular-nums text-xs font-semibold",
+                cagr >= 0 ? "text-profit" : "text-loss",
+              )}
+            >
+              {formatPercent(cagr)} p.a.
+            </div>
+          );
+        },
+      },
+    ],
+    [],
+  );
+
+  const table = useReactTable({
+    data: enrichedHoldings,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+        <RefreshCw className="size-5 animate-spin" />
+        <span className="text-sm">Loading holdings...</span>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+        <AlertCircle className="size-5 text-loss" />
+        <span className="text-sm">Failed to load holdings.</span>
+        <Button variant="outline" size="sm" onClick={refetch} className="text-xs">
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <PlaceholderTab
-      icon={Search}
-      title="Stock Screener"
-      version="v0.2.0"
-      description="Screen NSE/BSE stocks by fundamental and technical filters. Build custom screens
-      combining valuation (P/E, P/B, ROE), quality (debt/equity, promoter holding), and
-      momentum (52W high/low, RSI, price vs. moving averages) criteria."
-      bullets={[
-        "200+ screening parameters across fundamentals, technicals, and ownership",
-        "Pre-built screens: CANSLIM, Magic Formula, Piotroski, 52W breakouts",
-        "Save and schedule screens — run daily and get Telegram alerts",
-        "Export to CSV or open directly in Chart or Trade widget",
-        "Data: OpenAlgo OHLCV + screener Python package (included in monorepo)",
-      ]}
-    />
+    <div className="space-y-6 max-w-3xl">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h3 className="font-heading font-semibold text-sm text-text-primary">Stock Holdings</h3>
+          <p className="text-xs text-text-muted">
+            Enhanced view of your equity holdings from OpenAlgo with inferred sector breakdown and
+            illustrative CAGR. Buy dates from trade history will improve CAGR accuracy in v0.2.0.
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={refetch}
+          className="text-xs text-text-muted h-7 px-2 gap-1 shrink-0"
+        >
+          <RefreshCw className="size-3" />
+          Refresh
+        </Button>
+      </div>
+
+      {holdings.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 gap-3 text-text-muted">
+          <BarChart3 className="size-8 text-text-disabled" />
+          <span className="text-sm font-medium text-text-secondary">No holdings found</span>
+          <span className="text-xs text-text-muted max-w-sm text-center">
+            Buy equities via your broker through OpenAlgo and they will appear here after
+            settlement.
+          </span>
+        </div>
+      ) : (
+        <>
+          {/* Holdings table with CAGR */}
+          <div className="border border-border-default rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader>
+                {table.getHeaderGroups().map((hg) => (
+                  <TableRow key={hg.id} className="border-border-default hover:bg-transparent">
+                    {hg.headers.map((header) => (
+                      <TableHead
+                        key={header.id}
+                        className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider cursor-pointer select-none"
+                        onClick={header.column.getToggleSortingHandler()}
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {header.column.getIsSorted() === "asc" && " ↑"}
+                        {header.column.getIsSorted() === "desc" && " ↓"}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {table.getRowModel().rows.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    className="border-border-default hover:bg-surface-card transition-colors"
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className="py-2 text-xs">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Sector breakdown */}
+          {sectorEntries.length > 0 && (
+            <Card className="p-5 bg-surface-card border-border-default space-y-4">
+              <h4 className="font-heading font-semibold text-sm text-text-primary">
+                Sector Breakdown
+              </h4>
+              <p className="text-xxs text-text-muted">
+                Sector classification is inferred from symbol names. Accuracy improves when trade
+                history and NSE master data are connected.
+              </p>
+              <div className="space-y-2">
+                {sectorEntries.map(({ sector, value, pct }, idx) => (
+                  <div key={sector} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn("size-2.5 rounded-sm", SECTOR_COLORS[idx % SECTOR_COLORS.length])}
+                        />
+                        <span className="text-text-secondary">{sector}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono tabular-nums text-text-primary">
+                          {formatINRCompact(value)}
+                        </span>
+                        <span className="font-mono tabular-nums text-text-muted w-12 text-right">
+                          {pct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-border-default rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all duration-700",
+                          SECTOR_COLORS[idx % SECTOR_COLORS.length],
+                        )}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* Dividend tracking placeholder */}
+      <Card className="p-5 bg-surface-card border-border-default space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bell className="size-4 text-profit" />
+            <h4 className="font-heading font-semibold text-sm text-text-primary">
+              Dividend Tracking
+            </h4>
+          </div>
+          <DisabledActionButton
+            label="Add Dividend"
+            tooltip="Dividend auto-detection from OpenAlgo trade history is planned for v0.2.0."
+            icon={Plus}
+          />
+        </div>
+        <p className="text-xs text-text-muted leading-relaxed">
+          FlintTrade will auto-detect dividend credits from your trade history and map them to
+          holdings to show annual yield, total dividends received, and yield-on-cost per stock.
+          Requires trade history access via OpenAlgo tradebook.
+        </p>
+        <div className="grid grid-cols-3 gap-px bg-border-default rounded-lg overflow-hidden">
+          {[
+            { label: "Total Dividends (FY)", value: "—" },
+            { label: "Average Yield", value: "—" },
+            { label: "Next Ex-Dividend", value: "—" },
+          ].map(({ label, value }) => (
+            <div key={label} className="bg-surface-card p-3 space-y-1">
+              <div className="text-xxs text-text-muted uppercase tracking-wider">{label}</div>
+              <div className="font-mono text-sm font-bold tabular-nums text-text-muted">{value}</div>
+            </div>
+          ))}
+        </div>
+        <Badge className="bg-amber-500/20 text-amber-400 border-amber-700/50 text-xs gap-1">
+          Auto-detect dividends from trade history — v0.2.0
+        </Badge>
+      </Card>
+
+      {/* Stock screener concept */}
+      <Card className="p-5 bg-surface-card border-border-default space-y-3">
+        <div className="flex items-center gap-2">
+          <Search className="size-4 text-accent" />
+          <h4 className="font-heading font-semibold text-sm text-text-primary">
+            Stock Screener — v0.2.0
+          </h4>
+        </div>
+        <p className="text-xs text-text-muted leading-relaxed">
+          Screen NSE/BSE stocks by P/E, P/B, Dividend Yield, ROE, Debt-to-Equity, 52-week
+          high/low, RSI, and promoter holding. Uses the{" "}
+          <span className="text-accent font-mono">screener</span> Python package (already in the
+          monorepo) once connected to a OHLCV + fundamentals data source.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {["P/E < 20", "Dividend Yield > 3%", "ROE > 15%", "52W Breakout", "Low Debt", "CANSLIM"].map((screen) => (
+            <Badge
+              key={screen}
+              variant="outline"
+              className="text-xxs border-border-default text-text-muted opacity-60 cursor-not-allowed"
+            >
+              {screen}
+            </Badge>
+          ))}
+        </div>
+      </Card>
+    </div>
   );
 }
+
+// ─── 10. IPO Tracker ──────────────────────────────────────────────────────────
 
 function IpoTrackerTab() {
   return (
@@ -1240,7 +2422,14 @@ export default function InvestRoute() {
     quilt: <AssetQuiltTab />,
     sector: <SectorRotationTab />,
     etf: <EtfScreenerTab />,
-    stocks: <StockScreenerTab />,
+    stocks: (
+      <StocksTab
+        holdings={holdings}
+        isLoading={holdingsLoading}
+        isError={holdingsError}
+        refetch={refetchHoldings}
+      />
+    ),
     ipo: <IpoTrackerTab />,
   };
 

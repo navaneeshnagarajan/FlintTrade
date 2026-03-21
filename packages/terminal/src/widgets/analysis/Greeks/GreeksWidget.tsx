@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { RefreshCw, AlertCircle, TrendingDown, Activity } from "lucide-react";
-import { getPositionbook, getOptionGreeks } from "../../../services/api";
+import { getPositionbook, getMultiOptionGreeks } from "../../../services/api";
 import type { Position } from "../../../types/api";
 
 // ---------------------------------------------------------------------------
@@ -219,29 +219,39 @@ export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
         return;
       }
 
-      const greekResults = await Promise.allSettled(
-        fno.map(async (pos) => {
-          const parsed = parseOptionSymbol(pos.symbol, pos.exchange);
-          if (!parsed) return null;
-
-          try {
-            const data = await getOptionGreeks(parsed.symbol, parsed.exchange);
-            return { symbol: pos.symbol, data };
-          } catch {
-            return null;
-          }
-        })
+      // Build the list of valid option symbols to query in one batch call.
+      // getMultiOptionGreeks replaces N individual getOptionGreeks calls — one
+      // POST to /api/v1/multioptiongreeks for all F&O positions at once.
+      const parsed = fno.map((pos) => ({
+        pos,
+        sym: parseOptionSymbol(pos.symbol, pos.exchange),
+      })).filter((entry): entry is { pos: RawPosition; sym: NonNullable<ReturnType<typeof parseOptionSymbol>> } =>
+        entry.sym !== null
       );
 
       const newGreeksMap: Record<string, RawGreeks> = {};
-      greekResults.forEach((result) => {
-        if (result.status === "fulfilled" && result.value) {
-          const { symbol, data } = result.value;
-          const raw = data as unknown as RawGreeks | RawGreeks[];
-          const greekObj: RawGreeks | null = Array.isArray(raw) ? (raw[0] ?? null) : raw;
-          if (greekObj) newGreeksMap[symbol] = greekObj;
+
+      if (parsed.length > 0) {
+        const symbolRequests = parsed.map((entry) => ({
+          symbol: entry.sym.symbol,
+          exchange: entry.sym.exchange,
+        }));
+
+        try {
+          const batchResults = await getMultiOptionGreeks(symbolRequests);
+          // batchResults is Greeks[] — indexed in the same order as symbolRequests.
+          parsed.forEach((entry, idx) => {
+            const data = batchResults[idx];
+            if (data) {
+              const raw = data as unknown as RawGreeks;
+              newGreeksMap[entry.pos.symbol] = raw;
+            }
+          });
+        } catch {
+          // Batch call failed — greeksMap stays empty for this refresh cycle.
+          // The UI will display "—" for all greek values rather than crashing.
         }
-      });
+      }
 
       setGreeksMap(newGreeksMap);
       setLastRefresh(new Date());

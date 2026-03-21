@@ -35,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { searchSymbol, placeOrder } from "@/services/api";
+import { useMargin } from "@/hooks/useMargin";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 
@@ -278,6 +279,16 @@ export default function OrderPadWidget(_props: WidgetProps) {
   const priceEnabled = PRICE_ENABLED.has(orderType);
   const triggerEnabled = TRIGGER_ENABLED.has(orderType);
   const isBuy = action === "BUY";
+
+  // Live margin requirement — enabled only when symbol + qty are set
+  const { data: marginData, isFetching: marginFetching } = useMargin(
+    symbol,
+    exchange,
+    qty,
+    product,
+    action,
+    !!symbol && qty > 0,
+  );
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -622,6 +633,26 @@ export default function OrderPadWidget(_props: WidgetProps) {
             </div>
           )}
         </div>
+
+        {/* Margin requirement */}
+        {marginData != null && (
+          <div className={`rounded border border-border-default bg-surface-card px-3 py-2 transition-opacity ${marginFetching ? "opacity-50" : "opacity-100"}`}>
+            <div className="flex justify-between items-baseline">
+              <span className="text-xxs text-text-muted uppercase tracking-wider">Margin Required</span>
+              <span className="font-mono text-xs font-semibold text-text-primary tabular-nums">
+                ₹{marginData.total_margin_required.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="flex justify-between text-xxs text-text-muted mt-0.5 font-mono tabular-nums">
+              <span>
+                SPAN ₹{marginData.span_margin.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+              </span>
+              <span>
+                Exposure ₹{marginData.exposure_margin.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Submit button */}
         <Button

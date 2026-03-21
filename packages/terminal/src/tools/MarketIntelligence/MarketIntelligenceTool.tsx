@@ -14,7 +14,7 @@
  *   - oipulse/41-announcement: corporate announcements feed
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   X,
   BarChart3,
@@ -24,7 +24,7 @@ import {
   ArrowUpDown,
   Globe,
   Activity,
-  Map,
+  Map as MapIcon,
   Zap,
   Users,
   Package,
@@ -32,6 +32,11 @@ import {
   Megaphone,
   ChevronRight,
   ShieldAlert,
+  Flame,
+  LineChart,
+  Target,
+  Layers,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +49,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useGex, useIVSmile, useMaxPain, useOIProfile } from "@/hooks/useMarketIntel";
+import { getExpiry } from "@/services/api";
+import type { OIProfileEntry } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -653,7 +661,7 @@ function SectorHeatmapTab() {
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-3 mt-4 text-xs text-text-muted">
-        <Map size={10} />
+        <MapIcon size={10} />
         <span>Cell size = market cap weight</span>
         <span className="ml-1">Color:</span>
         {[
@@ -1312,6 +1320,840 @@ function AnnouncementsTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Shared: Symbol/Exchange/Expiry selector used by live-data tabs
+// ---------------------------------------------------------------------------
+
+const LIVE_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"] as const;
+type LiveSymbol = (typeof LIVE_SYMBOLS)[number];
+
+interface LiveSelectorState {
+  symbol: LiveSymbol;
+  exchange: string;
+  expiry: string | null;
+  expiries: string[];
+  expiryLoading: boolean;
+}
+
+function useLiveSelector(defaultSymbol: LiveSymbol = "NIFTY", defaultExchange = "NFO") {
+  const [symbol, setSymbol] = useState<LiveSymbol>(defaultSymbol);
+  const [exchange, setExchange] = useState(defaultExchange);
+  const [expiry, setExpiry] = useState<string | null>(null);
+  const [expiries, setExpiries] = useState<string[]>([]);
+  const [expiryLoading, setExpiryLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setExpiries([]);
+    setExpiry(null);
+    setExpiryLoading(true);
+    (async () => {
+      try {
+        const data = await getExpiry(symbol, exchange, "options");
+        if (cancelled) return;
+        const list: string[] = Array.isArray(data)
+          ? (data as string[])
+          : ((data as { expiry?: string[] })?.expiry ?? []);
+        setExpiries(list);
+        setExpiry(list[0] ?? null);
+      } catch {
+        if (!cancelled) setExpiry(null);
+      } finally {
+        if (!cancelled) setExpiryLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [symbol, exchange]);
+
+  const state: LiveSelectorState = { symbol, exchange, expiry, expiries, expiryLoading };
+  return { state, setSymbol, setExchange, setExpiry };
+}
+
+function LiveSelector({
+  state,
+  setSymbol,
+  setExchange,
+  setExpiry,
+}: {
+  state: LiveSelectorState;
+  setSymbol: (s: LiveSymbol) => void;
+  setExchange: (e: string) => void;
+  setExpiry: (e: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-4">
+      {/* Symbol */}
+      <div className="flex items-center gap-1">
+        {LIVE_SYMBOLS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setSymbol(s)}
+            className={[
+              "text-xs px-2 py-0.5 rounded border transition-colors",
+              state.symbol === s
+                ? "bg-neutral-bg text-primary border-neutral-border"
+                : "bg-surface-card text-text-muted border-border-default hover:border-border-strong",
+            ].join(" ")}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+      {/* Exchange */}
+      <div className="flex items-center gap-1">
+        {["NFO", "BFO"].map((ex) => (
+          <button
+            key={ex}
+            onClick={() => setExchange(ex)}
+            className={[
+              "text-xs px-2 py-0.5 rounded border transition-colors",
+              state.exchange === ex
+                ? "bg-neutral-bg text-primary border-neutral-border"
+                : "bg-surface-card text-text-muted border-border-default hover:border-border-strong",
+            ].join(" ")}
+          >
+            {ex}
+          </button>
+        ))}
+      </div>
+      {/* Expiry */}
+      {state.expiryLoading ? (
+        <span className="text-xs text-text-muted animate-pulse">Loading expiries…</span>
+      ) : state.expiries.length > 0 ? (
+        <select
+          value={state.expiry ?? ""}
+          onChange={(e) => setExpiry(e.target.value)}
+          className="text-xs bg-surface-card text-text-primary border border-border-default rounded px-2 py-0.5 cursor-pointer outline-none focus:border-border-strong"
+        >
+          {state.expiries.map((ex) => (
+            <option key={ex} value={ex}>
+              {ex}
+            </option>
+          ))}
+        </select>
+      ) : null}
+    </div>
+  );
+}
+
+function formatOINum(v: number): string {
+  if (Math.abs(v) >= 10000000) return `${(v / 10000000).toFixed(2)} Cr`;
+  if (Math.abs(v) >= 100000) return `${(v / 100000).toFixed(2)} L`;
+  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)} K`;
+  return v.toString();
+}
+
+function LoadingRows({ cols }: { cols: number }) {
+  return (
+    <>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <TableRow key={i} className="border-border-default">
+          {Array.from({ length: cols }).map((_, j) => (
+            <TableCell key={j} className="px-2 py-2">
+              <div className="h-3 bg-surface-elevated rounded animate-pulse" />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+function ErrorRetry({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+      <p className="text-xs text-red-400">{message}</p>
+      <button
+        onClick={onRetry}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border-default text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors"
+      >
+        <RefreshCw size={11} />
+        Retry
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 11: GEX (Gamma Exposure)
+// ---------------------------------------------------------------------------
+
+function GexTab() {
+  const { state, setSymbol, setExchange, setExpiry } = useLiveSelector();
+  const { data, isLoading, isError, error, refetch } = useGex(
+    state.symbol,
+    state.exchange,
+    state.expiry ?? undefined,
+  );
+
+  const maxAbsGamma = useMemo(() => {
+    if (!data?.length) return 1;
+    return Math.max(...data.map((d) => Math.abs(d.net_gamma)), 1);
+  }, [data]);
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-4">
+        <DataNotice text="Gamma Exposure (GEX) shows where market-makers are hedging. Positive net gamma = dealers are long gamma (stabilising). Negative = short gamma (amplifying moves). Refreshes every 30s during market hours." />
+
+        <LiveSelector state={state} setSymbol={setSymbol} setExchange={setExchange} setExpiry={setExpiry} />
+
+        {/* GEX bar chart */}
+        {isLoading ? (
+          <div className="space-y-1.5">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-7 bg-surface-elevated rounded animate-pulse" />
+            ))}
+          </div>
+        ) : isError ? (
+          <ErrorRetry message={(error as Error)?.message ?? "Failed to load GEX data"} onRetry={() => void refetch()} />
+        ) : data && data.length > 0 ? (
+          <>
+            {/* Chart */}
+            <div>
+              <SectionLabel icon={Flame} label="Net Gamma Exposure by Strike" />
+              <div className="space-y-px">
+                {data.map((row) => {
+                  const barPct = (Math.abs(row.net_gamma) / maxAbsGamma) * 100;
+                  const isPos = row.net_gamma >= 0;
+                  return (
+                    <div key={row.strike} className="flex items-center gap-2 group">
+                      <span className="font-mono text-xs text-text-muted w-16 text-right shrink-0">
+                        {row.strike.toLocaleString("en-IN")}
+                      </span>
+                      <div className="flex-1 relative h-5 flex items-center">
+                        <div className="absolute inset-0 flex items-center">
+                          <div className="w-full h-px bg-border-default" />
+                        </div>
+                        {isPos ? (
+                          <div
+                            className="absolute left-1/2 h-4 rounded-r"
+                            style={{
+                              width: `${barPct / 2}%`,
+                              backgroundColor: "#10b981",
+                              opacity: 0.75,
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="absolute right-1/2 h-4 rounded-l"
+                            style={{
+                              width: `${barPct / 2}%`,
+                              backgroundColor: "#ef4444",
+                              opacity: 0.75,
+                            }}
+                          />
+                        )}
+                      </div>
+                      <span
+                        className={`font-mono text-xs w-20 shrink-0 ${isPos ? "text-emerald-400" : "text-red-400"}`}
+                      >
+                        {isPos ? "+" : ""}
+                        {row.net_gamma.toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between text-xs text-text-muted mt-1 px-2">
+                <span className="text-red-400">Short Gamma (bearish amplifier)</span>
+                <span className="text-emerald-400">Long Gamma (market stabiliser)</span>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div>
+              <SectionLabel icon={Activity} label="GEX Data Table" />
+              <div className="rounded-md border border-border-default overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border-default hover:bg-transparent">
+                      {["Strike", "Call Gamma", "Put Gamma", "Net Gamma", "Call OI", "Put OI"].map((h) => (
+                        <TableHead key={h} className="text-xs text-text-muted h-8 px-2">
+                          {h}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.map((row) => (
+                      <TableRow key={row.strike} className="border-border-default hover:bg-surface-card">
+                        <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">
+                          {row.strike.toLocaleString("en-IN")}
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">
+                          {row.call_gamma.toFixed(4)}
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">
+                          {row.put_gamma.toFixed(4)}
+                        </TableCell>
+                        <TableCell
+                          className={`px-2 py-1.5 font-mono text-xs font-semibold ${row.net_gamma >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                        >
+                          {row.net_gamma >= 0 ? "+" : ""}
+                          {row.net_gamma.toFixed(4)}
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                          {formatOINum(row.call_oi)}
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                          {formatOINum(row.put_oi)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8 text-xs text-text-muted">
+            No GEX data available. Select a symbol and expiry above.
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 12: IV Smile
+// ---------------------------------------------------------------------------
+
+function IVSmileTab() {
+  const { state, setSymbol, setExchange, setExpiry } = useLiveSelector();
+  const { data, isLoading, isError, error, refetch } = useIVSmile(
+    state.symbol,
+    state.exchange,
+    state.expiry ?? undefined,
+  );
+
+  const atmStrike = useMemo(() => {
+    if (!data?.length) return null;
+    const atm = data.reduce((prev, cur) =>
+      Math.abs(cur.moneyness) < Math.abs(prev.moneyness) ? cur : prev,
+    );
+    return atm.strike;
+  }, [data]);
+
+  const maxIV = useMemo(() => {
+    if (!data?.length) return 1;
+    return Math.max(...data.map((d) => Math.max(d.call_iv, d.put_iv)), 1);
+  }, [data]);
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-4">
+        <DataNotice text="IV Smile shows implied volatility across strikes. A skewed smile indicates directional bias — higher put IV means market paying more for downside protection. Refreshes every 30s during market hours." />
+
+        <LiveSelector state={state} setSymbol={setSymbol} setExchange={setExchange} setExpiry={setExpiry} />
+
+        {isLoading ? (
+          <div className="space-y-1.5">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-7 bg-surface-elevated rounded animate-pulse" />
+            ))}
+          </div>
+        ) : isError ? (
+          <ErrorRetry message={(error as Error)?.message ?? "Failed to load IV Smile data"} onRetry={() => void refetch()} />
+        ) : data && data.length > 0 ? (
+          <>
+            {/* Chart — side-by-side IV bars per strike */}
+            <div>
+              <SectionLabel icon={LineChart} label="IV Smile Chart" />
+              <div className="flex items-center gap-4 mb-2 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-2 rounded bg-sky-500 inline-block" />
+                  <span className="text-text-muted">Call IV</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-2 rounded bg-amber-500 inline-block" />
+                  <span className="text-text-muted">Put IV</span>
+                </div>
+                {atmStrike !== null && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-2 rounded border border-primary inline-block" />
+                    <span className="text-text-muted">ATM Strike</span>
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1">
+                {data.map((row) => {
+                  const isAtm = row.strike === atmStrike;
+                  const callPct = (row.call_iv / maxIV) * 100;
+                  const putPct = (row.put_iv / maxIV) * 100;
+                  return (
+                    <div
+                      key={row.strike}
+                      className={[
+                        "flex items-center gap-2 px-1 rounded",
+                        isAtm ? "bg-primary/5 border border-primary/20" : "",
+                      ].join(" ")}
+                    >
+                      <span className="font-mono text-xs w-16 text-right text-text-muted shrink-0">
+                        {row.strike.toLocaleString("en-IN")}
+                        {isAtm && (
+                          <span className="ml-1 text-primary text-xxs">ATM</span>
+                        )}
+                      </span>
+                      <div className="flex-1 flex flex-col gap-0.5 py-1">
+                        <div
+                          className="h-2 rounded"
+                          style={{ width: `${callPct}%`, backgroundColor: "#0ea5e9", opacity: 0.8 }}
+                          title={`Call IV: ${row.call_iv.toFixed(2)}%`}
+                        />
+                        <div
+                          className="h-2 rounded"
+                          style={{ width: `${putPct}%`, backgroundColor: "#f59e0b", opacity: 0.8 }}
+                          title={`Put IV: ${row.put_iv.toFixed(2)}%`}
+                        />
+                      </div>
+                      <span className="font-mono text-xs w-12 text-right text-sky-400 shrink-0">
+                        {row.call_iv.toFixed(1)}%
+                      </span>
+                      <span className="font-mono text-xs w-12 text-right text-amber-400 shrink-0">
+                        {row.put_iv.toFixed(1)}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Table */}
+            <div>
+              <SectionLabel icon={Activity} label="IV Smile Data Table" />
+              <div className="rounded-md border border-border-default overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border-default hover:bg-transparent">
+                      {["Strike", "Call IV", "Put IV", "Moneyness"].map((h) => (
+                        <TableHead key={h} className="text-xs text-text-muted h-8 px-3">
+                          {h}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.map((row) => {
+                      const isAtm = row.strike === atmStrike;
+                      return (
+                        <TableRow
+                          key={row.strike}
+                          className={[
+                            "border-border-default hover:bg-surface-card",
+                            isAtm ? "bg-primary/5" : "",
+                          ].join(" ")}
+                        >
+                          <TableCell className="px-3 py-1.5 font-mono text-xs font-semibold text-text-primary">
+                            {row.strike.toLocaleString("en-IN")}
+                            {isAtm && (
+                              <Badge className="ml-2 text-xxs h-4 px-1.5 bg-transparent border border-primary text-primary">
+                                ATM
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 font-mono text-xs text-sky-400">
+                            {row.call_iv.toFixed(2)}%
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 font-mono text-xs text-amber-400">
+                            {row.put_iv.toFixed(2)}%
+                          </TableCell>
+                          <TableCell className={`px-3 py-1.5 font-mono text-xs ${row.moneyness > 0 ? "text-emerald-400" : row.moneyness < 0 ? "text-red-400" : "text-text-muted"}`}>
+                            {row.moneyness > 0 ? "+" : ""}
+                            {row.moneyness.toFixed(2)}%
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8 text-xs text-text-muted">
+            No IV Smile data available. Select a symbol and expiry above.
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 13: Max Pain
+// ---------------------------------------------------------------------------
+
+function MaxPainTab() {
+  const { state, setSymbol, setExchange, setExpiry } = useLiveSelector();
+  const { data, isLoading, isError, error, refetch } = useMaxPain(
+    state.symbol,
+    state.exchange,
+    state.expiry ?? undefined,
+  );
+
+  const maxTotalPain = useMemo(() => {
+    if (!data?.strikes?.length) return 1;
+    return Math.max(...data.strikes.map((s) => s.total_pain), 1);
+  }, [data]);
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-4">
+        <DataNotice text="Max Pain is the strike price where option buyers would collectively lose the most at expiry. Historically, price tends to gravitate toward max pain as expiry approaches. Refreshes every 30s during market hours." />
+
+        <LiveSelector state={state} setSymbol={setSymbol} setExchange={setExchange} setExpiry={setExpiry} />
+
+        {isLoading ? (
+          <div className="space-y-3">
+            <div className="h-20 bg-surface-elevated rounded animate-pulse" />
+            <div className="space-y-1.5">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-7 bg-surface-elevated rounded animate-pulse" />
+              ))}
+            </div>
+          </div>
+        ) : isError ? (
+          <ErrorRetry message={(error as Error)?.message ?? "Failed to load Max Pain data"} onRetry={() => void refetch()} />
+        ) : data ? (
+          <>
+            {/* Big max pain display */}
+            <Card className="bg-surface-card border-primary/30">
+              <CardContent className="pt-4 pb-4 px-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-text-muted mb-1 flex items-center gap-1">
+                      <Target size={11} />
+                      Max Pain Strike
+                    </div>
+                    <div className="text-4xl font-mono font-bold tabular-nums text-primary">
+                      {data.max_pain_strike.toLocaleString("en-IN")}
+                    </div>
+                    <div className="text-xs text-text-secondary mt-1">
+                      {state.symbol} · {state.exchange} · {state.expiry ?? "—"}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-text-muted">Option writers profit</div>
+                    <div className="text-xs text-text-muted mt-0.5">maximally at this strike</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Pain distribution chart */}
+            {data.strikes.length > 0 && (
+              <div>
+                <SectionLabel icon={Target} label="Pain Distribution Across Strikes" />
+                <div className="flex items-center gap-4 mb-2 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-2 rounded bg-emerald-600 inline-block" />
+                    <span className="text-text-muted">Call Pain</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-2 rounded bg-red-600 inline-block" />
+                    <span className="text-text-muted">Put Pain</span>
+                  </div>
+                </div>
+                <div className="space-y-px">
+                  {data.strikes.map((row) => {
+                    const isMaxPain = row.strike === data.max_pain_strike;
+                    const totalPct = (row.total_pain / maxTotalPain) * 100;
+                    const callPct = row.total_pain > 0 ? (row.call_pain / row.total_pain) * totalPct : 0;
+                    const putPct = totalPct - callPct;
+                    return (
+                      <div
+                        key={row.strike}
+                        className={[
+                          "flex items-center gap-2 px-1 py-0.5 rounded",
+                          isMaxPain ? "bg-primary/10 border border-primary/30" : "",
+                        ].join(" ")}
+                      >
+                        <span className="font-mono text-xs w-16 text-right shrink-0 text-text-muted">
+                          {row.strike.toLocaleString("en-IN")}
+                          {isMaxPain && (
+                            <span className="ml-1 text-primary text-xxs">MAX</span>
+                          )}
+                        </span>
+                        <div className="flex-1 flex h-4 rounded overflow-hidden bg-surface-elevated">
+                          <div
+                            className="h-full bg-emerald-600/70"
+                            style={{ width: `${callPct}%` }}
+                            title={`Call Pain: ${row.call_pain.toFixed(0)}`}
+                          />
+                          <div
+                            className="h-full bg-red-600/70"
+                            style={{ width: `${putPct}%` }}
+                            title={`Put Pain: ${row.put_pain.toFixed(0)}`}
+                          />
+                        </div>
+                        <span className="font-mono text-xs w-20 text-right shrink-0 text-text-secondary">
+                          {formatOINum(row.total_pain)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Table */}
+            <div>
+              <SectionLabel icon={Activity} label="Max Pain Data Table" />
+              <div className="rounded-md border border-border-default overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border-default hover:bg-transparent">
+                      {["Strike", "Call OI", "Put OI", "Call Pain", "Put Pain", "Total Pain"].map((h) => (
+                        <TableHead key={h} className="text-xs text-text-muted h-8 px-2">
+                          {h}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <LoadingRows cols={6} />
+                    ) : (
+                      data.strikes.map((row) => {
+                        const isMaxPain = row.strike === data.max_pain_strike;
+                        return (
+                          <TableRow
+                            key={row.strike}
+                            className={[
+                              "border-border-default hover:bg-surface-card",
+                              isMaxPain ? "bg-primary/5" : "",
+                            ].join(" ")}
+                          >
+                            <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">
+                              {row.strike.toLocaleString("en-IN")}
+                              {isMaxPain && (
+                                <Badge className="ml-2 text-xxs h-4 px-1.5 bg-transparent border border-primary text-primary">
+                                  MAX
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">
+                              {formatOINum(row.call_oi)}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">
+                              {formatOINum(row.put_oi)}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                              {formatOINum(row.call_pain)}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                              {formatOINum(row.put_pain)}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">
+                              {formatOINum(row.total_pain)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8 text-xs text-text-muted">
+            No Max Pain data available. Select a symbol and expiry above.
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 14: OI Profile
+// ---------------------------------------------------------------------------
+
+type OIBuildUp = "Long Build Up" | "Short Build Up" | "Long Unwinding" | "Short Covering" | "Neutral";
+type StrikeEntry = { ce: OIProfileEntry | null; pe: OIProfileEntry | null };
+
+function getOIBuildUp(oi: number, oiDelta: number, ltp: number): OIBuildUp {
+  // Infer direction from LTP sign proxy: positive ltp delta = price up, negative = price down
+  // Use oiDelta sign and magnitude relative to oi
+  const oiUp = oiDelta > 0;
+  const priceUp = ltp > 0; // positive ltp used as a proxy for price direction when available
+  if (Math.abs(oiDelta) < oi * 0.005) return "Neutral";
+  if (oiUp && priceUp) return "Long Build Up";
+  if (oiUp && !priceUp) return "Short Build Up";
+  if (!oiUp && priceUp) return "Short Covering";
+  return "Long Unwinding";
+}
+
+const OI_BUILDUP_COLORS: Record<OIBuildUp, string> = {
+  "Long Build Up": "text-emerald-400 border-emerald-800",
+  "Short Build Up": "text-red-400 border-red-800",
+  "Long Unwinding": "text-orange-400 border-orange-800",
+  "Short Covering": "text-sky-400 border-sky-800",
+  "Neutral": "text-text-muted border-border-default",
+};
+
+function OIProfileTab() {
+  const { state, setSymbol, setExchange, setExpiry } = useLiveSelector();
+  const { data, isLoading, isError, error, refetch } = useOIProfile(
+    state.symbol,
+    state.exchange,
+    state.expiry ?? undefined,
+  );
+
+  // Group entries by strike into CE and PE
+  const strikeMap = useMemo(() => {
+    const m: Map<number, StrikeEntry> = new Map<number, StrikeEntry>();
+    if (!data?.length) return m;
+    for (const entry of data) {
+      const existing: StrikeEntry = m.get(entry.strike) ?? { ce: null, pe: null };
+      if (entry.type === "CE") existing.ce = entry;
+      else existing.pe = entry;
+      m.set(entry.strike, existing);
+    }
+    return m;
+  }, [data]);
+
+  const strikes = useMemo(() => Array.from(strikeMap.keys()).sort((a, b) => a - b), [strikeMap]);
+
+  const maxOI = useMemo(() => {
+    if (!data?.length) return 1;
+    return Math.max(...data.map((d) => d.oi), 1);
+  }, [data]);
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-4">
+        <DataNotice text="OI Profile displays open interest distribution across strikes. CE bars go right (green), PE bars go left (red). OI changes help identify build-up or unwinding. Refreshes every 30s during market hours." />
+
+        <LiveSelector state={state} setSymbol={setSymbol} setExchange={setExchange} setExpiry={setExpiry} />
+
+        {isLoading ? (
+          <div className="space-y-1.5">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-7 bg-surface-elevated rounded animate-pulse" />
+            ))}
+          </div>
+        ) : isError ? (
+          <ErrorRetry message={(error as Error)?.message ?? "Failed to load OI Profile data"} onRetry={() => void refetch()} />
+        ) : strikes.length > 0 ? (
+          <>
+            {/* Horizontal butterfly chart */}
+            <div>
+              <SectionLabel icon={Layers} label="OI Profile — CE (right) vs PE (left)" />
+              <div className="flex justify-between text-xs text-text-muted mb-2 px-1">
+                <span className="text-red-400">PE OI</span>
+                <span className="text-text-muted">Strike</span>
+                <span className="text-emerald-400">CE OI</span>
+              </div>
+              <div className="space-y-px">
+                {strikes.map((strike) => {
+                  const entry = strikeMap.get(strike)!;
+                  const ceOI = entry.ce?.oi ?? 0;
+                  const peOI = entry.pe?.oi ?? 0;
+                  const cePct = (ceOI / maxOI) * 45;
+                  const pePct = (peOI / maxOI) * 45;
+                  return (
+                    <div key={strike} className="flex items-center gap-1 h-5">
+                      {/* PE bar — grows leftward */}
+                      <div className="flex-1 flex justify-end">
+                        <div
+                          className="h-4 rounded-l bg-red-500/60"
+                          style={{ width: `${pePct}%`, minWidth: peOI > 0 ? "2px" : "0" }}
+                          title={`PE OI: ${formatOINum(peOI)}`}
+                        />
+                      </div>
+                      {/* Strike label */}
+                      <div className="w-20 text-center font-mono text-xs text-text-muted shrink-0">
+                        {strike.toLocaleString("en-IN")}
+                      </div>
+                      {/* CE bar — grows rightward */}
+                      <div className="flex-1 flex justify-start">
+                        <div
+                          className="h-4 rounded-r bg-emerald-500/60"
+                          style={{ width: `${cePct}%`, minWidth: ceOI > 0 ? "2px" : "0" }}
+                          title={`CE OI: ${formatOINum(ceOI)}`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Table */}
+            <div>
+              <SectionLabel icon={Activity} label="OI Profile Data Table" />
+              <div className="rounded-md border border-border-default overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border-default hover:bg-transparent">
+                      {["Strike", "CE OI", "PE OI", "CE OI Chg", "PE OI Chg", "CE LTP", "PE LTP", "Signal"].map((h) => (
+                        <TableHead key={h} className="text-xs text-text-muted h-8 px-2">
+                          {h}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {strikes.map((strike) => {
+                      const entry = strikeMap.get(strike)!;
+                      const ceOI = entry.ce?.oi ?? 0;
+                      const peOI = entry.pe?.oi ?? 0;
+                      const ceDelta = entry.ce?.oi_delta_d ?? 0;
+                      const peDelta = entry.pe?.oi_delta_d ?? 0;
+                      const ceLtp = entry.ce?.ltp ?? 0;
+                      const peLtp = entry.pe?.ltp ?? 0;
+                      const ceSignal = getOIBuildUp(ceOI, ceDelta, ceLtp);
+                      const ceColor = OI_BUILDUP_COLORS[ceSignal];
+                      return (
+                        <TableRow key={strike} className="border-border-default hover:bg-surface-card">
+                          <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">
+                            {strike.toLocaleString("en-IN")}
+                          </TableCell>
+                          <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">
+                            {formatOINum(ceOI)}
+                          </TableCell>
+                          <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">
+                            {formatOINum(peOI)}
+                          </TableCell>
+                          <TableCell className={`px-2 py-1.5 font-mono text-xs ${ceDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {ceDelta >= 0 ? "+" : ""}{formatOINum(ceDelta)}
+                          </TableCell>
+                          <TableCell className={`px-2 py-1.5 font-mono text-xs ${peDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {peDelta >= 0 ? "+" : ""}{formatOINum(peDelta)}
+                          </TableCell>
+                          <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                            {ceLtp > 0 ? ceLtp.toFixed(2) : "--"}
+                          </TableCell>
+                          <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                            {peLtp > 0 ? peLtp.toFixed(2) : "--"}
+                          </TableCell>
+                          <TableCell className="px-2 py-1.5">
+                            <Badge className={`text-xxs h-5 px-1.5 bg-transparent border ${ceColor}`}>
+                              {ceSignal}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8 text-xs text-text-muted">
+            No OI Profile data available. Select a symbol and expiry above.
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sidebar tab definitions
 // ---------------------------------------------------------------------------
 
@@ -1325,7 +2167,11 @@ type TabId =
   | "participantoi"
   | "delivery"
   | "correlation"
-  | "announcements";
+  | "announcements"
+  | "gex"
+  | "ivsmile"
+  | "maxpain"
+  | "oiprofile";
 
 interface TabDef {
   id: TabId;
@@ -1337,13 +2183,17 @@ const TABS: TabDef[] = [
   { id: "breadth", label: "Market Breadth", icon: Activity },
   { id: "fiidii", label: "FII/DII Flows", icon: Globe },
   { id: "sectors", label: "Sector Rotation", icon: ArrowUpDown },
-  { id: "heatmap", label: "Sector Heatmap", icon: Map },
+  { id: "heatmap", label: "Sector Heatmap", icon: MapIcon },
   { id: "vix", label: "India VIX", icon: ShieldAlert },
   { id: "global", label: "Global Indices", icon: Zap },
   { id: "participantoi", label: "Participant OI", icon: Users },
   { id: "delivery", label: "Delivery Data", icon: Package },
   { id: "correlation", label: "Correlation Matrix", icon: Grid3X3 },
   { id: "announcements", label: "Announcements", icon: Megaphone },
+  { id: "gex", label: "GEX", icon: Flame },
+  { id: "ivsmile", label: "IV Smile", icon: LineChart },
+  { id: "maxpain", label: "Max Pain", icon: Target },
+  { id: "oiprofile", label: "OI Profile", icon: Layers },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1368,10 +2218,24 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
     delivery: <DeliveryDataTab />,
     correlation: <CorrelationMatrixTab />,
     announcements: <AnnouncementsTab />,
+    gex: <GexTab />,
+    ivsmile: <IVSmileTab />,
+    maxpain: <MaxPainTab />,
+    oiprofile: <OIProfileTab />,
   };
 
   // Tabs that manage their own scroll (use ScrollArea internally)
-  const selfScrollingTabs: TabId[] = ["breadth", "fiidii", "vix", "participantoi", "correlation"];
+  const selfScrollingTabs: TabId[] = [
+    "breadth",
+    "fiidii",
+    "vix",
+    "participantoi",
+    "correlation",
+    "gex",
+    "ivsmile",
+    "maxpain",
+    "oiprofile",
+  ];
 
   const currentTab = TABS.find((t) => t.id === activeTab);
 

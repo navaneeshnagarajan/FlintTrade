@@ -148,6 +148,82 @@ export interface SmartOrderParams extends PlaceOrderParams {
   positionSize: number;
 }
 
+// --- GEX (Gamma Exposure) ---
+export interface GexEntry {
+  strike: number;
+  call_gamma: number;
+  put_gamma: number;
+  net_gamma: number;
+  call_oi: number;
+  put_oi: number;
+}
+
+// --- IV Smile ---
+export interface IVSmileEntry {
+  strike: number;
+  call_iv: number;
+  put_iv: number;
+  moneyness: number;
+}
+
+// --- Max Pain ---
+export interface MaxPainData {
+  max_pain_strike: number;
+  strikes: Array<{
+    strike: number;
+    call_oi: number;
+    put_oi: number;
+    call_pain: number;
+    put_pain: number;
+    total_pain: number;
+  }>;
+}
+
+// --- OI Profile ---
+export interface OIProfileEntry {
+  strike: number;
+  type: "CE" | "PE";
+  oi: number;
+  oi_delta_d: number;
+  ltp: number;
+}
+
+// --- Synthetic Future ---
+export interface SyntheticFutureData {
+  underlying: string;
+  underlying_ltp: number;
+  expiry: string;
+  atm_strike: number;
+  synthetic_future_price: number;
+}
+
+// --- Margin ---
+export interface MarginData {
+  total_margin_required: number;
+  span_margin: number;
+  exposure_margin: number;
+}
+
+// --- Holidays ---
+export interface Holiday {
+  date: string;
+  description: string;
+  holiday_type: string;
+  closed_exchanges: string[];
+  open_exchanges: Array<{
+    exchange: string;
+    start_time: number;
+    end_time: number;
+  }>;
+}
+
+// --- Market Timings ---
+export interface MarketTiming {
+  exchange: string;
+  start_time: number;
+  end_time: number;
+}
+
 // --- WebSocket ---
 export interface WsTick {
   symbol: string;

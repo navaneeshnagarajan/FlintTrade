@@ -15,6 +15,8 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { ping } from "@/services/api";
+import { useTimings } from "@/hooks/useMarketStatus";
+import type { MarketTiming } from "@/types/api";
 
 function ISTClock() {
   const [time, setTime] = useState("");
@@ -39,6 +41,92 @@ function ISTClock() {
     <span className="font-mono text-xs text-text-secondary tabular-nums">
       {time} IST
     </span>
+  );
+}
+
+type MarketStatus = "open" | "pre-market" | "closed" | "weekend";
+
+interface MarketStatusInfo {
+  status: MarketStatus;
+  label: string;
+}
+
+/** Returns market status from NSE timing, falling back to hardcoded 9:15–15:30 IST. */
+function getNseStatus(timings: MarketTiming[] | undefined): MarketStatusInfo {
+  const now = new Date();
+  const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+  const ist = new Date(istString);
+  const day = ist.getDay(); // 0 = Sunday, 6 = Saturday
+
+  if (day === 0 || day === 6) {
+    return { status: "weekend", label: "Weekend" };
+  }
+
+  const nowMs = now.getTime();
+
+  // Try live timings first (NSE exchange)
+  const nseTiming = timings?.find(
+    (t) => t.exchange === "NSE" || t.exchange === "NSE_INDEX",
+  );
+
+  if (nseTiming) {
+    if (nowMs < nseTiming.start_time) {
+      return { status: "pre-market", label: "Pre-Market" };
+    }
+    if (nowMs <= nseTiming.end_time) {
+      return { status: "open", label: "Market Open" };
+    }
+    return { status: "closed", label: "Closed" };
+  }
+
+  // Fallback: hardcoded 9:15–15:30 IST
+  const hour = ist.getHours();
+  const mins = hour * 60 + ist.getMinutes();
+  const OPEN_MINS = 9 * 60 + 15; // 555
+  const CLOSE_MINS = 15 * 60 + 30; // 930
+
+  if (mins < OPEN_MINS) return { status: "pre-market", label: "Pre-Market" };
+  if (mins <= CLOSE_MINS) return { status: "open", label: "Market Open" };
+  return { status: "closed", label: "Closed" };
+}
+
+function MarketStatusBadge() {
+  const { data: timings } = useTimings();
+  const [statusInfo, setStatusInfo] = useState<MarketStatusInfo>(() =>
+    getNseStatus(timings),
+  );
+
+  // Recompute every 30 seconds so the badge flips automatically at open/close
+  useEffect(() => {
+    const update = () => setStatusInfo(getNseStatus(timings));
+    update();
+    const id = setInterval(update, 30_000);
+    return () => clearInterval(id);
+  }, [timings]);
+
+  const dotClass: Record<MarketStatus, string> = {
+    open: "bg-profit animate-[pulse-glow_2s_ease-in-out_infinite]",
+    "pre-market": "bg-amber-400",
+    closed: "bg-loss",
+    weekend: "bg-text-muted",
+  };
+
+  const textClass: Record<MarketStatus, string> = {
+    open: "text-profit",
+    "pre-market": "text-amber-400",
+    closed: "text-text-muted",
+    weekend: "text-text-muted",
+  };
+
+  return (
+    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-hover">
+      <div
+        className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass[statusInfo.status]}`}
+      />
+      <span className={`text-xs font-medium tabular-nums ${textClass[statusInfo.status]}`}>
+        {statusInfo.label}
+      </span>
+    </div>
   );
 }
 
@@ -317,6 +405,7 @@ export default function TopBar() {
           </span>
         </div>
 
+        <MarketStatusBadge />
         <ISTClock />
       </div>
     </div>

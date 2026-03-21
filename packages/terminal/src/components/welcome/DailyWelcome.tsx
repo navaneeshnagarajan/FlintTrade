@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { X, AlertTriangle } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
+import { useHolidays } from "@/hooks/useMarketStatus";
+import type { Holiday } from "@/types/api";
 
 interface DailyWelcomeProps {
   onDismiss: () => void;
@@ -88,10 +90,64 @@ function handleBeforeUnload(): void {
   }
 }
 
+/** Returns today's date in IST as a "YYYY-MM-DD" string for comparison with Holiday.date. */
+function getIstDateString(offsetDays = 0): string {
+  const now = new Date();
+  now.setDate(now.getDate() + offsetDays);
+  return now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
+}
+
+/** Formats a "YYYY-MM-DD" date string as "Mon, 26 Jan". */
+function formatHolidayDate(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  return d.toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+interface HolidayContext {
+  /** Non-null when today itself is a holiday for NSE. */
+  todayHoliday: Holiday | null;
+  /** Non-null when the next calendar day is a holiday for NSE. */
+  tomorrowHoliday: Holiday | null;
+  /** First holiday within the next 3 days (exclusive of today and tomorrow). */
+  upcomingHoliday: Holiday | null;
+}
+
+function getHolidayContext(holidays: Holiday[] | undefined): HolidayContext {
+  if (!holidays || holidays.length === 0) {
+    return { todayHoliday: null, tomorrowHoliday: null, upcomingHoliday: null };
+  }
+
+  /** Returns true when NSE is listed as a closed exchange on the holiday. */
+  const affectsNse = (h: Holiday): boolean =>
+    h.closed_exchanges.some((ex) => ex === "NSE" || ex === "NSE_INDEX");
+
+  const nseHolidays = holidays.filter(affectsNse);
+
+  const today = getIstDateString(0);
+  const tomorrow = getIstDateString(1);
+  const dayAfter = getIstDateString(2);
+  const dayAfterAfter = getIstDateString(3);
+
+  const todayHoliday = nseHolidays.find((h) => h.date === today) ?? null;
+  const tomorrowHoliday = nseHolidays.find((h) => h.date === tomorrow) ?? null;
+  const upcomingHoliday =
+    nseHolidays.find(
+      (h) => h.date === dayAfter || h.date === dayAfterAfter,
+    ) ?? null;
+
+  return { todayHoliday, tomorrowHoliday, upcomingHoliday };
+}
+
 export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const name = useSettingsStore((s) => s.name);
   const positionCount = useTradingStore((s) => s.positionCount);
+  const { data: holidays } = useHolidays();
 
   const wasCrash = useRef(detectCrashRecovery());
 
@@ -126,9 +182,20 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
     }
 
     const displayName = name && name !== "Trader" ? name : "";
-    const greeting = displayName
-      ? `${ctx.greeting}, ${displayName}`
-      : ctx.greeting;
+    const { todayHoliday, tomorrowHoliday, upcomingHoliday } =
+      getHolidayContext(holidays);
+
+    // Override greeting when today is a holiday
+    const baseGreeting = todayHoliday
+      ? `Today is ${todayHoliday.description} — markets closed`
+      : displayName
+        ? `${ctx.greeting}, ${displayName}`
+        : ctx.greeting;
+
+    // Override message when tomorrow is a holiday
+    const baseMessage = tomorrowHoliday
+      ? `Tomorrow: ${tomorrowHoliday.description} — markets closed`
+      : ctx.message;
 
     return (
       <div
@@ -144,10 +211,16 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
           <X className="h-4 w-4" />
         </button>
         <p className="font-heading font-semibold text-lg text-text-primary pr-6">
-          {greeting}
+          {baseGreeting}
         </p>
-        <p className="text-sm text-text-secondary mt-1">{ctx.message}</p>
-        {ctx.suggestion && (
+        <p className="text-sm text-text-secondary mt-1">{baseMessage}</p>
+        {upcomingHoliday && !tomorrowHoliday && (
+          <p className="text-xs text-amber-400 mt-2">
+            Upcoming: {upcomingHoliday.description} on{" "}
+            {formatHolidayDate(upcomingHoliday.date)}
+          </p>
+        )}
+        {ctx.suggestion && !todayHoliday && !tomorrowHoliday && (
           <p className="text-xs text-primary mt-2 cursor-pointer hover:underline">
             {ctx.suggestion}
           </p>
@@ -171,7 +244,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
         <X className="h-4 w-4" />
       </button>
       <div className="flex items-center gap-2 pr-6">
-        <AlertTriangle className="h-5 w-5 text-loss flex-shrink-0" />
+        <AlertTriangle className="h-5 w-5 text-loss shrink-0" />
         <p className="font-heading font-semibold text-lg text-loss">
           Session recovered
         </p>

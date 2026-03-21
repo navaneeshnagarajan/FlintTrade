@@ -17,6 +17,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useSyntheticFuture } from "@/hooks/useSyntheticFuture";
 import DataEditor, {
   type GridColumn,
   type GridCell,
@@ -37,7 +39,7 @@ import {
   X,
   Loader2,
 } from "lucide-react";
-import { getExpiry, getOptionChain, getQuotes, placeOrder, searchSymbol } from "../../../services/api";
+import { getExpiry, getInstruments, getOptionChain, getOptionSymbol, getQuotes, getSymbol, placeOrder, searchSymbol } from "../../../services/api";
 import type { Quote } from "../../../types/api";
 import {
   Popover,
@@ -73,6 +75,20 @@ interface SymbolSearchResult {
   symbol: string;
   exchange: string;
 }
+
+/** Shape returned by getInstruments() */
+interface InstrumentRecord {
+  symbol: string;
+  name: string;
+  exchange: string;
+  instrumenttype: string;
+  lotsize: number;
+  tick_size: number;
+  token: string;
+}
+
+/** Exchanges that have option chains */
+const OPTION_CHAIN_EXCHANGES = new Set(["NFO", "BFO", "MCX", "CDS"]);
 
 type ViewType = "LTP" | "OI" | "GREEKS";
 
@@ -314,29 +330,65 @@ function mapToSpotExchange(exchange: string): string {
   return "NSE";
 }
 
+/** Convert an InstrumentRecord to a SymbolDef for the option chain */
+function instrumentToSymbolDef(inst: InstrumentRecord): SymbolDef {
+  const optExchange = mapToOptionExchange(inst.exchange);
+  const spotExchange = mapToSpotExchange(inst.exchange);
+  return {
+    label: inst.symbol,
+    exchange: optExchange,
+    spotSymbol: inst.symbol,
+    spotExchange,
+  };
+}
+
 /** Searchable symbol combobox — Popover + Command (cmdk) */
 function SymbolSearchCombobox({
   activeSymbol,
   onSelect,
+  instruments,
 }: {
   activeSymbol: SymbolDef;
   onSelect: (sym: SymbolDef) => void;
+  instruments: InstrumentRecord[];
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SymbolSearchResult[]>([]);
+  const [searchFailed, setSearchFailed] = useState(false);
   const [searching, setSearching] = useState(false);
   const debouncedQuery = useDebounce(query, 300);
+
+  // Known labels in the hardcoded SYMBOLS list — used for deduplication
+  const hardcodedLabels = useMemo(() => new Set(SYMBOLS.map((s) => s.label)), []);
+
+  // Extra instruments from the API that aren't in the hardcoded list
+  const extraInstruments = useMemo(
+    () => instruments.filter((inst) => !hardcodedLabels.has(inst.symbol)),
+    [instruments, hardcodedLabels],
+  );
+
+  // Client-side filter of instruments matching the query (fallback when API search fails/returns nothing)
+  const instrumentFallbackResults = useMemo<SymbolSearchResult[]>(() => {
+    if (debouncedQuery.length < 2) return [];
+    const q = debouncedQuery.toUpperCase();
+    return instruments
+      .filter((inst) => inst.symbol.includes(q) || inst.name.toUpperCase().includes(q))
+      .slice(0, 15)
+      .map((inst) => ({ symbol: inst.symbol, exchange: inst.exchange }));
+  }, [debouncedQuery, instruments]);
 
   // Search API when query changes (2+ chars)
   useEffect(() => {
     if (debouncedQuery.length < 2) {
       setSearchResults([]);
+      setSearchFailed(false);
       setSearching(false);
       return;
     }
     let cancelled = false;
     setSearching(true);
+    setSearchFailed(false);
     (async () => {
       try {
         const raw = await searchSymbol(debouncedQuery.trim());
@@ -345,14 +397,28 @@ function SymbolSearchCombobox({
           ? raw
           : ((raw as unknown as { data?: SymbolSearchResult[] })?.data ?? []);
         setSearchResults(list.slice(0, 15));
+        setSearchFailed(false);
       } catch {
-        if (!cancelled) setSearchResults([]);
+        if (!cancelled) {
+          setSearchResults([]);
+          setSearchFailed(true);
+        }
       } finally {
         if (!cancelled) setSearching(false);
       }
     })();
     return () => { cancelled = true; };
   }, [debouncedQuery]);
+
+  // Decide which results to show: live API results, or instrument fallback
+  const showingFallback = !searching && debouncedQuery.length >= 2 && (searchFailed || searchResults.length === 0) && instrumentFallbackResults.length > 0;
+  const displayResults = showingFallback ? instrumentFallbackResults : searchResults;
+
+  // Look up name for a search result from the instruments list
+  function instrumentName(symbol: string): string | null {
+    const found = instruments.find((i) => i.symbol === symbol);
+    return found?.name ?? null;
+  }
 
   function handleSelectPopular(sym: SymbolDef) {
     onSelect(sym);
@@ -375,6 +441,13 @@ function SymbolSearchCombobox({
     setSearchResults([]);
   }
 
+  function handleSelectInstrument(inst: InstrumentRecord) {
+    onSelect(instrumentToSymbolDef(inst));
+    setOpen(false);
+    setQuery("");
+    setSearchResults([]);
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -387,7 +460,7 @@ function SymbolSearchCombobox({
           <ChevronDown size={10} className={`text-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-64 p-0 bg-surface-card border-border-default" align="start" sideOffset={4}>
+      <PopoverContent className="w-72 p-0 bg-surface-card border-border-default" align="start" sideOffset={4}>
         <Command shouldFilter={false} className="bg-surface-card">
           <CommandInput
             placeholder="Search symbol..."
@@ -395,33 +468,45 @@ function SymbolSearchCombobox({
             onValueChange={setQuery}
             className="text-xs"
           />
-          <CommandList className="max-h-64">
+          <CommandList className="max-h-72">
             {/* Search results — shown when typing */}
             {debouncedQuery.length >= 2 && (
-              <CommandGroup heading={searching ? "Searching..." : `Results for "${debouncedQuery}"`}>
+              <CommandGroup heading={
+                searching
+                  ? "Searching..."
+                  : showingFallback
+                    ? `Offline matches for "${debouncedQuery}"`
+                    : `Results for "${debouncedQuery}"`
+              }>
                 {searching && (
                   <div className="flex items-center justify-center py-2">
                     <Loader2 size={14} className="animate-spin text-text-muted" />
                   </div>
                 )}
-                {!searching && searchResults.length === 0 && debouncedQuery.length >= 2 && (
+                {!searching && displayResults.length === 0 && (
                   <CommandEmpty>No symbols found</CommandEmpty>
                 )}
-                {!searching && searchResults.map((r) => (
-                  <CommandItem
-                    key={`${r.symbol}-${r.exchange}`}
-                    value={`${r.symbol}-${r.exchange}`}
-                    onSelect={() => handleSelectSearch(r)}
-                    className="text-xs cursor-pointer"
-                  >
-                    <span className="font-semibold text-text-primary">{r.symbol}</span>
-                    <span className="ml-auto text-xxs text-text-muted">{r.exchange}</span>
-                  </CommandItem>
-                ))}
+                {!searching && displayResults.map((r) => {
+                  const name = instrumentName(r.symbol);
+                  return (
+                    <CommandItem
+                      key={`${r.symbol}-${r.exchange}`}
+                      value={`${r.symbol}-${r.exchange}`}
+                      onSelect={() => handleSelectSearch(r)}
+                      className="text-xs cursor-pointer"
+                    >
+                      <span className="font-semibold text-text-primary">{r.symbol}</span>
+                      {name && (
+                        <span className="ml-1.5 text-xxs text-text-muted truncate max-w-28">{name}</span>
+                      )}
+                      <span className="ml-auto text-xxs text-text-muted shrink-0">{r.exchange}</span>
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
             )}
 
-            {/* Popular symbols — always shown */}
+            {/* Popular symbols — shown when no query */}
             {debouncedQuery.length < 2 && (
               <>
                 <CommandGroup heading="Popular">
@@ -439,11 +524,34 @@ function SymbolSearchCombobox({
                     </CommandItem>
                   ))}
                 </CommandGroup>
+
+                {/* Extra instruments loaded from API */}
+                {extraInstruments.length > 0 && (
+                  <>
+                    <CommandSeparator />
+                    <CommandGroup heading="All Instruments">
+                      {extraInstruments.slice(0, 50).map((inst) => (
+                        <CommandItem
+                          key={`inst-${inst.symbol}-${inst.exchange}`}
+                          value={`inst-${inst.symbol}-${inst.exchange}`}
+                          onSelect={() => handleSelectInstrument(inst)}
+                          className={`text-xs cursor-pointer ${
+                            inst.symbol === activeSymbol.label ? "bg-accent/10 text-accent" : ""
+                          }`}
+                        >
+                          <span className="font-semibold">{inst.symbol}</span>
+                          <span className="ml-1.5 text-xxs text-text-muted truncate max-w-28">{inst.name}</span>
+                          <span className="ml-auto text-xxs text-text-muted shrink-0">{inst.exchange}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </>
+                )}
               </>
             )}
 
-            {/* Separator between search and popular when both could show */}
-            {debouncedQuery.length >= 2 && searchResults.length > 0 && (
+            {/* When searching: show Popular shortcut below results */}
+            {debouncedQuery.length >= 2 && displayResults.length > 0 && (
               <>
                 <CommandSeparator />
                 <CommandGroup heading="Popular">
@@ -526,6 +634,22 @@ interface OptionChainWidgetProps {
 export default function OptionChainWidget({ node: _node }: OptionChainWidgetProps) {
   const [symDef, setSymDef] = useState<SymbolDef>(SYMBOLS[0]);
   const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // Instruments — fetched once (1-hour staleTime), filtered to option exchanges
+  // ---------------------------------------------------------------------------
+  const { data: rawInstruments } = useQuery({
+    queryKey: ["instruments"],
+    queryFn: getInstruments,
+    staleTime: 60 * 60 * 1000, // 1 hour
+    gcTime: 2 * 60 * 60 * 1000,
+    retry: 1,
+  });
+
+  const optionInstruments = useMemo<InstrumentRecord[]>(() => {
+    if (!rawInstruments) return [];
+    return rawInstruments.filter((inst) => OPTION_CHAIN_EXCHANGES.has(inst.exchange));
+  }, [rawInstruments]);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [view, setView] = useState<ViewType>("LTP");
@@ -543,6 +667,17 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
   const [basketOpen, setBasketOpen] = useState(false);
 
   const exchange = exchangeOverride ?? symDef.exchange;
+
+  // ---------------------------------------------------------------------------
+  // Symbol details — lot size and metadata for the selected symbol
+  // ---------------------------------------------------------------------------
+  const { data: symbolDetails } = useQuery({
+    queryKey: ["symbol", symDef.label, exchange],
+    queryFn: () => getSymbol(symDef.label, exchange),
+    staleTime: 30 * 60 * 1000, // 30 minutes — lot sizes rarely change intraday
+    gcTime: 60 * 60 * 1000,
+    retry: 1,
+  });
 
   const gridRef = useRef<DataEditorRef>(null);
 
@@ -698,14 +833,34 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
   // PCR — prefer API value, fallback to computed
   const pcr = chain?.pcr != null ? chain.pcr : computedPCR;
 
-  // order handler
+  // order handler — resolves the exact trading symbol via getOptionSymbol before placing the order.
+  // The offset parameter accepts "ATM", "ATM+N", "ATM-N", or the literal strike price as a string.
+  // Here we know the exact strike, so we pass it directly as the offset value.
   async function handleOrder({ strike, optionType, expiry, action }: OrderParams) {
-    const orderSymbol = `${symDef.label}${expiry}${strike}${optionType}`;
+    let orderSymbol = `${symDef.label}${expiry}${strike}${optionType}`;
+    let orderExchange = exchange;
+    try {
+      // Resolve the canonical broker trading symbol from OpenAlgo.
+      // getOptionSymbol(underlying, exchange, expiry_date, option_type, offset)
+      // offset = strike price as string when we know the exact strike.
+      const resolved = await getOptionSymbol(
+        symDef.label,
+        exchange,
+        expiry,
+        optionType,
+        String(strike),
+      );
+      orderSymbol = resolved.symbol;
+      orderExchange = resolved.exchange;
+    } catch {
+      // If symbol resolution fails, fall back to the manually constructed symbol.
+      // This keeps existing behavior intact for brokers where optionsymbol is not required.
+    }
     try {
       await placeOrder({
         strategy: "FlintChain",
         symbol: orderSymbol,
-        exchange,
+        exchange: orderExchange,
         action: action === "B" ? "BUY" : "SELL",
         quantity: 1,
         orderType: "MARKET",
@@ -737,6 +892,14 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
   function isInBasket(strike: number, optionType: "CE" | "PE"): boolean {
     return basket.some((b) => b.strike === strike && b.optionType === optionType);
   }
+
+  // Synthetic future — only for equity/index options (not MCX/CDS)
+  const showSyntheticFuture = exchange === "NFO" || exchange === "BFO";
+  const { data: syntheticFutureData } = useSyntheticFuture(
+    symDef.label,
+    exchange,
+    selectedExpiry ?? undefined,
+  );
 
   const expiryButtons = expiries.slice(0, 5);
 
@@ -1017,6 +1180,7 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
               setSymDef(newSym);
               setExchangeOverride(null);
             }}
+            instruments={optionInstruments}
           />
 
           <ExchangeSelector
@@ -1115,6 +1279,31 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
             </>
           ) : (
             <span className="text-xs text-text-muted">Spot: —</span>
+          )}
+
+          {/* Lot size badge — populated by getSymbol query */}
+          {symbolDetails?.lotsize != null && symbolDetails.lotsize > 0 && (
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded border bg-surface-card border-border-default text-xs font-mono">
+              <span className="text-text-muted font-sans">Lot</span>
+              <span className="font-semibold text-text-primary">{NUM0.format(symbolDetails.lotsize)}</span>
+            </div>
+          )}
+
+          {/* Synthetic future price badge */}
+          {showSyntheticFuture && syntheticFutureData?.synthetic_future_price != null && (
+            <div className="flex flex-col gap-0 px-2 py-0.5 rounded border bg-surface-card border-border-default">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-text-secondary uppercase tracking-wide">Syn Future</span>
+                <span className="font-mono text-sm font-bold text-text-primary">
+                  ₹{syntheticFutureData.synthetic_future_price.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              {syntheticFutureData.atm_strike != null && (
+                <span className="text-xxs text-text-muted font-mono">
+                  ATM {NUM0.format(syntheticFutureData.atm_strike)}
+                </span>
+              )}
+            </div>
           )}
 
           {/* PCR badge — bullish/bearish/neutral token colors */}

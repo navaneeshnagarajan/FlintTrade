@@ -4,6 +4,7 @@ import TopBar from "@/chrome/TopBar";
 import TickerBar from "@/chrome/TickerBar";
 import InteractiveTour from "@/components/tour/InteractiveTour";
 import { useWsBridge } from "@/hooks/useWsBridge";
+import { useTickerFallback } from "@/hooks/useTickerFallback";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 
 const TOUR_STORAGE_KEY = "flinttrade:tourComplete";
@@ -14,7 +15,8 @@ const TOUR_STORAGE_KEY = "flinttrade:tourComplete";
  * Flow routes (/welcome, /explore, /setup) render outside this layout.
  */
 export default function AppLayout() {
-  useWsBridge(); // WebSocket connection (no-ops if no apiKey)
+  useWsBridge();         // WebSocket connection (no-ops if no apiKey)
+  useTickerFallback();   // REST polling fallback when WS is disconnected
   const [showWelcome, setShowWelcome] = useState(true);
   const [tourComplete, setTourComplete] = useState(
     () => localStorage.getItem(TOUR_STORAGE_KEY) === "true",
