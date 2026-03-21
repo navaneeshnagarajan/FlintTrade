@@ -70,13 +70,24 @@ infra/openclaw/.env
 chroma_data/
 .gitnexus/
 
-# === Reference (cloned repos, screenshots, captured code — local only) ===
-# === DEV-ONLY (never in public repo) ===
+# === Local dev (all private/internal docs, reference repos, screenshots) ===
+.local/
 .reference/
+
+# === DEV-ONLY (tools need these in root, but not in public repo) ===
 .claude/
 bugs/
 .vscode/
 docs/superpowers/
+
+# === Internal dev docs (stay in root for tools, hidden from public) ===
+AGENTS.md
+DEVLOG.md
+PLAN.md
+SOP.md
+REPOS.md
+packages/*/CLAUDE.md
+packages/*/AGENTS.md
 
 # === Firecrawl scrape cache ===
 .firecrawl/
@@ -90,6 +101,18 @@ docs/conversations/users.json
 # === Conversation summaries (personal context, not public) ===
 docs/conversations/*.md
 !docs/conversations/README.md
+
+# === Internal docs (moved to .local/, kept in docs/ for legacy tool compat) ===
+docs/AUDIT_*.md
+docs/FINAL_SWEEP.md
+docs/MISSING_ITEMS.md
+docs/BEST_IN_CLASS_2026.md
+docs/TECH_COMPARISON.md
+docs/DISCORD_GITHUB_FINDINGS.md
+docs/OPERATIONS_GUIDE.md
+docs/REPO_FEATURE_MAP.md
+docs/references/
+!docs/references/README.md
 
 # === Playwright MCP (screenshots from browser testing) ===
 .playwright-mcp/
