@@ -37,8 +37,8 @@ function formatINR(value: number): string {
 }
 
 function pnlClass(v: number) {
-  if (v > 0) return "text-emerald-400";
-  if (v < 0) return "text-red-400";
+  if (v > 0) return "text-profit";
+  if (v < 0) return "text-loss";
   return "text-text-secondary";
 }
 
@@ -242,7 +242,7 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
             {winners.length > 0 && (
               <Card className="bg-surface-card border-border-default">
                 <CardHeader className="p-3 pb-1">
-                  <CardTitle className="font-heading font-semibold text-xs text-emerald-400 uppercase tracking-wider">Top Winners</CardTitle>
+                  <CardTitle className="font-heading font-semibold text-xs text-profit uppercase tracking-wider">Top Winners</CardTitle>
                 </CardHeader>
                 <CardContent className="p-3 pt-1">
                   <BarList
@@ -257,7 +257,7 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
             {losers.length > 0 && (
               <Card className="bg-surface-card border-border-default">
                 <CardHeader className="p-3 pb-1">
-                  <CardTitle className="font-heading font-semibold text-xs text-red-400 uppercase tracking-wider">Top Losers</CardTitle>
+                  <CardTitle className="font-heading font-semibold text-xs text-loss uppercase tracking-wider">Top Losers</CardTitle>
                 </CardHeader>
                 <CardContent className="p-3 pt-1">
                   <BarList
@@ -317,7 +317,7 @@ function CalendarTab({ trades }: { trades: Trade[] }) {
           <Card key={label} className="bg-surface-card border-border-default">
             <CardContent className="p-3">
               <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">{label}</div>
-              <div className={`text-base font-bold font-mono tabular-nums ${pos === undefined ? "text-text-primary" : pos ? "text-emerald-400" : "text-red-400"}`}>{value}</div>
+              <div className={`text-base font-bold font-mono tabular-nums ${pos === undefined ? "text-text-primary" : pos ? "text-profit" : "text-loss"}`}>{value}</div>
             </CardContent>
           </Card>
         ))}
@@ -404,7 +404,7 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Drawdown</div>
-            <div className={`text-xl font-bold font-mono tabular-nums ${maxDrawdown < 0 ? "text-red-400" : "text-emerald-400"}`}>
+            <div className={`text-xl font-bold font-mono tabular-nums ${maxDrawdown < 0 ? "text-loss" : "text-profit"}`}>
               {maxDrawdown.toFixed(2)}%
             </div>
           </CardContent>
@@ -486,11 +486,11 @@ export default function PnLDashboardTool({ onClose }: Props) {
           <PieChart size={16} className="text-primary" />
           <h1 className="font-heading font-bold text-lg text-text-primary">P&L Dashboard</h1>
           {isLoading && <span className="text-xs text-text-muted">Loading...</span>}
-          {isError && <AlertCircle size={12} className="text-red-400" />}
+          {isError && <AlertCircle size={12} className="text-loss" />}
           {!isLoading && !isError && (
             <Badge
               variant="outline"
-              className={`text-xxs px-1.5 py-0 border-0 font-mono font-medium ${totalPnl >= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
+              className={`text-xxs px-1.5 py-0 border-0 font-mono font-medium ${totalPnl >= 0 ? "bg-bullish-bg text-profit" : "bg-bearish-bg text-loss"}`}
             >
               {totalPnl >= 0 ? <TrendingUp size={9} className="inline mr-0.5" /> : <TrendingDown size={9} className="inline mr-0.5" />}
               {formatINR(totalPnl)}

@@ -201,9 +201,9 @@ function StrategiesTab() {
   const filtered = filter === "all" ? STRATEGIES : STRATEGIES.filter((s) => s.category === filter);
 
   const difficultyColor = (d: string) =>
-    d === "Beginner" ? "bg-green-500/20 text-green-400" :
-    d === "Intermediate" ? "bg-yellow-500/20 text-yellow-400" :
-    "bg-red-500/20 text-red-400";
+    d === "Beginner" ? "bg-bullish-bg text-profit" :
+    d === "Intermediate" ? "bg-atm-bg text-warning" :
+    "bg-bearish-bg text-loss";
 
   return (
     <div className="space-y-4">
@@ -259,7 +259,7 @@ function PaperTradingTab() {
         <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">Supported Sandboxes</h3>
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <Badge className="bg-green-500/20 text-green-400">Active</Badge>
+            <Badge className="bg-bullish-bg text-profit">Active</Badge>
             <span className="text-sm text-text-primary">Dhan Sandbox</span>
             <span className="text-xs text-text-muted">— ₹10L virtual funds, 24/7, all instruments</span>
           </div>

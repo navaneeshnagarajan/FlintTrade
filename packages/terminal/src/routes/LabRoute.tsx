@@ -102,9 +102,9 @@ interface MetricCardProps {
 function MetricCard({ label, value, positive }: MetricCardProps) {
   const valueColor =
     positive === true
-      ? "text-emerald-400"
+      ? "text-profit"
       : positive === false
-        ? "text-red-400"
+        ? "text-loss"
         : "text-text-primary";
   return (
     <div className="bg-surface-base border border-border-default rounded-lg p-4 text-center">
@@ -288,8 +288,8 @@ function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
                       <Badge
                         className={`text-xxs ${
                           trade.side === "BUY"
-                            ? "bg-emerald-500/20 text-emerald-400"
-                            : "bg-red-500/20 text-red-400"
+                            ? "bg-bullish-bg text-profit"
+                            : "bg-bearish-bg text-loss"
                         }`}
                       >
                         {trade.side}
@@ -303,7 +303,7 @@ function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
                     </TableCell>
                     <TableCell
                       className={`text-xs font-mono font-semibold text-right ${
-                        trade.pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                        trade.pnl >= 0 ? "text-profit" : "text-loss"
                       }`}
                     >
                       {fmtInr(trade.pnl)}
@@ -398,7 +398,7 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
                 Loading strategies…
               </div>
             ) : strategiesQuery.isError ? (
-              <div className="flex items-center gap-2 text-xs text-red-400 h-9">
+              <div className="flex items-center gap-2 text-xs text-loss h-9">
                 <AlertCircle className="w-3 h-3" />
                 Failed to load strategies
                 <button
@@ -554,11 +554,11 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
           </Button>
 
           {backtestMutation.isSuccess && (
-            <span className="text-xs text-emerald-400">Backtest complete.</span>
+            <span className="text-xs text-profit">Backtest complete.</span>
           )}
 
           {runError && (
-            <div className="flex items-center gap-2 text-xs text-red-400">
+            <div className="flex items-center gap-2 text-xs text-loss">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               <span>{runError.message}</span>
               <button
@@ -657,15 +657,15 @@ function ForwardTradesTable({ trades }: ForwardTradesTableProps) {
               <TableCell className="text-xxs text-text-secondary font-mono">
                 {trade.exit_timestamp
                   ? trade.exit_timestamp.slice(0, 16).replace("T", " ")
-                  : <span className="text-amber-400">Open</span>}
+                  : <span className="text-warning">Open</span>}
               </TableCell>
               <TableCell className="text-xs font-mono text-text-primary">{trade.symbol}</TableCell>
               <TableCell>
                 <Badge
                   className={`text-xxs ${
                     trade.side === "BUY"
-                      ? "bg-emerald-500/20 text-emerald-400"
-                      : "bg-red-500/20 text-red-400"
+                      ? "bg-bullish-bg text-profit"
+                      : "bg-bearish-bg text-loss"
                   }`}
                 >
                   {trade.side}
@@ -684,7 +684,7 @@ function ForwardTradesTable({ trades }: ForwardTradesTableProps) {
               </TableCell>
               <TableCell
                 className={`text-xs font-mono font-semibold text-right ${
-                  trade.pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                  trade.pnl >= 0 ? "text-profit" : "text-loss"
                 }`}
               >
                 {trade.exit_price > 0 ? fmtInr(trade.pnl) : "—"}
@@ -736,12 +736,12 @@ function ForwardMonitor({ running, onStop, isStopping }: ForwardMonitorProps) {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-400" />
+              <Activity className="w-4 h-4 text-profit" />
               <span className="text-sm font-semibold text-text-primary font-mono">
                 {running.name}
               </span>
             </div>
-            <Badge className="bg-emerald-500/20 text-emerald-400 text-xs border-0">
+            <Badge className="bg-bullish-bg text-profit text-xs border-0">
               {running.status}
             </Badge>
             <span className="text-xs text-text-muted font-mono">{running.symbol} / {running.exchange}</span>
@@ -1015,7 +1015,7 @@ function ForwardTestSection() {
                   Loading strategies…
                 </div>
               ) : strategiesQuery.isError ? (
-                <div className="flex items-center gap-2 text-xs text-red-400 h-9">
+                <div className="flex items-center gap-2 text-xs text-loss h-9">
                   <AlertCircle className="w-3 h-3" />
                   Failed to load strategies
                   <button
@@ -1132,7 +1132,7 @@ function ForwardTestSection() {
             </Button>
 
             {startMutation.isError && (
-              <div className="flex items-center gap-2 text-xs text-red-400">
+              <div className="flex items-center gap-2 text-xs text-loss">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                 <span>{startMutation.error.message}</span>
                 <button
@@ -1210,7 +1210,7 @@ function OptimizeSection() {
         </div>
       </Card>
       <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-amber-500/20 text-amber-400 text-xs">Coming in v0.2.0</Badge>
+        <Badge className="bg-atm-bg text-warning text-xs">Coming in v0.2.0</Badge>
         <p className="text-sm text-text-muted mt-2">
           Parameter optimization UI will be available in the next release. The Python
           backtest-engine package already supports walk-forward optimization via{" "}
@@ -1241,7 +1241,7 @@ function ResultsSection({ lastResult }: ResultsSectionProps) {
             <h3 className="font-heading font-semibold text-lg text-text-primary">
               Last Backtest Results
             </h3>
-            <Badge className="bg-emerald-500/20 text-emerald-400 text-xs">Run complete</Badge>
+            <Badge className="bg-bullish-bg text-profit text-xs">Run complete</Badge>
           </div>
           <p className="text-xs text-text-muted mb-4">
             Showing results from the most recent backtest run. Run a new backtest from the
@@ -1285,7 +1285,7 @@ function ResultsSection({ lastResult }: ResultsSectionProps) {
         </div>
       </Card>
       <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-amber-500/20 text-amber-400 text-xs">No data yet</Badge>
+        <Badge className="bg-atm-bg text-warning text-xs">No data yet</Badge>
         <p className="text-sm text-text-muted mt-2">
           Run a backtest from the Backtest section to populate results here. Multi-run
           comparison and CSV export will be available in v0.2.0.
@@ -1337,7 +1337,7 @@ function LabSettingsSection() {
         </div>
       </Card>
       <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-amber-500/20 text-amber-400 text-xs">Coming in v0.2.0</Badge>
+        <Badge className="bg-atm-bg text-warning text-xs">Coming in v0.2.0</Badge>
         <p className="text-sm text-text-muted mt-2">
           Settings will be persisted to workspace.json and configurable via form controls.
         </p>
@@ -1386,7 +1386,7 @@ export default function LabRoute() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
+        <nav aria-label="Section navigation" className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
           {SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -1394,6 +1394,7 @@ export default function LabRoute() {
               <button
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
+                aria-current={isActive ? "true" : undefined}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors ${
                   isActive
                     ? "text-accent bg-accent/10 border-l-2 border-accent"
@@ -1406,7 +1407,7 @@ export default function LabRoute() {
               </button>
             );
           })}
-        </div>
+        </nav>
 
         {/* Content */}
         <ScrollArea className="flex-1">

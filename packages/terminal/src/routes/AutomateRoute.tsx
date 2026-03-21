@@ -405,7 +405,7 @@ function StatusBadge({ status }: { status: string }) {
     return <Badge className="text-xs bg-profit/10 text-profit border-0">Active</Badge>;
   }
   if (lower === "paused") {
-    return <Badge className="text-xs bg-amber-500/10 text-amber-400 border-0">Paused</Badge>;
+    return <Badge className="text-xs bg-atm-bg text-warning border-0">Paused</Badge>;
   }
   if (lower === "error") {
     return <Badge className="text-xs bg-loss/10 text-loss border-0">Error</Badge>;
@@ -625,7 +625,7 @@ function MonitorsSection() {
       return <Badge className="text-xs bg-profit/10 text-profit border-0">Running</Badge>;
     }
     if (lower === "stopping") {
-      return <Badge className="text-xs bg-amber-500/10 text-amber-400 border-0">Stopping</Badge>;
+      return <Badge className="text-xs bg-atm-bg text-warning border-0">Stopping</Badge>;
     }
     if (lower === "error") {
       return <Badge className="text-xs bg-loss/10 text-loss border-0">Error</Badge>;
@@ -729,7 +729,7 @@ function verdictClass(verdict: string): string {
   const lower = verdict.toLowerCase();
   if (lower === "pass") return "text-profit";
   if (lower === "fail") return "text-loss";
-  if (lower === "warn") return "text-amber-400";
+  if (lower === "warn") return "text-warning";
   return "text-text-muted";
 }
 
@@ -742,7 +742,7 @@ function VerdictBadge({ verdict }: { verdict: string }) {
     return <Badge className="text-xs bg-loss/10 text-loss border-0">FAIL</Badge>;
   }
   if (lower === "warn") {
-    return <Badge className="text-xs bg-amber-500/10 text-amber-400 border-0">WARN</Badge>;
+    return <Badge className="text-xs bg-atm-bg text-warning border-0">WARN</Badge>;
   }
   return (
     <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">{verdict}</Badge>
@@ -1268,7 +1268,7 @@ export default function AutomateRoute() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
+        <nav aria-label="Section navigation" className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
           {SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -1276,6 +1276,7 @@ export default function AutomateRoute() {
               <button
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
+                aria-current={isActive ? "true" : undefined}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors ${
                   isActive
                     ? "text-accent bg-accent/10 border-l-2 border-accent"
@@ -1290,7 +1291,7 @@ export default function AutomateRoute() {
               </button>
             );
           })}
-        </div>
+        </nav>
 
         {/* Content */}
         <ScrollArea className="flex-1">

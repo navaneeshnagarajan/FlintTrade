@@ -109,8 +109,8 @@ function ChatSection() {
 // ---------------------------------------------------------------------------
 
 function signalBadgeClass(type: Signal["signal_type"]): string {
-  if (type === "BUY") return "bg-green-500/20 text-green-400";
-  if (type === "SELL") return "bg-red-500/20 text-red-400";
+  if (type === "BUY") return "bg-bullish-bg text-profit";
+  if (type === "SELL") return "bg-bearish-bg text-loss";
   return "bg-surface-base text-text-muted";
 }
 
@@ -138,9 +138,9 @@ function SignalCard({ signal }: { signal: Signal }) {
           <div
             className={`h-full rounded-full transition-all ${
               signal.signal_type === "BUY"
-                ? "bg-green-500"
+                ? "bg-profit"
                 : signal.signal_type === "SELL"
-                  ? "bg-red-500"
+                  ? "bg-loss"
                   : "bg-text-muted"
             }`}
             style={{ width: `${signal.confidence * 100}%` }}
@@ -217,8 +217,8 @@ function SignalsSection() {
 
       {/* Error */}
       {isError && (
-        <Card className="bg-surface-card border border-red-500/30 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-red-400 text-sm">
+        <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
+          <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>Signal service unavailable.</span>
           </div>
@@ -261,15 +261,15 @@ function SignalsSection() {
 // ---------------------------------------------------------------------------
 
 function scoreToColor(score: number): string {
-  if (score > 0.1) return "text-green-400";
-  if (score < -0.1) return "text-red-400";
-  return "text-amber-400";
+  if (score > 0.1) return "text-profit";
+  if (score < -0.1) return "text-loss";
+  return "text-warning";
 }
 
 function labelBadgeClass(label: SentimentResult["label"]): string {
-  if (label === "bullish") return "bg-green-500/20 text-green-400";
-  if (label === "bearish") return "bg-red-500/20 text-red-400";
-  return "bg-amber-500/20 text-amber-400";
+  if (label === "bullish") return "bg-bullish-bg text-profit";
+  if (label === "bearish") return "bg-bearish-bg text-loss";
+  return "bg-atm-bg text-warning";
 }
 
 function SentimentResult({ result }: { result: SentimentResult }) {
@@ -309,10 +309,10 @@ function SentimentResult({ result }: { result: SentimentResult }) {
           <div
             className={`absolute top-0 h-full rounded-full transition-all ${
               result.score > 0.1
-                ? "bg-green-500"
+                ? "bg-profit"
                 : result.score < -0.1
-                  ? "bg-red-500"
-                  : "bg-amber-500"
+                  ? "bg-loss"
+                  : "bg-warning"
             }`}
             style={{ left: "50%", width: `${pct / 2}%`, transform: result.score < 0 ? "translateX(-100%)" : undefined }}
           />
@@ -426,8 +426,8 @@ function SentimentSection() {
 
       {/* Error */}
       {mutation.isError && (
-        <Card className="bg-surface-card border border-red-500/30 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-red-400 text-sm">
+        <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
+          <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>
               {mutation.error instanceof Error
@@ -539,8 +539,8 @@ function KnowledgeSection() {
 
       {/* Error */}
       {mutation.isError && (
-        <Card className="bg-surface-card border border-red-500/30 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-red-400 text-sm">
+        <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
+          <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>
               {mutation.error instanceof Error &&
@@ -641,7 +641,7 @@ function AISettingsSection() {
         )}
 
         {isError && (
-          <div className="flex items-center gap-2 text-red-400 text-sm">
+          <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             Could not reach the AI backend. Ensure the FT Python server is running on port 5001.
           </div>
@@ -654,13 +654,13 @@ function AISettingsSection() {
               <div className="flex items-center gap-2">
                 {data.configured ? (
                   <>
-                    <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                    <Badge className="bg-green-500/20 text-green-400 text-xs">Configured</Badge>
+                    <CheckCircle2 className="w-4 h-4 text-profit shrink-0" />
+                    <Badge className="bg-bullish-bg text-profit text-xs">Configured</Badge>
                   </>
                 ) : (
                   <>
-                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <Badge className="bg-amber-500/20 text-amber-400 text-xs">Not configured</Badge>
+                    <AlertCircle className="w-4 h-4 text-warning shrink-0" />
+                    <Badge className="bg-atm-bg text-warning text-xs">Not configured</Badge>
                   </>
                 )}
               </div>
@@ -723,7 +723,7 @@ function AISettingsSection() {
       </Card>
 
       <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-amber-500/20 text-amber-400 text-xs">Coming in v0.2.0</Badge>
+        <Badge className="bg-atm-bg text-warning text-xs">Coming in v0.2.0</Badge>
         <p className="text-sm text-text-muted mt-2">
           Settings form controls will be available in the next release. Use workspace.json
           directly to configure provider, model, and ChromaDB paths in the meantime.
@@ -765,7 +765,7 @@ export default function AIRoute() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
+        <nav aria-label="Section navigation" className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
           {SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -773,6 +773,7 @@ export default function AIRoute() {
               <button
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
+                aria-current={isActive ? "true" : undefined}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors ${
                   isActive
                     ? "text-accent bg-accent/10 border-l-2 border-accent"
@@ -787,7 +788,7 @@ export default function AIRoute() {
               </button>
             );
           })}
-        </div>
+        </nav>
 
         {/* Content */}
         <ScrollArea className="flex-1">

@@ -252,7 +252,7 @@ function formatCr(v: number): string {
 }
 
 function netColor(v: number): string {
-  return v >= 0 ? "text-emerald-400" : "text-red-400";
+  return v >= 0 ? "text-profit" : "text-loss";
 }
 
 function ReturnBadge({ value, size = "sm" }: { value: number | null; size?: "sm" | "xs" }) {
@@ -261,7 +261,7 @@ function ReturnBadge({ value, size = "sm" }: { value: number | null; size?: "sm"
   const cls = [
     "font-mono font-medium",
     size === "xs" ? "text-xs" : "text-xs",
-    isPos ? "text-emerald-400" : "text-red-400",
+    isPos ? "text-profit" : "text-loss",
   ].join(" ");
   return <span className={cls}>{formatReturn(value)}</span>;
 }
@@ -269,7 +269,7 @@ function ReturnBadge({ value, size = "sm" }: { value: number | null; size?: "sm"
 function DataNotice({ text }: { text?: string }) {
   return (
     <div className="flex items-start gap-2 rounded-md bg-surface-elevated border border-border-default p-3 mb-4">
-      <Info size={13} className="text-amber-400 mt-0.5 shrink-0" />
+      <Info size={13} className="text-warning mt-0.5 shrink-0" />
       <p className="text-xs text-text-secondary">
         {text ?? (
           <>
@@ -341,8 +341,8 @@ function MarketBreadthTab() {
         {/* Summary cards */}
         <div className="grid grid-cols-3 gap-2">
           {[
-            { label: "Advances", value: totalAdvances, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
-            { label: "Declines", value: totalDeclines, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" },
+            { label: "Advances", value: totalAdvances, color: "text-profit", bg: "bg-bullish-bg border-bullish-border" },
+            { label: "Declines", value: totalDeclines, color: "text-loss", bg: "bg-bearish-bg border-bearish-border" },
             { label: "Unchanged", value: totalUnchanged, color: "text-text-secondary", bg: "bg-surface-card border-border-default" },
           ].map((c) => (
             <Card key={c.label} className={`border ${c.bg}`}>
@@ -359,7 +359,7 @@ function MarketBreadthTab() {
           <Card className="bg-surface-card border-border-default">
             <CardContent className="pt-3 pb-3 px-4">
               <div className="text-xs text-text-muted mb-1">A/D Ratio</div>
-              <div className={`text-xl font-mono font-bold tabular-nums ${parseFloat(adRatio) >= 1 ? "text-emerald-400" : "text-red-400"}`}>
+              <div className={`text-xl font-mono font-bold tabular-nums ${parseFloat(adRatio) >= 1 ? "text-profit" : "text-loss"}`}>
                 {adRatio}
               </div>
               <div className="text-xs text-text-muted mt-0.5">
@@ -376,7 +376,7 @@ function MarketBreadthTab() {
           <Card className="bg-surface-card border-border-default">
             <CardContent className="pt-3 pb-3 px-4">
               <div className="text-xs text-text-muted mb-1">Breadth Thrust</div>
-              <div className={`text-xl font-mono font-bold tabular-nums ${breadthThrustRaw >= 61.5 ? "text-emerald-400" : breadthThrustRaw >= 40 ? "text-text-secondary" : "text-red-400"}`}>
+              <div className={`text-xl font-mono font-bold tabular-nums ${breadthThrustRaw >= 61.5 ? "text-profit" : breadthThrustRaw >= 40 ? "text-text-secondary" : "text-loss"}`}>
                 {breadthThrustRaw.toFixed(1)}%
               </div>
               <div className="text-xs text-text-muted mt-0.5">
@@ -400,11 +400,11 @@ function MarketBreadthTab() {
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs text-text-primary font-medium">{bd.label}</span>
                       <div className="flex items-center gap-3 text-xs">
-                        <span className="text-emerald-400">
+                        <span className="text-profit">
                           <TrendingUp size={10} className="inline mr-0.5" />
                           {bd.advances} ({advPct}%)
                         </span>
-                        <span className="text-red-400">
+                        <span className="text-loss">
                           <TrendingDown size={10} className="inline mr-0.5" />
                           {bd.declines} ({decPct}%)
                         </span>
@@ -412,13 +412,13 @@ function MarketBreadthTab() {
                       </div>
                     </div>
                     <div className="h-2 bg-surface-elevated rounded-full overflow-hidden flex gap-px">
-                      <div className="h-full bg-emerald-500 transition-all" style={{ width: `${advPct}%` }} />
+                      <div className="h-full bg-profit transition-all" style={{ width: `${advPct}%` }} />
                       <div className="h-full bg-surface-active transition-all" style={{ width: `${unchPct}%` }} />
-                      <div className="h-full bg-red-500 transition-all" style={{ width: `${decPct}%` }} />
+                      <div className="h-full bg-loss transition-all" style={{ width: `${decPct}%` }} />
                     </div>
                     <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
-                      <span>52W High: <span className="text-emerald-400">{bd.newHighs}</span></span>
-                      <span>52W Low: <span className="text-red-400">{bd.newLows}</span></span>
+                      <span>52W High: <span className="text-profit">{bd.newHighs}</span></span>
+                      <span>52W Low: <span className="text-loss">{bd.newLows}</span></span>
                     </div>
                   </CardContent>
                 </Card>
@@ -693,11 +693,11 @@ function IndiaVixTab() {
 
   function getVixZone(v: number): { label: string; description: string; color: string; bg: string } {
     if (v < 12) return { label: "Extreme Complacency", description: "Markets are extremely calm. Options are cheap. Consider buying protection.", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" };
-    if (v < 16) return { label: "Low Volatility", description: "Fear is low. Markets are trending. Options premiums are affordable.", color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" };
-    if (v < 20) return { label: "Moderate Volatility", description: "Normal market conditions. Options are fairly priced.", color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" };
+    if (v < 16) return { label: "Low Volatility", description: "Fear is low. Markets are trending. Options premiums are affordable.", color: "text-profit", bg: "bg-bullish-bg border-bullish-border" };
+    if (v < 20) return { label: "Moderate Volatility", description: "Normal market conditions. Options are fairly priced.", color: "text-warning", bg: "bg-atm-bg border-atm-border" };
     if (v < 25) return { label: "Elevated Fear", description: "Increased uncertainty. Traders are hedging more aggressively.", color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/20" };
-    if (v < 30) return { label: "High Fear", description: "Significant market stress. Strong sell-off likely in progress.", color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" };
-    return { label: "Panic Zone", description: "Extreme fear and market stress. Historically a contrarian buy signal.", color: "text-red-500", bg: "bg-red-600/20 border-red-600/30" };
+    if (v < 30) return { label: "High Fear", description: "Significant market stress. Strong sell-off likely in progress.", color: "text-loss", bg: "bg-bearish-bg border-bearish-border" };
+    return { label: "Panic Zone", description: "Extreme fear and market stress. Historically a contrarian buy signal.", color: "text-loss", bg: "bg-bearish-bg border-bearish-border" };
   }
 
   const zone = getVixZone(vixValue);
@@ -724,7 +724,7 @@ function IndiaVixTab() {
                 <div className={`text-4xl font-mono font-bold tabular-nums leading-none ${zone.color}`}>
                   {vixValue.toFixed(2)}
                 </div>
-                <div className={`text-sm font-mono tabular-nums mt-1 ${vixChange >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                <div className={`text-sm font-mono tabular-nums mt-1 ${vixChange >= 0 ? "text-profit" : "text-loss"}`}>
                   {vixChange >= 0 ? "+" : ""}{vixChange.toFixed(2)} ({vixChangePct.toFixed(2)}%)
                 </div>
               </div>
@@ -750,8 +750,8 @@ function IndiaVixTab() {
               />
             </div>
             <div className="flex justify-between mt-2 text-xs font-mono">
-              <span className="text-emerald-400">{vix52wLow.toFixed(2)} (52W Low)</span>
-              <span className="text-red-400">{vix52wHigh.toFixed(2)} (52W High)</span>
+              <span className="text-profit">{vix52wLow.toFixed(2)} (52W Low)</span>
+              <span className="text-loss">{vix52wHigh.toFixed(2)} (52W High)</span>
             </div>
           </CardContent>
         </Card>
@@ -769,11 +769,11 @@ function IndiaVixTab() {
             <div className="space-y-2">
               {[
                 { range: "Below 12", meaning: "Extreme complacency — markets at peak confidence", color: "text-blue-400" },
-                { range: "12 – 16", meaning: "Low volatility — trending bull market", color: "text-emerald-400" },
-                { range: "16 – 20", meaning: "Normal volatility — healthy market conditions", color: "text-amber-400" },
+                { range: "12 – 16", meaning: "Low volatility — trending bull market", color: "text-profit" },
+                { range: "16 – 20", meaning: "Normal volatility — healthy market conditions", color: "text-warning" },
                 { range: "20 – 25", meaning: "Elevated fear — watch for trend reversal", color: "text-orange-400" },
-                { range: "25 – 30", meaning: "High fear — significant selling pressure", color: "text-red-400" },
-                { range: "Above 30", meaning: "Panic zone — historically extreme buy signal", color: "text-red-500" },
+                { range: "25 – 30", meaning: "High fear — significant selling pressure", color: "text-loss" },
+                { range: "Above 30", meaning: "Panic zone — historically extreme buy signal", color: "text-loss" },
               ].map((row) => (
                 <div key={row.range} className="flex items-start gap-2 text-xs">
                   <span className={`font-mono font-medium w-20 shrink-0 ${row.color}`}>{row.range}</span>
@@ -869,10 +869,10 @@ function GlobalIndicesTab() {
                   {idx.ltp.toLocaleString("en-US", { maximumFractionDigits: 2 })}
                   <span className="text-xxs text-text-muted ml-1">{idx.currency}</span>
                 </TableCell>
-                <TableCell className={`px-3 py-2 font-mono text-xs ${idx.change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                <TableCell className={`px-3 py-2 font-mono text-xs ${idx.change >= 0 ? "text-profit" : "text-loss"}`}>
                   {idx.change >= 0 ? "+" : ""}{idx.change.toFixed(2)}
                 </TableCell>
-                <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${idx.change_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${idx.change_pct >= 0 ? "text-profit" : "text-loss"}`}>
                   <span className="flex items-center gap-1">
                     {idx.change_pct >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
                     {idx.change_pct >= 0 ? "+" : ""}{idx.change_pct.toFixed(2)}%
@@ -900,11 +900,11 @@ function ParticipantOITab() {
   }
 
   function getInterpretation(net: number): { label: string; color: string } {
-    if (net > 50000) return { label: "Long Build Up", color: "text-emerald-400" };
-    if (net > 10000) return { label: "Mildly Long", color: "text-emerald-400" };
+    if (net > 50000) return { label: "Long Build Up", color: "text-profit" };
+    if (net > 10000) return { label: "Mildly Long", color: "text-profit" };
     if (net > -10000) return { label: "Neutral", color: "text-text-secondary" };
-    if (net > -50000) return { label: "Mildly Short", color: "text-red-400" };
-    return { label: "Short Build Up", color: "text-red-400" };
+    if (net > -50000) return { label: "Mildly Short", color: "text-loss" };
+    return { label: "Short Build Up", color: "text-loss" };
   }
 
   return (
@@ -932,17 +932,17 @@ function ParticipantOITab() {
                       <TableCell className="px-3 py-2">
                         <span className="text-xs font-semibold text-primary">{row.participant}</span>
                       </TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">
+                      <TableCell className="px-3 py-2 font-mono text-xs text-profit">
                         {formatOI(row.long_index_fut)}
                       </TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">
+                      <TableCell className="px-3 py-2 font-mono text-xs text-loss">
                         {formatOI(row.short_index_fut)}
                       </TableCell>
                       <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${netColor(row.net_index_fut)}`}>
                         {row.net_index_fut >= 0 ? "+" : ""}{formatOI(Math.abs(row.net_index_fut))}
                       </TableCell>
                       <TableCell className="px-3 py-2">
-                        <Badge className={`text-xs h-5 px-2 bg-transparent border ${interp.color === "text-emerald-400" ? "border-emerald-800 text-emerald-400" : interp.color === "text-red-400" ? "border-red-800 text-red-400" : "border-border-default text-text-secondary"}`}>
+                        <Badge className={`text-xs h-5 px-2 bg-transparent border ${interp.color === "text-profit" ? "border-bullish-border text-profit" : interp.color === "text-loss" ? "border-bearish-border text-loss" : "border-border-default text-text-secondary"}`}>
                           {interp.label}
                         </Badge>
                       </TableCell>
@@ -974,10 +974,10 @@ function ParticipantOITab() {
                       <TableCell className="px-3 py-2">
                         <span className="text-xs font-semibold text-primary">{row.participant}</span>
                       </TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">{formatOI(row.long_index_opt)}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">{formatOI(row.short_index_opt)}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">{formatOI(Math.round(row.long_index_opt * 0.48))}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">{formatOI(Math.round(row.short_index_opt * 0.52))}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-profit">{formatOI(row.long_index_opt)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-loss">{formatOI(row.short_index_opt)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-profit">{formatOI(Math.round(row.long_index_opt * 0.48))}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-loss">{formatOI(Math.round(row.short_index_opt * 0.52))}</TableCell>
                       <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${netColor(net)}`}>
                         {net >= 0 ? "+" : ""}{formatOI(Math.abs(net))}
                       </TableCell>
@@ -1007,8 +1007,8 @@ function ParticipantOITab() {
                   return (
                     <TableRow key={row.participant} className="border-border-default hover:bg-surface-card">
                       <TableCell className="px-3 py-2 text-xs font-semibold text-primary">{row.participant}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-emerald-400">{formatOI(row.long_stock_fut)}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-red-400">{formatOI(row.short_stock_fut)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-profit">{formatOI(row.long_stock_fut)}</TableCell>
+                      <TableCell className="px-3 py-2 font-mono text-xs text-loss">{formatOI(row.short_stock_fut)}</TableCell>
                       <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${netColor(net)}`}>
                         {net >= 0 ? "+" : ""}{formatOI(Math.abs(net))}
                       </TableCell>
@@ -1084,18 +1084,18 @@ function DeliveryDataTab() {
             {sorted.map((row) => {
               const changeAmt = row.close - row.open;
               const changePct = ((changeAmt / row.open) * 100);
-              const deliveryColor = row.delivery_pct >= 60 ? "text-emerald-400" : row.delivery_pct >= 45 ? "text-amber-400" : "text-text-secondary";
+              const deliveryColor = row.delivery_pct >= 60 ? "text-profit" : row.delivery_pct >= 45 ? "text-warning" : "text-text-secondary";
               return (
                 <TableRow key={row.symbol} className="border-border-default hover:bg-surface-card">
                   <TableCell className="px-2 py-1.5">
                     <div className="text-xs font-semibold font-mono text-primary">{row.symbol}</div>
-                    <div className={`text-xs font-mono ${changePct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    <div className={`text-xs font-mono ${changePct >= 0 ? "text-profit" : "text-loss"}`}>
                       {changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%
                     </div>
                   </TableCell>
                   <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{row.open.toFixed(1)}</TableCell>
-                  <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">{row.high.toFixed(1)}</TableCell>
-                  <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">{row.low.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">{row.high.toFixed(1)}</TableCell>
+                  <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">{row.low.toFixed(1)}</TableCell>
                   <TableCell className="px-2 py-1.5 font-mono text-xs text-text-primary">{row.close.toFixed(1)}</TableCell>
                   <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{row.volume_lakh.toFixed(1)}L</TableCell>
                   <TableCell className="px-2 py-1.5">
@@ -1235,8 +1235,8 @@ function CorrelationMatrixTab() {
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Board Meeting": "text-primary border-neutral-border",
-  "Dividend": "text-emerald-400 border-emerald-800",
-  "Debt": "text-amber-400 border-amber-800",
+  "Dividend": "text-profit border-bullish-border",
+  "Debt": "text-warning border-atm-border",
   "Compliance": "text-text-secondary border-border-default",
   "Appointment": "text-purple-400 border-purple-800",
   "Results": "text-cyan-400 border-cyan-800",
@@ -1461,7 +1461,7 @@ function LoadingRows({ cols }: { cols: number }) {
 function ErrorRetry({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-      <p className="text-xs text-red-400">{message}</p>
+      <p className="text-xs text-loss">{message}</p>
       <button
         onClick={onRetry}
         className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border-default text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors"
@@ -1545,7 +1545,7 @@ function GexTab() {
                         )}
                       </div>
                       <span
-                        className={`font-mono text-xs w-20 shrink-0 ${isPos ? "text-emerald-400" : "text-red-400"}`}
+                        className={`font-mono text-xs w-20 shrink-0 ${isPos ? "text-profit" : "text-loss"}`}
                       >
                         {isPos ? "+" : ""}
                         {row.net_gamma.toFixed(2)}
@@ -1555,8 +1555,8 @@ function GexTab() {
                 })}
               </div>
               <div className="flex justify-between text-xs text-text-muted mt-1 px-2">
-                <span className="text-red-400">Short Gamma (bearish amplifier)</span>
-                <span className="text-emerald-400">Long Gamma (market stabiliser)</span>
+                <span className="text-loss">Short Gamma (bearish amplifier)</span>
+                <span className="text-profit">Long Gamma (market stabiliser)</span>
               </div>
             </div>
 
@@ -1580,14 +1580,14 @@ function GexTab() {
                         <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">
                           {row.strike.toLocaleString("en-IN")}
                         </TableCell>
-                        <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">
                           {row.call_gamma.toFixed(4)}
                         </TableCell>
-                        <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">
                           {row.put_gamma.toFixed(4)}
                         </TableCell>
                         <TableCell
-                          className={`px-2 py-1.5 font-mono text-xs font-semibold ${row.net_gamma >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                          className={`px-2 py-1.5 font-mono text-xs font-semibold ${row.net_gamma >= 0 ? "text-profit" : "text-loss"}`}
                         >
                           {row.net_gamma >= 0 ? "+" : ""}
                           {row.net_gamma.toFixed(4)}
@@ -1758,7 +1758,7 @@ function IVSmileTab() {
                           <TableCell className="px-3 py-1.5 font-mono text-xs text-amber-400">
                             {row.put_iv.toFixed(2)}%
                           </TableCell>
-                          <TableCell className={`px-3 py-1.5 font-mono text-xs ${row.moneyness > 0 ? "text-emerald-400" : row.moneyness < 0 ? "text-red-400" : "text-text-muted"}`}>
+                          <TableCell className={`px-3 py-1.5 font-mono text-xs ${row.moneyness > 0 ? "text-profit" : row.moneyness < 0 ? "text-loss" : "text-text-muted"}`}>
                             {row.moneyness > 0 ? "+" : ""}
                             {row.moneyness.toFixed(2)}%
                           </TableCell>
@@ -1933,10 +1933,10 @@ function MaxPainTab() {
                                 </Badge>
                               )}
                             </TableCell>
-                            <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">
                               {formatOINum(row.call_oi)}
                             </TableCell>
-                            <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">
                               {formatOINum(row.put_oi)}
                             </TableCell>
                             <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
@@ -2043,9 +2043,9 @@ function OIProfileTab() {
             <div>
               <SectionLabel icon={Layers} label="OI Profile — CE (right) vs PE (left)" />
               <div className="flex justify-between text-xs text-text-muted mb-2 px-1">
-                <span className="text-red-400">PE OI</span>
+                <span className="text-loss">PE OI</span>
                 <span className="text-text-muted">Strike</span>
-                <span className="text-emerald-400">CE OI</span>
+                <span className="text-profit">CE OI</span>
               </div>
               <div className="space-y-px">
                 {strikes.map((strike) => {
@@ -2112,16 +2112,16 @@ function OIProfileTab() {
                           <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">
                             {strike.toLocaleString("en-IN")}
                           </TableCell>
-                          <TableCell className="px-2 py-1.5 font-mono text-xs text-emerald-400">
+                          <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">
                             {formatOINum(ceOI)}
                           </TableCell>
-                          <TableCell className="px-2 py-1.5 font-mono text-xs text-red-400">
+                          <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">
                             {formatOINum(peOI)}
                           </TableCell>
-                          <TableCell className={`px-2 py-1.5 font-mono text-xs ${ceDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          <TableCell className={`px-2 py-1.5 font-mono text-xs ${ceDelta >= 0 ? "text-profit" : "text-loss"}`}>
                             {ceDelta >= 0 ? "+" : ""}{formatOINum(ceDelta)}
                           </TableCell>
-                          <TableCell className={`px-2 py-1.5 font-mono text-xs ${peDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          <TableCell className={`px-2 py-1.5 font-mono text-xs ${peDelta >= 0 ? "text-profit" : "text-loss"}`}>
                             {peDelta >= 0 ? "+" : ""}{formatOINum(peDelta)}
                           </TableCell>
                           <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">

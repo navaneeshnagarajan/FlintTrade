@@ -93,8 +93,8 @@ function formatTime(ts: string): string {
 }
 
 function pnlColor(value: number): string {
-  if (value > 0) return "text-emerald-400";
-  if (value < 0) return "text-red-400";
+  if (value > 0) return "text-profit";
+  if (value < 0) return "text-loss";
   return "text-text-secondary";
 }
 
@@ -252,8 +252,8 @@ function StatCard({
             positive === undefined
               ? "text-text-primary"
               : positive
-                ? "text-emerald-400"
-                : "text-red-400"
+                ? "text-profit"
+                : "text-loss"
           }`}
         >
           {value}
@@ -465,7 +465,7 @@ function TradeLogTab({
                   className="text-center py-8 text-text-muted"
                 >
                   <div className="flex flex-col items-center gap-2">
-                    <AlertCircle size={20} className="text-red-400" />
+                    <AlertCircle size={20} className="text-loss" />
                     <span className="text-xs">Failed to load trade journal</span>
                     <Button
                       variant="ghost"
@@ -521,8 +521,8 @@ function TradeLogTab({
                       variant="outline"
                       className={`text-xxs px-1.5 py-0 border-0 font-medium ${
                         trade.action === "BUY"
-                          ? "bg-emerald-900/40 text-emerald-400"
-                          : "bg-red-900/40 text-red-400"
+                          ? "bg-bullish-bg text-profit"
+                          : "bg-bearish-bg text-loss"
                       }`}
                     >
                       {trade.action}
@@ -628,7 +628,7 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
               <Trophy
                 size={14}
                 className={
-                  a.streakType === "win" ? "text-emerald-400" : "text-red-400"
+                  a.streakType === "win" ? "text-profit" : "text-loss"
                 }
               />
               <span className="text-xs text-text-secondary">
@@ -636,7 +636,7 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
               </span>
               <span
                 className={`text-sm font-bold font-mono ${
-                  a.streakType === "win" ? "text-emerald-400" : "text-red-400"
+                  a.streakType === "win" ? "text-profit" : "text-loss"
                 }`}
               >
                 {a.currentStreak} {a.streakType === "win" ? "wins" : "losses"}
@@ -768,7 +768,7 @@ function NotesTab() {
         <Button
           variant="ghost"
           size="sm"
-          className="self-end text-xs text-text-muted hover:text-red-400 h-6"
+          className="self-end text-xs text-text-muted hover:text-loss h-6"
           onClick={() => save("")}
         >
           Clear
@@ -876,7 +876,7 @@ export default function TradeJournalTool({ onClose }: Props) {
             </span>
           )}
           {isError && (
-            <span className="text-xs text-red-400 flex items-center gap-1">
+            <span className="text-xs text-loss flex items-center gap-1">
               <AlertCircle size={11} />
               Error
             </span>

@@ -15,6 +15,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { RefreshCw, Layers, AlertCircle } from "lucide-react";
 import { getDepth } from "../../../services/api";
+import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,15 +59,6 @@ interface RawDepth {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function isMarketHours(): boolean {
-  const now = new Date();
-  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const day = ist.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = ist.getHours() * 60 + ist.getMinutes();
-  return mins >= 555 && mins <= 930;
-}
 
 const NUM  = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });

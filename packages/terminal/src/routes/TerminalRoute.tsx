@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
+import { LayoutGrid, Layers } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useLayoutStore } from "@/stores/layoutStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
@@ -24,6 +26,7 @@ const tools: Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onCl
 
 export default function TerminalRoute() {
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
+  const [panelCount, setPanelCount] = useState<number | null>(null);
 
   const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
   const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
@@ -49,16 +52,32 @@ export default function TerminalRoute() {
   const onDockviewReady = useCallback(
     (event: DockviewReadyEvent) => {
       setDockviewApi(event.api);
+
+      // Track panel count for the empty-state overlay.
+      setPanelCount(event.api.panels.length);
+      event.api.onDidAddPanel(() => setPanelCount(event.api.panels.length));
+      event.api.onDidRemovePanel(() => setPanelCount(event.api.panels.length));
+
       const activeTabId = useLayoutStore.getState().activeTabId;
       const savedLayout = useLayoutStore.getState().getTabLayout(activeTabId);
+
       if (savedLayout) {
-        try {
-          // Restore the persisted layout for this workspace tab.
-          // Cast through unknown because we store as Record<string,unknown> in Zustand.
-          event.api.fromJSON(savedLayout as unknown as Parameters<typeof event.api.fromJSON>[0]);
-        } catch {
-          // Corrupted saved layout — fall back to the default preset
-          applyPreset(event.api, DEFAULT_PRESET_ID);
+        // Check if the setup wizard left a pending preset request instead of a
+        // real serialized layout.
+        const pendingPreset = (savedLayout as Record<string, unknown>).__pendingPreset;
+        if (typeof pendingPreset === "string") {
+          // Clear the placeholder and apply the chosen preset.
+          useLayoutStore.getState().saveTabLayout(activeTabId, {});
+          applyPreset(event.api, pendingPreset);
+        } else {
+          try {
+            // Restore the persisted layout for this workspace tab.
+            // Cast through unknown because we store as Record<string,unknown> in Zustand.
+            event.api.fromJSON(savedLayout as unknown as Parameters<typeof event.api.fromJSON>[0]);
+          } catch {
+            // Corrupted saved layout — fall back to the default preset
+            applyPreset(event.api, DEFAULT_PRESET_ID);
+          }
         }
       } else {
         // No layout saved yet — apply the default "Market Watch" preset
@@ -82,6 +101,18 @@ export default function TerminalRoute() {
 
   const handleSelectTool = useCallback((toolId: ToolId) => {
     setActiveTool(toolId);
+  }, []);
+
+  // Listen for the custom event dispatched by DailyWelcome's "Open Trade Journal" link.
+  useEffect(() => {
+    function onOpenTool(e: Event) {
+      const detail = (e as CustomEvent<{ toolId: ToolId }>).detail;
+      if (detail?.toolId) {
+        setActiveTool(detail.toolId);
+      }
+    }
+    window.addEventListener("flinttrade:open-tool", onOpenTool);
+    return () => window.removeEventListener("flinttrade:open-tool", onOpenTool);
   }, []);
 
   const ToolComponent = activeTool ? tools[activeTool] : null;
@@ -116,6 +147,44 @@ export default function TerminalRoute() {
             components={widgetComponents}
             singleTabMode="fullwidth"
           />
+          {/* Empty-state overlay: shown when the canvas has no open panels */}
+          {panelCount === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+              <div
+                className="pointer-events-auto flex flex-col items-center gap-4 px-8 py-10 rounded-xl border border-border-default bg-surface-card/80 backdrop-blur-sm shadow-lg animate-fade-in text-center max-w-xs"
+                role="status"
+              >
+                <LayoutGrid className="h-10 w-10 text-text-muted" />
+                <div className="space-y-1">
+                  <p className="font-heading font-semibold text-base text-text-primary">
+                    Your workspace is empty
+                  </p>
+                  <p className="text-sm text-text-secondary">
+                    Add widgets or choose a template to get started
+                  </p>
+                </div>
+                <div className="flex gap-2 mt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs border-border-default text-text-secondary hover:text-text-primary"
+                    onClick={() => setWidgetPickerOpen(true)}
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
+                    Add Widgets
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
+                    onClick={() => setPresetPickerOpen(true)}
+                  >
+                    <Layers className="h-3.5 w-3.5 mr-1.5" />
+                    Choose Template
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

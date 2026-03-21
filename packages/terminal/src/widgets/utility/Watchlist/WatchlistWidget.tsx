@@ -20,6 +20,7 @@ import { useSetAtom } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { getMultiQuotes, searchSymbol } from "@/services/api";
 import type { Quote, WsInstrument } from "@/types/api";
+import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,16 +71,6 @@ const SPARK_MAX = 20;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** True during NSE/BSE market hours: Mon–Fri 09:15–15:30 IST. */
-function isMarketHours(): boolean {
-  const now = new Date();
-  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const day = ist.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = ist.getHours() * 60 + ist.getMinutes();
-  return mins >= 555 && mins <= 930; // 09:15 – 15:30
-}
 
 const FMT = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 

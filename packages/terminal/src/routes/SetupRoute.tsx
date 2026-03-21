@@ -41,6 +41,7 @@ import {
 
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import { ping } from "@/services/api";
 
 // ---------------------------------------------------------------------------
@@ -516,19 +517,39 @@ function getPresetName(experience: string, interests: string[]): string {
   }
   // intermediate or fallback
   if (interests.length >= 3) return "full";
-  if (interests.includes("investing")) return "investor";
+  if (interests.includes("investing")) return "invest-diversified";
   return "minimal";
 }
 
+/**
+ * Maps wizard-internal preset names (which may not match real preset IDs) to
+ * the actual preset IDs registered in workspacePresets.ts.
+ */
+function mapWizardPreset(wizardPreset: string): string {
+  const MAP: Record<string, string> = {
+    "learn-first": "market-watch",
+    "learn-then-trade": "market-watch",
+    "invest-lite": "investor-view",
+    "invest-diversified": "investor-view",
+    "power-user": "scalper-zone",
+    "full": "analysis",
+    "minimal": "market-watch",
+    "scalper-zone": "scalper-zone",
+    "options-desk": "options-desk",
+  };
+  return MAP[wizardPreset] ?? "market-watch";
+}
+
 const PRESET_DESCRIPTIONS: Record<string, string> = {
-  "learn-first": "Guided workspace with lessons, paper trading, and market education",
-  "learn-then-trade": "Learning tools alongside a trading terminal for hands-on practice",
-  "invest-lite": "Portfolio overview with holdings, SIPs, and net worth tracking",
-  "scalper-zone": "Scalper + Chart + Option Chain + Depth for rapid execution",
-  "power-user": "Full-featured workspace with all analysis and automation tools",
-  "full": "Complete layout with trading, analysis, and automation panels",
-  "investor": "Investment dashboard with portfolio, holdings, and fund tracking",
-  "minimal": "Clean workspace with essential widgets to get started",
+  "learn-first": "Market Watch workspace — Watchlist, Chart, and Dashboard to get started",
+  "learn-then-trade": "Market Watch workspace — overview layout ideal for learning while watching markets",
+  "invest-lite": "Investor View — Chart, Watchlist, Holdings, and Dashboard for portfolio tracking",
+  "invest-diversified": "Investor View — portfolio overview with holdings, watchlist, and chart",
+  "scalper-zone": "Scalper Zone — Chart, Order Pad, Depth, Positions, and Scalper for rapid execution",
+  "power-user": "Scalper Zone — full-featured layout with all execution and analysis panels",
+  "full": "Analysis workspace — Chart, OI Chart, Depth, Positions, and News feed",
+  "minimal": "Market Watch workspace — clean layout with essential widgets to get started",
+  "options-desk": "Options Desk — Option Chain, Chart, Greeks, Positions, and Straddle",
 };
 
 interface LayoutPreviewProps {
@@ -537,9 +558,13 @@ interface LayoutPreviewProps {
 }
 
 function LayoutPreview({ experience, interests }: LayoutPreviewProps) {
-  const preset = getPresetName(experience, interests);
-  const description = PRESET_DESCRIPTIONS[preset] ?? "Custom workspace layout";
-  const displayName = preset.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  const wizardPreset = getPresetName(experience, interests);
+  const actualPresetId = mapWizardPreset(wizardPreset);
+  const description = PRESET_DESCRIPTIONS[wizardPreset] ?? "Custom workspace layout";
+  const displayName = actualPresetId
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 
   return (
     <div className="bg-surface-card border border-border-default rounded-lg p-4 shadow-sm space-y-2">
@@ -986,6 +1011,25 @@ export default function SetupRoute() {
 
     if (riskLimits) {
       useSettingsStore.getState().setRiskLimits(riskLimits);
+    }
+
+    // Derive and apply the actual workspace preset before navigating.
+    // The Dockview API may not be mounted yet (user is still on /setup), so we
+    // store the intent and TerminalRoute will pick it up on mount. If the API is
+    // already mounted (e.g., navigating back to /trade), apply immediately.
+    const wizardPreset = getPresetName(w.experience ?? "intermediate", w.interests);
+    const actualPresetId = mapWizardPreset(wizardPreset);
+    const api = useLayoutStore.getState().dockviewApi;
+    if (api) {
+      useLayoutStore.getState().applyPreset(actualPresetId);
+    } else {
+      // Store the desired preset so TerminalRoute can apply it on first mount.
+      // We reuse the active tab's layout slot — clear any stale saved layout so
+      // TerminalRoute falls through to applyPreset with our chosen preset.
+      const activeTabId = useLayoutStore.getState().activeTabId;
+      useLayoutStore.getState().saveTabLayout(activeTabId, {
+        __pendingPreset: actualPresetId,
+      } as unknown as Record<string, unknown>);
     }
 
     navigate(personaRoute(persona));

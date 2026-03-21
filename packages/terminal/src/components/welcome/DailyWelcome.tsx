@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { X, AlertTriangle } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useHolidays } from "@/hooks/useMarketStatus";
 import type { Holiday } from "@/types/api";
+import type { ToolId } from "@/types/widgets";
 
 interface DailyWelcomeProps {
   onDismiss: () => void;
@@ -148,6 +150,37 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
   const name = useSettingsStore((s) => s.name);
   const positionCount = useTradingStore((s) => s.positionCount);
   const { data: holidays } = useHolidays();
+  const navigate = useNavigate();
+
+  /** Navigate to the lab route (Backtest Lab). */
+  function goToLab() {
+    onDismiss();
+    navigate("/lab");
+  }
+
+  /** Navigate to the trade route (Terminal). */
+  function goToTrade() {
+    onDismiss();
+    navigate("/trade");
+  }
+
+  /** Navigate to the trade route and open the Trade Journal tool. */
+  function openTradeJournal() {
+    onDismiss();
+    navigate("/trade");
+    // Open the trade-journal tool after navigation via the layout store.
+    // We schedule a micro-task so the route has time to render.
+    setTimeout(() => {
+      // The TerminalRoute listens to toolsMenuOpen but tools are opened by
+      // setting activeTool inside TerminalRoute. We dispatch a custom event
+      // that TerminalRoute can listen to.
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:open-tool", {
+          detail: { toolId: "trade-journal" satisfies ToolId },
+        }),
+      );
+    }, 100);
+  }
 
   const wasCrash = useRef(detectCrashRecovery());
 
@@ -221,7 +254,22 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
           </p>
         )}
         {ctx.suggestion && !todayHoliday && !tomorrowHoliday && (
-          <p className="text-xs text-primary mt-2 cursor-pointer hover:underline">
+          <p
+            className="text-xs text-primary mt-2 cursor-pointer hover:underline"
+            onClick={
+              ctx.suggestion === "Try backtesting a strategy"
+                ? goToLab
+                : ctx.suggestion === "Open Trade Journal?"
+                  ? openTradeJournal
+                  : undefined
+            }
+            role={
+              ctx.suggestion === "Try backtesting a strategy" ||
+              ctx.suggestion === "Open Trade Journal?"
+                ? "button"
+                : undefined
+            }
+          >
             {ctx.suggestion}
           </p>
         )}
@@ -254,7 +302,11 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
         <span className="font-mono text-loss">{positionCount}</span> open
         position{positionCount !== 1 ? "s" : ""}.
       </p>
-      <p className="text-xs text-loss mt-2 cursor-pointer hover:underline">
+      <p
+        className="text-xs text-loss mt-2 cursor-pointer hover:underline"
+        onClick={goToTrade}
+        role="button"
+      >
         Review positions now
       </p>
     </div>

@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2 } from "lucide-react";
+import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,9 +120,13 @@ function MarketStatusBadge() {
   };
 
   return (
-    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-hover">
+    <div
+      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-hover"
+      aria-label={`Market status: ${statusInfo.label}`}
+    >
       <div
         className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass[statusInfo.status]}`}
+        aria-hidden="true"
       />
       <span className={`text-xs font-medium tabular-nums ${textClass[statusInfo.status]}`}>
         {statusInfo.label}
@@ -172,6 +177,12 @@ export default function TopBar() {
   const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
 
   const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  /** Id of the workspace tab currently being renamed inline. */
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  /** Id of the workspace tab awaiting inline delete confirmation. */
+  const [deletingTabId, setDeletingTabId] = useState<string | null>(null);
 
   const connected = status === "connected";
 
@@ -204,14 +215,25 @@ export default function TopBar() {
     (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId);
       if (!tab) return;
-      const newName = window.prompt("Rename workspace:", tab.name);
-      if (newName && newName.trim()) {
-        renameTab(tabId, newName.trim());
-      }
+      setRenamingTabId(tabId);
+      setRenameValue(tab.name);
       setContextMenu(null);
     },
-    [tabs, renameTab],
+    [tabs],
   );
+
+  const commitRename = useCallback(() => {
+    if (renamingTabId && renameValue.trim()) {
+      renameTab(renamingTabId, renameValue.trim());
+    }
+    setRenamingTabId(null);
+    setRenameValue("");
+  }, [renamingTabId, renameValue, renameTab]);
+
+  const cancelRename = useCallback(() => {
+    setRenamingTabId(null);
+    setRenameValue("");
+  }, []);
 
   const handleDeleteTab = useCallback(
     (tabId: string) => {
@@ -219,16 +241,30 @@ export default function TopBar() {
         setContextMenu(null);
         return;
       }
-      const tab = tabs.find((t) => t.id === tabId);
-      if (!tab) return;
-      const confirmed = window.confirm(`Delete workspace "${tab.name}"?`);
-      if (confirmed) {
-        removeTab(tabId);
-      }
+      setDeletingTabId(tabId);
       setContextMenu(null);
     },
-    [tabs, removeTab],
+    [tabs],
   );
+
+  const confirmDelete = useCallback(() => {
+    if (deletingTabId) {
+      removeTab(deletingTabId);
+    }
+    setDeletingTabId(null);
+  }, [deletingTabId, removeTab]);
+
+  const cancelDelete = useCallback(() => {
+    setDeletingTabId(null);
+  }, []);
+
+  // Auto-focus the rename input when it appears.
+  useLayoutEffect(() => {
+    if (renamingTabId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingTabId]);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -265,11 +301,12 @@ export default function TopBar() {
         <LogoIcon size={20} />
 
         {/* Route tabs (always visible) */}
-        <div className="flex items-center gap-0.5 ml-3">
+        <nav aria-label="Main navigation" className="flex items-center gap-0.5 ml-3">
           {ROUTE_TABS.map((tab) => (
             <button
               key={tab.path}
               onClick={() => navigate(tab.path)}
+              aria-current={currentPath === tab.path ? "page" : undefined}
               className={`px-3 py-1 text-xs font-heading font-medium rounded transition-colors ${
                 currentPath === tab.path
                   ? "bg-accent/15 text-accent border-b-2 border-accent"
@@ -279,7 +316,7 @@ export default function TopBar() {
               {tab.label}
             </button>
           ))}
-        </div>
+        </nav>
 
         {/* Separator + Workspace tabs (only on /terminal) */}
         {isTerminal && (
@@ -288,27 +325,80 @@ export default function TopBar() {
 
             <div className="flex items-center gap-1">
               {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
-                  className={`px-3 py-1 text-xs font-heading rounded transition-colors ${
-                    tab.id === activeTabId
-                      ? "bg-surface-hover text-text-primary"
-                      : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-                  }`}
-                >
-                  {tab.name}
-                </button>
+                <div key={tab.id} className="relative flex items-center">
+                  {renamingTabId === tab.id ? (
+                    /* Inline rename input */
+                    <div className="flex items-center gap-1 px-1">
+                      <Input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename();
+                          if (e.key === "Escape") cancelRename();
+                        }}
+                        onBlur={commitRename}
+                        className="h-6 w-28 px-1.5 text-xs bg-surface-base border-border-default text-text-primary font-heading"
+                        aria-label="Rename workspace"
+                      />
+                      <button
+                        onMouseDown={(e) => { e.preventDefault(); commitRename(); }}
+                        className="p-0.5 rounded text-profit hover:bg-surface-hover transition-colors"
+                        aria-label="Confirm rename"
+                      >
+                        <Check size={12} />
+                      </button>
+                      <button
+                        onMouseDown={(e) => { e.preventDefault(); cancelRename(); }}
+                        className="p-0.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+                        aria-label="Cancel rename"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ) : deletingTabId === tab.id ? (
+                    /* Inline delete confirmation */
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-surface-hover border border-loss/40 text-xs">
+                      <span className="text-text-secondary">Delete?</span>
+                      <button
+                        onClick={confirmDelete}
+                        className="px-1.5 py-0.5 rounded text-loss hover:bg-loss/10 transition-colors font-medium"
+                        aria-label="Confirm delete"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={cancelDelete}
+                        className="px-1.5 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+                        aria-label="Cancel delete"
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setActiveTab(tab.id)}
+                      onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
+                      className={`px-3 py-1 text-xs font-heading rounded transition-colors ${
+                        tab.id === activeTabId
+                          ? "bg-surface-hover text-text-primary"
+                          : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
+                      }`}
+                    >
+                      {tab.name}
+                    </button>
+                  )}
+                </div>
               ))}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     title="New workspace"
+                    aria-label="New workspace"
                     className="px-2 py-1 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded transition-colors"
                   >
-                    <Plus size={14} />
+                    <Plus size={14} aria-hidden="true" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-48">
@@ -369,29 +459,38 @@ export default function TopBar() {
         </div>
       )}
 
-      {/* Right: TOOLS + WIDGETS + Connection status + Clock */}
+      {/* Right: TOOLS + WIDGETS (only on /trade) + Connection status + Clock */}
       <div className="flex items-center gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
-          className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
-        >
-          <Wrench size={14} className="mr-1" />
-          TOOLS
-        </Button>
+        {isTerminal && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
+              className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
+            >
+              <Wrench size={14} className="mr-1" />
+              TOOLS
+            </Button>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setWidgetPickerOpen(true)}
-          className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
-        >
-          <Grid3x3 size={14} className="mr-1" />
-          WIDGETS
-        </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setWidgetPickerOpen(true)}
+              className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
+            >
+              <Grid3x3 size={14} className="mr-1" />
+              WIDGETS
+            </Button>
+          </>
+        )}
 
-        <div className="flex items-center gap-1.5">
+        <div
+          className="flex items-center gap-1.5"
+          role="status"
+          aria-live="polite"
+          aria-label={`OpenAlgo: ${connected && broker ? broker : connected ? "Connected" : "Disconnected"}`}
+        >
           <div
             className={`w-2 h-2 rounded-full transition-colors ${
               connected ? "bg-profit ring-2 ring-profit/20 animate-[pulse-glow_2s_ease-in-out_infinite]" : "bg-loss"

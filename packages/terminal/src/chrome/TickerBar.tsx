@@ -45,7 +45,11 @@ export default function TickerBar() {
   const indices = useAtomValue(indicesSummaryAtom);
 
   return (
-    <div className="h-7 bg-surface-base border-b border-border-default flex items-center overflow-x-auto shrink-0">
+    <div
+      className="h-7 bg-surface-base border-b border-border-default flex items-center overflow-x-auto shrink-0"
+      role="region"
+      aria-label="Market indices"
+    >
       {indices.map((idx) => (
         <IndexChip key={idx.name} name={idx.name} data={idx.data} />
       ))}

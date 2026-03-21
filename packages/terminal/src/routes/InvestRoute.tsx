@@ -193,7 +193,7 @@ function PlaceholderTab({
       </ul>
 
       <div className="flex items-center gap-2">
-        <Badge className="bg-amber-500/20 text-amber-400 border-amber-700/50 text-xs">
+        <Badge className="bg-atm-bg text-warning border-atm-border text-xs">
           Coming in {version}
         </Badge>
         <Badge variant="outline" className="text-xs text-text-muted border-border-default gap-1">
@@ -967,9 +967,9 @@ const MF_CATEGORIES: MfCategory[] = [
 ];
 
 const RISK_COLOR: Record<string, string> = {
-  Low: "bg-emerald-900/40 text-emerald-400 border-emerald-800",
-  Medium: "bg-amber-900/40 text-amber-400 border-amber-800",
-  High: "bg-red-900/40 text-red-400 border-red-800",
+  Low: "bg-bullish-bg text-profit border-bullish-border",
+  Medium: "bg-atm-bg text-warning border-atm-border",
+  High: "bg-bearish-bg text-loss border-bearish-border",
   "Low–Med": "bg-cyan-900/40 text-cyan-400 border-cyan-800",
 };
 
@@ -994,12 +994,12 @@ function MutualFundsTab() {
     <div className="space-y-5 max-w-2xl">
       {/* Status banner */}
       <div className="flex items-start gap-3 bg-surface-card border border-border-default rounded-lg p-4">
-        <AlertCircle className="size-4 text-amber-400 mt-0.5 shrink-0" />
+        <AlertCircle className="size-4 text-warning mt-0.5 shrink-0" />
         <div className="space-y-1">
           <p className="text-xs font-medium text-text-primary">NAV data source not connected</p>
           <p className="text-xs text-text-muted">
             Connect a NAV feed in{" "}
-            <span className="text-amber-400 font-mono">Settings → Data Sources</span> to see live
+            <span className="text-warning font-mono">Settings → Data Sources</span> to see live
             NAV, folio balances, and returns. Integration with jugaad-data and mftool is planned
             for v0.2.0.
           </p>
@@ -1079,7 +1079,7 @@ function MutualFundsTab() {
       </div>
 
       <div className="flex items-center justify-center pt-2">
-        <Badge className="bg-amber-500/20 text-amber-400 border-amber-700/50 text-xs gap-1">
+        <Badge className="bg-atm-bg text-warning border-atm-border text-xs gap-1">
           <Bell className="w-3 h-3" />
           Full MF dashboard with folio sync coming in v0.2.0
         </Badge>
@@ -1213,7 +1213,7 @@ function SipCalculatorTab() {
                 style={{ width: `${100 - result.progress}%` }}
               />
               <div
-                className="h-full bg-emerald-500 transition-all duration-500"
+                className="h-full bg-profit transition-all duration-500"
                 style={{ width: `${result.progress}%` }}
               />
             </div>
@@ -1536,7 +1536,7 @@ function SectorRotationTab() {
 
       {isError && (
         <div className="flex items-start gap-3 bg-surface-card border border-border-default rounded-lg p-4">
-          <AlertCircle className="size-4 text-amber-400 mt-0.5 shrink-0" />
+          <AlertCircle className="size-4 text-warning mt-0.5 shrink-0" />
           <div className="space-y-1">
             <p className="text-xs font-medium text-text-primary">Could not fetch sector data</p>
             <p className="text-xs text-text-muted">
@@ -1633,14 +1633,14 @@ function SectorRotationTab() {
         <p className="text-xs text-text-muted leading-relaxed">
           RRG plots each sector on Relative Strength vs. Momentum axes. Sectors cycle
           through four quadrants: <span className="text-profit">Leading</span> →{" "}
-          <span className="text-amber-400">Weakening</span> →{" "}
+          <span className="text-warning">Weakening</span> →{" "}
           <span className="text-loss">Lagging</span> →{" "}
           <span className="text-blue-400">Improving</span>. Tail trails show momentum direction.
           Configurable look-back: 1D, 1W, 2W, 1M. Requires OHLCV history from OpenAlgo or
           jugaad-data.
         </p>
         <div className="flex items-center gap-2">
-          <Badge className="bg-amber-500/20 text-amber-400 border-amber-700/50 text-xs">
+          <Badge className="bg-atm-bg text-warning border-atm-border text-xs">
             Coming in v0.2.0
           </Badge>
         </div>
@@ -2212,7 +2212,7 @@ function StocksTab({
             </div>
           ))}
         </div>
-        <Badge className="bg-amber-500/20 text-amber-400 border-amber-700/50 text-xs gap-1">
+        <Badge className="bg-atm-bg text-warning border-atm-border text-xs gap-1">
           Auto-detect dividends from trade history — v0.2.0
         </Badge>
       </Card>
@@ -2379,7 +2379,7 @@ export default function InvestRoute() {
       {/* Body: sidebar + content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
+        <nav aria-label="Section navigation" className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -2387,6 +2387,7 @@ export default function InvestRoute() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                aria-current={isActive ? "true" : undefined}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors ${
                   isActive
                     ? "text-accent bg-accent/10 border-l-2 border-accent"
@@ -2401,7 +2402,7 @@ export default function InvestRoute() {
               </button>
             );
           })}
-        </div>
+        </nav>
 
         {/* Content */}
         {fullHeightTabs.includes(activeTab) ? (

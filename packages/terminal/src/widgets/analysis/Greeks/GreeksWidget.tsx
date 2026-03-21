@@ -17,6 +17,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { RefreshCw, AlertCircle, TrendingDown, Activity } from "lucide-react";
 import { getPositionbook, getMultiOptionGreeks } from "../../../services/api";
 import type { Position } from "../../../types/api";
+import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,15 +74,6 @@ type ColorScheme = "delta" | "theta" | "neutral";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function isMarketHours(): boolean {
-  const now = new Date();
-  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const day = ist.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = ist.getHours() * 60 + ist.getMinutes();
-  return mins >= 555 && mins <= 930;
-}
 
 function isFnO(position: RawPosition): boolean {
   const exchange = (position.exchange || "").toUpperCase();

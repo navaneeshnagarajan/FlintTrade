@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import { Provider as JotaiProvider } from "jotai";
 import { QueryProvider } from "./providers/QueryProvider";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import "./index.css";
@@ -17,6 +18,7 @@ const LabRoute = lazy(() => import("./routes/LabRoute"));
 const AutomateRoute = lazy(() => import("./routes/AutomateRoute"));
 const AIRoute = lazy(() => import("./routes/AIRoute"));
 const SettingsRoute = lazy(() => import("./routes/SettingsRoute"));
+const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
 
 const Loading = () => (
   <div className="min-h-screen bg-surface-base flex items-center justify-center">
@@ -71,16 +73,21 @@ const router = createBrowserRouter([
           { path: "ai", element: <Suspense fallback={<Loading />}><AIRoute /></Suspense> },
         ],
       },
+
+      /* 404 catch-all — must be last */
+      { path: "*", element: <Suspense fallback={<Loading />}><NotFoundRoute /></Suspense> },
     ],
   },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <JotaiProvider>
-      <QueryProvider>
-        <RouterProvider router={router} />
-      </QueryProvider>
-    </JotaiProvider>
+    <ErrorBoundary>
+      <JotaiProvider>
+        <QueryProvider>
+          <RouterProvider router={router} />
+        </QueryProvider>
+      </JotaiProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

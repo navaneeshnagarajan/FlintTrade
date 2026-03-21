@@ -16,6 +16,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { RefreshCw, ChevronDown, AlertCircle } from "lucide-react";
 import { getExpiry, getOptionChain, getQuotes } from "../../../services/api";
 import type { Quote } from "../../../types/api";
+import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -74,15 +75,6 @@ const STRIKES_AROUND_ATM = 15;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function isMarketHours(): boolean {
-  const now = new Date();
-  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const day = ist.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = ist.getHours() * 60 + ist.getMinutes();
-  return mins >= 555 && mins <= 930;
-}
 
 const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 

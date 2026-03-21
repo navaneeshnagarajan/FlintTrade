@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { devtools } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
 import type { ConnectionStatus } from "@/types/stores";
 
@@ -18,7 +18,8 @@ interface ConnectionStore {
   setDemo: (v: boolean) => void;
 }
 
-const storeImpl: StateCreator<ConnectionStore> = (set) => ({
+// Inner StateCreator (no middleware mutators — persist is applied outside)
+const storeImpl: StateCreator<ConnectionStore, [["zustand/persist", unknown]]> = (set) => ({
   host: import.meta.env.VITE_OPENALGO_HOST || "",
   apiKey: import.meta.env.VITE_OPENALGO_API_KEY || "",
   wsUrl: import.meta.env.VITE_OPENALGO_WS
@@ -36,6 +37,17 @@ const storeImpl: StateCreator<ConnectionStore> = (set) => ({
   setDemo: (demo) => set({ demo }),
 });
 
+const persistedStore = persist(storeImpl, {
+  name: "flinttrade:connection",
+  version: 1,
+  // Only persist credentials — runtime connection state is always re-derived
+  partialize: (state) => ({
+    host: state.host,
+    apiKey: state.apiKey,
+    wsUrl: state.wsUrl,
+  }),
+});
+
 export const useConnectionStore = import.meta.env.DEV
-  ? create<ConnectionStore>()(devtools(storeImpl, { name: "connection" }))
-  : create<ConnectionStore>()(storeImpl);
+  ? create<ConnectionStore>()(devtools(persistedStore, { name: "connection" }))
+  : create<ConnectionStore>()(persistedStore);

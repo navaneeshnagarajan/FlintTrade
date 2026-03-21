@@ -62,8 +62,8 @@
     --color-border-strong: #3a3a4a;
     --color-text-primary: #e4e4e7;
     --color-text-secondary: #8b8b95;
-    --color-text-muted: #6b6b78;
-    --color-text-disabled: #45454f;
+    --color-text-muted: #7e7e8a;
+    --color-text-disabled: #52525b;
     --color-profit: #22c55e;
     --color-loss: #ef4444;
     --color-warning: #eab308;
@@ -307,17 +307,27 @@ html.density-compact {
 
 /* ---------- Dockview light theme overrides ---------- */
 html.theme-light .dockview-theme-dark {
-  --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #f0f2f5;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-tab-divider-color: transparent;
-  --dv-activegroup-visiblepanel-tab-color: #1a1a2a;
-  --dv-activegroup-hiddenpanel-tab-color: #aaa;
-  --dv-inactivegroup-visiblepanel-tab-color: #666;
-  --dv-inactivegroup-hiddenpanel-tab-color: #aaa;
-  --dv-separator-border: #e8eaf0;
-  --dv-paneview-header-border-color: #e8eaf0;
-  --dv-background-color: #f8f9fa;
-  --dv-group-view-background-color: #f8f9fa;
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+  --dv-separator-border: var(--color-border-default);
+  --dv-paneview-header-border-color: var(--color-border-default);
+  --dv-background-color: var(--color-surface-base);
+  --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* ---------- Reduced motion respect (WCAG 2.3.3) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

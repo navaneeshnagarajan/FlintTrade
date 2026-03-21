@@ -38,6 +38,7 @@ import { searchSymbol, placeOrder } from "@/services/api";
 import { useMargin } from "@/hooks/useMargin";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
+import { isMarketHours } from "@/lib/market";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -67,16 +68,6 @@ const orderSchema = z.object({
 });
 
 type OrderFormValues = z.infer<typeof orderSchema>;
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function isMarketHours(): boolean {
-  const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const day = ist.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = ist.getHours() * 60 + ist.getMinutes();
-  return mins >= 555 && mins <= 930;
-}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
