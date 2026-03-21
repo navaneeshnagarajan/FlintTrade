@@ -45,7 +45,10 @@ function ISTClock() {
 const ROUTE_TABS = [
   { path: "/learn", label: "Learn" },
   { path: "/invest", label: "Invest" },
-  { path: "/terminal", label: "Trade" },
+  { path: "/trade", label: "Trade" },
+  { path: "/lab", label: "Lab" },
+  { path: "/automate", label: "Automate" },
+  { path: "/ai", label: "AI" },
 ] as const;
 
 /**
@@ -58,7 +61,7 @@ export default function TopBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = location.pathname;
-  const isTerminal = currentPath === "/terminal";
+  const isTerminal = currentPath === "/trade";
 
   const status = useConnectionStore((s) => s.status);
   const setStatus = useConnectionStore((s) => s.setStatus);

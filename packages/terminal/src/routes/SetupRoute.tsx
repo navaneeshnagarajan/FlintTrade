@@ -105,7 +105,7 @@ function deriveWsUrl(host: string, wsPort: string): string {
 function personaRoute(persona: Persona): string {
   if (persona === "investor") return "/invest";
   if (persona === "beginner") return "/learn";
-  return "/terminal";
+  return "/trade";
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,7 +1060,7 @@ export default function SetupRoute() {
             <Button
               variant="ghost"
               className="text-sm text-text-muted hover:text-text-primary"
-              onClick={() => navigate("/terminal")}
+              onClick={() => navigate("/trade")}
             >
               Skip setup — use defaults
             </Button>

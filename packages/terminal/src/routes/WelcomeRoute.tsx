@@ -67,15 +67,15 @@ const PILLARS: Pillar[] = [
     title: "Trade",
     desc: "F&O scalping, options analysis, real-time execution",
     color: "text-amber-400",
-    route: "/terminal",
+    route: "/trade",
     preset: "scalper-zone",
   },
   {
     icon: Zap,
-    title: "Backtest",
+    title: "Strategy Lab",
     desc: "Rust-powered tick-level backtesting \u2014 no broker has this",
     color: "text-purple-400",
-    route: "/terminal",
+    route: "/lab",
     preset: "analysis-desk",
   },
   {
@@ -83,7 +83,7 @@ const PILLARS: Pillar[] = [
     title: "Automate",
     desc: "54-node flow builder, cron scheduler, Telegram kill switch",
     color: "text-rose-400",
-    route: "/terminal",
+    route: "/automate",
     preset: "blank",
   },
   {
@@ -91,7 +91,7 @@ const PILLARS: Pillar[] = [
     title: "AI",
     desc: "Local LLM advisor, RAG analysis, sentiment signals",
     color: "text-cyan-400",
-    route: "/terminal",
+    route: "/ai",
     preset: "minimal",
   },
 ];
@@ -325,12 +325,15 @@ export default function WelcomeRoute() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full mt-2">
                 {PILLARS.map((pillar, i) => {
                   const Icon = pillar.icon;
-                  const routeLabel =
-                    pillar.route === "/terminal"
-                      ? "Terminal"
-                      : pillar.route === "/invest"
-                        ? "Invest"
-                        : "Learn";
+                  const ROUTE_LABELS: Record<string, string> = {
+                    "/learn": "Learn",
+                    "/invest": "Invest",
+                    "/trade": "Trade",
+                    "/lab": "Lab",
+                    "/automate": "Automate",
+                    "/ai": "AI",
+                  };
+                  const routeLabel = ROUTE_LABELS[pillar.route] ?? "Trade";
                   return (
                     <button
                       key={pillar.title}
@@ -368,7 +371,7 @@ export default function WelcomeRoute() {
                 Set Up Workspace
               </button>
               <button
-                onClick={() => navigate("/terminal")}
+                onClick={() => navigate("/trade")}
                 className="border border-border-default text-text-primary px-8 py-3 rounded-lg text-lg hover:bg-surface-hover transition-colors duration-200 cursor-pointer"
               >
                 Explore First

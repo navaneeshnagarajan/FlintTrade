@@ -13,6 +13,9 @@ const InvestRoute = lazy(() => import("./routes/InvestRoute"));
 const LearnRoute = lazy(() => import("./routes/LearnRoute"));
 const WelcomeRoute = lazy(() => import("./routes/WelcomeRoute"));
 const ExploreRoute = lazy(() => import("./routes/ExploreRoute"));
+const LabRoute = lazy(() => import("./routes/LabRoute"));
+const AutomateRoute = lazy(() => import("./routes/AutomateRoute"));
+const AIRoute = lazy(() => import("./routes/AIRoute"));
 
 const Loading = () => (
   <div className="min-h-screen bg-surface-base flex items-center justify-center">
@@ -34,7 +37,7 @@ function getInitialRoute(): string {
     if (!persona) return "/welcome";
     if (persona === "investor") return "/invest";
     if (persona === "beginner") return "/learn";
-    return "/terminal";
+    return "/trade";
   } catch {
     return "/welcome";
   }
@@ -57,9 +60,13 @@ const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
-          { path: "terminal", element: <Suspense fallback={<Loading />}><TerminalRoute /></Suspense> },
+          { path: "trade", element: <Suspense fallback={<Loading />}><TerminalRoute /></Suspense> },
+          { path: "terminal", element: <Navigate to="/trade" replace /> },
           { path: "invest", element: <Suspense fallback={<Loading />}><InvestRoute /></Suspense> },
           { path: "learn", element: <Suspense fallback={<Loading />}><LearnRoute /></Suspense> },
+          { path: "lab", element: <Suspense fallback={<Loading />}><LabRoute /></Suspense> },
+          { path: "automate", element: <Suspense fallback={<Loading />}><AutomateRoute /></Suspense> },
+          { path: "ai", element: <Suspense fallback={<Loading />}><AIRoute /></Suspense> },
         ],
       },
     ],
