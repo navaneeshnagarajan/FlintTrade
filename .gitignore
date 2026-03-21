@@ -75,6 +75,8 @@ chroma_data/
 .reference/
 .claude/
 bugs/
+.vscode/
+docs/superpowers/
 
 # === Firecrawl scrape cache ===
 .firecrawl/
