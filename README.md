@@ -4,7 +4,7 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-1021%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1018%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
@@ -74,31 +74,32 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 | **data** | Tick capture, trade logs, DuckDB storage, SEBI audit trail | ✅ Built |
 | **historical** | Multi-source downloader, free NSE data, DuckDB/Parquet pipeline | ✅ Built |
 | **screener** | Option chain, OI analysis, futures quadrant, Greeks, IV | ✅ Built |
-| **backtest-engine** | Event-driven simulator, 36 strategies, walk-forward optimizer | ✅ Built |
+| **backtest-engine** | Event-driven simulator, 28 strategies, walk-forward optimizer | ✅ Built |
 | **ai** | LLM client, RAG, ML signals, sentiment, MCP bridge | ✅ Built |
 | **integration** | TradingView webhooks, ChartInk, visual flow builder | ✅ Built |
 | **automation** | Cron jobs, Telegram bot, OpenClaw bridge | ✅ Built |
 | **ditto** | Multi-account mirroring, margin calculator, trailing SL | ✅ Built |
 | **indicators** | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | ✅ Built |
+| **tick-engine** | Rust/PyO3 tick-level backtest engine for high-performance simulation | ✅ Built |
 | **terminal** | React + TypeScript trading terminal — Dockview workspace, widget-composable, scalper, option chain, charts | ✅ Built |
 | Infrastructure | Makefile, systemd, Docker, deploy scripts | 🔨 In Progress |
 
 ## Current State
 
 **What works:**
-- 13 packages (11 Python + 1 React + 1 Rust/PyO3) with **1,021 passing tests** (985 Python + 36 terminal)
+- 13 packages (11 Python + 1 React + 1 Rust/PyO3) with **1,018 passing tests** (982 Python + 36 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
-- 36 backtest strategy templates with walk-forward optimizer
+- 28 backtest strategy templates with walk-forward optimizer
 - React terminal with Dockview widget-composable workspace and 6 preset templates
 - 20 FlintTrade backend endpoints (backtest execution, signals, sentiment, RAG, cron, audit, safety)
 - Docker Compose for cross-platform development
 
 **What's complete:**
 - TypeScript strict mode migration (zero JSX/JS files remain)
-- Dockview v5.1 widget-composable workspace with 21 widgets + 4 tools
-- 6 route modules: Learn, Invest, Trade, Lab, Automate, AI — each with dedicated functionality
+- Dockview v5.1 widget-composable workspace with 21 widgets + 7 tools
+- 10 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai
 - State architecture: Zustand 5 + Jotai + TanStack Query 5
 - Cinematic welcome (/welcome), Explore mode (/explore), Setup wizard (/setup)
 - Investor dashboard (/invest), Strategy Lab (/lab), Automation Hub (/automate), AI Center (/ai)
@@ -125,7 +126,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 985 tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 982 tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -142,10 +143,10 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 13 packages, 1,021 tests, CI | ✅ Complete |
+| Foundation | Monorepo, 13 packages, 1,018 tests, CI | ✅ Complete |
 | Infrastructure | Makefile, systemd, Docker, deploy scripts, git submodules | ✅ Complete |
 | Live Connection | OpenAlgo sandbox trading, WebSocket data, REST fallback | ✅ Complete |
-| Terminal UI | 21 widgets, 4 tools, 7 routes, Dockview v5.1, 6 presets | ✅ Complete |
+| Terminal UI | 21 widgets, 7 tools, 10 routes, Dockview v5.1, 6 presets | ✅ Complete |
 | Full-Stack Wiring | 20 backend endpoints, all routes functional, 5 themes | ✅ Complete |
 | UI/UX Polish | Accessibility, animations, responsive, error handling | ✅ Complete |
 | AI Integration | OpenClaw agent skills, autonomous signals | 📋 Planned |

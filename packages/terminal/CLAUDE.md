@@ -18,7 +18,7 @@ npx vitest run -t "test name"                  # single test by name
 ## Architecture
 - Single React app serving 3 personas via 10 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai
 - Dockview v5 for widget-composable workspace on /trade (drag, resize, tabs, serialize)
-- 21 widgets (all TSX) + 4 canvas tools (P&L Dashboard, Market Intelligence, Trade Journal, Settings)
+- 21 widgets (all TSX) + 7 tools: canvas overlays (P&L Dashboard, Market Intelligence, Trade Journal, Settings) + full-page tools (Backtest Lab, Flow Builder, Strategy Builder)
 - 6 workspace presets: Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View
 - UI libraries: shadcn/ui + Tremor (dashboards) + Magic UI (animations) + Aceternity UI (effects)
 - 5 themes: Midnight, Obsidian, Terminal Green, Ocean Blue, Light

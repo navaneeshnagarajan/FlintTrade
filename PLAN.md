@@ -16,7 +16,7 @@
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, zero `any` types. tsc: 0 errors.
 - **Python:** 13 packages (11 + tick-engine Rust/PyO3 + indicators), 985 tests passing (3 skipped — vectorbt absent)
 - **CI:** GitHub Actions green (python-tests + node-tests + secrets-check). Fixed ruff E402+F841 in app.py.
-- **Packages:** 12 Python + 1 React (terminal). tick-engine: new Rust/PyO3 wheel installed.
+- **Packages:** 13 Python packages (11 + tick-engine + indicators) + 1 React (terminal). tick-engine: new Rust/PyO3 wheel installed.
 - **Dependencies:** All v2 deps installed + Glide Data Grid 6 (lodash added), @glideapps/glide-data-grid v6.0.3. WinLibs GCC 15.2 + GNU Rust toolchain on Nitro.
 - **State:** Zustand stores (4), Jotai atoms, TanStack Query hooks (6), WebSocket service with ping/pong — all wired.
 - **Shell:** Dockview canvas, TopBar (global Learn/Invest/Trade route tabs), TickerBar (16 instruments incl. MCX/CDS), WidgetPicker, ToolsDropdown — all TSX + shadcn/ui. 13 layout presets (7 original + 6 new).
@@ -44,7 +44,7 @@
 - [x] Phase 7: Tools Build-Out (6 stub tools → functional — TradeJournal, PnLDashboard, StrategyBuilder, BacktestLab, MarketIntelligence, FlowBuilder)
 - [x] Phase 8: Routes (/setup wizard with Quick/Guided/Advanced, /invest with holdings+SIP, /learn placeholder)
 - [x] Phase 9: Python Upgrades (indicators package — 13 indicators, 42 tests; EMASuperTrendDEMA strategy)
-- [ ] Phase 10: Testing + Beta Release (966 tests green, Glide DataGrid + indicators wired + Rust tick-engine — tag v0.1.0-beta pending user verification)
+- [ ] Phase 10: Testing + Beta Release (985 tests green, Glide DataGrid + indicators wired + Rust tick-engine — tag v0.1.0-beta pending user verification)
 
 ---
 
@@ -224,7 +224,7 @@
 - [ ] Test with Kotak Neo sandbox if available
 - [ ] Fix all bugs found during testing
 - [x] Performance optimization — Glide Data Grid for option chain (canvas-rendered, 100K+ updates/sec) — DataEditor replaces custom table, ATM row highlight, action cells, scrollTo ATM
-- [ ] /learn route — basic content only (Market Basics, Glossary, Strategy Library browse)
+- [x] /learn route — basic content only (Market Basics, Glossary, Strategy Library browse)
 
 ### Beta Release Checklist
 - [ ] All widgets render and display live data
@@ -234,7 +234,7 @@
 - [ ] `tsc --noEmit` — zero errors
 - [ ] `npm run build` — zero warnings
 - [ ] `vitest run` — all tests pass
-- [ ] `make test` — 712+ Python tests pass
+- [ ] `make test` — 982+ Python tests pass
 - [ ] Update all documentation (CLAUDE.md, README.md, CONTRIBUTING.md, packages/terminal/CLAUDE.md)
 - [ ] Clean up git history
 - [ ] Tag v0.1.0-beta

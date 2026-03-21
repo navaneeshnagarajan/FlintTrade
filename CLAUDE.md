@@ -183,6 +183,12 @@ Two-tier config. No exceptions.
 | `ditto` | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager |
 | `indicators` | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) |
 
+### Rust/PyO3 package (1)
+
+| Package | Description |
+|---|---|
+| `tick-engine` | High-performance tick processing engine (Rust core with Python bindings via PyO3) |
+
 ### React package (1)
 
 | Package | Port | Description |
@@ -193,10 +199,10 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Terminal — Widgets & Tools
 
-21 widgets (all TSX) + 4 canvas tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
+21 widgets (all TSX) + 7 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
 
 - **Widgets:** `src/widgets/` — Trading (9: dashboard, scalper, positions, orders, holdings, tradebook, orderpad, mtmmonitor, riskpanel), Analysis (7: chart, optionchain, oichart, straddle, depth, greeks, sectormap), Utility (5: watchlist, calculator, news, ticker, aiadvisor)
-- **Canvas tools (overlay on /trade):** P&L Dashboard, Market Intelligence, Trade Journal, Settings
+- **Tools:** `src/tools/` — Canvas overlays (4: P&L Dashboard, Market Intelligence, Trade Journal, Settings) + Full-page tools (3: Backtest Lab, Flow Builder, Strategy Builder)
 - **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG)
 - **Workspace presets:** Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View. Serialized via Dockview API.
 
@@ -204,7 +210,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 - **Version:** 0.1.0-alpha (released 2026-03-21)
 - **Tests:** 36 terminal (Vitest) + 985 Python (pytest) = 1,021 total
-- **Terminal:** 21 widgets (TSX) + 4 canvas tools + 10 routes + 6 workspace presets in Dockview v5.1 shell
+- **Terminal:** 21 widgets (TSX) + 7 tools + 10 routes + 6 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
 - **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 5 themes, density modes, zero arbitrary values
 - **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)

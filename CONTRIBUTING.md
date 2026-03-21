@@ -32,8 +32,8 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | Version | Status | Meaning |
 |---|---|---|
 | 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
-| 0.1.0-alpha | **CURRENT** | 13 packages, 1,021 tests, 7 routes, full-stack wiring, 5 themes |
-| 0.1.0-beta | Next (deadline March 30, 2026) | All packages verified end-to-end, live trading tested |
+| 0.1.0-alpha | **RELEASED** (2026-03-21) | 13 packages, 1,021 tests, 10 routes, full-stack wiring, 5 themes |
+| 0.1.0-beta | Next (target March 30, 2026) | All packages verified end-to-end, live trading tested |
 | 0.1.0-rc.1 | Planned | Release candidate — community feedback incorporated |
 | 0.1.0 | Planned | First stable release |
 | 0.2.0 | Planned | Mac + Antigravity test suite, OpenAlgo submodule updated |
