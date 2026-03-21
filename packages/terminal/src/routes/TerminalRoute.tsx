@@ -4,8 +4,6 @@ import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { useLayoutStore } from "@/stores/layoutStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
-import TopBar from "@/chrome/TopBar";
-import TickerBar from "@/chrome/TickerBar";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import ToolsDropdown from "@/chrome/ToolsDropdown";
 import { widgetComponents } from "@/layout/widgetFactory";
@@ -23,11 +21,13 @@ const tools: Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onCl
 };
 
 export default function TerminalRoute() {
-  const [widgetPickerOpen, setWidgetPickerOpen] = useState(false);
-  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
 
   const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
+  const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
+  const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
+  const toolsMenuOpen = useLayoutStore((s) => s.toolsMenuOpen);
+  const setToolsMenuOpen = useLayoutStore((s) => s.setToolsMenuOpen);
 
   // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
   useGlobalKeys({
@@ -35,7 +35,7 @@ export default function TerminalRoute() {
       if (activeTool) { setActiveTool(null); return; }
       if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
       if (toolsMenuOpen) { setToolsMenuOpen(false); return; }
-    }, [activeTool, widgetPickerOpen, toolsMenuOpen]),
+    }, [activeTool, widgetPickerOpen, toolsMenuOpen, setWidgetPickerOpen, setToolsMenuOpen]),
     onCommandPalette: useCallback(() => {
       // Future: open command palette (Ctrl+K)
     }, []),
@@ -78,16 +78,7 @@ export default function TerminalRoute() {
   const ToolComponent = activeTool ? tools[activeTool] : null;
 
   return (
-    <div className="h-screen flex flex-col bg-surface-base text-text-primary overflow-hidden select-none">
-      {/* Chrome Layer 1: Top Bar */}
-      <TopBar
-        onWidgetPicker={() => setWidgetPickerOpen(true)}
-        onToolsMenu={() => setToolsMenuOpen(!toolsMenuOpen)}
-      />
-
-      {/* Chrome Layer 2: Ticker Bar */}
-      <TickerBar />
-
+    <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden select-none">
       {/* Tools dropdown (absolute positioned) */}
       <ToolsDropdown
         isOpen={toolsMenuOpen}

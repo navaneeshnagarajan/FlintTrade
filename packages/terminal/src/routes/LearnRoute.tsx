@@ -320,7 +320,7 @@ export default function LearnRoute() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-base">
+    <div className="h-full bg-surface-base flex flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 py-4">
         <div className="flex items-center gap-3">
@@ -332,7 +332,7 @@ export default function LearnRoute() {
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-73px)]">
+      <div className="flex flex-1 overflow-hidden">
         {/* Sidebar tabs */}
         <div className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
           {TABS.map((tab) => {

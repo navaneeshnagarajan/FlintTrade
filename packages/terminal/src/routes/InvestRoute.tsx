@@ -1248,7 +1248,7 @@ export default function InvestRoute() {
   const fullHeightTabs: TabId[] = ["holdings"];
 
   return (
-    <div className="min-h-screen bg-surface-base">
+    <div className="h-full bg-surface-base flex flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 py-4">
         <div className="flex items-center justify-between">
@@ -1276,7 +1276,7 @@ export default function InvestRoute() {
       </div>
 
       {/* Body: sidebar + content */}
-      <div className="flex h-[calc(100vh-73px)]">
+      <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <div className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
           {TABS.map((tab) => {

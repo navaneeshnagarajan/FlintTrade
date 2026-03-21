@@ -13,6 +13,8 @@ interface LayoutStore {
   tabs: LayoutTab[];
   activeTabId: string;
   dockviewApi: DockviewApi | null;
+  widgetPickerOpen: boolean;
+  toolsMenuOpen: boolean;
   addTab: (name?: string) => void;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
@@ -20,6 +22,8 @@ interface LayoutStore {
   saveTabLayout: (id: string, layout: Record<string, unknown>) => void;
   getTabLayout: (id: string) => Record<string, unknown> | undefined;
   setDockviewApi: (api: DockviewApi | null) => void;
+  setWidgetPickerOpen: (open: boolean) => void;
+  setToolsMenuOpen: (open: boolean) => void;
 }
 
 function generateId(): string {
@@ -32,6 +36,8 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   tabs: [{ id: defaultTabId, name: "Workspace" }],
   activeTabId: defaultTabId,
   dockviewApi: null,
+  widgetPickerOpen: false,
+  toolsMenuOpen: false,
   addTab: (name) => {
     const id = generateId();
     const tabName = name || `Layout ${get().tabs.length + 1}`;
@@ -66,6 +72,8 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
     return get().tabs.find((t) => t.id === id)?.serializedLayout;
   },
   setDockviewApi: (api) => set({ dockviewApi: api }),
+  setWidgetPickerOpen: (open) => set({ widgetPickerOpen: open }),
+  setToolsMenuOpen: (open) => set({ toolsMenuOpen: open }),
 });
 
 const persistedStore = persist(storeImpl, {

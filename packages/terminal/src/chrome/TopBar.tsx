@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Wrench, Grid3x3, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,16 +35,24 @@ function ISTClock() {
   );
 }
 
-interface TopBarProps {
-  onWidgetPicker: () => void;
-  onToolsMenu: () => void;
-}
+const ROUTE_TABS = [
+  { path: "/learn", label: "Learn" },
+  { path: "/invest", label: "Invest" },
+  { path: "/terminal", label: "Trade" },
+] as const;
 
 /**
  * TopBar -- always-visible chrome bar at h-10.
- * Uses Zustand stores for connection, trading, and layout state.
+ * Renders route tabs (Learn/Invest/Trade) on all app routes.
+ * Workspace tabs (Dockview layout management) only appear on /terminal.
+ * TOOLS and WIDGETS buttons are visible on all app routes.
  */
-export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
+export default function TopBar() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const currentPath = location.pathname;
+  const isTerminal = currentPath === "/terminal";
+
   const status = useConnectionStore((s) => s.status);
   const setStatus = useConnectionStore((s) => s.setStatus);
   const [broker, setBroker] = useState("");
@@ -55,6 +64,9 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
   const activeTabId = useLayoutStore((s) => s.activeTabId);
   const setActiveTab = useLayoutStore((s) => s.setActiveTab);
   const addTab = useLayoutStore((s) => s.addTab);
+  const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
+  const setToolsMenuOpen = useLayoutStore((s) => s.setToolsMenuOpen);
+  const toolsMenuOpen = useLayoutStore((s) => s.toolsMenuOpen);
 
   const connected = status === "connected";
 
@@ -80,33 +92,57 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
 
   return (
     <div className="h-10 bg-surface-card border-b border-border-default flex items-center justify-between px-3 select-none shrink-0">
-      {/* Left: Logo + Layout Tabs */}
+      {/* Left: Logo + Route Tabs + Separator + Workspace Tabs */}
       <div className="flex items-center gap-3">
         <LogoIcon size={20} />
 
-        <div className="flex items-center gap-1">
-          {tabs.map((tab) => (
+        {/* Route tabs (always visible) */}
+        <div className="flex items-center gap-0.5 ml-3">
+          {ROUTE_TABS.map((tab) => (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1 text-xs font-heading rounded transition-colors ${
-                tab.id === activeTabId
-                  ? "bg-surface-hover text-text-primary"
-                  : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
+              key={tab.path}
+              onClick={() => navigate(tab.path)}
+              className={`px-3 py-1 text-xs font-heading font-medium rounded transition-colors ${
+                currentPath === tab.path
+                  ? "bg-accent/15 text-accent border-b-2 border-accent"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
               }`}
             >
-              {tab.name}
+              {tab.label}
             </button>
           ))}
-
-          <button
-            onClick={() => addTab()}
-            title="New layout"
-            className="px-2 py-1 text-xs text-text-muted hover:text-text-primary transition-colors"
-          >
-            <Plus size={12} />
-          </button>
         </div>
+
+        {/* Separator + Workspace tabs (only on /terminal) */}
+        {isTerminal && (
+          <>
+            <div className="w-px h-4 bg-border-default mx-2" />
+
+            <div className="flex items-center gap-1">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-3 py-1 text-xs font-heading rounded transition-colors ${
+                    tab.id === activeTabId
+                      ? "bg-surface-hover text-text-primary"
+                      : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
+                  }`}
+                >
+                  {tab.name}
+                </button>
+              ))}
+
+              <button
+                onClick={() => addTab()}
+                title="New layout"
+                className="px-2 py-1 text-xs text-text-muted hover:text-text-primary transition-colors"
+              >
+                <Plus size={12} />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Center: P&L summary (shown when positions exist) */}
@@ -126,7 +162,7 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={onToolsMenu}
+          onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
           className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
         >
           <Wrench size={14} className="mr-1" />
@@ -136,7 +172,7 @@ export default function TopBar({ onWidgetPicker, onToolsMenu }: TopBarProps) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={onWidgetPicker}
+          onClick={() => setWidgetPickerOpen(true)}
           className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
         >
           <Grid3x3 size={14} className="mr-1" />
