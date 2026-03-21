@@ -12,6 +12,7 @@ import {
   BarChart3,
   Minus,
 } from "lucide-react";
+import { SparkAreaChart, Tracker } from "@tremor/react";
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
 import { useOrders } from "@/hooks/useOrders";
@@ -108,11 +109,23 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
 
   const ltp = tick.ltp ?? 0;
   const prevClose = tick.close ?? 0;
+  const open = tick.open ?? prevClose;
+  const high = tick.high ?? ltp;
+  const low = tick.low ?? ltp;
   const change = prevClose > 0 ? ltp - prevClose : 0;
   const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
   const up = change >= 0;
   const isVix = name === "VIX";
   const vixHigh = isVix && ltp > 20;
+
+  // Build a 5-point OHLC sparkline from the available tick data
+  const sparkData = [
+    { t: "Open", v: open },
+    { t: "Low", v: low },
+    { t: "Mid", v: (open + ltp) / 2 },
+    { t: "High", v: high },
+    { t: "LTP", v: ltp },
+  ];
 
   return (
     <div
@@ -141,6 +154,15 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
           {changePct.toFixed(2)}%)
         </span>
       </div>
+      {ltp > 0 && (
+        <SparkAreaChart
+          data={sparkData}
+          categories={["v"]}
+          index="t"
+          colors={[up ? "emerald" : "red"]}
+          className="h-8 mt-2"
+        />
+      )}
     </div>
   );
 }
@@ -220,6 +242,30 @@ export default function DashboardWidget(_props: WidgetProps) {
           </div>
         </div>
       </div>
+
+      {/* Position status tracker — Tremor Tracker */}
+      {positions.length > 0 && (() => {
+        const trackerData = positions.map((p) => {
+          const pnl = parseFloat(String(p.pnl ?? 0));
+          return {
+            color: pnl > 0 ? ("emerald" as const) : pnl < 0 ? ("red" as const) : ("gray" as const),
+            tooltip: `${p.symbol}: ${pnl >= 0 ? "+" : ""}₹${Math.abs(pnl).toFixed(0)}`,
+          };
+        });
+        return (
+          <div className="bg-surface-card border border-border-default rounded-lg px-4 py-3 shadow-sm">
+            <div className="text-xxs uppercase tracking-wider text-text-muted font-sans mb-2">
+              Position Status
+            </div>
+            <Tracker data={trackerData} className="h-5" />
+            <div className="flex gap-4 mt-1.5 text-xxs text-text-muted">
+              <span className="text-emerald-400">{positions.filter((p) => parseFloat(String(p.pnl ?? 0)) > 0).length} profit</span>
+              <span className="text-red-400">{positions.filter((p) => parseFloat(String(p.pnl ?? 0)) < 0).length} loss</span>
+              <span>{positions.filter((p) => parseFloat(String(p.pnl ?? 0)) === 0).length} flat</span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Positions section */}
       <div className="bg-surface-card border border-border-default rounded-lg shadow-sm overflow-hidden">

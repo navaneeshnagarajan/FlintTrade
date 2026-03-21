@@ -31,6 +31,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LogoIcon } from "@/components/brand/Logo";
 
+// Magic UI
+import { Particles } from "@/components/magicui/particles";
+import { BlurFade } from "@/components/magicui/blur-fade";
+import { AnimatedCounter } from "@/components/magicui/animated-counter";
+import { ShimmerButton } from "@/components/magicui/shimmer-button";
+
+// Aceternity UI
+import { HoverCard } from "@/components/aceternity/card-hover-effect";
+import { TextGenerateEffect } from "@/components/aceternity/text-generate-effect";
+
 // ---------------------------------------------------------------------------
 // Toast — inline, no external library needed
 // ---------------------------------------------------------------------------
@@ -401,7 +411,24 @@ const MODULES: ModuleDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Module preview card
+// Stat definitions — numeric value + label
+// ---------------------------------------------------------------------------
+
+interface StatDef {
+  label: string;
+  value: number;
+  suffix: string;
+}
+
+const STATS: StatDef[] = [
+  { label: "Brokers supported", value: 30,  suffix: "+" },
+  { label: "Modules",           value: 6,   suffix: ""  },
+  { label: "Strategies",        value: 12,  suffix: "+" },
+  { label: "Indicators",        value: 150, suffix: "+" },
+];
+
+// ---------------------------------------------------------------------------
+// Module preview card — wrapped with HoverCard spotlight
 // ---------------------------------------------------------------------------
 
 interface ModuleCardProps {
@@ -413,42 +440,45 @@ interface ModuleCardProps {
 function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
   const Icon = module.icon;
   return (
-    <button
-      type="button"
-      onClick={() => onNavigate(module.route, module.title)}
-      className="group relative text-left w-full animate-fade-in-up"
-      style={{ animationDelay: `${index * 80}ms` }}
-      aria-label={`Explore ${module.title} module`}
-    >
-      <Card className="bg-surface-card border border-border-default rounded-xl p-5 h-full transition-all duration-200 hover:-translate-y-1 hover:border-border-strong hover:shadow-lg hover:shadow-black/30 cursor-pointer">
-        {/* Preview badge */}
-        <span className="absolute top-3 right-3 text-xxs font-medium px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border-subtle">
-          Preview
-        </span>
+    <BlurFade delay={index * 0.08} duration={0.4}>
+      <button
+        type="button"
+        onClick={() => onNavigate(module.route, module.title)}
+        className="group relative text-left w-full"
+        aria-label={`Explore ${module.title} module`}
+      >
+        <HoverCard className="h-full transition-all duration-200 hover:-translate-y-1 hover:border-border-strong hover:shadow-lg hover:shadow-black/30 cursor-pointer">
+          <Card className="bg-transparent border-0 rounded-xl p-5 h-full">
+            {/* Preview badge */}
+            <span className="absolute top-3 right-3 text-xxs font-medium px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border-subtle">
+              Preview
+            </span>
 
-        {/* Header */}
-        <div className="flex items-center gap-2.5 mb-3">
-          <div className="p-1.5 rounded-lg bg-surface-elevated">
-            <Icon className={`w-4 h-4 ${module.iconColor}`} />
-          </div>
-          <div className="min-w-0">
-            <h3 className="font-heading font-semibold text-sm text-text-primary leading-tight">
-              {module.title}
-            </h3>
-            <p className="text-xxs text-text-muted truncate">{module.subtitle}</p>
-          </div>
-        </div>
+            {/* Header */}
+            <div className="flex items-center gap-2.5 mb-3">
+              <div className="p-1.5 rounded-lg bg-surface-elevated">
+                <Icon className={`w-4 h-4 ${module.iconColor}`} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-heading font-semibold text-sm text-text-primary leading-tight">
+                  {module.title}
+                </h3>
+                <p className="text-xxs text-text-muted truncate">{module.subtitle}</p>
+              </div>
+            </div>
 
-        {/* Module-specific preview */}
-        <div className="mt-2">{module.preview}</div>
+            {/* Module-specific preview */}
+            <div className="mt-2">{module.preview}</div>
 
-        {/* Footer hover cue */}
-        <div className="mt-3 flex items-center gap-1 text-xxs text-text-disabled group-hover:text-text-muted transition-colors">
-          <span>Open {module.title}</span>
-          <ArrowRight className="w-3 h-3" />
-        </div>
-      </Card>
-    </button>
+            {/* Footer hover cue */}
+            <div className="mt-3 flex items-center gap-1 text-xxs text-text-disabled group-hover:text-text-muted transition-colors">
+              <span>Open {module.title}</span>
+              <ArrowRight className="w-3 h-3" />
+            </div>
+          </Card>
+        </HoverCard>
+      </button>
+    </BlurFade>
   );
 }
 
@@ -509,114 +539,134 @@ export default function ExploreRoute() {
               >
                 <Link to="/settings">Settings</Link>
               </Button>
-              <Button
-                size="sm"
-                className="text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
-                asChild
+              {/* ShimmerButton wrapping the Get Started navigation */}
+              <ShimmerButton
+                onClick={() => navigate("/setup")}
+                className="text-xs px-4 py-1.5"
               >
-                <Link to="/setup">
-                  Get Started
-                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                </Link>
-              </Button>
+                Get Started
+                <ArrowRight className="w-3.5 h-3.5" />
+              </ShimmerButton>
             </div>
           </div>
         </div>
 
         <div className="max-w-6xl mx-auto px-6 py-12 space-y-12">
           {/* ---------------------------------------------------------------- */}
-          {/* Hero                                                               */}
+          {/* Hero — Particles background + TextGenerateEffect heading          */}
           {/* ---------------------------------------------------------------- */}
-          <div className="text-center space-y-4 animate-fade-in-up">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-card border border-border-default text-xs text-text-muted">
-              <BarChart3 className="w-3.5 h-3.5 text-primary" />
-              Sample data only — no broker connection needed
-            </div>
-            <h1 className="font-heading font-bold text-text-primary tracking-tight"
-              style={{ fontSize: "clamp(1.75rem, 4vw, 2.75rem)" }}
-            >
-              Explore FlintTrade
-            </h1>
-            <p className="text-text-secondary max-w-xl mx-auto leading-relaxed"
-              style={{ fontSize: "clamp(0.875rem, 1.5vw, 1rem)" }}
-            >
-              See what&apos;s possible — no broker connection needed. Click any module to open it,
-              then connect OpenAlgo in Settings for live data.
-            </p>
+          <BlurFade delay={0} duration={0.5}>
+            <div className="relative text-center space-y-4 py-8 overflow-hidden rounded-2xl">
+              {/* Particles layer — behind everything */}
+              <Particles
+                quantity={40}
+                color="#22c55e"
+                size={1.5}
+                className="rounded-2xl"
+              />
 
-            {/* Stats row */}
-            <div className="flex flex-wrap justify-center gap-6 pt-2">
-              {[
-                { label: "Brokers supported", value: "30+" },
-                { label: "Modules",           value: "6"   },
-                { label: "Strategies",        value: "12+" },
-                { label: "Indicators",        value: "150+"},
-              ].map((stat) => (
-                <div key={stat.label} className="text-center">
-                  <div className="font-heading font-bold text-text-primary text-lg">{stat.value}</div>
-                  <div className="text-xxs text-text-muted">{stat.label}</div>
+              <div className="relative z-10 space-y-4">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-card border border-border-default text-xs text-text-muted">
+                  <BarChart3 className="w-3.5 h-3.5 text-primary" />
+                  Sample data only — no broker connection needed
                 </div>
-              ))}
+
+                <div style={{ fontSize: "clamp(1.75rem, 4vw, 2.75rem)" }}>
+                  <TextGenerateEffect
+                    words="Explore FlintTrade"
+                    className="font-bold text-text-primary tracking-tight"
+                    duration={0.4}
+                  />
+                </div>
+
+                <BlurFade delay={0.6} duration={0.5}>
+                  <p
+                    className="text-text-secondary max-w-xl mx-auto leading-relaxed"
+                    style={{ fontSize: "clamp(0.875rem, 1.5vw, 1rem)" }}
+                  >
+                    See what&apos;s possible — no broker connection needed. Click any module to open it,
+                    then connect OpenAlgo in Settings for live data.
+                  </p>
+                </BlurFade>
+
+                {/* Stats row — AnimatedCounter for each number */}
+                <BlurFade delay={0.9} duration={0.5}>
+                  <div className="flex flex-wrap justify-center gap-6 pt-2">
+                    {STATS.map((stat) => (
+                      <div key={stat.label} className="text-center">
+                        <div className="font-heading font-bold text-text-primary text-lg">
+                          <AnimatedCounter
+                            value={stat.value}
+                            duration={1.5}
+                            formatter={(v) => `${v}${stat.suffix}`}
+                          />
+                        </div>
+                        <div className="text-xxs text-text-muted">{stat.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </BlurFade>
+              </div>
             </div>
-          </div>
+          </BlurFade>
 
           {/* ---------------------------------------------------------------- */}
           {/* Module grid                                                        */}
           {/* ---------------------------------------------------------------- */}
-          <div>
-            <h2 className="font-heading font-semibold text-text-secondary text-xs uppercase tracking-widest mb-5">
-              All Modules
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {MODULES.map((mod, i) => (
-                <ModuleCard
-                  key={mod.id}
-                  module={mod}
-                  index={i}
-                  onNavigate={handleNavigate}
-                />
-              ))}
+          <BlurFade delay={0.2} duration={0.4}>
+            <div>
+              <h2 className="font-heading font-semibold text-text-secondary text-xs uppercase tracking-widest mb-5">
+                All Modules
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {MODULES.map((mod, i) => (
+                  <ModuleCard
+                    key={mod.id}
+                    module={mod}
+                    index={i}
+                    onNavigate={handleNavigate}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
+          </BlurFade>
 
           {/* ---------------------------------------------------------------- */}
           {/* Bottom CTA                                                         */}
           {/* ---------------------------------------------------------------- */}
-          <div className="rounded-xl border border-border-default bg-surface-card px-8 py-8 text-center space-y-4 animate-fade-in-up"
-            style={{ animationDelay: "520ms" }}
-          >
-            <TrendingUp className="w-8 h-8 text-profit mx-auto" />
-            <div>
-              <h2 className="font-heading font-bold text-text-primary text-lg">
-                Ready to start?
-              </h2>
-              <p className="text-text-muted text-sm mt-1">
-                Set up your workspace in 2 minutes — or connect an existing OpenAlgo instance.
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
-              <Button
-                size="lg"
-                className="bg-profit hover:bg-profit/90 text-surface-base font-semibold px-8"
-                asChild
-              >
-                <Link to="/setup">
+          <BlurFade delay={0.4} duration={0.5}>
+            <div className="rounded-xl border border-border-default bg-surface-card px-8 py-8 text-center space-y-4">
+              <TrendingUp className="w-8 h-8 text-profit mx-auto" />
+              <div>
+                <h2 className="font-heading font-bold text-text-primary text-lg">
+                  Ready to start?
+                </h2>
+                <p className="text-text-muted text-sm mt-1">
+                  Set up your workspace in 2 minutes — or connect an existing OpenAlgo instance.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
+                <ShimmerButton
+                  onClick={() => navigate("/setup")}
+                  shimmerColor="#22c55e"
+                  className="px-8 py-3 text-base font-semibold bg-profit/10 border-profit/40 text-profit hover:bg-profit/15"
+                >
                   Set Up Workspace
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Link>
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="border-border-default text-text-primary hover:bg-surface-hover px-8"
-                asChild
-              >
-                <Link to="/settings">
-                  Already have OpenAlgo?
-                </Link>
-              </Button>
+                  <ArrowRight className="w-4 h-4" />
+                </ShimmerButton>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="border-border-default text-text-primary hover:bg-surface-hover px-8"
+                  asChild
+                >
+                  <Link to="/settings">
+                    Already have OpenAlgo?
+                  </Link>
+                </Button>
+              </div>
             </div>
-          </div>
+          </BlurFade>
 
           {/* Bottom spacer */}
           <div className="h-8" />

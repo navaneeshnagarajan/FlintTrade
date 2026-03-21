@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { DonutChart, AreaChart, BarList } from "@tremor/react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -213,34 +214,6 @@ interface AllocationBand {
   bg: string;
 }
 
-function AllocationBar({ bands }: { bands: AllocationBand[] }) {
-  const total = bands.reduce((a, b) => a + b.value, 0);
-  return (
-    <div className="space-y-1.5">
-      <div className="h-3 w-full flex rounded-full overflow-hidden gap-px bg-border-default">
-        {bands.map((b) => (
-          <div
-            key={b.label}
-            className={cn("h-full transition-all duration-500", b.bg)}
-            style={{ width: total > 0 ? `${(b.value / total) * 100}%` : "0%" }}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-4">
-        {bands.map((b) => (
-          <div key={b.label} className="flex items-center gap-1.5">
-            <span className={cn("size-2 rounded-full", b.bg)} />
-            <span className={cn("text-xs", b.color)}>{b.label}</span>
-            <span className="text-xs text-text-muted font-mono tabular-nums">
-              {total > 0 ? `${((b.value / total) * 100).toFixed(1)}%` : "—"}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function OverviewTab({
   holdings,
   availableCash,
@@ -380,7 +353,7 @@ function OverviewTab({
         })}
       </div>
 
-      {/* Allocation breakdown */}
+      {/* Allocation breakdown — Tremor DonutChart + BarList */}
       <Card className="p-5 bg-surface-card border-border-default space-y-4">
         <div>
           <h3 className="font-heading font-semibold text-sm text-text-primary">Asset Allocation</h3>
@@ -390,26 +363,27 @@ function OverviewTab({
         </div>
 
         {bands.length > 0 ? (
-          <>
-            <AllocationBar bands={bands} />
-            <div className="grid grid-cols-1 gap-2">
-              {[
-                { label: "Equity", value: equityValue, color: "text-neutral-text" },
-                { label: "Commodity", value: commodityValue, color: "text-warning" },
-                { label: "Cash", value: availableCash, color: "text-profit" },
-              ]
-                .filter((r) => r.value > 0)
-                .map((r) => (
-                  <div
-                    key={r.label}
-                    className="flex justify-between items-center text-xs"
-                  >
-                    <span className={cn("font-medium", r.color)}>{r.label}</span>
-                    <span className="font-mono tabular-nums text-text-primary">{formatINR(r.value)}</span>
-                  </div>
-                ))}
+          <div className="flex flex-col sm:flex-row gap-4 items-start">
+            <DonutChart
+              data={bands.map((b) => ({ name: b.label, value: b.value }))}
+              category="value"
+              index="name"
+              valueFormatter={(v: number) => formatINR(v)}
+              colors={["blue", "amber", "emerald"]}
+              className="h-36 shrink-0"
+              showLabel={false}
+            />
+            <div className="flex-1 min-w-0">
+              <BarList
+                data={bands
+                  .filter((b) => b.value > 0)
+                  .map((b) => ({ name: b.label, value: b.value }))}
+                valueFormatter={(v: number) => formatINR(v)}
+                color="blue"
+                className="text-xs"
+              />
             </div>
-          </>
+          </div>
         ) : (
           <div className="text-center py-6 text-text-muted text-xs">
             No holdings or cash data available. Connect to OpenAlgo to see allocation.
@@ -640,37 +614,6 @@ function HoldingsTab({
 
 // ─── 3. Net Worth ─────────────────────────────────────────────────────────────
 
-// CSS donut chart — pure div rings
-function DonutSegment({
-  percentage,
-  color,
-  offset,
-  radius = 48,
-}: {
-  percentage: number;
-  color: string;
-  offset: number;
-  radius?: number;
-}) {
-  const circumference = 2 * Math.PI * radius;
-  const dasharray = (percentage / 100) * circumference;
-  const dashoffset = circumference * (1 - offset / 100);
-  return (
-    <circle
-      cx="60"
-      cy="60"
-      r={radius}
-      fill="none"
-      stroke={color}
-      strokeWidth="14"
-      strokeDasharray={`${dasharray} ${circumference - dasharray}`}
-      strokeDashoffset={dashoffset}
-      strokeLinecap="butt"
-      style={{ transition: "stroke-dasharray 0.6s ease" }}
-    />
-  );
-}
-
 interface AssetCategory {
   label: string;
   value: number | null;
@@ -697,35 +640,21 @@ function buildEquityTrend(currentValue: number): { month: string; value: number 
 }
 
 function NetWorthMonthlyBar({ trend }: { trend: { month: string; value: number }[] }) {
-  const max = Math.max(...trend.map((t) => t.value), 1);
+  const chartData = trend.map((t) => ({ month: t.month, "Portfolio Value": t.value }));
   return (
-    <div className="space-y-2">
-      <div className="flex items-end gap-2 h-20">
-        {trend.map((t) => {
-          const heightPct = (t.value / max) * 100;
-          const isLast = t.month === trend[trend.length - 1].month;
-          return (
-            <div key={t.month} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className={cn(
-                  "w-full rounded-t transition-all duration-700",
-                  isLast ? "bg-profit" : "bg-surface-elevated",
-                )}
-                style={{ height: `${heightPct}%` }}
-                title={formatINRCompact(t.value)}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex gap-2">
-        {trend.map((t) => (
-          <div key={t.month} className="flex-1 text-center text-xxs text-text-muted">
-            {t.month}
-          </div>
-        ))}
-      </div>
-    </div>
+    <AreaChart
+      data={chartData}
+      index="month"
+      categories={["Portfolio Value"]}
+      colors={["emerald"]}
+      valueFormatter={(v: number) => formatINRCompact(v)}
+      showLegend={false}
+      showYAxis={false}
+      showXAxis={true}
+      showGridLines={false}
+      className="h-20 text-xs"
+      curveType="monotone"
+    />
   );
 }
 
@@ -803,16 +732,9 @@ function NetWorthTab({
     },
   ];
 
-  // Build donut segments — only from known values
+  // Build allocation data — only from known values
   const knownCategories = categories.filter((c) => c.value !== null && c.value > 0);
   const donutTotal = knownCategories.reduce((acc, c) => acc + (c.value ?? 0), 0);
-  let segmentOffset = 25; // start at top (12 o'clock = 25% offset on svg circle convention)
-  const donutSegments = knownCategories.map((cat) => {
-    const pct = donutTotal > 0 ? ((cat.value ?? 0) / donutTotal) * 100 : 0;
-    const seg = { cat, pct, offset: segmentOffset };
-    segmentOffset += pct;
-    return seg;
-  });
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -865,34 +787,24 @@ function NetWorthTab({
           )}
         </Card>
 
-        {/* CSS donut */}
+        {/* Tremor DonutChart for allocation */}
         <Card className="p-5 bg-surface-card border-border-default flex flex-col items-center gap-4">
           <div className="text-xxs text-text-muted uppercase tracking-wider self-start">
             Allocation (live assets only)
           </div>
           {knownCategories.length > 0 ? (
             <>
-              <div className="relative w-32 h-32 shrink-0">
-                <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-                  {/* Track */}
-                  <circle
-                    cx="60"
-                    cy="60"
-                    r="48"
-                    fill="none"
-                    stroke="var(--color-border-default, #2a2a3a)"
-                    strokeWidth="14"
-                  />
-                  {donutSegments.map(({ cat, pct, offset }) => (
-                    <DonutSegment
-                      key={cat.label}
-                      percentage={pct}
-                      color={cat.hexColor}
-                      offset={offset}
-                    />
-                  ))}
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <div className="relative w-36 h-36 shrink-0 flex items-center justify-center">
+                <DonutChart
+                  data={knownCategories.map((c) => ({ name: c.label, value: c.value ?? 0 }))}
+                  category="value"
+                  index="name"
+                  valueFormatter={(v: number) => formatINRCompact(v)}
+                  colors={["blue", "emerald", "violet", "amber", "cyan"]}
+                  className="h-36"
+                  showLabel={false}
+                />
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-xxs text-text-muted">tracked</span>
                   <span className="font-mono text-xs font-bold text-text-primary tabular-nums">
                     {isLoading ? "—" : formatINRCompact(knownTotal)}

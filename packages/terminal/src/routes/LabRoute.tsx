@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Zap,
@@ -16,6 +16,7 @@ import {
   Activity,
   Clock,
 } from "lucide-react";
+import { AreaChart, BarChart } from "@tremor/react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -107,54 +108,50 @@ function MetricCard({ label, value, positive }: MetricCardProps) {
         : "text-text-primary";
   return (
     <div className="bg-surface-base border border-border-default rounded-lg p-4 text-center">
-      <p className="text-xs text-text-muted mb-1">{label}</p>
+      <p className="text-xs text-text-muted mb-1 uppercase tracking-wider">{label}</p>
       <p className={`text-sm font-mono font-semibold ${valueColor}`}>{value}</p>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Equity curve — CSS div bars
+// Equity curve — Tremor AreaChart
 // ---------------------------------------------------------------------------
 
 interface EquityCurveProps {
   curve: Array<{ timestamp: string; equity: number }>;
+  initialEquity: number;
 }
 
-function EquityCurve({ curve }: EquityCurveProps) {
+function EquityCurve({ curve, initialEquity }: EquityCurveProps) {
   if (curve.length === 0) return null;
 
-  const values = curve.map((p) => p.equity);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
-  const range = maxVal - minVal || 1;
-
-  // Sample down to at most 120 points so bars aren't too thin
+  // Sample down to at most 120 points for performance
   const step = Math.max(1, Math.floor(curve.length / 120));
-  const sampled = curve.filter((_, i) => i % step === 0);
-  const initialEquity = values[0];
+  const sampled = curve
+    .filter((_, i) => i % step === 0)
+    .map((p) => ({
+      date: p.timestamp.slice(0, 10),
+      Equity: p.equity,
+    }));
+
+  const lastEquity = sampled[sampled.length - 1]?.Equity ?? initialEquity;
+  const isPositive = lastEquity >= initialEquity;
 
   return (
-    <div>
-      <div className="flex items-end gap-px h-28 w-full overflow-hidden">
-        {sampled.map((point, i) => {
-          const heightPct = ((point.equity - minVal) / range) * 100;
-          const isPositive = point.equity >= initialEquity;
-          return (
-            <div
-              key={i}
-              title={`${point.timestamp}: ${fmtInr(point.equity)}`}
-              className={`flex-1 min-w-0 rounded-t-sm ${isPositive ? "bg-emerald-500/70" : "bg-red-500/70"}`}
-              style={{ height: `${Math.max(2, heightPct)}%` }}
-            />
-          );
-        })}
-      </div>
-      <div className="flex justify-between mt-1">
-        <span className="text-xxs text-text-muted">{sampled[0]?.timestamp.slice(0, 10)}</span>
-        <span className="text-xxs text-text-muted">{sampled[sampled.length - 1]?.timestamp.slice(0, 10)}</span>
-      </div>
-    </div>
+    <AreaChart
+      data={sampled}
+      index="date"
+      categories={["Equity"]}
+      colors={[isPositive ? "emerald" : "red"]}
+      valueFormatter={(v: number) => fmtInr(v)}
+      showLegend={false}
+      showYAxis={true}
+      showXAxis={true}
+      showGridLines={false}
+      className="h-36 text-xs"
+      curveType="monotone"
+    />
   );
 }
 
@@ -169,6 +166,19 @@ interface BacktestResultDisplayProps {
 function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
   const { metrics, trades, equity_curve, final_equity } = result;
   const totalReturnPositive = metrics.total_return >= 0;
+  const initialEquity = equity_curve.length > 0 ? equity_curve[0].equity : final_equity;
+
+  // Group closed trades by month for monthly P&L bar chart
+  const monthlyPnl = useMemo(() => {
+    const grouped: Record<string, number> = {};
+    trades.forEach((t) => {
+      const month = t.exit_timestamp.slice(0, 7); // YYYY-MM
+      grouped[month] = (grouped[month] ?? 0) + t.pnl;
+    });
+    return Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, pnl]) => ({ month, "P&L": pnl }));
+  }, [trades]);
 
   return (
     <div className="space-y-4">
@@ -216,11 +226,30 @@ function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
         </div>
       </Card>
 
-      {/* Equity curve */}
+      {/* Equity curve — Tremor AreaChart */}
       {equity_curve.length > 0 && (
         <Card className="bg-surface-card border border-border-default rounded-lg p-5">
           <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">Equity Curve</h4>
-          <EquityCurve curve={equity_curve} />
+          <EquityCurve curve={equity_curve} initialEquity={initialEquity} />
+        </Card>
+      )}
+
+      {/* Monthly P&L breakdown — Tremor BarChart */}
+      {monthlyPnl.length > 0 && (
+        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
+          <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">Monthly P&L</h4>
+          <BarChart
+            data={monthlyPnl}
+            index="month"
+            categories={["P&L"]}
+            colors={["emerald"]}
+            valueFormatter={(v: number) => fmtInr(v)}
+            showLegend={false}
+            showYAxis={true}
+            showXAxis={true}
+            showGridLines={false}
+            className="h-36 text-xs"
+          />
         </Card>
       )}
 

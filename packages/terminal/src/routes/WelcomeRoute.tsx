@@ -32,6 +32,15 @@ import type { LucideIcon } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { useSettingsStore } from "@/stores/settingsStore";
 
+// Magic UI
+import { Particles } from "@/components/magicui/particles";
+import { BlurFade } from "@/components/magicui/blur-fade";
+import { ShimmerButton } from "@/components/magicui/shimmer-button";
+
+// Aceternity UI
+import { Meteors } from "@/components/aceternity/meteors";
+import { HoverCard } from "@/components/aceternity/card-hover-effect";
+
 // ---------------------------------------------------------------------------
 // Pillar data
 // ---------------------------------------------------------------------------
@@ -230,13 +239,22 @@ export default function WelcomeRoute() {
           opacity: 0;
           animation: welcomeFadeInUp 0.5s ease-out forwards;
         }
-
-        .welcome-pillar-card:hover {
-          transform: translateY(-4px);
-        }
       `}</style>
 
       <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center relative overflow-hidden select-none">
+        {/* Particles — always visible, behind everything */}
+        <Particles
+          quantity={25}
+          color="#22c55e"
+          size={1.2}
+          className="opacity-40"
+        />
+
+        {/* Meteors — visible during cinematic reveal (steps 1-4) */}
+        {step >= 1 && step < 5 && (
+          <Meteors number={10} />
+        )}
+
         {/* Theme switcher — top-left */}
         <div className="fixed top-4 left-4 flex items-center gap-1 z-50">
           {THEME_OPTIONS.map((t) => {
@@ -267,7 +285,7 @@ export default function WelcomeRoute() {
         </button>
 
         {/* Main content container */}
-        <div className="flex flex-col items-center gap-8 px-4 w-full max-w-5xl">
+        <div className="relative z-10 flex flex-col items-center gap-8 px-4 w-full max-w-5xl">
           {/* Step 1: Green spark */}
           {step >= 1 && (
             <div className="flex items-center justify-center">
@@ -316,67 +334,75 @@ export default function WelcomeRoute() {
             </p>
           )}
 
-          {/* Step 4: Pillar cards */}
+          {/* Step 4: Pillar cards — HoverCard + BlurFade */}
           {step >= 4 && (
             <>
-              <p className="welcome-fade-in text-text-secondary text-sm mt-2">
-                Click any module to jump in, or set up your full workspace below.
-              </p>
+              <BlurFade delay={0} duration={0.4}>
+                <p className="text-text-secondary text-sm mt-2">
+                  Click any module to jump in, or set up your full workspace below.
+                </p>
+              </BlurFade>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full mt-2">
                 {PILLARS.map((pillar, i) => {
                   const Icon = pillar.icon;
                   const ROUTE_LABELS: Record<string, string> = {
-                    "/learn": "Learn",
-                    "/invest": "Invest",
-                    "/trade": "Trade",
-                    "/lab": "Lab",
+                    "/learn":    "Learn",
+                    "/invest":   "Invest",
+                    "/trade":    "Trade",
+                    "/lab":      "Lab",
                     "/automate": "Automate",
-                    "/ai": "AI",
+                    "/ai":       "AI",
                   };
                   const routeLabel = ROUTE_LABELS[pillar.route] ?? "Trade";
                   return (
-                    <button
-                      key={pillar.title}
-                      type="button"
-                      onClick={() => handlePillarClick(pillar)}
-                      className="welcome-pillar-card bg-surface-card border border-border-default rounded-lg p-6 text-center transition-all duration-200 cursor-pointer hover:border-accent/40 hover:bg-surface-hover"
-                      style={{ animationDelay: `${i * 200}ms` }}
-                    >
-                      <div className="flex justify-center mb-3">
-                        <Icon className={`size-8 ${pillar.color}`} />
-                      </div>
-                      <h3 className="font-heading font-semibold text-text-primary text-base mb-1">
-                        {pillar.title}
-                      </h3>
-                      <p className="text-text-muted text-sm leading-relaxed">
-                        {pillar.desc}
-                      </p>
-                      <span className="text-xxs text-text-disabled mt-1 block">
-                        &rarr; {routeLabel}
-                      </span>
-                    </button>
+                    <BlurFade key={pillar.title} delay={i * 0.1} duration={0.4}>
+                      <HoverCard className="transition-all duration-200 cursor-pointer hover:border-accent/40">
+                        <button
+                          type="button"
+                          onClick={() => handlePillarClick(pillar)}
+                          className="w-full p-6 text-center"
+                        >
+                          <div className="flex justify-center mb-3">
+                            <Icon className={`size-8 ${pillar.color}`} />
+                          </div>
+                          <h3 className="font-heading font-semibold text-text-primary text-base mb-1">
+                            {pillar.title}
+                          </h3>
+                          <p className="text-text-muted text-sm leading-relaxed">
+                            {pillar.desc}
+                          </p>
+                          <span className="text-xxs text-text-disabled mt-1 block">
+                            &rarr; {routeLabel}
+                          </span>
+                        </button>
+                      </HoverCard>
+                    </BlurFade>
                   );
                 })}
               </div>
             </>
           )}
 
-          {/* Step 5: CTA buttons */}
+          {/* Step 5: CTA buttons — ShimmerButton */}
           {step >= 5 && (
-            <div className="flex flex-col sm:flex-row items-center gap-4 mt-6 welcome-fade-in">
-              <button
-                onClick={() => navigate("/setup")}
-                className="bg-profit text-surface-base font-semibold px-8 py-3 rounded-lg text-lg shadow-lg hover:bg-profit/90 transition-colors duration-200 cursor-pointer"
-              >
-                Set Up Workspace
-              </button>
-              <button
-                onClick={() => navigate("/trade")}
-                className="border border-border-default text-text-primary px-8 py-3 rounded-lg text-lg hover:bg-surface-hover transition-colors duration-200 cursor-pointer"
-              >
-                Explore First
-              </button>
-            </div>
+            <BlurFade delay={0} duration={0.5}>
+              <div className="flex flex-col sm:flex-row items-center gap-4 mt-6">
+                <ShimmerButton
+                  onClick={() => navigate("/setup")}
+                  shimmerColor="#22c55e"
+                  className="px-8 py-3 text-lg font-semibold bg-profit/10 border-profit/40 text-profit hover:shadow-[0_0_30px_rgba(34,197,94,0.4)]"
+                >
+                  Set Up Workspace
+                </ShimmerButton>
+                <button
+                  type="button"
+                  onClick={() => navigate("/trade")}
+                  className="border border-border-default text-text-primary px-8 py-3 rounded-lg text-lg hover:bg-surface-hover transition-colors duration-200 cursor-pointer"
+                >
+                  Explore First
+                </button>
+              </div>
+            </BlurFade>
           )}
         </div>
       </div>

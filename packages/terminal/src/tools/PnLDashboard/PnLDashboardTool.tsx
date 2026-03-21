@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AreaChart, DonutChart, BarList } from "@tremor/react";
 import { usePositions } from "@/hooks/usePositions";
 import { useFunds } from "@/hooks/useFunds";
 import { useTradebook } from "@/hooks/useTradebook";
@@ -164,6 +165,31 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
         </Card>
       </div>
 
+      {/* Symbol P&L donut — Tremor DonutChart */}
+      {positions.length > 0 && (() => {
+        const donutData = computeSymbolBreakdown(positions)
+          .filter((s) => s.pnl !== 0)
+          .map((s) => ({ name: s.symbol, value: Math.abs(s.pnl) }));
+        return donutData.length > 0 ? (
+          <Card className="bg-surface-card border-border-default">
+            <CardHeader className="p-3 pb-1">
+              <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">P&L Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 pt-1 flex items-center justify-center">
+              <DonutChart
+                data={donutData}
+                category="value"
+                index="name"
+                valueFormatter={(v: number) => formatINR(v)}
+                colors={["emerald", "blue", "violet", "amber", "rose", "cyan"]}
+                className="h-36"
+                showLabel={false}
+              />
+            </CardContent>
+          </Card>
+        ) : null;
+      })()}
+
       {/* Positions breakdown */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
@@ -206,32 +232,46 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
         </CardContent>
       </Card>
 
-      {/* Instrument P&L breakdown — absorbed from analytics BarChart pattern */}
-      {positions.length > 0 && (
-        <Card className="bg-surface-card border-border-default">
-          <CardHeader className="p-3 pb-1">
-            <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">P&L by Instrument</CardTitle>
-          </CardHeader>
-          <CardContent className="p-3 pt-1 space-y-1.5">
-            {computeSymbolBreakdown(positions).map(({ symbol, pnl }) => {
-              const maxAbs = Math.max(...positions.map((p) => Math.abs(p.pnl)), 1);
-              const w = (Math.abs(pnl) / maxAbs) * 100;
-              return (
-                <div key={symbol} className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-text-primary w-24 shrink-0 truncate">{symbol}</span>
-                  <div className="flex-1 h-4 bg-surface-base rounded overflow-hidden">
-                    <div
-                      className={`h-full rounded transition-all ${pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"}`}
-                      style={{ width: `${w}%` }}
-                    />
-                  </div>
-                  <span className={`text-xs font-mono w-20 text-right shrink-0 ${pnlClass(pnl)}`}>{formatINR(pnl)}</span>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
-      )}
+      {/* Instrument P&L breakdown — Tremor BarList */}
+      {positions.length > 0 && (() => {
+        const breakdown = computeSymbolBreakdown(positions);
+        const winners = breakdown.filter((s) => s.pnl >= 0).map((s) => ({ name: s.symbol, value: s.pnl }));
+        const losers = breakdown.filter((s) => s.pnl < 0).map((s) => ({ name: s.symbol, value: Math.abs(s.pnl) }));
+        return (
+          <div className="grid grid-cols-2 gap-2">
+            {winners.length > 0 && (
+              <Card className="bg-surface-card border-border-default">
+                <CardHeader className="p-3 pb-1">
+                  <CardTitle className="font-heading font-semibold text-xs text-emerald-400 uppercase tracking-wider">Top Winners</CardTitle>
+                </CardHeader>
+                <CardContent className="p-3 pt-1">
+                  <BarList
+                    data={winners}
+                    valueFormatter={(v: number) => formatINR(v)}
+                    color="emerald"
+                    className="text-xs"
+                  />
+                </CardContent>
+              </Card>
+            )}
+            {losers.length > 0 && (
+              <Card className="bg-surface-card border-border-default">
+                <CardHeader className="p-3 pb-1">
+                  <CardTitle className="font-heading font-semibold text-xs text-red-400 uppercase tracking-wider">Top Losers</CardTitle>
+                </CardHeader>
+                <CardContent className="p-3 pt-1">
+                  <BarList
+                    data={losers}
+                    valueFormatter={(v: number) => `-${formatINR(v)}`}
+                    color="red"
+                    className="text-xs"
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -358,10 +398,6 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
     );
   }
 
-  const maxCum = Math.max(...cumulativeSeries.map((d) => d.cum), 1);
-  const minCum = Math.min(...cumulativeSeries.map((d) => d.cum), -1);
-  const range = maxCum - minCum || 1;
-
   return (
     <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
       <div className="grid grid-cols-2 gap-2">
@@ -383,57 +419,47 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
         </Card>
       </div>
 
-      {/* Equity curve */}
+      {/* Equity curve — Tremor AreaChart */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
           <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Equity Curve</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
-          <div className="relative h-32 flex items-end gap-0.5">
-            {cumulativeSeries.map(({ date, cum }) => {
-              const normalized = (cum - minCum) / range;
-              const h = Math.max(2, normalized * 100);
-              return (
-                <div
-                  key={date}
-                  title={`${date}: ${formatINR(cum)}`}
-                  className={`flex-1 rounded-sm transition-all ${cum >= 0 ? "bg-emerald-600/60" : "bg-red-600/60"}`}
-                  style={{ height: `${h}%` }}
-                />
-              );
-            })}
-            {/* Zero line */}
-            <div
-              className="absolute left-0 right-0 h-px bg-surface-active"
-              style={{ bottom: `${(-minCum / range) * 100}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-1">
-            <span className="text-xxs text-text-muted">{cumulativeSeries[0]?.date ?? ""}</span>
-            <span className="text-xxs text-text-muted">{cumulativeSeries[cumulativeSeries.length - 1]?.date ?? ""}</span>
-          </div>
+          <AreaChart
+            data={cumulativeSeries.map(({ date, cum }) => ({ date, "Cumulative P&L": cum }))}
+            index="date"
+            categories={["Cumulative P&L"]}
+            colors={[cumulativeSeries[cumulativeSeries.length - 1]?.cum >= 0 ? "emerald" : "red"]}
+            valueFormatter={(v: number) => formatINR(v)}
+            showLegend={false}
+            showYAxis={true}
+            showXAxis={true}
+            showGridLines={false}
+            className="h-36 text-xs"
+            curveType="monotone"
+          />
         </CardContent>
       </Card>
 
-      {/* Drawdown chart */}
+      {/* Drawdown chart — Tremor AreaChart */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
           <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Drawdown (%)</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
-          <div className="relative h-20 flex items-start gap-0.5">
-            {drawdowns.map(({ date, dd }) => {
-              const h = Math.abs(dd) / Math.max(Math.abs(maxDrawdown), 1) * 100;
-              return (
-                <div
-                  key={date}
-                  title={`${date}: ${dd.toFixed(2)}%`}
-                  className="flex-1 rounded-sm bg-red-800/50 transition-all"
-                  style={{ height: `${Math.max(2, h)}%` }}
-                />
-              );
-            })}
-          </div>
+          <AreaChart
+            data={drawdowns.map(({ date, dd }) => ({ date, "Drawdown %": dd }))}
+            index="date"
+            categories={["Drawdown %"]}
+            colors={["red"]}
+            valueFormatter={(v: number) => `${v.toFixed(2)}%`}
+            showLegend={false}
+            showYAxis={true}
+            showXAxis={false}
+            showGridLines={false}
+            className="h-24 text-xs"
+            curveType="monotone"
+          />
         </CardContent>
       </Card>
     </div>
