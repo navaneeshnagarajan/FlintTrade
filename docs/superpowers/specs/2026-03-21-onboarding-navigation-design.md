@@ -33,20 +33,56 @@ Create a cohesive first-time and returning-user experience that showcases FlintT
 /welcome → WelcomeRoute (cinematic, first-time only)
 /explore → ExploreRoute (try-before-setup, sample data)
 /setup → SetupRoute (enhanced wizard)
-/terminal → TerminalRoute (with global nav in TopBar)
-/invest → InvestRoute (with global nav in TopBar)
-/learn → LearnRoute (with global nav in TopBar)
+/terminal → TerminalRoute (with global nav)
+/invest → InvestRoute (with global nav)
+/learn → LearnRoute (with global nav)
 ```
 
 ### Smart redirect logic (in main.tsx)
+
+Uses Zustand's persisted store envelope (not raw localStorage):
 ```typescript
 function getInitialRoute(): string {
-  const settings = localStorage.getItem("flinttrade:settings");
-  if (!settings) return "/welcome"; // First time
-  const { persona } = JSON.parse(settings);
-  return personaRoute(persona); // Returning user → last route
+  const raw = localStorage.getItem("flinttrade:settings");
+  if (!raw) return "/welcome";
+  try {
+    const envelope = JSON.parse(raw);
+    const persona = envelope?.state?.persona;
+    if (!persona) return "/welcome";
+    if (persona === "investor") return "/invest";
+    if (persona === "beginner") return "/learn";
+    return "/terminal";
+  } catch { return "/welcome"; }
 }
 ```
+
+### Route layout split
+
+Two layout groups in the router:
+- **Flow routes** (`/welcome`, `/explore`, `/setup`): Full-page, no TopBar, no TickerBar
+- **App routes** (`/terminal`, `/invest`, `/learn`): Shared `AppLayout` with TopBar (route tabs + workspace tabs) + TickerBar
+
+```
+<BrowserRouter>
+  <Route path="/" element={<RootLayout />}>
+    <!-- Flow routes: full-page, no chrome -->
+    <Route path="welcome" element={<WelcomeRoute />} />
+    <Route path="explore" element={<ExploreRoute />} />
+    <Route path="setup" element={<SetupRoute />} />
+
+    <!-- App routes: shared chrome (TopBar + TickerBar) -->
+    <Route element={<AppLayout />}>
+      <Route path="terminal" element={<TerminalRoute />} />
+      <Route path="invest" element={<InvestRoute />} />
+      <Route path="learn" element={<LearnRoute />} />
+    </Route>
+  </Route>
+</BrowserRouter>
+```
+
+New file: `src/routes/AppLayout.tsx` — renders TopBar + TickerBar + `<Outlet />`. This extracts TopBar from TerminalRoute so all app routes share it.
+
+**WebSocket bridge:** `useWsBridge()` stays in `RootLayout` but no-ops when `connectionStore.apiKey` is empty (already handles this — the `if (!wsUrl) return;` guard on line 27 of useWsBridge.ts).
 
 ---
 
@@ -54,61 +90,75 @@ function getInitialRoute(): string {
 
 **Shows:** First-time only (no settings in localStorage).
 
-### Sequence (CSS @keyframes + Framer Motion)
+### Sequence (pure CSS @keyframes + React state transitions — NO Framer Motion)
 
 1. **Dark void** (0-1s) — Pure black screen
 2. **Spark ignition** (1-2s) — Small green spark (#22c55e) appears center, grows with glow
-3. **Logo formation** (2-3.5s) — Spark becomes the FlintTrade "F" icon, wordmark types out letter by letter
-4. **Tagline** (3.5-4.5s) — "Learn · Invest · Trade" fades in below, spaced with dots
-5. **6 Pillars reveal** (4.5-8s) — Cards slide up from bottom, staggered 200ms each:
+3. **Logo formation** (2-3s) — Spark becomes the FlintTrade "F" icon, wordmark types out
+4. **Tagline** (3-3.5s) — "Learn · Invest · Trade" fades in below
+5. **6 Pillars reveal** (3.5-6s) — Cards slide up from bottom, staggered 200ms each:
 
-| Pillar | Icon | Headline | Subtext |
-|--------|------|----------|---------|
-| Learn | 📚 | Learn | Market basics to advanced strategies — built into the terminal |
-| Invest | 💰 | Invest | Mutual funds, SIPs, portfolio tracking, net worth |
-| Trade | 📊 | Trade | F&O scalping, options analysis, real-time execution |
-| Backtest | ⚡ | Backtest | Rust-powered tick-level backtesting — no broker has this |
-| Automate | 🔄 | Automate | 54-node flow builder, cron scheduler, Telegram kill switch |
-| AI | 🤖 | AI | Local LLM advisor, RAG analysis, sentiment signals |
+| Pillar | Lucide Icon | Headline | Subtext |
+|--------|-------------|----------|---------|
+| Learn | `BookOpen` | Learn | Market basics to advanced strategies — built into the terminal |
+| Invest | `PiggyBank` | Invest | Mutual funds, SIPs, portfolio tracking, net worth |
+| Trade | `CandlestickChart` | Trade | F&O scalping, options analysis, real-time execution |
+| Backtest | `Zap` | Backtest | Rust-powered tick-level backtesting — no broker has this |
+| Automate | `Workflow` | Automate | 54-node flow builder, cron scheduler, Telegram kill switch |
+| AI | `Bot` | AI | Local LLM advisor, RAG analysis, sentiment signals |
 
-6. **CTA** (8-10s) — Two buttons fade in:
-   - **"Explore First"** → `/explore` (try before setup)
+6. **CTA** (6-7s) — Two buttons fade in:
+   - **"Explore First"** → `/explore`
    - **"Set Up Workspace"** → `/setup`
+   - **"Skip"** label visible from the start (top-right corner)
 
-7. **Skip** — Click anywhere or press Enter/Space/Escape at any point to skip to CTA
+7. **Skip** — Click "Skip" text, press Enter/Space/Escape, or click anywhere to jump to CTA instantly
 
 ### Technical
 - New file: `src/routes/WelcomeRoute.tsx`
-- CSS @keyframes for spark/fade/slide animations
-- No external animation library (pure CSS + React state transitions)
+- Pure CSS @keyframes — no animation libraries (Framer Motion NOT used)
 - `will-change: transform, opacity` for GPU acceleration
-- Responsive: scales down on smaller viewports via clamp()
+- Lucide icons (already installed), not emoji
+- Responsive via clamp()
+- Total duration shortened to ~7s (not 10s)
 
 ---
 
 ## 3. Explore Mode (`/explore`)
 
-**Purpose:** Let users try the terminal without setting up a broker. Ubuntu "try before install" concept.
+**Purpose:** Try the terminal without setting up a broker. Ubuntu "try before install" concept.
 
 ### What they see
 - Full terminal workspace (Dockview) with a sample layout
-- TopBar with route tabs (Learn / Invest / Trade) — all navigable
-- TickerBar showing **delayed/snapshot data** (last market close prices, hardcoded or fetched from free API)
-- Dashboard with sample index values
-- Chart with historical data (from OpenAlgo history API, no auth needed for some endpoints, or bundled sample data)
-- Option chain in "demo" mode (static snapshot)
-- A persistent banner at top: "Exploring with sample data. [Set up your workspace →] to connect your broker and go live."
+- TopBar with route tabs (Learn / Invest / Trade) — navigable
+- TickerBar showing **bundled snapshot data** from `src/data/sample-snapshot.json`
+- Dashboard with sample index values from snapshot
+- Chart with bundled historical candle data (NIFTY 5-min, ~500 bars)
+- Option chain with static snapshot data
+- Persistent banner: "Exploring with sample data. [Set up your workspace →] to connect your broker."
 
 ### What they CAN'T do
-- Place orders (buttons disabled with tooltip "Connect broker first")
+- Place orders (buttons disabled, tooltip: "Connect broker first")
 - See live ticks (WebSocket not connected)
 - Access real positions/orders/holdings
 
 ### Technical
 - New file: `src/routes/ExploreRoute.tsx`
-- Reuses TerminalRoute's Dockview workspace but with a `demo: true` flag in connectionStore
-- Sample data: bundle a JSON snapshot of NIFTY 5-min candles + option chain for demo
-- Banner component: `src/components/explore/ExploreBanner.tsx`
+- New file: `src/data/sample-snapshot.json` (bundled market snapshot — ALL explore data comes from this file, no API calls)
+- Add `demo` field to `ConnectionStore` interface:
+```typescript
+interface ConnectionStore {
+  // existing fields...
+  demo: boolean;
+  setDemo: (v: boolean) => void;
+}
+```
+- When `demo === true`:
+  - `useWsBridge` skips WebSocket connection (already handled by empty apiKey guard)
+  - API hooks (`usePositions`, `useOrders`, etc.) return empty arrays without fetching
+  - Chart/OptionChain hooks read from sample-snapshot.json instead of API
+  - Order mutation buttons are disabled
+- Banner: `src/components/explore/ExploreBanner.tsx`
 
 ---
 
@@ -116,20 +166,16 @@ function getInitialRoute(): string {
 
 ### Keep existing
 - Quick (2 steps) / Guided (5 steps) / Advanced (7 steps) modes
-- Connection step (OpenAlgo host + API key)
-- Experience level picker
+- Connection step, experience level picker
 
 ### Add: Persona × Interest Matrix
 
-Replace the single "Persona" picker with a two-axis selection:
+Replace single "Persona" picker with two-axis selection:
 
 **Axis 1: Experience Level** (already exists)
-- Beginner
-- Intermediate
-- Pro
-- Custom
+- Beginner / Intermediate / Pro / Custom
 
-**Axis 2: Interests** (NEW — multi-select)
+**Axis 2: Interests** (NEW — multi-select checkboxes)
 - [ ] Learning & Education
 - [ ] Investing (MF, SIP, Portfolio)
 - [ ] Trading (F&O, Intraday)
@@ -141,205 +187,204 @@ Replace the single "Persona" picker with a two-axis selection:
 
 | Experience | Primary Interest | Default Route | Layout Preset |
 |-----------|-----------------|---------------|---------------|
-| Beginner | Learning | /learn | Learn-first: Basics + Glossary |
-| Beginner | Investing | /invest | Invest-lite: Portfolio + SIP Calculator |
-| Beginner | Trading | /learn | Learn-then-trade: Basics + Paper Trading |
-| Intermediate | Trading | /terminal | Trader: Chart + Option Chain + Positions |
-| Intermediate | Investing | /invest | Investor: Portfolio + Holdings + Net Worth |
-| Intermediate | All | /terminal | Full: Chart + Dashboard + Option Chain |
-| Pro | Trading | /terminal | Scalper Zone: Scalper + Chart + Option Chain + Depth |
-| Pro | Trading + Investing | /terminal | Power User: Scalper + Portfolio + Positions |
-| Pro | All | /terminal | Everything: Dense 4-panel with all key widgets |
-| Custom | User picks | User picks | Empty canvas or user-selected template |
+| Beginner | Learning | /learn | learn-first |
+| Beginner | Investing | /invest | invest-lite |
+| Beginner | Trading | /learn | learn-then-trade |
+| Intermediate | Trading | /terminal | trader |
+| Intermediate | Investing | /invest | investor |
+| Intermediate | All | /terminal | full |
+| Pro | Trading | /terminal | scalper-zone |
+| Pro | Trading + Investing | /terminal | power-user |
+| Pro | All | /terminal | everything |
+| Custom | User picks | User picks | blank or user-selected |
 
 ### Add: Layout Preview
-
-After selecting experience + interests, show a **preview card** of what their workspace will look like (small screenshot/mockup of the layout preset). User can accept or choose "Customize" to start from blank.
+After selecting experience + interests, show preview card of the workspace layout. User accepts or clicks "Customize" for blank canvas.
 
 ### Technical
 - Modify: `src/routes/SetupRoute.tsx`
-- Add interest multi-select step (new wizard step between Persona and Connection)
-- Add layout preview component
-- Predefined layouts stored in `src/layouts/presets.ts` as serialized Dockview JSON
+- Add interest step (new wizard step)
+- Presets stored in `src/layout/presets/` (extends existing preset JSON files, NOT a new `src/layouts/` directory)
 
 ---
 
 ## 5. Global Navigation in TopBar
 
-### Design (approved: Option B — TopBar Integration)
-
-Add route tabs to the LEFT side of TopBar, before workspace tabs:
+### Design (approved: TopBar Integration)
 
 ```
 [F logo] [Learn] [Invest] [Trade] | [Workspace 1] [Workspace 2] [+] ... [TOOLS] [WIDGETS] [● dhan] [23:30 IST]
 ```
 
-**Route tab order: Learn · Invest · Trade** (deliberate — learning first philosophy)
+**Route tab order: Learn · Invest · Trade**
 
 ### Behavior
-- Clicking a route tab navigates to that route via react-router
-- Active route tab has accent highlight (`bg-accent/15 text-accent border-b-2 border-accent`)
-- Workspace tabs only show on `/terminal` route (Dockview is terminal-only)
-- On `/invest` and `/learn`, the workspace tab area shows the current section name
-- Route tabs are always visible on ALL routes (terminal, invest, learn)
-- NOT visible on /welcome, /explore, /setup (those are full-page flows)
+- Clicking route tab navigates via react-router
+- Active tab: `bg-accent/15 text-accent border-b-2 border-accent`
+- Workspace tabs only on `/terminal`
+- On `/invest` and `/learn`, workspace area shows section name
+- Route tabs on ALL app routes, NOT on flow routes (/welcome, /explore, /setup)
 
 ### Technical
-- Modify: `src/chrome/TopBar.tsx`
-- Add `useLocation()` from react-router to detect active route
-- Add `useNavigate()` for route switching
-- Route tabs component: `RouteTabBar` (inline in TopBar or separate)
+- TopBar extracted from TerminalRoute into `AppLayout.tsx` (shared by all app routes)
+- TopBar receives `currentRoute` from `useLocation()` and `navigate` from `useNavigate()`
+- Terminal-specific controls (TOOLS, WIDGETS) conditionally shown only on `/terminal`
+- TOOLS and WIDGETS also available on other routes via a simplified menu
 
 ---
 
 ## 6. Daily Welcome (Smart Welcome Card)
 
-### Shows: Every app open (not just first time)
+**NOT a full-page block.** Slide-in card, top-right, auto-dismiss 8s.
 
-**NOT a full-page block.** A slide-in card in the top-right corner that auto-dismisses after 8 seconds. User can dismiss immediately by clicking X.
+### Content (context-aware):
 
-### Content (context-aware by time of day):
+| Time | Content |
+|------|---------|
+| Pre-market (<9:15) | "Good morning" + market opens countdown |
+| Market hours (9:15-15:30) | No card (don't block trading). Exception: position alert |
+| Post-market (15:30-20:00) | "Markets closed" + P&L summary |
+| Evening/Weekend | Suggestions (backtest, learn) |
+| Recovery (crash with positions) | RED alert, does NOT auto-dismiss |
 
-**Pre-market (before 9:15 IST):**
-- "Good morning, {name}" (name from settings or "Trader")
-- Global indices overnight (if available)
-- "Market opens in {X} minutes"
-- Quick-launch: Last workspace
+### Crash detection
+Set `flinttrade:sessionActive = "true"` on mount via `useEffect`. Clear on `beforeunload` event. If `sessionActive` is still `"true"` on next mount AND `tradingStore.positionCount > 0`, show recovery card.
 
-**Market hours (9:15-15:30):**
-- Minimal — just restore workspace, no greeting card
-- Exception: if open positions exist, show "You have {N} open positions" alert
-
-**Post-market (15:30-20:00):**
-- "Markets closed"
-- Today's P&L summary (if traded)
-- "Review in Trade Journal?" link
-
-**Evening/Weekend:**
-- "Good evening"
-- Suggestions: "Try backtesting a strategy" / "Explore learning modules"
-
-**Recovery mode (crash/unexpected close with open positions):**
-- RED alert card: "⚠️ You have {N} open positions"
-- Shows positions summary
-- "Go to Terminal" button (prominent)
-- Does NOT auto-dismiss
+### Data sources
+- Name: `settingsStore.name` (new field, defaults to "Trader")
+- Position count: `useTradingStore.getState().positionCount` (existing)
+- P&L: `useTradingStore.getState().totalPnl` (existing)
 
 ### Technical
-- New component: `src/components/welcome/DailyWelcome.tsx`
-- Reads from settingsStore (persona, name) and positionStore
-- Time-of-day logic with IST timezone
-- Rendered in RootLayout.tsx (appears on all routes)
-- localStorage flag: `flinttrade:lastOpen` timestamp to detect long absence
+- New: `src/components/welcome/DailyWelcome.tsx`
+- Rendered in `AppLayout.tsx` (not RootLayout — only shows on app routes)
+- localStorage: `flinttrade:lastOpen`, `flinttrade:sessionActive`
 
 ---
 
-## 7. Workspace Management
+## 7. settingsStore Additions
 
-### Current state
-- `layoutStore` has multi-tab support (tabs array, activeTabId)
-- Tabs are Dockview layouts serialized to JSON
-- Create/delete tabs exists but UI is minimal (just + and X buttons)
+Add these fields to `settingsStore.ts` with Zustand persist migration:
 
-### Enhancement
+```typescript
+// New fields
+name: string;                    // User's display name, default "Trader"
+interests: string[];             // Selected interests from setup
+experience: "beginner" | "intermediate" | "pro" | "custom";
+lastOpenTimestamp: number;       // Last app open time (ms since epoch)
 
-**Workspace menu** (dropdown from the + button or workspace tab right-click):
-- **New from Template** — Shows preset grid (Scalper Zone, Options Desk, Market Watch, etc.)
-- **New Blank** — Empty Dockview canvas
-- **Clone Current** — Duplicate current workspace
-- **Rename** — Inline edit on tab name
-- **Delete** — Confirm dialog, can't delete last workspace
-
-**Template presets** (from the persona × interest matrix + extras):
-- Start Fresh (empty)
-- Scalper Zone (Scalper + Chart + Depth)
-- Options Desk (Option Chain + Chart + Greeks + Straddle)
-- Market Watch (Dashboard + News + Market Intelligence)
-- Investor View (Portfolio + Holdings + Net Worth)
-- Learning Path (integrated learn content)
-- Backtest Lab (Chart + Backtest Lab + Strategy Builder)
-- Automation Hub (Flow Builder + Settings + Positions)
-
-### Technical
-- Modify: `src/stores/layoutStore.ts` (add template presets)
-- New: `src/layouts/presets.ts` (serialized Dockview layout JSON for each preset)
-- Modify: TopBar workspace area to add dropdown menu
+// Zustand persist migration
+version: 2, // bump from current version
+migrate: (state, version) => {
+  if (version < 2) {
+    return { ...state, name: "Trader", interests: [], experience: "intermediate", lastOpenTimestamp: 0 };
+  }
+  return state;
+}
+```
 
 ---
 
-## 8. Interactive Tour
+## 8. Layout Presets
 
-### When: After first setup completion, before entering workspace
+Extend the existing `src/layout/presets/` directory (which already has 7 JSON files) with new preset files:
 
-### Style: Interactive sandbox (Option C from brainstorming)
+| Preset File | Widgets |
+|------------|---------|
+| `learn-first.json` | NEW — Learn basics + glossary panels |
+| `invest-lite.json` | NEW — Portfolio + SIP Calculator |
+| `learn-then-trade.json` | NEW — Paper trading + basics |
+| `trader.json` | EXISTS as `minimal.json` — rename/extend |
+| `investor.json` | NEW — Holdings + Net Worth + Funds |
+| `full.json` | NEW — Chart + Dashboard + Option Chain |
+| `power-user.json` | NEW — Scalper + Portfolio + Positions |
+| `everything.json` | NEW — Dense 4-panel |
 
-The workspace loads with the user's selected layout preset. Pulsing green dots appear on 6 key areas:
-
-1. **Route tabs** (Learn/Invest/Trade) — "Switch between modes here"
-2. **Workspace tabs** — "Create and manage multiple workspaces"
-3. **WIDGETS button** — "Add any widget to your workspace"
-4. **TOOLS button** — "Access full-page tools like Backtest Lab and Strategy Builder"
-5. **TickerBar** — "Live market prices update here during trading hours"
-6. **A widget** (the first panel) — "Drag edges to resize, right-click header for options"
-
-User clicks each dot to see a tooltip. After clicking all 6 (or clicking "Skip Tour"), dots disappear and the workspace is fully theirs.
-
-### Technical
-- New component: `src/components/tour/InteractiveTour.tsx`
-- Stores tour completion in localStorage: `flinttrade:tourComplete`
-- Pulsing dots use CSS @keyframes animation
-- Tooltip content is static (hardcoded strings)
-- Tour state managed by a simple React state array of completed steps
+Each JSON file is a serialized Dockview layout (same format as existing presets).
 
 ---
 
-## 9. Files Created/Modified
+## 9. Workspace Management Menu
 
-### New files
+**Dropdown from + button in TopBar:**
+- New from Template → preset grid
+- New Blank → empty Dockview
+- Clone Current → duplicate
+- Rename → inline edit
+- Delete → confirm dialog (can't delete last)
+
+Modify: TopBar workspace area, `layoutStore.ts`
+
+---
+
+## 10. Interactive Tour
+
+After first setup, pulsing green dots on 6 areas:
+1. Route tabs — "Switch between Learn, Invest, Trade"
+2. Workspace tabs — "Create multiple workspaces"
+3. WIDGETS — "Add panels to your workspace"
+4. TOOLS — "Full-page tools: Backtest, Strategy Builder"
+5. TickerBar — "Live market prices"
+6. First widget — "Drag to resize, right-click for options"
+
+Click dot → tooltip. Click all 6 or "Skip Tour" → done. Stored in `flinttrade:tourComplete`.
+
+New: `src/components/tour/InteractiveTour.tsx`
+
+---
+
+## 11. Files Summary
+
+### New files (9)
 | File | Purpose |
 |------|---------|
-| `src/routes/WelcomeRoute.tsx` | Cinematic welcome (6 pillars, CSS animations) |
-| `src/routes/ExploreRoute.tsx` | Try-before-setup with sample data |
-| `src/components/explore/ExploreBanner.tsx` | "Exploring with sample data" banner |
-| `src/components/welcome/DailyWelcome.tsx` | Context-aware daily greeting card |
-| `src/components/tour/InteractiveTour.tsx` | Pulsing dot walkthrough |
-| `src/layouts/presets.ts` | 8 predefined Dockview layout JSON presets |
-| `src/data/sample-snapshot.json` | Bundled sample market data for explore mode |
+| `src/routes/WelcomeRoute.tsx` | Cinematic welcome |
+| `src/routes/ExploreRoute.tsx` | Try-before-setup |
+| `src/routes/AppLayout.tsx` | Shared chrome for app routes |
+| `src/components/explore/ExploreBanner.tsx` | Demo banner |
+| `src/components/welcome/DailyWelcome.tsx` | Daily greeting |
+| `src/components/tour/InteractiveTour.tsx` | Pulsing dot tour |
+| `src/data/sample-snapshot.json` | Bundled demo data |
+| `src/layout/presets/*.json` (6 new) | Layout presets |
 
-### Modified files
+### Modified files (6)
 | File | Change |
 |------|--------|
-| `src/main.tsx` | Add /welcome, /explore routes, smart redirect |
-| `src/routes/SetupRoute.tsx` | Add interest multi-select, layout preview, matrix logic |
-| `src/chrome/TopBar.tsx` | Add route tabs (Learn/Invest/Trade), workspace dropdown |
-| `src/stores/settingsStore.ts` | Add interests[], lastOpenTimestamp |
-| `src/stores/layoutStore.ts` | Add template preset methods |
-| `src/routes/RootLayout.tsx` | Render DailyWelcome overlay |
+| `src/main.tsx` | New routes, smart redirect, route layout split |
+| `src/routes/SetupRoute.tsx` | Interest matrix, layout preview |
+| `src/chrome/TopBar.tsx` | Route tabs, workspace menu |
+| `src/stores/settingsStore.ts` | name, interests, experience, migration |
+| `src/stores/connectionStore.ts` | Add demo flag |
+| `src/stores/layoutStore.ts` | Preset loading methods |
 
 ---
 
-## 10. Implementation Priority
+## 12. Implementation Priority
 
-| Priority | Component | Effort |
-|----------|-----------|--------|
-| 1 | Global Navigation (TopBar route tabs) | Small — unblocks everything |
-| 2 | Setup Wizard Enhancement (interest matrix + presets) | Medium |
-| 3 | Layout Presets | Medium (Dockview serialization) |
-| 4 | Cinematic Welcome Screen | Medium (CSS animations) |
-| 5 | Explore Mode | Medium (sample data + demo flag) |
-| 6 | Daily Welcome Card | Small |
-| 7 | Interactive Tour | Small |
-| 8 | Workspace Management Menu | Small |
+| # | Component | Effort | Depends on |
+|---|-----------|--------|------------|
+| 1 | AppLayout + Global Nav | Small | Nothing |
+| 2 | settingsStore additions | Small | Nothing |
+| 3 | Layout Presets (JSON files) | Medium | Nothing |
+| 4 | Setup Wizard (interest matrix) | Medium | #2, #3 |
+| 5 | Cinematic Welcome | Medium | Nothing |
+| 6 | Explore Mode | Medium | #1, #3 |
+| 7 | Daily Welcome Card | Small | #2 |
+| 8 | Interactive Tour | Small | #1 |
+| 9 | Workspace Menu | Small | #3 |
+
+**Parallelizable:** #1, #2, #3, #5 can all run in parallel. Then #4, #6, #7, #8, #9 after.
 
 ---
 
-## 11. Success Criteria
+## 13. Success Criteria
 
-- First-time user sees cinematic welcome → can explore without setup → setup with interest matrix → lands on personalized workspace → interactive tour
-- Returning user gets context-aware daily card → auto-restores last workspace
-- Route tabs (Learn/Invest/Trade) visible and functional on all main routes
-- 8 layout presets load correctly for each persona × interest combination
-- All routes accessible from any other route via TopBar
-- Tour completes and never shows again
-- Zero hardcoded hex colors — uses Phase 1A design tokens throughout
+- First-time: cinematic welcome → explore without setup → setup with interests → personalized workspace → tour
+- Returning: context-aware daily card → auto-restore last workspace
+- Route tabs (Learn/Invest/Trade) visible on all app routes
+- 8+ layout presets load correctly
+- All routes accessible from any other route
+- Tour completes, never shows again
+- Crash recovery detects open positions
+- Zero hardcoded hex colors
 - tsc clean, vitest pass, build clean
