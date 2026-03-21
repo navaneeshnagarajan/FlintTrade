@@ -1,7 +1,12 @@
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import TopBar from "@/chrome/TopBar";
 import TickerBar from "@/chrome/TickerBar";
+import InteractiveTour from "@/components/tour/InteractiveTour";
 import { useWsBridge } from "@/hooks/useWsBridge";
+import DailyWelcome from "@/components/welcome/DailyWelcome";
+
+const TOUR_STORAGE_KEY = "flinttrade:tourComplete";
 
 /**
  * AppLayout -- shared chrome for all app routes (/terminal, /invest, /learn).
@@ -10,6 +15,11 @@ import { useWsBridge } from "@/hooks/useWsBridge";
  */
 export default function AppLayout() {
   useWsBridge(); // WebSocket connection (no-ops if no apiKey)
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [tourComplete, setTourComplete] = useState(
+    () => localStorage.getItem(TOUR_STORAGE_KEY) === "true",
+  );
+
   return (
     <div className="h-screen flex flex-col bg-surface-base overflow-hidden">
       <TopBar />
@@ -17,6 +27,17 @@ export default function AppLayout() {
       <div className="flex-1 overflow-hidden">
         <Outlet />
       </div>
+      {showWelcome && (
+        <DailyWelcome onDismiss={() => setShowWelcome(false)} />
+      )}
+      {!tourComplete && (
+        <InteractiveTour
+          onComplete={() => {
+            localStorage.setItem(TOUR_STORAGE_KEY, "true");
+            setTourComplete(true);
+          }}
+        />
+      )}
     </div>
   );
 }
