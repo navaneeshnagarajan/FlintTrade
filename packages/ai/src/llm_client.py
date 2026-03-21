@@ -42,6 +42,7 @@ class LLMProvider(StrEnum):
     GROK = "grok"       # Grok — xAI's model (x.ai)
     MISTRAL = "mistral"
     TOGETHER = "together"
+    NVIDIA = "nvidia"    # NVIDIA NIM — OpenAI-compatible (integrate.api.nvidia.com)
     OPENROUTER = "openrouter"  # Routes to 100+ models
     CUSTOM = "custom"    # Any OpenAI-compatible endpoint
 
@@ -90,6 +91,7 @@ class LLMConfig:
                 or os.getenv("GROK_API_KEY", "")
                 or os.getenv("MISTRAL_API_KEY", "")
                 or os.getenv("TOGETHER_API_KEY", "")
+                or os.getenv("NVIDIA_API_KEY", "")
                 or os.getenv("OPENROUTER_API_KEY", "")
             ),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
@@ -139,6 +141,7 @@ _PROVIDER_URLS: dict[str, str] = {
     "grok": "https://api.x.ai/v1/chat/completions",
     "mistral": "https://api.mistral.ai/v1/chat/completions",
     "together": "https://api.together.xyz/v1/chat/completions",
+    "nvidia": "https://integrate.api.nvidia.com/v1/chat/completions",
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     # Custom (any OpenAI-compatible endpoint)
     "custom": "{host}/v1/chat/completions",

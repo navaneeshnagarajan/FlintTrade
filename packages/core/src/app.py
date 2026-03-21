@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import signal
 import sys
@@ -26,7 +27,7 @@ if _REPO_ROOT not in sys.path:
 import math  # noqa: E402
 
 import numpy as np  # noqa: E402
-from flask import Flask, jsonify, request  # noqa: E402
+from flask import Flask, Response, jsonify, request  # noqa: E402
 
 from packages.core.src.config import Settings  # noqa: E402
 from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: E402
@@ -286,9 +287,13 @@ def create_flask_app() -> Flask:
     def advisor_chat() -> tuple[Any, int]:
         """Chat with the AI advisor via the configured LLM backend.
 
-        Request JSON:
-            message (str): User's message text.
+        Request JSON (conversation history — preferred):
+            messages (list[dict]): Array of ``{role, content}`` dicts.
             context (str, optional): Additional context (e.g. current positions).
+
+        Request JSON (legacy single-message):
+            message (str): User's message text.
+            context (str, optional): Additional context.
 
         Returns:
             JSON with ``status`` and ``data.response`` on success, or
@@ -303,29 +308,46 @@ def create_flask_app() -> Flask:
             }), 200
 
         body = request.get_json(silent=True) or {}
-        user_message: str = body.get("message", "").strip()
         context: str = body.get("context", "").strip()
 
-        if not user_message:
-            return jsonify({
-                "status": "error",
-                "message": "message field is required.",
-            }), 400
-
-        # Build conversation messages
-        messages: list[LLMMessage] = [
-            LLMMessage(role="system", content=_SYSTEM_PROMPT),
-        ]
-        if context:
-            messages.append(LLMMessage(
-                role="system",
-                content=f"Current trading context:\n{context}",
-            ))
-        messages.append(LLMMessage(role="user", content=user_message))
+        # Accept messages[] array (new) or message string (legacy)
+        raw_messages = body.get("messages")
+        if isinstance(raw_messages, list) and raw_messages:
+            # Conversation history supplied by the frontend
+            conversation: list[LLMMessage] = [
+                LLMMessage(role="system", content=_SYSTEM_PROMPT),
+            ]
+            if context:
+                conversation.append(LLMMessage(
+                    role="system",
+                    content=f"Current trading context:\n{context}",
+                ))
+            for msg in raw_messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role and content:
+                    conversation.append(LLMMessage(role=role, content=content))
+        else:
+            # Legacy: single message string
+            user_message: str = body.get("message", "").strip()
+            if not user_message:
+                return jsonify({
+                    "status": "error",
+                    "message": "message or messages field is required.",
+                }), 400
+            conversation = [
+                LLMMessage(role="system", content=_SYSTEM_PROMPT),
+            ]
+            if context:
+                conversation.append(LLMMessage(
+                    role="system",
+                    content=f"Current trading context:\n{context}",
+                ))
+            conversation.append(LLMMessage(role="user", content=user_message))
 
         try:
             client = LLMClient()
-            response = client.chat(messages)
+            response = client.chat(conversation)
             client.close()
 
             if response.success:
@@ -345,6 +367,70 @@ def create_flask_app() -> Flask:
                 "message": f"Internal error: {exc}",
             }), 500
 
+    @app.route("/api/v1/advisor/stream", methods=["POST"])
+    def advisor_stream() -> Response | tuple[Any, int]:
+        """SSE streaming variant of the advisor endpoint.
+
+        Accepts the same request body as ``/api/v1/advisor`` (messages[]
+        array or legacy message string).  Returns a ``text/event-stream``
+        response where each event carries a ``token`` field and the final
+        event carries ``done: true``.
+        """
+        if not _is_llm_configured():
+            return jsonify({
+                "status": "error",
+                "message": "LLM not configured. Set provider in Settings \u2192 AI.",
+            }), 200
+
+        body = request.get_json(silent=True) or {}
+        context: str = body.get("context", "").strip()
+
+        # Build conversation (same logic as /advisor)
+        raw_messages = body.get("messages")
+        if isinstance(raw_messages, list) and raw_messages:
+            conversation: list[LLMMessage] = [
+                LLMMessage(role="system", content=_SYSTEM_PROMPT),
+            ]
+            if context:
+                conversation.append(LLMMessage(
+                    role="system",
+                    content=f"Current trading context:\n{context}",
+                ))
+            for msg in raw_messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role and content:
+                    conversation.append(LLMMessage(role=role, content=content))
+        else:
+            user_message = body.get("message", "").strip()
+            if not user_message:
+                return jsonify({
+                    "status": "error",
+                    "message": "message or messages field is required.",
+                }), 400
+            conversation = [
+                LLMMessage(role="system", content=_SYSTEM_PROMPT),
+            ]
+            if context:
+                conversation.append(LLMMessage(
+                    role="system",
+                    content=f"Current trading context:\n{context}",
+                ))
+            conversation.append(LLMMessage(role="user", content=user_message))
+
+        def _generate():  # type: ignore[no-untyped-def]
+            try:
+                client = LLMClient()
+                for token in client.chat_stream(conversation):
+                    yield f"data: {_json.dumps({'token': token})}\n\n"
+                yield f"data: {_json.dumps({'done': True})}\n\n"
+                client.close()
+            except Exception as exc:
+                logger.exception("Advisor stream error")
+                yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
+
+        return Response(_generate(), content_type="text/event-stream")
+
     @app.route("/api/v1/advisor/status", methods=["GET"])
     def advisor_status() -> tuple[Any, int]:
         """Check whether the AI advisor LLM backend is configured."""
@@ -358,6 +444,59 @@ def create_flask_app() -> Flask:
                 "model": cfg.model if cfg else "",
             },
         }), 200
+
+    @app.route("/api/v1/signals", methods=["GET"])
+    def get_signals() -> tuple[Any, int]:
+        """Return current signal state (stub — populated by signal pipeline)."""
+        return jsonify({
+            "status": "success",
+            "data": {"signals": []},
+        }), 200
+
+    # ------------------------------------------------------------------
+    # MCP bridge — register handlers that route through OpenAlgo
+    # ------------------------------------------------------------------
+    try:
+        from packages.ai.src.mcp_bridge import MCPBridge  # noqa: PLC0415
+
+        _mcp_bridge = MCPBridge()
+
+        def _mcp_place_order(**params: Any) -> dict[str, Any]:
+            """Route MCP place_order through OpenAlgo (sync wrapper)."""
+            from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: PLC0415
+            client = OpenAlgoClient(Settings.from_env())
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(client.place_order(**params))
+            finally:
+                loop.run_until_complete(client.close())
+                loop.close()
+
+        def _mcp_get_positions(**params: Any) -> dict[str, Any]:
+            """Route MCP get_positions through OpenAlgo (sync wrapper)."""
+            from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: PLC0415
+            client = OpenAlgoClient(Settings.from_env())
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(client.positionbook())
+            finally:
+                loop.run_until_complete(client.close())
+                loop.close()
+
+        _mcp_bridge.register_handler("place_order", _mcp_place_order)
+        _mcp_bridge.register_handler("get_positions", _mcp_get_positions)
+        logger.info("MCP bridge initialized with place_order, get_positions handlers")
+    except Exception:
+        logger.debug("MCP bridge not available — skipping handler registration")
+
+    # ------------------------------------------------------------------
+    # RAG initialization (optional — requires chromadb)
+    # ------------------------------------------------------------------
+    # TODO: Initialize RAGEngine on startup once chromadb is a hard dependency.
+    #   from packages.ai.src.rag import RAGEngine
+    #   rag = RAGEngine()
+    #   if rag.document_count() == 0:
+    #       rag.index_directory("docs/")
 
     return app
 
