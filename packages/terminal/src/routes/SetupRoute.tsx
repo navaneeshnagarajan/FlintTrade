@@ -1,6 +1,6 @@
 /**
  * SetupRoute — multi-step first-time setup wizard.
- * Modes: Quick (2 steps), Guided (5 steps), Advanced (7 steps).
+ * Modes: Quick (2 steps), Guided (7 steps), Advanced (9 steps).
  * Saves to connectionStore + settingsStore, then navigates based on persona.
  */
 
@@ -19,6 +19,11 @@ import {
   ArrowLeft,
   ArrowRight,
   Wifi,
+  CandlestickChart,
+  PiggyBank,
+  Workflow,
+  Bot,
+  type LucideIcon,
 } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -406,6 +411,146 @@ function ExperiencePicker({ selected, onSelect }: ExperiencePickerProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Interest definitions
+// ---------------------------------------------------------------------------
+
+const INTERESTS = [
+  { id: "learning", label: "Learning & Education", icon: BookOpen, desc: "Market basics, strategies, paper trading" },
+  { id: "investing", label: "Investing", icon: PiggyBank, desc: "Mutual funds, SIPs, portfolio, net worth" },
+  { id: "trading", label: "Trading", icon: CandlestickChart, desc: "F&O scalping, options, intraday" },
+  { id: "backtesting", label: "Backtesting", icon: Zap, desc: "Strategy testing, walk-forward, optimization" },
+  { id: "automation", label: "Automation", icon: Workflow, desc: "Flow builder, cron jobs, alerts" },
+  { id: "ai", label: "AI & Analysis", icon: Bot, desc: "LLM advisor, sentiment, signals" },
+] as const;
+
+// ---------------------------------------------------------------------------
+// Interest picker (multi-select)
+// ---------------------------------------------------------------------------
+
+interface InterestPickerProps {
+  selected: string[];
+  onToggle: (id: string) => void;
+}
+
+function InterestPicker({ selected, onToggle }: InterestPickerProps) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {INTERESTS.map((interest) => {
+        const Icon: LucideIcon = interest.icon;
+        const isSelected = selected.includes(interest.id);
+        return (
+          <button
+            key={interest.id}
+            type="button"
+            onClick={() => onToggle(interest.id)}
+            className={[
+              "text-left rounded-lg border p-4 transition-all duration-150",
+              isSelected
+                ? "bg-accent/10 border-accent/40 ring-1 ring-accent/20"
+                : "bg-surface-card border-border-default hover:border-accent/30 hover:bg-surface-hover",
+            ].join(" ")}
+          >
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <Icon className={[
+                "size-4",
+                isSelected ? "text-accent" : "text-text-muted",
+              ].join(" ")} />
+              <span className={[
+                "text-sm font-medium",
+                isSelected ? "text-accent" : "text-text-primary",
+              ].join(" ")}>
+                {interest.label}
+              </span>
+            </div>
+            <p className={[
+              "text-xs leading-relaxed",
+              isSelected ? "text-accent/70" : "text-text-muted",
+            ].join(" ")}>
+              {interest.desc}
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Name input
+// ---------------------------------------------------------------------------
+
+interface NameInputProps {
+  value: string;
+  onChange: (name: string) => void;
+}
+
+function NameInput({ value, onChange }: NameInputProps) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-text-secondary text-xs uppercase tracking-wider">
+        What should we call you?
+      </Label>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Trader"
+        className="h-9 text-sm border-border-default rounded-md font-sans bg-surface-base text-text-primary"
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Layout preset logic
+// ---------------------------------------------------------------------------
+
+function getPresetName(experience: string, interests: string[]): string {
+  if (experience === "new") {
+    if (interests.includes("trading")) return "learn-then-trade";
+    if (interests.includes("investing")) return "invest-lite";
+    return "learn-first";
+  }
+  if (experience === "professional") {
+    if (interests.includes("trading")) return "scalper-zone";
+    return "power-user";
+  }
+  // intermediate or fallback
+  if (interests.length >= 3) return "full";
+  if (interests.includes("investing")) return "investor";
+  return "minimal";
+}
+
+const PRESET_DESCRIPTIONS: Record<string, string> = {
+  "learn-first": "Guided workspace with lessons, paper trading, and market education",
+  "learn-then-trade": "Learning tools alongside a trading terminal for hands-on practice",
+  "invest-lite": "Portfolio overview with holdings, SIPs, and net worth tracking",
+  "scalper-zone": "Scalper + Chart + Option Chain + Depth for rapid execution",
+  "power-user": "Full-featured workspace with all analysis and automation tools",
+  "full": "Complete layout with trading, analysis, and automation panels",
+  "investor": "Investment dashboard with portfolio, holdings, and fund tracking",
+  "minimal": "Clean workspace with essential widgets to get started",
+};
+
+interface LayoutPreviewProps {
+  experience: string;
+  interests: string[];
+}
+
+function LayoutPreview({ experience, interests }: LayoutPreviewProps) {
+  const preset = getPresetName(experience, interests);
+  const description = PRESET_DESCRIPTIONS[preset] ?? "Custom workspace layout";
+  const displayName = preset.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+
+  return (
+    <div className="bg-surface-card border border-border-default rounded-lg p-4 shadow-sm space-y-2">
+      <p className="text-xxs uppercase tracking-wider text-text-muted">Your workspace</p>
+      <p className="text-text-primary font-heading font-bold text-lg">{displayName}</p>
+      <p className="text-sm text-text-secondary leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Trading defaults step
 // ---------------------------------------------------------------------------
 
@@ -704,10 +849,11 @@ function LlmStep({ onComplete }: LlmStepProps) {
 
 interface DoneScreenProps {
   persona: Persona;
+  name: string;
   onGo: () => void;
 }
 
-function DoneScreen({ persona, onGo }: DoneScreenProps) {
+function DoneScreen({ persona, name, onGo }: DoneScreenProps) {
   const personaLabel =
     persona === "investor" ? "Investor" : persona === "beginner" ? "Learner" : "Trader";
 
@@ -718,6 +864,8 @@ function DoneScreen({ persona, onGo }: DoneScreenProps) {
         ? "Learning Workspace"
         : "Trading Terminal";
 
+  const greeting = name && name !== "Trader" ? `${name}, your` : "Your";
+
   return (
     <div className="text-center space-y-6 py-4">
       <div className="inline-flex items-center justify-center size-16 rounded-full bg-profit/15 border border-profit/30">
@@ -726,7 +874,7 @@ function DoneScreen({ persona, onGo }: DoneScreenProps) {
       <div className="space-y-2">
         <h3 className="font-heading font-bold text-lg text-text-primary">Setup Complete</h3>
         <p className="text-sm text-text-secondary">
-          Your workspace is configured for{" "}
+          {greeting} workspace is configured for{" "}
           <span className="text-accent font-medium">{personaLabel}</span>.
         </p>
         <p className="text-text-muted text-xxs">Opening {destination}</p>
@@ -753,6 +901,8 @@ interface WizardState {
   connection: ConnectionFormValues | null;
   tradingDefaults: TradingDefaultsFormValues | null;
   riskLimits: RiskFormValues | null;
+  name: string;
+  interests: string[];
 }
 
 const INITIAL_WIZARD: WizardState = {
@@ -761,6 +911,8 @@ const INITIAL_WIZARD: WizardState = {
   connection: null,
   tradingDefaults: null,
   riskLimits: null,
+  name: "Trader",
+  interests: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -768,14 +920,16 @@ const INITIAL_WIZARD: WizardState = {
 // ---------------------------------------------------------------------------
 
 const QUICK_STEPS = ["Connection", "Persona"];
-const GUIDED_STEPS = ["Persona", "Connection", "Experience", "Trading Defaults", "Done"];
+const GUIDED_STEPS = ["Persona", "Connection", "Experience", "Interests", "Trading Defaults", "Preview", "Done"];
 const ADVANCED_STEPS = [
   "Persona",
   "Connection",
   "Experience",
+  "Interests",
   "Trading Defaults",
   "Risk Limits",
   "AI Config",
+  "Preview",
   "Done",
 ];
 
@@ -795,6 +949,13 @@ export default function SetupRoute() {
   const [step, setStep] = useState(0);
   const [wizard, setWizard] = useState<WizardState>(INITIAL_WIZARD);
 
+  function mapExperience(level: ExperienceLevel | null): "beginner" | "intermediate" | "pro" | "custom" {
+    if (level === "new") return "beginner";
+    if (level === "professional") return "pro";
+    if (level === "intermediate") return "intermediate";
+    return "intermediate";
+  }
+
   function applyAndNavigate(w: WizardState) {
     const persona = w.persona ?? "trader";
     const connection = w.connection;
@@ -811,6 +972,9 @@ export default function SetupRoute() {
     }
 
     useSettingsStore.getState().setPersona(persona);
+    useSettingsStore.getState().setName(w.name || "Trader");
+    useSettingsStore.getState().setInterests(w.interests);
+    useSettingsStore.getState().setExperience(mapExperience(w.experience));
 
     if (tradingDefaults) {
       useSettingsStore.getState().setTradingDefaults({
@@ -825,6 +989,15 @@ export default function SetupRoute() {
     }
 
     navigate(personaRoute(persona));
+  }
+
+  function toggleInterest(id: string) {
+    setWizard((w) => ({
+      ...w,
+      interests: w.interests.includes(id)
+        ? w.interests.filter((i) => i !== id)
+        : [...w.interests, id],
+    }));
   }
 
   function next() {
@@ -867,16 +1040,16 @@ export default function SetupRoute() {
             />
             <ModeCard
               title="Guided Setup"
-              subtitle="5 steps — personalized"
-              description="Persona, connection, experience level, and trading defaults for a tailored workspace."
+              subtitle="7 steps — personalized"
+              description="Persona, connection, experience, interests, and trading defaults for a tailored workspace."
               badge="~2 min"
               icon={<BookOpen className="size-5" />}
               onClick={() => { setMode("guided"); setStep(0); }}
             />
             <ModeCard
               title="Advanced Setup"
-              subtitle="7 steps — full control"
-              description="Everything in Guided plus LLM provider, Telegram notifications, and risk limits."
+              subtitle="9 steps — full control"
+              description="Everything in Guided plus LLM provider, risk limits, and workspace preview."
               badge="~4 min"
               icon={<Settings2 className="size-5" />}
               onClick={() => { setMode("advanced"); setStep(0); }}
@@ -920,6 +1093,10 @@ export default function SetupRoute() {
       if (step === 1) {
         return (
           <div className="space-y-5">
+            <NameInput
+              value={wizard.name}
+              onChange={(name) => setWizard((w) => ({ ...w, name }))}
+            />
             <PersonaPicker
               selected={wizard.persona}
               onSelect={(p) => setWizard((w) => ({ ...w, persona: p }))}
@@ -937,11 +1114,16 @@ export default function SetupRoute() {
       }
     }
 
-    // GUIDED: 0=Persona, 1=Connection, 2=Experience, 3=TradingDefaults, 4=Done
+    // GUIDED: 0=Persona, 1=Connection, 2=Experience, 3=Interests,
+    //         4=TradingDefaults, 5=Preview, 6=Done
     if (mode === "guided") {
       if (step === 0) {
         return (
           <div className="space-y-5">
+            <NameInput
+              value={wizard.name}
+              onChange={(name) => setWizard((w) => ({ ...w, name }))}
+            />
             <PersonaPicker
               selected={wizard.persona}
               onSelect={(p) => setWizard((w) => ({ ...w, persona: p }))}
@@ -988,6 +1170,25 @@ export default function SetupRoute() {
       }
       if (step === 3) {
         return (
+          <div className="space-y-5">
+            <p className="text-sm text-text-secondary">Select one or more areas you are interested in.</p>
+            <InterestPicker
+              selected={wizard.interests}
+              onToggle={toggleInterest}
+            />
+            <Button
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+              disabled={wizard.interests.length === 0}
+              onClick={next}
+            >
+              Continue
+              <ArrowRight className="size-4 ml-2" />
+            </Button>
+          </div>
+        );
+      }
+      if (step === 4) {
+        return (
           <TradingDefaultsStep
             defaultValues={wizard.tradingDefaults ?? undefined}
             onComplete={(vals) => {
@@ -997,22 +1198,47 @@ export default function SetupRoute() {
           />
         );
       }
-      if (step === 4) {
+      if (step === 5) {
+        return (
+          <div className="space-y-5">
+            <LayoutPreview
+              experience={wizard.experience ?? "intermediate"}
+              interests={wizard.interests}
+            />
+            <p className="text-text-muted text-xs">
+              You can change your layout anytime from the workspace menu.
+            </p>
+            <Button
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={next}
+            >
+              Continue
+              <ArrowRight className="size-4 ml-2" />
+            </Button>
+          </div>
+        );
+      }
+      if (step === 6) {
         return (
           <DoneScreen
             persona={wizard.persona ?? "trader"}
+            name={wizard.name}
             onGo={() => applyAndNavigate(wizard)}
           />
         );
       }
     }
 
-    // ADVANCED: 0=Persona, 1=Connection, 2=Experience, 3=TradingDefaults,
-    //           4=RiskLimits, 5=LLM, 6=Done
+    // ADVANCED: 0=Persona, 1=Connection, 2=Experience, 3=Interests,
+    //           4=TradingDefaults, 5=RiskLimits, 6=LLM, 7=Preview, 8=Done
     if (mode === "advanced") {
       if (step === 0) {
         return (
           <div className="space-y-5">
+            <NameInput
+              value={wizard.name}
+              onChange={(name) => setWizard((w) => ({ ...w, name }))}
+            />
             <PersonaPicker
               selected={wizard.persona}
               onSelect={(p) => setWizard((w) => ({ ...w, persona: p }))}
@@ -1059,6 +1285,25 @@ export default function SetupRoute() {
       }
       if (step === 3) {
         return (
+          <div className="space-y-5">
+            <p className="text-sm text-text-secondary">Select one or more areas you are interested in.</p>
+            <InterestPicker
+              selected={wizard.interests}
+              onToggle={toggleInterest}
+            />
+            <Button
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+              disabled={wizard.interests.length === 0}
+              onClick={next}
+            >
+              Continue
+              <ArrowRight className="size-4 ml-2" />
+            </Button>
+          </div>
+        );
+      }
+      if (step === 4) {
+        return (
           <TradingDefaultsStep
             defaultValues={wizard.tradingDefaults ?? undefined}
             onComplete={(vals) => {
@@ -1068,7 +1313,7 @@ export default function SetupRoute() {
           />
         );
       }
-      if (step === 4) {
+      if (step === 5) {
         return (
           <RiskStep
             defaultValues={wizard.riskLimits ?? undefined}
@@ -1079,7 +1324,7 @@ export default function SetupRoute() {
           />
         );
       }
-      if (step === 5) {
+      if (step === 6) {
         return (
           <LlmStep
             onComplete={() => {
@@ -1090,10 +1335,31 @@ export default function SetupRoute() {
           />
         );
       }
-      if (step === 6) {
+      if (step === 7) {
+        return (
+          <div className="space-y-5">
+            <LayoutPreview
+              experience={wizard.experience ?? "intermediate"}
+              interests={wizard.interests}
+            />
+            <p className="text-text-muted text-xs">
+              You can change your layout anytime from the workspace menu.
+            </p>
+            <Button
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={next}
+            >
+              Continue
+              <ArrowRight className="size-4 ml-2" />
+            </Button>
+          </div>
+        );
+      }
+      if (step === 8) {
         return (
           <DoneScreen
             persona={wizard.persona ?? "trader"}
+            name={wizard.name}
             onGo={() => applyAndNavigate(wizard)}
           />
         );
@@ -1104,7 +1370,7 @@ export default function SetupRoute() {
   }
 
   const isDoneStep =
-    (mode === "guided" && step === 4) || (mode === "advanced" && step === 6);
+    (mode === "guided" && step === 6) || (mode === "advanced" && step === 8);
 
   return (
     <div className="min-h-screen bg-surface-base flex items-center justify-center p-4">
