@@ -16,9 +16,12 @@ npx vitest run -t "test name"                  # single test by name
 ```
 
 ## Architecture
-- Single React app serving 3 personas via routes: /terminal, /invest, /learn, /setup
-- Dockview v5 for widget-composable layout (floating, popout, tabs, serializable)
-- 21 widgets (all TSX) + 7 full-page tools (all functional)
+- Single React app serving 3 personas via 10 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai
+- Dockview v5 for widget-composable workspace on /trade (drag, resize, tabs, serialize)
+- 21 widgets (all TSX) + 4 canvas tools (P&L Dashboard, Market Intelligence, Trade Journal, Settings)
+- 6 workspace presets: Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View
+- UI libraries: shadcn/ui + Tremor (dashboards) + Magic UI (animations) + Aceternity UI (effects)
+- 5 themes: Midnight, Obsidian, Terminal Green, Ocean Blue, Light
 - Path alias: `@` → `src/`
 
 ## State Architecture
@@ -49,11 +52,13 @@ Boundary rule: data enters through ONE path only, never duplicated across stores
 - CDS decimal strikes (USDINR 85.50)
 - Crypto (Delta Exchange): 24/7, fractional lots, INR settlement
 
-## Theme (locked)
-- Background: #0a0a0f, Cards: #12121a, Borders: #1e1e2e
-- Inter for UI, JetBrains Mono for numbers
-- shadcn/ui dark theme with CSS variables
-- Dockview dark theme overrides
+## Theme System
+- 5 themes: Midnight (default), Obsidian, Terminal Green, Ocean Blue, Light
+- Base: #0a0a0f bg, #16161f cards, #2a2a3a borders (overridden by theme CSS files)
+- Fonts: Geist (headings), Inter (body), JetBrains Mono (data)
+- 60+ design tokens (surfaces, borders, text, trading semantics)
+- Dockview themed via CSS custom properties
+- Density modes: comfortable (default) / compact (auto on small screens)
 
 ## Rules
 - TypeScript strict — no `any` types

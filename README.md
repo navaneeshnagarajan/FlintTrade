@@ -19,7 +19,7 @@ Open-source modular trading platform for Indian markets, built on [OpenAlgo](htt
 
 FlintTrade is a self-hosted trading platform that sits on top of OpenAlgo. OpenAlgo handles broker connections and order execution across 30+ Indian brokers. FlintTrade handles everything else: strategy execution, risk management, backtesting, real-time analysis, AI-powered signals, and multi-account orchestration.
 
-The platform is organized into 12 independent packages (11 Python + 1 React). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
+The platform is organized into 13 independent packages (11 Python + 1 React + 1 Rust/PyO3). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
 
 FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a platform you run on your own hardware, with your own broker accounts, under your own control. It's designed for SEBI-compliant algorithmic trading in India.
 
@@ -74,7 +74,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 | **data** | Tick capture, trade logs, DuckDB storage, SEBI audit trail | ✅ Built |
 | **historical** | Multi-source downloader, free NSE data, DuckDB/Parquet pipeline | ✅ Built |
 | **screener** | Option chain, OI analysis, futures quadrant, Greeks, IV | ✅ Built |
-| **backtest-engine** | Event-driven simulator, 12 strategies, walk-forward optimizer | ✅ Built |
+| **backtest-engine** | Event-driven simulator, 36 strategies, walk-forward optimizer | ✅ Built |
 | **ai** | LLM client, RAG, ML signals, sentiment, MCP bridge | ✅ Built |
 | **integration** | TradingView webhooks, ChartInk, visual flow builder | ✅ Built |
 | **automation** | Cron jobs, Telegram bot, OpenClaw bridge | ✅ Built |

@@ -48,8 +48,8 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → FIX → UPDATE → C
 - Test with live OpenAlgo sandbox during market hours when possible
 
 ### Step 6: TEST
-- `npx vitest run` — all tests must pass
-- `make test` — all Python tests must pass (712+)
+- `npx vitest run` — all tests must pass (36+)
+- `make test` — all Python tests must pass (985+)
 - Spec compliance review after each task group
 - Code quality review after each task group
 - Use `/simplify` after completing features

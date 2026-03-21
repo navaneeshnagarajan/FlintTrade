@@ -27,13 +27,15 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-alpha
 ## Packages
 
 **Python (11):** core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, indicators
+**Rust/PyO3 (1):** tick-engine
 **React (1):** terminal (5173)
 
-## Current State
+## Current State (v0.1.0-alpha, released 2026-03-21)
 
-- 944 tests passing (918 Python + 26 terminal)
-- Terminal: 21 widgets (TSX), 7 tools (all functional), Dockview v5.1 layout, dark theme
-- 4 routes: /terminal, /setup, /invest, /learn
+- 1,021 tests passing (985 Python + 36 terminal)
+- Terminal: 21 widgets (TSX), 4 canvas tools, 10 routes, 6 workspace presets, 5 themes
+- Routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai
+- 20 FlintTrade backend endpoints, 100% OpenAlgo API coverage
 - Read PLAN.md for next tasks
 
 ## OpenAlgo API

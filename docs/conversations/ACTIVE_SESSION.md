@@ -1,40 +1,27 @@
-# Active Session Checkpoint — 2026-03-21 15:30 IST
+# Active Session — v0.1.0-alpha Released (2026-03-21)
 
-## NEXT SESSION: Wire 14 unused OpenAlgo endpoints into UI
+## STATUS: Alpha released. Next target: v0.1.0-beta (March 30, 2026)
 
-### Endpoints to integrate (all exist in api.ts, zero component usages):
+### What was completed in this session:
 
-| # | Endpoint | Target Widget/Section | Priority |
-|---|----------|----------------------|----------|
-| 1 | `getGex` | Market Intelligence → GEX tab | HIGH |
-| 2 | `getIVSmile` | Market Intelligence → IV Smile tab | HIGH |
-| 3 | `getMaxPain` | Market Intelligence → Max Pain tab | HIGH |
-| 4 | `getOIProfile` | Market Intelligence → OI Profile tab | HIGH |
-| 5 | `getSyntheticFuture` | Option Chain header → show synthetic future price | MEDIUM |
-| 6 | `getMargin` | Order Pad → margin requirement before order | MEDIUM |
-| 7 | `getHolidays` | Market Intelligence → Holidays tab + Daily Welcome | MEDIUM |
-| 8 | `getTimings` | TopBar/TickerBar → market hours display | MEDIUM |
-| 9 | `sendTelegram` | Automation Hub → alert delivery + Settings → test | MEDIUM |
-| 10 | `getInstruments` | Option Chain search + Watchlist symbol picker | LOW |
-| 11 | `getMultiOptionGreeks` | Greeks widget → batch Greeks view | LOW |
-| 12 | `getOptionSymbol` | Scalper + Option Chain → ATM/ITM/OTM resolution | LOW |
-| 13 | `getTicker` | WebSocket bridge alternative | LOW |
-| 14 | `getSymbol` | Multiple widgets → symbol details | LOW |
+1. **Wired all 14 OpenAlgo endpoints to UI** — GEX, IV Smile, Max Pain, OI Profile, Synthetic Future, Margin, Holidays, Timings, Telegram, Instruments, MultiOptionGreeks, OptionSymbol, Ticker, Symbol
+2. **Full-stack audit** — found 27 backend↔frontend gaps, built all of them
+3. **20 new Flask endpoints** — backtest, strategies, signals, sentiment, RAG, cron, audit, journal, safety, webhooks
+4. **All routes functional** — LabRoute (backtest + forward test), AIRoute (chat + signals + sentiment + RAG), AutomateRoute (cron + monitors + logs + safety + webhooks), TradeJournal (real trade logs)
+5. **Explore mode** — /explore with sample data previews
+6. **InvestRoute enhanced** — sector rotation (live), SIP calculator, ETF screener, stocks with CAGR
+7. **3 UI libraries added** — Tremor (dashboards), Magic UI (animations), Aceternity UI (effects)
+8. **UI/UX audit (120+ issues)** — fixed all critical/major issues across 5 waves
+9. **Tool segregation** — removed redundant tools from /trade, route-aware TOOLS dropdown
+10. **Widget responsive** — auto-density, overflow-x-auto tables, flex layout fixes
+11. **Repo audit** — docker-compose fixed, README/CHANGELOG/CONTRIBUTING updated, screenshots cleaned
 
-### Session completed (2026-03-20 20:00 → 2026-03-21 15:30):
-- **48 commits, 31 subagents, 120+ files, ~19 hours**
-- Phase 1A: UI Foundation (Geist font, tokens, 1182 replacements, Logo, components)
-- Phase 2: All widgets + tools + routes redesigned
-- Phase 1B: Onboarding (welcome, global nav, setup interest matrix, tour, daily welcome)
-- AI: Chat (memory, streaming, MCP), Signal pipeline, NVIDIA provider
-- Themes: 5 built-in (Midnight, Obsidian, Terminal Green, Ocean Blue, Light)
-- Routes: 6 modules (/learn, /invest, /trade, /lab, /automate, /ai)
-- 100% OpenAlgo API coverage (45+ endpoints in TypeScript)
-- Logo light mode fix, CI green
+### What's left for beta (v0.1.0-beta):
 
-### Also pending for next session:
-- DEVLOG entries for latest commits (routes, themes, API endpoints)
-- Wire the 3 new route pages (/lab, /automate, /ai) to actual functionality
-- Explore mode (/explore) — sample data for try-before-setup
-- Forward testing feature in Strategy Lab
-- Module-specific settings UI in each new route
+1. Live trading verification with real broker (market hours test)
+2. Performance optimization (bundle splitting, lazy loading audit)
+3. InvestRoute external data sources (MF NAV feeds, sector APIs)
+4. Forward testing with live market data
+5. SectorMapWidget live sector data
+6. Paper trading mode via OpenAlgo Analyzer
+7. End-to-end Playwright tests
