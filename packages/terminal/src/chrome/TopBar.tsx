@@ -169,6 +169,7 @@ export default function TopBar() {
   const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
   const setToolsMenuOpen = useLayoutStore((s) => s.setToolsMenuOpen);
   const toolsMenuOpen = useLayoutStore((s) => s.toolsMenuOpen);
+  const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
 
   const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
 
@@ -320,7 +321,7 @@ export default function TopBar() {
                     Clone Current
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => { /* TODO: show preset picker */ }}>
+                  <DropdownMenuItem onClick={() => setPresetPickerOpen(true)}>
                     <Layers size={14} className="mr-2" />
                     New from Template...
                   </DropdownMenuItem>

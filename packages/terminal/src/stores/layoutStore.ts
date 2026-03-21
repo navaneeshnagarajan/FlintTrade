@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
 import type { DockviewApi } from "dockview-react";
+import { applyPreset as applyPresetImpl } from "@/layout/workspacePresets";
 
 interface LayoutTab {
   id: string;
@@ -15,6 +16,7 @@ interface LayoutStore {
   dockviewApi: DockviewApi | null;
   widgetPickerOpen: boolean;
   toolsMenuOpen: boolean;
+  presetPickerOpen: boolean;
   addTab: (name?: string) => void;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
@@ -24,6 +26,8 @@ interface LayoutStore {
   setDockviewApi: (api: DockviewApi | null) => void;
   setWidgetPickerOpen: (open: boolean) => void;
   setToolsMenuOpen: (open: boolean) => void;
+  setPresetPickerOpen: (open: boolean) => void;
+  applyPreset: (presetId: string) => void;
 }
 
 function generateId(): string {
@@ -38,6 +42,7 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   dockviewApi: null,
   widgetPickerOpen: false,
   toolsMenuOpen: false,
+  presetPickerOpen: false,
   addTab: (name) => {
     const id = generateId();
     const tabName = name || `Layout ${get().tabs.length + 1}`;
@@ -74,6 +79,14 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   setDockviewApi: (api) => set({ dockviewApi: api }),
   setWidgetPickerOpen: (open) => set({ widgetPickerOpen: open }),
   setToolsMenuOpen: (open) => set({ toolsMenuOpen: open }),
+  setPresetPickerOpen: (open) => set({ presetPickerOpen: open }),
+  applyPreset: (presetId) => {
+    const api = get().dockviewApi;
+    if (!api) return;
+    applyPresetImpl(api, presetId);
+    // After applying, the onDidLayoutChange listener in TerminalRoute will
+    // auto-save the new layout to the active tab — no manual save needed.
+  },
 });
 
 const persistedStore = persist(storeImpl, {

@@ -16,6 +16,7 @@ const ExploreRoute = lazy(() => import("./routes/ExploreRoute"));
 const LabRoute = lazy(() => import("./routes/LabRoute"));
 const AutomateRoute = lazy(() => import("./routes/AutomateRoute"));
 const AIRoute = lazy(() => import("./routes/AIRoute"));
+const SettingsRoute = lazy(() => import("./routes/SettingsRoute"));
 
 const Loading = () => (
   <div className="min-h-screen bg-surface-base flex items-center justify-center">
@@ -55,6 +56,7 @@ const router = createBrowserRouter([
       { path: "welcome", element: <Suspense fallback={<Loading />}><WelcomeRoute /></Suspense> },
       { path: "explore", element: <Suspense fallback={<Loading />}><ExploreRoute /></Suspense> },
       { path: "setup", element: <Suspense fallback={<Loading />}><SetupRoute /></Suspense> },
+      { path: "settings", element: <Suspense fallback={<Loading />}><SettingsRoute /></Suspense> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {

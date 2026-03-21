@@ -6,7 +6,9 @@ import { useLayoutStore } from "@/stores/layoutStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import ToolsDropdown from "@/chrome/ToolsDropdown";
+import PresetPicker from "@/chrome/PresetPicker";
 import { widgetComponents } from "@/layout/widgetFactory";
+import { applyPreset, DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
 import type { ToolId } from "@/types/widgets";
 
 // Full-page tools (lazy loaded -- only fetched when opened)
@@ -28,14 +30,17 @@ export default function TerminalRoute() {
   const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
   const toolsMenuOpen = useLayoutStore((s) => s.toolsMenuOpen);
   const setToolsMenuOpen = useLayoutStore((s) => s.setToolsMenuOpen);
+  const presetPickerOpen = useLayoutStore((s) => s.presetPickerOpen);
+  const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
 
   // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
   useGlobalKeys({
     onEscape: useCallback(() => {
       if (activeTool) { setActiveTool(null); return; }
+      if (presetPickerOpen) { setPresetPickerOpen(false); return; }
       if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
       if (toolsMenuOpen) { setToolsMenuOpen(false); return; }
-    }, [activeTool, widgetPickerOpen, toolsMenuOpen, setWidgetPickerOpen, setToolsMenuOpen]),
+    }, [activeTool, presetPickerOpen, widgetPickerOpen, toolsMenuOpen, setPresetPickerOpen, setWidgetPickerOpen, setToolsMenuOpen]),
     onCommandPalette: useCallback(() => {
       // Future: open command palette (Ctrl+K)
     }, []),
@@ -48,12 +53,16 @@ export default function TerminalRoute() {
       const savedLayout = useLayoutStore.getState().getTabLayout(activeTabId);
       if (savedLayout) {
         try {
-          event.api.fromJSON(savedLayout as any);
+          // Restore the persisted layout for this workspace tab.
+          // Cast through unknown because we store as Record<string,unknown> in Zustand.
+          event.api.fromJSON(savedLayout as unknown as Parameters<typeof event.api.fromJSON>[0]);
         } catch {
-          event.api.addPanel({ id: "dashboard", component: "dashboard", title: "Dashboard" });
+          // Corrupted saved layout — fall back to the default preset
+          applyPreset(event.api, DEFAULT_PRESET_ID);
         }
       } else {
-        event.api.addPanel({ id: "dashboard", component: "dashboard", title: "Dashboard" });
+        // No layout saved yet — apply the default "Market Watch" preset
+        applyPreset(event.api, DEFAULT_PRESET_ID);
       }
     },
     [setDockviewApi]
@@ -114,6 +123,12 @@ export default function TerminalRoute() {
       <WidgetPicker
         isOpen={widgetPickerOpen}
         onClose={() => setWidgetPickerOpen(false)}
+      />
+
+      {/* Preset picker dialog */}
+      <PresetPicker
+        isOpen={presetPickerOpen}
+        onClose={() => setPresetPickerOpen(false)}
       />
     </div>
   );
