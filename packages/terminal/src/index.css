@@ -49,6 +49,38 @@
     --chart-5: 280 65% 60%;
     --text-2xl: clamp(20px, 2vw, 24px);
     --text-lg: clamp(16px, 1.5vw, 18px);
+
+    /* Surface defaults (overridden by theme CSS files) */
+    --color-surface-base: #0a0a0f;
+    --color-surface-card: #16161f;
+    --color-surface-elevated: #1e1e28;
+    --color-surface-hover: #24242e;
+    --color-surface-active: #2e2e3a;
+    --color-surface-stripe: #0e0e16;
+    --color-border-default: #2a2a3a;
+    --color-border-subtle: #1e1e2e;
+    --color-border-strong: #3a3a4a;
+    --color-text-primary: #e4e4e7;
+    --color-text-secondary: #8b8b95;
+    --color-text-muted: #6b6b78;
+    --color-text-disabled: #45454f;
+    --color-profit: #22c55e;
+    --color-loss: #ef4444;
+    --color-warning: #eab308;
+    --color-bullish-bg: rgba(34, 197, 94, 0.10);
+    --color-bullish-border: rgba(34, 197, 94, 0.30);
+    --color-bullish-text: #22c55e;
+    --color-bearish-bg: rgba(239, 68, 68, 0.10);
+    --color-bearish-border: rgba(239, 68, 68, 0.30);
+    --color-bearish-text: #ef4444;
+    --color-atm-bg: rgba(234, 179, 8, 0.08);
+    --color-atm-border: rgba(234, 179, 8, 0.30);
+    --color-atm-text: #eab308;
+    --color-neutral-bg: rgba(59, 130, 246, 0.10);
+    --color-neutral-border: rgba(59, 130, 246, 0.30);
+    --color-neutral-text: #3b82f6;
+    --color-itm-text: #22c55e;
+    --color-otm-text: #f97315;
   }
 }
 
@@ -88,48 +120,48 @@
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  /* --- Surface colors --- */
-  --color-surface-base: #0a0a0f;
-  --color-surface-card: #16161f;
-  --color-surface-elevated: #1e1e28;
-  --color-surface-hover: #24242e;
-  --color-surface-active: #2e2e3a;
-  --color-surface-stripe: #0e0e16;
+  /* --- Surface colors (read from :root, themeable) --- */
+  --color-surface-base: var(--color-surface-base);
+  --color-surface-card: var(--color-surface-card);
+  --color-surface-elevated: var(--color-surface-elevated);
+  --color-surface-hover: var(--color-surface-hover);
+  --color-surface-active: var(--color-surface-active);
+  --color-surface-stripe: var(--color-surface-stripe);
 
-  /* --- Border colors --- */
-  --color-border-default: #2a2a3a;
-  --color-border-subtle: #1e1e2e;
-  --color-border-strong: #3a3a4a;
+  /* --- Border colors (read from :root, themeable) --- */
+  --color-border-default: var(--color-border-default);
+  --color-border-subtle: var(--color-border-subtle);
+  --color-border-strong: var(--color-border-strong);
 
-  /* --- Text colors --- */
-  --color-text-primary: #e4e4e7;
-  --color-text-secondary: #8b8b95;
-  --color-text-muted: #6b6b78;
-  --color-text-disabled: #45454f;
+  /* --- Text colors (read from :root, themeable) --- */
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-disabled: var(--color-text-disabled);
 
-  /* --- Trading semantic colors --- */
-  --color-profit: #22c55e;
-  --color-loss: #ef4444;
-  --color-warning: #eab308;
+  /* --- Trading semantic colors (read from :root, themeable) --- */
+  --color-profit: var(--color-profit);
+  --color-loss: var(--color-loss);
+  --color-warning: var(--color-warning);
 
-  --color-bullish-bg: rgba(34, 197, 94, 0.10);
-  --color-bullish-border: rgba(34, 197, 94, 0.30);
-  --color-bullish-text: #22c55e;
+  --color-bullish-bg: var(--color-bullish-bg);
+  --color-bullish-border: var(--color-bullish-border);
+  --color-bullish-text: var(--color-bullish-text);
 
-  --color-bearish-bg: rgba(239, 68, 68, 0.10);
-  --color-bearish-border: rgba(239, 68, 68, 0.30);
-  --color-bearish-text: #ef4444;
+  --color-bearish-bg: var(--color-bearish-bg);
+  --color-bearish-border: var(--color-bearish-border);
+  --color-bearish-text: var(--color-bearish-text);
 
-  --color-atm-bg: rgba(234, 179, 8, 0.08);
-  --color-atm-border: rgba(234, 179, 8, 0.30);
-  --color-atm-text: #eab308;
+  --color-atm-bg: var(--color-atm-bg);
+  --color-atm-border: var(--color-atm-border);
+  --color-atm-text: var(--color-atm-text);
 
-  --color-neutral-bg: rgba(59, 130, 246, 0.10);
-  --color-neutral-border: rgba(59, 130, 246, 0.30);
-  --color-neutral-text: #3b82f6;
+  --color-neutral-bg: var(--color-neutral-bg);
+  --color-neutral-border: var(--color-neutral-border);
+  --color-neutral-text: var(--color-neutral-text);
 
-  --color-itm-text: #22c55e;
-  --color-otm-text: #f97315;
+  --color-itm-text: var(--color-itm-text);
+  --color-otm-text: var(--color-otm-text);
 }
 
 /* ---------- Responsive breakpoints ---------- */
