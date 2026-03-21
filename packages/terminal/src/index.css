@@ -172,6 +172,20 @@
   html { --widget-padding: 24px; }
 }
 
+/* ---------- Auto-detect density from viewport height ---------- */
+/* On small laptop displays (1366x768 or similar) use compact density unless
+   the user has explicitly requested comfortable density via the class. */
+@media (max-height: 800px) {
+  html:not(.density-comfortable) {
+    --table-cell-px: 8px;
+    --table-cell-py: 6px;
+    --card-padding: 12px;
+    --widget-padding: 12px;
+    --input-height: 32px;
+    --button-height: 32px;
+  }
+}
+
 /* ---------- Global resets ---------- */
 * {
   scrollbar-width: thin;

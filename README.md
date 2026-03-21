@@ -4,13 +4,13 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-944%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1021%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
-![Status](https://img.shields.io/badge/status-pre--alpha-red)
+![Status](https://img.shields.io/badge/status-v0.1.0--alpha-yellow)
 
-> **Pre-alpha** — Under active development. Not ready for production trading.
+> **Alpha v0.1.0** — Feature-complete for testing. Not ready for production trading.
 > Use with sandbox/paper trading only.
 
 Open-source modular trading platform for Indian markets, built on [OpenAlgo](https://openalgo.in). Supports 30+ brokers, equities, F&O, commodities, currency derivatives, and crypto.
@@ -86,27 +86,36 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 ## Current State
 
 **What works:**
-- 11 Python + 1 React packages with source code and **944 passing tests** (918 Python + 26 terminal)
+- 13 packages (11 Python + 1 React + 1 Rust/PyO3) with **1,021 passing tests** (985 Python + 36 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
-- 12 backtest strategy templates (EMA crossover, Supertrend, straddle sell, iron condor, etc.)
-- React terminal with Dockview widget-composable workspace
+- 36 backtest strategy templates with walk-forward optimizer
+- React terminal with Dockview widget-composable workspace and 6 preset templates
+- 20 FlintTrade backend endpoints (backtest execution, signals, sentiment, RAG, cron, audit, safety)
 - Docker Compose for cross-platform development
 
-**What's complete (Phases 1-9):**
+**What's complete:**
 - TypeScript strict mode migration (zero JSX/JS files remain)
-- Dockview v5.1 widget-composable workspace with 21 widgets (all TSX)
-- 7 functional tools (Settings, P&L Dashboard, Strategy Builder, Trade Journal, Flow Builder, Market Intelligence, Backtest Lab)
-- State architecture: Zustand 5 + Jotai + TanStack Query 5 (replaced DataBus)
-- Setup wizard (/setup), Investor dashboard (/invest), Learn center (/learn)
+- Dockview v5.1 widget-composable workspace with 21 widgets + 4 tools
+- 6 route modules: Learn, Invest, Trade, Lab, Automate, AI — each with dedicated functionality
+- State architecture: Zustand 5 + Jotai + TanStack Query 5
+- Cinematic welcome (/welcome), Explore mode (/explore), Setup wizard (/setup)
+- Investor dashboard (/invest), Strategy Lab (/lab), Automation Hub (/automate), AI Center (/ai)
+- 5 built-in themes (Midnight, Obsidian, Terminal Green, Ocean Blue, Light)
+- 3 UI libraries: Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
+- Full accessibility: WCAG AA landmarks, skip nav, ARIA tabs, reduced-motion support
+- 100% OpenAlgo API coverage (45+ endpoints wired to UI)
+- 20 FlintTrade backend endpoints for backtest, signals, safety, cron, audit, webhooks
+- REST ticker fallback when WebSocket disconnects
+- Error Boundary, 404 catch-all, mobile warning overlay
 - Git submodules for OpenAlgo, OpenClaw, AlgoMirror
 - Live WebSocket data feed with ping/pong heartbeat
-- Indicators package (31 indicators, 150+ tests — EMA, RSI, MACD, Supertrend, Ichimoku, OBV, and more)
+- Indicators package (31 indicators, 150+ tests)
 - CI: GitHub Actions (python-tests, node-tests, secrets-check)
 
 **What's planned:**
-- Live testing and performance optimization (Phase 10)
+- Live testing and performance optimization
 - OpenClaw AI agent integration for autonomous trading
 - Production monitoring and alerting
 
@@ -116,7 +125,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 918 tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 985 tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -133,10 +142,12 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 11 Python + 1 React packages, 944 tests, CI | ✅ Complete |
-| Infrastructure | Makefile, systemd, deploy scripts, git submodules | ✅ Complete |
-| Live Connection | OpenAlgo sandbox trading, WebSocket data | ✅ Complete |
-| Terminal | 21 widgets, 7 tools, 4 routes, Dockview v5.1 | ✅ Complete |
+| Foundation | Monorepo, 13 packages, 1,021 tests, CI | ✅ Complete |
+| Infrastructure | Makefile, systemd, Docker, deploy scripts, git submodules | ✅ Complete |
+| Live Connection | OpenAlgo sandbox trading, WebSocket data, REST fallback | ✅ Complete |
+| Terminal UI | 21 widgets, 4 tools, 7 routes, Dockview v5.1, 6 presets | ✅ Complete |
+| Full-Stack Wiring | 20 backend endpoints, all routes functional, 5 themes | ✅ Complete |
+| UI/UX Polish | Accessibility, animations, responsive, error handling | ✅ Complete |
 | AI Integration | OpenClaw agent skills, autonomous signals | 📋 Planned |
 | Production | SEBI compliance verification, multi-broker, monitoring | 📋 Future |
 
@@ -201,3 +212,7 @@ FlintTrade absorbs and adapts code from these open-source projects:
 - [Lightweight Charts](https://github.com/nicfv/Lightweight-Charts) — Financial charting (Apache-2.0)
 - [shadcn/ui](https://ui.shadcn.com/) — UI components (MIT)
 - [Glide Data Grid](https://github.com/glideapps/glide-data-grid) — High-performance grid (MIT)
+- [Tremor](https://tremor.so/) — Dashboard charts and KPI components (Apache-2.0)
+- [Magic UI](https://magicui.design/) — Animated React components (MIT)
+- [Aceternity UI](https://ui.aceternity.com/) — Visual effects components (MIT)
+- [Framer Motion](https://motion.dev/) — Animation library (MIT)

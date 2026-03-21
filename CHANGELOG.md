@@ -6,22 +6,72 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added — v2 Migration (2026-03-19)
-- TypeScript strict mode migration — zero JSX/JS files remain
-- Dockview v5.1 widget-composable workspace (replaced FlexLayout)
-- State architecture: Zustand 5 + Jotai + TanStack Query 5 (replaced DataBus)
-- 21 widgets (all TSX): 14 migrated + 7 new (SectorMap, Calculator, MTMMonitor, RiskPanel, NewsFeed, Ticker, AIAdvisor)
-- 7 functional tools (zero stubs): Settings, P&L Dashboard, Strategy Builder, Trade Journal, Flow Builder, Market Intelligence, Backtest Lab
-- 4 routes: /terminal, /setup (wizard), /invest (dashboard), /learn (placeholder)
-- indicators package: 13 indicators, 42 tests (EMA, SMA, DEMA, Supertrend, VWAP, RSI, MACD, etc.)
-- User's EMASuperTrendDEMA strategy implementation
-- CI: GitHub Actions (python-tests, node-tests, secrets-check)
-- shadcn/ui components throughout (no raw HTML controls)
-- 944 total tests (918 Python + 26 terminal)
+(Nothing yet — all changes landed in v0.1.0-alpha below.)
 
-## [0.1.0-alpha] — 2026-03-16
+## [0.1.0-alpha] — 2026-03-21
 
-First pre-release. All 12 packages built, 944 tests passing, Docker support.
+Feature-complete alpha release. 13 packages, 1,021 tests, 7 routes, 21 widgets, full-stack wiring.
+
+### Added — UI Foundation
+- Geist font (headings) + Inter (body) + JetBrains Mono (data) — 3-tier font system
+- 60+ design tokens (surfaces, borders, text, trading semantics)
+- 5 built-in themes: Midnight, Obsidian, Terminal Green, Ocean Blue, Light
+- SVG Logo component (LogoIcon, LogoWordmark, LogoFull)
+- Density modes (comfortable/compact, auto-detect on small screens)
+
+### Added — Routes & Navigation
+- 7 app routes: /learn, /invest, /trade, /lab, /automate, /ai, /settings
+- Cinematic /welcome screen with pillar cards and theme switcher
+- /explore demo mode with sample data previews (no broker needed)
+- /setup onboarding wizard with persona x interest matrix
+- Global route tabs in TopBar (Learn · Invest · Trade · Lab · Automate · AI)
+- 6 workspace presets: Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View
+
+### Added — Full-Stack Wiring
+- 100% OpenAlgo API coverage (45+ endpoints wired to UI)
+- 20 FlintTrade backend endpoints (backtest, signals, sentiment, RAG, cron, audit, safety, webhooks)
+- ftApi.ts TypeScript client for FlintTrade Python backend
+- Market Intelligence: 4 new tabs (GEX, IV Smile, Max Pain, OI Profile)
+- Synthetic Future in OptionChain header, Margin in OrderPad
+- Market status badge in TopBar, holiday-aware DailyWelcome
+- REST ticker fallback when WebSocket disconnects
+- AI Advisor embedded in /ai Chat section with streaming + MCP
+
+### Added — UI Libraries
+- Tremor (dashboard charts, KPI cards, sparklines, tracker)
+- Magic UI (AnimatedCounter, ShimmerButton, Particles, BlurFade)
+- Aceternity UI (HoverCard spotlight, TextGenerateEffect, Meteors)
+
+### Added — Infrastructure
+- ErrorBoundary wrapping entire app
+- 404 catch-all route (NotFoundRoute)
+- connectionStore persisted to localStorage
+- Mobile/small screen warning overlay
+- prefers-reduced-motion media query (WCAG 2.3.3)
+- Semantic landmarks (<header>, <main>, <nav>), skip-to-content link
+- ARIA roles on route tabs, sidebar navigation, icon buttons
+
+### Fixed
+- 80+ hardcoded palette colors → design tokens (text-profit/text-loss/text-warning)
+- isMarketHours() deduplicated to lib/market.ts, polling now dynamic
+- Dockview: slim tabs (28px), singleTabMode, hidden close buttons
+- window.prompt/confirm → inline rename/delete UI
+- TOOLS/WIDGETS buttons hidden on non-trade routes
+- Sidebar border-l-2 jump fixed (transparent border on inactive)
+- Light theme Dockview CSS uses var() tokens
+- Setup wizard presets mapped to real workspace presets
+- Empty Dockview state shows Add Widgets / Choose Template overlay
+- DailyWelcome suggestions now clickable
+- Removed unused deps (lodash, oakscriptjs)
+- docker-compose: removed deleted packages, fixed ports
+
+### Tests
+- Python: 985 passed, 3 skipped
+- Vitest: 36 passed (10 new ticker fallback tests)
+- TypeScript: 0 errors (strict mode)
+- Build: clean
+
+## [0.0.1-dev] — 2026-03-14
 
 ### Added — Core
 - async OpenAlgo client — 45+ endpoints, rate limiting (10 OPS orders,

@@ -188,9 +188,10 @@ export default function DashboardWidget(_props: WidgetProps) {
   const lastFetch = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
   return (
-    <div className="h-full overflow-auto p-4 space-y-4">
-      {/* Index strip */}
-      <div className="grid grid-cols-5 gap-3">
+    <div className="h-full w-full flex flex-col overflow-hidden bg-surface-base">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+      {/* Index strip — responsive: 5 cols on wide panels, fewer on narrow */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {INDICES.map((idx) => (
           <IndexCard
             key={idx.symbol}
@@ -201,7 +202,7 @@ export default function DashboardWidget(_props: WidgetProps) {
       </div>
 
       {/* Funds / Margin / P&L cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-surface-card border border-border-default rounded-lg p-4 shadow-sm">
           <div className="flex items-center gap-1.5 text-xxs uppercase tracking-wider text-text-muted font-sans mb-2">
             <Wallet size={12} className="text-text-muted" />
@@ -289,25 +290,26 @@ export default function DashboardWidget(_props: WidgetProps) {
             <p className="text-xs text-text-muted font-sans">No open positions</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans whitespace-nowrap">
                   Symbol
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right whitespace-nowrap">
                   Qty
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right whitespace-nowrap">
                   Avg
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right whitespace-nowrap">
                   LTP
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right whitespace-nowrap">
                   P&L
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right whitespace-nowrap">
                   P&L%
                 </TableHead>
               </TableRow>
@@ -324,11 +326,11 @@ export default function DashboardWidget(_props: WidgetProps) {
                     : 0;
                 return (
                   <TableRow key={p.symbol || String(i)}>
-                    <TableCell className="font-mono font-medium text-text-primary">
+                    <TableCell className="font-mono font-medium text-text-primary whitespace-nowrap">
                       {p.symbol}
                     </TableCell>
                     <TableCell
-                      className={`text-right font-mono tabular-nums ${
+                      className={`text-right font-mono tabular-nums whitespace-nowrap ${
                         qty > 0
                           ? "text-profit"
                           : qty < 0
@@ -338,21 +340,21 @@ export default function DashboardWidget(_props: WidgetProps) {
                     >
                       {qty}
                     </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums text-text-secondary">
+                    <TableCell className="text-right font-mono tabular-nums text-text-secondary whitespace-nowrap">
                       {INR.format(avg)}
                     </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums text-text-primary">
+                    <TableCell className="text-right font-mono tabular-nums text-text-primary whitespace-nowrap">
                       {INR.format(ltp)}
                     </TableCell>
                     <TableCell
-                      className={`text-right font-mono tabular-nums font-medium ${
+                      className={`text-right font-mono tabular-nums font-medium whitespace-nowrap ${
                         pnl >= 0 ? "text-profit" : "text-loss"
                       }`}
                     >
                       {pnl >= 0 ? "+" : ""}\u20B9{INR0.format(Math.abs(pnl))}
                     </TableCell>
                     <TableCell
-                      className={`text-right font-mono tabular-nums ${
+                      className={`text-right font-mono tabular-nums whitespace-nowrap ${
                         pnlPct >= 0 ? "text-profit" : "text-loss"
                       }`}
                     >
@@ -364,6 +366,7 @@ export default function DashboardWidget(_props: WidgetProps) {
               })}
             </TableBody>
           </Table>
+          </div>
         )}
       </div>
 
@@ -380,25 +383,26 @@ export default function DashboardWidget(_props: WidgetProps) {
             <p className="text-xs text-text-muted font-sans">No orders today</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans whitespace-nowrap">
                   Time
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans whitespace-nowrap">
                   Symbol
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-center">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-center whitespace-nowrap">
                   Action
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right whitespace-nowrap">
                   Qty
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-right whitespace-nowrap">
                   Price
                 </TableHead>
-                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-center">
+                <TableHead className="text-xxs uppercase tracking-wider text-text-muted font-sans text-center whitespace-nowrap">
                   Status
                 </TableHead>
               </TableRow>
@@ -412,26 +416,26 @@ export default function DashboardWidget(_props: WidgetProps) {
                     o.symbol + (o.timestamp ?? "") + String(i)
                   }
                 >
-                  <TableCell className="font-mono tabular-nums text-text-muted">
+                  <TableCell className="font-mono tabular-nums text-text-muted whitespace-nowrap">
                     {o.timestamp ?? "\u2014"}
                   </TableCell>
-                  <TableCell className="font-mono font-medium text-text-primary">
+                  <TableCell className="font-mono font-medium text-text-primary whitespace-nowrap">
                     {o.symbol}
                   </TableCell>
                   <TableCell
-                    className={`text-center font-sans font-medium ${
+                    className={`text-center font-sans font-medium whitespace-nowrap ${
                       o.action === "BUY" ? "text-profit" : "text-loss"
                     }`}
                   >
                     {o.action}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums text-text-secondary">
+                  <TableCell className="text-right font-mono tabular-nums text-text-secondary whitespace-nowrap">
                     {String(o.quantity ?? "")}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums text-text-secondary">
+                  <TableCell className="text-right font-mono tabular-nums text-text-secondary whitespace-nowrap">
                     {o.price ? String(o.price) : "MKT"}
                   </TableCell>
-                  <TableCell className="text-center">
+                  <TableCell className="text-center whitespace-nowrap">
                     <Badge
                       variant={getOrderStatusVariant(
                         o.order_status ?? o.status,
@@ -445,7 +449,9 @@ export default function DashboardWidget(_props: WidgetProps) {
               ))}
             </TableBody>
           </Table>
+          </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -151,7 +151,8 @@ export default function OrdersWidget(_props: WidgetProps) {
           <span className="text-sm">No orders today</span>
         </div>
       ) : (
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto min-h-0">
+          <div className="overflow-x-auto min-w-0">
           <Table>
             <TableHeader className="sticky top-0 bg-surface-card z-10">
               {table.getHeaderGroups().map((hg) => (
@@ -159,7 +160,7 @@ export default function OrdersWidget(_props: WidgetProps) {
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className={`text-xxs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1 ${
+                      className={`text-xxs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1 whitespace-nowrap ${
                         header.id === "quantity" || header.id === "price" ? "text-right" : ""
                       }`}
                       onClick={header.column.getToggleSortingHandler()}
@@ -186,7 +187,7 @@ export default function OrdersWidget(_props: WidgetProps) {
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
-                      className={`px-2 py-1 ${
+                      className={`px-2 py-1 whitespace-nowrap ${
                         cell.column.id === "quantity" || cell.column.id === "price" ? "text-right" : ""
                       }`}
                     >
@@ -197,6 +198,7 @@ export default function OrdersWidget(_props: WidgetProps) {
               ))}
             </TableBody>
           </Table>
+          </div>
         </div>
       )}
     </div>

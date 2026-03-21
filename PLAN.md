@@ -11,10 +11,10 @@
 ## Current State (updated 2026-03-21 — post UI overhaul + onboarding session)
 
 - **Version:** 0.1.0-alpha → beta pending user verification
-- **Tests:** 26 terminal (Vitest) + 966 Python (pytest, 3 skipped) = 992 total
-- **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes + /welcome in Dockview v5 shell
+- **Tests:** 36 terminal (Vitest) + 985 Python (pytest, 3 skipped) = 1,021 total
+- **Terminal:** 21 widgets (TSX) + 4 tools + 7 routes + /welcome + /explore + /settings in Dockview v5 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, zero `any` types. tsc: 0 errors.
-- **Python:** 12 packages (11 + tick-engine Rust/PyO3), 966 tests passing (966 passed, 3 skipped — vectorbt absent)
+- **Python:** 13 packages (11 + tick-engine Rust/PyO3 + indicators), 985 tests passing (3 skipped — vectorbt absent)
 - **CI:** GitHub Actions green (python-tests + node-tests + secrets-check). Fixed ruff E402+F841 in app.py.
 - **Packages:** 12 Python + 1 React (terminal). tick-engine: new Rust/PyO3 wheel installed.
 - **Dependencies:** All v2 deps installed + Glide Data Grid 6 (lodash added), @glideapps/glide-data-grid v6.0.3. WinLibs GCC 15.2 + GNU Rust toolchain on Nitro.

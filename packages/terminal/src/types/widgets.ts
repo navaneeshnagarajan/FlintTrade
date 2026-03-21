@@ -37,9 +37,6 @@ export type WidgetId =
 
 export type ToolId =
   | "settings"
-  | "backtest-lab"
-  | "trade-journal"
-  | "strategy-builder"
   | "pnl-dashboard"
-  | "market-intelligence"
-  | "flow-builder";
+  | "trade-journal"
+  | "market-intelligence";

@@ -14,6 +14,7 @@ import {
   Loader2,
   CheckCircle2,
 } from "lucide-react";
+import AIAdvisorWidget from "@/widgets/utility/AIAdvisor/AIAdvisorWidget";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,55 +52,13 @@ const SECTIONS: SectionDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Section: Chat (already wired — display only)
+// Section: Chat — embeds the real AIAdvisorWidget
 // ---------------------------------------------------------------------------
 
 function ChatSection() {
   return (
-    <div className="space-y-4">
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
-          AI Trading Advisor
-        </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
-          Chat with a local LLM-powered trading advisor that understands your portfolio,
-          open positions, and market context. Ask about strategy ideas, risk analysis,
-          trade setups, and market conditions — all processed locally for privacy.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <p className="text-xs text-text-muted mb-1">Processing</p>
-            <p className="text-lg font-mono font-bold text-accent">Local LLM</p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <p className="text-xs text-text-muted mb-1">Context</p>
-            <p className="text-lg font-mono font-bold text-text-primary">Portfolio-aware</p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <p className="text-xs text-text-muted mb-1">Privacy</p>
-            <p className="text-lg font-mono font-bold text-text-primary">100% Local</p>
-          </div>
-        </div>
-      </Card>
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-sm text-text-primary mb-2">
-          Example Questions
-        </h3>
-        <ul className="space-y-2 text-sm text-text-secondary">
-          {[
-            "What is the risk/reward of selling a NIFTY straddle at current IV?",
-            "Analyze my open positions — should I hedge?",
-            "Suggest a strategy for tomorrow based on OI data",
-            "Explain the Greeks of my current options portfolio",
-            "What happened to BANKNIFTY in the last 30 minutes?",
-          ].map((q) => (
-            <li key={q} className="flex items-start gap-2">
-              <MessageSquare className="w-3.5 h-3.5 text-accent shrink-0 mt-0.5" />
-              <span>{q}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
+    <div className="h-full">
+      <AIAdvisorWidget />
     </div>
   );
 }
@@ -790,10 +749,16 @@ export default function AIRoute() {
           })}
         </nav>
 
-        {/* Content */}
-        <ScrollArea className="flex-1">
-          <div className="p-6 max-w-4xl animate-fade-in-up">{sectionContent[activeSection]}</div>
-        </ScrollArea>
+        {/* Content — chat fills the pane; other sections scroll inside padded container */}
+        {activeSection === "chat" ? (
+          <div className="flex-1 overflow-hidden animate-fade-in-up">
+            {sectionContent[activeSection]}
+          </div>
+        ) : (
+          <ScrollArea className="flex-1">
+            <div className="p-6 max-w-4xl animate-fade-in-up">{sectionContent[activeSection]}</div>
+          </ScrollArea>
+        )}
       </div>
     </div>
   );

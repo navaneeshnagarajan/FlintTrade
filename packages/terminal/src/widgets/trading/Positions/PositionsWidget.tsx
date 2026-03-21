@@ -148,7 +148,8 @@ export default function PositionsWidget(_props: WidgetProps) {
           <span className="text-sm">No open positions</span>
         </div>
       ) : (
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto min-h-0">
+          <div className="overflow-x-auto min-w-0">
           <Table>
             <TableHeader className="sticky top-0 bg-surface-card z-10">
               {table.getHeaderGroups().map((hg) => (
@@ -156,7 +157,7 @@ export default function PositionsWidget(_props: WidgetProps) {
                   {hg.headers.map((header) => (
                     <TableHead
                       key={header.id}
-                      className={`text-xxs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1 ${
+                      className={`text-xxs text-text-muted uppercase tracking-wider cursor-pointer select-none px-2 py-1 whitespace-nowrap ${
                         header.id !== "symbol" ? "text-right" : ""
                       }`}
                       onClick={header.column.getToggleSortingHandler()}
@@ -183,7 +184,7 @@ export default function PositionsWidget(_props: WidgetProps) {
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
-                      className={`px-2 py-1 ${cell.column.id !== "symbol" ? "text-right" : ""}`}
+                      className={`px-2 py-1 whitespace-nowrap ${cell.column.id !== "symbol" ? "text-right" : ""}`}
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
@@ -192,6 +193,7 @@ export default function PositionsWidget(_props: WidgetProps) {
               ))}
             </TableBody>
           </Table>
+          </div>
         </div>
       )}
     </div>

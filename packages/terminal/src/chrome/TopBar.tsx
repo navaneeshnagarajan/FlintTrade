@@ -459,30 +459,30 @@ export default function TopBar() {
         </div>
       )}
 
-      {/* Right: TOOLS + WIDGETS (only on /trade) + Connection status + Clock */}
+      {/* Right: TOOLS (all routes) + WIDGETS (/trade only) + Connection status + Clock */}
       <div className="flex items-center gap-3">
-        {isTerminal && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
-              className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
-            >
-              <Wrench size={14} className="mr-1" />
-              TOOLS
-            </Button>
+        {/* TOOLS: always visible — shows route-relevant tools via ToolsDropdown */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
+          className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
+        >
+          <Wrench size={14} className="mr-1" />
+          TOOLS
+        </Button>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setWidgetPickerOpen(true)}
-              className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
-            >
-              <Grid3x3 size={14} className="mr-1" />
-              WIDGETS
-            </Button>
-          </>
+        {/* WIDGETS: only on /trade (Dockview canvas) */}
+        {isTerminal && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setWidgetPickerOpen(true)}
+            className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
+          >
+            <Grid3x3 size={14} className="mr-1" />
+            WIDGETS
+          </Button>
         )}
 
         <div
