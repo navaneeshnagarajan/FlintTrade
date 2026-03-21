@@ -67,7 +67,7 @@ export default function ToolsDropdown({
   return (
     <div
       ref={ref}
-      className="absolute right-24 top-10 z-40 bg-surface-card border border-border-default rounded-lg shadow-xl py-1 w-52"
+      className="absolute right-24 top-10 z-40 bg-surface-card border border-border-default rounded-lg shadow-xl py-1 w-52 animate-fade-in-scale"
     >
       {TOOLS.map((tool) => {
         const Icon = tool.icon;

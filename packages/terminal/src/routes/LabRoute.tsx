@@ -1395,10 +1395,10 @@ export default function LabRoute() {
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
                 aria-current={isActive ? "true" : undefined}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors ${
+                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors border-l-2 ${
                   isActive
-                    ? "text-accent bg-accent/10 border-l-2 border-accent"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-base"
+                    ? "text-accent bg-accent/10 border-accent"
+                    : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -1411,7 +1411,7 @@ export default function LabRoute() {
 
         {/* Content */}
         <ScrollArea className="flex-1">
-          <div className="p-6 max-w-4xl">{renderSection(activeSection)}</div>
+          <div className="p-6 max-w-4xl animate-fade-in-up">{renderSection(activeSection)}</div>
         </ScrollArea>
       </div>
     </div>

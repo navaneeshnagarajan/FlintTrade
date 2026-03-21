@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import TopBar from "@/chrome/TopBar";
 import TickerBar from "@/chrome/TickerBar";
@@ -8,6 +8,35 @@ import { useTickerFallback } from "@/hooks/useTickerFallback";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 
 const TOUR_STORAGE_KEY = "flinttrade:tourComplete";
+const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
+const SMALL_SCREEN_BREAKPOINT = 768;
+
+function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="fixed inset-0 z-200 flex flex-col items-center justify-center bg-surface-base px-6 text-center">
+      <div className="flex flex-col items-center gap-5 max-w-xs">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <rect width="40" height="40" rx="8" fill="var(--color-accent, #6366f1)" fillOpacity="0.15" />
+          <path d="M12 20h16M20 12l8 8-8 8" stroke="var(--color-accent, #6366f1)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <div className="space-y-2">
+          <h1 className="font-heading font-bold text-lg text-text-primary">
+            FlintTrade is designed for desktop
+          </h1>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            For the best experience, use a screen wider than 768px. The workspace, charts, and data grids require more horizontal space.
+          </p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="mt-2 px-5 py-2 rounded-lg bg-accent/10 border border-accent/30 text-accent text-sm font-medium hover:bg-accent/20 transition-colors"
+        >
+          Continue anyway
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * AppLayout -- shared chrome for all app routes (/terminal, /invest, /learn).
@@ -22,11 +51,35 @@ export default function AppLayout() {
     () => localStorage.getItem(TOUR_STORAGE_KEY) === "true",
   );
 
+  const [showSmallScreenWarning, setShowSmallScreenWarning] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (sessionStorage.getItem(SMALL_SCREEN_DISMISSED_KEY) === "true") return false;
+    return window.innerWidth < SMALL_SCREEN_BREAKPOINT;
+  });
+
+  useEffect(() => {
+    function handleResize() {
+      if (window.innerWidth >= SMALL_SCREEN_BREAKPOINT) {
+        setShowSmallScreenWarning(false);
+      }
+    }
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  function handleDismissSmallScreen() {
+    sessionStorage.setItem(SMALL_SCREEN_DISMISSED_KEY, "true");
+    setShowSmallScreenWarning(false);
+  }
+
   return (
     <div className="h-screen flex flex-col bg-surface-base overflow-hidden">
+      {showSmallScreenWarning && (
+        <SmallScreenOverlay onDismiss={handleDismissSmallScreen} />
+      )}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:z-[100] focus:top-2 focus:left-2 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm"
+        className="sr-only focus:not-sr-only focus:fixed focus:z-100 focus:top-2 focus:left-2 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm"
       >
         Skip to main content
       </a>

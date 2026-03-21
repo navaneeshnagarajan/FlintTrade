@@ -15,6 +15,9 @@ html.theme-terminal-green {
   --color-profit: #4ade80;
   --color-loss: #f87171;
   --color-warning: #fbbf24;
+  --color-bullish-text: #4ade80;
+  --color-bullish-bg: rgba(74, 222, 128, 0.10);
+  --color-bullish-border: rgba(74, 222, 128, 0.30);
   --primary: 152 60% 50%;
   --ring: 152 60% 50%;
 }

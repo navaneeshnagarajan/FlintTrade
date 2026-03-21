@@ -7,6 +7,10 @@ interface IndexChipProps {
   data: WsTick | null;
 }
 
+function hasAnyLiveData(indices: { data: WsTick | null }[]): boolean {
+  return indices.some((idx) => idx.data !== null && (idx.data.ltp ?? 0) !== 0);
+}
+
 function IndexChip({ name, data }: IndexChipProps) {
   const ltp = data?.ltp ?? null;
   const change = data?.change ?? 0;
@@ -43,6 +47,7 @@ function IndexChip({ name, data }: IndexChipProps) {
  */
 export default function TickerBar() {
   const indices = useAtomValue(indicesSummaryAtom);
+  const hasData = hasAnyLiveData(indices);
 
   return (
     <div
@@ -53,6 +58,11 @@ export default function TickerBar() {
       {indices.map((idx) => (
         <IndexChip key={idx.name} name={idx.name} data={idx.data} />
       ))}
+      {!hasData && (
+        <span className="text-xxs text-text-disabled px-3 select-none">
+          Connect OpenAlgo for live prices
+        </span>
+      )}
     </div>
   );
 }

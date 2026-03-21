@@ -18,6 +18,10 @@ html.theme-light {
   --color-bullish-text: #16a34a;
   --color-bearish-text: #dc2626;
   --color-atm-text: #d97706;
+  --color-bullish-bg: rgba(22, 163, 74, 0.12);
+  --color-bearish-bg: rgba(220, 38, 38, 0.10);
+  --color-bullish-border: rgba(22, 163, 74, 0.30);
+  --color-bearish-border: rgba(220, 38, 38, 0.30);
   --primary: 220 90% 45%;
   --ring: 220 90% 45%;
   --background: 0 0% 98%;
