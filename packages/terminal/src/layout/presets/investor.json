@@ -1,0 +1,47 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-left",
+            "activeView": "holdings",
+            "views": ["holdings"]
+          },
+          "size": 400
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-center",
+            "activeView": "dashboard",
+            "views": ["dashboard"]
+          },
+          "size": 400
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-right",
+            "activeView": "watchlist",
+            "views": ["watchlist", "chart"]
+          },
+          "size": 400
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "holdings": { "id": "holdings", "contentComponent": "holdings", "title": "Holdings" },
+    "dashboard": { "id": "dashboard", "contentComponent": "dashboard", "title": "Dashboard" },
+    "watchlist": { "id": "watchlist", "contentComponent": "watchlist", "title": "Watchlist" },
+    "chart": { "id": "chart", "contentComponent": "chart", "title": "Chart" }
+  },
+  "activeGroup": "group-center"
+}

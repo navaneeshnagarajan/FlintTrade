@@ -1,0 +1,37 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-left",
+            "activeView": "holdings",
+            "views": ["holdings"]
+          },
+          "size": 500
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-right",
+            "activeView": "dashboard",
+            "views": ["dashboard", "calculator"]
+          },
+          "size": 500
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "holdings": { "id": "holdings", "contentComponent": "holdings", "title": "Holdings" },
+    "dashboard": { "id": "dashboard", "contentComponent": "dashboard", "title": "Dashboard" },
+    "calculator": { "id": "calculator", "contentComponent": "calculator", "title": "Calculator" }
+  },
+  "activeGroup": "group-left"
+}

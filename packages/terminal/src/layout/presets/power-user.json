@@ -1,0 +1,66 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-left",
+            "activeView": "scalper",
+            "views": ["scalper"]
+          },
+          "size": 450
+        },
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-top-center",
+                "activeView": "positions",
+                "views": ["positions", "orders", "tradebook"]
+              },
+              "size": 550
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-bottom-center",
+                "activeView": "optionchain",
+                "views": ["optionchain", "oichart"]
+              },
+              "size": 450
+            }
+          ],
+          "size": 550
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-right",
+            "activeView": "dashboard",
+            "views": ["dashboard", "riskpanel"]
+          },
+          "size": 350
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "scalper": { "id": "scalper", "contentComponent": "scalper", "title": "Scalper" },
+    "positions": { "id": "positions", "contentComponent": "positions", "title": "Positions" },
+    "orders": { "id": "orders", "contentComponent": "orders", "title": "Orders" },
+    "tradebook": { "id": "tradebook", "contentComponent": "tradebook", "title": "Trade Book" },
+    "optionchain": { "id": "optionchain", "contentComponent": "optionchain", "title": "Option Chain" },
+    "oichart": { "id": "oichart", "contentComponent": "oichart", "title": "OI Chart" },
+    "dashboard": { "id": "dashboard", "contentComponent": "dashboard", "title": "Dashboard" },
+    "riskpanel": { "id": "riskpanel", "contentComponent": "riskpanel", "title": "Risk Panel" }
+  },
+  "activeGroup": "group-left"
+}

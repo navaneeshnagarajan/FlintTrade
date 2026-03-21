@@ -10,10 +10,12 @@ interface ConnectionStore {
   status: ConnectionStatus;
   wsConnected: boolean;
   lastPing: number | null;
+  demo: boolean;
   setStatus: (status: ConnectionStatus) => void;
   setWsConnected: (connected: boolean) => void;
   setConfig: (config: { host?: string; apiKey?: string; wsUrl?: string }) => void;
   setLastPing: (timestamp: number) => void;
+  setDemo: (v: boolean) => void;
 }
 
 const storeImpl: StateCreator<ConnectionStore> = (set) => ({
@@ -26,10 +28,12 @@ const storeImpl: StateCreator<ConnectionStore> = (set) => ({
   status: "disconnected",
   wsConnected: false,
   lastPing: null,
+  demo: false,
   setStatus: (status) => set({ status }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
   setConfig: (config) => set((state) => ({ ...state, ...config })),
   setLastPing: (lastPing) => set({ lastPing }),
+  setDemo: (demo) => set({ demo }),
 });
 
 export const useConnectionStore = import.meta.env.DEV

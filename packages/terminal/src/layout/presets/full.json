@@ -1,0 +1,46 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-left",
+            "activeView": "chart",
+            "views": ["chart"]
+          },
+          "size": 500
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-center",
+            "activeView": "dashboard",
+            "views": ["dashboard"]
+          },
+          "size": 450
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "id": "group-right",
+            "activeView": "optionchain",
+            "views": ["optionchain"]
+          },
+          "size": 450
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "chart": { "id": "chart", "contentComponent": "chart", "title": "Chart" },
+    "dashboard": { "id": "dashboard", "contentComponent": "dashboard", "title": "Dashboard" },
+    "optionchain": { "id": "optionchain", "contentComponent": "optionchain", "title": "Option Chain" }
+  },
+  "activeGroup": "group-left"
+}
