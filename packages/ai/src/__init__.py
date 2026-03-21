@@ -11,6 +11,7 @@ from .sentiment import (
     SentimentAnalyzer,
     SentimentScore,
 )
+from .pipeline import SignalPipeline
 from .signals import Signal, SignalGenerator
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "RAGResponse",
     # Signals
     "SignalGenerator",
+    "SignalPipeline",
     "Signal",
     # Sentiment
     "SentimentAnalyzer",
