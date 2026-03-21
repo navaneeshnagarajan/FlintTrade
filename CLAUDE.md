@@ -198,12 +198,15 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 - **Version:** 0.1.0-alpha
 - **Phases 1-9 complete:** Foundation, state architecture, shell, widget migration, verification, new widgets, tools, routes, Python upgrades
-- **Tests:** 26 terminal (Vitest) + 712 Python (pytest) = 738 total
-- **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes in Dockview v5.1 shell
+- **Phase 1A (UI Foundation) complete:** Geist font, SVG logo, 60+ design tokens, 1,182 arbitrary values replaced, density modes
+- **Phase 1B (Onboarding + Navigation) complete:** Global Learn/Invest/Trade route tabs in TopBar, cinematic /welcome screen, setup wizard interest matrix, daily welcome card, interactive tour, workspace dropdown menu, smart redirect
+- **Phase 2 (Widget Redesigns) complete:** All 26 widget/tool/route files restyled with design tokens, zero arbitrary values remaining
+- **Tests:** 26 terminal (Vitest) + 966 Python (pytest) = 992 total
+- **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes + /welcome in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
 - **3 critical bugs fixed:** ping GET (was POST), closePosition body, optionchain expiry param
 - **OpenAlgo:** Tested with broker sandbox, first trade placed
-- **Shell components (TSX):** TopBar, TickerBar, WidgetPicker, ToolsDropdown, widgetFactory
+- **Shell components (TSX):** TopBar (global route tabs), TickerBar (16 instruments), WidgetPicker, ToolsDropdown, widgetFactory
 - **State layer (TS):** 4 Zustand stores, Jotai market atoms, 6 TanStack Query hooks, WebSocket service with ping/pong
 - **Infrastructure:** Makefile (setup/start/stop/test/status), setup.sh, systemd templates, health-check.sh
 - **Workspace:** `~/.flinttrade/workspace.json`, cross-platform, CLI: `python -m packages.core.src.cli init|status`
@@ -218,7 +221,10 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 - No personal hostnames, IPs, or provider names in committed code
 - FlintTrade (capital T) in display text, `flinttrade` lowercase in paths/packages
 - Tailwind CSS v4 with `@tailwindcss/vite` plugin
-- Terminal theme: #0a0a0f bg, #12121a cards, #1e1e2e borders, Inter UI, JetBrains Mono numbers
+- Terminal theme: #0a0a0f bg, #16161f cards (was #12121a), #2a2a3a borders (was #1e1e2e)
+- Font: Geist (headings) + Inter (body) + JetBrains Mono (numbers/data) — 3-tier system
+- Route tabs: Learn / Invest / Trade order in TopBar (global navigation)
+- Cinematic welcome at /welcome for first-time users (smart redirect)
 - Pre-release (v0.x): all commits to main, no PRs required
 - Dockview v5 for layout (NOT FlexLayout)
 - Single React app with routes (NOT 3 separate apps)
