@@ -30,13 +30,13 @@ import {
 } from "lucide-react";
 import { ping } from "@/services/api";
 import { resetWsService } from "@/services/websocket";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface GeneralSettings {
-  theme: "dark" | "light";
   fontSize: "small" | "normal" | "large";
   density: "compact" | "comfortable";
 }
@@ -133,7 +133,6 @@ const STORAGE_KEY = "flinttrade:settings";
 
 const DEFAULT_SETTINGS: AllSettings = {
   general: {
-    theme: "dark",
     fontSize: "normal",
     density: "comfortable",
   },

@@ -1,0 +1,17 @@
+html.theme-ocean-blue {
+  --color-surface-base: #0a0f18;
+  --color-surface-card: #141c28;
+  --color-surface-elevated: #1a2a3a;
+  --color-surface-hover: #202a3a;
+  --color-surface-active: #2a3a4a;
+  --color-surface-stripe: #0d1218;
+  --color-border-default: #1a3a5a;
+  --color-border-subtle: #142a4a;
+  --color-border-strong: #2a5a8a;
+  --color-text-primary: #d0e8ff;
+  --color-text-secondary: #7a9aaa;
+  --color-text-muted: #5a7a8a;
+  --color-text-disabled: #3a5a6a;
+  --primary: 210 100% 60%;
+  --ring: 210 100% 60%;
+}

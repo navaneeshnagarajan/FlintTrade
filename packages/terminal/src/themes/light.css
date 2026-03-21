@@ -1,0 +1,33 @@
+html.theme-light {
+  --color-surface-base: #f8f9fa;
+  --color-surface-card: #ffffff;
+  --color-surface-elevated: #f0f1f5;
+  --color-surface-hover: #e8eaf0;
+  --color-surface-active: #dcdee5;
+  --color-surface-stripe: #f4f5f8;
+  --color-border-default: #d0d5e0;
+  --color-border-subtle: #e0e5f0;
+  --color-border-strong: #a0a5b0;
+  --color-text-primary: #1a1a2a;
+  --color-text-secondary: #555570;
+  --color-text-muted: #888898;
+  --color-text-disabled: #bbbbcc;
+  --color-profit: #16a34a;
+  --color-loss: #dc2626;
+  --color-warning: #d97706;
+  --color-bullish-text: #16a34a;
+  --color-bearish-text: #dc2626;
+  --color-atm-text: #d97706;
+  --primary: 217 91% 40%;
+  --ring: 217 91% 40%;
+  --background: 0 0% 98%;
+  --foreground: 240 10% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 10%;
+  --popover: 0 0% 97%;
+  --popover-foreground: 240 10% 10%;
+  --muted: 240 5% 92%;
+  --muted-foreground: 240 4% 46%;
+  --border: 240 6% 85%;
+  --input: 240 6% 85%;
+}

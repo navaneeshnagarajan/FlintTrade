@@ -1,0 +1,17 @@
+html.theme-obsidian {
+  --color-surface-base: #000000;
+  --color-surface-card: #0d0d15;
+  --color-surface-elevated: #161620;
+  --color-surface-hover: #1a1a24;
+  --color-surface-active: #252535;
+  --color-surface-stripe: #080812;
+  --color-border-default: #1f1f2e;
+  --color-border-subtle: #141420;
+  --color-border-strong: #3a3a4a;
+  --color-text-primary: #f5f5fa;
+  --color-text-secondary: #a0a0ab;
+  --color-text-muted: #7a7a88;
+  --color-text-disabled: #555560;
+  --primary: 217 95% 65%;
+  --ring: 217 95% 65%;
+}

@@ -14,9 +14,11 @@ interface LLMSettings {
   model: string;
 }
 
+type ThemeId = "midnight" | "obsidian" | "terminal-green" | "ocean-blue" | "light";
+
 interface SettingsStore {
   persona: "trader" | "investor" | "beginner";
-  theme: "dark";
+  theme: ThemeId;
   density: "compact" | "comfortable";
   defaultExchange: string;
   defaultProduct: string;
@@ -28,6 +30,7 @@ interface SettingsStore {
   experience: "beginner" | "intermediate" | "pro" | "custom";
   lastOpenTimestamp: number;
   setPersona: (persona: "trader" | "investor" | "beginner") => void;
+  setTheme: (theme: ThemeId) => void;
   setDensity: (density: "compact" | "comfortable") => void;
   setTradingDefaults: (defaults: Partial<Pick<SettingsStore, "defaultExchange" | "defaultProduct" | "defaultQty">>) => void;
   setRiskLimits: (limits: Partial<RiskLimits>) => void;
@@ -41,7 +44,7 @@ interface SettingsStore {
 // Inner StateCreator (no middleware mutators — persist is applied outside)
 const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (set) => ({
   persona: "trader",
-  theme: "dark" as const,
+  theme: "midnight" as const,
   density: "compact",
   defaultExchange: "NFO",
   defaultProduct: "MIS",
@@ -61,6 +64,7 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   experience: "intermediate",
   lastOpenTimestamp: 0,
   setPersona: (persona) => set({ persona }),
+  setTheme: (theme) => set({ theme }),
   setDensity: (density) => set({ density }),
   setTradingDefaults: (defaults) => set((state) => ({ ...state, ...defaults })),
   setRiskLimits: (limits) =>
@@ -75,7 +79,7 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:settings",
-  version: 2,
+  version: 3,
   migrate: (persistedState: unknown, version: number) => {
     const state = persistedState as Record<string, unknown>;
     if (version < 2) {
@@ -85,6 +89,15 @@ const persistedStore = persist(storeImpl, {
         interests: [],
         experience: "intermediate",
         lastOpenTimestamp: 0,
+        theme: "midnight",
+      };
+    }
+    if (version < 3) {
+      // Migrate old "dark" theme value to "midnight"
+      const oldTheme = state.theme;
+      return {
+        ...state,
+        theme: oldTheme === "dark" || !oldTheme ? "midnight" : oldTheme,
       };
     }
     return state;

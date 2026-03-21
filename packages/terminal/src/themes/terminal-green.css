@@ -1,0 +1,20 @@
+html.theme-terminal-green {
+  --color-surface-base: #0a1a10;
+  --color-surface-card: #102018;
+  --color-surface-elevated: #142a1f;
+  --color-surface-hover: #1a3a28;
+  --color-surface-active: #204030;
+  --color-surface-stripe: #081410;
+  --color-border-default: #1f4a35;
+  --color-border-subtle: #142820;
+  --color-border-strong: #2a6a50;
+  --color-text-primary: #22ff88;
+  --color-text-secondary: #118855;
+  --color-text-muted: #0a6630;
+  --color-text-disabled: #0a3a20;
+  --color-profit: #00ff00;
+  --color-loss: #ff4444;
+  --color-warning: #ffff00;
+  --primary: 150 100% 45%;
+  --ring: 150 100% 45%;
+}

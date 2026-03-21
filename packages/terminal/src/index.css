@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "./themes/obsidian.css";
+@import "./themes/terminal-green.css";
+@import "./themes/ocean-blue.css";
+@import "./themes/light.css";
 
 /* ---------- Geist font (variable, from geist npm package) ---------- */
 @font-face {
@@ -189,6 +193,47 @@ html.density-compact {
   animation: slide-in-right 0.3s ease-out both;
 }
 
+/* ---------- Global micro-animations ---------- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-scale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+  50% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+@utility animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out both;
+}
+
+@utility animate-fade-in-scale {
+  animation: fade-in-scale 0.3s ease-out both;
+}
+
+@utility hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+
 /* ---------- Dockview theme overrides ---------- */
 .dockview-theme-dark {
   --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
@@ -204,4 +249,21 @@ html.density-compact {
   --dv-paneview-header-border-color: var(--color-border-default);
   --dv-background-color: var(--color-surface-base);
   --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* ---------- Dockview light theme overrides ---------- */
+html.theme-light .dockview-theme-dark {
+  --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
+  --dv-activegroup-hiddenpanel-tab-background-color: #f8f9fa;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #ffffff;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #f8f9fa;
+  --dv-tab-divider-color: #e0e5f0;
+  --dv-activegroup-visiblepanel-tab-color: #1a1a2a;
+  --dv-activegroup-hiddenpanel-tab-color: #888898;
+  --dv-inactivegroup-visiblepanel-tab-color: #555570;
+  --dv-inactivegroup-hiddenpanel-tab-color: #888898;
+  --dv-separator-border: #d0d5e0;
+  --dv-paneview-header-border-color: #d0d5e0;
+  --dv-background-color: #f8f9fa;
+  --dv-group-view-background-color: #f8f9fa;
 }
