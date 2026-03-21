@@ -8,23 +8,27 @@
 
 ---
 
-## Current State (updated 2026-03-20 — post full sprint)
+## Current State (updated 2026-03-21 — post UI overhaul + onboarding session)
 
 - **Version:** 0.1.0-alpha → beta pending user verification
 - **Tests:** 26 terminal (Vitest) + 966 Python (pytest, 3 skipped) = 992 total
-- **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes in Dockview v5 shell
+- **Terminal:** 21 widgets (TSX) + 7 tools (all functional) + 4 routes + /welcome in Dockview v5 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, zero `any` types. tsc: 0 errors.
 - **Python:** 12 packages (11 + tick-engine Rust/PyO3), 966 tests passing (966 passed, 3 skipped — vectorbt absent)
-- **CI:** GitHub Actions green (python-tests + node-tests + secrets-check)
+- **CI:** GitHub Actions green (python-tests + node-tests + secrets-check). Fixed ruff E402+F841 in app.py.
 - **Packages:** 12 Python + 1 React (terminal). tick-engine: new Rust/PyO3 wheel installed.
 - **Dependencies:** All v2 deps installed + Glide Data Grid 6 (lodash added), @glideapps/glide-data-grid v6.0.3. WinLibs GCC 15.2 + GNU Rust toolchain on Nitro.
 - **State:** Zustand stores (4), Jotai atoms, TanStack Query hooks (6), WebSocket service with ping/pong — all wired.
-- **Shell:** Dockview canvas, TopBar, TickerBar (8 instruments incl. MCX GOLD/SILVER/CRUDEOIL/NATURALGAS), WidgetPicker, ToolsDropdown — all TSX + shadcn/ui. 7 layout presets.
+- **Shell:** Dockview canvas, TopBar (global Learn/Invest/Trade route tabs), TickerBar (16 instruments incl. MCX/CDS), WidgetPicker, ToolsDropdown — all TSX + shadcn/ui. 13 layout presets (7 original + 6 new).
 - **Performance:** TerminalRoute 1,251KB → 19KB. vendor-glide 196KB. All chunks < 500KB.
-- **Option Chain:** Glide DataGrid canvas-rendered (replaced DOM table). 3 tabs: LTP/OI/GREEKS. ATM highlight, basket actions, OI bars.
-- **Chart:** 23 indicators total (15 from prior sprint + 8 new: Williams %R, CCI, DEMA, Hull MA, Parabolic SAR, OBV, Keltner, VWMA). 7 drawing tools.
+- **Option Chain:** Glide DataGrid canvas-rendered (replaced DOM table). 3 tabs: LTP/OI/GREEKS. ATM highlight, basket actions, OI bars. Searchable stock symbol combobox.
+- **Chart:** 23 indicators total (15 from prior sprint + 8 new: Williams %R, CCI, DEMA, Hull MA, Parabolic SAR, OBV, Keltner, VWMA). 7 drawing tools. Configurable indicator periods.
 - **Python indicators API:** POST /api/v1/indicators/compute (23 tests). NaN→null, per-indicator error isolation.
 - **Rust tick-engine:** packages/tick-engine/ — TickSimulator + EMA crossover + Sharpe/drawdown metrics (25 tests, maturin abi3-py312 wheel).
+- **Phase 1A (UI Foundation) COMPLETE:** Geist font (headings) + Inter (body) + JetBrains Mono (data). 60+ design tokens. SVG Logo component. 1,182 arbitrary values replaced with tokens across 29 files. Density modes.
+- **Phase 1B (Onboarding + Navigation) COMPLETE:** Global route tabs (Learn/Invest/Trade) in TopBar. Cinematic /welcome screen (6-pillar CSS animation). Setup wizard interest matrix (6 cards). Daily Welcome card (context-aware). Interactive Tour (6 pulsing dots). Workspace dropdown menu (New Blank/Clone/Template + rename/delete). Smart redirect (first-time→/welcome, returning→persona route).
+- **Phase 2 (Widget Redesigns) COMPLETE:** All 26 widget/tool/route files restyled with design tokens. Zero arbitrary text-[Npx]/bg-[#hex]/border-[#hex] values remaining.
+- **Session stats:** 27+ commits, 6 DEVLOG entries. MCX ticker fix, option chain v2, UI overhaul, onboarding, navigation, lint fixes.
 - **Beta sprint:** 24/24 tasks complete + 3 additional (Glide, 8 indicators, Rust). Task 10 (beta tag) awaiting user verification.
 
 ---
