@@ -21,10 +21,16 @@ import {
   Zap,
   Workflow,
   Bot,
+  Moon,
+  Circle,
+  Leaf,
+  Waves,
+  Sun,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { LogoIcon } from "@/components/brand/Logo";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 // ---------------------------------------------------------------------------
 // Pillar data
@@ -35,6 +41,8 @@ interface Pillar {
   title: string;
   desc: string;
   color: string;
+  route: string;
+  preset: string;
 }
 
 const PILLARS: Pillar[] = [
@@ -43,37 +51,61 @@ const PILLARS: Pillar[] = [
     title: "Learn",
     desc: "Market basics to advanced strategies \u2014 built into the terminal",
     color: "text-blue-400",
+    route: "/learn",
+    preset: "learn-first",
   },
   {
     icon: PiggyBank,
     title: "Invest",
     desc: "Mutual funds, SIPs, portfolio tracking, net worth",
     color: "text-emerald-400",
+    route: "/invest",
+    preset: "invest-lite",
   },
   {
     icon: CandlestickChart,
     title: "Trade",
     desc: "F&O scalping, options analysis, real-time execution",
     color: "text-amber-400",
+    route: "/terminal",
+    preset: "scalper-zone",
   },
   {
     icon: Zap,
     title: "Backtest",
     desc: "Rust-powered tick-level backtesting \u2014 no broker has this",
     color: "text-purple-400",
+    route: "/terminal",
+    preset: "analysis-desk",
   },
   {
     icon: Workflow,
     title: "Automate",
     desc: "54-node flow builder, cron scheduler, Telegram kill switch",
     color: "text-rose-400",
+    route: "/terminal",
+    preset: "blank",
   },
   {
     icon: Bot,
     title: "AI",
     desc: "Local LLM advisor, RAG analysis, sentiment signals",
     color: "text-cyan-400",
+    route: "/terminal",
+    preset: "minimal",
   },
+];
+
+// ---------------------------------------------------------------------------
+// Theme options for the switcher
+// ---------------------------------------------------------------------------
+
+const THEME_OPTIONS = [
+  { id: "midnight" as const, icon: Moon, label: "Midnight" },
+  { id: "obsidian" as const, icon: Circle, label: "Obsidian" },
+  { id: "terminal-green" as const, icon: Leaf, label: "Green" },
+  { id: "ocean-blue" as const, icon: Waves, label: "Blue" },
+  { id: "light" as const, icon: Sun, label: "Light" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -89,6 +121,24 @@ const WORDMARK = "FlintTrade";
 export default function WelcomeRoute() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
+  const theme = useSettingsStore((s) => s.theme);
+
+  // Pillar click — set minimal persona + navigate to route
+  const handlePillarClick = useCallback(
+    (pillar: Pillar) => {
+      const store = useSettingsStore.getState();
+      store.setPersona(
+        pillar.route === "/learn"
+          ? "beginner"
+          : pillar.route === "/invest"
+            ? "investor"
+            : "trader",
+      );
+      store.setInterests([pillar.title.toLowerCase()]);
+      navigate(pillar.route);
+    },
+    [navigate],
+  );
 
   // Skip handler — jump straight to CTAs
   const skipToEnd = useCallback(() => {
@@ -187,6 +237,27 @@ export default function WelcomeRoute() {
       `}</style>
 
       <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center relative overflow-hidden select-none">
+        {/* Theme switcher — top-left */}
+        <div className="fixed top-4 left-4 flex items-center gap-1 z-50">
+          {THEME_OPTIONS.map((t) => {
+            const ThemeIcon = t.icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => useSettingsStore.getState().setTheme(t.id)}
+                className={`p-1.5 rounded transition-colors cursor-pointer ${
+                  theme === t.id
+                    ? "bg-accent/20 text-accent"
+                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                }`}
+                title={t.label}
+              >
+                <ThemeIcon size={14} />
+              </button>
+            );
+          })}
+        </div>
+
         {/* Skip button — always visible */}
         <button
           onClick={skipToEnd}
@@ -247,28 +318,44 @@ export default function WelcomeRoute() {
 
           {/* Step 4: Pillar cards */}
           {step >= 4 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full mt-4">
-              {PILLARS.map((pillar, i) => {
-                const Icon = pillar.icon;
-                return (
-                  <div
-                    key={pillar.title}
-                    className="welcome-pillar-card bg-surface-card border border-border-default rounded-lg p-6 text-center transition-transform duration-200"
-                    style={{ animationDelay: `${i * 200}ms` }}
-                  >
-                    <div className="flex justify-center mb-3">
-                      <Icon className={`size-8 ${pillar.color}`} />
-                    </div>
-                    <h3 className="font-heading font-semibold text-text-primary text-base mb-1">
-                      {pillar.title}
-                    </h3>
-                    <p className="text-text-muted text-sm leading-relaxed">
-                      {pillar.desc}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
+            <>
+              <p className="welcome-fade-in text-text-secondary text-sm mt-2">
+                Click any module to jump in, or set up your full workspace below.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full mt-2">
+                {PILLARS.map((pillar, i) => {
+                  const Icon = pillar.icon;
+                  const routeLabel =
+                    pillar.route === "/terminal"
+                      ? "Terminal"
+                      : pillar.route === "/invest"
+                        ? "Invest"
+                        : "Learn";
+                  return (
+                    <button
+                      key={pillar.title}
+                      type="button"
+                      onClick={() => handlePillarClick(pillar)}
+                      className="welcome-pillar-card bg-surface-card border border-border-default rounded-lg p-6 text-center transition-all duration-200 cursor-pointer hover:border-accent/40 hover:bg-surface-hover"
+                      style={{ animationDelay: `${i * 200}ms` }}
+                    >
+                      <div className="flex justify-center mb-3">
+                        <Icon className={`size-8 ${pillar.color}`} />
+                      </div>
+                      <h3 className="font-heading font-semibold text-text-primary text-base mb-1">
+                        {pillar.title}
+                      </h3>
+                      <p className="text-text-muted text-sm leading-relaxed">
+                        {pillar.desc}
+                      </p>
+                      <span className="text-xxs text-text-disabled mt-1 block">
+                        &rarr; {routeLabel}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
           )}
 
           {/* Step 5: CTA buttons */}
