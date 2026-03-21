@@ -487,7 +487,7 @@ export default function ExploreRoute() {
 
   return (
     <>
-      <div className="min-h-screen bg-surface-base overflow-y-auto">
+      <div className="fixed inset-0 bg-surface-base overflow-y-auto">
         {/* ------------------------------------------------------------------ */}
         {/* Top bar                                                              */}
         {/* ------------------------------------------------------------------ */}
