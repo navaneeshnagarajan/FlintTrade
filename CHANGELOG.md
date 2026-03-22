@@ -6,7 +6,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-(Nothing yet — all changes landed in v0.1.0-alpha below.)
+### Changed
+- SEBI compliance doc rewritten with full circular reference (SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013), implementation timeline, compliance matrix, White Box classification
+- README SEBI section updated with circular link, Section I.c personal use position, full enforcement date (April 1, 2026)
+- 50 internal dev docs removed from public repo (moved to .local/)
+- docs/REFERENCES.md added (public contributor reference)
+- Test counts and package counts corrected across all docs
 
 ## [0.1.0-alpha] — 2026-03-21
 

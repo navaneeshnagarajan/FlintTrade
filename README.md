@@ -154,13 +154,17 @@ docker compose up
 
 ## SEBI Compliance
 
-FlintTrade is designed for SEBI-compliant algorithmic trading:
+FlintTrade is designed for SEBI-compliant algorithmic trading per [SEBI Circular Feb 4, 2025](https://www.sebi.gov.in/legal/circulars/feb-2025/safer-participation-of-retail-investors-in-algorithmic-trading_91773.html) (effective August 1, 2025, full enforcement April 1, 2026).
 
-- **Static IP** — Required for order APIs. Enforced at broker level.
-- **Rate limiting** — 10 orders/second hard limit (engine layer).
-- **Kill switch** — Cancel all orders + close all positions in one command. Accessible via Telegram `/kill`, API, or safety system auto-trigger.
-- **Audit trail** — Every order, modification, and cancellation logged as append-only JSONL with gzip rotation. 5-year retention per SEBI requirement.
-- **Algo registration** — Strategy IDs mapped to broker-registered algo IDs.
+FlintTrade is a **personal White Box tool** for retail investors under Section I.c — below the OPS threshold, no algo provider registration required. Family use (self, spouse, dependent children, dependent parents) permitted.
+
+- **Rate limiting** — 10 orders/second hard limit (5-layer engine safety system).
+- **Kill switch** — Cancel all orders + close all positions. Triggers: Telegram `/kill`, UI button, auto P&L breach.
+- **Audit trail** — Append-only JSONL with gzip rotation. 5-year retention. Logs every order, modification, cancellation, safety check, login/logout.
+- **Static IP + OAuth + 2FA** — Enforced at broker level via OpenAlgo. Not FlintTrade's responsibility.
+- **Open-source** — AGPL-3.0, all algo logic disclosed and replicable (White Box per Section V.a.i).
+
+See [docs/SEBI_COMPLIANCE.md](docs/SEBI_COMPLIANCE.md) for the full compliance matrix.
 
 ## Prerequisites
 
