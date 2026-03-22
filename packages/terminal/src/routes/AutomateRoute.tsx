@@ -1,11 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Workflow,
   Clock,
   Activity,
   FileText,
   Settings2,
-  ChevronRight,
   Loader2,
   CheckCircle2,
   Send,
@@ -19,8 +18,8 @@ import {
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +32,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { GlassCard } from "@/components/ui/GlassCard";
+import TabTransition from "@/components/motion/TabTransition";
+import { StaggeredList } from "@/components/motion/StaggeredList";
 import { sendTelegram } from "@/services/api";
 import {
   getCronJobs,
@@ -56,6 +58,49 @@ import {
 } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
+// CSS keyframe styles injected once at module load
+// ---------------------------------------------------------------------------
+
+const PULSE_STYLES = `
+@keyframes ft-pulse-green {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0 4px rgba(34,197,94,0); }
+}
+@keyframes ft-pulse-red {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+  50%       { opacity: 0.6; box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+}
+.ft-dot-running {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #22c55e;
+  animation: ft-pulse-green 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.ft-dot-paused {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+}
+.ft-dot-kill {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ef4444;
+  animation: ft-pulse-red 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+`;
+
+// Inject once
+if (typeof document !== "undefined") {
+  const styleId = "ft-automate-pulse";
+  if (!document.getElementById(styleId)) {
+    const el = document.createElement("style");
+    el.id = styleId;
+    el.textContent = PULSE_STYLES;
+    document.head.appendChild(el);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Section registry
 // ---------------------------------------------------------------------------
 
@@ -69,12 +114,92 @@ interface SectionDef {
 }
 
 const SECTIONS: SectionDef[] = [
-  { id: "flows", label: "Flow Builder", icon: Workflow, desc: "Visual 54-node automation builder" },
-  { id: "schedules", label: "Schedules", icon: Clock, desc: "Cron jobs & timed executions" },
-  { id: "monitors", label: "Monitors", icon: Activity, desc: "Live strategy monitoring" },
-  { id: "logs", label: "Execution Logs", icon: FileText, desc: "History of automated actions" },
-  { id: "settings", label: "Automation Settings", icon: Settings2, desc: "Kill switches, limits, Telegram alerts" },
+  { id: "flows",     label: "Flow Builder",         icon: Workflow,   desc: "Visual 54-node automation builder" },
+  { id: "schedules", label: "Schedules",             icon: Clock,      desc: "Cron jobs & timed executions" },
+  { id: "monitors",  label: "Monitors",              icon: Activity,   desc: "Live strategy monitoring" },
+  { id: "logs",      label: "Execution Logs",        icon: FileText,   desc: "History of automated actions" },
+  { id: "settings",  label: "Automation Settings",   icon: Settings2,  desc: "Kill switches, limits, Telegram alerts" },
 ];
+
+// ---------------------------------------------------------------------------
+// Icon rail — 48px collapsed, ~168px expanded on hover
+// ---------------------------------------------------------------------------
+
+interface IconRailProps {
+  activeSection: SectionId;
+  onSelect: (id: SectionId) => void;
+  killSwitchActive: boolean;
+  runningCount: number;
+}
+
+function IconRail({ activeSection, onSelect, killSwitchActive, runningCount }: IconRailProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <motion.nav
+      aria-label="Section navigation"
+      onHoverStart={() => setExpanded(true)}
+      onHoverEnd={() => setExpanded(false)}
+      animate={{ width: expanded ? 168 : 48 }}
+      transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
+      className="relative shrink-0 border-r border-border-default bg-surface-card overflow-hidden py-2 flex flex-col gap-0.5"
+      style={{ minWidth: 48 }}
+    >
+      {SECTIONS.map((section) => {
+        const Icon = section.icon;
+        const isActive = activeSection === section.id;
+
+        // Compute status dot for this rail item
+        const dotClass =
+          section.id === "settings" && killSwitchActive
+            ? "ft-dot-kill"
+            : section.id === "monitors" && runningCount > 0
+            ? "ft-dot-running"
+            : section.id === "schedules" && !killSwitchActive
+            ? "ft-dot-paused"
+            : null;
+
+        return (
+          <button
+            key={section.id}
+            onClick={() => onSelect(section.id)}
+            aria-current={isActive ? "true" : undefined}
+            title={expanded ? undefined : section.label}
+            className={`
+              relative flex items-center gap-2.5 h-10 px-3 text-sm font-sans
+              transition-colors duration-150 border-l-2 overflow-hidden
+              ${
+                isActive
+                  ? "text-accent bg-accent/10 border-accent"
+                  : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
+              }
+            `}
+          >
+            {/* Fixed icon position so rail doesn't jump */}
+            <span className="shrink-0 flex items-center justify-center w-4 h-4 relative">
+              <Icon size={16} />
+              {dotClass && (
+                <span
+                  className={dotClass}
+                  style={{ position: "absolute", top: -3, right: -3 }}
+                />
+              )}
+            </span>
+
+            {/* Label — fades in as rail expands */}
+            <motion.span
+              animate={{ opacity: expanded ? 1 : 0 }}
+              transition={{ duration: 0.12, ease: "easeOut" }}
+              className="whitespace-nowrap text-xs font-medium leading-none"
+            >
+              {section.label}
+            </motion.span>
+          </button>
+        );
+      })}
+    </motion.nav>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Inline toast (no external toast library)
@@ -125,6 +250,12 @@ const EMPTY_WEBHOOK_FORM: WebhookFormState = {
   enabled: true,
 };
 
+const WEBHOOK_TYPE_LABELS: Record<WebhookConfig["type"], string> = {
+  tradingview: "TradingView",
+  chartink:    "ChartInk",
+  custom:      "Custom",
+};
+
 function FlowsSection() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -168,229 +299,225 @@ function FlowsSection() {
     createMutation.mutate(form);
   };
 
-  const WEBHOOK_TYPE_LABELS: Record<WebhookConfig["type"], string> = {
-    tradingview: "TradingView",
-    chartink: "ChartInk",
-    custom: "Custom",
-  };
-
   return (
     <div className="space-y-4">
-      {/* Description cards */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
-          Flow Builder
-        </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
-          Build trading automations visually with a 54-node drag-and-drop flow builder.
-          Connect market data triggers, conditions, and order actions without writing code.
-          Flows run server-side and persist across sessions.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <p className="text-xs text-text-muted mb-1">Node Types</p>
-            <p className="text-2xl font-mono font-bold text-text-primary">54</p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <p className="text-xs text-text-muted mb-1">Categories</p>
-            <p className="text-2xl font-mono font-bold text-text-primary">8</p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <p className="text-xs text-text-muted mb-1">Execution</p>
-            <p className="text-2xl font-mono font-bold text-accent">Server-side</p>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-sm text-text-primary mb-2">
-          Node Categories
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {[
-            "Triggers", "Conditions", "Actions", "Orders",
-            "Indicators", "Data", "Alerts", "Utilities",
-          ].map((cat) => (
-            <div
-              key={cat}
-              className="bg-surface-base border border-border-default rounded-lg p-3 text-center"
-            >
-              <p className="text-xs font-semibold text-text-primary">{cat}</p>
+      <StaggeredList className="space-y-4">
+        {/* Info cards */}
+        <GlassCard className="p-6">
+          <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
+            Flow Builder
+          </h3>
+          <p className="text-sm text-text-secondary leading-relaxed mb-4">
+            Build trading automations visually with a 54-node drag-and-drop flow builder.
+            Connect market data triggers, conditions, and order actions without writing code.
+            Flows run server-side and persist across sessions.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-surface-base border border-border-default rounded-lg p-4">
+              <p className="text-xs text-text-muted mb-1">Node Types</p>
+              <p className="text-2xl font-mono font-bold text-text-primary">54</p>
             </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Webhooks */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-heading font-semibold text-sm text-text-primary">
-              Registered Webhooks
-            </h3>
-            <p className="text-xs text-text-muted mt-0.5">
-              Inbound webhook endpoints for TradingView, ChartInk, and custom alert sources.
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setShowForm((v) => !v)}
-            className="h-7 px-3 gap-1.5 border-border-default text-text-primary hover:text-accent hover:border-accent text-xs"
-          >
-            <Plus size={12} />
-            {showForm ? "Cancel" : "Create Webhook"}
-          </Button>
-        </div>
-
-        {/* Create form */}
-        {showForm && (
-          <div className="bg-surface-base border border-border-default rounded-lg p-4 mb-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs text-text-muted">Name</label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="My TradingView alert"
-                  className="h-8 text-xs bg-surface-card border-border-default text-text-primary"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-text-muted">Type</label>
-                <select
-                  value={form.type}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      type: e.target.value as WebhookFormState["type"],
-                    }))
-                  }
-                  className="w-full h-8 rounded-md border border-border-default bg-surface-card text-text-primary text-xs px-2 focus:outline-none focus:ring-1 focus:ring-accent"
-                >
-                  <option value="tradingview">TradingView</option>
-                  <option value="chartink">ChartInk</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-text-muted">Path (e.g. /webhook/my-alert)</label>
-                <Input
-                  value={form.path}
-                  onChange={(e) => setForm((f) => ({ ...f, path: e.target.value }))}
-                  placeholder="/webhook/nifty-breakout"
-                  className="h-8 text-xs bg-surface-card border-border-default text-text-primary"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-text-muted">Secret (optional)</label>
-                <Input
-                  value={form.secret}
-                  onChange={(e) => setForm((f) => ({ ...f, secret: e.target.value }))}
-                  placeholder="Optional HMAC secret"
-                  type="password"
-                  className="h-8 text-xs bg-surface-card border-border-default text-text-primary"
-                />
-              </div>
+            <div className="bg-surface-base border border-border-default rounded-lg p-4">
+              <p className="text-xs text-text-muted mb-1">Categories</p>
+              <p className="text-2xl font-mono font-bold text-text-primary">8</p>
             </div>
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                onClick={handleCreate}
-                disabled={createMutation.isPending || !form.name.trim() || !form.path.trim()}
-                className="h-7 px-4 text-xs gap-1.5"
+            <div className="bg-surface-base border border-border-default rounded-lg p-4">
+              <p className="text-xs text-text-muted mb-1">Execution</p>
+              <p className="text-2xl font-mono font-bold text-accent">Server-side</p>
+            </div>
+          </div>
+        </GlassCard>
+
+        <GlassCard className="p-6">
+          <h3 className="font-heading font-semibold text-sm text-text-primary mb-2">
+            Node Categories
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {[
+              "Triggers", "Conditions", "Actions", "Orders",
+              "Indicators", "Data", "Alerts", "Utilities",
+            ].map((cat) => (
+              <div
+                key={cat}
+                className="bg-surface-base border border-border-default rounded-lg p-3 text-center"
               >
-                {createMutation.isPending ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <Plus size={12} />
-                )}
-                Create
-              </Button>
+                <p className="text-xs font-semibold text-text-primary">{cat}</p>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+
+        {/* Webhooks */}
+        <GlassCard className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-heading font-semibold text-sm text-text-primary">
+                Registered Webhooks
+              </h3>
+              <p className="text-xs text-text-muted mt-0.5">
+                Inbound webhook endpoints for TradingView, ChartInk, and custom alert sources.
+              </p>
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowForm((v) => !v)}
+              className="h-7 px-3 gap-1.5 border-border-default text-text-primary hover:text-accent hover:border-accent text-xs"
+            >
+              <Plus size={12} />
+              {showForm ? "Cancel" : "Create Webhook"}
+            </Button>
           </div>
-        )}
 
-        {/* Toast */}
-        {toast && (
-          <div className="mb-3">
-            <InlineToast message={toast.msg} variant={toast.variant} onDismiss={dismissToast} />
-          </div>
-        )}
-
-        {/* Webhook list */}
-        {loadingWebhooks && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 size={18} className="animate-spin text-text-muted" />
-          </div>
-        )}
-
-        {webhooksError && (
-          <p className="text-xs text-loss text-center py-4">
-            Failed to load webhooks. Backend may be offline.
-          </p>
-        )}
-
-        {!loadingWebhooks && !webhooksError && webhooks.length === 0 && (
-          <p className="text-xs text-text-muted text-center py-6">
-            No webhooks registered. Create one above to start receiving alerts.
-          </p>
-        )}
-
-        {!loadingWebhooks && webhooks.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border-default hover:bg-transparent">
-                <TableHead className="text-xs text-text-muted font-medium">Name</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium">Type</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium">Path</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium">Status</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {webhooks.map((wh) => (
-                <TableRow
-                  key={wh.id}
-                  className="border-border-default hover:bg-surface-base"
+          {/* Create form */}
+          {showForm && (
+            <div className="bg-surface-base border border-border-default rounded-lg p-4 mb-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-text-muted">Name</label>
+                  <Input
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="My TradingView alert"
+                    className="h-8 text-xs bg-surface-card border-border-default text-text-primary"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-text-muted">Type</label>
+                  <select
+                    value={form.type}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        type: e.target.value as WebhookFormState["type"],
+                      }))
+                    }
+                    className="w-full h-8 rounded-md border border-border-default bg-surface-card text-text-primary text-xs px-2 focus:outline-none focus:ring-1 focus:ring-accent"
+                  >
+                    <option value="tradingview">TradingView</option>
+                    <option value="chartink">ChartInk</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-text-muted">Path (e.g. /webhook/my-alert)</label>
+                  <Input
+                    value={form.path}
+                    onChange={(e) => setForm((f) => ({ ...f, path: e.target.value }))}
+                    placeholder="/webhook/nifty-breakout"
+                    className="h-8 text-xs bg-surface-card border-border-default text-text-primary"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-text-muted">Secret (optional)</label>
+                  <Input
+                    value={form.secret}
+                    onChange={(e) => setForm((f) => ({ ...f, secret: e.target.value }))}
+                    placeholder="Optional HMAC secret"
+                    type="password"
+                    className="h-8 text-xs bg-surface-card border-border-default text-text-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={handleCreate}
+                  disabled={createMutation.isPending || !form.name.trim() || !form.path.trim()}
+                  className="h-7 px-4 text-xs gap-1.5"
                 >
-                  <TableCell className="text-xs text-text-primary font-medium py-2">
-                    {wh.name}
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <Badge className="text-xs bg-accent/10 text-accent border-0">
-                      {WEBHOOK_TYPE_LABELS[wh.type]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-xs font-mono text-text-secondary py-2">
-                    {wh.path}
-                  </TableCell>
-                  <TableCell className="py-2">
-                    {wh.enabled ? (
-                      <Badge className="text-xs bg-profit/10 text-profit border-0">Active</Badge>
-                    ) : (
-                      <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">
-                        Disabled
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => deleteMutation.mutate(wh.id)}
-                      disabled={deleteMutation.isPending}
-                      className="h-6 w-6 p-0 text-text-muted hover:text-loss"
-                    >
-                      <Trash2 size={12} />
-                    </Button>
-                  </TableCell>
+                  {createMutation.isPending ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Plus size={12} />
+                  )}
+                  Create
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Toast */}
+          {toast && (
+            <div className="mb-3">
+              <InlineToast message={toast.msg} variant={toast.variant} onDismiss={dismissToast} />
+            </div>
+          )}
+
+          {/* Webhook list */}
+          {loadingWebhooks && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 size={18} className="animate-spin text-text-muted" />
+            </div>
+          )}
+
+          {webhooksError && (
+            <p className="text-xs text-loss text-center py-4">
+              Failed to load webhooks. Backend may be offline.
+            </p>
+          )}
+
+          {!loadingWebhooks && !webhooksError && webhooks.length === 0 && (
+            <p className="text-xs text-text-muted text-center py-6">
+              No webhooks registered. Create one above to start receiving alerts.
+            </p>
+          )}
+
+          {!loadingWebhooks && webhooks.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border-default hover:bg-transparent">
+                  <TableHead className="text-xs text-text-muted font-medium">Name</TableHead>
+                  <TableHead className="text-xs text-text-muted font-medium">Type</TableHead>
+                  <TableHead className="text-xs text-text-muted font-medium">Path</TableHead>
+                  <TableHead className="text-xs text-text-muted font-medium">Status</TableHead>
+                  <TableHead className="text-xs text-text-muted font-medium w-10" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {webhooks.map((wh) => (
+                  <TableRow
+                    key={wh.id}
+                    className="border-border-default hover:bg-surface-base"
+                  >
+                    <TableCell className="text-xs text-text-primary font-medium py-2">
+                      {wh.name}
+                    </TableCell>
+                    <TableCell className="py-2">
+                      <Badge className="text-xs bg-accent/10 text-accent border-0">
+                        {WEBHOOK_TYPE_LABELS[wh.type]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-text-secondary py-2">
+                      {wh.path}
+                    </TableCell>
+                    <TableCell className="py-2">
+                      {wh.enabled ? (
+                        <Badge className="text-xs bg-profit/10 text-profit border-0">Active</Badge>
+                      ) : (
+                        <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">
+                          Disabled
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="py-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => deleteMutation.mutate(wh.id)}
+                        disabled={deleteMutation.isPending}
+                        className="h-6 w-6 p-0 text-text-muted hover:text-loss"
+                      >
+                        <Trash2 size={12} />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </GlassCard>
+      </StaggeredList>
     </div>
   );
 }
@@ -398,6 +525,14 @@ function FlowsSection() {
 // ---------------------------------------------------------------------------
 // Section 2: Schedules — live cron jobs
 // ---------------------------------------------------------------------------
+
+function StatusDot({ status }: { status: string }) {
+  const lower = status.toLowerCase();
+  if (lower === "active") return <span className="ft-dot-running" />;
+  if (lower === "paused") return <span className="ft-dot-paused" />;
+  if (lower === "error")  return <span className="ft-dot-kill" />;
+  return <span className="ft-dot-paused" style={{ background: "#6b7280" }} />;
+}
 
 function StatusBadge({ status }: { status: string }) {
   const lower = status.toLowerCase();
@@ -467,7 +602,7 @@ function SchedulesSection() {
 
   return (
     <div className="space-y-4">
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
+      <GlassCard className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-heading font-semibold text-lg text-text-primary">
@@ -507,77 +642,62 @@ function SchedulesSection() {
         )}
 
         {!isLoading && jobs.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border-default hover:bg-transparent">
-                <TableHead className="text-xs text-text-muted font-medium">Name</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium">Trigger</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium">Status</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium">Last Run</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium text-right">Runs</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium text-right">Errors</TableHead>
-                <TableHead className="text-xs text-text-muted font-medium w-20" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {jobs.map((job) => {
-                const isWorking = pendingJob === job.name;
-                const isPaused = job.status.toLowerCase() === "paused";
-                return (
-                  <TableRow
-                    key={job.name}
-                    className="border-border-default hover:bg-surface-base"
-                  >
-                    <TableCell className="py-2">
-                      <p className="text-xs font-medium text-text-primary">{job.name}</p>
-                      {job.description && (
-                        <p className="text-xs text-text-muted mt-0.5 leading-tight">
-                          {job.description}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs font-mono text-text-secondary py-2">
-                      {job.trigger_type}
-                    </TableCell>
-                    <TableCell className="py-2">
+          <StaggeredList className="space-y-2">
+            {jobs.map((job) => {
+              const isWorking = pendingJob === job.name;
+              const isPaused = job.status.toLowerCase() === "paused";
+              return (
+                <div
+                  key={job.name}
+                  className="bg-surface-base border border-border-default rounded-lg px-4 py-3 flex items-center gap-3"
+                >
+                  <StatusDot status={job.status} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="text-xs font-semibold text-text-primary truncate">{job.name}</p>
                       <StatusBadge status={job.status} />
-                    </TableCell>
-                    <TableCell className="text-xs text-text-secondary py-2">
-                      {formatLastRun(job.last_run)}
-                    </TableCell>
-                    <TableCell className="text-xs text-text-primary font-mono text-right py-2">
-                      {job.run_count}
-                    </TableCell>
-                    <TableCell className="text-xs font-mono text-right py-2">
-                      <span className={job.error_count > 0 ? "text-loss" : "text-text-muted"}>
-                        {job.error_count}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-text-muted">
+                      <span className="font-mono">{job.trigger_type}</span>
+                      <span>Last: {formatLastRun(job.last_run)}</span>
+                      <span>
+                        Runs:{" "}
+                        <span className="text-text-primary font-mono">{job.run_count}</span>
                       </span>
-                    </TableCell>
-                    <TableCell className="py-2 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => toggleJob(job)}
-                        disabled={isWorking}
-                        className="h-6 px-2 text-xs gap-1 border-border-default text-text-secondary hover:text-text-primary"
-                      >
-                        {isWorking ? (
-                          <Loader2 size={11} className="animate-spin" />
-                        ) : isPaused ? (
-                          <Play size={11} />
-                        ) : (
-                          <Pause size={11} />
-                        )}
-                        {isPaused ? "Resume" : "Pause"}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      {job.error_count > 0 && (
+                        <span className="text-loss font-mono">
+                          Errors: {job.error_count}
+                        </span>
+                      )}
+                    </div>
+                    {job.description && (
+                      <p className="text-xs text-text-muted mt-0.5 leading-tight">
+                        {job.description}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => toggleJob(job)}
+                    disabled={isWorking}
+                    className="h-7 px-2.5 text-xs gap-1 border-border-default text-text-secondary hover:text-text-primary shrink-0"
+                  >
+                    {isWorking ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : isPaused ? (
+                      <Play size={11} />
+                    ) : (
+                      <Pause size={11} />
+                    )}
+                    {isPaused ? "Resume" : "Pause"}
+                  </Button>
+                </div>
+              );
+            })}
+          </StaggeredList>
         )}
-      </Card>
+      </GlassCard>
     </div>
   );
 }
@@ -585,6 +705,28 @@ function SchedulesSection() {
 // ---------------------------------------------------------------------------
 // Section 3: Monitors — live running strategies
 // ---------------------------------------------------------------------------
+
+function StrategyStatusDot({ status }: { status: string }) {
+  const lower = status.toLowerCase();
+  if (lower === "running")  return <span className="ft-dot-running" />;
+  if (lower === "stopping") return <span className="ft-dot-paused" />;
+  if (lower === "error")    return <span className="ft-dot-kill" />;
+  return <span className="ft-dot-paused" style={{ background: "#6b7280" }} />;
+}
+
+function strategyStatusBadge(status: string) {
+  const lower = status.toLowerCase();
+  if (lower === "running") {
+    return <Badge className="text-xs bg-profit/10 text-profit border-0">Running</Badge>;
+  }
+  if (lower === "stopping") {
+    return <Badge className="text-xs bg-atm-bg text-warning border-0">Stopping</Badge>;
+  }
+  if (lower === "error") {
+    return <Badge className="text-xs bg-loss/10 text-loss border-0">Error</Badge>;
+  }
+  return <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">{status}</Badge>;
+}
 
 function MonitorsSection() {
   const queryClient = useQueryClient();
@@ -619,23 +761,9 @@ function MonitorsSection() {
     }
   };
 
-  const strategyStatusBadge = (status: string) => {
-    const lower = status.toLowerCase();
-    if (lower === "running") {
-      return <Badge className="text-xs bg-profit/10 text-profit border-0">Running</Badge>;
-    }
-    if (lower === "stopping") {
-      return <Badge className="text-xs bg-atm-bg text-warning border-0">Stopping</Badge>;
-    }
-    if (lower === "error") {
-      return <Badge className="text-xs bg-loss/10 text-loss border-0">Error</Badge>;
-    }
-    return <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">{status}</Badge>;
-  };
-
   return (
     <div className="space-y-4">
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
+      <GlassCard className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-heading font-semibold text-lg text-text-primary">
@@ -667,18 +795,21 @@ function MonitorsSection() {
         )}
 
         {strategies.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <StaggeredList className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {strategies.map((s) => (
               <div
                 key={`${s.name}-${s.symbol}`}
                 className="bg-surface-base border border-border-default rounded-lg p-4"
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
-                  <div>
-                    <p className="text-sm font-semibold text-text-primary">{s.name}</p>
-                    <p className="text-xs text-text-muted mt-0.5">
-                      {s.symbol} · {s.exchange}
-                    </p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <StrategyStatusDot status={s.status} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-text-primary truncate">{s.name}</p>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        {s.symbol} · {s.exchange}
+                      </p>
+                    </div>
                   </div>
                   {strategyStatusBadge(s.status)}
                 </div>
@@ -712,9 +843,9 @@ function MonitorsSection() {
                 </Button>
               </div>
             ))}
-          </div>
+          </StaggeredList>
         )}
-      </Card>
+      </GlassCard>
     </div>
   );
 }
@@ -802,7 +933,7 @@ function LogsSection() {
 
   return (
     <div className="space-y-4">
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
+      <GlassCard className="p-6">
         <div className="flex items-center justify-between mb-4 gap-4">
           <div>
             <h3 className="font-heading font-semibold text-lg text-text-primary">
@@ -879,7 +1010,9 @@ function LogsSection() {
                       </TableCell>
                       <TableCell className="text-xs font-mono text-text-secondary py-1.5 whitespace-nowrap">
                         {log.symbol}
-                        {log.exchange ? <span className="text-text-muted"> · {log.exchange}</span> : null}
+                        {log.exchange ? (
+                          <span className="text-text-muted"> · {log.exchange}</span>
+                        ) : null}
                       </TableCell>
                       <TableCell className="text-xs text-text-secondary py-1.5">
                         {log.action}
@@ -926,7 +1059,7 @@ function LogsSection() {
             <Loader2 size={18} className="animate-spin text-text-muted" />
           </div>
         )}
-      </Card>
+      </GlassCard>
     </div>
   );
 }
@@ -1008,7 +1141,11 @@ function AutomationSettingsSection() {
   const [localConfig, setLocalConfig] = useState<Partial<SafetyConfig>>({});
   const [configDirty, setConfigDirty] = useState(false);
 
-  const { data: safetyConfig, isLoading: loadingConfig, isError: configError } = useQuery({
+  const {
+    data: safetyConfig,
+    isLoading: loadingConfig,
+    isError: configError,
+  } = useQuery({
     queryKey: ["safetyConfig"],
     queryFn: getSafetyConfig,
   });
@@ -1098,163 +1235,189 @@ function AutomationSettingsSection() {
         <InlineToast message={toast.msg} variant={toast.variant} onDismiss={dismissToast} />
       )}
 
-      {/* Kill Switch */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <div className="flex items-center gap-2 mb-1">
-          {killSwitchActive ? (
-            <ShieldAlert size={18} className="text-loss" />
-          ) : (
-            <ShieldCheck size={18} className="text-profit" />
-          )}
-          <h3 className="font-heading font-semibold text-lg text-text-primary">Kill Switch</h3>
-          {killSwitchActive ? (
-            <Badge className="ml-auto text-xs bg-loss/10 text-loss border-0">ACTIVE</Badge>
-          ) : (
-            <Badge className="ml-auto text-xs bg-profit/10 text-profit border-0">INACTIVE</Badge>
-          )}
-        </div>
-        <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-          Emergency stop for all automated strategies. Cancels pending orders and closes
-          positions immediately. Also available via Telegram /kill command.
-        </p>
-
-        {killSwitchActive ? (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/20">
-              <AlertTriangle size={14} className="text-loss flex-none" />
-              <p className="text-xs text-loss">
-                Kill switch is active. All automation is halted.
-              </p>
-            </div>
-            <Button
-              onClick={() => resetKillMutation.mutate()}
-              disabled={resetKillMutation.isPending}
-              className="bg-profit/20 hover:bg-profit/30 text-profit border border-profit/30 h-9 px-5 text-sm gap-2"
-              variant="outline"
-            >
-              {resetKillMutation.isPending ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <ShieldCheck size={14} />
-              )}
-              Reset Kill Switch — Resume Trading
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              <Input
-                value={killReason}
-                onChange={(e) => setKillReason(e.target.value)}
-                placeholder="Reason (optional, logged for audit)"
-                className="flex-1 h-9 text-xs bg-surface-base border-border-default text-text-primary"
-              />
-              <Button
-                onClick={() => activateKillMutation.mutate(killReason)}
-                disabled={activateKillMutation.isPending}
-                variant="outline"
-                className="bg-loss/10 hover:bg-loss/20 text-loss border border-loss/30 h-9 px-5 text-sm gap-2 shrink-0"
-              >
-                {activateKillMutation.isPending ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <ShieldAlert size={14} />
-                )}
-                Activate Kill Switch
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Safety Config */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-1">
-          Safety Configuration
-        </h3>
-        <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-          Hard limits enforced by the 5-layer safety system. These constraints cannot be
-          bypassed by any automation or strategy.
-        </p>
-
-        {loadingConfig && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 size={18} className="animate-spin text-text-muted" />
-          </div>
-        )}
-
-        {configError && (
-          <p className="text-xs text-loss text-center py-4">
-            Failed to load safety config. Backend may be offline.
-          </p>
-        )}
-
-        {!loadingConfig && !configError && safetyConfig && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {numericField("Max Positions", "max_positions")}
-              {numericField("Max Margin", "max_margin_pct", "%")}
-              {numericField("Daily Loss — Pause", "daily_loss_pause_pct", "%")}
-              {numericField("Daily Loss — Kill", "daily_loss_kill_pct", "%")}
-              {numericField("Max Net Delta", "max_net_delta")}
-              {numericField("Max Net Vega", "max_net_vega")}
-            </div>
-
-            {configDirty && (
-              <div className="flex justify-end pt-2">
-                <Button
-                  size="sm"
-                  onClick={handleSaveConfig}
-                  disabled={updateConfigMutation.isPending}
-                  className="h-8 px-5 text-xs gap-1.5"
-                >
-                  {updateConfigMutation.isPending ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <CheckCircle2 size={12} />
-                  )}
-                  Save Config
-                </Button>
-              </div>
+      <StaggeredList className="space-y-4">
+        {/* Kill Switch */}
+        <GlassCard className="p-6">
+          <div className="flex items-center gap-2 mb-1">
+            {killSwitchActive ? (
+              <>
+                <span className="ft-dot-kill" />
+                <ShieldAlert size={18} className="text-loss" />
+              </>
+            ) : (
+              <>
+                <span className="ft-dot-running" />
+                <ShieldCheck size={18} className="text-profit" />
+              </>
+            )}
+            <h3 className="font-heading font-semibold text-lg text-text-primary">Kill Switch</h3>
+            {killSwitchActive ? (
+              <Badge className="ml-auto text-xs bg-loss/10 text-loss border-0">ACTIVE</Badge>
+            ) : (
+              <Badge className="ml-auto text-xs bg-profit/10 text-profit border-0">INACTIVE</Badge>
             )}
           </div>
-        )}
-      </Card>
+          <p className="text-sm text-text-secondary mb-4 leading-relaxed">
+            Emergency stop for all automated strategies. Cancels pending orders and closes
+            positions immediately. Also available via Telegram /kill command.
+          </p>
 
-      {/* Telegram */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-1">
-          Telegram Alerts
-        </h3>
-        <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-          Configure bot token and chat ID in workspace.json. Test the connection below.
-          All trade notifications, P&L updates, and error alerts are sent to Telegram.
-        </p>
-        <TelegramTestPanel />
-      </Card>
+          {killSwitchActive ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/20">
+                <AlertTriangle size={14} className="text-loss flex-none" />
+                <p className="text-xs text-loss">
+                  Kill switch is active. All automation is halted.
+                </p>
+              </div>
+              <Button
+                onClick={() => resetKillMutation.mutate()}
+                disabled={resetKillMutation.isPending}
+                className="bg-profit/20 hover:bg-profit/30 text-profit border border-profit/30 h-9 px-5 text-sm gap-2"
+                variant="outline"
+              >
+                {resetKillMutation.isPending ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <ShieldCheck size={14} />
+                )}
+                Reset Kill Switch — Resume Trading
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <Input
+                  value={killReason}
+                  onChange={(e) => setKillReason(e.target.value)}
+                  placeholder="Reason (optional, logged for audit)"
+                  className="flex-1 h-9 text-xs bg-surface-base border-border-default text-text-primary"
+                />
+                <Button
+                  onClick={() => activateKillMutation.mutate(killReason)}
+                  disabled={activateKillMutation.isPending}
+                  variant="outline"
+                  className="bg-loss/10 hover:bg-loss/20 text-loss border border-loss/30 h-9 px-5 text-sm gap-2 shrink-0"
+                >
+                  {activateKillMutation.isPending ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <ShieldAlert size={14} />
+                  )}
+                  Activate Kill Switch
+                </Button>
+              </div>
+            </div>
+          )}
+        </GlassCard>
+
+        {/* Safety Config */}
+        <GlassCard className="p-6">
+          <h3 className="font-heading font-semibold text-lg text-text-primary mb-1">
+            Safety Configuration
+          </h3>
+          <p className="text-sm text-text-secondary mb-4 leading-relaxed">
+            Hard limits enforced by the 5-layer safety system. These constraints cannot be
+            bypassed by any automation or strategy.
+          </p>
+
+          {loadingConfig && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 size={18} className="animate-spin text-text-muted" />
+            </div>
+          )}
+
+          {configError && (
+            <p className="text-xs text-loss text-center py-4">
+              Failed to load safety config. Backend may be offline.
+            </p>
+          )}
+
+          {!loadingConfig && !configError && safetyConfig && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {numericField("Max Positions", "max_positions")}
+                {numericField("Max Margin", "max_margin_pct", "%")}
+                {numericField("Daily Loss — Pause", "daily_loss_pause_pct", "%")}
+                {numericField("Daily Loss — Kill", "daily_loss_kill_pct", "%")}
+                {numericField("Max Net Delta", "max_net_delta")}
+                {numericField("Max Net Vega", "max_net_vega")}
+              </div>
+
+              {configDirty && (
+                <div className="flex justify-end pt-2">
+                  <Button
+                    size="sm"
+                    onClick={handleSaveConfig}
+                    disabled={updateConfigMutation.isPending}
+                    className="h-8 px-5 text-xs gap-1.5"
+                  >
+                    {updateConfigMutation.isPending ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <CheckCircle2 size={12} />
+                    )}
+                    Save Config
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </GlassCard>
+
+        {/* Telegram */}
+        <GlassCard className="p-6">
+          <h3 className="font-heading font-semibold text-lg text-text-primary mb-1">
+            Telegram Alerts
+          </h3>
+          <p className="text-sm text-text-secondary mb-4 leading-relaxed">
+            Configure bot token and chat ID in workspace.json. Test the connection below.
+            All trade notifications, P&L updates, and error alerts are sent to Telegram.
+          </p>
+          <TelegramTestPanel />
+        </GlassCard>
+      </StaggeredList>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main — query kill switch & monitor counts for rail dots
 // ---------------------------------------------------------------------------
 
 export default function AutomateRoute() {
   const [activeSection, setActiveSection] = useState<SectionId>("flows");
 
+  // Lightweight queries for rail status dots — no extra network cost since
+  // the same keys are fetched by each section when it mounts.
+  const { data: safetyData } = useQuery({
+    queryKey: ["safetyConfig"],
+    queryFn: getSafetyConfig,
+  });
+
+  const { data: strategiesData } = useQuery({
+    queryKey: ["runningStrategies"],
+    queryFn: getRunningStrategies,
+    refetchInterval: 10000,
+  });
+
+  const killSwitchActive = safetyData?.kill_switch_active ?? false;
+  const runningCount = (strategiesData ?? []).filter(
+    (s) => s.status.toLowerCase() === "running",
+  ).length;
+
   const sectionContent: Record<SectionId, React.ReactNode> = {
-    flows: <FlowsSection />,
+    flows:     <FlowsSection />,
     schedules: <SchedulesSection />,
-    monitors: <MonitorsSection />,
-    logs: <LogsSection />,
-    settings: <AutomationSettingsSection />,
+    monitors:  <MonitorsSection />,
+    logs:      <LogsSection />,
+    settings:  <AutomationSettingsSection />,
   };
 
   return (
     <div className="h-full bg-surface-base flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border-default bg-surface-card px-6 py-4">
+      <div className="border-b border-border-default bg-surface-card px-6 py-4 shrink-0">
         <div className="flex items-center gap-3">
           <Workflow className="w-6 h-6 text-accent" />
           <div>
@@ -1263,39 +1426,29 @@ export default function AutomateRoute() {
               54-node flow builder, cron scheduler, Telegram kill switch — no other broker has this
             </p>
           </div>
+          {killSwitchActive && (
+            <div className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full bg-loss/10 border border-loss/30">
+              <span className="ft-dot-kill" />
+              <span className="text-xs text-loss font-medium">Kill Switch Active</span>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <nav aria-label="Section navigation" className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
-          {SECTIONS.map((section) => {
-            const Icon = section.icon;
-            const isActive = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                onClick={() => setActiveSection(section.id)}
-                aria-current={isActive ? "true" : undefined}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors border-l-2 ${
-                  isActive
-                    ? "text-accent bg-accent/10 border-accent"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {section.label}
-                <ChevronRight
-                  className={`w-3 h-3 ml-auto ${isActive ? "opacity-100" : "opacity-0"}`}
-                />
-              </button>
-            );
-          })}
-        </nav>
+        {/* Icon rail — replaces old 224px sidebar */}
+        <IconRail
+          activeSection={activeSection}
+          onSelect={setActiveSection}
+          killSwitchActive={killSwitchActive}
+          runningCount={runningCount}
+        />
 
-        {/* Content */}
+        {/* Content with TabTransition crossfade */}
         <ScrollArea className="flex-1">
-          <div className="p-6 max-w-4xl animate-fade-in-up">{sectionContent[activeSection]}</div>
+          <TabTransition tabKey={activeSection} className="p-6 max-w-4xl">
+            {sectionContent[activeSection]}
+          </TabTransition>
         </ScrollArea>
       </div>
     </div>

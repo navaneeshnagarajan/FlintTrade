@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Bot,
   MessageSquare,
@@ -7,12 +8,12 @@ import {
   TrendingUp,
   BookOpen,
   Settings2,
-  ChevronRight,
   RefreshCw,
   Search,
   AlertCircle,
   Loader2,
   CheckCircle2,
+  X,
 } from "lucide-react";
 import AIAdvisorWidget from "@/widgets/utility/AIAdvisor/AIAdvisorWidget";
 import { Card } from "@/components/ui/card";
@@ -29,6 +30,7 @@ import {
   type SentimentResult,
   type RAGResult,
 } from "@/services/ftApi";
+import { motionConfig, EASE_ENTER, DURATION } from "@/lib/motion";
 
 // ---------------------------------------------------------------------------
 // Section registry
@@ -40,19 +42,21 @@ interface SectionDef {
   id: SectionId;
   label: string;
   icon: typeof MessageSquare;
-  desc: string;
 }
 
 const SECTIONS: SectionDef[] = [
-  { id: "chat", label: "AI Chat", icon: MessageSquare, desc: "Conversational AI trading advisor" },
-  { id: "signals", label: "Signals", icon: Zap, desc: "ML-powered buy/sell signals" },
-  { id: "sentiment", label: "Sentiment", icon: TrendingUp, desc: "News sentiment analysis" },
-  { id: "knowledge", label: "Knowledge Base", icon: BookOpen, desc: "RAG-indexed trading docs" },
-  { id: "settings", label: "AI Settings", icon: Settings2, desc: "LLM provider, model, API keys" },
+  { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "signals", label: "Signals", icon: Zap },
+  { id: "sentiment", label: "Sentiment", icon: TrendingUp },
+  { id: "knowledge", label: "KB", icon: BookOpen },
+  { id: "settings", label: "Settings", icon: Settings2 },
 ];
 
+// Sections that appear as right-side overlay panels (not full-height)
+const OVERLAY_SECTIONS = new Set<SectionId>(["signals", "sentiment", "knowledge", "settings"]);
+
 // ---------------------------------------------------------------------------
-// Section: Chat — embeds the real AIAdvisorWidget
+// Section: Chat — full height, no chrome
 // ---------------------------------------------------------------------------
 
 function ChatSection() {
@@ -64,70 +68,93 @@ function ChatSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Section: Signals
+// Section: Signals — enhanced signal cards with animated confidence bar
 // ---------------------------------------------------------------------------
 
 function signalBadgeClass(type: Signal["signal_type"]): string {
-  if (type === "BUY") return "bg-bullish-bg text-profit";
-  if (type === "SELL") return "bg-bearish-bg text-loss";
-  return "bg-surface-base text-text-muted";
+  if (type === "BUY") return "bg-bullish-bg text-profit border-profit/30";
+  if (type === "SELL") return "bg-bearish-bg text-loss border-loss/30";
+  return "bg-surface-base text-text-muted border-border-default";
 }
 
-function SignalCard({ signal }: { signal: Signal }) {
+function signalBarColor(type: Signal["signal_type"]): string {
+  if (type === "BUY") return "bg-profit";
+  if (type === "SELL") return "bg-loss";
+  return "bg-text-muted";
+}
+
+function SignalCard({ signal, index }: { signal: Signal; index: number }) {
   const indicatorEntries = Object.entries(signal.indicators);
+  const pct = signal.confidence * 100;
+
   return (
-    <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="font-mono font-bold text-text-primary text-sm">{signal.symbol}</span>
-          <span className="ml-2 text-xs text-text-muted">{signal.exchange}</span>
-        </div>
-        <Badge className={`text-xs font-semibold ${signalBadgeClass(signal.signal_type)}`}>
-          {signal.signal_type}
-        </Badge>
-      </div>
-
-      {/* Confidence bar */}
-      <div className="space-y-1">
-        <div className="flex justify-between text-xs text-text-muted">
-          <span>Confidence</span>
-          <span className="font-mono">{Math.round(signal.confidence * 100)}%</span>
-        </div>
-        <div className="h-1.5 bg-surface-base rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${
-              signal.signal_type === "BUY"
-                ? "bg-profit"
-                : signal.signal_type === "SELL"
-                  ? "bg-loss"
-                  : "bg-text-muted"
-            }`}
-            style={{ width: `${signal.confidence * 100}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Indicator values */}
-      {indicatorEntries.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {indicatorEntries.map(([key, val]) => (
-            <span
-              key={key}
-              className="text-xs bg-surface-base border border-border-default rounded px-2 py-0.5 font-mono text-text-secondary"
-            >
-              {key}: {typeof val === "number" ? val.toFixed(2) : String(val)}
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={motionConfig.stagger(index)}
+    >
+      <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3">
+        {/* Header row: symbol + direction badge */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono font-bold text-text-primary text-sm leading-none">
+              {signal.symbol}
             </span>
-          ))}
+            <span className="text-xs text-text-muted">{signal.exchange}</span>
+          </div>
+          <Badge
+            className={`text-xs font-bold px-2 py-0.5 border rounded-full ${signalBadgeClass(signal.signal_type)}`}
+          >
+            {signal.signal_type === "BUY"
+              ? "Bullish"
+              : signal.signal_type === "SELL"
+                ? "Bearish"
+                : "Hold"}
+          </Badge>
         </div>
-      )}
 
-      <p className="text-xs text-text-muted">
-        {new Date(signal.timestamp).toLocaleString("en-IN", {
-          dateStyle: "short",
-          timeStyle: "short",
-        })}
-      </p>
-    </Card>
+        {/* Animated confidence bar */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-text-muted">
+            <span>Confidence</span>
+            <span className="font-mono">{Math.round(pct)}%</span>
+          </div>
+          <div className="h-1.5 bg-surface-base rounded-full overflow-hidden">
+            <motion.div
+              className={`h-full rounded-full ${signalBarColor(signal.signal_type)}`}
+              initial={{ width: "0%" }}
+              animate={{ width: `${pct}%` }}
+              transition={{
+                duration: DURATION.slow,
+                ease: EASE_ENTER,
+                delay: index * 0.05 + 0.1,
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Indicator chips */}
+        {indicatorEntries.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {indicatorEntries.map(([key, val]) => (
+              <span
+                key={key}
+                className="text-xs bg-surface-base border border-border-default rounded px-2 py-0.5 font-mono text-text-secondary"
+              >
+                {key}: {typeof val === "number" ? val.toFixed(2) : String(val)}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <p className="text-xs text-text-muted">
+          {new Date(signal.timestamp).toLocaleString("en-IN", {
+            dateStyle: "short",
+            timeStyle: "short",
+          })}
+        </p>
+      </Card>
+    </motion.div>
   );
 }
 
@@ -142,10 +169,9 @@ function SignalsSection() {
 
   return (
     <div className="space-y-4">
-      {/* Header card */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
+      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="font-heading font-semibold text-lg text-text-primary">
+          <h3 className="font-heading font-semibold text-base text-text-primary">
             ML-Powered Signals
           </h3>
           <Button
@@ -153,28 +179,24 @@ function SignalsSection() {
             size="sm"
             onClick={() => refetch()}
             disabled={isLoading}
-            className="text-text-muted hover:text-text-primary gap-1.5"
+            className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          Machine learning models analyze price action, volume, open interest, and technical
-          indicators to generate buy/sell signals. Models are trained on Indian market data
-          using LightGBM for fast inference. Auto-refreshes every 30s.
+        <p className="text-xs text-text-secondary leading-relaxed">
+          LightGBM models analyze price, volume, OI and technicals. Auto-refreshes every 30s.
         </p>
       </Card>
 
-      {/* Loading */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-text-muted text-sm py-4 justify-center">
+        <div className="flex items-center gap-2 text-text-muted text-sm py-6 justify-center">
           <Loader2 className="w-4 h-4 animate-spin" />
           Fetching signals...
         </div>
       )}
 
-      {/* Error */}
       {isError && (
         <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
           <div className="flex items-center gap-2 text-loss text-sm">
@@ -185,29 +207,31 @@ function SignalsSection() {
             variant="ghost"
             size="sm"
             onClick={() => refetch()}
-            className="mt-3 text-text-muted hover:text-text-primary"
+            className="mt-2 text-text-muted hover:text-text-primary text-xs"
           >
             Retry
           </Button>
         </Card>
       )}
 
-      {/* Empty */}
       {!isLoading && !isError && signals.length === 0 && (
         <Card className="bg-surface-card border border-border-default rounded-lg p-6 text-center">
-          <Zap className="w-8 h-8 text-text-muted mx-auto mb-3" />
+          <Zap className="w-7 h-7 text-text-muted mx-auto mb-2" />
           <p className="text-sm text-text-secondary">No active signals.</p>
           <p className="text-xs text-text-muted mt-1">
-            The signal pipeline generates signals during market hours.
+            Signal pipeline generates signals during market hours.
           </p>
         </Card>
       )}
 
-      {/* Signal cards */}
       {!isLoading && !isError && signals.length > 0 && (
         <div className="space-y-3">
           {signals.map((signal, idx) => (
-            <SignalCard key={`${signal.symbol}-${signal.timestamp}-${idx}`} signal={signal} />
+            <SignalCard
+              key={`${signal.symbol}-${signal.timestamp}-${idx}`}
+              signal={signal}
+              index={idx}
+            />
           ))}
         </div>
       )}
@@ -231,64 +255,70 @@ function labelBadgeClass(label: SentimentResult["label"]): string {
   return "bg-atm-bg text-warning";
 }
 
-function SentimentResult({ result }: { result: SentimentResult }) {
+function SentimentResultCard({ result }: { result: SentimentResult }) {
   const pct = Math.round(Math.abs(result.score) * 100);
   const gaugeWidth = Math.round(((result.score + 1) / 2) * 100);
 
   return (
-    <Card className="bg-surface-card border border-border-default rounded-lg p-5 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs text-text-muted mb-0.5">Sentiment Score</p>
-          <p className={`text-3xl font-mono font-bold ${scoreToColor(result.score)}`}>
-            {result.score >= 0 ? "+" : ""}
-            {result.score.toFixed(3)}
-          </p>
-        </div>
-        <div className="text-right">
-          <Badge className={`text-xs font-semibold mb-1 ${labelBadgeClass(result.label)}`}>
-            {result.label.toUpperCase()}
-          </Badge>
-          <p className="text-xs text-text-muted">
-            {Math.round(result.confidence * 100)}% confidence
-          </p>
-        </div>
-      </div>
-
-      {/* Score gauge (-1 to +1) */}
-      <div className="space-y-1">
-        <div className="flex justify-between text-xs text-text-muted">
-          <span>Bearish -1</span>
-          <span>Neutral 0</span>
-          <span>+1 Bullish</span>
-        </div>
-        <div className="relative h-2 bg-surface-base rounded-full overflow-hidden">
-          {/* Centre tick */}
-          <div className="absolute left-1/2 top-0 w-px h-full bg-border-default" />
-          <div
-            className={`absolute top-0 h-full rounded-full transition-all ${
-              result.score > 0.1
-                ? "bg-profit"
-                : result.score < -0.1
-                  ? "bg-loss"
-                  : "bg-warning"
-            }`}
-            style={{ left: "50%", width: `${pct / 2}%`, transform: result.score < 0 ? "translateX(-100%)" : undefined }}
-          />
-        </div>
-        {/* Pointer */}
-        <div
-          className="relative h-0"
-          style={{ marginLeft: `${gaugeWidth}%`, transform: "translateX(-50%)" }}
-        >
-          <div
-            className={`text-xs font-mono font-bold leading-none ${scoreToColor(result.score)}`}
-          >
-            ▲
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={motionConfig.transitions.tab}
+    >
+      <Card className="bg-surface-card border border-border-default rounded-lg p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-text-muted mb-0.5">Sentiment Score</p>
+            <p className={`text-3xl font-mono font-bold ${scoreToColor(result.score)}`}>
+              {result.score >= 0 ? "+" : ""}
+              {result.score.toFixed(3)}
+            </p>
+          </div>
+          <div className="text-right">
+            <Badge className={`text-xs font-semibold mb-1 ${labelBadgeClass(result.label)}`}>
+              {result.label.toUpperCase()}
+            </Badge>
+            <p className="text-xs text-text-muted">
+              {Math.round(result.confidence * 100)}% confidence
+            </p>
           </div>
         </div>
-      </div>
-    </Card>
+
+        {/* Score gauge (-1 to +1) */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-text-muted">
+            <span>Bearish -1</span>
+            <span>Neutral 0</span>
+            <span>+1 Bullish</span>
+          </div>
+          <div className="relative h-2 bg-surface-base rounded-full overflow-hidden">
+            <div className="absolute left-1/2 top-0 w-px h-full bg-border-default" />
+            <div
+              className={`absolute top-0 h-full rounded-full transition-all ${
+                result.score > 0.1
+                  ? "bg-profit"
+                  : result.score < -0.1
+                    ? "bg-loss"
+                    : "bg-warning"
+              }`}
+              style={{
+                left: "50%",
+                width: `${pct / 2}%`,
+                transform: result.score < 0 ? "translateX(-100%)" : undefined,
+              }}
+            />
+          </div>
+          <div
+            className="relative h-0"
+            style={{ marginLeft: `${gaugeWidth}%`, transform: "translateX(-50%)" }}
+          >
+            <div className={`text-xs font-mono font-bold leading-none ${scoreToColor(result.score)}`}>
+              ▲
+            </div>
+          </div>
+        </div>
+      </Card>
+    </motion.div>
   );
 }
 
@@ -315,20 +345,18 @@ function SentimentSection() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
+      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
+        <h3 className="font-heading font-semibold text-base text-text-primary mb-2">
           Sentiment Analysis
         </h3>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          Paste news headlines, social posts, or any financial text to analyze its market
-          sentiment. Score ranges from -1 (strongly bearish) to +1 (strongly bullish).
+        <p className="text-xs text-text-secondary leading-relaxed">
+          Paste news or any financial text to score market sentiment (-1 bearish to +1 bullish).
           Computed locally via the LLM for full privacy.
         </p>
       </Card>
 
       {/* Quick symbol lookup */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-5 space-y-3">
+      <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3">
         <h4 className="text-sm font-semibold text-text-primary">Quick Symbol Sentiment</h4>
         <div className="flex gap-2">
           <Input
@@ -342,6 +370,7 @@ function SentimentSection() {
             onClick={handleSymbolSentiment}
             disabled={!symbol.trim() || mutation.isPending}
             className="shrink-0"
+            size="sm"
           >
             {mutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -353,13 +382,13 @@ function SentimentSection() {
       </Card>
 
       {/* Text input */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-5 space-y-3">
+      <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3">
         <h4 className="text-sm font-semibold text-text-primary">Paste Text to Analyze</h4>
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Paste news, social post, or any market commentary here..."
-          rows={5}
+          rows={4}
           className="bg-surface-base border-border-default text-text-primary text-sm resize-none"
         />
         <div className="flex justify-end">
@@ -367,15 +396,16 @@ function SentimentSection() {
             onClick={handleAnalyze}
             disabled={!text.trim() || mutation.isPending}
             className="gap-2"
+            size="sm"
           >
             {mutation.isPending ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Analyzing...
               </>
             ) : (
               <>
-                <TrendingUp className="w-4 h-4" />
+                <TrendingUp className="w-3.5 h-3.5" />
                 Analyze
               </>
             )}
@@ -383,7 +413,6 @@ function SentimentSection() {
         </div>
       </Card>
 
-      {/* Error */}
       {mutation.isError && (
         <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
           <div className="flex items-center gap-2 text-loss text-sm">
@@ -397,9 +426,8 @@ function SentimentSection() {
         </Card>
       )}
 
-      {/* Result */}
       {mutation.isSuccess && mutation.data && (
-        <SentimentResult result={mutation.data} />
+        <SentimentResultCard result={mutation.data} />
       )}
     </div>
   );
@@ -411,27 +439,32 @@ function SentimentSection() {
 
 function RAGResultCard({ result, rank }: { result: RAGResult; rank: number }) {
   return (
-    <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-2">
-      <div className="flex items-start justify-between gap-3">
-        <span className="text-xs font-mono text-text-muted shrink-0">#{rank}</span>
-        <p className="text-xs font-mono text-accent truncate flex-1">{result.source}</p>
-        <span className="text-xs text-text-muted font-mono shrink-0">
-          {Math.round(result.score * 100)}% match
-        </span>
-      </div>
-
-      {/* Relevance bar */}
-      <div className="h-1 bg-surface-base rounded-full overflow-hidden">
-        <div
-          className="h-full bg-accent rounded-full"
-          style={{ width: `${result.score * 100}%` }}
-        />
-      </div>
-
-      <p className="text-sm text-text-secondary leading-relaxed line-clamp-4">
-        {result.content}
-      </p>
-    </Card>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={motionConfig.stagger(rank - 1)}
+    >
+      <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <span className="text-xs font-mono text-text-muted shrink-0">#{rank}</span>
+          <p className="text-xs font-mono text-accent truncate flex-1">{result.source}</p>
+          <span className="text-xs text-text-muted font-mono shrink-0">
+            {Math.round(result.score * 100)}% match
+          </span>
+        </div>
+        <div className="h-1 bg-surface-base rounded-full overflow-hidden">
+          <motion.div
+            className="h-full bg-accent rounded-full"
+            initial={{ width: "0%" }}
+            animate={{ width: `${result.score * 100}%` }}
+            transition={{ duration: DURATION.slow, ease: EASE_ENTER, delay: (rank - 1) * 0.05 }}
+          />
+        </div>
+        <p className="text-sm text-text-secondary leading-relaxed line-clamp-4">
+          {result.content}
+        </p>
+      </Card>
+    </motion.div>
   );
 }
 
@@ -452,19 +485,17 @@ function KnowledgeSection() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
+      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
+        <h3 className="font-heading font-semibold text-base text-text-primary mb-2">
           Knowledge Base (RAG)
         </h3>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          Query your RAG-indexed trading documentation, SEBI regulations, strategy guides,
-          and custom notes. Results are ranked by relevance using ChromaDB vector search.
+        <p className="text-xs text-text-secondary leading-relaxed">
+          Query RAG-indexed trading docs, SEBI regs, strategy guides, and custom notes.
+          Ranked by relevance using ChromaDB vector search.
         </p>
       </Card>
 
-      {/* Search */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-5 space-y-3">
+      <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3">
         <div className="flex gap-2">
           <Input
             value={query}
@@ -477,6 +508,7 @@ function KnowledgeSection() {
             onClick={handleQuery}
             disabled={!query.trim() || mutation.isPending}
             className="shrink-0 gap-1.5"
+            size="sm"
           >
             {mutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -488,15 +520,13 @@ function KnowledgeSection() {
         </div>
       </Card>
 
-      {/* Loading */}
       {mutation.isPending && (
-        <div className="flex items-center gap-2 text-text-muted text-sm py-4 justify-center">
+        <div className="flex items-center gap-2 text-text-muted text-sm py-6 justify-center">
           <Loader2 className="w-4 h-4 animate-spin" />
           Searching knowledge base...
         </div>
       )}
 
-      {/* Error */}
       {mutation.isError && (
         <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
           <div className="flex items-center gap-2 text-loss text-sm">
@@ -513,10 +543,9 @@ function KnowledgeSection() {
         </Card>
       )}
 
-      {/* Empty after query */}
       {mutation.isSuccess && results.length === 0 && (
         <Card className="bg-surface-card border border-border-default rounded-lg p-6 text-center">
-          <BookOpen className="w-8 h-8 text-text-muted mx-auto mb-3" />
+          <BookOpen className="w-7 h-7 text-text-muted mx-auto mb-2" />
           <p className="text-sm text-text-secondary">No results found.</p>
           <p className="text-xs text-text-muted mt-1">
             Knowledge base not indexed. Index your docs in AI Settings.
@@ -524,7 +553,6 @@ function KnowledgeSection() {
         </Card>
       )}
 
-      {/* Results */}
       {mutation.isSuccess && results.length > 0 && (
         <div className="space-y-3">
           <p className="text-xs text-text-muted px-1">
@@ -574,20 +602,17 @@ function AISettingsSection() {
 
   return (
     <div className="space-y-4">
-      {/* Live LLM status */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
+      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-heading font-semibold text-lg text-text-primary">
-            LLM Status
-          </h3>
+          <h3 className="font-heading font-semibold text-base text-text-primary">LLM Status</h3>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => refetch()}
             disabled={isLoading}
-            className="text-text-muted hover:text-text-primary gap-1.5"
+            className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
@@ -607,8 +632,8 @@ function AISettingsSection() {
         )}
 
         {data && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="bg-surface-base border border-border-default rounded-lg p-4">
+          <div className="grid grid-cols-1 gap-3">
+            <div className="bg-surface-base border border-border-default rounded-lg p-3">
               <p className="text-xs text-text-muted mb-1">Status</p>
               <div className="flex items-center gap-2">
                 {data.configured ? (
@@ -624,13 +649,13 @@ function AISettingsSection() {
                 )}
               </div>
             </div>
-            <div className="bg-surface-base border border-border-default rounded-lg p-4">
+            <div className="bg-surface-base border border-border-default rounded-lg p-3">
               <p className="text-xs text-text-muted mb-1">Provider</p>
               <p className="text-sm font-mono font-bold text-text-primary">
                 {data.provider || "—"}
               </p>
             </div>
-            <div className="bg-surface-base border border-border-default rounded-lg p-4">
+            <div className="bg-surface-base border border-border-default rounded-lg p-3">
               <p className="text-xs text-text-muted mb-1">Model</p>
               <p className="text-sm font-mono font-bold text-text-primary truncate">
                 {data.model || "—"}
@@ -640,50 +665,47 @@ function AISettingsSection() {
         )}
       </Card>
 
-      {/* Static config reference cards */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-4">
-          AI Settings
+      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
+        <h3 className="font-heading font-semibold text-base text-text-primary mb-3">
+          Configuration
         </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
-          Configure the LLM provider, model selection, and AI feature preferences.
-          All settings are persisted to workspace.json.
+        <p className="text-xs text-text-secondary leading-relaxed mb-4">
+          Configure the LLM provider, model selection, and AI preferences.
+          All settings persist to workspace.json.
         </p>
-        <div className="space-y-4">
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">LLM Provider</h4>
-            <p className="text-xs text-text-muted">
-              LM Studio (local), Ollama (local), OpenAI API, Anthropic API, or custom
-              OpenAI-compatible endpoint. Local providers are recommended for privacy.
-            </p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">Model Selection</h4>
-            <p className="text-xs text-text-muted">
-              Choose from available models on your provider. For local: Qwen 3.5, Llama 3,
-              Mistral. Model size affects speed vs quality tradeoff.
-            </p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">API Keys</h4>
-            <p className="text-xs text-text-muted">
-              API keys for cloud providers (stored in workspace.json with _ref pattern).
-              Not needed for local LLM providers.
-            </p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">RAG Settings</h4>
-            <p className="text-xs text-text-muted">
-              ChromaDB collection path, embedding model, chunk size, retrieval top-k.
-              Controls how the knowledge base is indexed and queried.
-            </p>
-          </div>
+        <div className="space-y-3">
+          {[
+            {
+              title: "LLM Provider",
+              desc: "LM Studio (local), Ollama (local), OpenAI API, Anthropic API, or custom OpenAI-compatible endpoint.",
+            },
+            {
+              title: "Model Selection",
+              desc: "Choose from available models. For local: Qwen 3.5, Llama 3, Mistral. Model size affects speed vs quality.",
+            },
+            {
+              title: "API Keys",
+              desc: "API keys for cloud providers stored in workspace.json with _ref pattern. Not needed for local LLMs.",
+            },
+            {
+              title: "RAG Settings",
+              desc: "ChromaDB collection path, embedding model, chunk size, retrieval top-k. Controls knowledge base indexing.",
+            },
+          ].map((item) => (
+            <div
+              key={item.title}
+              className="bg-surface-base border border-border-default rounded-lg p-3"
+            >
+              <h4 className="text-xs font-semibold text-text-primary mb-0.5">{item.title}</h4>
+              <p className="text-xs text-text-muted">{item.desc}</p>
+            </div>
+          ))}
         </div>
       </Card>
 
       <Card className="bg-surface-card border border-border-default rounded-lg p-4">
         <Badge className="bg-atm-bg text-warning text-xs">Coming in v0.2.0</Badge>
-        <p className="text-sm text-text-muted mt-2">
+        <p className="text-xs text-text-muted mt-2">
           Settings form controls will be available in the next release. Use workspace.json
           directly to configure provider, model, and ChromaDB paths in the meantime.
         </p>
@@ -693,72 +715,191 @@ function AISettingsSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Floating pill navigation — bottom center
+// ---------------------------------------------------------------------------
+
+interface FloatingPillNavProps {
+  active: SectionId;
+  onSelect: (id: SectionId) => void;
+}
+
+function FloatingPillNav({ active, onSelect }: FloatingPillNavProps) {
+  const reducedMotion = motionConfig.prefersReducedMotion();
+
+  return (
+    <div
+      role="navigation"
+      aria-label="AI section navigation"
+      className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30"
+    >
+      <div className="flex items-center gap-0.5 bg-surface-card/90 backdrop-blur-md border border-border-default rounded-full px-1.5 py-1.5 shadow-lg">
+        {SECTIONS.map((section) => {
+          const Icon = section.icon;
+          const isActive = active === section.id;
+
+          return (
+            <button
+              key={section.id}
+              onClick={() => onSelect(section.id)}
+              aria-current={isActive ? "true" : undefined}
+              aria-label={section.label}
+              className="relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              style={{ zIndex: 1 }}
+            >
+              {/* Sliding pill background */}
+              {isActive && (
+                <motion.span
+                  layoutId={reducedMotion ? undefined : "pill-indicator"}
+                  className="absolute inset-0 bg-accent rounded-full"
+                  style={{ zIndex: -1 }}
+                  transition={
+                    reducedMotion
+                      ? { duration: 0 }
+                      : { type: "spring", stiffness: 380, damping: 30 }
+                  }
+                />
+              )}
+              <Icon
+                className={`w-3.5 h-3.5 shrink-0 transition-colors duration-150 ${
+                  isActive ? "text-white" : "text-text-muted"
+                }`}
+              />
+              <span
+                className={`transition-colors duration-150 ${
+                  isActive ? "text-white" : "text-text-secondary"
+                }`}
+              >
+                {section.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Overlay panel — slides in from right for non-chat sections
+// ---------------------------------------------------------------------------
+
+interface OverlayPanelProps {
+  title: string;
+  icon: typeof MessageSquare;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProps) {
+  return (
+    <motion.div
+      className="absolute inset-y-0 right-0 w-full max-w-lg z-20 flex flex-col bg-surface-base border-l border-border-default shadow-2xl"
+      initial={{ x: "100%", opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: "100%", opacity: 0 }}
+      transition={{ duration: DURATION.slow, ease: EASE_ENTER }}
+    >
+      {/* Panel header */}
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-border-default bg-surface-card shrink-0">
+        <Icon className="w-4 h-4 text-accent" />
+        <h2 className="font-heading font-semibold text-sm text-text-primary flex-1">{title}</h2>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label="Close panel"
+          className="h-7 w-7 text-text-muted hover:text-text-primary rounded-full"
+        >
+          <X className="w-4 h-4" />
+        </Button>
+      </div>
+
+      {/* Panel scrollable content — pb-24 clears the floating pill nav */}
+      <ScrollArea className="flex-1">
+        <div className="p-5 pb-24 max-w-full">{children}</div>
+      </ScrollArea>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section content map (memoised outside render — no closures on state)
+// ---------------------------------------------------------------------------
+
+const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
+  chat: <ChatSection />,
+  signals: <SignalsSection />,
+  sentiment: <SentimentSection />,
+  knowledge: <KnowledgeSection />,
+  settings: <AISettingsSection />,
+};
+
+const SECTION_LABELS: Record<SectionId, string> = {
+  chat: "AI Chat",
+  signals: "Signals",
+  sentiment: "Sentiment Analysis",
+  knowledge: "Knowledge Base",
+  settings: "AI Settings",
+};
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 export default function AIRoute() {
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
 
-  const sectionContent: Record<SectionId, React.ReactNode> = {
-    chat: <ChatSection />,
-    signals: <SignalsSection />,
-    sentiment: <SentimentSection />,
-    knowledge: <KnowledgeSection />,
-    settings: <AISettingsSection />,
-  };
+  const isOverlay = OVERLAY_SECTIONS.has(activeSection);
+  const sectionDef = SECTIONS.find((s) => s.id === activeSection);
+
+  function handleSelectSection(id: SectionId) {
+    setActiveSection(id);
+  }
+
+  function handleCloseOverlay() {
+    setActiveSection("chat");
+  }
 
   return (
     <div className="h-full bg-surface-base flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="border-b border-border-default bg-surface-card px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Bot className="w-6 h-6 text-accent" />
+      {/* Top header bar */}
+      <div className="border-b border-border-default bg-surface-card px-5 py-3 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <Bot className="w-5 h-5 text-accent" />
           <div>
-            <h1 className="font-heading font-bold text-lg text-text-primary">AI Center</h1>
-            <p className="text-xxs text-text-muted">
-              Local LLM advisor, ML signals, sentiment analysis — your AI trading companion
+            <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
+              AI Center
+            </h1>
+            <p className="text-xxs text-text-muted mt-0.5">
+              Local LLM advisor · ML signals · Sentiment · Knowledge base
             </p>
           </div>
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <nav aria-label="Section navigation" className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
-          {SECTIONS.map((section) => {
-            const Icon = section.icon;
-            const isActive = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                onClick={() => setActiveSection(section.id)}
-                aria-current={isActive ? "true" : undefined}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors border-l-2 ${
-                  isActive
-                    ? "text-accent bg-accent/10 border-accent"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {section.label}
-                <ChevronRight
-                  className={`w-3 h-3 ml-auto ${isActive ? "opacity-100" : "opacity-0"}`}
-                />
-              </button>
-            );
-          })}
-        </nav>
+      {/* Main content area — relative for overlay positioning */}
+      <div className="flex-1 relative overflow-hidden">
+        {/* Chat is always rendered underneath (full height) */}
+        <div className="absolute inset-0">
+          <ChatSection />
+        </div>
 
-        {/* Content — chat fills the pane; other sections scroll inside padded container */}
-        {activeSection === "chat" ? (
-          <div className="flex-1 overflow-hidden animate-fade-in-up">
-            {sectionContent[activeSection]}
-          </div>
-        ) : (
-          <ScrollArea className="flex-1">
-            <div className="p-6 max-w-4xl animate-fade-in-up">{sectionContent[activeSection]}</div>
-          </ScrollArea>
-        )}
+        {/* Overlay panels slide in from right over the chat */}
+        <AnimatePresence>
+          {isOverlay && sectionDef && (
+            <OverlayPanel
+              key={activeSection}
+              title={SECTION_LABELS[activeSection]}
+              icon={sectionDef.icon}
+              onClose={handleCloseOverlay}
+            >
+              {SECTION_CONTENT[activeSection]}
+            </OverlayPanel>
+          )}
+        </AnimatePresence>
+
+        {/* Floating pill nav — always visible, sits above everything */}
+        <FloatingPillNav active={activeSection} onSelect={handleSelectSection} />
       </div>
     </div>
   );

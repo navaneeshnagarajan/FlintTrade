@@ -9,7 +9,9 @@ import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { motion, AnimatePresence } from "framer-motion";
 import {
+  Check,
   CheckCircle,
   XCircle,
   Loader2,
@@ -25,6 +27,7 @@ import {
   Bot,
   type LucideIcon,
 } from "lucide-react";
+import { motionConfig } from "@/lib/motion";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -110,30 +113,54 @@ function personaRoute(persona: Persona): string {
 }
 
 // ---------------------------------------------------------------------------
-// Step progress indicator
+// Step progress indicator — clickable dots
 // ---------------------------------------------------------------------------
 
 interface StepIndicatorProps {
   total: number;
   current: number;
+  /** Optional: called when user clicks a completed step dot */
+  onStepClick?: (index: number) => void;
 }
 
-function StepIndicator({ total, current }: StepIndicatorProps) {
+function StepIndicator({ total, current, onStepClick }: StepIndicatorProps) {
+  const reduced = motionConfig.prefersReducedMotion();
+
   return (
-    <div className="flex items-center gap-2 justify-center font-mono text-xs">
-      {Array.from({ length: total }, (_, i) => (
-        <div
-          key={i}
-          className={[
-            "h-1.5 rounded-full transition-all duration-300",
-            i < current
-              ? "w-6 bg-profit"
-              : i === current
-                ? "w-6 bg-primary"
-                : "w-4 bg-border-default",
-          ].join(" ")}
-        />
-      ))}
+    <div className="flex items-center gap-3 justify-center" role="tablist" aria-label="Setup steps">
+      {Array.from({ length: total }, (_, i) => {
+        const isCompleted = i < current;
+        const isActive = i === current;
+        const isClickable = isCompleted && onStepClick !== undefined;
+
+        return (
+          <button
+            key={i}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            aria-label={`Step ${i + 1}${isCompleted ? " (completed)" : isActive ? " (current)" : ""}`}
+            disabled={!isClickable}
+            onClick={isClickable ? () => onStepClick(i) : undefined}
+            className={[
+              "relative flex items-center justify-center rounded-full transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+              isActive ? "size-5 bg-primary" : isCompleted ? "size-4 bg-profit cursor-pointer hover:ring-2 hover:ring-profit/40" : "size-3 bg-border-default",
+              !isClickable && "cursor-default",
+            ].join(" ")}
+          >
+            {isActive && !reduced && (
+              <motion.span
+                layoutId="step-active-ring"
+                className="absolute inset-0 rounded-full ring-2 ring-primary/40"
+                transition={motionConfig.transitions.tab}
+              />
+            )}
+            {isCompleted && (
+              <Check className="size-2.5 text-surface-base" strokeWidth={3} />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -226,12 +253,14 @@ function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
         <Label htmlFor="host" className="text-text-secondary text-xs uppercase tracking-wider">
           OpenAlgo URL
         </Label>
-        <Input
-          id="host"
-          placeholder="http://localhost:5000"
-          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-          {...register("host")}
-        />
+        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+          <Input
+            id="host"
+            placeholder="http://localhost:5000"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+            {...register("host")}
+          />
+        </div>
         {errors.host && (
           <p className="text-red-400 text-xs">{errors.host.message}</p>
         )}
@@ -241,13 +270,15 @@ function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
         <Label htmlFor="apiKey" className="text-text-secondary text-xs uppercase tracking-wider">
           API Key
         </Label>
-        <Input
-          id="apiKey"
-          type="password"
-          placeholder="Your OpenAlgo API key"
-          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-          {...register("apiKey")}
-        />
+        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+          <Input
+            id="apiKey"
+            type="password"
+            placeholder="Your OpenAlgo API key"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+            {...register("apiKey")}
+          />
+        </div>
         {errors.apiKey && (
           <p className="text-red-400 text-xs">{errors.apiKey.message}</p>
         )}
@@ -257,12 +288,14 @@ function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
         <Label htmlFor="wsPort" className="text-text-secondary text-xs uppercase tracking-wider">
           WebSocket Port
         </Label>
-        <Input
-          id="wsPort"
-          placeholder="8765"
-          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-          {...register("wsPort")}
-        />
+        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+          <Input
+            id="wsPort"
+            placeholder="8765"
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+            {...register("wsPort")}
+          />
+        </div>
         {errors.wsPort && (
           <p className="text-red-400 text-xs">{errors.wsPort.message}</p>
         )}
@@ -491,12 +524,14 @@ function NameInput({ value, onChange }: NameInputProps) {
       <Label className="text-text-secondary text-xs uppercase tracking-wider">
         What should we call you?
       </Label>
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Trader"
-        className="h-9 text-sm border-border-default rounded-md font-sans bg-surface-base text-text-primary"
-      />
+      <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Trader"
+          className="h-9 text-sm border-border-default rounded-md font-sans bg-surface-base text-text-primary"
+        />
+      </div>
     </div>
   );
 }
@@ -657,14 +692,16 @@ function TradingDefaultsStep({ onComplete, defaultValues }: TradingDefaultsStepP
         <Label htmlFor="defaultQty" className="text-text-secondary text-xs uppercase tracking-wider">
           Default Quantity / Lots
         </Label>
-        <Input
-          id="defaultQty"
-          type="number"
-          min={1}
-          max={9999}
-          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-          {...register("defaultQty", { valueAsNumber: true })}
-        />
+        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+          <Input
+            id="defaultQty"
+            type="number"
+            min={1}
+            max={9999}
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+            {...register("defaultQty", { valueAsNumber: true })}
+          />
+        </div>
         {errors.defaultQty && (
           <p className="text-red-400 text-xs">{errors.defaultQty.message}</p>
         )}
@@ -709,13 +746,15 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
           <Label htmlFor="maxPositionLots" className="text-text-secondary text-xs uppercase tracking-wider">
             Max Position Lots
           </Label>
-          <Input
-            id="maxPositionLots"
-            type="number"
-            min={1}
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("maxPositionLots", { valueAsNumber: true })}
-          />
+          <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+            <Input
+              id="maxPositionLots"
+              type="number"
+              min={1}
+              className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+              {...register("maxPositionLots", { valueAsNumber: true })}
+            />
+          </div>
           {errors.maxPositionLots && (
             <p className="text-red-400 text-xs">{errors.maxPositionLots.message}</p>
           )}
@@ -725,13 +764,15 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
           <Label htmlFor="maxOrdersPerMin" className="text-text-secondary text-xs uppercase tracking-wider">
             Max Orders / Min
           </Label>
-          <Input
-            id="maxOrdersPerMin"
-            type="number"
-            min={1}
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("maxOrdersPerMin", { valueAsNumber: true })}
-          />
+          <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+            <Input
+              id="maxOrdersPerMin"
+              type="number"
+              min={1}
+              className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+              {...register("maxOrdersPerMin", { valueAsNumber: true })}
+            />
+          </div>
           {errors.maxOrdersPerMin && (
             <p className="text-red-400 text-xs">{errors.maxOrdersPerMin.message}</p>
           )}
@@ -741,13 +782,15 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
           <Label htmlFor="mtmStoploss" className="text-text-secondary text-xs uppercase tracking-wider">
             MTM Stop-loss (INR)
           </Label>
-          <Input
-            id="mtmStoploss"
-            type="number"
-            min={0}
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("mtmStoploss", { valueAsNumber: true })}
-          />
+          <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+            <Input
+              id="mtmStoploss"
+              type="number"
+              min={0}
+              className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+              {...register("mtmStoploss", { valueAsNumber: true })}
+            />
+          </div>
           {errors.mtmStoploss && (
             <p className="text-red-400 text-xs">{errors.mtmStoploss.message}</p>
           )}
@@ -757,13 +800,15 @@ function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
           <Label htmlFor="mtmTarget" className="text-text-secondary text-xs uppercase tracking-wider">
             MTM Target (INR)
           </Label>
-          <Input
-            id="mtmTarget"
-            type="number"
-            min={0}
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("mtmTarget", { valueAsNumber: true })}
-          />
+          <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+            <Input
+              id="mtmTarget"
+              type="number"
+              min={0}
+              className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+              {...register("mtmTarget", { valueAsNumber: true })}
+            />
+          </div>
           {errors.mtmTarget && (
             <p className="text-red-400 text-xs">{errors.mtmTarget.message}</p>
           )}
@@ -827,18 +872,20 @@ function LlmStep({ onComplete }: LlmStepProps) {
         <Label htmlFor="model" className="text-text-secondary text-xs uppercase tracking-wider">
           Model
         </Label>
-        <Input
-          id="model"
-          placeholder={
-            provider === "lmstudio" || provider === "ollama"
-              ? "qwen3-9b"
-              : provider === "anthropic"
-                ? "claude-3-5-haiku-20241022"
-                : "gpt-4o-mini"
-          }
-          className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-          {...register("model")}
-        />
+        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+          <Input
+            id="model"
+            placeholder={
+              provider === "lmstudio" || provider === "ollama"
+                ? "qwen3-9b"
+                : provider === "anthropic"
+                  ? "claude-3-5-haiku-20241022"
+                  : "gpt-4o-mini"
+            }
+            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+            {...register("model")}
+          />
+        </div>
         {errors.model && <p className="text-red-400 text-xs">{errors.model.message}</p>}
       </div>
 
@@ -847,12 +894,14 @@ function LlmStep({ onComplete }: LlmStepProps) {
           <Label htmlFor="llmHost" className="text-text-secondary text-xs uppercase tracking-wider">
             Local Host URL
           </Label>
-          <Input
-            id="llmHost"
-            placeholder={provider === "lmstudio" ? "http://localhost:1234" : "http://localhost:11434"}
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("host")}
-          />
+          <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
+            <Input
+              id="llmHost"
+              placeholder={provider === "lmstudio" ? "http://localhost:1234" : "http://localhost:11434"}
+              className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
+              {...register("host")}
+            />
+          </div>
         </div>
       )}
 
@@ -1416,22 +1465,63 @@ export default function SetupRoute() {
   const isDoneStep =
     (mode === "guided" && step === 6) || (mode === "advanced" && step === 8);
 
+  const reduced = motionConfig.prefersReducedMotion();
+
+  // Slide variants: enter from right, exit to left
+  const stepVariants = {
+    initial: { opacity: 0, x: reduced ? 0 : 20 },
+    animate: {
+      opacity: 1,
+      x: 0,
+      transition: { duration: motionConfig.duration.slow, ease: motionConfig.ease.enter },
+    },
+    exit: {
+      opacity: 0,
+      x: reduced ? 0 : -20,
+      transition: { duration: motionConfig.duration.fast, ease: motionConfig.ease.exit },
+    },
+  };
+
   return (
     <div className="min-h-screen bg-surface-base flex items-center justify-center p-4">
       <div className="max-w-lg w-full space-y-6">
         {/* Header */}
         <div className="text-center space-y-1">
           <p className="text-text-muted text-xxs uppercase tracking-widest">FlintTrade Setup</p>
-          <h2 className="font-heading font-bold text-lg text-text-primary">{stepLabel}</h2>
+          <AnimatePresence mode="wait">
+            <motion.h2
+              key={`label-${step}`}
+              initial={{ opacity: 0, y: reduced ? 0 : -4 }}
+              animate={{ opacity: 1, y: 0, transition: { duration: motionConfig.duration.normal, ease: motionConfig.ease.enter } }}
+              exit={{ opacity: 0, y: reduced ? 0 : 4, transition: { duration: motionConfig.duration.fast, ease: motionConfig.ease.exit } }}
+              className="font-heading font-bold text-lg text-text-primary"
+            >
+              {stepLabel}
+            </motion.h2>
+          </AnimatePresence>
         </div>
 
-        {/* Progress */}
-        <StepIndicator total={totalSteps} current={step} />
+        {/* Progress dots */}
+        <StepIndicator
+          total={totalSteps}
+          current={step}
+          onStepClick={(i) => setStep(i)}
+        />
 
-        {/* Card */}
-        <Card className="bg-surface-card border-border-default">
-          <CardContent key={step} className="pt-6 pb-6 px-6 animate-fade-in-up">
-            {renderStep()}
+        {/* Card with slide transitions */}
+        <Card className="bg-surface-card border-border-default overflow-hidden">
+          <CardContent className="pt-6 pb-6 px-6">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={step}
+                variants={stepVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+              >
+                {renderStep()}
+              </motion.div>
+            </AnimatePresence>
           </CardContent>
         </Card>
 

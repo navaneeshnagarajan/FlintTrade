@@ -1,13 +1,12 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
   FlaskConical,
   PlayCircle,
-  Settings2,
   TrendingUp,
   BarChart3,
-  ChevronRight,
   Loader2,
   AlertCircle,
   RefreshCw,
@@ -15,9 +14,11 @@ import {
   Square,
   Activity,
   Clock,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
 } from "lucide-react";
 import { AreaChart, BarChart } from "@tremor/react";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { GlassCard } from "@/components/ui/GlassCard";
+import TabTransition from "@/components/motion/TabTransition";
+import { AnimatedCounter } from "@/components/magicui/animated-counter";
+import { motionConfig } from "@/lib/motion";
 import {
   runBacktest,
   getStrategies,
@@ -53,24 +58,22 @@ import {
 } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
-// Section registry
+// Tab registry — 4 primary horizontal tabs
 // ---------------------------------------------------------------------------
 
-type SectionId = "backtest" | "forward-test" | "optimize" | "results" | "settings";
+type TabId = "backtest" | "forward-test" | "optimize" | "results";
 
-interface SectionDef {
-  id: SectionId;
+interface TabDef {
+  id: TabId;
   label: string;
   icon: typeof FlaskConical;
-  desc: string;
 }
 
-const SECTIONS: SectionDef[] = [
-  { id: "backtest", label: "Backtest", icon: FlaskConical, desc: "Test strategies on historical data" },
-  { id: "forward-test", label: "Forward Test", icon: PlayCircle, desc: "Paper trade strategies in live market" },
-  { id: "optimize", label: "Optimize", icon: TrendingUp, desc: "Walk-forward optimization" },
-  { id: "results", label: "Results", icon: BarChart3, desc: "Performance metrics & comparison" },
-  { id: "settings", label: "Lab Settings", icon: Settings2, desc: "Module-specific configuration" },
+const TABS: TabDef[] = [
+  { id: "backtest", label: "Backtest", icon: FlaskConical },
+  { id: "forward-test", label: "Forward Test", icon: PlayCircle },
+  { id: "optimize", label: "Optimize", icon: TrendingUp },
+  { id: "results", label: "Results", icon: BarChart3 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -78,7 +81,11 @@ const SECTIONS: SectionDef[] = [
 // ---------------------------------------------------------------------------
 
 function fmtInr(value: number): string {
-  return value.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
+  return value.toLocaleString("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  });
 }
 
 function fmtPct(value: number): string {
@@ -90,7 +97,62 @@ function fmtNum(value: number, decimals = 2): string {
 }
 
 // ---------------------------------------------------------------------------
-// Metrics card grid
+// AnimatedMetricCard — uses AnimatedCounter for numeric values on change
+// ---------------------------------------------------------------------------
+
+interface AnimatedMetricCardProps {
+  label: string;
+  /** Raw numeric value — drives the AnimatedCounter */
+  numericValue: number;
+  /** Formatted display string (used when not animatable, e.g. "∞", "—") */
+  displayValue: string;
+  /** Whether to animate (only for finite numbers) */
+  animate?: boolean;
+  positive?: boolean | null;
+  formatter?: (v: number) => string;
+}
+
+function AnimatedMetricCard({
+  label,
+  numericValue,
+  displayValue,
+  animate = true,
+  positive,
+  formatter,
+}: AnimatedMetricCardProps) {
+  const valueColor =
+    positive === true
+      ? "text-profit"
+      : positive === false
+        ? "text-loss"
+        : "text-text-primary";
+
+  const isFiniteNumber =
+    animate && isFinite(numericValue) && displayValue !== "—";
+
+  return (
+    <GlassCard className="p-4 text-center gap-1">
+      <p className="text-xs text-text-muted mb-1 uppercase tracking-wider">
+        {label}
+      </p>
+      <p className={`text-sm font-mono font-semibold ${valueColor}`}>
+        {isFiniteNumber ? (
+          <AnimatedCounter
+            value={numericValue}
+            formatter={formatter}
+            duration={1.2}
+            className={valueColor}
+          />
+        ) : (
+          displayValue
+        )}
+      </p>
+    </GlassCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Standard MetricCard (non-animated) — kept for inline use
 // ---------------------------------------------------------------------------
 
 interface MetricCardProps {
@@ -107,15 +169,19 @@ function MetricCard({ label, value, positive }: MetricCardProps) {
         ? "text-loss"
         : "text-text-primary";
   return (
-    <div className="bg-surface-base border border-border-default rounded-lg p-4 text-center">
-      <p className="text-xs text-text-muted mb-1 uppercase tracking-wider">{label}</p>
-      <p className={`text-sm font-mono font-semibold ${valueColor}`}>{value}</p>
-    </div>
+    <GlassCard className="p-4 text-center gap-1">
+      <p className="text-xs text-text-muted mb-1 uppercase tracking-wider">
+        {label}
+      </p>
+      <p className={`text-sm font-mono font-semibold ${valueColor}`}>
+        {value}
+      </p>
+    </GlassCard>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Equity curve — Tremor AreaChart
+// Equity curve — Tremor AreaChart wrapped in fade-in motion.div
 // ---------------------------------------------------------------------------
 
 interface EquityCurveProps {
@@ -126,7 +192,6 @@ interface EquityCurveProps {
 function EquityCurve({ curve, initialEquity }: EquityCurveProps) {
   if (curve.length === 0) return null;
 
-  // Sample down to at most 120 points for performance
   const step = Math.max(1, Math.floor(curve.length / 120));
   const sampled = curve
     .filter((_, i) => i % step === 0)
@@ -139,19 +204,25 @@ function EquityCurve({ curve, initialEquity }: EquityCurveProps) {
   const isPositive = lastEquity >= initialEquity;
 
   return (
-    <AreaChart
-      data={sampled}
-      index="date"
-      categories={["Equity"]}
-      colors={[isPositive ? "emerald" : "red"]}
-      valueFormatter={(v: number) => fmtInr(v)}
-      showLegend={false}
-      showYAxis={true}
-      showXAxis={true}
-      showGridLines={false}
-      className="h-36 text-xs"
-      curveType="monotone"
-    />
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={motionConfig.transitions.fade}
+    >
+      <AreaChart
+        data={sampled}
+        index="date"
+        categories={["Equity"]}
+        colors={[isPositive ? "emerald" : "red"]}
+        valueFormatter={(v: number) => fmtInr(v)}
+        showLegend={false}
+        showYAxis={true}
+        showXAxis={true}
+        showGridLines={false}
+        className="h-36 text-xs"
+        curveType="monotone"
+      />
+    </motion.div>
   );
 }
 
@@ -166,13 +237,13 @@ interface BacktestResultDisplayProps {
 function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
   const { metrics, trades, equity_curve, final_equity } = result;
   const totalReturnPositive = metrics.total_return >= 0;
-  const initialEquity = equity_curve.length > 0 ? equity_curve[0].equity : final_equity;
+  const initialEquity =
+    equity_curve.length > 0 ? equity_curve[0].equity : final_equity;
 
-  // Group closed trades by month for monthly P&L bar chart
   const monthlyPnl = useMemo(() => {
     const grouped: Record<string, number> = {};
     trades.forEach((t) => {
-      const month = t.exit_timestamp.slice(0, 7); // YYYY-MM
+      const month = t.exit_timestamp.slice(0, 7);
       grouped[month] = (grouped[month] ?? 0) + t.pnl;
     });
     return Object.entries(grouped)
@@ -182,20 +253,51 @@ function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
 
   return (
     <div className="space-y-4">
-      {/* Metrics */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-        <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">Performance Metrics</h4>
+      {/* Key metrics with AnimatedCounter */}
+      <GlassCard className="p-5 gap-3">
+        <h4 className="font-heading font-semibold text-sm text-text-primary">
+          Performance Metrics
+        </h4>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* Animated key metrics */}
+          <AnimatedMetricCard
+            label="Sharpe Ratio"
+            numericValue={metrics.sharpe_ratio}
+            displayValue={fmtNum(metrics.sharpe_ratio)}
+            positive={metrics.sharpe_ratio > 1}
+            formatter={(v) => v.toFixed(2)}
+          />
+          <AnimatedMetricCard
+            label="Max Drawdown"
+            numericValue={Math.abs(metrics.max_drawdown) * 100}
+            displayValue={fmtPct(Math.abs(metrics.max_drawdown))}
+            positive={false}
+            formatter={(v) => v.toFixed(2) + "%"}
+          />
+          <AnimatedMetricCard
+            label="Win Rate"
+            numericValue={metrics.win_rate * 100}
+            displayValue={fmtPct(metrics.win_rate)}
+            positive={metrics.win_rate >= 0.5}
+            formatter={(v) => v.toFixed(2) + "%"}
+          />
+          <AnimatedMetricCard
+            label="Profit Factor"
+            numericValue={metrics.profit_factor}
+            displayValue={fmtNum(metrics.profit_factor)}
+            positive={metrics.profit_factor > 1}
+            formatter={(v) => v.toFixed(2)}
+          />
+          {/* Non-animated supplemental metrics */}
           <MetricCard
             label="Total Return"
             value={fmtPct(metrics.total_return)}
             positive={totalReturnPositive}
           />
-          <MetricCard label="Final Equity" value={fmtInr(final_equity)} positive={null} />
           <MetricCard
-            label="Sharpe Ratio"
-            value={fmtNum(metrics.sharpe_ratio)}
-            positive={metrics.sharpe_ratio > 1}
+            label="Final Equity"
+            value={fmtInr(final_equity)}
+            positive={null}
           />
           <MetricCard
             label="Sortino Ratio"
@@ -203,62 +305,63 @@ function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
             positive={metrics.sortino_ratio > 1}
           />
           <MetricCard
-            label="Max Drawdown"
-            value={fmtPct(Math.abs(metrics.max_drawdown))}
-            positive={false}
+            label="Total Trades"
+            value={String(metrics.total_trades)}
+            positive={null}
           />
-          <MetricCard
-            label="Win Rate"
-            value={fmtPct(metrics.win_rate)}
-            positive={metrics.win_rate >= 0.5}
-          />
-          <MetricCard
-            label="Profit Factor"
-            value={fmtNum(metrics.profit_factor)}
-            positive={metrics.profit_factor > 1}
-          />
-          <MetricCard label="Total Trades" value={String(metrics.total_trades)} positive={null} />
           <MetricCard
             label="Expectancy"
             value={fmtInr(metrics.expectancy)}
             positive={metrics.expectancy >= 0}
           />
         </div>
-      </Card>
+      </GlassCard>
 
-      {/* Equity curve — Tremor AreaChart */}
+      {/* Equity curve */}
       {equity_curve.length > 0 && (
-        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-          <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">Equity Curve</h4>
+        <GlassCard className="p-5 gap-3">
+          <h4 className="font-heading font-semibold text-sm text-text-primary">
+            Equity Curve
+          </h4>
           <EquityCurve curve={equity_curve} initialEquity={initialEquity} />
-        </Card>
+        </GlassCard>
       )}
 
-      {/* Monthly P&L breakdown — Tremor BarChart */}
+      {/* Monthly P&L breakdown */}
       {monthlyPnl.length > 0 && (
-        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-          <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">Monthly P&L</h4>
-          <BarChart
-            data={monthlyPnl}
-            index="month"
-            categories={["P&L"]}
-            colors={["emerald"]}
-            valueFormatter={(v: number) => fmtInr(v)}
-            showLegend={false}
-            showYAxis={true}
-            showXAxis={true}
-            showGridLines={false}
-            className="h-36 text-xs"
-          />
-        </Card>
+        <GlassCard className="p-5 gap-3">
+          <h4 className="font-heading font-semibold text-sm text-text-primary">
+            Monthly P&L
+          </h4>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={motionConfig.transitions.fade}
+          >
+            <BarChart
+              data={monthlyPnl}
+              index="month"
+              categories={["P&L"]}
+              colors={["emerald"]}
+              valueFormatter={(v: number) => fmtInr(v)}
+              showLegend={false}
+              showYAxis={true}
+              showXAxis={true}
+              showGridLines={false}
+              className="h-36 text-xs"
+            />
+          </motion.div>
+        </GlassCard>
       )}
 
       {/* Trade list */}
       {trades.length > 0 && (
-        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-          <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">
+        <GlassCard className="p-5 gap-3">
+          <h4 className="font-heading font-semibold text-sm text-text-primary">
             Trade Log
-            <span className="ml-2 text-xs text-text-muted font-normal">({trades.length} trades)</span>
+            <span className="ml-2 text-xs text-text-muted font-normal">
+              ({trades.length} trades)
+            </span>
           </h4>
           <div className="overflow-x-auto">
             <Table>
@@ -283,7 +386,9 @@ function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
                     <TableCell className="text-xxs text-text-secondary font-mono">
                       {trade.exit_timestamp.slice(0, 16).replace("T", " ")}
                     </TableCell>
-                    <TableCell className="text-xs font-mono text-text-primary">{trade.symbol}</TableCell>
+                    <TableCell className="text-xs font-mono text-text-primary">
+                      {trade.symbol}
+                    </TableCell>
                     <TableCell>
                       <Badge
                         className={`text-xxs ${
@@ -316,14 +421,323 @@ function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
               </TableBody>
             </Table>
           </div>
-        </Card>
+        </GlassCard>
       )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Backtest section
+// Backtest config panel — collapsible left panel
+// ---------------------------------------------------------------------------
+
+interface BacktestConfigPanelProps {
+  symbol: string;
+  onSymbol: (v: string) => void;
+  exchange: string;
+  onExchange: (v: string) => void;
+  interval: string;
+  onInterval: (v: string) => void;
+  startDate: string;
+  onStartDate: (v: string) => void;
+  endDate: string;
+  onEndDate: (v: string) => void;
+  initialCapital: number;
+  onInitialCapital: (v: number) => void;
+  positionSizePct: number;
+  onPositionSizePct: (v: number) => void;
+  selectedStrategy: string;
+  onStrategy: (v: string) => void;
+  strategiesQuery: ReturnType<typeof useQuery<StrategyInfo[], Error>>;
+  isRunning: boolean;
+  runError: Error | null;
+  onRun: () => void;
+  isSuccess: boolean;
+  onRetry: () => void;
+}
+
+function BacktestConfigPanel({
+  symbol,
+  onSymbol,
+  exchange,
+  onExchange,
+  interval,
+  onInterval,
+  startDate,
+  onStartDate,
+  endDate,
+  onEndDate,
+  initialCapital,
+  onInitialCapital,
+  positionSizePct,
+  onPositionSizePct,
+  selectedStrategy,
+  onStrategy,
+  strategiesQuery,
+  isRunning,
+  runError,
+  onRun,
+  isSuccess,
+  onRetry,
+}: BacktestConfigPanelProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const strategiesByCategory = (strategiesQuery.data ?? []).reduce<
+    Record<string, StrategyInfo[]>
+  >((acc, s) => {
+    const cat = s.category || "Other";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(s);
+    return acc;
+  }, {});
+
+  return (
+    <GlassCard className="flex flex-col gap-0 p-0 overflow-hidden">
+      {/* Panel header — always visible, click to collapse */}
+      <button
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex items-center justify-between px-4 py-3 border-b border-border-default hover:bg-surface-base/50 transition-colors w-full text-left"
+        aria-expanded={!collapsed}
+        aria-controls="backtest-config-body"
+      >
+        <div className="flex items-center gap-2">
+          <Settings2 className="w-3.5 h-3.5 text-text-muted" />
+          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+            Configuration
+          </span>
+        </div>
+        {collapsed ? (
+          <ChevronDown className="w-3.5 h-3.5 text-text-muted" />
+        ) : (
+          <ChevronUp className="w-3.5 h-3.5 text-text-muted" />
+        )}
+      </button>
+
+      {/* Collapsible body */}
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            id="backtest-config-body"
+            key="config-body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{
+              height: { duration: motionConfig.duration.slow, ease: motionConfig.ease.enter },
+              opacity: { duration: motionConfig.duration.normal },
+            }}
+            style={{ overflow: "hidden" }}
+          >
+            <div className="p-4 space-y-3">
+              {/* Strategy selector */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">Strategy</Label>
+                {strategiesQuery.isLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-text-muted h-9">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Loading…
+                  </div>
+                ) : strategiesQuery.isError ? (
+                  <div className="flex items-center gap-2 text-xs text-loss h-9">
+                    <AlertCircle className="w-3 h-3" />
+                    Failed
+                    <button
+                      onClick={() => strategiesQuery.refetch()}
+                      className="underline hover:no-underline"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <Select value={selectedStrategy} onValueChange={onStrategy}>
+                    <SelectTrigger className="bg-surface-base border-border-default text-text-primary text-sm">
+                      <SelectValue placeholder="Select a strategy…" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-surface-card border-border-default">
+                      {Object.entries(strategiesByCategory).map(
+                        ([category, strategies]) => (
+                          <div key={category}>
+                            <div className="px-2 py-1 text-xxs text-text-muted font-semibold uppercase tracking-wider">
+                              {category}
+                            </div>
+                            {strategies.map((s) => (
+                              <SelectItem
+                                key={s.name}
+                                value={s.name}
+                                className="text-text-primary text-sm"
+                              >
+                                <span className="font-mono">{s.name}</span>
+                                {s.description && (
+                                  <span className="ml-2 text-text-muted text-xs">
+                                    — {s.description}
+                                  </span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </div>
+                        ),
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              {/* Symbol */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">Symbol</Label>
+                <Input
+                  value={symbol}
+                  onChange={(e) => onSymbol(e.target.value.toUpperCase())}
+                  placeholder="NIFTY"
+                  className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+                />
+              </div>
+
+              {/* Exchange */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">Exchange</Label>
+                <Select value={exchange} onValueChange={onExchange}>
+                  <SelectTrigger className="bg-surface-base border-border-default text-text-primary text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-surface-card border-border-default">
+                    {["NFO", "NSE", "BSE", "MCX", "CDS"].map((ex) => (
+                      <SelectItem
+                        key={ex}
+                        value={ex}
+                        className="text-text-primary text-sm font-mono"
+                      >
+                        {ex}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Interval */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">Interval</Label>
+                <Select value={interval} onValueChange={onInterval}>
+                  <SelectTrigger className="bg-surface-base border-border-default text-text-primary text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-surface-card border-border-default">
+                    {["1m", "3m", "5m", "10m", "15m", "30m", "1h", "D", "W"].map(
+                      (iv) => (
+                        <SelectItem
+                          key={iv}
+                          value={iv}
+                          className="text-text-primary text-sm font-mono"
+                        >
+                          {iv}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Start date */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">Start Date</Label>
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => onStartDate(e.target.value)}
+                  className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+                />
+              </div>
+
+              {/* End date */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">End Date</Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => onEndDate(e.target.value)}
+                  className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+                />
+              </div>
+
+              {/* Initial capital */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">
+                  Capital (₹)
+                </Label>
+                <Input
+                  type="number"
+                  min={1000}
+                  step={10000}
+                  value={initialCapital}
+                  onChange={(e) => onInitialCapital(Number(e.target.value))}
+                  className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+                />
+              </div>
+
+              {/* Position size */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-text-secondary">
+                  Position Size (%)
+                </Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={positionSizePct}
+                  onChange={(e) => onPositionSizePct(Number(e.target.value))}
+                  className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
+                />
+              </div>
+
+              {/* Run button */}
+              <Button
+                onClick={onRun}
+                disabled={isRunning || !selectedStrategy}
+                className="w-full bg-accent text-white hover:bg-accent/90 font-sans text-sm"
+              >
+                {isRunning ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Running…
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 mr-2" />
+                    Run Backtest
+                  </>
+                )}
+              </Button>
+
+              {isSuccess && (
+                <p className="text-xs text-profit text-center">
+                  Backtest complete.
+                </p>
+              )}
+
+              {runError && (
+                <div className="flex items-center gap-2 text-xs text-loss">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span className="flex-1 truncate">{runError.message}</span>
+                  <button
+                    onClick={onRetry}
+                    className="flex items-center gap-1 underline hover:no-underline shrink-0"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </GlassCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Backtest section — split layout: config left, results right
 // ---------------------------------------------------------------------------
 
 interface BacktestSectionProps {
@@ -353,16 +767,6 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
     },
   });
 
-  // Group strategies by category
-  const strategiesByCategory = (strategiesQuery.data ?? []).reduce<
-    Record<string, StrategyInfo[]>
-  >((acc, s) => {
-    const cat = s.category || "Other";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(s);
-    return acc;
-  }, {});
-
   function handleRun() {
     if (!selectedStrategy) return;
     backtestMutation.mutate({
@@ -381,209 +785,59 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
   const runError = backtestMutation.error;
 
   return (
-    <div className="space-y-4">
-      {/* Config form */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-4">
-          Backtest Configuration
-        </h3>
+    <div className="flex gap-4 items-start">
+      {/* Left: collapsible config panel — fixed width */}
+      <div className="w-64 shrink-0">
+        <BacktestConfigPanel
+          symbol={symbol}
+          onSymbol={setSymbol}
+          exchange={exchange}
+          onExchange={setExchange}
+          interval={interval}
+          onInterval={setInterval}
+          startDate={startDate}
+          onStartDate={setStartDate}
+          endDate={endDate}
+          onEndDate={setEndDate}
+          initialCapital={initialCapital}
+          onInitialCapital={setInitialCapital}
+          positionSizePct={positionSizePct}
+          onPositionSizePct={setPositionSizePct}
+          selectedStrategy={selectedStrategy}
+          onStrategy={setSelectedStrategy}
+          strategiesQuery={strategiesQuery}
+          isRunning={isRunning}
+          runError={runError}
+          onRun={handleRun}
+          isSuccess={backtestMutation.isSuccess}
+          onRetry={handleRun}
+        />
+      </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Strategy selector */}
-          <div className="sm:col-span-2 space-y-1.5">
-            <Label className="text-xs text-text-secondary">Strategy</Label>
-            {strategiesQuery.isLoading ? (
-              <div className="flex items-center gap-2 text-xs text-text-muted h-9">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Loading strategies…
-              </div>
-            ) : strategiesQuery.isError ? (
-              <div className="flex items-center gap-2 text-xs text-loss h-9">
-                <AlertCircle className="w-3 h-3" />
-                Failed to load strategies
-                <button
-                  onClick={() => strategiesQuery.refetch()}
-                  className="underline hover:no-underline"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : (
-              <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
-                <SelectTrigger className="bg-surface-base border-border-default text-text-primary text-sm">
-                  <SelectValue placeholder="Select a strategy…" />
-                </SelectTrigger>
-                <SelectContent className="bg-surface-card border-border-default">
-                  {Object.entries(strategiesByCategory).map(([category, strategies]) => (
-                    <div key={category}>
-                      <div className="px-2 py-1 text-xxs text-text-muted font-semibold uppercase tracking-wider">
-                        {category}
-                      </div>
-                      {strategies.map((s) => (
-                        <SelectItem
-                          key={s.name}
-                          value={s.name}
-                          className="text-text-primary text-sm"
-                        >
-                          <span className="font-mono">{s.name}</span>
-                          {s.description && (
-                            <span className="ml-2 text-text-muted text-xs">— {s.description}</span>
-                          )}
-                        </SelectItem>
-                      ))}
-                    </div>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {/* Symbol */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-text-secondary">Symbol</Label>
-            <Input
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              placeholder="NIFTY"
-              className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
-            />
-          </div>
-
-          {/* Exchange */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-text-secondary">Exchange</Label>
-            <Select value={exchange} onValueChange={setExchange}>
-              <SelectTrigger className="bg-surface-base border-border-default text-text-primary text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-surface-card border-border-default">
-                {["NFO", "NSE", "BSE", "MCX", "CDS"].map((ex) => (
-                  <SelectItem key={ex} value={ex} className="text-text-primary text-sm font-mono">
-                    {ex}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Interval */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-text-secondary">Interval</Label>
-            <Select value={interval} onValueChange={setInterval}>
-              <SelectTrigger className="bg-surface-base border-border-default text-text-primary text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-surface-card border-border-default">
-                {["1m", "3m", "5m", "10m", "15m", "30m", "1h", "D", "W"].map((iv) => (
-                  <SelectItem key={iv} value={iv} className="text-text-primary text-sm font-mono">
-                    {iv}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Initial capital */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-text-secondary">Initial Capital (₹)</Label>
-            <Input
-              type="number"
-              min={1000}
-              step={10000}
-              value={initialCapital}
-              onChange={(e) => setInitialCapital(Number(e.target.value))}
-              className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
-            />
-          </div>
-
-          {/* Start date */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-text-secondary">Start Date</Label>
-            <Input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
-            />
-          </div>
-
-          {/* End date */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-text-secondary">End Date</Label>
-            <Input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
-            />
-          </div>
-
-          {/* Position size */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-text-secondary">Position Size (%)</Label>
-            <Input
-              type="number"
-              min={1}
-              max={100}
-              step={1}
-              value={positionSizePct}
-              onChange={(e) => setPositionSizePct(Number(e.target.value))}
-              className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
-            />
-          </div>
-        </div>
-
-        {/* Run button + error */}
-        <div className="mt-5 flex items-center gap-3">
-          <Button
-            onClick={handleRun}
-            disabled={isRunning || !selectedStrategy}
-            className="bg-accent text-white hover:bg-accent/90 font-sans text-sm px-5"
-          >
-            {isRunning ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Running…
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 mr-2" />
-                Run Backtest
-              </>
-            )}
-          </Button>
-
-          {backtestMutation.isSuccess && (
-            <span className="text-xs text-profit">Backtest complete.</span>
-          )}
-
-          {runError && (
-            <div className="flex items-center gap-2 text-xs text-loss">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>{runError.message}</span>
-              <button
-                onClick={handleRun}
-                className="flex items-center gap-1 underline hover:no-underline"
-              >
-                <RefreshCw className="w-3 h-3" />
-                Retry
-              </button>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* Results (inline — shown as soon as mutation succeeds) */}
-      {isRunning && (
-        <Card className="bg-surface-card border border-border-default rounded-lg p-6 flex items-center gap-3">
-          <Loader2 className="w-5 h-5 text-accent animate-spin" />
-          <p className="text-sm text-text-secondary">
-            Running backtest… this may take a few seconds.
-          </p>
-        </Card>
-      )}
-
-      {!isRunning && lastResult && <BacktestResultDisplay result={lastResult} />}
+      {/* Right: results panel */}
+      <div className="flex-1 min-w-0">
+        {isRunning ? (
+          <GlassCard className="p-6 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-accent animate-spin" />
+            <p className="text-sm text-text-secondary">
+              Running backtest… this may take a few seconds.
+            </p>
+          </GlassCard>
+        ) : lastResult ? (
+          <BacktestResultDisplay result={lastResult} />
+        ) : (
+          <GlassCard className="p-8 text-center gap-2">
+            <FlaskConical className="w-8 h-8 text-text-muted mx-auto mb-2" />
+            <p className="text-sm font-semibold text-text-secondary">
+              No results yet
+            </p>
+            <p className="text-xs text-text-muted">
+              Configure and run a backtest to see performance metrics, equity
+              curve, and trade log.
+            </p>
+          </GlassCard>
+        )}
+      </div>
     </div>
   );
 }
@@ -595,7 +849,6 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
 function useDuration(startedAt: string | null): string {
   const [now, setNow] = useState(() => Date.now());
 
-  // tick every second while a start time is present
   useState(() => {
     if (!startedAt) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -655,11 +908,15 @@ function ForwardTradesTable({ trades }: ForwardTradesTableProps) {
                 {trade.entry_timestamp.slice(0, 16).replace("T", " ")}
               </TableCell>
               <TableCell className="text-xxs text-text-secondary font-mono">
-                {trade.exit_timestamp
-                  ? trade.exit_timestamp.slice(0, 16).replace("T", " ")
-                  : <span className="text-warning">Open</span>}
+                {trade.exit_timestamp ? (
+                  trade.exit_timestamp.slice(0, 16).replace("T", " ")
+                ) : (
+                  <span className="text-warning">Open</span>
+                )}
               </TableCell>
-              <TableCell className="text-xs font-mono text-text-primary">{trade.symbol}</TableCell>
+              <TableCell className="text-xs font-mono text-text-primary">
+                {trade.symbol}
+              </TableCell>
               <TableCell>
                 <Badge
                   className={`text-xxs ${
@@ -698,7 +955,7 @@ function ForwardTradesTable({ trades }: ForwardTradesTableProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Forward test — live monitor panel (shown while strategy is running)
+// Forward monitor panel (shown while running)
 // ---------------------------------------------------------------------------
 
 interface ForwardMonitorProps {
@@ -719,20 +976,23 @@ function ForwardMonitor({ running, onStop, isStopping }: ForwardMonitorProps) {
   const trades = tradesQuery.data ?? [];
   const closedTrades = trades.filter((t) => t.exit_price > 0);
 
-  // Derive live metrics from accumulated trades
-  const totalPnl = running.virtual_pnl ?? closedTrades.reduce((sum, t) => sum + t.pnl, 0);
+  const totalPnl =
+    running.virtual_pnl ?? closedTrades.reduce((sum, t) => sum + t.pnl, 0);
   const wins = closedTrades.filter((t) => t.pnl > 0).length;
   const winRate = closedTrades.length > 0 ? wins / closedTrades.length : 0;
-  const grossWin = closedTrades.filter((t) => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
+  const grossWin = closedTrades
+    .filter((t) => t.pnl > 0)
+    .reduce((s, t) => s + t.pnl, 0);
   const grossLoss = Math.abs(
     closedTrades.filter((t) => t.pnl < 0).reduce((s, t) => s + t.pnl, 0),
   );
-  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
+  const profitFactor =
+    grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
 
   return (
     <div className="space-y-4">
       {/* Status bar */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
+      <GlassCard className="p-4 gap-0">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
@@ -744,7 +1004,9 @@ function ForwardMonitor({ running, onStop, isStopping }: ForwardMonitorProps) {
             <Badge className="bg-bullish-bg text-profit text-xs border-0">
               {running.status}
             </Badge>
-            <span className="text-xs text-text-muted font-mono">{running.symbol} / {running.exchange}</span>
+            <span className="text-xs text-text-muted font-mono">
+              {running.symbol} / {running.exchange}
+            </span>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5 text-xs text-text-muted">
@@ -772,17 +1034,43 @@ function ForwardMonitor({ running, onStop, isStopping }: ForwardMonitorProps) {
             </Button>
           </div>
         </div>
-      </Card>
+      </GlassCard>
 
-      {/* Live metrics */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-        <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">
+      {/* Live metrics — animated counters */}
+      <GlassCard className="p-5 gap-3">
+        <h4 className="font-heading font-semibold text-sm text-text-primary">
           Live Performance
           {tradesQuery.isFetching && (
             <Loader2 className="inline-block w-3 h-3 ml-2 animate-spin text-text-muted" />
           )}
         </h4>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <AnimatedMetricCard
+            label="Win Rate"
+            numericValue={winRate * 100}
+            displayValue={
+              closedTrades.length > 0 ? fmtPct(winRate) : "—"
+            }
+            animate={closedTrades.length > 0}
+            positive={winRate >= 0.5}
+            formatter={(v) => v.toFixed(2) + "%"}
+          />
+          <AnimatedMetricCard
+            label="Profit Factor"
+            numericValue={isFinite(profitFactor) ? profitFactor : 0}
+            displayValue={
+              profitFactor === Infinity
+                ? "∞"
+                : closedTrades.length > 0
+                  ? fmtNum(profitFactor)
+                  : "—"
+            }
+            animate={closedTrades.length > 0 && isFinite(profitFactor)}
+            positive={
+              profitFactor > 1 ? true : profitFactor === 0 ? null : false
+            }
+            formatter={(v) => v.toFixed(2)}
+          />
           <MetricCard
             label="Virtual P&L"
             value={fmtInr(totalPnl)}
@@ -799,11 +1087,6 @@ function ForwardMonitor({ running, onStop, isStopping }: ForwardMonitorProps) {
             positive={null}
           />
           <MetricCard
-            label="Win Rate"
-            value={closedTrades.length > 0 ? fmtPct(winRate) : "—"}
-            positive={winRate >= 0.5}
-          />
-          <MetricCard
             label="Gross Win"
             value={grossWin > 0 ? fmtInr(grossWin) : "—"}
             positive={grossWin > 0 ? true : null}
@@ -814,34 +1097,23 @@ function ForwardMonitor({ running, onStop, isStopping }: ForwardMonitorProps) {
             positive={false}
           />
           <MetricCard
-            label="Profit Factor"
-            value={
-              profitFactor === Infinity
-                ? "∞"
-                : closedTrades.length > 0
-                  ? fmtNum(profitFactor)
-                  : "—"
-            }
-            positive={profitFactor > 1 ? true : profitFactor === 0 ? null : false}
-          />
-          <MetricCard
             label="Open Trades"
             value={String(trades.length - closedTrades.length)}
             positive={null}
           />
         </div>
-      </Card>
+      </GlassCard>
 
       {/* Virtual trades table */}
-      <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-        <h4 className="font-heading font-semibold text-sm text-text-primary mb-3">
+      <GlassCard className="p-5 gap-3">
+        <h4 className="font-heading font-semibold text-sm text-text-primary">
           Virtual Trade Log
           <span className="ml-2 text-xs text-text-muted font-normal">
             ({trades.length} trade{trades.length !== 1 ? "s" : ""})
           </span>
         </h4>
         <ForwardTradesTable trades={trades} />
-      </Card>
+      </GlassCard>
     </div>
   );
 }
@@ -859,19 +1131,19 @@ function ForwardTestSection() {
   const [positionSizePct, setPositionSizePct] = useState(10);
   const [selectedStrategy, setSelectedStrategy] = useState("");
   const [ftState, setFtState] = useState<ForwardTestState>("idle");
-  const [activeStrategyName, setActiveStrategyName] = useState<string | null>(null);
+  const [activeStrategyName, setActiveStrategyName] = useState<string | null>(
+    null,
+  );
   const [stoppedSummary, setStoppedSummary] = useState<{
     trades: ForwardTrade[];
     pnl: number;
   } | null>(null);
 
-  // Strategy list (shared query key with BacktestSection)
   const strategiesQuery = useQuery<StrategyInfo[], Error>({
     queryKey: ["strategies"],
     queryFn: getStrategies,
   });
 
-  // Poll running strategies to find ours
   const runningQuery = useQuery<RunningStrategy[], Error>({
     queryKey: ["runningStrategies"],
     queryFn: getRunningStrategies,
@@ -879,14 +1151,14 @@ function ForwardTestSection() {
     enabled: ftState === "running",
   });
 
-  const activeRunning = runningQuery.data?.find(
-    (s) => s.name === activeStrategyName,
-  ) ?? null;
+  const activeRunning =
+    runningQuery.data?.find((s) => s.name === activeStrategyName) ?? null;
 
-  // Sync ftState if the backend reports the strategy stopped externally
   useState(() => {
     if (ftState === "running" && activeStrategyName && runningQuery.data) {
-      const found = runningQuery.data.find((s) => s.name === activeStrategyName);
+      const found = runningQuery.data.find(
+        (s) => s.name === activeStrategyName,
+      );
       if (!found) {
         setFtState("stopped");
       }
@@ -921,7 +1193,6 @@ function ForwardTestSection() {
   const stopMutation = useMutation<{ status: string }, Error, void>({
     mutationFn: () => stopStrategy(activeStrategyName!),
     onSuccess: async () => {
-      // Snapshot the last known trades + pnl before clearing
       const pnl = activeRunning?.virtual_pnl ?? 0;
       let lastTrades: ForwardTrade[] = [];
       try {
@@ -935,29 +1206,35 @@ function ForwardTestSection() {
     },
   });
 
-  // ---------- Render: config form ----------
   if (ftState === "idle" || ftState === "stopped") {
-    const closedTrades = stoppedSummary?.trades.filter((t) => t.exit_price > 0) ?? [];
+    const closedTrades =
+      stoppedSummary?.trades.filter((t) => t.exit_price > 0) ?? [];
     const wins = closedTrades.filter((t) => t.pnl > 0).length;
-    const winRate = closedTrades.length > 0 ? wins / closedTrades.length : 0;
-    const grossWin = closedTrades.filter((t) => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
+    const winRate =
+      closedTrades.length > 0 ? wins / closedTrades.length : 0;
+    const grossWin = closedTrades
+      .filter((t) => t.pnl > 0)
+      .reduce((s, t) => s + t.pnl, 0);
     const grossLoss = Math.abs(
       closedTrades.filter((t) => t.pnl < 0).reduce((s, t) => s + t.pnl, 0),
     );
-    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
+    const profitFactor =
+      grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
 
     return (
       <div className="space-y-4">
         {/* Stopped summary */}
         {ftState === "stopped" && stoppedSummary && (
-          <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-            <div className="flex items-center justify-between mb-3">
+          <GlassCard className="p-5 gap-3">
+            <div className="flex items-center justify-between">
               <h4 className="font-heading font-semibold text-sm text-text-primary">
                 Session Summary
               </h4>
-              <Badge className="bg-text-muted/10 text-text-muted text-xs border-0">Stopped</Badge>
+              <Badge className="bg-text-muted/10 text-text-muted text-xs border-0">
+                Stopped
+              </Badge>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <MetricCard
                 label="Final P&L"
                 value={fmtInr(stoppedSummary.pnl)}
@@ -982,26 +1259,30 @@ function ForwardTestSection() {
                       ? fmtNum(profitFactor)
                       : "—"
                 }
-                positive={profitFactor > 1 ? true : profitFactor === 0 ? null : false}
+                positive={
+                  profitFactor > 1 ? true : profitFactor === 0 ? null : false
+                }
               />
             </div>
             {stoppedSummary.trades.length > 0 && (
               <>
-                <h5 className="text-xs font-semibold text-text-secondary mb-2">
+                <h5 className="text-xs font-semibold text-text-secondary">
                   Trade Log
                   <span className="ml-2 text-text-muted font-normal">
-                    ({stoppedSummary.trades.length} trade{stoppedSummary.trades.length !== 1 ? "s" : ""})
+                    (
+                    {stoppedSummary.trades.length} trade
+                    {stoppedSummary.trades.length !== 1 ? "s" : ""})
                   </span>
                 </h5>
                 <ForwardTradesTable trades={stoppedSummary.trades} />
               </>
             )}
-          </Card>
+          </GlassCard>
         )}
 
         {/* Config form */}
-        <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-          <h3 className="font-heading font-semibold text-lg text-text-primary mb-4">
+        <GlassCard className="p-6 gap-4">
+          <h3 className="font-heading font-semibold text-lg text-text-primary">
             Forward Test Configuration
           </h3>
 
@@ -1026,30 +1307,37 @@ function ForwardTestSection() {
                   </button>
                 </div>
               ) : (
-                <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+                <Select
+                  value={selectedStrategy}
+                  onValueChange={setSelectedStrategy}
+                >
                   <SelectTrigger className="bg-surface-base border-border-default text-text-primary text-sm">
                     <SelectValue placeholder="Select a strategy…" />
                   </SelectTrigger>
                   <SelectContent className="bg-surface-card border-border-default">
-                    {Object.entries(strategiesByCategory).map(([category, strategies]) => (
-                      <div key={category}>
-                        <div className="px-2 py-1 text-xxs text-text-muted font-semibold uppercase tracking-wider">
-                          {category}
+                    {Object.entries(strategiesByCategory).map(
+                      ([category, strategies]) => (
+                        <div key={category}>
+                          <div className="px-2 py-1 text-xxs text-text-muted font-semibold uppercase tracking-wider">
+                            {category}
+                          </div>
+                          {strategies.map((s) => (
+                            <SelectItem
+                              key={s.name}
+                              value={s.name}
+                              className="text-text-primary text-sm"
+                            >
+                              <span className="font-mono">{s.name}</span>
+                              {s.description && (
+                                <span className="ml-2 text-text-muted text-xs">
+                                  — {s.description}
+                                </span>
+                              )}
+                            </SelectItem>
+                          ))}
                         </div>
-                        {strategies.map((s) => (
-                          <SelectItem
-                            key={s.name}
-                            value={s.name}
-                            className="text-text-primary text-sm"
-                          >
-                            <span className="font-mono">{s.name}</span>
-                            {s.description && (
-                              <span className="ml-2 text-text-muted text-xs">— {s.description}</span>
-                            )}
-                          </SelectItem>
-                        ))}
-                      </div>
-                    ))}
+                      ),
+                    )}
                   </SelectContent>
                 </Select>
               )}
@@ -1075,7 +1363,11 @@ function ForwardTestSection() {
                 </SelectTrigger>
                 <SelectContent className="bg-surface-card border-border-default">
                   {["NFO", "NSE", "BSE", "MCX", "CDS"].map((ex) => (
-                    <SelectItem key={ex} value={ex} className="text-text-primary text-sm font-mono">
+                    <SelectItem
+                      key={ex}
+                      value={ex}
+                      className="text-text-primary text-sm font-mono"
+                    >
                       {ex}
                     </SelectItem>
                   ))}
@@ -1085,7 +1377,9 @@ function ForwardTestSection() {
 
             {/* Virtual capital */}
             <div className="space-y-1.5">
-              <Label className="text-xs text-text-secondary">Virtual Capital (₹)</Label>
+              <Label className="text-xs text-text-secondary">
+                Virtual Capital (₹)
+              </Label>
               <Input
                 type="number"
                 min={1000}
@@ -1098,7 +1392,9 @@ function ForwardTestSection() {
 
             {/* Position size */}
             <div className="space-y-1.5">
-              <Label className="text-xs text-text-secondary">Position Size (%)</Label>
+              <Label className="text-xs text-text-secondary">
+                Position Size (%)
+              </Label>
               <Input
                 type="number"
                 min={1}
@@ -1112,7 +1408,7 @@ function ForwardTestSection() {
           </div>
 
           {/* Start button */}
-          <div className="mt-5 flex items-center gap-3">
+          <div className="flex items-center gap-3">
             <Button
               onClick={() => startMutation.mutate()}
               disabled={startMutation.isPending || !selectedStrategy}
@@ -1145,12 +1441,11 @@ function ForwardTestSection() {
               </div>
             )}
           </div>
-        </Card>
+        </GlassCard>
       </div>
     );
   }
 
-  // ---------- Render: running monitor ----------
   if (ftState === "running" && activeRunning) {
     return (
       <ForwardMonitor
@@ -1161,14 +1456,13 @@ function ForwardTestSection() {
     );
   }
 
-  // Waiting for backend to confirm running (transitional state)
   return (
-    <Card className="bg-surface-card border border-border-default rounded-lg p-6 flex items-center gap-3">
+    <GlassCard className="p-6 flex items-center gap-3">
       <Loader2 className="w-5 h-5 text-accent animate-spin" />
       <p className="text-sm text-text-secondary">
         Starting forward test… waiting for strategy engine.
       </p>
-    </Card>
+    </GlassCard>
   );
 }
 
@@ -1179,18 +1473,21 @@ function ForwardTestSection() {
 function OptimizeSection() {
   return (
     <div className="space-y-4">
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
+      <GlassCard className="p-6 gap-4">
+        <h3 className="font-heading font-semibold text-lg text-text-primary">
           Walk-Forward Optimization
         </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
-          Optimize strategy parameters using walk-forward analysis to avoid overfitting.
-          The optimizer splits historical data into in-sample (training) and out-of-sample
-          (validation) windows, finding parameters that generalize across market regimes.
+        <p className="text-sm text-text-secondary leading-relaxed">
+          Optimize strategy parameters using walk-forward analysis to avoid
+          overfitting. The optimizer splits historical data into in-sample
+          (training) and out-of-sample (validation) windows, finding parameters
+          that generalize across market regimes.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">Methods</h4>
+            <h4 className="text-sm font-semibold text-text-primary mb-1">
+              Methods
+            </h4>
             <ul className="text-xs text-text-secondary space-y-1">
               <li>Grid Search</li>
               <li>Random Search</li>
@@ -1199,7 +1496,9 @@ function OptimizeSection() {
             </ul>
           </div>
           <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">Objective Functions</h4>
+            <h4 className="text-sm font-semibold text-text-primary mb-1">
+              Objective Functions
+            </h4>
             <ul className="text-xs text-text-secondary space-y-1">
               <li>Maximize Sharpe Ratio</li>
               <li>Maximize Sortino Ratio</li>
@@ -1208,18 +1507,21 @@ function OptimizeSection() {
             </ul>
           </div>
         </div>
-      </Card>
-      <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-atm-bg text-warning text-xs">Coming in v0.2.0</Badge>
-        <p className="text-sm text-text-muted mt-2">
-          Parameter optimization UI will be available in the next release. The Python
-          backtest-engine package already supports walk-forward optimization via{" "}
+      </GlassCard>
+      <GlassCard className="p-4 gap-2">
+        <Badge className="bg-atm-bg text-warning text-xs">
+          Coming in v0.2.0
+        </Badge>
+        <p className="text-sm text-text-muted">
+          Parameter optimization UI will be available in the next release. The
+          Python backtest-engine package already supports walk-forward
+          optimization via{" "}
           <code className="text-xxs bg-surface-base px-1 py-0.5 rounded font-mono">
             Optimizer.optimize()
           </code>
           .
         </p>
-      </Card>
+      </GlassCard>
     </div>
   );
 }
@@ -1236,18 +1538,20 @@ function ResultsSection({ lastResult }: ResultsSectionProps) {
   if (lastResult) {
     return (
       <div className="space-y-4">
-        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-          <div className="flex items-center justify-between mb-3">
+        <GlassCard className="p-5 gap-3">
+          <div className="flex items-center justify-between">
             <h3 className="font-heading font-semibold text-lg text-text-primary">
               Last Backtest Results
             </h3>
-            <Badge className="bg-bullish-bg text-profit text-xs">Run complete</Badge>
+            <Badge className="bg-bullish-bg text-profit text-xs">
+              Run complete
+            </Badge>
           </div>
-          <p className="text-xs text-text-muted mb-4">
-            Showing results from the most recent backtest run. Run a new backtest from the
-            Backtest tab to refresh.
+          <p className="text-xs text-text-muted">
+            Showing results from the most recent backtest run. Run a new
+            backtest from the Backtest tab to refresh.
           </p>
-        </Card>
+        </GlassCard>
         <BacktestResultDisplay result={lastResult} />
       </div>
     );
@@ -1255,13 +1559,14 @@ function ResultsSection({ lastResult }: ResultsSectionProps) {
 
   return (
     <div className="space-y-4">
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
+      <GlassCard className="p-6 gap-4">
+        <h3 className="font-heading font-semibold text-lg text-text-primary">
           Performance Results
         </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
-          Compare backtest runs side by side, view equity curves, drawdown analysis, and
-          detailed trade logs. Export results to CSV or share with your team.
+        <p className="text-sm text-text-secondary leading-relaxed">
+          Compare backtest runs side by side, view equity curves, drawdown
+          analysis, and detailed trade logs. Export results to CSV or share
+          with your team.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
@@ -1283,137 +1588,118 @@ function ResultsSection({ lastResult }: ResultsSectionProps) {
             </div>
           ))}
         </div>
-      </Card>
-      <Card className="bg-surface-card border border-border-default rounded-lg p-4">
+      </GlassCard>
+      <GlassCard className="p-4 gap-2">
         <Badge className="bg-atm-bg text-warning text-xs">No data yet</Badge>
-        <p className="text-sm text-text-muted mt-2">
-          Run a backtest from the Backtest section to populate results here. Multi-run
-          comparison and CSV export will be available in v0.2.0.
+        <p className="text-sm text-text-muted">
+          Run a backtest from the Backtest section to populate results here.
+          Multi-run comparison and CSV export will be available in v0.2.0.
         </p>
-      </Card>
+      </GlassCard>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Lab Settings section
+// Horizontal tab bar
 // ---------------------------------------------------------------------------
 
-function LabSettingsSection() {
+interface LabTabBarProps {
+  active: TabId;
+  onChange: (id: TabId) => void;
+}
+
+function LabTabBar({ active, onChange }: LabTabBarProps) {
   return (
-    <div className="space-y-4">
-      <Card className="bg-surface-card border border-border-default rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">
-          Lab Settings
-        </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
-          Configure module-specific settings for backtesting, forward testing, and optimization.
-        </p>
-        <div className="space-y-4">
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">Default Instruments</h4>
-            <p className="text-xs text-text-muted">
-              Set default symbols for quick backtesting (e.g., NIFTY, BANKNIFTY, RELIANCE)
-            </p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">Data Range</h4>
-            <p className="text-xs text-text-muted">
-              Default lookback period for historical data (1M, 3M, 6M, 1Y, 3Y, 5Y)
-            </p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">Optimization Parameters</h4>
-            <p className="text-xs text-text-muted">
-              Default walk-forward window size, in-sample/out-of-sample split ratio, max iterations
-            </p>
-          </div>
-          <div className="bg-surface-base border border-border-default rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-text-primary mb-1">Forward Test Defaults</h4>
-            <p className="text-xs text-text-muted">
-              Virtual capital, slippage model, commission assumptions
-            </p>
-          </div>
-        </div>
-      </Card>
-      <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-atm-bg text-warning text-xs">Coming in v0.2.0</Badge>
-        <p className="text-sm text-text-muted mt-2">
-          Settings will be persisted to workspace.json and configurable via form controls.
-        </p>
-      </Card>
+    <div
+      role="tablist"
+      aria-label="Strategy Lab sections"
+      className="flex items-center gap-1 border-b border-border-default bg-surface-card px-6"
+    >
+      {TABS.map((tab) => {
+        const Icon = tab.icon;
+        const isActive = active === tab.id;
+        return (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(tab.id)}
+            className={[
+              "relative flex items-center gap-2 px-4 py-3 text-sm font-sans transition-colors select-none",
+              isActive
+                ? "text-accent"
+                : "text-text-secondary hover:text-text-primary",
+            ].join(" ")}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {tab.label}
+            {/* Active underline */}
+            {isActive && (
+              <motion.div
+                layoutId="lab-tab-indicator"
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-t"
+                transition={motionConfig.transitions.tab}
+              />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main LabRoute
 // ---------------------------------------------------------------------------
 
 export default function LabRoute() {
-  const [activeSection, setActiveSection] = useState<SectionId>("backtest");
+  const [activeTab, setActiveTab] = useState<TabId>("backtest");
   const [lastResult, setLastResult] = useState<BacktestResult | null>(null);
 
-  function renderSection(id: SectionId) {
+  function renderTab(id: TabId) {
     switch (id) {
       case "backtest":
-        return <BacktestSection onResult={setLastResult} lastResult={lastResult} />;
+        return (
+          <BacktestSection onResult={setLastResult} lastResult={lastResult} />
+        );
       case "forward-test":
         return <ForwardTestSection />;
       case "optimize":
         return <OptimizeSection />;
       case "results":
         return <ResultsSection lastResult={lastResult} />;
-      case "settings":
-        return <LabSettingsSection />;
     }
   }
 
   return (
     <div className="h-full bg-surface-base flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border-default bg-surface-card px-6 py-4">
-        <div className="flex items-center gap-3">
+      <div className="border-b border-border-default bg-surface-card px-6 pt-4 pb-0">
+        <div className="flex items-center gap-3 pb-3">
           <Zap className="w-6 h-6 text-accent" />
           <div>
-            <h1 className="font-heading font-bold text-lg text-text-primary">Strategy Lab</h1>
+            <h1 className="font-heading font-bold text-lg text-text-primary">
+              Strategy Lab
+            </h1>
             <p className="text-xxs text-text-muted">
-              Backtest, forward test, and optimize strategies — no broker has this built-in
+              Backtest, forward test, and optimize strategies — no broker has
+              this built-in
             </p>
           </div>
         </div>
+        {/* Horizontal tab bar — sits flush at bottom of header */}
+        <LabTabBar active={activeTab} onChange={setActiveTab} />
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <nav aria-label="Section navigation" className="w-56 border-r border-border-default bg-surface-card shrink-0 py-2">
-          {SECTIONS.map((section) => {
-            const Icon = section.icon;
-            const isActive = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                onClick={() => setActiveSection(section.id)}
-                aria-current={isActive ? "true" : undefined}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-sans transition-colors border-l-2 ${
-                  isActive
-                    ? "text-accent bg-accent/10 border-accent"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {section.label}
-                <ChevronRight className={`w-3 h-3 ml-auto ${isActive ? "opacity-100" : "opacity-0"}`} />
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Content */}
-        <ScrollArea className="flex-1">
-          <div className="p-6 max-w-4xl animate-fade-in-up">{renderSection(activeSection)}</div>
-        </ScrollArea>
-      </div>
+      {/* Tab content */}
+      <ScrollArea className="flex-1">
+        <div className="p-6 max-w-5xl">
+          <TabTransition tabKey={activeTab}>
+            {renderTab(activeTab)}
+          </TabTransition>
+        </div>
+      </ScrollArea>
     </div>
   );
 }
