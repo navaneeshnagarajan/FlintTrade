@@ -14,7 +14,19 @@ interface LLMSettings {
   model: string;
 }
 
-type ThemeId = "midnight" | "obsidian" | "terminal-green" | "ocean-blue" | "light";
+type ThemeId =
+  | "midnight"
+  | "obsidian"
+  | "terminal-green"
+  | "ocean-blue"
+  | "light"
+  | "sunset"
+  | "arctic"
+  | "neon"
+  | "forest"
+  | "monochrome"
+  | "solarized-dark"
+  | "solarized-light";
 
 interface SettingsStore {
   persona: "trader" | "investor" | "beginner";
