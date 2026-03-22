@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import TopBar from "@/chrome/TopBar";
+import PageTransition from "@/components/motion/PageTransition";
 import TickerBar from "@/chrome/TickerBar";
 import InteractiveTour from "@/components/tour/InteractiveTour";
 import { useWsBridge } from "@/hooks/useWsBridge";
@@ -46,6 +47,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
 export default function AppLayout() {
   useWsBridge();         // WebSocket connection (no-ops if no apiKey)
   useTickerFallback();   // REST polling fallback when WS is disconnected
+  const location = useLocation();
   const [showWelcome, setShowWelcome] = useState(true);
   const [tourComplete, setTourComplete] = useState(
     () => localStorage.getItem(TOUR_STORAGE_KEY) === "true",
@@ -88,7 +90,9 @@ export default function AppLayout() {
         <TickerBar />
       </header>
       <main id="main-content" className="flex-1 overflow-hidden">
-        <Outlet />
+        <PageTransition locationKey={location.pathname}>
+          <Outlet />
+        </PageTransition>
       </main>
       {showWelcome && (
         <DailyWelcome onDismiss={() => setShowWelcome(false)} />
