@@ -3,15 +3,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGES = ["core","engine","terminal","ai","data","historical","screener","backtest-engine","integration","automation","ditto"]
 
 def test_root_files():
-    for f in ["CLAUDE.md","AGENTS.md","README.md","VERSION","LICENSE",".gitignore",".env.example","flint.toml","Makefile","SOP.md","CODE_OF_CONDUCT.md","SECURITY.md"]:
+    for f in ["CLAUDE.md","AGENTS.md","README.md","VERSION","LICENSE",".gitignore",".env.example","flint.toml","Makefile","CONTRIBUTING.md","CHANGELOG.md","CODE_OF_CONDUCT.md","SECURITY.md"]:
         assert os.path.exists(os.path.join(ROOT, f)), f"Missing: {f}"
 
 def test_packages():
     for pkg in PACKAGES:
         d = os.path.join(ROOT, "packages", pkg)
         assert os.path.isdir(d), f"Missing: {pkg}"
-        assert os.path.exists(os.path.join(d, "CLAUDE.md"))
-        assert os.path.exists(os.path.join(d, "AGENTS.md"))
+        assert os.path.exists(os.path.join(d, "README.md")), f"Missing: {pkg}/README.md"
 
 def test_version():
     with open(os.path.join(ROOT, "VERSION")) as f:
