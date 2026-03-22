@@ -301,7 +301,7 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 - `playwright` MCP to test UI changes in a real browser
 - `/simplify` after completing a feature
 - `/code-review` before marking any task done
-- Check `docs/references/REPOS.md` and `docs/REPO_FEATURE_MAP.md` before writing new code — absorb from existing repos first
+- Check `.local/reference/REPO_FEATURE_MAP.md` before writing new code — absorb from existing repos first
 - Use specialized agents (e.g., engineering, testing) over general-purpose ones
 
 ## Code Standards
@@ -327,10 +327,10 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 6. Run: `make test` (must pass 985+ Python) and `npx vitest run` in terminal (must pass 36+)
 7. For React: `npm run build` in `packages/terminal` (must build clean)
 8. Mark task done in PLAN.md
-9. Update DEVLOG.md with entry
-10. Commit with conventional message
+9. Update CHANGELOG.md [Unreleased] section for notable changes
+10. Commit with detailed conventional message (see CONTRIBUTING.md)
 
-For the complete SOP: `READ → PLAN → APPROVE → BUILD → VERIFY → TEST → FIX → UPDATE → COMMIT`
+Workflow: `READ → PLAN → APPROVE → BUILD → VERIFY → TEST → UPDATE → COMMIT`
 
 ## Machine Setup
 
@@ -347,19 +347,11 @@ To set up a new machine:
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
 4. Configure `infra/openalgo/.env` with broker credentials
 5. `make start` (starts OpenAlgo)
-6. `make test` (verify 985+ pass)
+6. `make test` (verify 982+ pass)
 7. `cd packages/terminal && npm install && npm run build` (verify clean build, 36+ vitest pass)
 8. Read PLAN.md, pick a task, start building
 
 See `docs/machine-setup/QUICKSTART.md` for detailed instructions.
-
-## DEVLOG Format
-
-```
-## YYYY-MM-DD HH:MM IST | Machine | @username | IDE/Tool | AI Model/Agent | Branch | Summary
-```
-
-Machines: `nitro-dev` (Windows), `mac-dev` (macOS), `ubuntu-server` (Ubuntu)
 
 ## Do NOT
 
@@ -370,9 +362,8 @@ Machines: `nitro-dev` (Windows), `mac-dev` (macOS), `ubuntu-server` (Ubuntu)
 - Use port 3000/3001/3002 for anything
 - Add TOTP auto-login
 - Duplicate functionality that OpenAlgo already provides
-- Skip DEVLOG entries
 - Bypass hooks with `--no-verify` or `dangerouslySkipPermissions`
-- Write new code without checking `docs/REPO_FEATURE_MAP.md` first — absorb, don't reinvent
+- Write new code without checking `.local/reference/REPO_FEATURE_MAP.md` first — absorb, don't reinvent
 - Use general-purpose agents when specialized ones exist (e.g., use engineering agent for code, testing agent for tests)
 - Skip spec review or code review for non-trivial changes
 - Use raw HTML buttons/inputs/dialogs — use shadcn/ui
