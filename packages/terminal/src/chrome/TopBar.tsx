@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import { LogoIcon } from "@/components/brand/Logo";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { useThemeStore } from "@/stores/themeStore";
 import { ping } from "@/services/api";
 import { useTimings } from "@/hooks/useMarketStatus";
 import type { MarketTiming } from "@/types/api";
@@ -156,6 +158,8 @@ export default function TopBar() {
   const currentPath = location.pathname;
   const isTerminal = currentPath === "/trade";
 
+  const glass = useThemeStore((s) => s.glass);
+
   const status = useConnectionStore((s) => s.status);
   const setStatus = useConnectionStore((s) => s.setStatus);
   const [broker, setBroker] = useState("");
@@ -294,28 +298,53 @@ export default function TopBar() {
   const pnlColor = totalPnl >= 0 ? "text-profit" : "text-loss";
   const pnlSign = totalPnl >= 0 ? "+" : "";
 
+  // Glass: apply backdrop-blur + reduced opacity background when enabled.
+  // When disabled, fall back to the solid surface-card token via className.
+  const glassStyle: React.CSSProperties = glass.enabled
+    ? {
+        backdropFilter: `blur(${glass.blur}px)`,
+        WebkitBackdropFilter: `blur(${glass.blur}px)`,
+        // Use CSS variable opacity notation supported in modern browsers
+        backgroundColor: `color-mix(in srgb, var(--color-surface-card) ${100 - glass.transparency}%, transparent)`,
+      }
+    : {};
+
   return (
-    <div className="h-10 bg-surface-card border-b border-border-default flex items-center justify-between px-3 select-none shrink-0 animate-fade-in">
+    <div
+      className={`h-10 border-b border-border-default flex items-center justify-between px-3 select-none shrink-0 animate-fade-in${glass.enabled ? "" : " bg-surface-card"}`}
+      style={glass.enabled ? glassStyle : undefined}
+    >
       {/* Left: Logo + Route Tabs + Separator + Workspace Tabs */}
       <div className="flex items-center gap-3">
         <LogoIcon size={20} />
 
         {/* Route tabs (always visible) */}
         <nav aria-label="Main navigation" className="flex items-center gap-0.5 ml-3">
-          {ROUTE_TABS.map((tab) => (
-            <button
-              key={tab.path}
-              onClick={() => navigate(tab.path)}
-              aria-current={currentPath === tab.path ? "page" : undefined}
-              className={`px-3 py-1 text-xs font-heading font-medium rounded transition-colors ${
-                currentPath === tab.path
-                  ? "bg-accent/15 text-accent border-b-2 border-accent"
-                  : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {ROUTE_TABS.map((tab) => {
+            const isActive = currentPath === tab.path;
+            return (
+              <button
+                key={tab.path}
+                onClick={() => navigate(tab.path)}
+                aria-current={isActive ? "page" : undefined}
+                className={`relative px-3 py-1 text-xs font-heading font-medium rounded transition-colors ${
+                  isActive
+                    ? "bg-accent/15 text-accent"
+                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                }`}
+              >
+                {tab.label}
+                {isActive && (
+                  <motion.div
+                    layoutId="route-tab-underline"
+                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full"
+                    initial={false}
+                    transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
+                  />
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Separator + Workspace tabs (only on /terminal) */}

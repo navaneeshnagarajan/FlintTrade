@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import {
   CandlestickChart,
   PiggyBank,
@@ -26,10 +27,11 @@ import {
   Info,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LogoIcon } from "@/components/brand/Logo";
+import { GlassCard } from "@/components/ui/GlassCard";
+import { motionConfig } from "@/lib/motion";
 
 // Magic UI
 import { Particles } from "@/components/magicui/particles";
@@ -52,10 +54,14 @@ interface ToastState {
 
 function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   return (
-    <div
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-lg bg-surface-elevated border border-border-default shadow-xl text-sm text-text-primary animate-fade-in-up"
+    <motion.div
       role="status"
       aria-live="polite"
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-lg bg-surface-elevated border border-border-default shadow-xl text-sm text-text-primary"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={motionConfig.transitions.fade}
     >
       <Info className="w-4 h-4 text-primary shrink-0" />
       <span>{message}</span>
@@ -66,7 +72,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
       >
         <X className="w-3.5 h-3.5" />
       </button>
-    </div>
+    </motion.div>
   );
 }
 
@@ -428,7 +434,7 @@ const STATS: StatDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Module preview card — wrapped with HoverCard spotlight
+// Module preview card — Framer Motion stagger + whileHover scale + glow
 // ---------------------------------------------------------------------------
 
 interface ModuleCardProps {
@@ -440,15 +446,45 @@ interface ModuleCardProps {
 function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
   const Icon = module.icon;
   return (
-    <BlurFade delay={index * 0.08} duration={0.4}>
+    // Staggered slide-up entrance — consistent with motionConfig throughout the app
+    <motion.div
+      variants={motionConfig.variants.slideUp}
+      initial="initial"
+      animate="animate"
+      transition={motionConfig.stagger(index)}
+      // Scale + subtle shadow on hover
+      whileHover={{ scale: 1.02 }}
+      className="group relative"
+      style={{ transformOrigin: "center" }}
+    >
       <button
         type="button"
         onClick={() => onNavigate(module.route, module.title)}
-        className="group relative text-left w-full"
+        className="relative text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-xl"
         aria-label={`Explore ${module.title} module`}
       >
-        <HoverCard className="h-full transition-all duration-200 hover:-translate-y-1 hover:border-border-strong hover:shadow-lg hover:shadow-black/30 cursor-pointer">
-          <Card className="bg-transparent border-0 rounded-xl p-5 h-full">
+        {/*
+         * HoverCard: provides the cursor-tracking spotlight gradient.
+         * The inner motion.div handles the border glow that expands on hover
+         * via Tailwind group-hover utilities (accent color, shadow).
+         */}
+        <HoverCard
+          className={[
+            "h-full",
+            "transition-shadow duration-200",
+            "group-hover:shadow-lg group-hover:shadow-black/30",
+            "group-hover:border-accent/40",
+          ].join(" ")}
+        >
+          {/*
+           * GlassCard as interior layout container.
+           * glass={false} so it uses standard card surface tokens.
+           * bg/border overridden to transparent — HoverCard already owns those.
+           */}
+          <GlassCard
+            glass={false}
+            className="bg-transparent border-0 rounded-xl p-5 h-full shadow-none gap-0"
+          >
             {/* Preview badge */}
             <span className="absolute top-3 right-3 text-xxs font-medium px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border-subtle">
               Preview
@@ -475,10 +511,10 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
               <span>Open {module.title}</span>
               <ArrowRight className="w-3 h-3" />
             </div>
-          </Card>
+          </GlassCard>
         </HoverCard>
       </button>
-    </BlurFade>
+    </motion.div>
   );
 }
 
@@ -610,30 +646,36 @@ export default function ExploreRoute() {
           </BlurFade>
 
           {/* ---------------------------------------------------------------- */}
-          {/* Module grid                                                        */}
+          {/* Module grid — motion.div fade-in wrapper, cards stagger inside   */}
           {/* ---------------------------------------------------------------- */}
-          <BlurFade delay={0.2} duration={0.4}>
-            <div>
-              <h2 className="font-heading font-semibold text-text-secondary text-xs uppercase tracking-widest mb-5">
-                All Modules
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {MODULES.map((mod, i) => (
-                  <ModuleCard
-                    key={mod.id}
-                    module={mod}
-                    index={i}
-                    onNavigate={handleNavigate}
-                  />
-                ))}
-              </div>
+          <motion.div
+            variants={motionConfig.variants.fadeIn}
+            initial="initial"
+            animate="animate"
+          >
+            <h2 className="font-heading font-semibold text-text-secondary text-xs uppercase tracking-widest mb-5">
+              All Modules
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {MODULES.map((mod, i) => (
+                <ModuleCard
+                  key={mod.id}
+                  module={mod}
+                  index={i}
+                  onNavigate={handleNavigate}
+                />
+              ))}
             </div>
-          </BlurFade>
+          </motion.div>
 
           {/* ---------------------------------------------------------------- */}
-          {/* Bottom CTA                                                         */}
+          {/* Bottom CTA — smooth opacity fade, matches welcome screen style   */}
           {/* ---------------------------------------------------------------- */}
-          <BlurFade delay={0.4} duration={0.5}>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 1, ease: "easeOut", delay: 0.4 }}
+          >
             <div className="rounded-xl border border-border-default bg-surface-card px-8 py-8 text-center space-y-4">
               <TrendingUp className="w-8 h-8 text-profit mx-auto" />
               <div>
@@ -653,26 +695,32 @@ export default function ExploreRoute() {
                   Set Up Workspace
                   <ArrowRight className="w-4 h-4" />
                 </ShimmerButton>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="border-border-default text-text-primary hover:bg-surface-hover px-8"
-                  asChild
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 1, ease: "easeOut", delay: 0.7 }}
                 >
-                  <Link to="/settings">
-                    Already have OpenAlgo?
-                  </Link>
-                </Button>
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    className="border-border-default text-text-primary hover:bg-surface-hover px-8"
+                    asChild
+                  >
+                    <Link to="/settings">
+                      Already have OpenAlgo?
+                    </Link>
+                  </Button>
+                </motion.div>
               </div>
             </div>
-          </BlurFade>
+          </motion.div>
 
           {/* Bottom spacer */}
           <div className="h-8" />
         </div>
       </div>
 
-      {/* Toast */}
+      {/* Toast — smooth opacity fade, no popup effect */}
       {toast.visible && (
         <Toast message={toast.message} onClose={dismissToast} />
       )}

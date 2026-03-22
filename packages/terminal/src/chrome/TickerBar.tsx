@@ -1,4 +1,5 @@
 import { useAtomValue } from "jotai";
+import { useRef, useEffect, useState } from "react";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import type { WsTick } from "@/types/api";
 
@@ -6,6 +7,8 @@ interface IndexChipProps {
   name: string;
   data: WsTick | null;
 }
+
+type FlashDirection = "up" | "down" | null;
 
 function hasAnyLiveData(indices: { data: WsTick | null }[]): boolean {
   return indices.some((idx) => idx.data !== null && (idx.data.ltp ?? 0) !== 0);
@@ -17,10 +20,54 @@ function IndexChip({ name, data }: IndexChipProps) {
   const pct = data?.pct ?? 0;
   const isUp = change >= 0;
 
+  // Track previous LTP to detect price direction changes
+  const prevLtpRef = useRef<number | null>(null);
+  const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [flash, setFlash] = useState<FlashDirection>(null);
+
+  useEffect(() => {
+    if (ltp === null) return;
+
+    const prev = prevLtpRef.current;
+    if (prev !== null && prev !== ltp) {
+      const direction: FlashDirection = ltp > prev ? "up" : "down";
+      setFlash(direction);
+
+      // Clear any pending reset before scheduling a new one
+      if (flashTimeoutRef.current !== null) {
+        clearTimeout(flashTimeoutRef.current);
+      }
+      flashTimeoutRef.current = setTimeout(() => {
+        setFlash(null);
+        flashTimeoutRef.current = null;
+      }, 200);
+    }
+
+    prevLtpRef.current = ltp;
+  }, [ltp]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (flashTimeoutRef.current !== null) {
+        clearTimeout(flashTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const ltpColorClass =
+    flash === "up"
+      ? "text-profit"
+      : flash === "down"
+        ? "text-loss"
+        : "text-text-primary";
+
   return (
     <div className="flex items-center gap-2 px-3 shrink-0 border-r border-border-default last:border-r-0 h-full">
       <span className="text-xs text-text-muted">{name}</span>
-      <span className="text-xs font-mono text-text-primary tabular-nums">
+      <span
+        className={`text-xs font-mono tabular-nums transition-colors duration-200 ${ltpColorClass}`}
+      >
         {ltp !== null
           ? ltp.toLocaleString("en-IN", {
               minimumFractionDigits: 2,
@@ -44,6 +91,7 @@ function IndexChip({ name, data }: IndexChipProps) {
 /**
  * TickerBar -- always-visible bar at h-7 showing live index prices.
  * Reads from Jotai indicesSummaryAtom (populated by useWsBridge).
+ * LTP numbers flash green on price increase and red on decrease (200ms).
  */
 export default function TickerBar() {
   const indices = useAtomValue(indicesSummaryAtom);
