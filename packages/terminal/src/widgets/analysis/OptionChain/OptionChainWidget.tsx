@@ -39,8 +39,8 @@ import {
   X,
   Loader2,
 } from "lucide-react";
-import { getExpiry, getInstruments, getOptionChain, getOptionSymbol, getQuotes, getSymbol, placeOrder, searchSymbol } from "../../../services/api";
-import type { Quote } from "../../../types/api";
+import { getExpiry, getInstruments, getOptionChain, getOptionSymbol, getQuotes, getSymbol, placeOrder, searchSymbol } from "@/services/api";
+import type { Quote } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import {
   Popover,
@@ -60,10 +60,6 @@ import {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface FlexLayoutNode {
-  getId?: () => string;
-}
 
 interface SymbolDef {
   label: string;
@@ -619,11 +615,7 @@ function ExchangeSelector({
 // Main widget
 // ---------------------------------------------------------------------------
 
-interface OptionChainWidgetProps {
-  node?: FlexLayoutNode;
-}
-
-export default function OptionChainWidget({ node: _node }: OptionChainWidgetProps) {
+export default function OptionChainWidget() {
   const [symDef, setSymDef] = useState<SymbolDef>(SYMBOLS[0]);
   const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
 
@@ -653,6 +645,15 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const [orderMsg, setOrderMsg] = useState<OrderToast | null>(null);
+  const orderMsgTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(orderMsgTimerRef.current);
+      clearTimeout(scrollTimerRef.current);
+    };
+  }, []);
 
   // Basket state — selected strikes for multi-leg orders
   const [basket, setBasket] = useState<BasketItem[]>([]);
@@ -748,10 +749,12 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     if (atmStrike == null || !gridRef.current) return;
     const atmIdx = strikes.findIndex((s) => s.strike === atmStrike);
     if (atmIdx >= 0) {
-      setTimeout(() => {
+      clearTimeout(scrollTimerRef.current);
+      scrollTimerRef.current = setTimeout(() => {
         gridRef.current?.scrollTo(0, atmIdx, "vertical", 0, 80, { vAlign: "center" });
       }, 100);
     }
+    return () => clearTimeout(scrollTimerRef.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chain]);
 
@@ -862,7 +865,8 @@ export default function OptionChainWidget({ node: _node }: OptionChainWidgetProp
     } catch (e) {
       setOrderMsg({ text: (e as Error).message, ok: false });
     } finally {
-      setTimeout(() => setOrderMsg(null), 3000);
+      clearTimeout(orderMsgTimerRef.current);
+      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
     }
   }
 

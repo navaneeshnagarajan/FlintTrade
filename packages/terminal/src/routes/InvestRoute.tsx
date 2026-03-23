@@ -91,13 +91,14 @@ const TABS: TabDef[] = [
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
+const INR_FORMATTER = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
 function formatINR(value: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+  return INR_FORMATTER.format(value);
 }
 
 function formatINRCompact(value: number): string {

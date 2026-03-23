@@ -87,7 +87,11 @@ export default function InteractiveTour({ onComplete }: InteractiveTourProps) {
   }, [onComplete]);
 
   return (
-    <div className="fixed inset-0 z-[9999] pointer-events-none">
+    <div
+      role="dialog"
+      aria-label="Interactive tour"
+      className="fixed inset-0 z-[9999] pointer-events-none"
+    >
       {/* Skip button */}
       <div className="absolute top-3 right-3 pointer-events-auto flex items-center gap-3">
         <span className="text-xxs text-text-muted tabular-nums">

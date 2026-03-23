@@ -14,17 +14,13 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { RefreshCw, ChevronDown, AlertCircle } from "lucide-react";
-import { getExpiry, getOptionChain, getQuotes } from "../../../services/api";
-import type { Quote } from "../../../types/api";
+import { getExpiry, getOptionChain, getQuotes } from "@/services/api";
+import type { Quote } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface FlexLayoutNode {
-  getId?: () => string;
-}
 
 interface SymbolDef {
   label: string;
@@ -248,11 +244,7 @@ function OIRow({ strike, callOI, putOI, maxOI, isAtm, isMaxCall, isMaxPut, spotL
 // Main widget
 // ---------------------------------------------------------------------------
 
-interface OIChartWidgetProps {
-  node?: FlexLayoutNode;
-}
-
-export default function OIChartWidget({ node: _node }: OIChartWidgetProps) {
+export default function OIChartWidget() {
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 const THEME_CLASSES = [
@@ -9,8 +9,32 @@ const THEME_CLASSES = [
   "theme-light",
 ] as const;
 
+const ROUTE_TITLES: Record<string, string> = {
+  "/welcome": "Welcome",
+  "/explore": "Explore",
+  "/setup": "Setup",
+  "/settings": "Settings",
+  "/trade": "Trade",
+  "/invest": "Invest",
+  "/learn": "Learn",
+  "/lab": "Strategy Lab",
+  "/automate": "Automate",
+  "/ai": "AI Center",
+};
+
+function useDocumentTitle() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const base = "/" + pathname.split("/")[1];
+    const title = ROUTE_TITLES[base] ?? "FlintTrade";
+    document.title = title === "FlintTrade" ? title : `${title} | FlintTrade`;
+  }, [pathname]);
+}
+
 export default function RootLayout() {
   const theme = useSettingsStore((s) => s.theme);
+
+  useDocumentTitle();
 
   useEffect(() => {
     const html = document.documentElement;

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   PieChart,
@@ -76,6 +76,28 @@ export default function ToolsDropdown({
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, [isOpen]);
 
+  // Arrow key navigation between menu items
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const items = ref.current?.querySelectorAll<HTMLButtonElement>("button[role='menuitem']");
+        if (!items || items.length === 0) return;
+        const idx = Array.from(items).indexOf(document.activeElement as HTMLButtonElement);
+        const next =
+          e.key === "ArrowDown"
+            ? (idx + 1) % items.length
+            : (idx - 1 + items.length) % items.length;
+        items[next]?.focus();
+      }
+    },
+    [onClose],
+  );
+
   if (!isOpen) return null;
 
   function handleClick(tool: ToolEntry) {
@@ -91,13 +113,16 @@ export default function ToolsDropdown({
   return (
     <div
       ref={ref}
+      role="menu"
       className="absolute right-24 top-10 z-40 bg-surface-card border border-border-default rounded-lg shadow-xl py-1 w-52 animate-fade-in-scale"
+      onKeyDown={handleKeyDown}
     >
       {tools.map((tool) => {
         const Icon = tool.icon;
         return (
           <button
             key={tool.id}
+            role="menuitem"
             onClick={() => handleClick(tool)}
             className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
           >

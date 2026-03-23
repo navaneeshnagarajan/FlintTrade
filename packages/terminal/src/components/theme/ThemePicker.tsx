@@ -132,6 +132,7 @@ function ColorField({ label, value, onChange }: ColorFieldProps) {
           onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
           className="h-7 w-7 rounded border border-border-default cursor-pointer bg-transparent p-0.5"
           title={label}
+          aria-label={`${label} color picker`}
         />
         <input
           type="text"
@@ -139,6 +140,7 @@ function ColorField({ label, value, onChange }: ColorFieldProps) {
           onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
           className="flex-1 min-w-0 px-2 py-1 text-xs font-mono bg-surface-base border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/60"
           spellCheck={false}
+          aria-label={`${label} hex value`}
         />
       </div>
     </div>
@@ -176,6 +178,7 @@ function RangeField({ label, value, min, max, step = 1, unit = "", onChange }: R
         value={value}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))}
         className="w-full h-1 accent-accent cursor-pointer"
+        aria-label={label}
       />
     </div>
   );

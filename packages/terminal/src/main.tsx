@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import { Provider as JotaiProvider } from "jotai";
+import { MotionConfig } from "framer-motion";
 import { QueryProvider } from "./providers/QueryProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import RootLayout from "./routes/RootLayout";
@@ -21,7 +22,10 @@ const SettingsRoute = lazy(() => import("./routes/SettingsRoute"));
 const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
 
 const Loading = () => (
-  <div className="min-h-screen bg-surface-base flex items-center justify-center">
+  <div
+    role="status"
+    className="min-h-screen bg-surface-base flex items-center justify-center"
+  >
     <div className="text-text-muted text-sm">Loading...</div>
   </div>
 );
@@ -84,9 +88,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <JotaiProvider>
-        <QueryProvider>
-          <RouterProvider router={router} />
-        </QueryProvider>
+        <MotionConfig reducedMotion="user">
+          <QueryProvider>
+            <RouterProvider router={router} />
+          </QueryProvider>
+        </MotionConfig>
       </JotaiProvider>
     </ErrorBoundary>
   </React.StrictMode>

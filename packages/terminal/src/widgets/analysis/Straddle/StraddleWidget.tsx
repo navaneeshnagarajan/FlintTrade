@@ -27,17 +27,13 @@ import {
   getOptionChain,
   getQuotes,
   getPositionbook,
-} from "../../../services/api";
-import type { Quote, Position } from "../../../types/api";
+} from "@/services/api";
+import type { Quote, Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface FlexLayoutNode {
-  getId?: () => string;
-}
 
 interface SymbolDef {
   label: string;
@@ -393,11 +389,7 @@ function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOve
 // Main widget
 // ---------------------------------------------------------------------------
 
-interface StraddleWidgetProps {
-  node?: FlexLayoutNode;
-}
-
-export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
+export default function StraddleWidget() {
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
   const [expiries, setExpiries]               = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry]   = useState<string | null>(null);
@@ -560,17 +552,14 @@ export default function StraddleWidget({ node: _node }: StraddleWidgetProps) {
 
   const expiryButtons = expiries.slice(0, 5);
   const spotLtp = spot?.ltp ?? null;
-  const spotChange = spot?.ltp && (spot as unknown as { prev_close?: number }).prev_close
-    ? Number(spot.ltp) - Number((spot as unknown as { prev_close?: number }).prev_close)
+  const spotChange = spot?.ltp && spot.prev_close
+    ? Number(spot.ltp) - Number(spot.prev_close)
     : null;
   const spotUp = spotChange == null ? null : spotChange >= 0;
 
   // Stable chart data arrays
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const chartStraddlePoints = useMemo(() => [...straddlePointsRef.current], [chartVersion]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const chartSpotPoints     = useMemo(() => [...spotPointsRef.current],     [chartVersion]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const chartSynfutPoints   = useMemo(() => [...synfutPointsRef.current],   [chartVersion]);
 
   const hasChartData = chartStraddlePoints.length > 0;

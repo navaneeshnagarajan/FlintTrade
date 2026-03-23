@@ -219,7 +219,8 @@ class TelegramBot:
     def is_authorized(self, chat_id: str | int) -> bool:
         """Check if the message sender is the authorized owner."""
         if not self.config.chat_id:
-            return True  # No restriction if not configured
+            logger.warning("TELEGRAM_CHAT_ID not set — rejecting all commands for safety")
+            return False
         return str(chat_id) == str(self.config.chat_id)
 
     def handle_command(self, text: str, chat_id: str | int = "", username: str = "") -> CommandResult:

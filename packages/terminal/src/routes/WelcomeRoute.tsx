@@ -21,6 +21,7 @@ import { Moon, Circle, Leaf, Waves, Sun } from "lucide-react";
 
 import { LogoIcon } from "@/components/brand/Logo";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { motionConfig } from "@/lib/motion";
 
 // Magic UI
 import { Particles } from "@/components/magicui/particles";
@@ -62,8 +63,14 @@ export default function WelcomeRoute() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const theme = useSettingsStore((s) => s.theme);
+  const reducedMotion = motionConfig.prefersReducedMotion();
 
   const skipToEnd = useCallback(() => setStep(5), []);
+
+  // Skip animation entirely when prefers-reduced-motion is set
+  useEffect(() => {
+    if (reducedMotion) setStep(5);
+  }, [reducedMotion]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -90,7 +97,7 @@ export default function WelcomeRoute() {
   }, []);
 
   return (
-    <>
+    <main aria-label="Welcome">
       <style>{`
         /* Container rotated -45deg so fireball travels along that axis.
            translateX moves it along the diagonal — positive = toward top-right */
@@ -274,14 +281,14 @@ export default function WelcomeRoute() {
               <button
                 key={t.id}
                 onClick={() => useSettingsStore.getState().setTheme(t.id)}
+                aria-label={t.label}
                 className={`p-1.5 rounded transition-colors duration-150 cursor-pointer ${
                   theme === t.id
                     ? "bg-accent/20 text-accent"
                     : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
                 }`}
-                title={t.label}
               >
-                <ThemeIcon size={14} />
+                <ThemeIcon size={14} aria-hidden="true" />
               </button>
             );
           })}
@@ -432,6 +439,6 @@ export default function WelcomeRoute() {
           </div>
         </div>
       </div>
-    </>
+    </main>
   );
 }

@@ -14,16 +14,12 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { RefreshCw, Layers, AlertCircle } from "lucide-react";
-import { getDepth } from "../../../services/api";
+import { getDepth } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface FlexLayoutNode {
-  getId?: () => string;
-}
 
 interface DepthLevel {
   price: number;
@@ -169,11 +165,7 @@ function DepthRow({ bidOrders, bidQty, bidPrice, askPrice, askQty, askOrders, ma
 
 const KNOWN_EXCHANGES = ["NSE", "BSE", "NFO", "BFO", "MCX", "NSE_INDEX", "BSE_INDEX"];
 
-interface DepthWidgetProps {
-  node?: FlexLayoutNode;
-}
-
-export default function DepthWidget({ node: _node }: DepthWidgetProps) {
+export default function DepthWidget() {
   const [symbol,   setSymbol]   = useState("NIFTY");
   const [exchange, setExchange] = useState("NSE");
   const [depth,    setDepth]    = useState<NormalisedDepth | null>(null);

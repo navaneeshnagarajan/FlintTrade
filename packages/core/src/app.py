@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
+import os
 import signal
 import sys
 import threading
@@ -100,6 +101,34 @@ def create_flask_app(
     app.config["CRON"] = cron
     app.config["AUDIT"] = audit
     app.config["CLIENT"] = client
+
+    @app.before_request
+    def require_auth() -> Any:
+        """Require API key authentication on all endpoints."""
+        # Allow health check without auth
+        if request.endpoint in ("health", "static"):
+            return None
+        # Allow OPTIONS for CORS preflight
+        if request.method == "OPTIONS":
+            return None
+
+        api_key = (
+            request.headers.get("X-API-Key")
+            or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        )
+        if not api_key:
+            body = request.get_json(silent=True) or {}
+            api_key = body.get("apikey", "")
+
+        expected_key = os.environ.get("OPENALGO_API_KEY", "")
+        if not expected_key:
+            logger.warning("OPENALGO_API_KEY not set — all requests will be rejected")
+            return jsonify({"status": "error", "message": "Server not configured"}), 503
+
+        if api_key != expected_key:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        return None
 
     @app.route("/api/v1/indicators/compute", methods=["POST"])
     def indicators_compute() -> tuple[Any, int]:
@@ -379,11 +408,11 @@ def create_flask_app(
                 "status": "error",
                 "message": f"LLM error: {response.error}",
             }), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("Advisor endpoint error")
             return jsonify({
                 "status": "error",
-                "message": f"Internal error: {exc}",
+                "message": "Internal server error",
             }), 500
 
     @app.route("/api/v1/advisor/stream", methods=["POST"])
@@ -444,9 +473,9 @@ def create_flask_app(
                     yield f"data: {_json.dumps({'token': token})}\n\n"
                 yield f"data: {_json.dumps({'done': True})}\n\n"
                 client.close()
-            except Exception as exc:
+            except Exception:
                 logger.exception("Advisor stream error")
-                yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
+                yield f"data: {_json.dumps({'error': 'Internal server error'})}\n\n"
 
         return Response(_generate(), content_type="text/event-stream")
 
@@ -543,9 +572,9 @@ def create_flask_app(
         try:
             dc = DataConnector()
             data_result = dc.load(symbol, exchange, interval, start_date, end_date)
-        except Exception as exc:
+        except Exception:
             logger.exception("Backtest data load error")
-            return jsonify({"status": "error", "message": f"Data load error: {exc}"}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
         if not data_result.success:
             return jsonify({
@@ -570,9 +599,9 @@ def create_flask_app(
                 symbol=symbol,
             )
             result = sim.run(strategy_instance, data_result.bars)
-        except Exception as exc:
+        except Exception:
             logger.exception("Backtest simulation error")
-            return jsonify({"status": "error", "message": f"Simulation error: {exc}"}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
         try:
             report = PerformanceMetrics.compute(result)
@@ -695,9 +724,9 @@ def create_flask_app(
                 for name, info in status_map.items()
             ]
             return jsonify({"status": "success", "data": {"strategies": strategies_list}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("strategies_running error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/strategies/<name>/start", methods=["POST"])
     def strategy_start(name: str) -> tuple[Any, int]:
@@ -724,9 +753,9 @@ def create_flask_app(
             finally:
                 loop.close()
             return jsonify({"status": "success", "data": {"message": f"Strategy '{name}' started"}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("strategy_start error for %s", name)
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/strategies/<name>/stop", methods=["POST"])
     def strategy_stop(name: str) -> tuple[Any, int]:
@@ -751,9 +780,9 @@ def create_flask_app(
             return jsonify({"status": "success", "data": {"message": f"Strategy '{name}' stopped"}}), 200
         except KeyError:
             return jsonify({"status": "error", "message": f"Strategy '{name}' not registered"}), 404
-        except Exception as exc:
+        except Exception:
             logger.exception("strategy_stop error for %s", name)
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Active signals (replaces stub)
@@ -790,9 +819,9 @@ def create_flask_app(
                 for key, info in raw_signals.items()
             ]
             return jsonify({"status": "success", "data": {"signals": signals}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("signals_active error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Sentiment
@@ -864,9 +893,9 @@ def create_flask_app(
                     "reasoning": scored.reasoning,
                 },
             }), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("sentiment_analyze error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # RAG
@@ -919,9 +948,9 @@ def create_flask_app(
                 for chunk in response.chunks_used
             ]
             return jsonify({"status": "success", "data": {"results": results}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("rag_query error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Cron jobs
@@ -954,9 +983,9 @@ def create_flask_app(
                 for job in _cron._jobs.values()
             ]
             return jsonify({"status": "success", "data": {"jobs": jobs}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("cron_jobs_list error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/cron/jobs/<name>/pause", methods=["POST"])
     def cron_job_pause(name: str) -> tuple[Any, int]:
@@ -977,9 +1006,9 @@ def create_flask_app(
                 return jsonify({"status": "error", "message": f"Job '{name}' not found"}), 404
             _cron.pause(name)
             return jsonify({"status": "success", "data": {"message": f"Job '{name}' paused"}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("cron_job_pause error for %s", name)
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/cron/jobs/<name>/resume", methods=["POST"])
     def cron_job_resume(name: str) -> tuple[Any, int]:
@@ -1000,9 +1029,9 @@ def create_flask_app(
                 return jsonify({"status": "error", "message": f"Job '{name}' not found"}), 404
             _cron.resume(name)
             return jsonify({"status": "success", "data": {"message": f"Job '{name}' resumed"}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("cron_job_resume error for %s", name)
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Audit logs
@@ -1041,9 +1070,9 @@ def create_flask_app(
                 "status": "success",
                 "data": {"logs": page, "total": total, "date": date_str},
             }), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("audit_logs error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Trade journal
@@ -1104,9 +1133,9 @@ def create_flask_app(
                 "status": "error",
                 "message": "Trade storage not available (DuckDB not configured)",
             }), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("trades_journal error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Safety config
@@ -1151,9 +1180,9 @@ def create_flask_app(
                 },
             }
             return jsonify({"status": "success", "data": data}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("safety_config_get error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/safety/config", methods=["POST"])
     def safety_config_update() -> tuple[Any, int]:
@@ -1198,9 +1227,9 @@ def create_flask_app(
             return jsonify({"status": "success", "data": {"message": "Safety config updated"}}), 200
         except (ValueError, TypeError) as exc:
             return jsonify({"status": "error", "message": f"Invalid value: {exc}"}), 400
-        except Exception as exc:
+        except Exception:
             logger.exception("safety_config_update error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Kill switch
@@ -1233,9 +1262,9 @@ def create_flask_app(
                 "status": "success",
                 "data": {"message": "Kill switch activated", "reason": reason},
             }), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("kill_switch_activate error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/safety/kill-switch", methods=["DELETE"])
     def kill_switch_reset() -> tuple[Any, int]:
@@ -1257,9 +1286,9 @@ def create_flask_app(
                 "status": "success",
                 "data": {"message": "Kill switch reset — trading may resume"},
             }), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("kill_switch_reset error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # Webhooks
@@ -1286,9 +1315,9 @@ def create_flask_app(
                 for ep in server._endpoints.values()
             ]
             return jsonify({"status": "success", "data": {"webhooks": webhooks}}), 200
-        except Exception as exc:
+        except Exception:
             logger.exception("webhooks_list error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/webhooks", methods=["POST"])
     def webhooks_create() -> tuple[Any, int]:
@@ -1329,9 +1358,9 @@ def create_flask_app(
                 "status": "success",
                 "data": {"path": path, "name": name, "enabled": True},
             }), 201
-        except Exception as exc:
+        except Exception:
             logger.exception("webhooks_create error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     @app.route("/api/v1/webhooks/<webhook_id>", methods=["DELETE"])
     def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
@@ -1364,9 +1393,9 @@ def create_flask_app(
                     return jsonify({"status": "success", "data": {"message": f"Webhook '{ep.name}' removed"}}), 200
 
             return jsonify({"status": "error", "message": f"Webhook '{webhook_id}' not found"}), 404
-        except Exception as exc:
+        except Exception:
             logger.exception("webhooks_delete error")
-            return jsonify({"status": "error", "message": str(exc)}), 500
+            return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
     # MCP bridge — register handlers that route through OpenAlgo

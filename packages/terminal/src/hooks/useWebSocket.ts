@@ -24,6 +24,7 @@ export default function useWebSocket(
   useEffect(() => {
     if (!wsUrl) return;
     const ws = getWsService(wsUrl, apiKey);
+    if (!ws) return;
     if (!ws.isConnected) ws.connect();
 
     const unsubTick = ws.onTick((tick: WsTick) => {
@@ -37,12 +38,13 @@ export default function useWebSocket(
       unsubTick();
       unsubStatus();
     };
-  }, [wsUrl]);
+  }, [wsUrl, apiKey]);
 
   // Manage instrument subscriptions
   useEffect(() => {
     if (!wsUrl || instruments.length === 0) return;
     const ws = getWsService(wsUrl);
+    if (!ws) return;
 
     const toAdd = instruments.filter(
       (i) => !prevRef.current.some((p) => p.symbol === i.symbol && p.exchange === i.exchange),

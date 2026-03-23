@@ -13,7 +13,7 @@ export default function NotFoundRoute() {
   const navigate = useNavigate();
 
   return (
-    <div className="fixed inset-0 bg-surface-base flex items-center justify-center p-6 overflow-y-auto">
+    <main aria-label="Page not found" className="fixed inset-0 bg-surface-base flex items-center justify-center p-6 overflow-y-auto">
       <BlurFade delay={0} duration={0.4}>
         <div className="max-w-md w-full text-center space-y-6">
           {/* Logo */}
@@ -57,6 +57,6 @@ export default function NotFoundRoute() {
           </BlurFade>
         </div>
       </BlurFade>
-    </div>
+    </main>
   );
 }

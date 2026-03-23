@@ -18,6 +18,7 @@ export interface Quote {
   volume: number;
   change?: number;
   pct?: number;
+  prev_close?: number;
 }
 
 export interface DepthLevel {

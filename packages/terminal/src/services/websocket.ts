@@ -240,11 +240,11 @@ export class WebSocketService {
 
 let instance: WebSocketService | null = null;
 
-export function getWsService(url?: string, apiKey?: string): WebSocketService {
+export function getWsService(url?: string, apiKey?: string): WebSocketService | null {
   if (!instance && url) {
     instance = new WebSocketService(url, apiKey || "");
   }
-  return instance!;
+  return instance;
 }
 
 export function resetWsService(): void {

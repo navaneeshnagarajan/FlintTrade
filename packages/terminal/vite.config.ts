@@ -34,6 +34,7 @@ export default defineConfig({
     },
   },
   build: {
+    target: "es2022",
     rollupOptions: {
       // Glide Data Grid v6 has optional peer deps we don't use. Externalize them
       // to suppress "unresolved import" build errors without installing them.
@@ -103,6 +104,18 @@ export default defineConfig({
           // The wildcard `import * as LucideIcons` has been removed from WidgetPicker
           // so Rollup can now tree-shake lucide per-chunk (each widget/chrome file
           // only pulls in the icons it explicitly imports).
+          // Framer Motion — loaded async, not needed on initial page
+          if (id.includes("node_modules/framer-motion")) return "vendor-framer";
+          // Tremor + Recharts + d3 — only /invest, /lab, dashboard, pnl-dashboard
+          if (
+            id.includes("node_modules/@tremor/") ||
+            id.includes("node_modules/recharts") ||
+            id.includes("node_modules/d3-") ||
+            id.includes("node_modules/@headlessui/") ||
+            id.includes("node_modules/@floating-ui/") ||
+            id.includes("node_modules/react-day-picker") ||
+            id.includes("node_modules/react-transition-state")
+          ) return "vendor-charts";
           // Everything else in node_modules — clsx, tailwind-merge, date-fns, cmdk, etc.
           if (id.includes("node_modules/")) {
             return "vendor-misc";

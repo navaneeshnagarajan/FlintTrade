@@ -127,7 +127,10 @@ function StepIndicator({ total, current, onStepClick }: StepIndicatorProps) {
   const reduced = motionConfig.prefersReducedMotion();
 
   return (
-    <div className="flex items-center gap-3 justify-center" role="tablist" aria-label="Setup steps">
+    <div
+      className="flex items-center gap-3 justify-center"
+      aria-label={`Setup progress: step ${current + 1} of ${total}`}
+    >
       {Array.from({ length: total }, (_, i) => {
         const isCompleted = i < current;
         const isActive = i === current;
@@ -137,8 +140,6 @@ function StepIndicator({ total, current, onStepClick }: StepIndicatorProps) {
           <button
             key={i}
             type="button"
-            role="tab"
-            aria-selected={isActive}
             aria-label={`Step ${i + 1}${isCompleted ? " (completed)" : isActive ? " (current)" : ""}`}
             disabled={!isClickable}
             onClick={isClickable ? () => onStepClick(i) : undefined}
@@ -1108,7 +1109,7 @@ export default function SetupRoute() {
   // ---------- Mode selection ----------
   if (!mode) {
     return (
-      <div className="min-h-screen bg-surface-base flex items-center justify-center p-4">
+      <main aria-label="Setup wizard" className="min-h-screen bg-surface-base flex items-center justify-center p-4">
         <div className="max-w-3xl w-full space-y-8">
           <div className="text-center space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/40 bg-accent/15 text-accent text-xxs font-medium mb-2">
@@ -1159,7 +1160,7 @@ export default function SetupRoute() {
             </Button>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -1483,7 +1484,7 @@ export default function SetupRoute() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-base flex items-center justify-center p-4">
+    <main aria-label="Setup wizard" className="min-h-screen bg-surface-base flex items-center justify-center p-4">
       <div className="max-w-lg w-full space-y-6">
         {/* Header */}
         <div className="text-center space-y-1">
@@ -1544,6 +1545,6 @@ export default function SetupRoute() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

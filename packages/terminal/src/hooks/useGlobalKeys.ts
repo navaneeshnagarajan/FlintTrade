@@ -46,7 +46,7 @@ export default function useGlobalKeys({
       if (e.key === "x" || e.key === "X") {
         if (e.shiftKey) {
           // Shift+X = immediate exit (no confirm)
-          closePosition("Flint").catch(() => {});
+          closePosition("Flint").catch((e) => console.error("[GlobalKeys] Failed to close position:", e));
           return;
         }
         // Regular X = let the UI handle confirmation
@@ -56,7 +56,7 @@ export default function useGlobalKeys({
       // C -- Cancel all orders
       if (e.key === "c" || e.key === "C") {
         if (!e.ctrlKey && !e.metaKey) {
-          cancelAllOrders().catch(() => {});
+          cancelAllOrders().catch((e) => console.error("[GlobalKeys] Failed to cancel orders:", e));
           return;
         }
       }

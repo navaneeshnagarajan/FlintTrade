@@ -254,8 +254,9 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
           </p>
         )}
         {ctx.suggestion && !todayHoliday && !tomorrowHoliday && (
-          <p
-            className="text-xs text-primary mt-2 cursor-pointer hover:underline"
+          <button
+            type="button"
+            className="text-xs text-primary mt-2 cursor-pointer hover:underline text-left"
             onClick={
               ctx.suggestion === "Try backtesting a strategy"
                 ? goToLab
@@ -263,15 +264,9 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
                   ? openTradeJournal
                   : undefined
             }
-            role={
-              ctx.suggestion === "Try backtesting a strategy" ||
-              ctx.suggestion === "Open Trade Journal?"
-                ? "button"
-                : undefined
-            }
           >
             {ctx.suggestion}
-          </p>
+          </button>
         )}
       </div>
     );
@@ -280,7 +275,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
   // Recovery card
   return (
     <div
-      className="fixed top-16 right-4 w-80 rounded-lg border border-loss bg-[rgba(239,68,68,0.1)] p-4 shadow-lg z-50 animate-slide-in-right"
+      className="fixed top-16 right-4 w-80 rounded-lg border border-loss bg-loss/10 p-4 shadow-lg z-50 animate-slide-in-right"
       role="alert"
       aria-live="assertive"
     >
@@ -302,13 +297,13 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
         <span className="font-mono text-loss">{positionCount}</span> open
         position{positionCount !== 1 ? "s" : ""}.
       </p>
-      <p
-        className="text-xs text-loss mt-2 cursor-pointer hover:underline"
+      <button
+        type="button"
+        className="text-xs text-loss mt-2 cursor-pointer hover:underline text-left"
         onClick={goToTrade}
-        role="button"
       >
         Review positions now
-      </p>
+      </button>
     </div>
   );
 }

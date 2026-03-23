@@ -66,6 +66,7 @@ function IndexChip({ name, data }: IndexChipProps) {
     <div className="flex items-center gap-2 px-3 shrink-0 border-r border-border-default last:border-r-0 h-full">
       <span className="text-xs text-text-muted">{name}</span>
       <span
+        aria-live="off"
         className={`text-xs font-mono tabular-nums transition-colors duration-200 ${ltpColorClass}`}
       >
         {ltp !== null

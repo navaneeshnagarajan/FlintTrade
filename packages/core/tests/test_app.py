@@ -19,15 +19,44 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+_TEST_API_KEY = "test-api-key-for-unit-tests"
+
+
 @pytest.fixture(scope="module")
-def client():
+def client(monkeypatch_module):
     """Return a Flask test client for the FlintTrade app."""
+    import os
     from packages.core.src.app import create_flask_app
 
+    monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
     app = create_flask_app()
     app.config["TESTING"] = True
     with app.test_client() as c:
+        # Wrap the test client so every request includes the auth header
+        original_open = c.open
+
+        def authed_open(*args, **kwargs):
+            headers = kwargs.pop("headers", {}) or {}
+            headers["X-API-Key"] = _TEST_API_KEY
+            return original_open(*args, headers=headers, **kwargs)
+
+        c.post = lambda *a, **kw: authed_open(*a, method="POST", **kw)
+        c.get = lambda *a, **kw: authed_open(*a, method="GET", **kw)
+        c.delete = lambda *a, **kw: authed_open(*a, method="DELETE", **kw)
         yield c
+
+
+@pytest.fixture(scope="module")
+def monkeypatch_module():
+    """Module-scoped monkeypatch for environment variables."""
+    import os
+    original_env = dict(os.environ)
+    yield type("MonkeyPatch", (), {
+        "setenv": lambda self, k, v: os.environ.update({k: v}),
+        "delenv": lambda self, k, **kw: os.environ.pop(k, None),
+    })()
+    os.environ.clear()
+    os.environ.update(original_env)
 
 
 def _make_bars(n: int = 100) -> list[dict[str, float | int]]:

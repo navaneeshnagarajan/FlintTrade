@@ -256,8 +256,8 @@ html.density-compact {
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
-  50% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 @utility animate-fade-in {

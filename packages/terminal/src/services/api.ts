@@ -57,7 +57,7 @@ function getApiKey(): string {
   return useConnectionStore.getState().apiKey;
 }
 
-async function post<T>(endpoint: string, extra: Record<string, unknown> = {}): Promise<T> {
+async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
   // Enforce rate limits before making the request
   if (SMART_ORDER_ENDPOINTS.has(endpoint)) {
     if (!smartOrderLimiter.tryConsume()) {
@@ -97,9 +97,9 @@ async function get<T>(endpoint: string): Promise<T> {
 
 // --- Orders ---
 export const placeOrder = (params: PlaceOrderParams) =>
-  post<{ orderId: string }>("placeorder", params as unknown as Record<string, unknown>);
+  post<{ orderId: string }>("placeorder", params);
 export const placeSmartOrder = (params: SmartOrderParams) =>
-  post<{ orderId: string }>("placesmartorder", params as unknown as Record<string, unknown>);
+  post<{ orderId: string }>("placesmartorder", params);
 export const cancelOrder = (strategy: string, orderid: string) =>
   post<void>("cancelorder", { strategy, orderid });
 export const cancelAllOrders = (strategy = "Flint") =>
@@ -111,7 +111,7 @@ export const modifyOrder = (params: Record<string, unknown>) =>
 export const orderStatus = (strategy: string, orderid: string) =>
   post<Order>("orderstatus", { strategy, orderid });
 export const openPosition = (params: PlaceOrderParams) =>
-  post<Record<string, unknown>>("openposition", params as unknown as Record<string, unknown>);
+  post<Record<string, unknown>>("openposition", params);
 
 // --- Data ---
 export const getQuotes = (symbol: string, exchange = "NSE") =>

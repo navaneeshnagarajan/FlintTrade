@@ -82,8 +82,10 @@ def _get_fernet(key: str | None = None):
 
     encryption_key = key or os.getenv("DITTO_ENCRYPTION_KEY", "")
     if not encryption_key:
-        encryption_key = Fernet.generate_key().decode()
-        logger.warning("No DITTO_ENCRYPTION_KEY set — generated ephemeral key (data won't persist across restarts)")
+        raise ValueError(
+            "DITTO_ENCRYPTION_KEY environment variable is required. "
+            "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
     return Fernet(encryption_key.encode() if isinstance(encryption_key, str) else encryption_key)
 
 

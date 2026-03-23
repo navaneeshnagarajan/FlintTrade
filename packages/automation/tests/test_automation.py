@@ -272,58 +272,59 @@ class TestTelegramBot:
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         assert not bot.is_authorized("99999")
 
-    def test_authorization_no_restriction(self):
+    def test_authorization_no_chat_id_denies(self):
+        """When TELEGRAM_CHAT_ID is not set, all commands are denied for safety."""
         from packages.automation.src.telegram_bot import BotConfig, TelegramBot
         bot = TelegramBot(config=BotConfig(chat_id=""))
-        assert bot.is_authorized("any_id")
+        assert not bot.is_authorized("any_id")
 
     def test_handle_status(self):
-        from packages.automation.src.telegram_bot import TelegramBot
-        bot = TelegramBot()
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
+        bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("get_positions", lambda: [
             {"symbol": "RELIANCE", "quantity": "10", "pnl": "500", "ltp": "2500"},
         ])
-        result = bot.handle_command("/status")
+        result = bot.handle_command("/status", chat_id="12345")
         assert "RELIANCE" in result.response
         assert result.command == "status"
 
     def test_handle_kill(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
         kill_fn = MagicMock()
-        bot = TelegramBot()
+        bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("kill_switch", kill_fn)
-        result = bot.handle_command("/kill")
+        result = bot.handle_command("/kill", chat_id="12345")
         kill_fn.assert_called_once()
         assert "KILL" in result.response
 
     def test_handle_pause(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
         pause_fn = MagicMock()
-        bot = TelegramBot()
+        bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("pause_strategy", pause_fn)
-        result = bot.handle_command("/pause EMA_Strategy")
+        result = bot.handle_command("/pause EMA_Strategy", chat_id="12345")
         pause_fn.assert_called_once_with("EMA_Strategy")
         assert "paused" in result.response
 
     def test_handle_resume(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
         resume_fn = MagicMock()
-        bot = TelegramBot()
+        bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("resume_strategy", resume_fn)
-        result = bot.handle_command("/resume EMA_Strategy")
+        result = bot.handle_command("/resume EMA_Strategy", chat_id="12345")
         resume_fn.assert_called_once_with("EMA_Strategy")
         assert "resumed" in result.response
 
     def test_handle_pause_no_args(self):
-        from packages.automation.src.telegram_bot import TelegramBot
-        bot = TelegramBot()
-        result = bot.handle_command("/pause")
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
+        bot = TelegramBot(config=BotConfig(chat_id="12345"))
+        result = bot.handle_command("/pause", chat_id="12345")
         assert "Usage" in result.response
 
     def test_handle_unknown_command(self):
-        from packages.automation.src.telegram_bot import TelegramBot
-        bot = TelegramBot()
-        result = bot.handle_command("/foobar")
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
+        bot = TelegramBot(config=BotConfig(chat_id="12345"))
+        result = bot.handle_command("/foobar", chat_id="12345")
         assert "Unknown" in result.response
 
     def test_unauthorized_command_blocked(self):
@@ -376,18 +377,18 @@ class TestTelegramKillSwitch:
     """Test the wired /kill command — safety, orders, scheduler, audit."""
 
     def test_kill_switch_activates_safety(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
 
         mock_safety = MagicMock()
         mock_safety.l5_kill = MagicMock()
-        bot = TelegramBot(safety_system=mock_safety)
-        result = bot.handle_command("/kill", username="test_user")
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), safety_system=mock_safety)
+        result = bot.handle_command("/kill", chat_id="12345", username="test_user")
 
         mock_safety.l5_kill.activate.assert_called_once()
         assert "KILL" in result.response
 
     def test_kill_switch_cancels_orders(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
 
         mock_client = MagicMock()
         # Make cancel_all_orders return a non-coroutine (sync mock)
@@ -396,28 +397,28 @@ class TestTelegramKillSwitch:
         mock_router = MagicMock()
         mock_router.client = mock_client
 
-        bot = TelegramBot(router=mock_router)
-        bot.handle_command("/kill")
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), router=mock_router)
+        bot.handle_command("/kill", chat_id="12345")
 
         mock_client.cancel_all_orders.assert_called_once()
 
     def test_kill_switch_stops_scheduler(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
 
         mock_scheduler = MagicMock()
         mock_scheduler.stop_all = MagicMock(return_value=None)
 
-        bot = TelegramBot(scheduler=mock_scheduler)
-        bot.handle_command("/kill")
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), scheduler=mock_scheduler)
+        bot.handle_command("/kill", chat_id="12345")
 
         mock_scheduler.stop_all.assert_called_once()
 
     def test_kill_switch_logs_audit(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
 
         mock_audit = MagicMock()
-        bot = TelegramBot(audit_logger=mock_audit)
-        bot.handle_command("/kill", username="admin")
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), audit_logger=mock_audit)
+        bot.handle_command("/kill", chat_id="12345", username="admin")
 
         mock_audit.log_event.assert_called_once_with(
             "KILL_SWITCH",
@@ -426,7 +427,7 @@ class TestTelegramKillSwitch:
         )
 
     def test_kill_switch_full_response(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
 
         mock_safety = MagicMock()
         mock_safety.l5_kill = MagicMock()
@@ -440,12 +441,13 @@ class TestTelegramKillSwitch:
         mock_audit = MagicMock()
 
         bot = TelegramBot(
+            config=BotConfig(chat_id="12345"),
             router=mock_router,
             safety_system=mock_safety,
             scheduler=mock_scheduler,
             audit_logger=mock_audit,
         )
-        result = bot.handle_command("/kill")
+        result = bot.handle_command("/kill", chat_id="12345")
 
         assert "KILL SWITCH ACTIVATED" in result.response
         assert "All orders cancelled" in result.response
@@ -453,7 +455,7 @@ class TestTelegramKillSwitch:
         assert "All strategies stopped" in result.response
 
     def test_status_with_wired_router(self):
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
 
         # Mock a router with sync positionbook/funds for testing
         mock_client = MagicMock()
@@ -468,8 +470,12 @@ class TestTelegramKillSwitch:
             "EMA_9_21": {"state": "ACTIVE", "exchange": "NSE", "tick_count": 42},
         }
 
-        bot = TelegramBot(router=mock_router, scheduler=mock_scheduler)
-        result = bot.handle_command("/status")
+        bot = TelegramBot(
+            config=BotConfig(chat_id="12345"),
+            router=mock_router,
+            scheduler=mock_scheduler,
+        )
+        result = bot.handle_command("/status", chat_id="12345")
 
         assert "EMA_9_21" in result.response
         assert "NSE" in result.response
@@ -477,12 +483,12 @@ class TestTelegramKillSwitch:
 
     def test_kill_fallback_to_legacy_handler(self):
         """If no safety_system wired, falls back to legacy handler."""
-        from packages.automation.src.telegram_bot import TelegramBot
+        from packages.automation.src.telegram_bot import BotConfig, TelegramBot
 
         kill_fn = MagicMock()
-        bot = TelegramBot()
+        bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("kill_switch", kill_fn)
-        result = bot.handle_command("/kill")
+        result = bot.handle_command("/kill", chat_id="12345")
 
         kill_fn.assert_called_once()
         assert "KILL" in result.response

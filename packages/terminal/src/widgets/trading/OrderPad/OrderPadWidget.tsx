@@ -241,6 +241,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
 
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const { control, handleSubmit, watch, setValue } = useForm<OrderFormValues>({
     // zodResolver v5 + zod v4 inferred type mismatch (coerce vs number): cast required
@@ -348,8 +349,13 @@ export default function OrderPadWidget(_props: WidgetProps) {
   }, []);
 
   const showToast = useCallback((type: "success" | "error", text: string, ms = 4000) => {
+    clearTimeout(toastTimerRef.current);
     setToast({ type, text });
-    setTimeout(() => setToast(null), ms);
+    toastTimerRef.current = setTimeout(() => setToast(null), ms);
+  }, []);
+
+  useEffect(() => {
+    return () => clearTimeout(toastTimerRef.current);
   }, []);
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {

@@ -15,17 +15,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { RefreshCw, AlertCircle, TrendingDown, Activity } from "lucide-react";
-import { getPositionbook, getMultiOptionGreeks } from "../../../services/api";
-import type { Position } from "../../../types/api";
+import { getPositionbook, getMultiOptionGreeks } from "@/services/api";
+import type { Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface FlexLayoutNode {
-  getId?: () => string;
-}
 
 /** Raw position from OpenAlgo — may have additional fields beyond typed Position */
 interface RawPosition extends Position {
@@ -163,11 +159,7 @@ function GreekCard({ label, value, colorScheme, description }: GreekCardProps) {
 // Main widget
 // ---------------------------------------------------------------------------
 
-interface GreeksWidgetProps {
-  node?: FlexLayoutNode;
-}
-
-export default function GreeksWidget({ node: _node }: GreeksWidgetProps) {
+export default function GreeksWidget() {
   const [positions,  setPositions]  = useState<RawPosition[]>([]);
   const [greeksMap,  setGreeksMap]  = useState<Record<string, RawGreeks>>({});
   const [ltpMap,     setLtpMap]     = useState<Record<string, number>>({});

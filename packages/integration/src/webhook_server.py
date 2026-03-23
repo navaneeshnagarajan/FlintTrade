@@ -91,7 +91,7 @@ class WebhookServer:
     def __init__(
         self,
         port: int = 8080,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         rate_limit: int = 100,
         rate_window: float = 60.0,
     ) -> None:

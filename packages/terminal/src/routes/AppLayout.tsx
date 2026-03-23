@@ -14,14 +14,19 @@ const SMALL_SCREEN_BREAKPOINT = 768;
 
 function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="fixed inset-0 z-200 flex flex-col items-center justify-center bg-surface-base px-6 text-center">
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="small-screen-title"
+      className="fixed inset-0 z-200 flex flex-col items-center justify-center bg-surface-base px-6 text-center"
+    >
       <div className="flex flex-col items-center gap-5 max-w-xs">
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
           <rect width="40" height="40" rx="8" fill="var(--color-accent, #6366f1)" fillOpacity="0.15" />
           <path d="M12 20h16M20 12l8 8-8 8" stroke="var(--color-accent, #6366f1)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <div className="space-y-2">
-          <h1 className="font-heading font-bold text-lg text-text-primary">
+          <h1 id="small-screen-title" className="font-heading font-bold text-lg text-text-primary">
             FlintTrade is designed for desktop
           </h1>
           <p className="text-sm text-text-secondary leading-relaxed">
@@ -29,6 +34,8 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
           </p>
         </div>
         <button
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
           onClick={onDismiss}
           className="mt-2 px-5 py-2 rounded-lg bg-accent/10 border border-accent/30 text-accent text-sm font-medium hover:bg-accent/20 transition-colors"
         >

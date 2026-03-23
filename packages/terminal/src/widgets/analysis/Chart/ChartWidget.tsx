@@ -32,8 +32,8 @@ import {
   Move,
   Trash2,
 } from "lucide-react";
-import { Button } from "../../../components/ui/button";
-import { Input } from "../../../components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,14 +41,10 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
-} from "../../../components/ui/dropdown-menu";
-import { searchSymbol, getHistory, getQuotes, getIntervals } from "../../../services/api";
+} from "@/components/ui/dropdown-menu";
+import { searchSymbol, getHistory, getQuotes, getIntervals } from "@/services/api";
 
 // --- types -------------------------------------------------------------------
-
-interface FlexLayoutNode {
-  getId?: () => string;
-}
 
 interface SymbolSearchResult {
   symbol: string;
@@ -1451,11 +1447,7 @@ function PeriodInput({
 
 // --- main component ----------------------------------------------------------
 
-interface ChartWidgetProps {
-  node?: FlexLayoutNode;
-}
-
-export default function ChartWidget({ node: _node }: ChartWidgetProps) {
+export default function ChartWidget() {
   // symbol / interval state
   const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
   const [exchange, setExchange] = useState(DEFAULT_EXCHANGE);

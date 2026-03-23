@@ -556,7 +556,7 @@ export default function ExploreRoute() {
         {/* ------------------------------------------------------------------ */}
         {/* Top bar                                                              */}
         {/* ------------------------------------------------------------------ */}
-        <div className="sticky top-0 z-40 border-b border-border-subtle bg-surface-base/90 backdrop-blur-sm">
+        <header className="sticky top-0 z-40 border-b border-border-subtle bg-surface-base/90 backdrop-blur-sm">
           <div className="max-w-6xl mx-auto px-6 h-12 flex items-center justify-between">
             <Link
               to="/welcome"
@@ -565,7 +565,7 @@ export default function ExploreRoute() {
               <LogoIcon size={20} />
               <span className="font-heading font-semibold text-sm">FlintTrade</span>
             </Link>
-            <div className="flex items-center gap-2">
+            <nav aria-label="Explore navigation" className="flex items-center gap-2">
               <Button
                 variant="ghost"
                 size="sm"
@@ -582,11 +582,11 @@ export default function ExploreRoute() {
                 Get Started
                 <ArrowRight className="w-3.5 h-3.5" />
               </ShimmerButton>
-            </div>
+            </nav>
           </div>
-        </div>
+        </header>
 
-        <div className="max-w-6xl mx-auto px-6 py-12 space-y-12">
+        <main className="max-w-6xl mx-auto px-6 py-12 space-y-12">
           {/* ---------------------------------------------------------------- */}
           {/* Hero — Particles background + TextGenerateEffect heading          */}
           {/* ---------------------------------------------------------------- */}
@@ -717,7 +717,7 @@ export default function ExploreRoute() {
 
           {/* Bottom spacer */}
           <div className="h-8" />
-        </div>
+        </main>
       </div>
 
       {/* Toast — smooth opacity fade, no popup effect */}

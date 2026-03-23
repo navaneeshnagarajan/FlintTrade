@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -791,8 +791,26 @@ interface OverlayPanelProps {
 }
 
 function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProps) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // Move focus to close button when panel opens
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  // Close on Escape
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <motion.div
+      role="dialog"
+      aria-label={title}
       className="absolute inset-y-0 right-0 w-full max-w-lg z-20 flex flex-col bg-surface-base border-l border-border-default shadow-2xl"
       initial={{ x: "100%", opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
@@ -803,15 +821,15 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
       <div className="flex items-center gap-3 px-5 py-4 border-b border-border-default bg-surface-card shrink-0">
         <Icon className="w-4 h-4 text-accent" />
         <h2 className="font-heading font-semibold text-sm text-text-primary flex-1">{title}</h2>
-        <Button
-          variant="ghost"
-          size="icon"
+        <button
+          ref={closeButtonRef}
+          type="button"
           onClick={onClose}
           aria-label="Close panel"
-          className="h-7 w-7 text-text-muted hover:text-text-primary rounded-full"
+          className="h-7 w-7 flex items-center justify-center text-text-muted hover:text-text-primary rounded-full hover:bg-surface-hover transition-colors"
         >
           <X className="w-4 h-4" />
-        </Button>
+        </button>
       </div>
 
       {/* Panel scrollable content — pb-24 clears the floating pill nav */}

@@ -280,6 +280,7 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
     <button
       type="button"
       onClick={() => setOpen((v) => !v)}
+      aria-expanded={open}
       className="w-full text-left"
     >
       <GlassCard className="rounded-lg p-0 overflow-hidden hover:-translate-y-0.5 transition-transform duration-200">
@@ -341,6 +342,7 @@ function GlossaryTab() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-9 bg-surface-card border-border-default"
+          aria-label="Search glossary terms"
         />
       </div>
 
@@ -371,6 +373,7 @@ function StrategyCardItem({ s }: StrategyCardItemProps) {
     <button
       type="button"
       onClick={() => setExpanded((v) => !v)}
+      aria-expanded={expanded}
       className="w-full text-left"
     >
       <GlassCard className="rounded-lg p-4 hover:-translate-y-0.5 transition-transform duration-200 cursor-pointer">
@@ -538,6 +541,8 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
     <div className="relative">
       <button
         type="button"
+        role="tab"
+        aria-selected={isActive}
         onClick={onClick}
         title={collapsed ? tab.label : undefined}
         className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-sans transition-colors border-l-2 ${
@@ -653,22 +658,24 @@ export default function LearnRoute() {
           </div>
 
           {/* Nav items */}
-          <div className="flex-1 overflow-y-auto">
-            {TABS.map((tab) => (
-              <SidebarItem
-                key={tab.id}
-                tab={tab}
-                isActive={activeTab === tab.id}
-                collapsed={sidebarCollapsed}
-                onClick={() => setActiveTab(tab.id)}
-              />
-            ))}
-          </div>
+          <nav aria-label="Learning sections" className="flex-1 overflow-y-auto">
+            <div role="tablist" aria-orientation="vertical" className="flex flex-col">
+              {TABS.map((tab) => (
+                <SidebarItem
+                  key={tab.id}
+                  tab={tab}
+                  isActive={activeTab === tab.id}
+                  collapsed={sidebarCollapsed}
+                  onClick={() => setActiveTab(tab.id)}
+                />
+              ))}
+            </div>
+          </nav>
         </motion.div>
 
         {/* Content area */}
         <ScrollArea className="flex-1">
-          <div className="p-6 max-w-4xl">
+          <div role="tabpanel" className="p-6 max-w-4xl">
             <TabTransition tabKey={activeTab}>
               {tabContent[activeTab]}
             </TabTransition>

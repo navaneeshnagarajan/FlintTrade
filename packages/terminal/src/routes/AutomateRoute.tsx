@@ -162,6 +162,8 @@ function IconRail({ activeSection, onSelect, killSwitchActive, runningCount }: I
         return (
           <button
             key={section.id}
+            role="tab"
+            aria-selected={isActive}
             onClick={() => onSelect(section.id)}
             aria-current={isActive ? "true" : undefined}
             title={expanded ? undefined : section.label}

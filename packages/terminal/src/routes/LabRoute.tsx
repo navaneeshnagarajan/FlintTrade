@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -848,25 +848,16 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
 
 function useDuration(startedAt: string | null): string {
   const [now, setNow] = useState(() => Date.now());
-
-  useState(() => {
+  useEffect(() => {
     if (!startedAt) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  });
-
-  if (!startedAt) return "—";
-
-  const diffMs = now - new Date(startedAt).getTime();
-  if (diffMs < 0) return "—";
-
-  const secs = Math.floor(diffMs / 1000);
-  const mins = Math.floor(secs / 60);
-  const hrs = Math.floor(mins / 60);
-
-  if (hrs > 0) return `${hrs}h ${mins % 60}m ${secs % 60}s`;
-  if (mins > 0) return `${mins}m ${secs % 60}s`;
-  return `${secs}s`;
+  }, [startedAt]);
+  if (!startedAt) return "00:00";
+  const diff = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+  const m = String(Math.floor(diff / 60)).padStart(2, "0");
+  const s = String(diff % 60).padStart(2, "0");
+  return `${m}:${s}`;
 }
 
 // ---------------------------------------------------------------------------

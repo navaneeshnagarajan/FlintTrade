@@ -16,7 +16,7 @@ export default function SettingsRoute() {
   const navigate = useNavigate();
 
   return (
-    <div className="fixed inset-0 bg-surface-base flex flex-col overflow-hidden">
+    <main aria-label="Settings" className="fixed inset-0 bg-surface-base flex flex-col overflow-hidden">
       {/* Slim header */}
       <div className="flex items-center gap-3 px-4 h-10 border-b border-border-subtle shrink-0">
         <button
@@ -46,6 +46,6 @@ export default function SettingsRoute() {
           <SettingsTool />
         </Suspense>
       </div>
-    </div>
+    </main>
   );
 }

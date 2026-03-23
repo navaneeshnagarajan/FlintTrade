@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, lazy, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
@@ -26,6 +26,8 @@ const tools: Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onCl
 export default function TerminalRoute() {
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
   const [panelCount, setPanelCount] = useState<number | null>(null);
+  const disposablesRef = useRef<Array<{ dispose(): void }>>([]);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
   const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
@@ -54,8 +56,9 @@ export default function TerminalRoute() {
 
       // Track panel count for the empty-state overlay.
       setPanelCount(event.api.panels.length);
-      event.api.onDidAddPanel(() => setPanelCount(event.api.panels.length));
-      event.api.onDidRemovePanel(() => setPanelCount(event.api.panels.length));
+      const d1 = event.api.onDidAddPanel(() => setPanelCount(event.api.panels.length));
+      const d2 = event.api.onDidRemovePanel(() => setPanelCount(event.api.panels.length));
+      disposablesRef.current.push(d1, d2);
 
       const activeTabId = useLayoutStore.getState().activeTabId;
       const savedLayout = useLayoutStore.getState().getTabLayout(activeTabId);
@@ -86,16 +89,24 @@ export default function TerminalRoute() {
     [setDockviewApi]
   );
 
-  // Auto-save layout on changes
+  // Auto-save layout on changes (debounced 500ms to avoid thrashing on rapid panel ops)
   useEffect(() => {
     const api = useLayoutStore.getState().dockviewApi;
     if (!api) return;
-    const disposable = api.onDidLayoutChange(() => {
-      const activeTabId = useLayoutStore.getState().activeTabId;
-      const layout = api.toJSON();
-      useLayoutStore.getState().saveTabLayout(activeTabId, layout as unknown as Record<string, unknown>);
+    const d3 = api.onDidLayoutChange(() => {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        const activeTabId = useLayoutStore.getState().activeTabId;
+        const layout = api.toJSON();
+        useLayoutStore.getState().saveTabLayout(activeTabId, layout as unknown as Record<string, unknown>);
+      }, 500);
     });
-    return () => disposable.dispose();
+    disposablesRef.current.push(d3);
+    return () => {
+      disposablesRef.current.forEach(d => d.dispose());
+      disposablesRef.current = [];
+      clearTimeout(saveTimerRef.current);
+    };
   }, []);
 
   const handleSelectTool = useCallback((toolId: ToolId) => {

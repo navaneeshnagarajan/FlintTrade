@@ -41,7 +41,10 @@ function ISTClock() {
   }, []);
 
   return (
-    <span className="font-mono text-xs text-text-secondary tabular-nums">
+    <span
+      className="font-mono text-xs text-text-secondary tabular-nums"
+      aria-label="Current time in IST"
+    >
       {time} IST
     </span>
   );
@@ -352,7 +355,7 @@ export default function TopBar() {
           <>
             <div className="w-px h-4 bg-border-default mx-2" />
 
-            <div className="flex items-center gap-1">
+            <div role="tablist" aria-label="Workspaces" className="flex items-center gap-1">
               {tabs.map((tab) => (
                 <div key={tab.id} className="relative flex items-center">
                   {renamingTabId === tab.id ? (
@@ -406,8 +409,20 @@ export default function TopBar() {
                     </div>
                   ) : (
                     <button
+                      role="tab"
+                      aria-selected={tab.id === activeTabId}
                       onClick={() => setActiveTab(tab.id)}
                       onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                          e.preventDefault();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setContextMenu({ tabId: tab.id, x: rect.left, y: rect.bottom });
+                        }
+                        if (e.key === "Escape") {
+                          setContextMenu(null);
+                        }
+                      }}
                       className={`px-3 py-1 text-xs font-heading rounded transition-colors ${
                         tab.id === activeTabId
                           ? "bg-surface-hover text-text-primary"
@@ -454,6 +469,8 @@ export default function TopBar() {
                 className="fixed z-50 min-w-32 bg-popover border border-border rounded-md p-1 shadow-md"
                 style={{ top: contextMenu.y, left: contextMenu.x }}
                 onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === "Escape") setContextMenu(null); }}
+                role="menu"
               >
                 <button
                   onClick={() => handleRenameTab(contextMenu.tabId)}
@@ -478,7 +495,10 @@ export default function TopBar() {
 
       {/* Center: P&L summary (shown when positions exist) */}
       {positionCount > 0 && (
-        <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-2"
+          aria-label={`Total P&L: ${totalPnl >= 0 ? "+" : ""}${totalPnl.toLocaleString()}, ${positionCount} position${positionCount !== 1 ? "s" : ""}`}
+        >
           <span className={`font-mono text-xs tabular-nums ${pnlColor}`}>
             {pnlSign}{totalPnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
@@ -495,6 +515,8 @@ export default function TopBar() {
           variant="ghost"
           size="sm"
           onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
+          aria-expanded={toolsMenuOpen}
+          aria-haspopup="menu"
           className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
         >
           <Wrench size={14} className="mr-1" />

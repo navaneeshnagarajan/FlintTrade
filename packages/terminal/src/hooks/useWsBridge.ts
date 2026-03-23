@@ -55,6 +55,7 @@ export function useWsBridge(): void {
     const { wsUrl, apiKey } = useConnectionStore.getState();
     if (!wsUrl) return;
     const ws = getWsService(wsUrl, apiKey);
+    if (!ws) return;
 
     // Map of resolved futures symbol → display name for tick routing
     // e.g. "MCX:GOLD02APR26FUT" → "MCX:GOLD"
