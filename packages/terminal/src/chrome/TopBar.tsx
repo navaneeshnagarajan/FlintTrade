@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -161,7 +162,7 @@ export default function TopBar() {
   const currentPath = location.pathname;
   const isTerminal = currentPath === "/trade";
 
-  const glass = useThemeStore((s) => s.glass);
+  const glass = useThemeStore(useShallow((s) => s.glass));
 
   const status = useConnectionStore((s) => s.status);
   const setStatus = useConnectionStore((s) => s.setStatus);
@@ -170,18 +171,36 @@ export default function TopBar() {
   const totalPnl = useTradingStore((s) => s.totalPnl);
   const positionCount = useTradingStore((s) => s.positionCount);
 
-  const tabs = useLayoutStore((s) => s.tabs);
+  // tabs is an array — useShallow prevents re-renders when the reference changes
+  // but the contents (ids/names) are the same
+  const tabs = useLayoutStore(useShallow((s) => s.tabs));
   const activeTabId = useLayoutStore((s) => s.activeTabId);
-  const setActiveTab = useLayoutStore((s) => s.setActiveTab);
-  const addTab = useLayoutStore((s) => s.addTab);
-  const removeTab = useLayoutStore((s) => s.removeTab);
-  const renameTab = useLayoutStore((s) => s.renameTab);
-  const saveTabLayout = useLayoutStore((s) => s.saveTabLayout);
-  const getTabLayout = useLayoutStore((s) => s.getTabLayout);
-  const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
-  const setToolsMenuOpen = useLayoutStore((s) => s.setToolsMenuOpen);
   const toolsMenuOpen = useLayoutStore((s) => s.toolsMenuOpen);
-  const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
+  // Group action selectors into a single shallow call — functions are stable
+  // references but grouping reduces the number of store subscriptions
+  const {
+    setActiveTab,
+    addTab,
+    removeTab,
+    renameTab,
+    saveTabLayout,
+    getTabLayout,
+    setWidgetPickerOpen,
+    setToolsMenuOpen,
+    setPresetPickerOpen,
+  } = useLayoutStore(
+    useShallow((s) => ({
+      setActiveTab: s.setActiveTab,
+      addTab: s.addTab,
+      removeTab: s.removeTab,
+      renameTab: s.renameTab,
+      saveTabLayout: s.saveTabLayout,
+      getTabLayout: s.getTabLayout,
+      setWidgetPickerOpen: s.setWidgetPickerOpen,
+      setToolsMenuOpen: s.setToolsMenuOpen,
+      setPresetPickerOpen: s.setPresetPickerOpen,
+    }))
+  );
 
   const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   /** Id of the workspace tab currently being renamed inline. */

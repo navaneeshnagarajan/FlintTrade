@@ -37,6 +37,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { TrendingUp, TrendingDown, AlertTriangle, Target } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { usePositions } from "@/hooks/usePositions";
@@ -113,7 +114,7 @@ function StatCard({
 export default function MTMMonitorWidget(_props: WidgetProps) {
   const { data: positions } = usePositions();
   const { data: _funds } = useFunds(); // keeps store updated
-  const riskLimits = useSettingsStore((s) => s.riskLimits);
+  const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);

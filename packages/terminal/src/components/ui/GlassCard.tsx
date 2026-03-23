@@ -16,6 +16,7 @@
  */
 
 import * as React from "react";
+import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/lib/utils";
 import { useThemeStore } from "@/stores/themeStore";
 
@@ -60,8 +61,13 @@ export function GlassCard({
   style,
   ...rest
 }: GlassCardProps) {
-  const glassStore = useThemeStore((state) => state.glass);
-  const activeTheme = useThemeStore((state) => state.getActiveTheme());
+  const glassStore = useThemeStore(useShallow((state) => state.glass));
+  // getActiveTheme() returns a new object on every invocation; subscribe to
+  // the stable source fields so the selector only re-renders when the active
+  // theme ID or custom themes list actually changes.
+  const activeTheme = useThemeStore(
+    useShallow((state) => state.getActiveTheme())
+  );
 
   // Resolve whether glass mode is active for this instance
   const isGlass = glass !== undefined ? glass : glassStore.enabled;

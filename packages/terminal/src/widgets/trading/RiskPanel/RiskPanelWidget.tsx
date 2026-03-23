@@ -25,6 +25,7 @@ import {
   Banknote,
   Target,
 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useFunds } from "@/hooks/useFunds";
@@ -161,7 +162,7 @@ function formatINR(n: number): string {
 export default function RiskPanelWidget(_props: WidgetProps) {
   const { data: fundsData } = useFunds();
   const { data: positions } = usePositions();
-  const riskLimits = useSettingsStore((s) => s.riskLimits);
+  const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
   const { totalPnl, openOrderCount } = useTradingStore();
 
   // Derived values

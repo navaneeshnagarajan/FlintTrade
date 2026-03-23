@@ -78,10 +78,16 @@ export default defineConfig({
           if (id.includes("node_modules/@tanstack/")) {
             return "vendor-tanstack";
           }
-          // Radix UI primitives — shared by all shadcn/ui components
+          // Radix UI primitives — shared by all shadcn/ui components.
+          // @floating-ui and cmdk are co-located here because they are imported
+          // directly by @radix-ui packages; placing them in the same chunk
+          // eliminates the vendor-radix → vendor-misc → vendor-radix circular
+          // dependency that Rollup would otherwise produce.
           if (
             id.includes("node_modules/radix-ui") ||
-            id.includes("node_modules/@radix-ui/")
+            id.includes("node_modules/@radix-ui/") ||
+            id.includes("node_modules/@floating-ui/") ||
+            id.includes("node_modules/cmdk/")
           ) {
             return "vendor-radix";
           }
@@ -107,12 +113,13 @@ export default defineConfig({
           // Framer Motion — loaded async, not needed on initial page
           if (id.includes("node_modules/framer-motion")) return "vendor-framer";
           // Tremor + Recharts + d3 — only /invest, /lab, dashboard, pnl-dashboard
+          // NOTE: @floating-ui is intentionally omitted here — it lives in
+          // vendor-radix to avoid the circular chunk warning.
           if (
             id.includes("node_modules/@tremor/") ||
             id.includes("node_modules/recharts") ||
             id.includes("node_modules/d3-") ||
             id.includes("node_modules/@headlessui/") ||
-            id.includes("node_modules/@floating-ui/") ||
             id.includes("node_modules/react-day-picker") ||
             id.includes("node_modules/react-transition-state")
           ) return "vendor-charts";

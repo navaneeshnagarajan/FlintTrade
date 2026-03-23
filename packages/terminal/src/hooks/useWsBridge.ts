@@ -61,11 +61,27 @@ export function useWsBridge(): void {
     // e.g. "MCX:GOLD02APR26FUT" → "MCX:GOLD"
     let futuresMap = new Map<string, string>();
 
+    // --- RAF tick batching ---
+    // During market hours multiple ticks may arrive before the browser paints
+    // the next frame. Accumulate them in a Map (keyed by display key so each
+    // instrument is written at most once per frame) and flush in rAF.
+    const pendingTicks = new Map<string, WsTick>();
+    let rafId: number | null = null;
+
     const unsubTick = ws.onTick((tick: WsTick) => {
       const key = `${tick.exchange}:${tick.symbol}`;
       // Route MCX futures ticks to their display-name atoms
       const displayKey = futuresMap.get(key) ?? key;
-      store.set(tickAtomFamily(displayKey), tick);
+      pendingTicks.set(displayKey, tick);
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          for (const [k, t] of pendingTicks) {
+            store.set(tickAtomFamily(k), t);
+          }
+          pendingTicks.clear();
+          rafId = null;
+        });
+      }
     });
 
     const unsubStatus = ws.onStatus((connected: boolean) => {
@@ -91,6 +107,13 @@ export function useWsBridge(): void {
     ws.connect();
 
     return () => {
+      // Cancel any pending RAF flush so stale ticks are not written after
+      // the hook unmounts (e.g. during HMR or navigation away from /trade).
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      pendingTicks.clear();
       unsubTick();
       unsubStatus();
     };
