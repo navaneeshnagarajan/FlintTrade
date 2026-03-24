@@ -512,20 +512,30 @@ export default function TopBar() {
         )}
       </div>
 
-      {/* Center: P&L summary (shown when positions exist) */}
-      {positionCount > 0 && (
-        <div
-          className="flex items-center gap-2"
-          aria-label={`Total P&L: ${totalPnl >= 0 ? "+" : ""}${totalPnl.toLocaleString()}, ${positionCount} position${positionCount !== 1 ? "s" : ""}`}
-        >
-          <span className={`font-mono text-xs tabular-nums ${pnlColor}`}>
-            {pnlSign}{totalPnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      {/* Center: P&L summary — always visible to prevent layout shift */}
+      <div
+        className="flex items-center gap-2 w-40 justify-center"
+        aria-label={
+          positionCount > 0
+            ? `Total P&L: ${totalPnl >= 0 ? "+" : ""}${totalPnl.toLocaleString()}, ${positionCount} position${positionCount !== 1 ? "s" : ""}`
+            : "No open positions"
+        }
+      >
+        {positionCount > 0 ? (
+          <>
+            <span className={`font-mono text-xs tabular-nums ${pnlColor}`}>
+              {pnlSign}{totalPnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+            <Badge variant="secondary" className="text-xxs px-1.5 py-0">
+              {positionCount} pos
+            </Badge>
+          </>
+        ) : (
+          <span className="font-mono text-xs tabular-nums text-text-muted">
+            0 positions · ₹0.00
           </span>
-          <Badge variant="secondary" className="text-xxs px-1.5 py-0">
-            {positionCount} pos
-          </Badge>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Right: TOOLS (all routes) + WIDGETS (/trade only) + Connection status + Clock */}
       <div className="flex items-center gap-3">

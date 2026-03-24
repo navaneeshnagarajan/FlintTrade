@@ -197,11 +197,19 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
 interface ToastMsg {
   type: "success" | "error";
   text: string;
+  retryable?: boolean;
 }
 
-function Toast({ msg }: { msg: ToastMsg | null }) {
+interface ToastProps {
+  msg: ToastMsg | null;
+  onRetry?: () => void;
+}
+
+function Toast({ msg, onRetry }: ToastProps) {
   if (!msg) return null;
   const ok = msg.type === "success";
+  // Transient errors (network, server 500) are retryable; auth/validation errors are not
+  const showRetry = !ok && msg.retryable && !!onRetry;
   return (
     <div
       className={`flex items-center gap-2 px-3 py-2 text-xs border-t ${
@@ -212,6 +220,15 @@ function Toast({ msg }: { msg: ToastMsg | null }) {
     >
       {ok ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
       <span className="flex-1 leading-tight">{msg.text}</span>
+      {showRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 px-2 py-0.5 rounded border border-loss/30 text-loss hover:bg-loss/10 transition-colors text-xxs font-medium"
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }
@@ -242,6 +259,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastParamsRef = useRef<PlaceOrderParams | null>(null);
 
   const { control, handleSubmit, watch, setValue } = useForm<OrderFormValues>({
     // zodResolver v5 + zod v4 inferred type mismatch (coerce vs number): cast required
@@ -348,15 +366,39 @@ export default function OrderPadWidget(_props: WidgetProps) {
     setSearchOpen(false);
   }, []);
 
-  const showToast = useCallback((type: "success" | "error", text: string, ms = 4000) => {
+  const showToast = useCallback((type: "success" | "error", text: string, ms = 4000, retryable = false) => {
     clearTimeout(toastTimerRef.current);
-    setToast({ type, text });
+    setToast({ type, text, retryable });
     toastTimerRef.current = setTimeout(() => setToast(null), ms);
   }, []);
 
   useEffect(() => {
     return () => clearTimeout(toastTimerRef.current);
   }, []);
+
+  // Determine whether an error message warrants a retry button
+  function isRetryableError(msg: string): boolean {
+    return (
+      msg.includes("Connection failed") ||
+      msg.includes("server error") ||
+      msg.includes("Rate limit")
+    );
+  }
+
+  const submitOrder = useCallback(async (params: PlaceOrderParams) => {
+    setLoading(true);
+    try {
+      const result = await placeOrder(params);
+      const orderId = (result as { orderId?: string; order_id?: string }).orderId ??
+        (result as { order_id?: string }).order_id ?? "";
+      showToast("success", `Order placed${orderId ? ` · ID: ${orderId}` : ""}`, 3000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Order failed";
+      showToast("error", msg, 6000, isRetryableError(msg));
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     const params: PlaceOrderParams = {
@@ -370,19 +412,16 @@ export default function OrderPadWidget(_props: WidgetProps) {
       triggerPrice: triggerEnabled ? (values.trigPrice ?? 0) : 0,
       strategy: "FlintOrderPad",
     };
-
-    setLoading(true);
-    try {
-      const result = await placeOrder(params);
-      const orderId = (result as { orderId?: string; order_id?: string }).orderId ??
-        (result as { order_id?: string }).order_id ?? "";
-      showToast("success", `Order placed${orderId ? ` · ID: ${orderId}` : ""}`);
-    } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "Order failed");
-    } finally {
-      setLoading(false);
-    }
+    lastParamsRef.current = params;
+    await submitOrder(params);
   };
+
+  const handleRetry = useCallback(() => {
+    if (lastParamsRef.current) {
+      setToast(null);
+      void submitOrder(lastParamsRef.current);
+    }
+  }, [submitOrder]);
 
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
@@ -663,7 +702,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
       </form>
 
       {/* Toast */}
-      <Toast msg={toast} />
+      <Toast msg={toast} onRetry={handleRetry} />
     </div>
   );
 }

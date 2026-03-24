@@ -21,14 +21,16 @@ const AIRoute = lazy(() => import("./routes/AIRoute"));
 const SettingsRoute = lazy(() => import("./routes/SettingsRoute"));
 const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
 
-const Loading = () => (
-  <div
-    role="status"
-    className="min-h-screen bg-surface-base flex items-center justify-center"
-  >
-    <div className="text-text-muted text-sm">Loading...</div>
-  </div>
-);
+function Loading() {
+  return (
+    <div className="flex items-center justify-center h-screen bg-background" role="status">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+        <p className="text-sm text-muted animate-pulse">Loading FlintTrade...</p>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Determine the initial route based on persisted settings.
