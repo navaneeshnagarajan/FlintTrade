@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { AITutorPill } from "@/components/help/AITutorPill";
 
 const THEME_CLASSES = [
   "theme-obsidian",
@@ -46,5 +47,11 @@ export default function RootLayout() {
     }
   }, [theme]);
 
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      {/* AITutorPill is rendered here so it appears on every route including /welcome and /explore */}
+      <AITutorPill />
+    </>
+  );
 }

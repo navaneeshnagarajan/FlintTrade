@@ -10,8 +10,68 @@ import WidgetPicker from "@/chrome/WidgetPicker";
 import ToolsDropdown from "@/chrome/ToolsDropdown";
 import PresetPicker from "@/chrome/PresetPicker";
 import { widgetComponents } from "@/layout/widgetFactory";
-import { applyPreset, DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
+import { applyPreset } from "@/layout/workspacePresets";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
+
+/**
+ * Returns the best default preset for the given skill level on /trade.
+ *   Beginner      → "beginner-core" (applied manually — 5 widgets)
+ *   Intermediate  → "market-watch"
+ *   Advanced      → "scalper-zone"
+ */
+function getDefaultPresetId(level: "beginner" | "intermediate" | "advanced"): string {
+  if (level === "advanced") return "scalper-zone";
+  if (level === "intermediate") return "market-watch";
+  return "beginner-core"; // handled as a special case below
+}
+
+/**
+ * Apply the beginner-friendly 5-widget layout:
+ * Dashboard, Chart, Watchlist, OrderPad, Positions — simple top/bottom split.
+ */
+function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
+  const ts = Date.now();
+  const chartId = `chart-${ts}-a`;
+  const watchlistId = `watchlist-${ts}-b`;
+  const orderpadId = `orderpad-${ts}-c`;
+  const positionsId = `positions-${ts}-d`;
+  const dashboardId = `dashboard-${ts}-e`;
+
+  api.addPanel({ id: chartId, component: "chart", title: "Chart" });
+
+  api.addPanel({
+    id: watchlistId,
+    component: "watchlist",
+    title: "Watchlist",
+    position: { referencePanel: chartId, direction: "right" },
+    initialWidth: 240,
+  });
+
+  api.addPanel({
+    id: orderpadId,
+    component: "orderpad",
+    title: "Order Pad",
+    position: { referencePanel: watchlistId, direction: "below" },
+  });
+
+  api.addPanel({
+    id: positionsId,
+    component: "positions",
+    title: "Positions",
+    position: { referencePanel: chartId, direction: "below" },
+    initialHeight: 200,
+  });
+
+  api.addPanel({
+    id: dashboardId,
+    component: "dashboard",
+    title: "Dashboard",
+    position: { referencePanel: positionsId, direction: "within" },
+  });
+}
 
 // Full-page tools available from the TOOLS dropdown on /trade.
 // backtest-lab → /lab, strategy-builder → /lab, flow-builder → /automate
@@ -28,6 +88,8 @@ export default function TerminalRoute() {
   const [panelCount, setPanelCount] = useState<number | null>(null);
   const disposablesRef = useRef<Array<{ dispose(): void }>>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const level = useSkillLevel("trade");
 
   const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
   const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
@@ -77,15 +139,31 @@ export default function TerminalRoute() {
             // Cast through unknown because we store as Record<string,unknown> in Zustand.
             event.api.fromJSON(savedLayout as unknown as Parameters<typeof event.api.fromJSON>[0]);
           } catch {
-            // Corrupted saved layout — fall back to the default preset
-            applyPreset(event.api, DEFAULT_PRESET_ID);
+            // Corrupted saved layout — apply skill-appropriate default
+            const skillPreset = getDefaultPresetId(level);
+            if (skillPreset === "beginner-core") {
+              applyBeginnerLayout(event.api);
+            } else {
+              applyPreset(event.api, skillPreset);
+            }
           }
         }
       } else {
-        // No layout saved yet — apply the default "Market Watch" preset
-        applyPreset(event.api, DEFAULT_PRESET_ID);
+        // No layout saved yet — apply the skill-appropriate default preset.
+        // Beginner: 5 core widgets (dashboard, chart, watchlist, orderpad, positions)
+        // Intermediate: Market Watch preset
+        // Advanced: Scalper Zone preset
+        const skillPreset = getDefaultPresetId(level);
+        if (skillPreset === "beginner-core") {
+          applyBeginnerLayout(event.api);
+        } else {
+          applyPreset(event.api, skillPreset);
+        }
       }
     },
+    // level intentionally omitted — we only use it for the initial layout decision.
+    // Re-running onDockviewReady on every skill change would reset the layout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [setDockviewApi]
   );
 
@@ -150,7 +228,10 @@ export default function TerminalRoute() {
           </Suspense>
         </div>
       ) : (
-        <div className="flex-1 relative overflow-hidden">
+        <div
+          className="flex-1 relative overflow-hidden"
+          data-tour-target="workspace"
+        >
           <DockviewReact
             className="dockview-theme-dark"
             onReady={onDockviewReady}
@@ -170,7 +251,9 @@ export default function TerminalRoute() {
                     Your workspace is empty
                   </p>
                   <p className="text-sm text-text-secondary">
-                    Add widgets or choose a template to get started
+                    {level === "beginner"
+                      ? "Add your first widget — start with the Watchlist or Chart"
+                      : "Add widgets or choose a template to get started"}
                   </p>
                 </div>
                 <div className="flex gap-2 mt-1">
@@ -179,6 +262,7 @@ export default function TerminalRoute() {
                     variant="outline"
                     className="h-8 text-xs border-border-default text-text-secondary hover:text-text-primary"
                     onClick={() => setWidgetPickerOpen(true)}
+                    data-tour-target="widget-picker"
                   >
                     <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
                     Add Widgets
@@ -209,6 +293,14 @@ export default function TerminalRoute() {
         isOpen={presetPickerOpen}
         onClose={() => setPresetPickerOpen(false)}
       />
+
+      {/* Guided tour — only shown to beginners on their first visit */}
+      {level === "beginner" && (
+        <SpotlightTour
+          tourId="trade-beginner"
+          steps={TOUR_DEFINITIONS["trade-beginner"] ?? []}
+        />
+      )}
     </div>
   );
 }
