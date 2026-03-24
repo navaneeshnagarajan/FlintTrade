@@ -1,0 +1,31 @@
+name: Status Report
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'   # Every Monday at 07:00 UTC
+  workflow_dispatch:        # Allow manual trigger
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate status report
+        run: |
+          mkdir -p .local
+          python scripts/audit_repos.py --format markdown > .local/STATUS.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: status-report
+          path: .local/STATUS.md

@@ -220,6 +220,12 @@ def create_flask_app(
     from packages.core.src.monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
+    # Register admin blueprint (dev/debug only)
+    if app.debug or os.environ.get("FLINTTRADE_DEV"):
+        from packages.core.src.admin_routes import admin_bp  # noqa: PLC0415
+        app.register_blueprint(admin_bp)
+        logger.info("Admin endpoints registered (dev mode)")
+
     # Reconnect saved accounts (best-effort, don't block startup)
     try:
         _reconnect_saved_accounts(registry, credential_store, logger)
