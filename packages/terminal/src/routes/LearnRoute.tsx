@@ -1,4 +1,7 @@
 import React, { useState } from "react";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen,
@@ -611,6 +614,18 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
 export default function LearnRoute() {
   const [activeTab, setActiveTab] = useState<TabId>("basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const level = useSkillLevel("learn");
+
+  // Density adaptation — beginner sees fewer sidebar items
+  // Beginner: basics + glossary prominently (guided lesson list)
+  // Intermediate: all sections
+  // Advanced: all sections
+  const visibleTabIds: TabId[] = (() => {
+    if (level === "beginner") return ["basics", "glossary", "paper"];
+    return ["basics", "glossary", "strategies", "paper", "videos"];
+  })();
+
+  const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
 
   const tabContent: Record<TabId, React.ReactNode> = {
     basics:     <BasicsTab />,
@@ -623,12 +638,18 @@ export default function LearnRoute() {
   return (
     <div className="h-full bg-surface-base flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border-default bg-surface-card px-6 py-4">
+      <div className="border-b border-border-default bg-surface-card px-6 py-4" data-tour-target="course-list">
         <div className="flex items-center gap-3">
           <GraduationCap className="w-6 h-6 text-accent" />
           <div>
-            <h1 className="font-heading font-bold text-lg text-text-primary">Learning Center</h1>
-            <p className="text-xxs text-text-muted">Market basics, strategies, and paper trading guides</p>
+            <h1 className="font-heading font-bold text-lg text-text-primary">
+              {level === "beginner" ? "Getting Started" : "Learning Center"}
+            </h1>
+            <p className="text-xxs text-text-muted">
+              {level === "beginner"
+                ? "Learn the basics of trading — one lesson at a time"
+                : "Market basics, strategies, and paper trading guides"}
+            </p>
           </div>
         </div>
       </div>
@@ -657,10 +678,10 @@ export default function LearnRoute() {
             </button>
           </div>
 
-          {/* Nav items */}
-          <nav aria-label="Learning sections" className="flex-1 overflow-y-auto">
+          {/* Nav items — filtered by skill level */}
+          <nav aria-label="Learning sections" className="flex-1 overflow-y-auto" data-tour-target="glossary">
             <div role="tablist" aria-orientation="vertical" className="flex flex-col">
-              {TABS.map((tab) => (
+              {visibleTabs.map((tab) => (
                 <SidebarItem
                   key={tab.id}
                   tab={tab}
@@ -682,6 +703,14 @@ export default function LearnRoute() {
           </div>
         </ScrollArea>
       </div>
+
+      {/* Guided tour — beginner only, first visit */}
+      {level === "beginner" && (
+        <SpotlightTour
+          tourId="learn-beginner"
+          steps={TOUR_DEFINITIONS["learn-beginner"] ?? []}
+        />
+      )}
     </div>
   );
 }

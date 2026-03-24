@@ -1,4 +1,7 @@
 import { useState, useMemo } from "react";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { DonutChart, AreaChart, BarList } from "@tremor/react";
 import {
   useReactTable,
@@ -1274,6 +1277,19 @@ function IpoTrackerTab() {
 
 export default function InvestRoute() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+  const level = useSkillLevel("invest");
+
+  // Tabs visible per skill level (density adaptation — hide, not restructure)
+  // Beginner: goal-focused — Dashboard + Holdings + SIPs + Net Worth
+  // Intermediate: full tab bar minus advanced research tabs
+  // Advanced: all tabs
+  const visibleTabIds: TabId[] = (() => {
+    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "sector"];
+    return ["dashboard", "holdings", "sip", "networth", "sector", "etf", "stocks", "ipo"];
+  })();
+
+  const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
 
   const {
     data: holdings = [],
@@ -1346,18 +1362,20 @@ export default function InvestRoute() {
       <div className="border-b border-border-default bg-surface-card shrink-0">
         {/* Title row */}
         <div className="flex items-center justify-between px-6 pt-4 pb-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3" data-tour-target="holdings">
             <TrendingUp className="w-5 h-5 text-profit" />
             <div>
               <h1 className="font-heading font-bold text-base text-text-primary">
-                Investor Dashboard
+                {level === "beginner" ? "Your Journey" : "Investor Dashboard"}
               </h1>
               <p className="text-xxs text-text-muted">
-                Portfolio, holdings, net worth, and investment tools
+                {level === "beginner"
+                  ? "Track your holdings and build your wealth over time"
+                  : "Portfolio, holdings, net worth, and investment tools"}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" data-tour-target="networth">
             {isLoading && <RefreshCw className="size-3 text-text-muted animate-spin" />}
             {!isLoading && (
               <Badge
@@ -1370,12 +1388,12 @@ export default function InvestRoute() {
           </div>
         </div>
 
-        {/* Horizontal tab bar */}
+        {/* Horizontal tab bar — filtered by skill level */}
         <nav
           aria-label="Section navigation"
           className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
         >
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -1409,6 +1427,14 @@ export default function InvestRoute() {
             <div className="p-6 max-w-5xl">{tabContent[activeTab]}</div>
           </TabTransition>
         </ScrollArea>
+      )}
+
+      {/* Guided tour — beginner only, first visit */}
+      {level === "beginner" && (
+        <SpotlightTour
+          tourId="invest-beginner"
+          steps={TOUR_DEFINITIONS["invest-beginner"] ?? []}
+        />
       )}
     </div>
   );

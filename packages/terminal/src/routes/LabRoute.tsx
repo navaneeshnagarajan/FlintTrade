@@ -1,4 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -1598,16 +1601,18 @@ function ResultsSection({ lastResult }: ResultsSectionProps) {
 interface LabTabBarProps {
   active: TabId;
   onChange: (id: TabId) => void;
+  /** Filtered tab list based on skill level. Defaults to all TABS. */
+  tabs?: TabDef[];
 }
 
-function LabTabBar({ active, onChange }: LabTabBarProps) {
+function LabTabBar({ active, onChange, tabs = TABS }: LabTabBarProps) {
   return (
     <div
       role="tablist"
       aria-label="Strategy Lab sections"
       className="flex items-center gap-1 border-b border-border-default bg-surface-card px-6"
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = active === tab.id;
         return (
@@ -1647,6 +1652,19 @@ function LabTabBar({ active, onChange }: LabTabBarProps) {
 export default function LabRoute() {
   const [activeTab, setActiveTab] = useState<TabId>("backtest");
   const [lastResult, setLastResult] = useState<BacktestResult | null>(null);
+  const level = useSkillLevel("lab");
+
+  // Density adaptation:
+  // Beginner: Show only Backtest tab (simplified "Try a Strategy" entry point) + Results
+  // Intermediate: Full form + Results (all except Optimize)
+  // Advanced: All tabs including Optimize (Monte Carlo / walk-forward)
+  const visibleTabIds: TabId[] = (() => {
+    if (level === "beginner") return ["backtest", "results"];
+    if (level === "intermediate") return ["backtest", "forward-test", "results"];
+    return ["backtest", "forward-test", "optimize", "results"];
+  })();
+
+  const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
 
   function renderTab(id: TabId) {
     switch (id) {
@@ -1667,30 +1685,39 @@ export default function LabRoute() {
     <div className="h-full bg-surface-base flex flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 pt-4 pb-0">
-        <div className="flex items-center gap-3 pb-3">
+        <div className="flex items-center gap-3 pb-3" data-tour-target="strategy-picker">
           <Zap className="w-6 h-6 text-accent" />
           <div>
             <h1 className="font-heading font-bold text-lg text-text-primary">
-              Strategy Lab
+              {level === "beginner" ? "Try a Strategy" : "Strategy Lab"}
             </h1>
             <p className="text-xxs text-text-muted">
-              Backtest, forward test, and optimize strategies — no broker has
-              this built-in
+              {level === "beginner"
+                ? "Pick a built-in strategy and run a backtest — no code needed"
+                : "Backtest, forward test, and optimize strategies — no broker has this built-in"}
             </p>
           </div>
         </div>
-        {/* Horizontal tab bar — sits flush at bottom of header */}
-        <LabTabBar active={activeTab} onChange={setActiveTab} />
+        {/* Horizontal tab bar — filtered by skill level */}
+        <LabTabBar active={activeTab} onChange={setActiveTab} tabs={visibleTabs} />
       </div>
 
       {/* Tab content */}
       <ScrollArea className="flex-1">
-        <div className="p-6 max-w-5xl">
+        <div className="p-6 max-w-5xl" data-tour-target="backtest-results">
           <TabTransition tabKey={activeTab}>
             {renderTab(activeTab)}
           </TabTransition>
         </div>
       </ScrollArea>
+
+      {/* Guided tour — beginner only, first visit */}
+      {level === "beginner" && (
+        <SpotlightTour
+          tourId="lab-beginner"
+          steps={TOUR_DEFINITIONS["lab-beginner"] ?? []}
+        />
+      )}
     </div>
   );
 }
