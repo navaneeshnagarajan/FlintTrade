@@ -26,6 +26,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 import math  # noqa: E402
+import time  # noqa: E402
 
 import numpy as np  # noqa: E402
 from flask import Flask, Response, jsonify, request  # noqa: E402
@@ -192,6 +193,33 @@ def create_flask_app(
     from packages.screener.src.analysis_routes import analysis_bp  # noqa: PLC0415
     app.register_blueprint(analysis_bp)
 
+    # Register Action Center blueprint (/ft-api/v1/action-center/*)
+    from packages.engine.src.action_center import ActionCenter  # noqa: PLC0415
+    from packages.engine.src.action_center_routes import action_center_bp  # noqa: PLC0415
+    action_center = ActionCenter()
+    app.config["ACTION_CENTER"] = action_center
+    app.register_blueprint(action_center_bp)
+
+    # Register Security blueprint and middleware (/ft-api/v1/security/*)
+    from packages.core.src.security import SecurityMonitor  # noqa: PLC0415
+    from packages.core.src.security_routes import register_security_middleware, security_bp  # noqa: PLC0415
+    security_monitor = SecurityMonitor()
+    app.config["SECURITY_MONITOR"] = security_monitor
+    app.register_blueprint(security_bp)
+    register_security_middleware(app, security_monitor)
+
+    # Register P&L tracker blueprint
+    from packages.data.src.pnl_routes import pnl_bp  # noqa: PLC0415
+    app.register_blueprint(pnl_bp)
+
+    # Register Historify watchlist blueprint
+    from packages.historical.src.watchlist_routes import historify_bp  # noqa: PLC0415
+    app.register_blueprint(historify_bp)
+
+    # Register monitoring blueprint (health, traffic, latency)
+    from packages.core.src.monitoring_routes import monitoring_bp, get_traffic_counter  # noqa: PLC0415
+    app.register_blueprint(monitoring_bp)
+
     # Reconnect saved accounts (best-effort, don't block startup)
     try:
         _reconnect_saved_accounts(registry, credential_store, logger)
@@ -236,6 +264,31 @@ def create_flask_app(
             return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
         return None
+
+    @app.before_request
+    def _record_request_start() -> None:
+        """Store request start time for latency calculation."""
+        import flask  # noqa: PLC0415
+        flask.g._request_start = time.monotonic()
+
+    @app.after_request
+    def _record_traffic(response: Any) -> Any:
+        """Record method, path, status, and duration in TrafficCounter."""
+        try:
+            import flask  # noqa: PLC0415
+            from packages.core.src.monitoring_routes import get_traffic_counter  # noqa: PLC0415
+
+            start = getattr(flask.g, "_request_start", None)
+            duration_ms = (time.monotonic() - start) * 1000 if start is not None else 0.0
+            get_traffic_counter().record(
+                method=request.method,
+                path=request.path,
+                status=response.status_code,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            pass  # Never let monitoring break the response
+        return response
 
     @app.route("/api/v1/indicators/compute", methods=["POST"])
     def indicators_compute() -> tuple[Any, int]:
