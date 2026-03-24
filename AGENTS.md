@@ -8,7 +8,7 @@
 
 Open-source modular trading platform for Indian F&O, commodities, crypto.
 Built on OpenAlgo (30+ broker gateway). 13 packages (11 Python + 1 Rust/PyO3 + 1 React), monorepo, AGPL-3.0.
-Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-alpha
+Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-beta
 
 ## Architecture
 
@@ -30,7 +30,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.1.0-alpha
 **Rust/PyO3 (1):** tick-engine (high-performance tick processing, Python bindings via PyO3)
 **React (1):** terminal (5173)
 
-## Current State (v0.1.0-alpha, released 2026-03-21)
+## Current State (v0.1.0-beta, released 2026-03-24)
 
 - 1,021 tests passing (985 Python + 36 terminal)
 - Terminal: 21 widgets (TSX), 7 tools (4 canvas overlays + 3 full-page), 10 routes, 6 workspace presets, 5 themes

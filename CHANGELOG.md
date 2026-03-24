@@ -6,21 +6,74 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-- AGENTS.md restored to public repo (useful for contributors using AI tools)
-- docs/REFERENCES.md (public contributor reference with libraries and upstream projects)
+## [0.1.0-beta] — 2026-03-24
+
+Full repo audit + god component refactoring. Security hardened, performance optimized, WCAG accessible.
+
+### Added — Security
+- Flask API authentication (before_request hook validates API key on all 20+ endpoints)
+- SQL injection prevention (table name allowlist + path validation in DuckDB pipeline)
+- Telegram bot denies commands by default when chat_id not configured
+- Ditto module requires DITTO_ENCRYPTION_KEY (was silently generating ephemeral key)
+
+### Added — Accessibility (WCAG 2.2 AA)
+- MotionConfig reducedMotion="user" at app root (all Framer Motion respects OS preference)
+- Landmarks (<main>, <header>, <nav>) on all 5 flow routes
+- useDocumentTitle hook — page title updates on every route change
+- Keyboard-accessible ToolsDropdown (role="menu", Arrow/Escape navigation)
+- Keyboard-accessible workspace tab context menu (Shift+F10, Escape)
+- ARIA roles for sidebars (Learn, Lab, Automate), workspace tabs, accordion items
+- Form labels (aria-label) on all ThemePicker, BackgroundPicker, SettingsTool inputs
+- Focus management on AIRoute overlay panels
+- role="alertdialog" + aria-modal on SmallScreenOverlay
+- role="dialog" on InteractiveTour
+
+### Added — Performance
+- vendor-misc chunk split: 1,116 KB → 320 KB (-71%). Tremor/recharts/d3 deferred to async vendor-charts
+- WebSocket tick batching via requestAnimationFrame in useWsBridge
+- Zustand useShallow selectors for array/object subscriptions (TopBar, GlassCard, RiskPanel, MTMMonitor)
+- Dockview layout auto-save debounced to 500ms (was every pixel of drag)
+- Build target set to es2022 (smaller output, native syntax)
+
+### Changed — Code Quality
+- ChartWidget split: 3,001 → 628 lines (indicators.ts, useChartInit, useDrawingTools, useIndicators, ChartLegend, types)
+- OptionChainWidget split: 1,376 → 491 lines (SymbolSearch, BasketPanel, useOptionChainData, gridConfig, formatters, types)
+- AutomateRoute split: 1,338 → 81 lines (7 section components)
+- SetupRoute split: 1,422 → 367 lines (8 step components)
+- SettingsTool split: 1,278 → 212 lines (11 section components with aria-labels)
+- getWsService return type corrected to WebSocketService | null (was null!)
+- Timer leaks fixed in OrderPad + OptionChain (ref-based cleanup)
+- Dead FlexLayoutNode interface removed from 6 analysis widgets
+- Relative imports converted to @/ alias in 6 analysis widgets
+- prev_close added to Quote type, post() body type widened (removed double casts)
+- useGlobalKeys now logs errors (was silently swallowing trading action failures)
+
+### Fixed — Security
+- Flask error responses sanitized (no more str(exc) leaked to clients)
+- Webhook server binds to 127.0.0.1 by default (was 0.0.0.0)
+- useDuration memory leak in LabRoute (setInterval in useState never cleared)
+- Dockview panel listeners now disposed on unmount
+
+### Fixed — Accessibility
+- textMuted contrast fixed in 5 dark themes (Terminal Green, Ocean Blue, Sunset, Neon, Forest)
+- Solarized Dark profit color contrast improved (#859900 → #a3b900)
+- WelcomeRoute skips animation when prefers-reduced-motion enabled
+- DailyWelcome: <p role="button"> replaced with native <button>
+- SetupRoute: misused role="tablist" removed from progress indicator
+- pulse-glow CSS animation changed to opacity-only (was animating box-shadow)
+- bg-[rgba(...)] replaced with bg-loss/10 design token in DailyWelcome
+- Circular chunk warning eliminated (cmdk + @floating-ui moved to vendor-radix)
+- Unused deps (marked, react-responsive-carousel) moved to devDependencies
 
 ### Changed
-- SEBI compliance doc rewritten with full circular reference (SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013), implementation timeline (Aug 2025 → Apr 2026), compliance matrix, White Box classification
-- README SEBI section updated with circular link, Section I.c personal use position
-- CONTRIBUTING.md rewritten with detailed commit guidelines, file creation rules, bug report privacy rules
-- CLAUDE.md workflow updated — CHANGELOG replaces DEVLOG, SOP absorbed into CONTRIBUTING
-- .gitignore cleaned up — removed stale entries for deleted directories
-- Test counts corrected across all docs (982 Python + 36 Vitest = 1,018)
+- SEBI compliance doc rewritten with full circular reference
+- CONTRIBUTING.md rewritten with detailed commit guidelines
+- .gitignore cleaned up
+- Test counts: 979 Python + 36 Vitest = 1,015 total
 
 ### Removed
 - 50 internal dev docs removed from public repo (archived locally)
-- DEVLOG.md, SOP.md decommissioned from public workflow (archived locally, replaced by CHANGELOG + CONTRIBUTING)
+- DEVLOG.md, SOP.md decommissioned (replaced by CHANGELOG + CONTRIBUTING)
 
 ## [0.1.0-alpha] — 2026-03-21
 

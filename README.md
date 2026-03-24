@@ -4,14 +4,14 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-1018%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1015%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
-![Status](https://img.shields.io/badge/status-v0.1.0--alpha-yellow)
+![Status](https://img.shields.io/badge/status-v0.1.0--beta-blue)
 
-> **Alpha v0.1.0** — Feature-complete for testing. Not ready for production trading.
-> Use with sandbox/paper trading only.
+> **Beta v0.1.0** — Feature-complete, audited, tested. Use with sandbox/paper trading.
+> Security hardened, WCAG accessible, performance optimized.
 
 Open-source modular trading platform for Indian markets, built on [OpenAlgo](https://openalgo.in). Supports 30+ brokers, equities, F&O, commodities, currency derivatives, and crypto.
 

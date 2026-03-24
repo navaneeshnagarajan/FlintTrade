@@ -208,7 +208,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.1.0-alpha (released 2026-03-21)
+- **Version:** 0.1.0-beta (released 2026-03-24)
 - **Tests:** 36 terminal (Vitest) + 985 Python (pytest) = 1,021 total
 - **Terminal:** 21 widgets (TSX) + 7 tools + 10 routes + 6 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
