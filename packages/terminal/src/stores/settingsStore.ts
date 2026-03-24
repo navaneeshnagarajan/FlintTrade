@@ -41,6 +41,7 @@ interface SettingsStore {
   interests: string[];
   experience: "beginner" | "intermediate" | "pro" | "custom";
   lastOpenTimestamp: number;
+  sandboxMode: boolean;
   setPersona: (persona: "trader" | "investor" | "beginner") => void;
   setTheme: (theme: ThemeId) => void;
   setDensity: (density: "compact" | "comfortable") => void;
@@ -51,6 +52,7 @@ interface SettingsStore {
   setInterests: (interests: string[]) => void;
   setExperience: (exp: "beginner" | "intermediate" | "pro" | "custom") => void;
   setLastOpenTimestamp: (ts: number) => void;
+  setSandboxMode: (enabled: boolean) => void;
 }
 
 // Inner StateCreator (no middleware mutators — persist is applied outside)
@@ -75,6 +77,7 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   interests: [],
   experience: "intermediate",
   lastOpenTimestamp: 0,
+  sandboxMode: false,
   setPersona: (persona) => set({ persona }),
   setTheme: (theme) => set({ theme }),
   setDensity: (density) => set({ density }),
@@ -87,6 +90,7 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   setInterests: (interests) => set({ interests }),
   setExperience: (experience) => set({ experience }),
   setLastOpenTimestamp: (lastOpenTimestamp) => set({ lastOpenTimestamp }),
+  setSandboxMode: (sandboxMode) => set({ sandboxMode }),
 });
 
 const persistedStore = persist(storeImpl, {

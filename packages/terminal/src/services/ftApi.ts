@@ -494,3 +494,216 @@ export const getOIProfile = (
     expiry_date,
     ...(strike_count !== undefined ? { strike_count } : {}),
   });
+
+// ---------------------------------------------------------------------------
+// Sandbox / Paper trading
+// ---------------------------------------------------------------------------
+
+export interface SandboxConfig {
+  enabled: boolean;
+  mode: "paper" | "live";
+}
+
+export const getSandboxStatus = () => get<SandboxConfig>("sandbox/config");
+
+export const toggleSandbox = (enabled: boolean) =>
+  post<SandboxConfig>("sandbox/config", { enabled });
+
+// ---------------------------------------------------------------------------
+// Uploaded strategy management (distinct from backtest strategies)
+// ---------------------------------------------------------------------------
+
+export interface UploadedStrategy {
+  id: string;
+  name: string;
+  filename: string;
+  status: "running" | "stopped" | "crashed" | "uploading";
+  uploaded_at: string;
+  started_at: string | null;
+  error_message: string | null;
+}
+
+export interface StrategyLogEntry {
+  timestamp: string;
+  level: "INFO" | "WARNING" | "ERROR" | "DEBUG";
+  message: string;
+}
+
+export const getUploadedStrategies = () =>
+  get<UploadedStrategy[]>("strategies/uploaded");
+
+export const uploadStrategy = (file: File): Promise<UploadedStrategy> => {
+  const base = (import.meta.env.DEV ? "/ft-api" : "") + "/api/v1/strategies/upload";
+  const form = new FormData();
+  form.append("file", file);
+  return fetch(base, { method: "POST", body: form })
+    .then((res) => {
+      if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
+      return res.json() as Promise<{ data?: UploadedStrategy } | UploadedStrategy>;
+    })
+    .then((json) => {
+      const data =
+        json !== null &&
+        typeof json === "object" &&
+        "data" in json
+          ? (json as { data: UploadedStrategy }).data
+          : (json as UploadedStrategy);
+      return data;
+    });
+};
+
+export const startUploadedStrategy = (id: string) =>
+  post<{ status: string }>(
+    "strategies/uploaded/" + encodeURIComponent(id) + "/start",
+  );
+
+export const stopUploadedStrategy = (id: string) =>
+  post<{ status: string }>(
+    "strategies/uploaded/" + encodeURIComponent(id) + "/stop",
+  );
+
+export const getStrategyLogs = (id: string) =>
+  get<StrategyLogEntry[]>(
+    "strategies/uploaded/" + encodeURIComponent(id) + "/logs",
+  );
+
+// ---------------------------------------------------------------------------
+// Action Center — pending order approvals
+// ---------------------------------------------------------------------------
+
+export interface PendingOrder {
+  id: string;
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  order_type: string;
+  product: string;
+  strategy: string;
+  created_at: string;
+  reason: string;
+}
+
+export const getPendingOrders = () =>
+  get<PendingOrder[]>("action-center/pending");
+
+export const approveOrder = (id: string) =>
+  post<{ status: string }>(
+    "action-center/approve/" + encodeURIComponent(id),
+  );
+
+export const rejectOrder = (id: string) =>
+  post<{ status: string }>(
+    "action-center/reject/" + encodeURIComponent(id),
+  );
+
+export const approveAllOrders = () =>
+  post<{ status: string; approved_count: number }>("action-center/approve-all");
+
+// ---------------------------------------------------------------------------
+// Security
+// ---------------------------------------------------------------------------
+
+export interface SecurityStats {
+  total_requests: number;
+  failed_auths: number;
+  not_found_count: number;
+  banned_count: number;
+}
+
+export interface BannedIP {
+  ip: string;
+  reason: string;
+  banned_at: string;
+}
+
+export const getSecurityStats = () => get<SecurityStats>("security/stats");
+export const getBannedIPs     = () => get<{ bans: BannedIP[] }>("security/bans");
+export const banIP            = (ip: string, reason: string) =>
+  post<{ status: string }>("security/ban", { ip, reason });
+export const unbanIP          = (ip: string) =>
+  post<{ status: string }>("security/unban", { ip });
+
+// ---------------------------------------------------------------------------
+// P&L Tracker
+// ---------------------------------------------------------------------------
+
+export interface PnLTrackerEntry {
+  timestamp: string;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  total_pnl: number;
+}
+
+export interface PnLSummary {
+  realized_pnl: number;
+  unrealized_pnl: number;
+  total_pnl: number;
+  max_drawdown: number;
+  peak_pnl: number;
+  entries: PnLTrackerEntry[];
+}
+
+export const getPnLTracker = () => get<{ entries: PnLTrackerEntry[] }>("pnl-tracker");
+export const getPnLSummary = () => get<PnLSummary>("pnl-tracker/summary");
+
+// ---------------------------------------------------------------------------
+// Monitoring
+// ---------------------------------------------------------------------------
+
+export interface BrokerConnectionHealth {
+  account: string;
+  broker: string;
+  connected: boolean;
+  latency_ms: number | null;
+}
+
+export interface SystemHealth {
+  broker_connections: BrokerConnectionHealth[];
+  duckdb_status: "ok" | "error";
+  disk_free_gb: number;
+  disk_total_gb: number;
+  memory_used_mb: number;
+  memory_total_mb: number;
+}
+
+export interface EndpointStat {
+  endpoint: string;
+  count: number;
+}
+
+export interface TrafficStats {
+  requests_per_sec: number;
+  error_rate: number;
+  top_endpoints: EndpointStat[];
+}
+
+export interface BrokerLatency {
+  broker: string;
+  avg_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+}
+
+export interface LatencyStats {
+  brokers: BrokerLatency[];
+}
+
+export const getHealth       = () => get<SystemHealth>("health");
+export const getTrafficStats = () => get<TrafficStats>("traffic/stats");
+export const getLatencyStats = () => get<LatencyStats>("latency/stats");
+
+// ---------------------------------------------------------------------------
+// News (server-side RSS proxy — GET /ft-api/api/v1/news)
+// ---------------------------------------------------------------------------
+
+export interface NewsArticle {
+  title: string;
+  link: string;
+  pub_date: string;
+  source: string;
+}
+
+export const getNews = () => get<{ articles: NewsArticle[] }>("news");
