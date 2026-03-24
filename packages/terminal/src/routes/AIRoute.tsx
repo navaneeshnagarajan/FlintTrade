@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import AIAdvisorWidget from "@/widgets/utility/AIAdvisor/AIAdvisorWidget";
+import { FeatureTeaser } from "@/components/teasers";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -847,8 +848,16 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
 const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   chat: <ChatSection />,
   signals: <SignalsSection />,
-  sentiment: <SentimentSection />,
-  knowledge: <KnowledgeSection />,
+  sentiment: (
+    <FeatureTeaser status="in_dev" featureName="Market Sentiment" version="v0.3.0">
+      <SentimentSection />
+    </FeatureTeaser>
+  ),
+  knowledge: (
+    <FeatureTeaser status="in_dev" featureName="Knowledge Base" version="v0.3.0">
+      <KnowledgeSection />
+    </FeatureTeaser>
+  ),
   settings: <AISettingsSection />,
 };
 
