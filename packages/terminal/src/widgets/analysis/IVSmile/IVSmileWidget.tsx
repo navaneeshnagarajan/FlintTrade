@@ -7,13 +7,17 @@
  *   - ATM vertical reference line
  *   - ATM IV and 25-delta skew in header
  *   - X-axis toggle: Strike / Moneyness
- *   - Auto-refresh: 30s market hours
+ *   - Auto-refresh: 30s market hours (when broker connected)
+ *   - FeatureTeaser with sample data when no broker is connected
  */
 
 import { useState, useMemo } from "react";
 import { RefreshCw, AlertCircle, Loader2, TrendingDown, TrendingUp } from "lucide-react";
 import { useIVSmile } from "./useIVSmile";
+import { SAMPLE_IV_SMILE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
+import { FeatureTeaser } from "@/components/teasers";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { Data, Layout } from "plotly.js";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +49,7 @@ export default function IVSmileWidget() {
   const [optionType, setOptionType] = useState<OptionTypeFilter>("Both");
   const [xMode, setXMode] = useState<XAxisMode>("Strike");
 
+  const isConnected = useBrokerConnected();
   const exchange = SYMBOL_EXCHANGE[symbol] ?? "NFO";
 
   const expiryDates = useMemo(
@@ -57,11 +62,14 @@ export default function IVSmileWidget() {
     [expiriesInput],
   );
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useIVSmile(
+  const { data: liveData, isLoading, isError, error, refetch, isFetching } = useIVSmile(
     symbol,
     exchange,
     expiryDates.length > 0 ? expiryDates : undefined,
+    isConnected,
   );
+
+  const data = isConnected ? liveData : SAMPLE_IV_SMILE_DATA;
 
   const { plotData, plotLayout, atmIV, skew25d } = useMemo<{
     plotData: Data[];
@@ -265,29 +273,42 @@ export default function IVSmileWidget() {
         </div>
       )}
 
-      {/* Loading */}
-      {isLoading && (
+      {/* Loading — only shown when connected and query is running */}
+      {isConnected && isLoading && (
         <div className="flex-1 flex items-center justify-center gap-2 text-text-muted text-sm">
           <Loader2 size={16} className="animate-spin" />
           Loading IV smile...
         </div>
       )}
 
-      {/* Empty state */}
-      {!isLoading && !data && !isError && (
+      {/* Empty state — only when connected but no data yet */}
+      {isConnected && !isLoading && !liveData && !isError && (
         <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
           Select symbol to view IV smile curves
         </div>
       )}
 
       {/* Chart */}
-      {data && plotData.length > 0 && (
-        <div className="flex-1 min-h-0">
-          <PlotlyChart data={plotData} layout={plotLayout} />
-        </div>
-      )}
+      {data && plotData.length > 0 && (() => {
+        const chartContent = (
+          <div className="flex-1 min-h-0">
+            <PlotlyChart data={plotData} layout={plotLayout} />
+          </div>
+        );
+        return isConnected ? (
+          chartContent
+        ) : (
+          <FeatureTeaser
+            status="preview"
+            featureName="IV Smile"
+            version="v0.3.0"
+          >
+            {chartContent}
+          </FeatureTeaser>
+        );
+      })()}
 
-      {data && plotData.length === 0 && (
+      {isConnected && data && plotData.length === 0 && (
         <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
           No IV data available for the selected parameters
         </div>

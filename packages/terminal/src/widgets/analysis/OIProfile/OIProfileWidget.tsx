@@ -9,7 +9,8 @@
  *     - ATM strike highlighted
  *     - Max pain strike annotated
  *
- * Auto-refresh: 30s market hours
+ * Auto-refresh: 30s market hours (when broker connected)
+ * FeatureTeaser with sample data when no broker is connected
  */
 
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -17,7 +18,10 @@ import { createChart, CandlestickSeries } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, CandlestickData, Time } from "lightweight-charts";
 import { RefreshCw, AlertCircle, Loader2 } from "lucide-react";
 import { useOIProfile } from "./useOIProfile";
+import { SAMPLE_OI_PROFILE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
+import { FeatureTeaser } from "@/components/teasers";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory } from "@/services/api";
 import type { Data, Layout } from "plotly.js";
 
@@ -69,14 +73,19 @@ export default function OIProfileWidget() {
   const [expiry, setExpiry] = useState("");
   const [interval, setInterval] = useState("15m");
 
+  const isConnected = useBrokerConnected();
   const exchange = SYMBOL_EXCHANGE[symbol] ?? "NFO";
   const spotExchange = SPOT_EXCHANGE[symbol] ?? "NSE_INDEX";
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useOIProfile(
+  const { data: liveData, isLoading, isError, error, refetch, isFetching } = useOIProfile(
     symbol,
     exchange,
     expiry,
+    undefined,
+    isConnected,
   );
+
+  const data = isConnected ? liveData : SAMPLE_OI_PROFILE_DATA;
 
   // ---------------------------------------------------------------------------
   // Lightweight Charts — futures candlestick (top pane)
@@ -321,22 +330,35 @@ export default function OIProfileWidget() {
 
       {/* Bottom: OI Butterfly */}
       <div className="flex-1 min-h-0 flex flex-col">
-        {isLoading && (
+        {isConnected && isLoading && (
           <div className="flex-1 flex items-center justify-center gap-2 text-text-muted text-sm">
             <Loader2 size={16} className="animate-spin" />
             Loading OI profile...
           </div>
         )}
-        {!isLoading && !data && !isError && (
+        {isConnected && !isLoading && !liveData && !isError && (
           <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
             Enter symbol and expiry to view OI profile
           </div>
         )}
-        {data && butterflyData.length > 0 && (
-          <div className="flex-1 min-h-0">
-            <PlotlyChart data={butterflyData} layout={butterflyLayout} />
-          </div>
-        )}
+        {data && butterflyData.length > 0 && (() => {
+          const chart = (
+            <div className="flex-1 min-h-0">
+              <PlotlyChart data={butterflyData} layout={butterflyLayout} />
+            </div>
+          );
+          return isConnected ? (
+            chart
+          ) : (
+            <FeatureTeaser
+              status="in_dev"
+              featureName="OI Profile"
+              version="v0.3.0"
+            >
+              {chart}
+            </FeatureTeaser>
+          );
+        })()}
       </div>
 
       {/* Footer */}

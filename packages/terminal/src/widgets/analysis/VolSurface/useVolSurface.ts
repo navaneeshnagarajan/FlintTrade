@@ -12,12 +12,13 @@ export function useVolSurface(
   exchange: string,
   expiryDates: string[],
   strikeCount?: number,
+  isConnected = false,
 ) {
   return useQuery({
     queryKey: ["volsurface", symbol, exchange, expiryDates, strikeCount],
     queryFn: () => getVolSurface(symbol, exchange, expiryDates, strikeCount),
-    enabled: Boolean(symbol && exchange && expiryDates.length >= 1),
-    refetchInterval: isMarketHours() ? 30_000 : false,
+    enabled: isConnected && Boolean(symbol && exchange && expiryDates.length >= 1),
+    refetchInterval: isConnected && isMarketHours() ? 30_000 : false,
     staleTime: 25_000,
   });
 }

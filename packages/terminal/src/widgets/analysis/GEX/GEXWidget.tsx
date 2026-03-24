@@ -8,13 +8,17 @@
  *   - Gamma flip strike annotation
  *   - ATM strike vertical reference line
  *   - Summary badges: Net GEX, Gamma Flip Strike, Dealer Zone
- *   - Auto-refresh: 60s market hours
+ *   - Auto-refresh: 30s market hours (when broker connected)
+ *   - FeatureTeaser with sample data when no broker is connected
  */
 
 import { useState, useMemo } from "react";
 import { RefreshCw, ChevronDown, AlertCircle, Loader2 } from "lucide-react";
 import { useGEX } from "./useGEX";
+import { SAMPLE_GEX_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
+import { FeatureTeaser } from "@/components/teasers";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { Data, Layout } from "plotly.js";
 
 // ---------------------------------------------------------------------------
@@ -96,13 +100,17 @@ export default function GEXWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [expiry, setExpiry] = useState("");
 
+  const isConnected = useBrokerConnected();
   const exchange = SYMBOL_EXCHANGE[symbol] ?? "NFO";
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useGEX(
+  const { data: liveData, isLoading, isError, error, refetch, isFetching } = useGEX(
     symbol,
     exchange,
     expiry,
+    isConnected,
   );
+
+  const data = isConnected ? liveData : SAMPLE_GEX_DATA;
 
   // Build Plotly traces for grouped bar chart (Call GEX green, Put GEX red)
   const { barData, lineData, barLayout, lineLayout } = useMemo<{
@@ -314,57 +322,71 @@ export default function GEXWidget() {
       )}
 
       {/* Charts */}
-      {data && (
-        <>
-          {/* Bar chart — Call GEX vs Put GEX */}
-          <div className="flex-1 min-h-0">
-            <PlotlyChart data={barData} layout={barLayout} />
-          </div>
-
-          {/* Net GEX line chart */}
-          <div className="flex-none h-[30%] border-t border-border-default">
-            <PlotlyChart data={lineData} layout={lineLayout} />
-          </div>
-
-          {/* Summary footer */}
-          <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1.5 flex items-center gap-4 text-xs flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <span className="text-text-muted uppercase tracking-wide">Net GEX</span>
-              <span className={`font-mono tabular-nums font-semibold ${data.net_gex >= 0 ? "text-profit" : "text-loss"}`}>
-                {fmtGEX(data.net_gex)}
-              </span>
+      {data && (() => {
+        const chartContent = (
+          <>
+            {/* Bar chart — Call GEX vs Put GEX */}
+            <div className="flex-1 min-h-0">
+              <PlotlyChart data={barData} layout={barLayout} />
             </div>
 
-            {data.gamma_flip_strike != null && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-text-muted uppercase tracking-wide">Flip</span>
-                <span className="font-mono tabular-nums text-warning">
-                  {fmtStrike(data.gamma_flip_strike)}
-                </span>
-              </div>
-            )}
-
-            <div className="flex items-center gap-1.5">
-              <span className={`px-1.5 py-0.5 text-xxs font-medium rounded border ${
-                isLong
-                  ? "text-profit bg-profit/10 border-profit/30"
-                  : "text-loss bg-loss/10 border-loss/30"
-              }`}>
-                {data.dealer_zone ?? "—"}
-              </span>
+            {/* Net GEX line chart */}
+            <div className="flex-none h-[30%] border-t border-border-default">
+              <PlotlyChart data={lineData} layout={lineLayout} />
             </div>
 
-            {data.atm_strike > 0 && (
+            {/* Summary footer */}
+            <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1.5 flex items-center gap-4 text-xs flex-wrap">
               <div className="flex items-center gap-1.5">
-                <span className="text-text-muted uppercase tracking-wide">ATM</span>
-                <span className="font-mono tabular-nums text-accent">
-                  {fmtStrike(data.atm_strike)}
+                <span className="text-text-muted uppercase tracking-wide">Net GEX</span>
+                <span className={`font-mono tabular-nums font-semibold ${data.net_gex >= 0 ? "text-profit" : "text-loss"}`}>
+                  {fmtGEX(data.net_gex)}
                 </span>
               </div>
-            )}
-          </div>
-        </>
-      )}
+
+              {data.gamma_flip_strike != null && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-text-muted uppercase tracking-wide">Flip</span>
+                  <span className="font-mono tabular-nums text-warning">
+                    {fmtStrike(data.gamma_flip_strike)}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5">
+                <span className={`px-1.5 py-0.5 text-xxs font-medium rounded border ${
+                  isLong
+                    ? "text-profit bg-profit/10 border-profit/30"
+                    : "text-loss bg-loss/10 border-loss/30"
+                }`}>
+                  {data.dealer_zone ?? "—"}
+                </span>
+              </div>
+
+              {data.atm_strike > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-text-muted uppercase tracking-wide">ATM</span>
+                  <span className="font-mono tabular-nums text-accent">
+                    {fmtStrike(data.atm_strike)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </>
+        );
+
+        return isConnected ? (
+          chartContent
+        ) : (
+          <FeatureTeaser
+            status="preview"
+            featureName="GEX Dashboard"
+            version="v0.3.0"
+          >
+            {chartContent}
+          </FeatureTeaser>
+        );
+      })()}
     </div>
   );
 }

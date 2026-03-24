@@ -26,10 +26,24 @@ vi.mock("lightweight-charts", () => ({
   CandlestickSeries: {},
 }));
 
+// Mock useBrokerConnected — default: disconnected
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: vi.fn().mockReturnValue(false),
+}));
+
+// Mock FeatureTeaser to render children + sentinel
+vi.mock("@/components/teasers", () => ({
+  FeatureTeaser: ({ children, featureName }: { children: React.ReactNode; featureName: string }) => (
+    <div data-testid="feature-teaser" data-feature={featureName}>{children}</div>
+  ),
+}));
+
 import { useOIProfile } from "../useOIProfile";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import OIProfileWidget from "../OIProfileWidget";
 
 const mockUseOIProfile = useOIProfile as ReturnType<typeof vi.fn>;
+const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -45,7 +59,8 @@ beforeAll(() => {
 });
 
 describe("OIProfileWidget", () => {
-  it("renders loading state", () => {
+  it("renders loading state when connected and loading", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseOIProfile.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -58,7 +73,8 @@ describe("OIProfileWidget", () => {
     expect(screen.getByText(/loading oi profile/i)).toBeTruthy();
   });
 
-  it("renders empty state with no data", () => {
+  it("renders empty state when connected but no data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseOIProfile.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -71,7 +87,8 @@ describe("OIProfileWidget", () => {
     expect(screen.getByText(/enter symbol and expiry to view oi profile/i)).toBeTruthy();
   });
 
-  it("renders OI butterfly chart and footer when data is present", () => {
+  it("renders OI butterfly chart and footer when connected with live data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseOIProfile.mockReturnValue({
       data: {
         underlying: "NIFTY",
@@ -101,6 +118,7 @@ describe("OIProfileWidget", () => {
   });
 
   it("renders error banner", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseOIProfile.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -111,5 +129,21 @@ describe("OIProfileWidget", () => {
     });
     render(<OIProfileWidget />, { wrapper });
     expect(screen.getByText(/oi fetch failed/i)).toBeTruthy();
+  });
+
+  it("renders sample data with FeatureTeaser when disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseOIProfile.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+    render(<OIProfileWidget />, { wrapper });
+    expect(screen.getByTestId("feature-teaser")).toBeTruthy();
+    expect(screen.getByTestId("plotly-chart")).toBeTruthy();
+    expect(screen.getByText(/PCR/i)).toBeTruthy();
   });
 });

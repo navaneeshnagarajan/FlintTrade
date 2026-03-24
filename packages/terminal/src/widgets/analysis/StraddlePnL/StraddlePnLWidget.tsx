@@ -7,12 +7,16 @@
  *   - Plotly area chart: green fill above zero, red fill below zero
  *   - Break-even points annotated with vertical dashed lines
  *   - Summary: Max Loss, Break-Even Low/High, Total Premium
+ *   - FeatureTeaser with sample data when no broker is connected
  */
 
 import { useState, useMemo } from "react";
 import { RefreshCw, AlertCircle, Loader2, Plus, X } from "lucide-react";
 import { useStraddlePnL } from "./useStraddlePnL";
+import { SAMPLE_STRADDLE_PNL_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
+import { FeatureTeaser } from "@/components/teasers";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { StraddleLeg } from "@/types/api";
 import type { Data, Layout } from "plotly.js";
 
@@ -125,10 +129,13 @@ export default function StraddlePnLWidget() {
   const [expiry, setExpiry] = useState("");
   const [adjustments, setAdjustments] = useState<StraddleLeg[]>([]);
 
+  const isConnected = useBrokerConnected();
   const exchange = SYMBOL_EXCHANGE[symbol] ?? "NFO";
 
-  const { data, isLoading, isError, error, refetch, isFetching } =
-    useStraddlePnL(symbol, exchange, expiry, adjustments);
+  const { data: liveData, isLoading, isError, error, refetch, isFetching } =
+    useStraddlePnL(symbol, exchange, expiry, adjustments, isConnected);
+
+  const data = isConnected ? liveData : SAMPLE_STRADDLE_PNL_DATA;
 
   // Build Plotly traces
   const { plotData, plotLayout } = useMemo<{
@@ -312,22 +319,35 @@ export default function StraddlePnLWidget() {
 
         {/* Chart side */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {isLoading && (
+          {isConnected && isLoading && (
             <div className="flex-1 flex items-center justify-center gap-2 text-text-muted text-sm">
               <Loader2 size={16} className="animate-spin" />
               Simulating P&L...
             </div>
           )}
-          {!isLoading && !data && !isError && (
+          {isConnected && !isLoading && !liveData && !isError && (
             <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
               Enter symbol and expiry to simulate straddle P&L
             </div>
           )}
-          {data && (
-            <div className="flex-1 min-h-0">
-              <PlotlyChart data={plotData} layout={plotLayout} />
-            </div>
-          )}
+          {data && (() => {
+            const chart = (
+              <div className="flex-1 min-h-0">
+                <PlotlyChart data={plotData} layout={plotLayout} />
+              </div>
+            );
+            return isConnected ? (
+              chart
+            ) : (
+              <FeatureTeaser
+                status="in_dev"
+                featureName="Straddle P&L Simulator"
+                version="v0.3.0"
+              >
+                {chart}
+              </FeatureTeaser>
+            );
+          })()}
         </div>
 
         {/* Adjustment panel */}

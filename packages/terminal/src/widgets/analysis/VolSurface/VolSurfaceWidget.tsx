@@ -6,13 +6,17 @@
  *   - Color scale: RdYlBu_r (blue=low IV, red=high IV)
  *   - Multi-expiry support: enter comma-separated expiry dates
  *   - IV range and ATM IV shown in footer
- *   - Auto-refresh: 30s market hours
+ *   - Auto-refresh: 30s market hours (when broker connected)
+ *   - FeatureTeaser with sample data when no broker is connected
  */
 
 import { useState, useMemo } from "react";
 import { RefreshCw, AlertCircle, Loader2 } from "lucide-react";
 import { useVolSurface } from "./useVolSurface";
+import { SAMPLE_VOL_SURFACE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
+import { FeatureTeaser } from "@/components/teasers";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { Data, Layout } from "plotly.js";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +41,7 @@ export default function VolSurfaceWidget() {
   const [expiriesInput, setExpiriesInput] = useState("");
   const [strikeCount, setStrikeCount] = useState(20);
 
+  const isConnected = useBrokerConnected();
   const exchange = SYMBOL_EXCHANGE[symbol] ?? "NFO";
 
   const expiryDates = useMemo(
@@ -48,8 +53,10 @@ export default function VolSurfaceWidget() {
     [expiriesInput],
   );
 
-  const { data, isLoading, isError, error, refetch, isFetching } =
-    useVolSurface(symbol, exchange, expiryDates, strikeCount);
+  const { data: liveData, isLoading, isError, error, refetch, isFetching } =
+    useVolSurface(symbol, exchange, expiryDates, strikeCount, isConnected);
+
+  const data = isConnected ? liveData : SAMPLE_VOL_SURFACE_DATA;
 
   const plotData = useMemo<Data[]>(() => {
     if (!data?.iv_matrix?.length) return [];
@@ -154,58 +161,72 @@ export default function VolSurfaceWidget() {
         </div>
       )}
 
-      {/* Loading */}
-      {isLoading && (
+      {/* Loading — only shown when connected and query is running */}
+      {isConnected && isLoading && (
         <div className="flex-1 flex items-center justify-center gap-2 text-text-muted text-sm">
           <Loader2 size={16} className="animate-spin" />
           Building volatility surface...
         </div>
       )}
 
-      {/* Empty state */}
-      {!isLoading && !data && !isError && (
+      {/* Empty state — only when connected but no data yet */}
+      {isConnected && !isLoading && !liveData && !isError && (
         <div className="flex-1 flex items-center justify-center text-center text-text-muted text-sm px-4">
           Enter symbol and at least one expiry date to view the volatility surface
         </div>
       )}
 
       {/* 3D Surface chart */}
-      {data && plotData.length > 0 && (
-        <>
-          <div className="flex-1 min-h-0">
-            <PlotlyChart
-              data={plotData}
-              layout={plotLayout}
-              config={{ displayModeBar: true, responsive: true }}
-            />
-          </div>
+      {data && plotData.length > 0 && (() => {
+        const chartContent = (
+          <>
+            <div className="flex-1 min-h-0">
+              <PlotlyChart
+                data={plotData}
+                layout={plotLayout}
+                config={{ displayModeBar: true, responsive: true }}
+              />
+            </div>
 
-          {/* Footer stats */}
-          <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1.5 flex items-center gap-4 text-xs">
-            {data.atm_strike > 0 && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-text-muted uppercase tracking-wide">ATM</span>
-                <span className="font-mono tabular-nums text-accent">
-                  {new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(data.atm_strike)}
-                </span>
-              </div>
-            )}
-            {ivStats && (
-              <>
+            {/* Footer stats */}
+            <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1.5 flex items-center gap-4 text-xs">
+              {data.atm_strike > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-text-muted uppercase tracking-wide">IV Range</span>
-                  <span className="font-mono tabular-nums text-text-secondary">
-                    {ivStats.min.toFixed(1)}% – {ivStats.max.toFixed(1)}%
+                  <span className="text-text-muted uppercase tracking-wide">ATM</span>
+                  <span className="font-mono tabular-nums text-accent">
+                    {new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(data.atm_strike)}
                   </span>
                 </div>
-              </>
-            )}
-            <div className="ml-auto text-text-muted">
-              {data.expiries.length} expir{data.expiries.length === 1 ? "y" : "ies"} · {data.strikes.length} strikes
+              )}
+              {ivStats && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-text-muted uppercase tracking-wide">IV Range</span>
+                    <span className="font-mono tabular-nums text-text-secondary">
+                      {ivStats.min.toFixed(1)}% – {ivStats.max.toFixed(1)}%
+                    </span>
+                  </div>
+                </>
+              )}
+              <div className="ml-auto text-text-muted">
+                {data.expiries.length} expir{data.expiries.length === 1 ? "y" : "ies"} · {data.strikes.length} strikes
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        );
+
+        return isConnected ? (
+          chartContent
+        ) : (
+          <FeatureTeaser
+            status="preview"
+            featureName="Volatility Surface"
+            version="v0.3.0"
+          >
+            {chartContent}
+          </FeatureTeaser>
+        );
+      })()}
     </div>
   );
 }

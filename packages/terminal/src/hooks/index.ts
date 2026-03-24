@@ -7,3 +7,4 @@ export { useTradebook } from "./useTradebook";
 export { useBrokerAccounts } from "./useBrokerAccounts";
 export { useBrokerAuth } from "./useBrokerAuth";
 export { useBrokerList } from "./useBrokerList";
+export { useBrokerConnected } from "./useBrokerConnected";

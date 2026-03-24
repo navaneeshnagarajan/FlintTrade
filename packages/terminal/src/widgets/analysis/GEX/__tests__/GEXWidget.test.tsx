@@ -12,10 +12,24 @@ vi.mock("../useGEX", () => ({
   useGEX: vi.fn(),
 }));
 
+// Mock useBrokerConnected — default: disconnected (shows sample data + teaser)
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: vi.fn().mockReturnValue(false),
+}));
+
+// Mock FeatureTeaser to render children + sentinel
+vi.mock("@/components/teasers", () => ({
+  FeatureTeaser: ({ children, featureName }: { children: React.ReactNode; featureName: string }) => (
+    <div data-testid="feature-teaser" data-feature={featureName}>{children}</div>
+  ),
+}));
+
 import { useGEX } from "../useGEX";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import GEXWidget from "../GEXWidget";
 
 const mockUseGEX = useGEX as ReturnType<typeof vi.fn>;
+const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -32,7 +46,8 @@ beforeAll(() => {
 });
 
 describe("GEXWidget", () => {
-  it("renders loading state", () => {
+  it("renders loading state when connected and loading", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseGEX.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -45,7 +60,8 @@ describe("GEXWidget", () => {
     expect(screen.getByText(/loading gex data/i)).toBeTruthy();
   });
 
-  it("renders empty state when no data", () => {
+  it("renders empty state when connected but no data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseGEX.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -58,7 +74,8 @@ describe("GEXWidget", () => {
     expect(screen.getByText(/enter symbol and expiry/i)).toBeTruthy();
   });
 
-  it("renders chart and summary when data is present", () => {
+  it("renders chart and summary when connected with live data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseGEX.mockReturnValue({
       data: {
         underlying: "NIFTY",
@@ -87,6 +104,7 @@ describe("GEXWidget", () => {
   });
 
   it("renders error banner on failure", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseGEX.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -97,5 +115,20 @@ describe("GEXWidget", () => {
     });
     render(<GEXWidget />, { wrapper });
     expect(screen.getByText(/network error/i)).toBeTruthy();
+  });
+
+  it("renders sample data with FeatureTeaser when disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseGEX.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+    render(<GEXWidget />, { wrapper });
+    expect(screen.getByTestId("feature-teaser")).toBeTruthy();
+    expect(screen.getAllByTestId("plotly-chart").length).toBeGreaterThan(0);
   });
 });

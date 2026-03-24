@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getStraddlePnL } from "@/services/ftApi";
+import { isMarketHours } from "@/lib/market";
 import type { StraddleLeg } from "@/types/api";
 
 function hashLegs(legs: StraddleLeg[]): string {
@@ -18,6 +19,7 @@ export function useStraddlePnL(
   exchange: string,
   expiryDate: string,
   adjustments?: StraddleLeg[],
+  isConnected = false,
 ) {
   const adjustmentsHash = useMemo(
     () => hashLegs(adjustments ?? []),
@@ -27,9 +29,9 @@ export function useStraddlePnL(
   return useQuery({
     queryKey: ["straddlepnl", symbol, exchange, expiryDate, adjustmentsHash],
     queryFn: () => getStraddlePnL(symbol, exchange, expiryDate, adjustments),
-    enabled: Boolean(symbol && exchange && expiryDate),
+    enabled: isConnected && Boolean(symbol && exchange && expiryDate),
     // P&L is static for given premiums — only refetch on param changes
-    refetchInterval: false,
+    refetchInterval: isConnected && isMarketHours() ? 30_000 : false,
     staleTime: 5 * 60_000,
   });
 }

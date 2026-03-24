@@ -10,10 +10,24 @@ vi.mock("../useVolSurface", () => ({
   useVolSurface: vi.fn(),
 }));
 
+// Mock useBrokerConnected — default: disconnected
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: vi.fn().mockReturnValue(false),
+}));
+
+// Mock FeatureTeaser to render children + sentinel
+vi.mock("@/components/teasers", () => ({
+  FeatureTeaser: ({ children, featureName }: { children: React.ReactNode; featureName: string }) => (
+    <div data-testid="feature-teaser" data-feature={featureName}>{children}</div>
+  ),
+}));
+
 import { useVolSurface } from "../useVolSurface";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import VolSurfaceWidget from "../VolSurfaceWidget";
 
 const mockUseVolSurface = useVolSurface as ReturnType<typeof vi.fn>;
+const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -29,7 +43,8 @@ beforeAll(() => {
 });
 
 describe("VolSurfaceWidget", () => {
-  it("renders loading state", () => {
+  it("renders loading state when connected and loading", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseVolSurface.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -42,7 +57,8 @@ describe("VolSurfaceWidget", () => {
     expect(screen.getByText(/building volatility surface/i)).toBeTruthy();
   });
 
-  it("renders empty state with no data", () => {
+  it("renders empty state when connected but no data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseVolSurface.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -55,7 +71,8 @@ describe("VolSurfaceWidget", () => {
     expect(screen.getByText(/enter symbol and at least one expiry/i)).toBeTruthy();
   });
 
-  it("renders 3D chart when data is present", () => {
+  it("renders 3D chart when connected with live data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseVolSurface.mockReturnValue({
       data: {
         underlying: "NIFTY",
@@ -81,6 +98,7 @@ describe("VolSurfaceWidget", () => {
   });
 
   it("renders error banner", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseVolSurface.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -91,5 +109,20 @@ describe("VolSurfaceWidget", () => {
     });
     render(<VolSurfaceWidget />, { wrapper });
     expect(screen.getByText(/upstream error/i)).toBeTruthy();
+  });
+
+  it("renders sample data with FeatureTeaser when disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseVolSurface.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+    render(<VolSurfaceWidget />, { wrapper });
+    expect(screen.getByTestId("feature-teaser")).toBeTruthy();
+    expect(screen.getByTestId("plotly-chart")).toBeTruthy();
   });
 });

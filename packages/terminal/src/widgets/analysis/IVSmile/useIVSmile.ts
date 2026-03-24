@@ -11,12 +11,13 @@ export function useIVSmile(
   symbol: string,
   exchange: string,
   expiryDates?: string[],
+  isConnected = false,
 ) {
   return useQuery({
     queryKey: ["ivsmile", symbol, exchange, expiryDates],
     queryFn: () => getIVSmile(symbol, exchange, expiryDates),
-    enabled: Boolean(symbol && exchange),
-    refetchInterval: isMarketHours() ? 30_000 : false,
+    enabled: isConnected && Boolean(symbol && exchange),
+    refetchInterval: isConnected && isMarketHours() ? 30_000 : false,
     staleTime: 25_000,
   });
 }

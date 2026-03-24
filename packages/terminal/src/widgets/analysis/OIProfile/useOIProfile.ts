@@ -12,12 +12,13 @@ export function useOIProfile(
   exchange: string,
   expiryDate: string,
   strikeCount?: number,
+  isConnected = false,
 ) {
   return useQuery({
     queryKey: ["oiprofile", symbol, exchange, expiryDate, strikeCount],
     queryFn: () => getOIProfile(symbol, exchange, expiryDate, strikeCount),
-    enabled: Boolean(symbol && exchange && expiryDate),
-    refetchInterval: isMarketHours() ? 30_000 : false,
+    enabled: isConnected && Boolean(symbol && exchange && expiryDate),
+    refetchInterval: isConnected && isMarketHours() ? 30_000 : false,
     staleTime: 25_000,
   });
 }

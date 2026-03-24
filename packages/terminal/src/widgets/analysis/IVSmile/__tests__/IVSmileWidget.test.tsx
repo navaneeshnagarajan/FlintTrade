@@ -10,10 +10,24 @@ vi.mock("../useIVSmile", () => ({
   useIVSmile: vi.fn(),
 }));
 
+// Mock useBrokerConnected — default: disconnected
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: vi.fn().mockReturnValue(false),
+}));
+
+// Mock FeatureTeaser to render children + sentinel
+vi.mock("@/components/teasers", () => ({
+  FeatureTeaser: ({ children, featureName }: { children: React.ReactNode; featureName: string }) => (
+    <div data-testid="feature-teaser" data-feature={featureName}>{children}</div>
+  ),
+}));
+
 import { useIVSmile } from "../useIVSmile";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import IVSmileWidget from "../IVSmileWidget";
 
 const mockUseIVSmile = useIVSmile as ReturnType<typeof vi.fn>;
+const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -29,7 +43,8 @@ beforeAll(() => {
 });
 
 describe("IVSmileWidget", () => {
-  it("renders loading state", () => {
+  it("renders loading state when connected and loading", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseIVSmile.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -42,7 +57,8 @@ describe("IVSmileWidget", () => {
     expect(screen.getByText(/loading iv smile/i)).toBeTruthy();
   });
 
-  it("renders empty state when no data", () => {
+  it("renders empty state when connected but no data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseIVSmile.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -55,7 +71,8 @@ describe("IVSmileWidget", () => {
     expect(screen.getByText(/select symbol to view iv smile/i)).toBeTruthy();
   });
 
-  it("renders chart and metrics when data is present", () => {
+  it("renders chart and metrics when connected with live data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseIVSmile.mockReturnValue({
       data: {
         underlying: "NIFTY",
@@ -88,6 +105,7 @@ describe("IVSmileWidget", () => {
   });
 
   it("renders error banner", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseIVSmile.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -98,5 +116,20 @@ describe("IVSmileWidget", () => {
     });
     render(<IVSmileWidget />, { wrapper });
     expect(screen.getByText(/iv data unavailable/i)).toBeTruthy();
+  });
+
+  it("renders sample data with FeatureTeaser when disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseIVSmile.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+    render(<IVSmileWidget />, { wrapper });
+    expect(screen.getByTestId("feature-teaser")).toBeTruthy();
+    expect(screen.getByTestId("plotly-chart")).toBeTruthy();
   });
 });

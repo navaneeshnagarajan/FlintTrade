@@ -10,10 +10,24 @@ vi.mock("../useStraddlePnL", () => ({
   useStraddlePnL: vi.fn(),
 }));
 
+// Mock useBrokerConnected — default: disconnected
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: vi.fn().mockReturnValue(false),
+}));
+
+// Mock FeatureTeaser to render children + sentinel
+vi.mock("@/components/teasers", () => ({
+  FeatureTeaser: ({ children, featureName }: { children: React.ReactNode; featureName: string }) => (
+    <div data-testid="feature-teaser" data-feature={featureName}>{children}</div>
+  ),
+}));
+
 import { useStraddlePnL } from "../useStraddlePnL";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import StraddlePnLWidget from "../StraddlePnLWidget";
 
 const mockUseStraddlePnL = useStraddlePnL as ReturnType<typeof vi.fn>;
+const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -29,7 +43,8 @@ beforeAll(() => {
 });
 
 describe("StraddlePnLWidget", () => {
-  it("renders loading state", () => {
+  it("renders loading state when connected and loading", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseStraddlePnL.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -42,7 +57,8 @@ describe("StraddlePnLWidget", () => {
     expect(screen.getByText(/simulating p&l/i)).toBeTruthy();
   });
 
-  it("renders empty state with no data", () => {
+  it("renders empty state when connected but no data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseStraddlePnL.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -55,7 +71,8 @@ describe("StraddlePnLWidget", () => {
     expect(screen.getByText(/enter symbol and expiry/i)).toBeTruthy();
   });
 
-  it("renders chart and summary when data is present", () => {
+  it("renders chart and summary when connected with live data", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     const curve = Array.from({ length: 50 }, (_, i) => ({
       spot_price: 23000 + i * 50,
       pnl: -180 + Math.abs(i - 25) * 20,
@@ -89,6 +106,7 @@ describe("StraddlePnLWidget", () => {
   });
 
   it("renders error banner", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     mockUseStraddlePnL.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -99,5 +117,21 @@ describe("StraddlePnLWidget", () => {
     });
     render(<StraddlePnLWidget />, { wrapper });
     expect(screen.getByText(/simulation failed/i)).toBeTruthy();
+  });
+
+  it("renders sample data with FeatureTeaser when disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseStraddlePnL.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+    render(<StraddlePnLWidget />, { wrapper });
+    expect(screen.getByTestId("feature-teaser")).toBeTruthy();
+    expect(screen.getByTestId("plotly-chart")).toBeTruthy();
+    expect(screen.getByText(/Base Straddle/i)).toBeTruthy();
   });
 });
