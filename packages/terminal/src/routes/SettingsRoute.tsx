@@ -13,7 +13,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Monitor, Palette, Wifi, TrendingUp, ShieldAlert,
   Keyboard, Brain, Send, HardDrive, Info, RefreshCw,
-  ShieldCheck, Activity,
+  ShieldCheck, Activity, GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 import { resetWsService } from "@/services/websocket";
@@ -31,6 +31,7 @@ import { DataSection }       from "@/tools/Settings/DataSection";
 import { AboutSection }      from "@/tools/Settings/AboutSection";
 import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
+import { SkillSection }      from "@/tools/Settings/SkillSection";
 
 // ---------------------------------------------------------------------------
 // Types (mirror SettingsTool so same localStorage key is compatible)
@@ -53,7 +54,7 @@ interface AllSettings {
 type SectionId =
   | "general" | "appearance" | "api" | "trading" | "risk"
   | "keyboard" | "llm" | "telegram" | "dataPaths" | "about"
-  | "security" | "monitoring";
+  | "security" | "monitoring" | "skill";
 
 interface SectionDef { id: SectionId; label: string; icon: LucideIcon }
 
@@ -83,9 +84,10 @@ const SECTIONS: SectionDef[] = [
   { id: "llm",        label: "LLM Config",         icon: Brain       },
   { id: "telegram",   label: "Telegram",           icon: Send        },
   { id: "dataPaths",  label: "Data Paths",         icon: HardDrive   },
-  { id: "security",   label: "Security",           icon: ShieldCheck },
-  { id: "monitoring", label: "Monitoring",         icon: Activity    },
-  { id: "about",      label: "About",              icon: Info        },
+  { id: "security",   label: "Security",           icon: ShieldCheck    },
+  { id: "monitoring", label: "Monitoring",         icon: Activity       },
+  { id: "skill",      label: "Skill & Experience", icon: GraduationCap  },
+  { id: "about",      label: "About",              icon: Info           },
 ];
 
 // ---------------------------------------------------------------------------
@@ -176,6 +178,7 @@ export default function SettingsRoute() {
       case "dataPaths":  return <DataSection       settings={settings.dataPaths} onChange={(f, v) => updateSection("dataPaths", f, v)} />;
       case "security":   return <SecuritySection />;
       case "monitoring": return <MonitoringSection />;
+      case "skill":      return <SkillSection />;
       case "about":      return <AboutSection />;
     }
   }
