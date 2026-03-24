@@ -130,11 +130,29 @@ function mkAction(label: "B/S CE" | "B/S PE", inBasket: boolean): GridCell {
   };
 }
 
-function oiBarText(value: number | null | undefined, maxValue: number): string {
+/**
+ * Gradient OI bar — uses unicode block characters with varying density to simulate
+ * a gradient visual. Low OI: sparse chars (░), mid OI: medium (▒), high OI: dense (█).
+ */
+function oiBarGradient(value: number | null | undefined, maxValue: number): string {
   if (!value || !maxValue) return "";
-  const pct  = Math.min((Number(value) / Number(maxValue)) * 100, 100);
-  const bars = Math.round(pct / 20);
-  return "█".repeat(bars) + " " + fmtOI(value);
+  const pct = Math.min((Number(value) / Number(maxValue)) * 100, 100);
+  const totalWidth = 5;
+  const filled = Math.round((pct / 100) * totalWidth);
+  let bar = "";
+  for (let i = 0; i < totalWidth; i++) {
+    if (i < filled) {
+      // gradient: last segment lighter to give gradient feel
+      if (i === filled - 1 && filled < totalWidth) {
+        bar += "▓";
+      } else {
+        bar += "█";
+      }
+    } else if (i === filled) {
+      bar += pct > 5 ? "▒" : "";
+    }
+  }
+  return bar + " " + fmtOI(value);
 }
 
 function oiSigText(signal: OISignal): string {
@@ -158,10 +176,21 @@ interface CellParams {
   maxCallOI: number;
   maxPutOI: number;
   isInBasket: (strike: number, optionType: "CE" | "PE") => boolean;
+  /** Map of "<strike>_CE" | "<strike>_PE" → "up" | "down" for active flash state */
+  flashState?: Map<string, "up" | "down">;
+}
+
+/** Returns a bgCell override colour for flash animation, or undefined if not flashing */
+function flashBg(flashState: Map<string, "up" | "down"> | undefined, key: string): string | undefined {
+  if (!flashState) return undefined;
+  const dir = flashState.get(key);
+  if (dir === "up")   return "rgba(34, 197, 94, 0.25)";
+  if (dir === "down") return "rgba(239, 68, 68, 0.25)";
+  return undefined;
 }
 
 export function buildGetCellContent(params: CellParams) {
-  const { view, columns, strikes, atmStrike, maxCallOI, maxPutOI, isInBasket } = params;
+  const { view, columns, strikes, atmStrike, maxCallOI, maxPutOI, isInBasket, flashState } = params;
 
   return ([col, row]: [number, number]): GridCell => {
     const strikeRow = strikes[row];
@@ -196,18 +225,20 @@ export function buildGetCellContent(params: CellParams) {
       const pChg = put?.change_percent ?? put?.change_pct ?? null;
       const pOI  = put?.oi ?? put?.open_interest ?? null;
       const pSig = getOISignal(put);
+      const cFlash = flashBg(flashState, `${strike}_CE`);
+      const pFlash = flashBg(flashState, `${strike}_PE`);
 
       switch (colId) {
-        case "c_sig":  return mkText(oiSigText(cSig));
-        case "c_chg":  return mkText(fmtChg(cChg), { themeOverride: { textDark: chgColour(cChg) ?? "#a0a0b0" } });
-        case "c_ltp":  return mkText(fmtLtp(cLtp));
-        case "c_oi":   return mkText(oiBarText(cOI, maxCallOI));
+        case "c_sig":  return mkText(oiSigText(cSig), cFlash ? { themeOverride: { bgCell: cFlash } } : undefined);
+        case "c_chg":  return mkText(fmtChg(cChg), { themeOverride: { textDark: chgColour(cChg) ?? "#a0a0b0", ...(cFlash ? { bgCell: cFlash } : {}) } });
+        case "c_ltp":  return mkText(fmtLtp(cLtp), cFlash ? { themeOverride: { bgCell: cFlash } } : undefined);
+        case "c_oi":   return mkText(oiBarGradient(cOI, maxCallOI), cFlash ? { themeOverride: { bgCell: cFlash } } : undefined);
         case "c_act":  return mkAction("B/S CE", ceInBasket);
         case "p_act":  return mkAction("B/S PE", peInBasket);
-        case "p_ltp":  return mkText(fmtLtp(pLtp));
-        case "p_chg":  return mkText(fmtChg(pChg), { themeOverride: { textDark: chgColour(pChg) ?? "#a0a0b0" } });
-        case "p_oi":   return mkText(oiBarText(pOI, maxPutOI));
-        case "p_sig":  return mkText(oiSigText(pSig));
+        case "p_ltp":  return mkText(fmtLtp(pLtp), pFlash ? { themeOverride: { bgCell: pFlash } } : undefined);
+        case "p_chg":  return mkText(fmtChg(pChg), { themeOverride: { textDark: chgColour(pChg) ?? "#a0a0b0", ...(pFlash ? { bgCell: pFlash } : {}) } });
+        case "p_oi":   return mkText(oiBarGradient(pOI, maxPutOI), pFlash ? { themeOverride: { bgCell: pFlash } } : undefined);
+        case "p_sig":  return mkText(oiSigText(pSig), pFlash ? { themeOverride: { bgCell: pFlash } } : undefined);
       }
     }
 
@@ -221,21 +252,23 @@ export function buildGetCellContent(params: CellParams) {
       const pOI    = put?.oi ?? put?.open_interest ?? null;
       const pOiChg = put?.oi_change ?? null;
       const pSig   = getOISignal(put);
+      const cFlashOI = flashBg(flashState, `${strike}_CE`);
+      const pFlashOI = flashBg(flashState, `${strike}_PE`);
 
       const fmtOiChg = (v: number | null) =>
         v != null ? `${Number(v) >= 0 ? "+" : ""}${fmtOI(Math.abs(v))}` : "—";
 
       switch (colId) {
-        case "c_sig":   return mkText(oiSigText(cSig));
-        case "c_oichg": return mkText(fmtOiChg(cOiChg), { themeOverride: { textDark: chgColour(cOiChg) ?? "#a0a0b0" } });
-        case "c_oi":    return mkText(fmtOI(cOI));
-        case "c_ltp":   return mkText(fmtLtp(cLtp));
+        case "c_sig":   return mkText(oiSigText(cSig), cFlashOI ? { themeOverride: { bgCell: cFlashOI } } : undefined);
+        case "c_oichg": return mkText(fmtOiChg(cOiChg), { themeOverride: { textDark: chgColour(cOiChg) ?? "#a0a0b0", ...(cFlashOI ? { bgCell: cFlashOI } : {}) } });
+        case "c_oi":    return mkText(oiBarGradient(cOI, maxCallOI), cFlashOI ? { themeOverride: { bgCell: cFlashOI } } : undefined);
+        case "c_ltp":   return mkText(fmtLtp(cLtp), cFlashOI ? { themeOverride: { bgCell: cFlashOI } } : undefined);
         case "c_act":   return mkAction("B/S CE", ceInBasket);
         case "p_act":   return mkAction("B/S PE", peInBasket);
-        case "p_ltp":   return mkText(fmtLtp(pLtp));
-        case "p_oi":    return mkText(fmtOI(pOI));
-        case "p_oichg": return mkText(fmtOiChg(pOiChg), { themeOverride: { textDark: chgColour(pOiChg) ?? "#a0a0b0" } });
-        case "p_sig":   return mkText(oiSigText(pSig));
+        case "p_ltp":   return mkText(fmtLtp(pLtp), pFlashOI ? { themeOverride: { bgCell: pFlashOI } } : undefined);
+        case "p_oi":    return mkText(oiBarGradient(pOI, maxPutOI), pFlashOI ? { themeOverride: { bgCell: pFlashOI } } : undefined);
+        case "p_oichg": return mkText(fmtOiChg(pOiChg), { themeOverride: { textDark: chgColour(pOiChg) ?? "#a0a0b0", ...(pFlashOI ? { bgCell: pFlashOI } : {}) } });
+        case "p_sig":   return mkText(oiSigText(pSig), pFlashOI ? { themeOverride: { bgCell: pFlashOI } } : undefined);
       }
     }
 

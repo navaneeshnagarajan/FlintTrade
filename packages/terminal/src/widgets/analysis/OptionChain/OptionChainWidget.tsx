@@ -11,12 +11,14 @@
  *   - Buy/Sell mini buttons per strike (calls + puts)
  *   - BASKET toggle — select strikes, badge count, basket panel
  *   - Color-coded change%, OI bars, ATM accent border
+ *   - Flash animation on LTP change: green flash (price up), red flash (price down) — 500ms
+ *   - Max Pain badge in header (fetched from OpenAlgo max_pain endpoint)
  *   - Auto-refresh: 3 s market hours, 30 s off-hours
  *   - Dense layout: text-xs data, text-xs headers, font-mono numbers
  *   - Glide theme uses design token hex values (surface/border/text tokens)
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useReducer } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSyntheticFuture } from "@/hooks/useSyntheticFuture";
 import DataEditor, {
@@ -31,7 +33,7 @@ import {
   AlertCircle,
   ShoppingBasket,
 } from "lucide-react";
-import { getInstruments, getOptionSymbol, getSymbol, placeOrder } from "@/services/api";
+import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
 import { useOptionChainData } from "./useOptionChainData";
 import SymbolSearch from "./SymbolSearch";
@@ -64,6 +66,13 @@ export default function OptionChainWidget() {
   const orderMsgTimerRef                        = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scrollTimerRef                          = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gridRef                                 = useRef<DataEditorRef>(null);
+
+  // Flash animation tracking: Map<"strikeIndex_CE|PE", "up"|"down"> cleared after 500ms
+  const flashStateRef = useRef<Map<string, "up" | "down">>(new Map());
+  const flashTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const prevLtpRef = useRef<Map<string, number>>(new Map());
+  // Counter bumped to force getCellContent re-evaluation when flash state changes
+  const [flashTick, bumpFlashTick] = useReducer((n: number) => n + 1, 0);
 
   useEffect(() => () => {
     clearTimeout(orderMsgTimerRef.current);
@@ -116,6 +125,17 @@ export default function OptionChainWidget() {
     pcr,
   } = useOptionChainData(symDef, exchange);
 
+  // Max Pain — fetched per expiry, 60s refresh
+  const { data: maxPainData } = useQuery({
+    queryKey: ["maxpain", symDef.label, exchange, selectedExpiry],
+    queryFn: () => getMaxPain(symDef.label, exchange, selectedExpiry ?? undefined),
+    enabled: !!selectedExpiry,
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+  const maxPainStrike = maxPainData?.max_pain_strike ?? null;
+
   // Scroll ATM row into view when chain loads
   useEffect(() => {
     if (atmStrike == null || !gridRef.current) return;
@@ -129,6 +149,53 @@ export default function OptionChainWidget() {
     return () => clearTimeout(scrollTimerRef.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chain]);
+
+  // Flash detection — compare LTP on each strikes update, set flash state for changed cells
+  useEffect(() => {
+    if (strikes.length === 0) return;
+    let anyChanged = false;
+    for (const { strike, call, put } of strikes) {
+      const cLtp = call?.ltp ?? call?.last_price ?? null;
+      const pLtp = put?.ltp  ?? put?.last_price  ?? null;
+      const cKey = `${strike}_CE`;
+      const pKey = `${strike}_PE`;
+
+      if (cLtp != null) {
+        const prev = prevLtpRef.current.get(cKey);
+        if (prev != null && cLtp !== prev) {
+          const dir: "up" | "down" = cLtp > prev ? "up" : "down";
+          flashStateRef.current.set(cKey, dir);
+          const existing = flashTimersRef.current.get(cKey);
+          if (existing) clearTimeout(existing);
+          flashTimersRef.current.set(cKey, setTimeout(() => {
+            flashStateRef.current.delete(cKey);
+            flashTimersRef.current.delete(cKey);
+            bumpFlashTick();
+          }, 500));
+          anyChanged = true;
+        }
+        prevLtpRef.current.set(cKey, cLtp);
+      }
+      if (pLtp != null) {
+        const prev = prevLtpRef.current.get(pKey);
+        if (prev != null && pLtp !== prev) {
+          const dir: "up" | "down" = pLtp > prev ? "up" : "down";
+          flashStateRef.current.set(pKey, dir);
+          const existing = flashTimersRef.current.get(pKey);
+          if (existing) clearTimeout(existing);
+          flashTimersRef.current.set(pKey, setTimeout(() => {
+            flashStateRef.current.delete(pKey);
+            flashTimersRef.current.delete(pKey);
+            bumpFlashTick();
+          }, 500));
+          anyChanged = true;
+        }
+        prevLtpRef.current.set(pKey, pLtp);
+      }
+    }
+    if (anyChanged) bumpFlashTick();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strikes]);
 
   // Basket helpers
   const isInBasket = useCallback((strike: number, optionType: "CE" | "PE"): boolean =>
@@ -193,10 +260,12 @@ export default function OptionChainWidget() {
 
   const getCellContent = useCallback(
     (item: Item) =>
-      buildGetCellContent({ view, columns: glideColumns, strikes, atmStrike, maxCallOI, maxPutOI, isInBasket })(
+      buildGetCellContent({ view, columns: glideColumns, strikes, atmStrike, maxCallOI, maxPutOI, isInBasket, flashState: flashStateRef.current })(
         item as [number, number],
       ),
-    [view, glideColumns, strikes, atmStrike, maxCallOI, maxPutOI, isInBasket],
+    // flashTick intentionally included: forces re-evaluation when flash state changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, glideColumns, strikes, atmStrike, maxCallOI, maxPutOI, isInBasket, flashTick],
   );
 
   const handleCellClicked = useCallback(([col, row]: Item) => {
@@ -369,7 +438,7 @@ export default function OptionChainWidget() {
           )}
         </div>
 
-        {/* OI signal legend */}
+        {/* OI signal legend + Max Pain */}
         {view !== "GREEKS" && (
           <div className="flex items-center gap-2 flex-wrap">
             {(["Long Build Up", "Short Covering", "Long Unwinding", "Short Build Up"] as OISignal[]).map((sig) => (
@@ -381,6 +450,11 @@ export default function OptionChainWidget() {
                 <span className="opacity-70">{sig}</span>
               </span>
             ))}
+            {maxPainStrike != null && (
+              <span className="px-2 py-0.5 rounded text-xxs font-medium bg-accent/20 text-accent border border-accent/30 font-mono">
+                Max Pain: {maxPainStrike.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </span>
+            )}
           </div>
         )}
       </div>

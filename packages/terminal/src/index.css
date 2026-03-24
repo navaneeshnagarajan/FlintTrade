@@ -280,6 +280,18 @@ html.density-compact {
   }
 }
 
+/* ---------- Option chain cell flash animations ---------- */
+@keyframes cell-flash-up {
+  0% { background-color: rgba(34, 197, 94, 0.3); }
+  100% { background-color: transparent; }
+}
+@keyframes cell-flash-down {
+  0% { background-color: rgba(239, 68, 68, 0.3); }
+  100% { background-color: transparent; }
+}
+.cell-flash-up { animation: cell-flash-up 0.5s ease-out; }
+.cell-flash-down { animation: cell-flash-down 0.5s ease-out; }
+
 /* ---------- Dockview theme overrides — compact, content-first ---------- */
 .dockview-theme-dark {
   /* Slim tab bar — less chrome, more content */
