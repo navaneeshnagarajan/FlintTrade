@@ -70,6 +70,8 @@ export default defineConfig({
           ) {
             return "vendor-lwc";
           }
+          // Plotly.js — only loaded by analysis widgets (lazy)
+          if (id.includes("node_modules/plotly.js")) return "vendor-plotly";
           // Glide Data Grid — canvas grid for option chain / streaming tables
           if (id.includes("node_modules/@glideapps/")) {
             return "vendor-glide";
