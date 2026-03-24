@@ -4,7 +4,7 @@
 
 [project]
 name = "FlintTrade"
-version = "0.1.0-beta"
+version = "0.2.0-alpha"
 description = "Open-source algorithmic and manual trading platform built on OpenAlgo"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
@@ -12,6 +12,7 @@ python_requires = ">=3.11"
 node_requires = ">=20.0.0"
 
 [packages]
+gateway = { path = "packages/gateway", lang = "python", description = "Direct broker connections (31 brokers), adapter pattern, encrypted credentials, WebSocket bridge" }
 core = { path = "packages/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }
 engine = { path = "packages/engine", lang = "python", description = "Strategy execution, order routing, safety layers, kill switches" }
 terminal = { path = "packages/terminal", lang = "react", description = "Trading UI — scalper, option chain, OI analysis, DOM, charts" }

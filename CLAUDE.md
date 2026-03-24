@@ -39,7 +39,7 @@ gh run view <id> --log-failed                  # diagnose failure
 ## What This Is
 
 Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
-Built on OpenAlgo (30+ broker gateway). 13 packages (11 Python + 1 React + 1 Rust/PyO3), monorepo, AGPL-3.0.
+Built on OpenAlgo (31 broker gateway). 14 packages (12 Python + 1 React + 1 Rust/PyO3), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
 Serves three personas from a single application:
@@ -70,7 +70,7 @@ localhost:5173/
 ├── /explore        → Demo mode with sample data (no broker needed)
 ├── /setup          → First-time wizard (Quick / Guided / Advanced)
 ├── /settings       → Standalone settings page
-├── /trade          → Trader workspace (Dockview canvas, 21 widgets)
+├── /trade          → Trader workspace (Dockview canvas, 26 widgets)
 ├── /invest         → Investor dashboard (holdings, net worth, SIPs)
 ├── /learn          → Beginner center (courses, glossary, strategies)
 ├── /lab            → Strategy Lab (backtest, forward test, optimize)
@@ -167,10 +167,11 @@ Two-tier config. No exceptions.
 
 ## Monorepo Structure
 
-### Python packages (11)
+### Python packages (12)
 
 | Package | Description |
 |---|---|
+| `gateway` | Direct broker connections (31 brokers), adapter pattern, encrypted credentials, WebSocket bridge |
 | `core` | Framework, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions |
 | `engine` | 5-layer safety system, order router, scheduler, base strategy, strategy registry |
 | `data` | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
@@ -199,18 +200,18 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Terminal — Widgets & Tools
 
-21 widgets (all TSX) + 7 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
+26 widgets (all TSX) + 7 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
 
-- **Widgets:** `src/widgets/` — Trading (9: dashboard, scalper, positions, orders, holdings, tradebook, orderpad, mtmmonitor, riskpanel), Analysis (7: chart, optionchain, oichart, straddle, depth, greeks, sectormap), Utility (5: watchlist, calculator, news, ticker, aiadvisor)
+- **Widgets:** `src/widgets/` — Trading (9: dashboard, scalper, positions, orders, holdings, tradebook, orderpad, mtmmonitor, riskpanel), Analysis (12: chart, optionchain, oichart, straddle, depth, greeks, sectormap, gex, volsurface, ivsmile, straddlepnl, oiprofile), Utility (5: watchlist, calculator, news, ticker, aiadvisor)
 - **Tools:** `src/tools/` — Canvas overlays (4: P&L Dashboard, Market Intelligence, Trade Journal, Settings) + Full-page tools (3: Backtest Lab, Flow Builder, Strategy Builder)
 - **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG)
 - **Workspace presets:** Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View. Serialized via Dockview API.
 
 ## Current State
 
-- **Version:** 0.1.0-beta (released 2026-03-24)
+- **Version:** 0.2.0-alpha (released 2026-03-25)
 - **Tests:** 36 terminal (Vitest) + 985 Python (pytest) = 1,021 total
-- **Terminal:** 21 widgets (TSX) + 7 tools + 10 routes + 6 workspace presets in Dockview v5.1 shell
+- **Terminal:** 26 widgets (TSX) + 7 tools + 10 routes + 6 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
 - **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 5 themes, density modes, zero arbitrary values
 - **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
@@ -265,6 +266,10 @@ Modes: 1=LTP, 2=Quote, 3=Depth (50 levels in v2)
 Auth: `{ "action": "authenticate", "api_key": "<key>" }`
 Subscribe: `{ "action": "subscribe", "symbols": [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}], "mode": "LTP" }`
 Tick data arrives nested: `{ "type": "market_data", "data": { "ltp": ..., "symbol": ... } }`
+
+### FlintTrade Backend Endpoints (/ft-api/v1/)
+**Analysis (GET):** `gex`, `volsurface`, `ivsmile`, `straddlepnl`, `oiprofile`, `maxpain`
+**Gateway (POST):** `broker/catalog`, `broker/accounts`, `broker/connect`, `broker/disconnect`, `broker/auth/apikey`, `broker/auth/totp`, `broker/auth/oauth`, `broker/auth/otp`, `broker/auth/callback`, `broker/reconnect`
 
 ### Rate limits
 Orders: 10/sec | Smart orders: 2/sec | General API: 50/sec

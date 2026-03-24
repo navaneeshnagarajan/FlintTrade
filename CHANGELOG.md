@@ -6,6 +6,46 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0-alpha] — 2026-03-25
+
+OpenAlgo absorption: direct broker connections, analysis tools, platform features.
+
+### Added — Broker Gateway (SP1)
+- New packages/gateway/ package: direct connection to 31 brokers via adapter pattern
+- BrokerRegistry: multi-account management, N simultaneous broker connections
+- Fernet-encrypted credential storage (PBKDF2, per-account salt)
+- WebSocket bridge: TickDispatcher replaces ZMQ PUB/SUB (in-process, no separate server)
+- Flask auth blueprint: 10 endpoints for broker catalog, account CRUD, OAuth/TOTP/API key/OTP auth flows
+- 4 OpenAlgo import shims (token_db, auth_db, config, logging) for submodule isolation
+- ContractManager: per-broker master contract SQLite cache
+- Startup account reconnection from encrypted credentials
+- Frontend: brokerStore (Zustand), gatewayApi client, useBrokerAccounts/useBrokerAuth/useBrokerList hooks
+- Setup page: BrokerPicker, ConnectedAccounts, AuthFlowAPIKey, AuthFlowTOTP components
+
+### Added — Analysis Tools (SP2)
+- 5 new Plotly.js analysis widgets: GEX Dashboard, Volatility Surface 3D, IV Smile, Straddle P&L Simulator, OI Profile
+- Plotly.js integration with shared PlotlyChart wrapper (theme-aware, lazy-loaded)
+- 5 backend screener modules: gex.py, vol_surface.py, iv_smile.py, straddle_pnl.py, oi_profile.py
+- 6 new Flask analysis endpoints (/ft-api/v1/gex, volsurface, ivsmile, straddlepnl, oiprofile, maxpain)
+- OptionChain upgrade: LTP flash animation, max pain badge, gradient OI bars
+- OIChart upgrade: Plotly grouped bars replacing CSS, PCR overlay, ATM/Max Pain markers
+- Widget count: 21 → 26
+
+### Added — Platform Features (SP3)
+- Sandbox paper trading engine (DuckDB, MARKET/LIMIT/SL fills, auto square-off)
+- Python strategy runner (AST validation, subprocess isolation, memory limits)
+- Action Center: semi-auto order approval queue with configurable TTL
+- Security dashboard: IP tracking, auto-ban on threshold, threat detection
+- P&L tracker: real-time tradebook P&L time series
+- Historify watchlist: scheduled OHLCV download management
+- Health/Traffic/Latency monitoring with circular buffer and percentile tracking
+- OrderRouter sandbox integration (routes to virtual engine when account is in sandbox mode)
+
+### Added — Infrastructure
+- Weekly submodule compatibility CI check (.github/workflows/submodule-check.yml)
+- Makefile: start-gateway target for single-process mode
+- .env.example: gateway section (MASTER_PASSWORD, FLINTTRADE_PORT, WS_PORT)
+
 ## [0.1.0-beta] — 2026-03-24
 
 Full repo audit + god component refactoring. Security hardened, performance optimized, WCAG accessible.

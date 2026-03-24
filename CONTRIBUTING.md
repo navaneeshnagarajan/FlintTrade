@@ -19,8 +19,9 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 |---|---|---|
 | 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
 | 0.1.0-alpha | Released (2026-03-21) | 13 packages, 1,018 tests, 10 routes, full-stack wiring, 5 themes |
-| 0.1.0-beta | **RELEASED** (2026-03-24) | Security audit, WCAG a11y, perf optimization, god component splits |
-| 0.1.0-rc.1 | Planned | Release candidate — community feedback incorporated |
+| 0.1.0-beta | Released (2026-03-24) | Security audit, WCAG a11y, perf optimization, god component splits |
+| 0.2.0-alpha | **RELEASED** (2026-03-25) | OpenAlgo absorption: gateway, analysis tools, platform features |
+| 0.2.0-beta | Planned | Gateway stabilization, analysis tool refinement |
 | 0.1.0 | Planned | First stable release |
 | 0.2.0 | Planned | External data sources, advanced AI integrations |
 | 1.0.0 | Planned | Full production release, all platforms tested |
