@@ -45,6 +45,7 @@ import { useFunds } from "@/hooks/useFunds";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
+import { PnLSummary } from "./PnLSummary";
 
 // ---------------------------------------------------------------------------
 // IST time formatter (absorbed from PnLTracker.tsx)
@@ -433,6 +434,9 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
           SL
         </span>
       </div>
+
+      {/* P&L Tracker — backend data (auto-refreshes every 10s in market hours) */}
+      <PnLSummary />
     </div>
   );
 }
