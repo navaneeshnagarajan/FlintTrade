@@ -1,0 +1,15 @@
+[project]
+name = "flinttrade-gateway"
+version = "0.2.0-alpha"
+description = "Broker gateway — direct connections to 31 brokers via adapter pattern"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "cryptography>=41.0",
+    "httpx>=0.25",
+    "websockets>=12.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../.."]
