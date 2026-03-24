@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { getNews } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -205,17 +206,10 @@ async function fetchFeed(source: FeedSource): Promise<NewsItem[]> {
   });
 }
 
-async function fetchAllFeeds(): Promise<NewsItem[]> {
-  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
-
-  const items: NewsItem[] = [];
-  for (const r of results) {
-    if (r.status === "fulfilled") {
-      items.push(...r.value);
-    }
-  }
-
-  // De-duplicate by headline text (same story across sources)
+/**
+ * Deduplicate and sort a flat list of NewsItems newest-first.
+ */
+function dedupeAndSort(items: NewsItem[]): NewsItem[] {
   const seen = new Set<string>();
   const deduped: NewsItem[] = [];
   for (const item of items) {
@@ -225,10 +219,49 @@ async function fetchAllFeeds(): Promise<NewsItem[]> {
       deduped.push(item);
     }
   }
-
-  // Sort newest first
   deduped.sort((a, b) => b.timestamp - a.timestamp);
   return deduped;
+}
+
+/**
+ * Try the FlintTrade backend endpoint first (GET /ft-api/api/v1/news).
+ * If that fails or returns no articles, fall back to the CORS proxy path.
+ *
+ * TODO: Implement GET /api/v1/news in the FlintTrade Flask backend to fetch
+ *       RSS server-side (avoids CORS entirely). Until that endpoint is live
+ *       the widget automatically falls back to the allorigins CORS proxy.
+ */
+async function fetchAllFeeds(): Promise<NewsItem[]> {
+  // Attempt 1: backend server-side RSS proxy
+  try {
+    const result = await getNews();
+    if (result.articles && result.articles.length > 0) {
+      const items: NewsItem[] = result.articles.map((a) => {
+        const ts = a.pub_date ? new Date(a.pub_date).getTime() : Date.now();
+        return {
+          id: `${a.source}-${a.link}`,
+          headline: a.title.trim(),
+          link: a.link,
+          source: a.source,
+          timestamp: isNaN(ts) ? Date.now() : ts,
+          sentiment: classifySentiment(a.title),
+        };
+      });
+      return dedupeAndSort(items);
+    }
+  } catch {
+    // Backend not yet available — fall through to CORS proxy
+  }
+
+  // Attempt 2: client-side CORS proxy fallback
+  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
+  const items: NewsItem[] = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      items.push(...r.value);
+    }
+  }
+  return dedupeAndSort(items);
 }
 
 // ---------------------------------------------------------------------------
