@@ -22,7 +22,7 @@ endif
 OPENALGO_PORT ?= 5000
 OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 
-.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help
+.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check
 
 # ======================================================================
 # Setup
@@ -122,6 +122,30 @@ docker-down: ## Stop Docker services
 
 docker-build: ## Rebuild Docker images
 	docker compose build
+
+# ======================================================================
+# Management
+# ======================================================================
+
+full-check: ## Run full health check (tests + lint + typecheck)
+	@echo -e "$(CYAN)=== FlintTrade Health Check ===$(RESET)"
+	@echo -e "$(YELLOW)--- Python Tests ---$(RESET)"
+	@$(PYTHON) -m pytest packages/gateway/tests/ packages/core/tests/ packages/screener/tests/ packages/engine/tests/ -q --no-header --import-mode=importlib 2>&1 | tail -3
+	@echo -e "$(YELLOW)--- Ruff Lint ---$(RESET)"
+	@$(PYTHON) -m ruff check packages/*/src/ --statistics 2>&1 | tail -5
+	@echo -e "$(YELLOW)--- Terminal ---$(RESET)"
+	@cd packages/terminal && npm run typecheck 2>&1 | tail -2
+	@cd packages/terminal && npx vitest run 2>&1 | tail -3
+	@echo -e "$(GREEN)=== Done ===$(RESET)"
+
+audit: ## Check repo absorption status
+	@$(PYTHON) scripts/audit_repos.py
+
+sync-check: ## Check submodule upstream changes
+	@echo -e "$(CYAN)=== Submodule Sync Check ===$(RESET)"
+	@cd infra/openalgo && git fetch origin --quiet 2>/dev/null && echo "openalgo: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openalgo: not available"
+	@cd infra/algomirror && git fetch origin --quiet 2>/dev/null && echo "algomirror: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "algomirror: not available"
+	@cd infra/openclaw && git fetch origin --quiet 2>/dev/null && echo "openclaw: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openclaw: not available"
 
 # ======================================================================
 # Info
