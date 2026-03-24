@@ -149,7 +149,6 @@ class ContractManager:
 
         # Convert UTC mtime to IST
         ist_offset_seconds = (_IST_OFFSET_HOURS * 60 + _IST_OFFSET_MINUTES) * 60
-        mtime_ist = mtime_utc.utctimetuple()  # keep for year/month/day extraction
         # Use simple arithmetic: add offset seconds to the UTC timestamp
         mtime_ist_ts = mtime_utc.timestamp() + ist_offset_seconds
         mtime_ist_dt = datetime.fromtimestamp(mtime_ist_ts, tz=timezone.utc)

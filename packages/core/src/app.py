@@ -217,7 +217,7 @@ def create_flask_app(
     app.register_blueprint(historify_bp)
 
     # Register monitoring blueprint (health, traffic, latency)
-    from packages.core.src.monitoring_routes import monitoring_bp, get_traffic_counter  # noqa: PLC0415
+    from packages.core.src.monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
     # Reconnect saved accounts (best-effort, don't block startup)

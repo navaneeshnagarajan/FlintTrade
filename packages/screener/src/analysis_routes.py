@@ -28,13 +28,13 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from .gex import GEXResult, calculate_gex
-from .iv_smile import IVSmileResult, calculate_iv_smile
+from .gex import calculate_gex
+from .iv_smile import calculate_iv_smile
 from .oi_analysis import OIAnalysis
-from .oi_profile import OIProfileResult, calculate_oi_profile
+from .oi_profile import calculate_oi_profile
 from .option_chain import LOT_SIZES, OptionChainSnapshot, StrikeData
-from .straddle_pnl import StraddlePnLResult, simulate_straddle_pnl
-from .vol_surface import VolSurfaceResult, calculate_vol_surface
+from .straddle_pnl import simulate_straddle_pnl
+from .vol_surface import calculate_vol_surface
 
 logger = logging.getLogger("flinttrade.screener.analysis_routes")
 
