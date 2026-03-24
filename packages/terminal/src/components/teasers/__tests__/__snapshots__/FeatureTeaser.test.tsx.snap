@@ -1,0 +1,308 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
+<div>
+  <section
+    aria-label="Strategy Lab — Preview preview"
+    class="relative w-full h-full min-h-0 overflow-hidden"
+  >
+    <div
+      aria-hidden="true"
+      class="w-full h-full"
+      style="opacity: 0.6; pointer-events: none; user-select: none;"
+    >
+      <div>
+        preview widget content
+      </div>
+    </div>
+    <div
+      animate="animate"
+      aria-hidden="true"
+      class="absolute inset-0 pointer-events-none"
+      exit="exit"
+      initial="initial"
+      style="background: linear-gradient(rgba(10, 10, 15, 0.45) 0%, rgba(10, 10, 15, 0.2) 50%, rgba(10, 10, 15, 0.55) 100%);"
+      variants="[object Object]"
+    />
+    <div
+      class="absolute top-0 left-0 right-0 z-10 p-2"
+    >
+      <div
+        animate="animate"
+        aria-label="Strategy Lab — Preview"
+        class="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs bg-surface-card border border-border-default"
+        exit="exit"
+        initial="initial"
+        role="status"
+        variants="[object Object]"
+      >
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-eye shrink-0 text-blue-400"
+          fill="none"
+          height="12"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="12"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="3"
+          />
+        </svg>
+        <span
+          class="text-text-primary font-medium truncate"
+        >
+          Strategy Lab
+        </span>
+        <span
+          class="shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-blue-400 bg-current/10"
+        >
+          Preview
+        </span>
+        <span
+          class="shrink-0 text-text-muted font-mono"
+        >
+          v0.3.0
+        </span>
+        <button
+          aria-label="Dismiss banner"
+          class="ml-auto shrink-0 rounded p-0.5 text-text-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors duration-100"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="lucide lucide-x"
+            fill="none"
+            height="12"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="12"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M18 6 6 18"
+            />
+            <path
+              d="m6 6 12 12"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div
+      animate="animate"
+      class="absolute bottom-3 right-3 z-10 flex flex-col gap-2 p-3 rounded-xl bg-surface-card/90 border border-border-default backdrop-blur-sm min-w-[180px] max-w-[220px]"
+      exit="exit"
+      initial="initial"
+      style="backdrop-filter: blur(8px);"
+      variants="[object Object]"
+    >
+      <div
+        aria-label="Feature roadmap — current stage: Designed"
+        class="flex items-start w-full px-1"
+        role="group"
+      >
+        <div
+          class="flex items-start flex-1"
+        >
+          <div
+            class="flex flex-col items-center gap-1 relative"
+          >
+            <div
+              class="relative flex items-center justify-center w-5 h-5"
+            >
+              <div
+                animate="[object Object]"
+                aria-hidden="true"
+                class="absolute inset-0 rounded-full"
+                style="background: rgba(59, 130, 246, 0.25);"
+                transition="[object Object]"
+              />
+              <div
+                aria-hidden="true"
+                class="absolute inset-0 rounded-full bg-blue-400"
+                layoutid="roadmap-active"
+                transition="[object Object]"
+              />
+              <div
+                aria-label="Designed: current"
+                class="relative z-10 rounded-full transition-all duration-200 w-3 h-3 bg-blue-400"
+                role="img"
+              />
+            </div>
+            <span
+              class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
+            >
+              Designed
+            </span>
+          </div>
+          <div
+            aria-hidden="true"
+            class="relative flex-1 mx-1 h-px mt-2.5"
+          >
+            <div
+              class="absolute inset-0 bg-border-default"
+            />
+          </div>
+        </div>
+        <div
+          class="flex items-start flex-1"
+        >
+          <div
+            class="flex flex-col items-center gap-1 relative"
+          >
+            <div
+              class="relative flex items-center justify-center w-5 h-5"
+            >
+              <div
+                aria-label="In Dev: upcoming"
+                class="relative z-10 rounded-full transition-all duration-200 w-2 h-2 border border-border-default bg-transparent"
+                role="img"
+              />
+            </div>
+            <span
+              class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+            >
+              In Dev
+            </span>
+          </div>
+          <div
+            aria-hidden="true"
+            class="relative flex-1 mx-1 h-px mt-2.5"
+          >
+            <div
+              class="absolute inset-0 bg-border-default"
+            />
+          </div>
+        </div>
+        <div
+          class="flex items-start flex-1"
+        >
+          <div
+            class="flex flex-col items-center gap-1 relative"
+          >
+            <div
+              class="relative flex items-center justify-center w-5 h-5"
+            >
+              <div
+                aria-label="Testing: upcoming"
+                class="relative z-10 rounded-full transition-all duration-200 w-2 h-2 border border-border-default bg-transparent"
+                role="img"
+              />
+            </div>
+            <span
+              class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+            >
+              Testing
+            </span>
+          </div>
+          <div
+            aria-hidden="true"
+            class="relative flex-1 mx-1 h-px mt-2.5"
+          >
+            <div
+              class="absolute inset-0 bg-border-default"
+            />
+          </div>
+        </div>
+        <div
+          class="flex items-start flex-1"
+        >
+          <div
+            class="flex flex-col items-center gap-1 relative"
+          >
+            <div
+              class="relative flex items-center justify-center w-5 h-5"
+            >
+              <div
+                aria-label="Live: upcoming"
+                class="relative z-10 rounded-full transition-all duration-200 w-2 h-2 border border-border-default bg-transparent"
+                role="img"
+              />
+            </div>
+            <span
+              class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+            >
+              Live
+            </span>
+          </div>
+        </div>
+      </div>
+      <div
+        class="flex flex-col items-start gap-1.5"
+      >
+        <div
+          animate="[object Object]"
+          exit="[object Object]"
+          initial="[object Object]"
+        >
+          <button
+            class="group relative inline-flex items-center justify-center overflow-hidden rounded-lg bg-surface-card border border-border-default text-text-primary font-medium transition-all duration-300 hover:shadow-[0_0_20px_rgba(34,197,94,0.3)] disabled:opacity-50 disabled:cursor-not-allowed text-xs px-3 py-1.5 h-auto"
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              class="absolute inset-0 overflow-hidden rounded-lg"
+              style="padding: 0.1em;"
+            >
+              <span
+                class="absolute inset-[-100%] animate-[spin_3s_linear_infinite]"
+                style="background: conic-gradient(from 90deg at 50% 50%, transparent 0%, rgb(59, 130, 246) 50%, transparent 100%);"
+              />
+            </span>
+            <span
+              aria-hidden="true"
+              class="absolute inset-px rounded-lg bg-surface-card"
+            />
+            <span
+              class="relative z-10 flex items-center gap-2"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-send"
+                fill="none"
+                height="11"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="11"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"
+                />
+                <path
+                  d="m21.854 2.147-10.94 10.939"
+                />
+              </svg>
+              <span>
+                Notify me when live
+              </span>
+            </span>
+          </button>
+        </div>
+        <span
+          class="text-[10px] text-text-muted pl-0.5"
+        >
+          via 
+          Telegram
+        </span>
+      </div>
+    </div>
+  </section>
+</div>
+`;

@@ -1,0 +1,42 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`NotifyMe > matches snapshot for subscribed state 1`] = `
+<div>
+  <div
+    class="flex flex-col items-start gap-1.5"
+  >
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium bg-emerald-400/10 border border-emerald-400/20 text-emerald-400"
+      role="status"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-circle-check"
+        fill="none"
+        height="12"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="12"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <circle
+          cx="12"
+          cy="12"
+          r="10"
+        />
+        <path
+          d="m9 12 2 2 4-4"
+        />
+      </svg>
+      <span>
+        Subscribed
+      </span>
+    </div>
+  </div>
+</div>
+`;
