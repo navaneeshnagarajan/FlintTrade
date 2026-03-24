@@ -80,6 +80,11 @@ const router = createBrowserRouter([
         ],
       },
 
+      /* Admin dashboard — DEV only */
+      ...(import.meta.env.DEV
+        ? [{ path: "admin", lazy: () => import("./routes/AdminRoute").then((m) => ({ Component: m.default })) }]
+        : []),
+
       /* 404 catch-all — must be last */
       { path: "*", element: <Suspense fallback={<Loading />}><NotFoundRoute /></Suspense> },
     ],
