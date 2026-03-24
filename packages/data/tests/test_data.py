@@ -374,6 +374,10 @@ class TestAuditLogger:
 class TestTradeLogger:
     """Test trade logging, P&L calculation, and daily summaries."""
 
+    # Fixed test date — avoids midnight race conditions and UTC/IST divergence on CI.
+    _TEST_DATE = "2026-03-16"
+    _TEST_TS = datetime(2026, 3, 16, 10, 30, 0, tzinfo=IST)
+
     def _make_storage_and_logger(self):
         from packages.data.src.storage import StorageManager
         from packages.data.src.trade_logger import TradeLogger
@@ -397,45 +401,54 @@ class TestTradeLogger:
         assert pnl == -200.0
 
     def test_log_trade_stores_in_duckdb(self):
+        """log_trade() stores the trade; use a frozen clock so CI timezone never drifts."""
+        from unittest.mock import patch
         storage, tl = self._make_storage_and_logger()
-        tl.log_trade(
-            orderid="ORD001", symbol="RELIANCE", exchange="NSE",
-            action="BUY", quantity=10, price=2500.0, strategy="Flint",
-        )
-        trades = storage.get_trades_by_date(datetime.now(IST).strftime("%Y-%m-%d"))
+        with patch("packages.data.src.trade_logger.datetime") as mock_dt:
+            mock_dt.now.return_value = self._TEST_TS
+            tl.log_trade(
+                orderid="ORD001", symbol="RELIANCE", exchange="NSE",
+                action="BUY", quantity=10, price=2500.0, strategy="Flint",
+            )
+        trades = storage.get_trades_by_date(self._TEST_DATE)
         assert len(trades) == 1
         assert trades[0]["symbol"] == "RELIANCE"
         storage.close()
 
     def test_log_trade_with_pnl(self):
+        """P&L is auto-calculated from entry/exit; frozen clock keeps date consistent."""
+        from unittest.mock import patch
         storage, tl = self._make_storage_and_logger()
-        tl.log_trade(
-            orderid="ORD002", symbol="TCS", exchange="NSE",
-            action="BUY", quantity=5, price=3520.0, strategy="Flint",
-            entry_price=3500.0, exit_price=3520.0,
-        )
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        trades = storage.get_trades_by_strategy("Flint", today, today)
+        with patch("packages.data.src.trade_logger.datetime") as mock_dt:
+            mock_dt.now.return_value = self._TEST_TS
+            tl.log_trade(
+                orderid="ORD002", symbol="TCS", exchange="NSE",
+                action="BUY", quantity=5, price=3520.0, strategy="Flint",
+                entry_price=3500.0, exit_price=3520.0,
+            )
+        trades = storage.get_trades_by_strategy("Flint", self._TEST_DATE, self._TEST_DATE)
         assert len(trades) == 1
         assert trades[0]["pnl"] == 100.0  # (3520-3500)*5
         storage.close()
 
     def test_log_trade_with_slippage(self):
+        """Slippage = |actual - expected|; frozen clock avoids midnight date drift."""
+        from unittest.mock import patch
         storage, tl = self._make_storage_and_logger()
-        tl.log_trade(
-            orderid="ORD003", symbol="INFY", exchange="NSE",
-            action="BUY", quantity=10, price=1502.0, strategy="Flint",
-            expected_price=1500.0,
-        )
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        trades = storage.get_trades_by_strategy("Flint", today, today)
+        with patch("packages.data.src.trade_logger.datetime") as mock_dt:
+            mock_dt.now.return_value = self._TEST_TS
+            tl.log_trade(
+                orderid="ORD003", symbol="INFY", exchange="NSE",
+                action="BUY", quantity=10, price=1502.0, strategy="Flint",
+                expected_price=1500.0,
+            )
+        trades = storage.get_trades_by_strategy("Flint", self._TEST_DATE, self._TEST_DATE)
         assert trades[0]["slippage"] == 2.0
         storage.close()
 
     def test_compute_daily_summary(self):
         storage, tl = self._make_storage_and_logger()
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        ts = datetime.now(IST)
+        ts = self._TEST_TS
 
         # Simulate 3 trades: 2 winning, 1 losing
         storage.insert_trade(
@@ -454,7 +467,7 @@ class TestTradeLogger:
             strategy="Flint", pnl=-200.0, fees=5.0,
         )
 
-        summary = tl.compute_daily_summary(today, "Flint")
+        summary = tl.compute_daily_summary(self._TEST_DATE, "Flint")
         assert summary.total_trades == 3
         assert summary.winning_trades == 2
         assert summary.losing_trades == 1
@@ -466,25 +479,23 @@ class TestTradeLogger:
 
     def test_daily_summary_persisted(self):
         storage, tl = self._make_storage_and_logger()
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        ts = datetime.now(IST)
+        ts = self._TEST_TS
 
         storage.insert_trade(
             ts=ts, orderid="1", symbol="A", exchange="NSE",
             action="BUY", quantity=1, price=100.0,
             strategy="Flint", pnl=50.0,
         )
-        tl.compute_daily_summary(today, "Flint")
+        tl.compute_daily_summary(self._TEST_DATE, "Flint")
 
-        summaries = storage.get_daily_summaries(today, today, "Flint")
+        summaries = storage.get_daily_summaries(self._TEST_DATE, self._TEST_DATE, "Flint")
         assert len(summaries) == 1
         assert summaries[0]["total_trades"] == 1
         storage.close()
 
     def test_daily_summary_max_drawdown(self):
         storage, tl = self._make_storage_and_logger()
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        ts = datetime.now(IST)
+        ts = self._TEST_TS
 
         # Sequence: +500, -300, -400 → peak 500, trough -200 → dd=700
         storage.insert_trade(
@@ -503,7 +514,7 @@ class TestTradeLogger:
             strategy="Test", pnl=-400.0,
         )
 
-        summary = tl.compute_daily_summary(today, "Test")
+        summary = tl.compute_daily_summary(self._TEST_DATE, "Test")
         assert summary.max_drawdown == 700.0
         storage.close()
 
@@ -517,14 +528,13 @@ class TestTradeLogger:
 
     def test_export_csv(self):
         storage, tl = self._make_storage_and_logger()
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        ts = datetime.now(IST)
+        ts = self._TEST_TS
 
         storage.insert_trade(
             ts=ts, orderid="ORD001", symbol="RELIANCE", exchange="NSE",
             action="BUY", quantity=10, price=2500.0, strategy="Flint",
         )
-        csv_str = tl.export_csv(today, today, "Flint")
+        csv_str = tl.export_csv(self._TEST_DATE, self._TEST_DATE, "Flint")
         assert "RELIANCE" in csv_str
         assert "ORD001" in csv_str
         storage.close()
