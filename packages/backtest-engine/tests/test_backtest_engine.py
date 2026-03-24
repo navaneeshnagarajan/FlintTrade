@@ -538,7 +538,7 @@ class TestStrategies:
         assert "ORB" in BUILTIN_STRATEGIES
 
     def test_ema_crossover_generates_orders(self):
-        from models import OHLCV
+        from packages.core.src.models import OHLCV
         from strategies import EMACrossover
 
         s = EMACrossover(name="test", fast_period=3, slow_period=10, symbol="TEST")

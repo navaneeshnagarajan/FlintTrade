@@ -82,7 +82,7 @@ def _intraday_bars(n: int = 100) -> list[dict[str, Any]]:
 
 def _bars_to_ohlcv(bars: list[dict[str, Any]]):  # type: ignore[return]
     """Convert dict bars to OHLCV model instances."""
-    from models import OHLCV
+    from packages.core.src.models import OHLCV
     return [OHLCV(**b) for b in bars]
 
 
@@ -93,7 +93,7 @@ def _bars_to_ohlcv(bars: list[dict[str, Any]]):  # type: ignore[return]
 
 def _run_strategy(strategy: Any, bars: list[dict[str, Any]]) -> list[Any]:
     """Feed bars to a strategy and return all generated orders."""
-    from models import OHLCV
+    from packages.core.src.models import OHLCV
     strategy.start()
     orders = []
     for b in bars:
