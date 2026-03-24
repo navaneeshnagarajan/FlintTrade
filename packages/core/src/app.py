@@ -40,7 +40,57 @@ from packages.automation.src.cron_manager import CronManager  # noqa: E402
 from packages.automation.src.telegram_bot import TelegramBot  # noqa: E402
 from packages.ai.src.llm_client import LLMClient, LLMConfig, LLMMessage  # noqa: E402
 
+# Ensure the gateway src directory is on sys.path so bare gateway imports resolve.
+_GATEWAY_SRC = str(Path(_REPO_ROOT) / "packages" / "gateway" / "src")
+if _GATEWAY_SRC not in sys.path:
+    sys.path.insert(0, _GATEWAY_SRC)
+
+from packages.gateway.src.registry import BrokerRegistry  # noqa: E402
+from packages.gateway.src.credentials import CredentialStore  # noqa: E402
+from packages.gateway.src.auth import gateway_bp  # noqa: E402
+from packages.gateway.src.contracts import ContractManager  # noqa: E402
+
 logger = logging.getLogger("flinttrade")
+
+
+def _reconnect_saved_accounts(
+    registry: BrokerRegistry,
+    credential_store: CredentialStore,
+    reconnect_logger: logging.Logger,
+) -> None:
+    """Reconnect previously saved broker accounts on startup.
+
+    Iterates over every account persisted in the CredentialStore and attempts
+    to re-authenticate each one against the registry.  Failures are logged as
+    warnings so that a single bad account does not block the rest.
+
+    Args:
+        registry: The live BrokerRegistry to populate with sessions.
+        credential_store: The CredentialStore that holds persisted credentials.
+        reconnect_logger: Logger instance to use for progress messages.
+    """
+    from packages.gateway.src.session import BrokerSession  # noqa: PLC0415
+
+    saved = credential_store.list_accounts()
+    if not saved:
+        reconnect_logger.info("No saved broker accounts to reconnect")
+        return
+
+    reconnect_logger.info("Reconnecting %d saved broker account(s)...", len(saved))
+    for acct in saved:
+        account_id: str = acct["account_id"]
+        broker: str = acct["broker"]
+        label: str = acct["label"]
+        try:
+            creds = credential_store.retrieve(account_id)
+            session = BrokerSession(account_id, broker, label)
+            session.authenticate(creds)
+            registry._sessions[account_id] = session
+            if acct.get("is_primary"):
+                registry._primary = account_id
+            reconnect_logger.info("  Connected: %s (%s)", label, broker)
+        except Exception as exc:
+            reconnect_logger.warning("  Failed: %s (%s): %s", label, broker, exc)
 
 
 def _read_version() -> str:
@@ -80,6 +130,9 @@ def create_flask_app(
     cron: CronManager | None = None,
     audit: AuditLogger | None = None,
     client: OpenAlgoClient | None = None,
+    registry: BrokerRegistry | None = None,
+    credential_store: CredentialStore | None = None,
+    contract_manager: ContractManager | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -89,6 +142,9 @@ def create_flask_app(
         cron: CronManager instance for cron job management endpoints.
         audit: AuditLogger instance for audit log endpoints.
         client: OpenAlgoClient instance for MCP bridge and backtest data.
+        registry: BrokerRegistry for multi-broker account management.
+        credential_store: CredentialStore for encrypted credential persistence.
+        contract_manager: ContractManager for broker symbol contract data.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -102,14 +158,65 @@ def create_flask_app(
     app.config["AUDIT"] = audit
     app.config["CLIENT"] = client
 
+    # --- Gateway initialization ---
+    if registry is None:
+        registry = BrokerRegistry()
+
+    if credential_store is None:
+        flinttrade_dir = Path.home() / ".flinttrade"
+        flinttrade_dir.mkdir(exist_ok=True)
+        master_password = os.environ.get("MASTER_PASSWORD", "")
+        if not master_password:
+            master_password = "flinttrade-dev-default"
+            logger.warning(
+                "MASTER_PASSWORD not set — using development default. Set it for production."
+            )
+        credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
+
+    if contract_manager is None:
+        flinttrade_dir = Path.home() / ".flinttrade"
+        flinttrade_dir.mkdir(exist_ok=True)
+        contracts_dir = flinttrade_dir / "contracts"
+        contracts_dir.mkdir(exist_ok=True)
+        contract_manager = ContractManager(contracts_dir)
+
+    app.config["REGISTRY"] = registry
+    app.config["CREDENTIAL_STORE"] = credential_store
+    app.config["CONTRACT_MANAGER"] = contract_manager
+    app.config["OAUTH_STATES"] = {}
+
+    # Register gateway blueprint (mounts at /ft-api/v1/)
+    app.register_blueprint(gateway_bp)
+
+    # Register analysis blueprint (GEX, vol surface, IV smile, straddle P&L, OI profile, max pain)
+    from packages.screener.src.analysis_routes import analysis_bp  # noqa: PLC0415
+    app.register_blueprint(analysis_bp)
+
+    # Reconnect saved accounts (best-effort, don't block startup)
+    try:
+        _reconnect_saved_accounts(registry, credential_store, logger)
+    except Exception as exc:
+        logger.error("Account reconnection failed: %s", exc)
+
     @app.before_request
     def require_auth() -> Any:
-        """Require API key authentication on all endpoints."""
+        """Require API key authentication on all endpoints.
+
+        Gateway endpoints under /ft-api/v1/brokers and /ft-api/v1/auth/
+        are public (broker catalog listing, OAuth callback) or manage their
+        own account-level credentials — they do not use the FlintTrade API key.
+        All other /ft-api/v1/ endpoints (accounts, reconnect, set-primary) are
+        also exempted here because account management uses the gateway's own
+        credential/session model rather than the server-level API key.
+        """
         # Allow health check without auth
         if request.endpoint in ("health", "static"):
             return None
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
+            return None
+        # Gateway endpoints handle their own auth — exempt the entire /ft-api/ namespace
+        if request.path.startswith("/ft-api/"):
             return None
 
         api_key = (
@@ -1526,6 +1633,23 @@ class FlintTradeApp:
         # Wire Telegram into cron so jobs can send alerts
         self.cron.telegram_bot = self.telegram
 
+        # Gateway — broker registry + credential store + contract manager
+        flinttrade_dir = Path.home() / ".flinttrade"
+        flinttrade_dir.mkdir(exist_ok=True)
+        master_password = os.environ.get("MASTER_PASSWORD", "")
+        if not master_password:
+            master_password = "flinttrade-dev-default"
+            logger.warning(
+                "MASTER_PASSWORD not set — using development default. Set it for production."
+            )
+        self.credential_store = CredentialStore(
+            flinttrade_dir / "credentials.db", master_password
+        )
+        contracts_dir = flinttrade_dir / "contracts"
+        contracts_dir.mkdir(exist_ok=True)
+        self.contract_manager = ContractManager(contracts_dir)
+        self.registry = BrokerRegistry()
+
         self._stop_event = asyncio.Event()
 
         logger.info("FlintTradeApp initialized — v%s", self.version)
@@ -1539,6 +1663,9 @@ class FlintTradeApp:
             cron=self.cron,
             audit=self.audit,
             client=self.client,
+            registry=self.registry,
+            credential_store=self.credential_store,
+            contract_manager=self.contract_manager,
         )
         _run_flask_server(flask_app, port=5001)
 
