@@ -37,6 +37,11 @@ const lazyWidgets = {
 
   // New analysis widgets
   sectormap: lazy(() => import("@/widgets/analysis/SectorMap/SectorMapWidget")),
+  gex: lazy(() => import("@/widgets/analysis/GEX/GEXWidget")),
+  volsurface: lazy(() => import("@/widgets/analysis/VolSurface/VolSurfaceWidget")),
+  ivsmile: lazy(() => import("@/widgets/analysis/IVSmile/IVSmileWidget")),
+  straddlepnl: lazy(() => import("@/widgets/analysis/StraddlePnL/StraddlePnLWidget")),
+  oiprofile: lazy(() => import("@/widgets/analysis/OIProfile/OIProfileWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -64,6 +69,11 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading" },
   { id: "riskpanel", name: "Risk Panel", icon: "ShieldAlert", category: "Trading" },
   { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis" },
+  { id: "gex", name: "GEX Dashboard", icon: "BarChart2", category: "Analysis" },
+  { id: "volsurface", name: "Vol Surface", icon: "Box", category: "Analysis" },
+  { id: "ivsmile", name: "IV Smile", icon: "TrendingUp", category: "Analysis" },
+  { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis" },
+  { id: "oiprofile", name: "OI Profile", icon: "BarChart", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------
