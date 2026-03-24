@@ -22,7 +22,7 @@ endif
 OPENALGO_PORT ?= 5000
 OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 
-.PHONY: setup start stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help
+.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help
 
 # ======================================================================
 # Setup
@@ -43,6 +43,14 @@ start: ## Start OpenAlgo service
 	@echo -e "$(CYAN)=== Starting FlintTrade ===$(RESET)"
 	@bash infra/scripts/start-openalgo.sh
 	@echo -e "$(GREEN)=== FlintTrade running ===$(RESET)"
+
+# --- Gateway mode (v0.2.0+) — single process, no separate OpenAlgo ---
+
+start-gateway: ## Start FlintTrade gateway backend (standalone, no OpenAlgo)
+	$(PYTHON) -m packages.core.src.app
+
+# Legacy mode alias — requires separate OpenAlgo instance (same as `start`)
+start-legacy: start ## Start in legacy mode (requires separate OpenAlgo instance)
 
 stop: ## Stop OpenAlgo service
 	@bash infra/scripts/stop-openalgo.sh
