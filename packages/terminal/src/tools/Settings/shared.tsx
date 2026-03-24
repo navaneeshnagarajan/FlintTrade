@@ -4,7 +4,13 @@
  */
 
 import { useEffect } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Info } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,10 +180,36 @@ export function Toggle({ checked, onChange, label }: ToggleProps) {
 // FieldRow
 // ---------------------------------------------------------------------------
 
-export function FieldRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+export function FieldRow({
+  label,
+  hint,
+  tooltip,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  tooltip?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1">
-      <FieldLabel>{label}</FieldLabel>
+      <div className="flex items-center gap-1">
+        <FieldLabel>{label}</FieldLabel>
+        {tooltip && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="text-text-muted hover:text-text-secondary transition-colors" aria-label={`Help for ${label}`}>
+                  <Info size={11} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-56 text-xs">
+                {tooltip}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
       {children}
       {hint && <p className="text-xs text-text-muted mt-0.5">{hint}</p>}
     </div>

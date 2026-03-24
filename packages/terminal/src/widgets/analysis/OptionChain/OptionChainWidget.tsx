@@ -63,6 +63,7 @@ export default function OptionChainWidget() {
   const [basket, setBasket]                     = useState<BasketItem[]>([]);
   const [basketOpen, setBasketOpen]             = useState(false);
   const [orderMsg, setOrderMsg]                 = useState<OrderToast | null>(null);
+  const [secondsAgo, setSecondsAgo]             = useState<number | null>(null);
   const orderMsgTimerRef                        = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scrollTimerRef                          = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gridRef                                 = useRef<DataEditorRef>(null);
@@ -124,6 +125,17 @@ export default function OptionChainWidget() {
     spotUp,
     pcr,
   } = useOptionChainData(symDef, exchange);
+
+  // "Updated Xs ago" counter — ticks every second, resets when lastRefresh changes
+  useEffect(() => {
+    if (!lastRefresh) { setSecondsAgo(null); return; }
+    setSecondsAgo(0);
+    const id = setInterval(() => {
+      setSecondsAgo(Math.round((Date.now() - lastRefresh.getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastRefresh]);
 
   // Max Pain — fetched per expiry, 60s refresh
   const { data: maxPainData } = useQuery({
@@ -430,10 +442,12 @@ export default function OptionChainWidget() {
             </div>
           )}
 
-          {lastRefresh && (
-            <div className="flex items-center gap-1 ml-auto text-xs text-text-muted">
-              <RefreshCw size={9} />
-              {lastRefresh.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
+          {secondsAgo != null && (
+            <div className="flex items-center gap-1 ml-auto text-xxs text-text-muted" title={lastRefresh?.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}>
+              <RefreshCw size={9} className={loading ? "animate-spin" : ""} />
+              {secondsAgo < 5
+                ? "Just updated"
+                : `Updated ${secondsAgo}s ago`}
             </div>
           )}
         </div>

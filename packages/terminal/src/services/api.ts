@@ -73,12 +73,32 @@ async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
     }
   }
 
-  const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apikey: getApiKey(), ...extra }),
-  });
-  if (!resp.ok) throw new Error(`API ${endpoint}: HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apikey: getApiKey(), ...extra }),
+    });
+  } catch {
+    throw new Error("Connection failed. Check OpenAlgo is running.");
+  }
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const serverMsg = body?.message ?? body?.error ?? null;
+    if (resp.status === 401) {
+      throw new Error("API key invalid. Check Settings → Connection.");
+    }
+    if (resp.status === 400) {
+      throw new Error(serverMsg ?? "Invalid order parameters. Check symbol and exchange.");
+    }
+    if (resp.status === 500) {
+      throw new Error(serverMsg ?? "OpenAlgo server error. Try again in a few seconds.");
+    }
+    throw new Error(serverMsg ?? `Server error (${resp.status})`);
+  }
+
   const json = await resp.json();
   if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
   return (json.data ?? json) as T;
@@ -88,8 +108,19 @@ async function get<T>(endpoint: string): Promise<T> {
   if (!generalLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for GET ${endpoint}`);
   }
-  const resp = await fetch(`${getBase()}/api/v1/${endpoint}`);
-  if (!resp.ok) throw new Error(`API ${endpoint}: HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${getBase()}/api/v1/${endpoint}`);
+  } catch {
+    throw new Error("Connection failed. Check OpenAlgo is running.");
+  }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const serverMsg = body?.message ?? body?.error ?? null;
+    if (resp.status === 401) throw new Error("API key invalid. Check Settings → Connection.");
+    if (resp.status === 500) throw new Error(serverMsg ?? "OpenAlgo server error. Try again in a few seconds.");
+    throw new Error(serverMsg ?? `Server error (${resp.status})`);
+  }
   const json = await resp.json();
   if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
   return (json.data ?? json) as T;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { isMarketHours } from "@/lib/market";
 import type { Time } from "lightweight-charts";
 import {
   Search,
@@ -353,36 +354,64 @@ export default function ChartWidget() {
       .catch(() => { /* use static fallback */ });
   }, []);
 
-  // Fetch OHLCV data
+  // Fetch OHLCV data with localStorage cache
   useEffect(() => {
     const candle = candleRef.current;
     const volume = volumeRef.current;
     if (!candle || !volume) return;
+    // Capture non-null references so the async closure and applyBars can use them safely
+    const candleSeries = candle;
+    const volumeSeries = volume;
     let cancelled = false;
 
+    function applyBars(data: OhlcvBar[]) {
+      if (cancelled) return;
+      const times: Time[] = data.map((b) => b.timestamp as unknown as Time);
+      barsRef.current = data;
+      timesRef.current = times;
+      const candles = data.map((b, i) => ({
+        time: times[i], open: b.open, high: b.high, low: b.low, close: b.close,
+      }));
+      const volumes = data.map((b, i) => ({
+        time: times[i], value: b.volume || 0,
+        color: b.close >= b.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
+      }));
+      candleSeries.setData(candles);
+      volumeSeries.setData(volumes);
+      chartRef.current?.timeScale().fitContent();
+    }
+
     (async () => {
+      const cacheKey = `ft-chart-${symbol}-${exchange}-${interval}`;
+      const FIVE_MIN = 5 * 60 * 1000;
+
+      // Show cached data immediately while fetching
+      try {
+        const raw = localStorage.getItem(cacheKey);
+        if (raw) {
+          const { data, timestamp } = JSON.parse(raw) as { data: OhlcvBar[]; timestamp: number };
+          if (Array.isArray(data) && data.length > 0) {
+            applyBars(data);
+            // Skip network request if cache is fresh and market is closed
+            if (Date.now() - timestamp < FIVE_MIN && !isMarketHours()) {
+              return;
+            }
+          }
+        }
+      } catch { /* corrupt cache entry — proceed to fetch */ }
+
       try {
         const endDate = formatDate(new Date());
         const startDate = getStartDate(interval);
         const data = await getHistory(symbol, exchange, interval, startDate, endDate);
-        if (cancelled || !Array.isArray(data)) return;
+        if (cancelled || !Array.isArray(data) || data.length === 0) return;
 
-        barsRef.current = data as OhlcvBar[];
-        const times: Time[] = (data as OhlcvBar[]).map((b) => b.timestamp as unknown as Time);
-        timesRef.current = times;
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: Date.now() }));
+        } catch { /* localStorage quota exceeded — ignore */ }
 
-        const candles = (data as OhlcvBar[]).map((b, i) => ({
-          time: times[i], open: b.open, high: b.high, low: b.low, close: b.close,
-        }));
-        const volumes = (data as OhlcvBar[]).map((b, i) => ({
-          time: times[i], value: b.volume || 0,
-          color: b.close >= b.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
-        }));
-
-        candle.setData(candles);
-        volume.setData(volumes);
-        chartRef.current?.timeScale().fitContent();
-      } catch { /* API unavailable */ }
+        applyBars(data as OhlcvBar[]);
+      } catch { /* API unavailable — cached data already shown */ }
     })();
 
     return () => { cancelled = true; };

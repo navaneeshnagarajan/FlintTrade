@@ -2,6 +2,8 @@
  * LLMSection — LLM provider, model, host URL, and API key configuration.
  */
 
+import { useState, useCallback } from "react";
+import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { FieldRow, SelectInput, TextInput, SectionTitle } from "./shared";
 
 type LlmProvider =
@@ -47,8 +49,69 @@ interface LLMSectionProps {
   onChange: (field: keyof LlmSettings, value: string) => void;
 }
 
+type TestStatus = "idle" | "testing" | "ok" | "error";
+
+function buildTestUrl(provider: LlmProvider, host: string): string | null {
+  switch (provider) {
+    case "lmstudio":
+    case "ollama":
+    case "custom":
+      return host ? `${host.replace(/\/$/, "")}/v1/models` : null;
+    case "openai":
+      return "https://api.openai.com/v1/models";
+    case "anthropic":
+      return "https://api.anthropic.com/v1/models";
+    case "gemini":
+      return "https://generativelanguage.googleapis.com/v1beta/models";
+    case "deepseek":
+      return "https://api.deepseek.com/v1/models";
+    case "groq":
+      return "https://api.groq.com/openai/v1/models";
+    case "mistral":
+      return "https://api.mistral.ai/v1/models";
+    case "together":
+      return "https://api.together.xyz/v1/models";
+    case "openrouter":
+      return "https://openrouter.ai/api/v1/models";
+    default:
+      return null;
+  }
+}
+
 export function LLMSection({ settings, onChange }: LLMSectionProps) {
   const isLocal = LOCAL_PROVIDERS.has(settings.provider);
+  const [testStatus, setTestStatus] = useState<TestStatus>("idle");
+  const [testMessage, setTestMessage] = useState<string>("");
+
+  const handleTestConnection = useCallback(async () => {
+    setTestStatus("testing");
+    setTestMessage("");
+
+    const url = buildTestUrl(settings.provider, settings.host);
+    if (!url) {
+      setTestStatus("error");
+      setTestMessage("Enter a host URL before testing.");
+      return;
+    }
+
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (settings.apiKey) {
+        headers["Authorization"] = `Bearer ${settings.apiKey}`;
+      }
+      const resp = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(8000) });
+      if (resp.ok) {
+        setTestStatus("ok");
+        setTestMessage("Connection successful.");
+      } else {
+        setTestStatus("error");
+        setTestMessage(`Server returned ${resp.status}. Check API key or host URL.`);
+      }
+    } catch (e) {
+      setTestStatus("error");
+      setTestMessage(e instanceof Error ? e.message : "Connection failed.");
+    }
+  }, [settings.provider, settings.host, settings.apiKey]);
 
   return (
     <div className="space-y-5">
@@ -60,7 +123,7 @@ export function LLMSection({ settings, onChange }: LLMSectionProps) {
       >
         <SelectInput
           value={settings.provider}
-          onChange={(v) => onChange("provider", v)}
+          onChange={(v) => { onChange("provider", v); setTestStatus("idle"); setTestMessage(""); }}
           options={LLM_PROVIDER_OPTIONS}
           aria-label="LLM provider"
         />
@@ -120,6 +183,30 @@ export function LLMSection({ settings, onChange }: LLMSectionProps) {
           />
         </FieldRow>
       )}
+
+      {/* Test Connection */}
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          type="button"
+          onClick={() => void handleTestConnection()}
+          disabled={testStatus === "testing"}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-border-default bg-surface-hover text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {testStatus === "testing" ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : testStatus === "ok" ? (
+            <CheckCircle2 size={12} className="text-profit" />
+          ) : testStatus === "error" ? (
+            <AlertCircle size={12} className="text-loss" />
+          ) : null}
+          Test Connection
+        </button>
+        {testMessage && (
+          <span className={`text-xs ${testStatus === "ok" ? "text-profit" : "text-loss"}`}>
+            {testMessage}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
