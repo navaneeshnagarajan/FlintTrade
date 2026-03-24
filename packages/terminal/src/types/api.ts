@@ -189,6 +189,102 @@ export interface OIProfileEntry {
   ltp: number;
 }
 
+// --- GEX (new FlintTrade backend shape) ---
+export interface GEXStrike {
+  strike: number;
+  call_gex: number;
+  put_gex: number;
+  net_gex: number;
+  call_oi: number;
+  put_oi: number;
+}
+
+export interface GEXData {
+  underlying: string;
+  spot_price: number;
+  atm_strike: number;
+  strikes: GEXStrike[];
+  gamma_flip_strike: number | null;
+  dealer_zone: string;
+  total_call_gex: number;
+  total_put_gex: number;
+  net_gex: number;
+}
+
+// --- Vol Surface ---
+export interface VolSurfaceData {
+  underlying: string;
+  spot_price: number;
+  strikes: number[];
+  expiries: string[];
+  days_to_expiry: number[];
+  iv_matrix: number[][];
+  atm_strike: number;
+}
+
+// --- IV Smile (new FlintTrade backend shape) ---
+export interface IVSmileCurveData {
+  expiry: string;
+  days_to_expiry: number;
+  atm_iv: number;
+  atm_strike: number;
+  points: IVSmileEntry[];
+  skew_25delta: number;
+}
+
+export interface IVSmileData {
+  underlying: string;
+  spot_price: number;
+  curves: IVSmileCurveData[];
+}
+
+// --- Straddle P&L ---
+export interface StraddleLeg {
+  strike: number;
+  type: "CE" | "PE";
+  action: "BUY" | "SELL";
+  premium: number;
+  lots: number;
+}
+
+export interface StraddlePnLPoint {
+  spot_price: number;
+  pnl: number;
+}
+
+export interface StraddlePnLData {
+  underlying: string;
+  atm_strike: number;
+  call_premium: number;
+  put_premium: number;
+  break_even_low: number;
+  break_even_high: number;
+  max_loss: number;
+  curve: StraddlePnLPoint[];
+  legs: StraddleLeg[];
+}
+
+// --- OI Profile (new FlintTrade backend shape) ---
+export interface OIProfileStrike {
+  strike: number;
+  ce_oi: number;
+  pe_oi: number;
+  ce_oi_change: number;
+  pe_oi_change: number;
+}
+
+export interface OIProfileData {
+  underlying: string;
+  expiry: string;
+  spot_price: number;
+  atm_strike: number;
+  max_pain_strike: number;
+  strikes: OIProfileStrike[];
+  total_ce_oi: number;
+  total_pe_oi: number;
+  pcr: number;
+}
+
 // --- Synthetic Future ---
 export interface SyntheticFutureData {
   underlying: string;

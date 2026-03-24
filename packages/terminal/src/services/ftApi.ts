@@ -420,3 +420,77 @@ export const computeIndicators = (
     bars: bars as unknown as Record<string, unknown>[],
     indicators,
   });
+
+// ---------------------------------------------------------------------------
+// Analysis endpoints (SP2)
+// ---------------------------------------------------------------------------
+
+import type {
+  GEXData,
+  VolSurfaceData,
+  IVSmileData,
+  StraddlePnLData,
+  StraddleLeg,
+  OIProfileData,
+} from "@/types/api";
+
+export const getGEXData = (
+  symbol: string,
+  exchange: string,
+  expiry_date?: string,
+) =>
+  post<GEXData>("gex", {
+    symbol,
+    exchange,
+    ...(expiry_date ? { expiry_date } : {}),
+  });
+
+export const getVolSurface = (
+  symbol: string,
+  exchange: string,
+  expiry_dates: string[],
+  strike_count?: number,
+) =>
+  post<VolSurfaceData>("volsurface", {
+    symbol,
+    exchange,
+    expiry_dates,
+    ...(strike_count !== undefined ? { strike_count } : {}),
+  });
+
+export const getIVSmile = (
+  symbol: string,
+  exchange: string,
+  expiry_dates?: string[],
+) =>
+  post<IVSmileData>("iv_smile", {
+    symbol,
+    exchange,
+    ...(expiry_dates ? { expiry_dates } : {}),
+  });
+
+export const getStraddlePnL = (
+  symbol: string,
+  exchange: string,
+  expiry_date: string,
+  adjustments?: StraddleLeg[],
+) =>
+  post<StraddlePnLData>("straddlepnl", {
+    symbol,
+    exchange,
+    expiry_date,
+    ...(adjustments ? { adjustments: adjustments as unknown as Record<string, unknown>[] } : {}),
+  });
+
+export const getOIProfile = (
+  symbol: string,
+  exchange: string,
+  expiry_date: string,
+  strike_count?: number,
+) =>
+  post<OIProfileData>("oiprofile", {
+    symbol,
+    exchange,
+    expiry_date,
+    ...(strike_count !== undefined ? { strike_count } : {}),
+  });
