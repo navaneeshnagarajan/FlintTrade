@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { useSkillStore } from "@/stores/skillStore";
+import type { SkillLevel, Domain } from "@/types/skill";
 
 import { ModeSelection } from "./setup/ModeSelection";
 import type { SetupMode } from "./setup/ModeSelection";
@@ -86,6 +88,39 @@ function mapExperience(level: ExperienceLevel | null): "beginner" | "intermediat
   return "intermediate";
 }
 
+/**
+ * Maps wizard persona + experience to skillStore levels.
+ * Returns globalLevel and optional per-domain overrides.
+ */
+function deriveSkillLevels(
+  persona: Persona,
+  experience: ExperienceLevel | null,
+): { globalLevel: SkillLevel; overrides: Partial<Record<Domain, SkillLevel>> } {
+  if (persona === "beginner") {
+    return { globalLevel: "beginner", overrides: {} };
+  }
+  if (persona === "trader") {
+    if (experience === "new" || experience === null) {
+      return { globalLevel: "beginner", overrides: {} };
+    }
+    if (experience === "intermediate") {
+      return { globalLevel: "intermediate", overrides: {} };
+    }
+    // professional
+    return { globalLevel: "advanced", overrides: {} };
+  }
+  // investor
+  if (experience === "new" || experience === null) {
+    return { globalLevel: "beginner", overrides: { invest: "intermediate" } };
+  }
+  // intermediate investor
+  if (experience === "intermediate") {
+    return { globalLevel: "intermediate", overrides: {} };
+  }
+  // professional investor
+  return { globalLevel: "intermediate", overrides: { invest: "advanced" } };
+}
+
 // ---------------------------------------------------------------------------
 // Main SetupRoute
 // ---------------------------------------------------------------------------
@@ -112,6 +147,13 @@ export default function SetupRoute() {
     useSettingsStore.getState().setName(w.name || "Trader");
     useSettingsStore.getState().setInterests(w.interests);
     useSettingsStore.getState().setExperience(mapExperience(w.experience));
+
+    // Wire persona + experience into the adaptive skill layer
+    const { globalLevel, overrides } = deriveSkillLevels(persona, w.experience);
+    useSkillStore.getState().setGlobalLevel(globalLevel);
+    for (const [domain, level] of Object.entries(overrides) as [Domain, SkillLevel][]) {
+      useSkillStore.getState().setRouteOverride(domain, level);
+    }
 
     if (w.tradingDefaults) {
       useSettingsStore.getState().setTradingDefaults({

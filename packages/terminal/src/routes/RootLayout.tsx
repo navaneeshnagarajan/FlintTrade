@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { AITutorPill } from "@/components/help/AITutorPill";
+import { UpgradeSuggestionHost } from "@/components/help/UpgradeSuggestion";
 
 const THEME_CLASSES = [
   "theme-obsidian",
@@ -52,6 +53,8 @@ export default function RootLayout() {
       <Outlet />
       {/* AITutorPill is rendered here so it appears on every route including /welcome and /explore */}
       <AITutorPill />
+      {/* UpgradeSuggestionHost polls for upgrade suggestions every 60 s */}
+      <UpgradeSuggestionHost />
     </>
   );
 }

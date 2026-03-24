@@ -8,6 +8,7 @@ import type {
   HelpPrefs,
   UpgradeSuggestion,
 } from "@/types/skill";
+import { evaluateThresholds } from "@/lib/upgradeThresholds";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -147,8 +148,30 @@ const storeImpl: StateCreator<SkillState, [["zustand/persist", unknown]]> = (
     return routeOverrides[domain] ?? globalLevel;
   },
 
-  // Thresholds will be imported from lib/upgradeThresholds.ts in Task 3.
-  getSuggestions: () => [],
+  getSuggestions: () => {
+    const { metrics, globalLevel, routeOverrides, dismissedSuggestions } = get();
+    const domains: Domain[] = ["trade", "invest", "learn", "lab", "automate", "ai"];
+    const currentLevels = Object.fromEntries(
+      domains.map((d) => [d, routeOverrides[d] ?? globalLevel]),
+    ) as Record<Domain, SkillLevel>;
+
+    return evaluateThresholds(metrics, currentLevels)
+      .filter((t) => !dismissedSuggestions.includes(`${t.domain}:${t.to}`))
+      .map((t) => {
+        // Interpolate {placeholder} tokens in the message using domain metrics
+        const domainMetrics = metrics[t.domain] as Record<string, number>;
+        const reason = t.message.replace(/\{(\w+)\}/g, (_, key) =>
+          String(domainMetrics[key] ?? 0),
+        );
+        return {
+          domain: t.domain,
+          fromLevel: t.from,
+          toLevel: t.to,
+          reason,
+          timestamp: Date.now(),
+        } satisfies UpgradeSuggestion;
+      });
+  },
 });
 
 // ---------------------------------------------------------------------------
