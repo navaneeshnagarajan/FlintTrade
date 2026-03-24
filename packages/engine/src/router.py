@@ -1,16 +1,26 @@
-"""Order router — runs orders through safety layers, then dispatches to OpenAlgo."""
+"""Order router — runs orders through safety layers, then dispatches to OpenAlgo.
+
+Sandbox integration: when an account has ``is_sandbox=True`` in the sandbox
+registry, the order is routed to a :class:`~packages.engine.src.sandbox.SandboxEngine`
+instead of the live broker. This lets the safety system, audit trail, and all
+other routing logic remain identical for paper and live trading.
+"""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from packages.core.src.models import Order, OrderResponse, Position
 from packages.core.src.openalgo_client import OpenAlgoClient
 from packages.data.src.audit_logger import AuditLogger
 
 from .safety import SafetyResult, SafetySystem
+
+if TYPE_CHECKING:
+    from .sandbox import SandboxEngine
 
 logger = logging.getLogger("flinttrade.engine.router")
 
@@ -55,6 +65,27 @@ class StrategyRouteConfig:
 
 
 # ---------------------------------------------------------------------------
+# Sandbox account registry
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SandboxAccountConfig:
+    """Mark an account as a sandbox (paper trading) account.
+
+    Attributes:
+        account_id: The account identifier. When an order's ``strategy`` field
+            matches an account registered here the order is routed to the
+            :class:`~packages.engine.src.sandbox.SandboxEngine` instead of the
+            live broker.
+        engine: The SandboxEngine instance bound to this account.
+    """
+
+    account_id: str
+    engine: "SandboxEngine"
+
+
+# ---------------------------------------------------------------------------
 # OrderRouter
 # ---------------------------------------------------------------------------
 
@@ -83,6 +114,7 @@ class OrderRouter:
         safety: SafetySystem | None = None,
         strategy_configs: dict[str, StrategyRouteConfig] | None = None,
         audit_logger: AuditLogger | None = None,
+        sandbox_accounts: dict[str, "SandboxAccountConfig"] | None = None,
         # Alternative param names for convenience
         openalgo_client: OpenAlgoClient | None = None,
         safety_system: SafetySystem | None = None,
@@ -91,6 +123,8 @@ class OrderRouter:
         self.safety = safety or safety_system or SafetySystem()
         self.audit = audit_logger
         self._strategy_configs = strategy_configs or {}
+        # Maps account_id → SandboxAccountConfig for paper trading accounts
+        self._sandbox_accounts: dict[str, "SandboxAccountConfig"] = sandbox_accounts or {}
         self._history: list[RoutingDecision] = []
 
     @property
@@ -99,6 +133,29 @@ class OrderRouter:
 
     def add_strategy_config(self, config: StrategyRouteConfig) -> None:
         self._strategy_configs[config.strategy_name] = config
+
+    def register_sandbox_account(self, config: "SandboxAccountConfig") -> None:
+        """Register an account as a sandbox (paper trading) account.
+
+        Once registered, all orders whose ``order_data`` or account context
+        matches ``config.account_id`` will be routed to the SandboxEngine
+        rather than the live broker.
+
+        Args:
+            config: SandboxAccountConfig binding account_id to a SandboxEngine.
+        """
+        self._sandbox_accounts[config.account_id] = config
+
+    def is_sandbox_account(self, account_id: str) -> bool:
+        """Check whether an account is in sandbox (paper trading) mode.
+
+        Args:
+            account_id: The account identifier to check.
+
+        Returns:
+            True if the account is registered as a sandbox account.
+        """
+        return account_id in self._sandbox_accounts
 
     # ------------------------------------------------------------------
     # Sync interface (backwards-compatible, uses mock/sync client)
@@ -174,14 +231,62 @@ class OrderRouter:
         if strategy_cfg and strategy_cfg.openalgo_strategy != order.strategy:
             routed_order = order.model_copy(update={"strategy": strategy_cfg.openalgo_strategy})
 
-        # Place order via OpenAlgo (sync — for mock clients in tests)
+        # Sandbox routing: if the order's account_id is registered as a sandbox
+        # account, route to SandboxEngine instead of the live broker.
+        account_id = getattr(order, "account_id", "") or ""
+        sandbox_cfg = self._sandbox_accounts.get(account_id)
+
         order_response: OrderResponse | None = None
         error = ""
-        try:
-            order_response = self.client.place_order(routed_order)
-        except Exception as exc:
-            error = str(exc)
-            logger.error("Order placement failed for %s: %s", order.symbol, exc)
+
+        if sandbox_cfg is not None:
+            # Paper trading path
+            try:
+                result_dict = sandbox_cfg.engine.place_order(
+                    {
+                        "symbol": routed_order.symbol,
+                        "exchange": (
+                            routed_order.exchange.value
+                            if hasattr(routed_order.exchange, "value")
+                            else str(routed_order.exchange)
+                        ),
+                        "action": (
+                            routed_order.action.value
+                            if hasattr(routed_order.action, "value")
+                            else str(routed_order.action)
+                        ),
+                        "quantity": int(routed_order.quantity),
+                        "price": float(routed_order.price or 0),
+                        "pricetype": (
+                            routed_order.pricetype.value
+                            if hasattr(routed_order.pricetype, "value")
+                            else str(routed_order.pricetype)
+                        ),
+                        "product": (
+                            routed_order.product.value
+                            if hasattr(routed_order.product, "value")
+                            else str(routed_order.product)
+                        ),
+                        "strategy": routed_order.strategy,
+                    }
+                )
+                if result_dict.get("status") in ("COMPLETE", "PENDING"):
+                    order_response = OrderResponse(
+                        status=result_dict["status"],
+                        orderid=result_dict.get("order_id", ""),
+                    )
+                else:
+                    error = result_dict.get("message", "Sandbox order rejected")
+            except Exception as exc:
+                error = str(exc)
+                logger.error("Sandbox order placement failed for %s: %s", order.symbol, exc)
+        else:
+            # Live broker path
+            try:
+                order_response = self.client.place_order(routed_order)
+            except Exception as exc:
+                error = str(exc)
+                logger.error("Order placement failed for %s: %s", order.symbol, exc)
 
         decision = RoutingDecision(
             timestamp=now,
@@ -302,14 +407,60 @@ class OrderRouter:
                 product=product,
             )
 
-        # Place order via async OpenAlgo client
+        # Sandbox routing (async path mirrors sync path)
+        account_id = getattr(order, "account_id", "") or ""
+        sandbox_cfg = self._sandbox_accounts.get(account_id)
+
         order_response: OrderResponse | None = None
         error = ""
-        try:
-            order_response = await self.client.place_order(routed_order)
-        except Exception as exc:
-            error = str(exc)
-            logger.error("Order placement failed for %s: %s", order.symbol, exc)
+
+        if sandbox_cfg is not None:
+            try:
+                result_dict = sandbox_cfg.engine.place_order(
+                    {
+                        "symbol": routed_order.symbol,
+                        "exchange": (
+                            routed_order.exchange.value
+                            if hasattr(routed_order.exchange, "value")
+                            else str(routed_order.exchange)
+                        ),
+                        "action": (
+                            routed_order.action.value
+                            if hasattr(routed_order.action, "value")
+                            else str(routed_order.action)
+                        ),
+                        "quantity": int(routed_order.quantity),
+                        "price": float(routed_order.price or 0),
+                        "pricetype": (
+                            routed_order.pricetype.value
+                            if hasattr(routed_order.pricetype, "value")
+                            else str(routed_order.pricetype)
+                        ),
+                        "product": (
+                            routed_order.product.value
+                            if hasattr(routed_order.product, "value")
+                            else str(routed_order.product)
+                        ),
+                        "strategy": routed_order.strategy,
+                    }
+                )
+                if result_dict.get("status") in ("COMPLETE", "PENDING"):
+                    order_response = OrderResponse(
+                        status=result_dict["status"],
+                        orderid=result_dict.get("order_id", ""),
+                    )
+                else:
+                    error = result_dict.get("message", "Sandbox order rejected")
+            except Exception as exc:
+                error = str(exc)
+                logger.error("Sandbox order placement failed for %s: %s", order.symbol, exc)
+        else:
+            # Place order via async OpenAlgo client
+            try:
+                order_response = await self.client.place_order(routed_order)
+            except Exception as exc:
+                error = str(exc)
+                logger.error("Order placement failed for %s: %s", order.symbol, exc)
 
         # Audit: log result after broker confirms
         if self.audit and order_response:

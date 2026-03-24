@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0-alpha"
 
-from .router import OrderRouter, RoutingDecision, StrategyRouteConfig
+from .router import OrderRouter, RoutingDecision, SandboxAccountConfig, StrategyRouteConfig
 from .safety import (
     DailyPnLLimits,
     KillSwitch,
@@ -23,6 +23,16 @@ from .scheduler import (
 )
 from .strategy import BaseStrategy, StrategyRegistry, StrategyState
 
+# NOTE: SandboxEngine, SandboxConfig, and UserStrategyRunner are intentionally
+# NOT imported here to prevent triggering the pre-existing circular import
+# between packages.core.src.__init__ (which imports app.py) and
+# packages.engine.src.router.  Import these directly from their submodules:
+#
+#   from packages.engine.src.sandbox import SandboxEngine, SandboxConfig
+#   from packages.engine.src.strategy_runner import UserStrategyRunner
+#   from packages.engine.src.sandbox_routes import sandbox_bp
+#   from packages.engine.src.strategy_routes import strategy_bp
+
 __all__ = [
     # Safety
     "SafetySystem",
@@ -38,6 +48,7 @@ __all__ = [
     "OrderRouter",
     "RoutingDecision",
     "StrategyRouteConfig",
+    "SandboxAccountConfig",
     # Scheduler
     "TimeScheduler",
     "ExchangeSchedule",
