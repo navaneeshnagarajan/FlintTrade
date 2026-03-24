@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Monitor, Palette, Wifi, TrendingUp, ShieldAlert,
   Keyboard, Brain, Send, HardDrive, Info, RefreshCw,
+  ShieldCheck, Activity,
   type LucideIcon,
 } from "lucide-react";
 import { resetWsService } from "@/services/websocket";
@@ -28,6 +29,8 @@ import { LLMSection }        from "@/tools/Settings/LLMSection";
 import { TelegramSection }   from "@/tools/Settings/TelegramSection";
 import { DataSection }       from "@/tools/Settings/DataSection";
 import { AboutSection }      from "@/tools/Settings/AboutSection";
+import { SecuritySection }   from "@/tools/Settings/SecuritySection";
+import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 
 // ---------------------------------------------------------------------------
 // Types (mirror SettingsTool so same localStorage key is compatible)
@@ -49,7 +52,8 @@ interface AllSettings {
 
 type SectionId =
   | "general" | "appearance" | "api" | "trading" | "risk"
-  | "keyboard" | "llm" | "telegram" | "dataPaths" | "about";
+  | "keyboard" | "llm" | "telegram" | "dataPaths" | "about"
+  | "security" | "monitoring";
 
 interface SectionDef { id: SectionId; label: string; icon: LucideIcon }
 
@@ -79,6 +83,8 @@ const SECTIONS: SectionDef[] = [
   { id: "llm",        label: "LLM Config",         icon: Brain       },
   { id: "telegram",   label: "Telegram",           icon: Send        },
   { id: "dataPaths",  label: "Data Paths",         icon: HardDrive   },
+  { id: "security",   label: "Security",           icon: ShieldCheck },
+  { id: "monitoring", label: "Monitoring",         icon: Activity    },
   { id: "about",      label: "About",              icon: Info        },
 ];
 
@@ -168,6 +174,8 @@ export default function SettingsRoute() {
       case "llm":        return <LLMSection        settings={settings.llm}       onChange={(f, v) => updateSection("llm", f, v)} />;
       case "telegram":   return <TelegramSection   settings={settings.telegram}  onChangeField={updateTelegram} />;
       case "dataPaths":  return <DataSection       settings={settings.dataPaths} onChange={(f, v) => updateSection("dataPaths", f, v)} />;
+      case "security":   return <SecuritySection />;
+      case "monitoring": return <MonitoringSection />;
       case "about":      return <AboutSection />;
     }
   }

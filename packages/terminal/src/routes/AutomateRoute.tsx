@@ -3,14 +3,15 @@ import { Workflow } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
-import { getSafetyConfig, getRunningStrategies } from "@/services/ftApi";
+import { getSafetyConfig, getRunningStrategies, getUploadedStrategies } from "@/services/ftApi";
 
 import AutomateSidebar, { type SectionId } from "./automate/AutomateSidebar";
-import FlowsSection     from "./automate/FlowsSection";
-import CronSection      from "./automate/CronSection";
-import MonitorsSection  from "./automate/MonitorsSection";
-import LogsSection      from "./automate/LogsSection";
-import SettingsSection  from "./automate/SettingsSection";
+import FlowsSection       from "./automate/FlowsSection";
+import CronSection        from "./automate/CronSection";
+import MonitorsSection    from "./automate/MonitorsSection";
+import LogsSection        from "./automate/LogsSection";
+import StrategiesSection  from "./automate/StrategiesSection";
+import SettingsSection    from "./automate/SettingsSection";
 
 export default function AutomateRoute() {
   const [activeSection, setActiveSection] = useState<SectionId>("flows");
@@ -28,17 +29,27 @@ export default function AutomateRoute() {
     refetchInterval: 10000,
   });
 
+  const { data: uploadedStrategiesData } = useQuery({
+    queryKey: ["uploadedStrategies"],
+    queryFn: getUploadedStrategies,
+    refetchInterval: 10000,
+  });
+
   const killSwitchActive = safetyData?.kill_switch_active ?? false;
   const runningCount = (strategiesData ?? []).filter(
     (s) => s.status.toLowerCase() === "running",
   ).length;
+  const uploadedRunningCount = (uploadedStrategiesData ?? []).filter(
+    (s) => s.status === "running",
+  ).length;
 
   const sectionContent: Record<SectionId, React.ReactNode> = {
-    flows:     <FlowsSection />,
-    schedules: <CronSection />,
-    monitors:  <MonitorsSection />,
-    logs:      <LogsSection />,
-    settings:  <SettingsSection />,
+    flows:      <FlowsSection />,
+    schedules:  <CronSection />,
+    monitors:   <MonitorsSection />,
+    strategies: <StrategiesSection />,
+    logs:       <LogsSection />,
+    settings:   <SettingsSection />,
   };
 
   return (
@@ -68,6 +79,7 @@ export default function AutomateRoute() {
           onSelect={setActiveSection}
           killSwitchActive={killSwitchActive}
           runningCount={runningCount}
+          uploadedRunningCount={uploadedRunningCount}
         />
 
         <ScrollArea className="flex-1">

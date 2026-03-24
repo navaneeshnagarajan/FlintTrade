@@ -6,14 +6,14 @@
  */
 
 import { useState } from "react";
-import { Workflow, Clock, Activity, FileText, Settings2 } from "lucide-react";
+import { Workflow, Clock, Activity, FileText, Settings2, FileCode2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type SectionId = "flows" | "schedules" | "monitors" | "logs" | "settings";
+export type SectionId = "flows" | "schedules" | "monitors" | "logs" | "strategies" | "settings";
 
 interface SectionDef {
   id: SectionId;
@@ -23,11 +23,12 @@ interface SectionDef {
 }
 
 export const SECTIONS: SectionDef[] = [
-  { id: "flows",     label: "Flow Builder",       icon: Workflow,  desc: "Visual 54-node automation builder" },
-  { id: "schedules", label: "Schedules",           icon: Clock,     desc: "Cron jobs & timed executions" },
-  { id: "monitors",  label: "Monitors",            icon: Activity,  desc: "Live strategy monitoring" },
-  { id: "logs",      label: "Execution Logs",      icon: FileText,  desc: "History of automated actions" },
-  { id: "settings",  label: "Automation Settings", icon: Settings2, desc: "Kill switches, limits, Telegram alerts" },
+  { id: "flows",      label: "Flow Builder",       icon: Workflow,   desc: "Visual 54-node automation builder" },
+  { id: "schedules",  label: "Schedules",           icon: Clock,      desc: "Cron jobs & timed executions" },
+  { id: "monitors",   label: "Monitors",            icon: Activity,   desc: "Live strategy monitoring" },
+  { id: "strategies", label: "Strategies",          icon: FileCode2,  desc: "Upload and run Python strategies" },
+  { id: "logs",       label: "Execution Logs",      icon: FileText,   desc: "History of automated actions" },
+  { id: "settings",   label: "Automation Settings", icon: Settings2,  desc: "Kill switches, limits, Telegram alerts" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ interface AutomateSidebarProps {
   onSelect: (id: SectionId) => void;
   killSwitchActive: boolean;
   runningCount: number;
+  uploadedRunningCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +52,7 @@ export default function AutomateSidebar({
   onSelect,
   killSwitchActive,
   runningCount,
+  uploadedRunningCount,
 }: AutomateSidebarProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -71,6 +74,8 @@ export default function AutomateSidebar({
           section.id === "settings" && killSwitchActive
             ? "ft-dot-kill"
             : section.id === "monitors" && runningCount > 0
+            ? "ft-dot-running"
+            : section.id === "strategies" && uploadedRunningCount > 0
             ? "ft-dot-running"
             : section.id === "schedules" && !killSwitchActive
             ? "ft-dot-paused"
