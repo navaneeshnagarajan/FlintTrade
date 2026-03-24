@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -19,8 +20,11 @@ import { useTradingStore } from "@/stores/tradingStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ping } from "@/services/api";
+import { getPendingOrders } from "@/services/ftApi";
 import { useTimings } from "@/hooks/useMarketStatus";
 import type { MarketTiming } from "@/types/api";
+import AccountSwitcher from "./AccountSwitcher";
+import SandboxToggle from "./SandboxToggle";
 
 function ISTClock() {
   const [time, setTime] = useState("");
@@ -211,6 +215,16 @@ export default function TopBar() {
   const [deletingTabId, setDeletingTabId] = useState<string | null>(null);
 
   const connected = status === "connected";
+
+  // Pending action center orders — poll every 5s for badge count
+  const { data: pendingOrders } = useQuery({
+    queryKey: ["actionCenterPending"],
+    queryFn: getPendingOrders,
+    refetchInterval: 5_000,
+    // Don't throw on error — badge simply won't appear
+    throwOnError: false,
+  });
+  const pendingCount = (pendingOrders ?? []).length;
 
   const handleNewBlank = useCallback(() => {
     addTab();
@@ -537,8 +551,8 @@ export default function TopBar() {
         )}
       </div>
 
-      {/* Right: TOOLS (all routes) + WIDGETS (/trade only) + Connection status + Clock */}
-      <div className="flex items-center gap-3">
+      {/* Right: TOOLS (all routes) + WIDGETS (/trade only) + AccountSwitcher + SandboxToggle + Connection status + Clock */}
+      <div className="flex items-center gap-2">
         {/* TOOLS: always visible — shows route-relevant tools via ToolsDropdown */}
         <Button
           variant="ghost"
@@ -546,10 +560,19 @@ export default function TopBar() {
           onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
           aria-expanded={toolsMenuOpen}
           aria-haspopup="menu"
-          className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary"
+          className="h-7 px-2 text-xs text-text-secondary hover:text-text-primary relative"
         >
           <Wrench size={14} className="mr-1" />
           TOOLS
+          {/* Pending action center badge */}
+          {pendingCount > 0 && (
+            <span
+              className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-loss text-white text-xxs font-bold px-1 leading-none"
+              aria-label={`${pendingCount} pending order approval${pendingCount !== 1 ? "s" : ""}`}
+            >
+              {pendingCount > 9 ? "9+" : pendingCount}
+            </span>
+          )}
         </Button>
 
         {/* WIDGETS: only on /trade (Dockview canvas) */}
@@ -564,6 +587,16 @@ export default function TopBar() {
             WIDGETS
           </Button>
         )}
+
+        <div className="w-px h-4 bg-border-default" aria-hidden="true" />
+
+        {/* Account switcher — hidden when no accounts connected */}
+        <AccountSwitcher />
+
+        {/* Sandbox / Live trading toggle */}
+        <SandboxToggle />
+
+        <div className="w-px h-4 bg-border-default" aria-hidden="true" />
 
         <div
           className="flex items-center gap-1.5"
