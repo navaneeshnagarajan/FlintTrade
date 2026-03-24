@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -722,9 +723,11 @@ function AISettingsSection() {
 interface FloatingPillNavProps {
   active: SectionId;
   onSelect: (id: SectionId) => void;
+  /** Optional filtered list. Defaults to all SECTIONS. */
+  sections?: SectionDef[];
 }
 
-function FloatingPillNav({ active, onSelect }: FloatingPillNavProps) {
+function FloatingPillNav({ active, onSelect, sections = SECTIONS }: FloatingPillNavProps) {
   const reducedMotion = motionConfig.prefersReducedMotion();
 
   return (
@@ -734,7 +737,7 @@ function FloatingPillNav({ active, onSelect }: FloatingPillNavProps) {
       className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30"
     >
       <div className="flex items-center gap-0.5 bg-surface-card/90 backdrop-blur-md border border-border-default rounded-full px-1.5 py-1.5 shadow-lg">
-        {SECTIONS.map((section) => {
+        {sections.map((section) => {
           const Icon = section.icon;
           const isActive = active === section.id;
 
@@ -875,6 +878,19 @@ const SECTION_LABELS: Record<SectionId, string> = {
 
 export default function AIRoute() {
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
+  const level = useSkillLevel("ai");
+
+  // Density adaptation:
+  // Beginner: Chat only — guided prompts, larger focused input
+  // Intermediate: Chat + Signals
+  // Advanced: All sections (chat, signals, sentiment, knowledge, settings)
+  const visibleSectionIds: SectionId[] = useMemo(() => {
+    if (level === "beginner") return ["chat"];
+    if (level === "intermediate") return ["chat", "signals"];
+    return ["chat", "signals", "sentiment", "knowledge", "settings"];
+  }, [level]);
+
+  const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
 
   const isOverlay = OVERLAY_SECTIONS.has(activeSection);
   const sectionDef = SECTIONS.find((s) => s.id === activeSection);
@@ -898,7 +914,11 @@ export default function AIRoute() {
               AI Center
             </h1>
             <p className="text-xxs text-text-muted mt-0.5">
-              Local LLM advisor · ML signals · Sentiment · Knowledge base
+              {level === "beginner"
+                ? "Ask me anything about markets, stocks, or how to trade"
+                : level === "intermediate"
+                  ? "Local LLM advisor · ML signals"
+                  : "Local LLM advisor · ML signals · Sentiment · Knowledge base"}
             </p>
           </div>
         </div>
@@ -913,7 +933,7 @@ export default function AIRoute() {
 
         {/* Overlay panels slide in from right over the chat */}
         <AnimatePresence>
-          {isOverlay && sectionDef && (
+          {isOverlay && sectionDef && visibleSectionIds.includes(activeSection) && (
             <OverlayPanel
               key={activeSection}
               title={SECTION_LABELS[activeSection]}
@@ -925,8 +945,14 @@ export default function AIRoute() {
           )}
         </AnimatePresence>
 
-        {/* Floating pill nav — always visible, sits above everything */}
-        <FloatingPillNav active={activeSection} onSelect={handleSelectSection} />
+        {/* Floating pill nav — filtered by skill level */}
+        {visibleSections.length > 1 && (
+          <FloatingPillNav
+            active={activeSection}
+            onSelect={handleSelectSection}
+            sections={visibleSections}
+          />
+        )}
       </div>
     </div>
   );

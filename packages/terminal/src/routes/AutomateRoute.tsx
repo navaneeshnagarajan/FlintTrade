@@ -4,8 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
 import { getSafetyConfig, getRunningStrategies, getUploadedStrategies } from "@/services/ftApi";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
 
-import AutomateSidebar, { type SectionId } from "./automate/AutomateSidebar";
+import AutomateSidebar, { SECTIONS, type SectionId } from "./automate/AutomateSidebar";
 import FlowsSection       from "./automate/FlowsSection";
 import CronSection        from "./automate/CronSection";
 import MonitorsSection    from "./automate/MonitorsSection";
@@ -14,7 +15,23 @@ import StrategiesSection  from "./automate/StrategiesSection";
 import SettingsSection    from "./automate/SettingsSection";
 
 export default function AutomateRoute() {
-  const [activeSection, setActiveSection] = useState<SectionId>("flows");
+  const level = useSkillLevel("automate");
+
+  // Density adaptation:
+  // Beginner: Alerts/Monitors + Settings only (hide Flows, Cron, Strategies)
+  // Intermediate: Flows + Schedules + Monitors + Logs
+  // Advanced: All sections
+  const visibleSectionIds: SectionId[] = (() => {
+    if (level === "beginner") return ["monitors", "settings"];
+    if (level === "intermediate") return ["flows", "schedules", "monitors", "logs"];
+    return ["flows", "schedules", "monitors", "strategies", "logs", "settings"];
+  })();
+
+  const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
+
+  // Default to the first visible section for the current skill level
+  const defaultSection = visibleSectionIds[0] ?? "monitors";
+  const [activeSection, setActiveSection] = useState<SectionId>(defaultSection);
 
   // Lightweight queries for rail status dots — same keys fetched by each section on mount,
   // so no extra network requests are made.
@@ -78,6 +95,7 @@ export default function AutomateRoute() {
           activeSection={activeSection}
           onSelect={setActiveSection}
           killSwitchActive={killSwitchActive}
+          sections={visibleSections}
           runningCount={runningCount}
           uploadedRunningCount={uploadedRunningCount}
         />

@@ -41,6 +41,8 @@ interface AutomateSidebarProps {
   killSwitchActive: boolean;
   runningCount: number;
   uploadedRunningCount: number;
+  /** Optional filtered list. Defaults to all SECTIONS. */
+  sections?: SectionDef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +55,7 @@ export default function AutomateSidebar({
   killSwitchActive,
   runningCount,
   uploadedRunningCount,
+  sections = SECTIONS,
 }: AutomateSidebarProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -66,7 +69,7 @@ export default function AutomateSidebar({
       className="relative shrink-0 border-r border-border-default bg-surface-card overflow-hidden py-2 flex flex-col gap-0.5"
       style={{ minWidth: 48 }}
     >
-      {SECTIONS.map((section) => {
+      {sections.map((section) => {
         const Icon     = section.icon;
         const isActive = activeSection === section.id;
 
