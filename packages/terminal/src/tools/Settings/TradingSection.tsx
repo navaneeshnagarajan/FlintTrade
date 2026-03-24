@@ -21,7 +21,11 @@ export function TradingSection({ settings, onChange }: TradingSectionProps) {
     <div className="space-y-5">
       <SectionTitle>Trading Defaults</SectionTitle>
 
-      <FieldRow label="Default Exchange">
+      <FieldRow
+        label="Default Exchange"
+        hint="Pre-selected exchange in order entry forms. Can be overridden per order."
+        tooltip="Sets the exchange pre-selected when opening order entry. NFO for F&O, NSE for equities, MCX for commodities, CDS for currency derivatives."
+      >
         <SelectInput
           value={settings.exchange}
           onChange={(v) => onChange("exchange", v)}
@@ -53,7 +57,11 @@ export function TradingSection({ settings, onChange }: TradingSectionProps) {
         />
       </FieldRow>
 
-      <FieldRow label="Default Order Type">
+      <FieldRow
+        label="Default Order Type"
+        hint="MARKET = execute immediately at best price. LIMIT = specify your price. SL = stoploss limit. SL-M = stoploss market."
+        tooltip="Pre-selected order type in the order entry form. MARKET executes at the best available price immediately. LIMIT holds until your specified price is hit. SL triggers a limit order when the trigger price is crossed. SL-M triggers a market order at the trigger price."
+      >
         <SegmentControl
           value={settings.orderType}
           onChange={(v) => onChange("orderType", v)}

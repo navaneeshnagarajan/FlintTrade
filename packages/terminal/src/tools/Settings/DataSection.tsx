@@ -27,6 +27,7 @@ export function DataSection({ settings, onChange }: DataSectionProps) {
       <FieldRow
         label="Fast Storage Path"
         hint="DuckDB database and intraday tick cache. Use an SSD path for best performance."
+        tooltip="Path for tick data and real-time caches. Use SSD for best performance. Default: ~/.flinttrade/data/"
       >
         <TextInput
           value={settings.fastStoragePath}
@@ -39,6 +40,7 @@ export function DataSection({ settings, onChange }: DataSectionProps) {
       <FieldRow
         label="Archive Storage Path"
         hint="Long-term OHLCV history and SEBI audit logs (5-year retention required). Can be a slower disk."
+        tooltip="Path for historical OHLCV data and audit logs. Can be slower storage. Default: ~/.flinttrade/archive/"
       >
         <TextInput
           value={settings.archiveStoragePath}

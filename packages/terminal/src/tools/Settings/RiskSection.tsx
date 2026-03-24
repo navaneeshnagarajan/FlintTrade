@@ -29,7 +29,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       <FieldRow
         label="Max Position Size (lots)"
         hint="Maximum number of lots per position. Leave blank to disable."
-        tooltip="Limits the size of any single position. For example, entering 10 means you cannot hold more than 10 lots of any one instrument at a time. Applies to new orders — existing positions are not auto-closed."
+        tooltip="Maximum number of lots per single position. Prevents oversizing on any one trade. For example, entering 10 means you cannot hold more than 10 lots of any one instrument at a time. Applies to new orders — existing positions are not auto-closed."
       >
         <TextInput
           value={settings.maxPositionLots}
@@ -43,7 +43,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       <FieldRow
         label="MTM Stoploss (₹)"
         hint="Mark-to-market loss limit. Enter as negative number (e.g. -5000). Leave blank to disable."
-        tooltip="Mark-to-market (MTM) stoploss: when cumulative unrealised + realised loss for the day exceeds this value, no new orders are allowed. Enter a negative rupee amount (e.g. -5000 = stop at ₹5,000 loss). This is a soft limit enforced in the browser only."
+        tooltip="Maximum net loss allowed per day in ₹. Trading is blocked when this limit is hit. Reset at market open. Enter a negative rupee amount (e.g. -5000 = stop at ₹5,000 loss). This is a soft limit enforced in the browser only."
       >
         <TextInput
           value={settings.mtmStoploss}
@@ -71,7 +71,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       <FieldRow
         label="Max Orders per Minute"
         hint="Rate limit for order placement. Leave blank to use OpenAlgo default (10/sec)."
-        tooltip="Caps how many orders FlintTrade will attempt to send per minute. This is in addition to OpenAlgo's own rate limiter (10 orders/sec). Useful to prevent runaway automation from firing too many orders. 20 = up to 20 orders per minute."
+        tooltip="Maximum orders per second. SEBI mandates ≤10 OPS for retail algo trading. This cap applies on top of OpenAlgo's own rate limiter. Useful to prevent runaway automation from firing too many orders."
       >
         <TextInput
           value={settings.maxOrdersPerMinute}
