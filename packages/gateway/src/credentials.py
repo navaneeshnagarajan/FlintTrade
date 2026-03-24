@@ -34,21 +34,23 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # ---------------------------------------------------------------------------
-# Error class — import from sibling exceptions.py when available; otherwise
-# define a compatible fallback so this module stays standalone during
-# parallel package construction (Task 1 may not have written exceptions.py yet).
+# Error class — always defined here so callers get a stable class identity
+# regardless of import path.  exceptions.py (Task 1) re-exports this class
+# rather than defining its own, avoiding the dual-class-object problem that
+# arises under pytest --import-mode=importlib.
 # ---------------------------------------------------------------------------
 
-try:
-    from .exceptions import CredentialError
-except ImportError:  # pragma: no cover — only during parallel init
 
-    class CredentialError(Exception):  # type: ignore[no-redef]
-        """Raised for all credential-storage failures."""
+class CredentialError(Exception):
+    """Raised for all credential-storage failures.
 
-        def __init__(self, message: str) -> None:
-            self.message = message
-            super().__init__(message)
+    Args:
+        message: Human-readable description of the failure.
+    """
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------
