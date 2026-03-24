@@ -7,6 +7,7 @@ import InteractiveTour from "@/components/tour/InteractiveTour";
 import { useWsBridge } from "@/hooks/useWsBridge";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
+import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 
 const TOUR_STORAGE_KEY = "flinttrade:tourComplete";
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
@@ -112,6 +113,7 @@ export default function AppLayout() {
           }}
         />
       )}
+      <NoConnectionOverlay />
     </div>
   );
 }
