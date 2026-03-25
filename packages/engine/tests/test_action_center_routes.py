@@ -94,6 +94,12 @@ class TestApproveEndpoint:
         assert resp.status_code == 409
         assert resp.get_json()["status"] == "error"
 
+    def test_approve_already_approved_returns_409(self, client, action_center):
+        _submit(action_center, "a1")
+        action_center.approve("a1")
+        resp = client.post("/ft-api/v1/action-center/approve/a1")
+        assert resp.status_code == 409
+
 
 # ---------------------------------------------------------------------------
 # POST /reject/<order_id>
@@ -114,6 +120,12 @@ class TestRejectEndpoint:
         resp = client.post("/ft-api/v1/action-center/reject/ord-1")
         assert resp.status_code == 409
 
+    def test_reject_already_rejected_returns_409(self, client, action_center):
+        _submit(action_center, "r1")
+        action_center.reject("r1")
+        resp = client.post("/ft-api/v1/action-center/reject/r1")
+        assert resp.status_code == 409
+
 
 # ---------------------------------------------------------------------------
 # POST /approve-all
@@ -128,6 +140,26 @@ class TestApproveAllEndpoint:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["data"]["approved_count"] == 2
+        assert len(data["data"]["orders"]) == 2
+        assert data["data"]["orders"][0]["order_id"] == "m1"
+        assert data["data"]["orders"][1]["order_id"] == "m2"
+
+    def test_approve_all_empty_queue_returns_zero(self, client):
+        resp = client.post("/ft-api/v1/action-center/approve-all")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["data"]["approved_count"] == 0
+        assert data["data"]["orders"] == []
+
+    def test_approve_all_mixed_statuses_only_approves_pending(self, client, action_center):
+        _submit(action_center, "p1")
+        _submit(action_center, "r1")
+        action_center.reject("r1")
+        resp = client.post("/ft-api/v1/action-center/approve-all")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["data"]["approved_count"] == 1
+        assert data["data"]["orders"][0]["order_id"] == "p1"
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +201,19 @@ class TestConfigEndpoints:
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+    def test_post_config_zero_ttl_returns_400(self, client):
+        resp = client.post(
+            "/ft-api/v1/action-center/config",
+            json={"ttl_seconds": 0},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    def test_post_config_empty_body_returns_200(self, client):
+        resp = client.post(
+            "/ft-api/v1/action-center/config",
+            json={},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
