@@ -556,7 +556,7 @@ function CanvasNodeCard({ node, selected, onMouseDown, onPortMouseDown, onInputP
             height: PORT_R * 2,
             borderRadius: "50%",
             background: "#6b6b8a",
-            border: "2px solid #0a0a0f",
+            border: "2px solid var(--color-base)",
             zIndex: 10,
             cursor: "crosshair",
           }}
@@ -570,8 +570,8 @@ function CanvasNodeCard({ node, selected, onMouseDown, onPortMouseDown, onInputP
       {/* Node card body */}
       <div
         style={{
-          background: "#12121a",
-          border: `1px solid ${selected ? node.color : "#1e1e2e"}`,
+          background: "var(--color-card)",
+          border: `1px solid ${selected ? node.color : "var(--color-border)"}`,
           borderLeft: `3px solid ${node.color}`,
           borderRadius: 6,
           boxShadow: selected ? `0 0 0 2px ${node.color}40` : "none",
@@ -596,10 +596,10 @@ function CanvasNodeCard({ node, selected, onMouseDown, onPortMouseDown, onInputP
             <Zap size={10} />
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#e0e0f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {node.label}
             </div>
-            <div style={{ fontSize: 9, color: "#6b6b8a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <div style={{ fontSize: 9, color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {node.type}
             </div>
           </div>
@@ -609,9 +609,9 @@ function CanvasNodeCard({ node, selected, onMouseDown, onPortMouseDown, onInputP
         {Object.keys(node.config).length > 0 && (
           <div style={{ padding: "0 8px 6px", display: "flex", flexDirection: "column", gap: 2 }}>
             {Object.entries(node.config).slice(0, 2).map(([k, v]) => (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0a0a0f", borderRadius: 3, padding: "2px 5px" }}>
-                <span style={{ fontSize: 9, color: "#6b6b8a" }}>{k}</span>
-                <span style={{ fontSize: 9, color: "#c0c0d8", fontFamily: "monospace", maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--color-base)", borderRadius: 3, padding: "2px 5px" }}>
+                <span style={{ fontSize: 9, color: "var(--color-text-muted)" }}>{k}</span>
+                <span style={{ fontSize: 9, color: "var(--color-text)", fontFamily: "monospace", maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>
               </div>
             ))}
           </div>
@@ -633,7 +633,7 @@ function CanvasNodeCard({ node, selected, onMouseDown, onPortMouseDown, onInputP
               height: PORT_R * 2,
               borderRadius: "50%",
               background: "#22c55e",
-              border: "2px solid #0a0a0f",
+              border: "2px solid var(--color-base)",
               zIndex: 10,
               cursor: "crosshair",
             }}
@@ -654,7 +654,7 @@ function CanvasNodeCard({ node, selected, onMouseDown, onPortMouseDown, onInputP
               height: PORT_R * 2,
               borderRadius: "50%",
               background: "#f87171",
-              border: "2px solid #0a0a0f",
+              border: "2px solid var(--color-base)",
               zIndex: 10,
               cursor: "crosshair",
             }}
@@ -676,7 +676,7 @@ function CanvasNodeCard({ node, selected, onMouseDown, onPortMouseDown, onInputP
             height: PORT_R * 2,
             borderRadius: "50%",
             background: "#6c8ef0",
-            border: "2px solid #0a0a0f",
+            border: "2px solid var(--color-base)",
             zIndex: 10,
             cursor: "crosshair",
           }}
@@ -752,8 +752,8 @@ function ConfigPanel({ node, onChange, onLabelChange, onDelete, onClose }: Confi
       style={{
         width: 220,
         flexShrink: 0,
-        background: "#12121a",
-        borderLeft: "1px solid #1e1e2e",
+        background: "var(--color-card)",
+        borderLeft: "1px solid var(--color-border)",
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -761,12 +761,12 @@ function ConfigPanel({ node, onChange, onLabelChange, onDelete, onClose }: Confi
       }}
     >
       {/* Config header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderBottom: "1px solid #1e1e2e" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderBottom: "1px solid var(--color-border)" }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#e0e0f0" }}>Node Config</div>
-          <div style={{ fontSize: 9, color: "#6b6b8a" }}>{node.type}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text)" }}>Node Config</div>
+          <div style={{ fontSize: 9, color: "var(--color-text-muted)" }}>{node.type}</div>
         </div>
-        <button onClick={onClose} style={{ color: "#6b6b8a", cursor: "pointer", background: "none", border: "none", padding: 2 }}>
+        <button onClick={onClose} style={{ color: "var(--color-text-muted)", cursor: "pointer", background: "none", border: "none", padding: 2 }}>
           <X size={13} />
         </button>
       </div>
@@ -775,12 +775,12 @@ function ConfigPanel({ node, onChange, onLabelChange, onDelete, onClose }: Confi
         <div style={{ padding: "10px" }}>
           {/* Label */}
           <div style={{ marginBottom: 10 }}>
-            <Label style={{ fontSize: 10, color: "#9090b0", marginBottom: 4, display: "block" }}>Label</Label>
+            <Label style={{ fontSize: 10, color: "var(--color-text-muted)", marginBottom: 4, display: "block" }}>Label</Label>
             <Input
               value={localLabel}
               onChange={(e) => setLocalLabel(e.target.value)}
               onBlur={handleLabelBlur}
-              style={{ height: 28, fontSize: 11, background: "#0a0a0f", border: "1px solid #1e1e2e", color: "#e0e0f0" }}
+              style={{ height: 28, fontSize: 11, background: "var(--color-base)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
             />
           </div>
 
@@ -796,20 +796,20 @@ function ConfigPanel({ node, onChange, onLabelChange, onDelete, onClose }: Confi
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {fields.map((field) => (
                 <div key={field}>
-                  <Label style={{ fontSize: 10, color: "#9090b0", marginBottom: 3, display: "block", textTransform: "capitalize" }}>
+                  <Label style={{ fontSize: 10, color: "var(--color-text-muted)", marginBottom: 3, display: "block", textTransform: "capitalize" }}>
                     {field.replace(/([A-Z])/g, " $1").toLowerCase()}
                   </Label>
                   <Input
                     value={localConfig[field] ?? ""}
                     onChange={(e) => handleFieldChange(field, e.target.value)}
                     placeholder={field}
-                    style={{ height: 28, fontSize: 11, background: "#0a0a0f", border: "1px solid #1e1e2e", color: "#e0e0f0" }}
+                    style={{ height: 28, fontSize: 11, background: "var(--color-base)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
                   />
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: 11, color: "#6b6b8a", padding: "8px 0" }}>
+            <div style={{ fontSize: 11, color: "var(--color-text-muted)", padding: "8px 0" }}>
               No configuration fields for this node type.
             </div>
           )}
@@ -865,16 +865,16 @@ function NodePalette({ onDragStart }: NodePaletteProps) {
       style={{
         width: 188,
         flexShrink: 0,
-        background: "#0a0a0f",
-        borderRight: "1px solid #1e1e2e",
+        background: "var(--color-base)",
+        borderRight: "1px solid var(--color-border)",
         display: "flex",
         flexDirection: "column",
         height: "100%",
         overflow: "hidden",
       }}
     >
-      <div style={{ padding: "8px", borderBottom: "1px solid #1e1e2e" }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: "#9090b0", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Node Palette</div>
+      <div style={{ padding: "8px", borderBottom: "1px solid var(--color-border)" }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-muted)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Node Palette</div>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -883,10 +883,10 @@ function NodePalette({ onDragStart }: NodePaletteProps) {
             width: "100%",
             height: 26,
             fontSize: 11,
-            background: "#12121a",
-            border: "1px solid #1e1e2e",
+            background: "var(--color-card)",
+            border: "1px solid var(--color-border)",
             borderRadius: 4,
-            color: "#e0e0f0",
+            color: "var(--color-text)",
             padding: "0 8px",
             outline: "none",
             boxSizing: "border-box",
@@ -905,9 +905,9 @@ function NodePalette({ onDragStart }: NodePaletteProps) {
                 alignItems: "center",
                 justifyContent: "space-between",
                 padding: "5px 8px",
-                background: "#12121a",
+                background: "var(--color-card)",
                 border: "none",
-                borderBottom: "1px solid #1e1e2e",
+                borderBottom: "1px solid var(--color-border)",
                 cursor: "pointer",
                 color: cat.color,
               }}
@@ -915,7 +915,7 @@ function NodePalette({ onDragStart }: NodePaletteProps) {
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 {cat.icon}
                 <span style={{ fontSize: 10, fontWeight: 600 }}>{cat.label}</span>
-                <span style={{ fontSize: 9, color: "#6b6b8a" }}>{cat.nodes.length}</span>
+                <span style={{ fontSize: 9, color: "var(--color-text-muted)" }}>{cat.nodes.length}</span>
               </div>
               {expanded.has(cat.id) ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
             </button>
@@ -932,18 +932,18 @@ function NodePalette({ onDragStart }: NodePaletteProps) {
                     style={{
                       padding: "4px 6px",
                       borderRadius: 4,
-                      background: "#12121a",
-                      border: "1px solid #1e1e2e",
+                      background: "var(--color-card)",
+                      border: "1px solid var(--color-border)",
                       cursor: "grab",
                       display: "flex",
                       alignItems: "center",
                       gap: 5,
                     }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = cat.color; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "#1e1e2e"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--color-border)"; }}
                   >
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: cat.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 10, color: "#c0c0d8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 10, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {node.label}
                     </span>
                   </div>
@@ -955,7 +955,7 @@ function NodePalette({ onDragStart }: NodePaletteProps) {
       </div>
 
       {/* Drag hint */}
-      <div style={{ padding: "6px 8px", borderTop: "1px solid #1e1e2e", fontSize: 9, color: "#404060", textAlign: "center" }}>
+      <div style={{ padding: "6px 8px", borderTop: "1px solid var(--color-border)", fontSize: 9, color: "var(--color-text-muted)", textAlign: "center" }}>
         Drag nodes onto the canvas
       </div>
     </div>
@@ -1127,7 +1127,7 @@ function Canvas({ workflow, onWorkflowChange }: CanvasProps) {
       {/* Canvas area */}
       <div
         ref={canvasRef}
-        style={{ flex: 1, position: "relative", overflow: "hidden", background: "#0a0a0f", cursor: panning.current ? "grabbing" : "default" }}
+        style={{ flex: 1, position: "relative", overflow: "hidden", background: "var(--color-base)", cursor: panning.current ? "grabbing" : "default" }}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseDown={handleCanvasMouseDown}
@@ -1139,7 +1139,7 @@ function Canvas({ workflow, onWorkflowChange }: CanvasProps) {
         <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
           <defs>
             <pattern id="grid" width={16 * zoom} height={16 * zoom} patternUnits="userSpaceOnUse" x={pan.x % (16 * zoom)} y={pan.y % (16 * zoom)}>
-              <circle cx={0} cy={0} r={0.6} fill="#1e1e2e" />
+              <circle cx={0} cy={0} r={0.6} fill="var(--color-border)" />
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
@@ -1216,7 +1216,7 @@ function Canvas({ workflow, onWorkflowChange }: CanvasProps) {
         </div>
 
         {/* Zoom level indicator */}
-        <div style={{ position: "absolute", bottom: 12, right: selectedNode ? 232 : 12, zIndex: 20, fontSize: 9, color: "#404060", background: "#12121a", border: "1px solid #1e1e2e", borderRadius: 4, padding: "2px 6px" }}>
+        <div style={{ position: "absolute", bottom: 12, right: selectedNode ? 232 : 12, zIndex: 20, fontSize: 9, color: "var(--color-text-muted)", background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: 4, padding: "2px 6px" }}>
           {Math.round(zoom * 100)}%
         </div>
 
@@ -1224,11 +1224,11 @@ function Canvas({ workflow, onWorkflowChange }: CanvasProps) {
         {nodes.length === 0 && (
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
             <div style={{ textAlign: "center" }}>
-              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#12121a", border: "1px solid #1e1e2e", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-                <Workflow size={20} style={{ color: "#6b6b8a" }} />
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--color-card)", border: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+                <Workflow size={20} style={{ color: "var(--color-text-muted)" }} />
               </div>
-              <div style={{ fontSize: 13, color: "#e0e0f0", marginBottom: 4 }}>Empty canvas</div>
-              <div style={{ fontSize: 11, color: "#6b6b8a" }}>Drag nodes from the palette to get started</div>
+              <div style={{ fontSize: 13, color: "var(--color-text)", marginBottom: 4 }}>Empty canvas</div>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Drag nodes from the palette to get started</div>
             </div>
           </div>
         )}
@@ -1251,10 +1251,10 @@ function Canvas({ workflow, onWorkflowChange }: CanvasProps) {
 const zoomBtnStyle: React.CSSProperties = {
   width: 24,
   height: 24,
-  background: "#12121a",
-  border: "1px solid #1e1e2e",
+  background: "var(--color-card)",
+  border: "1px solid var(--color-border)",
   borderRadius: 4,
-  color: "#9090b0",
+  color: "var(--color-text-muted)",
   cursor: "pointer",
   fontSize: 14,
   display: "flex",
@@ -1295,25 +1295,25 @@ function EditorView({ flow, onSave, onBack }: EditorViewProps) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#0a0a0f" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--color-base)" }}>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid #1e1e2e", background: "#12121a", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--color-border)", background: "var(--color-card)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={onBack} style={{ color: "#6b6b8a", background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}>
+          <button onClick={onBack} style={{ color: "var(--color-text-muted)", background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}>
             <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
           </button>
           <input
             value={name}
             onChange={(e) => { setName(e.target.value); setSaved(false); }}
-            style={{ fontSize: 12, fontWeight: 600, background: "transparent", border: "1px solid transparent", borderRadius: 4, color: "#e0e0f0", padding: "2px 6px", outline: "none" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "#1e1e2e"; }}
+            style={{ fontSize: 12, fontWeight: 600, background: "transparent", border: "1px solid transparent", borderRadius: 4, color: "var(--color-text)", padding: "2px 6px", outline: "none" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "var(--color-border)"; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "transparent"; }}
           />
-          {!saved && <span style={{ fontSize: 10, color: "#6b6b8a" }}>Unsaved</span>}
+          {!saved && <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>Unsaved</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {/* Node/edge count */}
-          <span style={{ fontSize: 10, color: "#6b6b8a" }}>{workflow.nodes.length} nodes · {workflow.edges.length} edges</span>
+          <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{workflow.nodes.length} nodes · {workflow.edges.length} edges</span>
 
           <Button
             size="sm"
@@ -1349,14 +1349,14 @@ function EditorView({ flow, onSave, onBack }: EditorViewProps) {
 
       {/* Run backend note */}
       {showRunNote && (
-        <div style={{ background: "#1a1a0a", borderBottom: "1px solid #2a2a1a", padding: "6px 12px", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ background: "var(--color-card)", borderBottom: "1px solid var(--color-border)", padding: "6px 12px", display: "flex", alignItems: "center", gap: 6 }}>
           <AlertCircle size={12} style={{ color: "#f59e0b", flexShrink: 0 }} />
-          <span style={{ fontSize: 11, color: "#9090b0" }}>
+          <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
             Connect the Python backend to execute flows. Run{" "}
-            <span style={{ fontFamily: "monospace", color: "#e0e0f0" }}>python -m packages.automation.src.flow_runner</span>{" "}
+            <span style={{ fontFamily: "monospace", color: "var(--color-text)" }}>python -m packages.automation.src.flow_runner</span>{" "}
             and enable execution in Settings.
           </span>
-          <button onClick={() => setShowRunNote(false)} style={{ marginLeft: "auto", color: "#6b6b8a", background: "none", border: "none", cursor: "pointer" }}>
+          <button onClick={() => setShowRunNote(false)} style={{ marginLeft: "auto", color: "var(--color-text-muted)", background: "none", border: "none", cursor: "pointer" }}>
             <X size={11} />
           </button>
         </div>

@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createChart, LineSeries } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, LineData, Time } from "lightweight-charts";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import {
   RefreshCw,
   ChevronDown,
@@ -90,13 +91,9 @@ const SYMBOLS: SymbolDef[] = [
 const OVERLAYS: OverlayName[] = ["Straddle", "Spot", "SynFut"];
 
 const CHART_COLORS = {
-  straddle:   "#3b82f6",
-  spot:       "#eab308",
-  synfut:     "#a78bfa",
-  background: "#0a0a0f",
-  text:       "#71717a",
-  grid:       "#1e1e2e",
-  border:     "#1e1e2e",
+  straddle: "#3b82f6",
+  spot:     "#eab308",
+  synfut:   "#a78bfa",
 };
 
 // ---------------------------------------------------------------------------
@@ -256,6 +253,7 @@ function StraddleChart({
   const straddleRef  = useRef<ISeriesApi<"Line"> | null>(null);
   const spotRef      = useRef<ISeriesApi<"Line"> | null>(null);
   const synfutRef    = useRef<ISeriesApi<"Line"> | null>(null);
+  const chartTheme   = useLightweightChartTheme();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -264,22 +262,15 @@ function StraddleChart({
       width:  containerRef.current.clientWidth,
       height,
       layout: {
-        background:  { color: CHART_COLORS.background },
-        textColor:   CHART_COLORS.text,
-        fontSize:    10,
-        fontFamily:  "'JetBrains Mono', ui-monospace, monospace",
+        ...chartTheme.layout,
+        fontSize: 10,
       },
-      grid: {
-        vertLines: { color: CHART_COLORS.grid },
-        horzLines: { color: CHART_COLORS.grid },
-      },
-      crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: CHART_COLORS.border },
+      grid:            chartTheme.grid,
+      crosshair:       { mode: 1 },
+      rightPriceScale: chartTheme.rightPriceScale,
       timeScale: {
-        borderColor:    CHART_COLORS.border,
-        timeVisible:    true,
-        secondsVisible: false,
-        ticksVisible:   true,
+        ...chartTheme.timeScale,
+        ticksVisible: true,
       },
       handleScale:  { mouseWheel: true },
       handleScroll: { mouseWheel: true },
@@ -324,7 +315,8 @@ function StraddleChart({
       ro.disconnect();
       chart.remove();
     };
-  }, [height]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [height, chartTheme]);
 
   useEffect(() => {
     if (!straddleRef.current) return;

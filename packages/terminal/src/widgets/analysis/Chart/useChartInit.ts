@@ -21,41 +21,9 @@ import type {
 } from "lightweight-charts";
 import type { LegendState } from "./ChartLegend";
 import type { IndicatorSeriesRefs } from "./types";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 
 export type { IndicatorSeriesRefs };
-
-// ---------------------------------------------------------------------------
-// Constants (chart theme + candle colours)
-// ---------------------------------------------------------------------------
-
-const CHART_THEME = {
-  layout: {
-    background: { color: "#0a0a0a" },
-    textColor: "#e5e5e5",
-    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-    fontSize: 11,
-  },
-  grid: {
-    vertLines: { color: "#1a1a2e" },
-    horzLines: { color: "#1a1a2e" },
-  },
-  crosshair: { mode: 0 },
-  rightPriceScale: { borderColor: "#2a2a3e" },
-  timeScale: {
-    borderColor: "#2a2a3e",
-    timeVisible: true,
-    secondsVisible: false,
-  },
-} as const;
-
-const CANDLE_OPTIONS = {
-  upColor: "#22c55e",
-  downColor: "#ef4444",
-  borderUpColor: "#22c55e",
-  borderDownColor: "#ef4444",
-  wickUpColor: "#22c55e",
-  wickDownColor: "#ef4444",
-};
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -81,6 +49,8 @@ export interface ChartInitRefs {
 export function useChartInit(
   setLegend: (state: LegendState | null) => void,
 ): ChartInitRefs {
+  const chartTheme = useLightweightChartTheme();
+
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -129,12 +99,16 @@ export function useChartInit(
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
-      ...CHART_THEME,
+      layout: chartTheme.layout,
+      grid: chartTheme.grid,
+      crosshair: chartTheme.crosshair,
+      rightPriceScale: chartTheme.rightPriceScale,
+      timeScale: chartTheme.timeScale,
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
     });
 
-    const candleSeries = chart.addSeries(CandlestickSeries, CANDLE_OPTIONS);
+    const candleSeries = chart.addSeries(CandlestickSeries, chartTheme.candle);
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -222,7 +196,7 @@ export function useChartInit(
       };
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // chart created once; setLegend is stable (state setter)
+  }, [chartTheme]); // re-create chart when theme changes; setLegend is stable (state setter)
 
   return { containerRef, chartRef, candleRef, volumeRef, markersPluginRef, indRef };
 }

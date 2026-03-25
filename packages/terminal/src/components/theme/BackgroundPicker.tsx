@@ -9,6 +9,12 @@
 import { type ChangeEvent } from "react";
 import { useThemeStore } from "@/stores/themeStore";
 
+/** Read a CSS custom property from the document root at call-time. */
+function cssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -48,7 +54,12 @@ function parseGradient(value: string): {
   angle: number;
   type: GradientType;
 } {
-  const defaults = { colorA: "#0a0a0f", colorB: "#1e1e3f", angle: 135, type: "linear" as GradientType };
+  const defaults = {
+    colorA: cssVar("--color-base", "#0a0a0f"),
+    colorB: cssVar("--color-card", "#16161f"),
+    angle: 135,
+    type: "linear" as GradientType,
+  };
   if (!value) return defaults;
 
   if (value.startsWith("radial")) {
@@ -132,7 +143,7 @@ interface SolidConfigProps {
 function SolidConfig({ value, onChange }: SolidConfigProps) {
   return (
     <div className="pt-1">
-      <ColorInput label="Color" value={value || "#0a0a0f"} onChange={onChange} />
+      <ColorInput label="Color" value={value || cssVar("--color-base", "#0a0a0f")} onChange={onChange} />
     </div>
   );
 }
@@ -300,10 +311,12 @@ export function BackgroundPicker() {
   const activeValue = background.value || "";
 
   function handleTypeChange(type: BgType) {
-    // Reset value to a sensible default per type
+    // Reset value to a sensible default per type — read from active theme CSS vars
+    const base = cssVar("--color-base", "#0a0a0f");
+    const card = cssVar("--color-card", "#16161f");
     const defaultValue: Record<BgType, string> = {
-      solid:    "#0a0a0f",
-      gradient: "linear-gradient(135deg, #0a0a0f, #1e1e3f)",
+      solid:    base,
+      gradient: `linear-gradient(135deg, ${base}, ${card})`,
       image:    "",
       pattern:  "none",
     };

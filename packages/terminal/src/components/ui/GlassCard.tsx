@@ -41,13 +41,26 @@ export interface GlassCardProps extends React.HTMLAttributes<HTMLDivElement> {
 // Helper — hex color → rgba string
 // ---------------------------------------------------------------------------
 
+/** Read a CSS custom property from the document root. */
+function readRootCssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
 function hexToRgba(hex: string, alpha: number): string {
   const cleaned = hex.startsWith("#") ? hex.slice(1) : hex;
-  if (cleaned.length !== 6) return `rgba(22,22,31,${alpha})`;
+  if (cleaned.length !== 6) {
+    // Fall back to the theme card color so it adapts to light/dark mode
+    const cardHex = readRootCssVar("--color-card", "#16161f");
+    return hexToRgba(cardHex, alpha);
+  }
   const r = parseInt(cleaned.slice(0, 2), 16);
   const g = parseInt(cleaned.slice(2, 4), 16);
   const b = parseInt(cleaned.slice(4, 6), 16);
-  if (isNaN(r) || isNaN(g) || isNaN(b)) return `rgba(22,22,31,${alpha})`;
+  if (isNaN(r) || isNaN(g) || isNaN(b)) {
+    const cardHex = readRootCssVar("--color-card", "#16161f");
+    return hexToRgba(cardHex, alpha);
+  }
   return `rgba(${r},${g},${b},${alpha})`;
 }
 

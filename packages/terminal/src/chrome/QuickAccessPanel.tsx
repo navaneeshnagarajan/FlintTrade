@@ -327,7 +327,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         ...positionStyle,
         backdropFilter: "blur(24px)",
         WebkitBackdropFilter: "blur(24px)",
-        backgroundColor: "rgba(22,22,31,0.85)",
+        backgroundColor: "color-mix(in srgb, var(--color-card) 85%, transparent)",
         border: "1px solid rgba(255,255,255,0.08)",
       }}
       variants={motionConfig.variants.scaleIn}

@@ -23,25 +23,46 @@ import {
 // Theme
 // ---------------------------------------------------------------------------
 
-/** Glide theme — uses design token hex values */
-export const GLIDE_THEME: Partial<Theme> = {
-  bgCell:            "#0a0a0f",   // surface-base
-  bgCellMedium:      "#16161f",   // surface-card
-  bgHeader:          "#16161f",   // surface-card
-  bgHeaderHasFocus:  "#24242e",   // surface-hover
-  bgHeaderHovered:   "#24242e",   // surface-hover
-  textDark:          "#e4e4e7",   // text-primary
-  textMedium:        "#8b8b95",   // text-secondary
-  textLight:         "#6b6b78",   // text-muted
-  textHeader:        "#8b8b95",   // text-secondary
-  accentColor:       "#6366f1",
-  accentFg:          "#ffffff",
-  borderColor:       "#2a2a3a",   // border-default
-  fontFamily:        "JetBrains Mono, monospace",
-  baseFontStyle:     "11px",
-  headerFontStyle:   "500 10px",
-  editorFontSize:    "11px",
-};
+/** Read a CSS custom property from the document root. */
+function cssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+    fallback
+  );
+}
+
+/**
+ * Glide theme — reads CSS custom properties written by themeStore.applyTheme().
+ * Call this function at render time (not module load time) so values reflect
+ * the active theme. For hook-based usage prefer useGlideTheme().
+ */
+export function getGlideTheme(): Partial<Theme> {
+  return {
+    bgCell:            cssVar("--color-base",           "#0a0a0f"),
+    bgCellMedium:      cssVar("--color-card",           "#16161f"),
+    bgHeader:          cssVar("--color-card",           "#16161f"),
+    bgHeaderHasFocus:  cssVar("--color-hover",          "#24242e"),
+    bgHeaderHovered:   cssVar("--color-hover",          "#24242e"),
+    textDark:          cssVar("--color-text",           "#e4e4e7"),
+    textMedium:        cssVar("--color-text-secondary", "#8b8b95"),
+    textLight:         cssVar("--color-text-muted",     "#6b6b78"),
+    textHeader:        cssVar("--color-text-secondary", "#8b8b95"),
+    accentColor:       cssVar("--color-accent",         "#6366f1"),
+    accentFg:          "#ffffff",
+    borderColor:       cssVar("--color-border",         "#2a2a3a"),
+    fontFamily:        "JetBrains Mono, monospace",
+    baseFontStyle:     "11px",
+    headerFontStyle:   "500 10px",
+    editorFontSize:    "11px",
+  };
+}
+
+/**
+ * @deprecated Use useGlideTheme() hook or getGlideTheme() function instead.
+ * This static export always reflects dark-mode fallback values.
+ */
+export const GLIDE_THEME: Partial<Theme> = getGlideTheme();
 
 // ATM row theme override
 export const ATM_ROW_THEME = { bgCell: "#eab30812", bgCellMedium: "#eab30818" };

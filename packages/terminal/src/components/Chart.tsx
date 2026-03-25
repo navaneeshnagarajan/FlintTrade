@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { createChart, CandlestickSeries, HistogramSeries } from "lightweight-charts";
 import type { IChartApi, ISeriesApi } from "lightweight-charts";
 import { getHistory } from "../services/api";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 
 interface ChartProps {
   symbol?: string;
@@ -27,6 +28,7 @@ export default function Chart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const chartTheme = useLightweightChartTheme();
 
   // Create chart
   useEffect(() => {
@@ -34,21 +36,14 @@ export default function Chart({
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height,
-      layout: { background: { color: "#0a0a0a" }, textColor: "#e5e5e5" },
-      grid: { vertLines: { color: "#1a1a2e" }, horzLines: { color: "#1a1a2e" } },
-      crosshair: { mode: 0 },
-      rightPriceScale: { borderColor: "#2a2a3e" },
-      timeScale: { borderColor: "#2a2a3e", timeVisible: true, secondsVisible: false },
+      layout: chartTheme.layout,
+      grid: chartTheme.grid,
+      crosshair: chartTheme.crosshair,
+      rightPriceScale: chartTheme.rightPriceScale,
+      timeScale: chartTheme.timeScale,
     });
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
+    const candleSeries = chart.addSeries(CandlestickSeries, chartTheme.candle);
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
