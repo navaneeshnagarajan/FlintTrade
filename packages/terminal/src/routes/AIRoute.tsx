@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
-import { CinematicLayout } from "@/components/layout/CinematicLayout";
-import { BlurFade } from "@/components/magicui/blur-fade";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -909,11 +907,9 @@ export default function AIRoute() {
   }
 
   return (
-    <CinematicLayout mode="focused">
     <div className="h-full flex flex-col overflow-hidden">
       {/* Top header bar */}
-      <BlurFade delay={0} duration={0.4}>
-        <div className="border-b border-border-default bg-surface-card px-5 py-3 shrink-0">
+      <div className="border-b border-border-default bg-surface-card px-5 py-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <Bot className="w-5 h-5 text-accent" />
             <div>
@@ -929,8 +925,7 @@ export default function AIRoute() {
               </p>
             </div>
           </div>
-        </div>
-      </BlurFade>
+      </div>
 
       {/* Main content area — relative for overlay positioning */}
       <div className="flex-1 relative overflow-hidden">
@@ -963,6 +958,5 @@ export default function AIRoute() {
         )}
       </div>
     </div>
-    </CinematicLayout>
   );
 }

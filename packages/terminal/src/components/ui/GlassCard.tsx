@@ -30,11 +30,11 @@ export interface GlassCardProps extends React.HTMLAttributes<HTMLDivElement> {
   className?: string;
   /**
    * Override the glass mode.
-   * - undefined (default) → reads themeStore.glass.enabled
+   * - undefined (default) → false (solid card)
    * - true                → force glass on regardless of store
-   * - false               → force glass off regardless of store
+   * - false               → force glass off (solid card)
    */
-  glass?: boolean;
+  glass?: boolean; // default false
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +75,7 @@ export function GlassCard({
   style,
   ...rest
 }: GlassCardProps) {
+  // Only used when glass={true} is explicitly passed — provides blur/transparency values.
   const glassStore = useThemeStore(useShallow((state) => state.glass));
   // Subscribe to stable source fields so the selector only re-renders when
   // the active theme ID or mode actually changes.
@@ -95,7 +96,8 @@ export function GlassCard({
   const variant = getResolvedVariant(activeTheme, resolvedMode);
 
   // Resolve whether glass mode is active for this instance
-  const isGlass = glass !== undefined ? glass : glassStore.enabled;
+  // Default is false (solid card); pass glass={true} to opt in to glassmorphism.
+  const isGlass = glass !== undefined ? glass : false;
 
   if (!isGlass) {
     // Non-glass: standard Card appearance via Tailwind tokens

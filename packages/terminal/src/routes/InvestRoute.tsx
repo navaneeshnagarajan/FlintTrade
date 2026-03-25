@@ -32,9 +32,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
-import { BlurFade } from "@/components/magicui/blur-fade";
-import { TextGenerateEffect } from "@/components/aceternity/text-generate-effect";
-import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { cn } from "@/lib/utils";
 import { InvestProvider, useInvest } from "./invest/InvestContext";
 import {
@@ -116,18 +113,15 @@ function InvestShell() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <BlurFade delay={0} duration={0.5}>
-        <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm shrink-0">
+      <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm shrink-0">
           {/* Title row */}
           <div className="flex items-center justify-between px-6 pt-4 pb-3">
             <div className="flex items-center gap-3" data-tour-target="holdings">
               <TrendingUp className="w-5 h-5 text-profit" />
               <div>
-                <TextGenerateEffect
-                  words={level === "beginner" ? "Your Journey" : "Investor Dashboard"}
-                  className="font-bold text-base text-text-primary"
-                  duration={0.3}
-                />
+                <h1 className="font-heading font-bold text-base text-text-primary">
+                  {level === "beginner" ? "Your Journey" : "Investor Dashboard"}
+                </h1>
                 <p className="text-xxs text-text-muted">
                   {level === "beginner"
                     ? "Track your holdings and build your wealth over time"
@@ -174,8 +168,7 @@ function InvestShell() {
               );
             })}
           </nav>
-        </div>
-      </BlurFade>
+      </div>
 
       {/* Content */}
       {FULL_HEIGHT_TABS.includes(activeTab) ? (
@@ -185,7 +178,7 @@ function InvestShell() {
       ) : (
         <ScrollArea className="flex-1">
           <TabTransition tabKey={activeTab}>
-            <div className="p-6 max-w-5xl">{TAB_CONTENT[activeTab]}</div>
+            <div className="p-6 max-w-5xl mx-auto">{TAB_CONTENT[activeTab]}</div>
           </TabTransition>
         </ScrollArea>
       )}
@@ -205,10 +198,8 @@ function InvestShell() {
 
 export default function InvestRoute() {
   return (
-    <CinematicLayout mode="cinematic">
-      <InvestProvider>
-        <InvestShell />
-      </InvestProvider>
-    </CinematicLayout>
+    <InvestProvider>
+      <InvestShell />
+    </InvestProvider>
   );
 }

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { Workflow } from "lucide-react";
-import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
@@ -74,7 +73,6 @@ export default function AutomateRoute() {
   };
 
   return (
-    <CinematicLayout mode="focused">
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 py-4 shrink-0">
@@ -106,12 +104,11 @@ export default function AutomateRoute() {
         />
 
         <ScrollArea className="flex-1">
-          <TabTransition tabKey={activeSection} className="p-6 max-w-4xl">
+          <TabTransition tabKey={activeSection} className="p-6 max-w-4xl mx-auto">
             {sectionContent[activeSection]}
           </TabTransition>
         </ScrollArea>
       </div>
     </div>
-    </CinematicLayout>
   );
 }

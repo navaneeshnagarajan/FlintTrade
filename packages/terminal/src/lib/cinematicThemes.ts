@@ -1,7 +1,15 @@
 /**
  * cinematicThemes.ts
  *
- * CinematicTheme type system and 6 built-in presets.
+ * CinematicTheme type system and 6 built-in presets (v3).
+ *
+ * v3 canonical themes (6 total):
+ *   graphite       — default; neutral dark with blue-indigo accent
+ *   midnight       — deep navy with sky-blue highlights
+ *   arctic-frost   — slate greys with ice-white crystalline clarity
+ *   monochrome     — pure black/white, zero color distraction
+ *   solarized-dark — warm teal canvas with Solarized palette fidelity
+ *   light          — clean white with indigo accent (light-first theme)
  *
  * Each theme carries both a dark and light ThemeVariant so the user can
  * switch color-mode without changing the theme identity. Per-variant accent
@@ -138,80 +146,81 @@ function hexRgba(hex: string, alpha: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Emerald Night
+// 1. Graphite  (index 0 — default fallback)
 // ---------------------------------------------------------------------------
-const emeraldNight: CinematicTheme = {
-  id: "emerald-night",
-  name: "Emerald Night",
-  description: "Deep black canvas with vibrant green accents",
-  icon: "leaf",
+const graphite: CinematicTheme = {
+  id: "graphite",
+  name: "Graphite",
+  description: "Neutral dark with premium blue-indigo accent",
+  icon: "layers",
 
   dark: {
     colors: {
-      base:          "#0a0a0f",
-      card:          "#13151a",
-      cardHover:     "#1c1f27",
-      border:        "#1e2430",
-      text:          "#e2ffe8",
-      textMuted:     "#7a9a86",
-      textSecondary: "#8ab89a",
-      accent:        "#22c55e",
-      accentText:    "#0a0a0f",
+      base:          "#0b0b0f",
+      card:          "#141418",
+      cardHover:     "#1a1a20",
+      border:        "#28283a",
+      text:          "#e8e8ed",
+      textMuted:     "#9898a5",
+      textSecondary: "#6b6b78",
+      accent:        "#7c8be8",
+      // Dark text on light-indigo accent: #0b0b0f on #7c8be8 = 6.28:1 (WCAG AA pass)
+      accentText:    "#0b0b0f",
     },
     particles: {
-      colors: ["#22c55e", "#16a34a", "#4ade80"],
-      opacity: 0.55,
+      colors: ["#7c8be8", "#5c6bc0", "#9fa8da"],
+      opacity: 0.3,
     },
     glass: {
-      tint:        hexRgba("#0a0a0f", 0.75),
+      tint:        "rgba(20,20,24,0.85)",
       blur:        12,
-      borderAlpha: 0.18,
-      minOpacity:  0.60,
+      borderAlpha: 0.1,
+      minOpacity:  0.80,
     },
     glow: {
-      color:   hexRgba("#22c55e", 0.15),
-      opacity: 0.15,
-      radius:  24,
+      color:   "#7c8be8",
+      opacity: 0.05,
+      radius:  200,
     },
-    shimmerColor: hexRgba("#22c55e", 0.08),
+    shimmerColor: hexRgba("#7c8be8", 0.06),
   },
 
   light: {
     colors: {
-      base:          "#f8faf9",
+      base:          "#f5f5f7",
       card:          "#ffffff",
-      cardHover:     "#edf7f1",
-      border:        "#cce8d6",
-      text:          "#0f2318",
-      textMuted:     "#6a907a",
-      textSecondary: "#3d6b52",
-      accent:        "#15803d",    // Darker green — WCAG AA on #f8faf9
+      cardHover:     "#f0f0f5",
+      border:        "#d0d0da",
+      text:          "#18181b",
+      textMuted:     "#71717a",
+      textSecondary: "#52525b",
+      accent:        "#4f5bd5",
       accentText:    "#ffffff",
     },
     particles: {
-      colors: ["#15803d", "#16a34a", "#4ade80"],
-      opacity: 0.35,
+      colors: ["#4f5bd5", "#3f4bc5", "#6f7be5"],
+      opacity: 0.15,
     },
     glass: {
-      tint:        hexRgba("#f8faf9", 0.80),
-      blur:        10,
-      borderAlpha: 0.20,
-      minOpacity:  0.70,
+      tint:        "rgba(255,255,255,0.90)",
+      blur:        12,
+      borderAlpha: 0.08,
+      minOpacity:  0.90,
     },
     glow: {
-      color:   hexRgba("#15803d", 0.10),
-      opacity: 0.10,
-      radius:  20,
+      color:   "#4f5bd5",
+      opacity: 0.03,
+      radius:  200,
     },
-    shimmerColor: hexRgba("#15803d", 0.06),
+    shimmerColor: hexRgba("#4f5bd5", 0.05),
   },
 
   shared: {
     profit: "#22c55e",
     loss:   "#ef4444",
-    shimmer: { speed: "2.4s" },
+    shimmer: { speed: "2.5s" },
     particles: {
-      quantity:  40,
+      quantity:  35,
       sizeRange: [1, 3],
       behavior:  "drift",
     },
@@ -219,13 +228,13 @@ const emeraldNight: CinematicTheme = {
 };
 
 // ---------------------------------------------------------------------------
-// 2. Ocean Depth
+// 2. Midnight
 // ---------------------------------------------------------------------------
-const oceanDepth: CinematicTheme = {
-  id: "ocean-depth",
-  name: "Ocean Depth",
-  description: "Abyssal blues with sky-blue highlights",
-  icon: "waves",
+const midnight: CinematicTheme = {
+  id: "midnight",
+  name: "Midnight",
+  description: "Deep navy canvas with sky-blue highlights",
+  icon: "moon",
 
   dark: {
     colors: {
@@ -300,171 +309,7 @@ const oceanDepth: CinematicTheme = {
 };
 
 // ---------------------------------------------------------------------------
-// 3. Solar Flare
-// ---------------------------------------------------------------------------
-const solarFlare: CinematicTheme = {
-  id: "solar-flare",
-  name: "Solar Flare",
-  description: "Volcanic dark with fiery orange energy",
-  icon: "sun",
-
-  dark: {
-    colors: {
-      base:          "#0f0a06",
-      card:          "#1a1008",
-      cardHover:     "#251810",
-      border:        "#3a2010",
-      text:          "#fff3e6",
-      textMuted:     "#9a7050",
-      textSecondary: "#c0854a",
-      accent:        "#fb923c",
-      accentText:    "#0f0a06",
-    },
-    particles: {
-      colors: ["#fb923c", "#f97316", "#fdba74"],
-      opacity: 0.52,
-    },
-    glass: {
-      tint:        hexRgba("#0f0a06", 0.76),
-      blur:        12,
-      borderAlpha: 0.20,
-      minOpacity:  0.60,
-    },
-    glow: {
-      color:   hexRgba("#fb923c", 0.14),
-      opacity: 0.14,
-      radius:  26,
-    },
-    shimmerColor: hexRgba("#fb923c", 0.07),
-  },
-
-  light: {
-    colors: {
-      base:          "#fffbf5",
-      card:          "#ffffff",
-      cardHover:     "#fff3e0",
-      border:        "#f5d8b0",
-      text:          "#1f0e00",
-      textMuted:     "#8a5520",
-      textSecondary: "#6b3e10",
-      accent:        "#c2410c",    // Darker burnt orange — WCAG AA on #fffbf5
-      accentText:    "#ffffff",
-    },
-    particles: {
-      colors: ["#c2410c", "#ea580c", "#fdba74"],
-      opacity: 0.28,
-    },
-    glass: {
-      tint:        hexRgba("#fffbf5", 0.83),
-      blur:        10,
-      borderAlpha: 0.18,
-      minOpacity:  0.70,
-    },
-    glow: {
-      color:   hexRgba("#c2410c", 0.08),
-      opacity: 0.08,
-      radius:  18,
-    },
-    shimmerColor: hexRgba("#c2410c", 0.05),
-  },
-
-  shared: {
-    profit: "#22c55e",
-    loss:   "#ef4444",
-    shimmer: { speed: "2.2s" },
-    particles: {
-      quantity:  35,
-      sizeRange: [1, 3],
-      behavior:  "drift",
-    },
-  },
-};
-
-// ---------------------------------------------------------------------------
-// 4. Neon Pulse
-// ---------------------------------------------------------------------------
-const neonPulse: CinematicTheme = {
-  id: "neon-pulse",
-  name: "Neon Pulse",
-  description: "Cyberpunk violet with electric purple glow",
-  icon: "zap",
-
-  dark: {
-    colors: {
-      base:          "#0a0610",
-      card:          "#120a1e",
-      cardHover:     "#1c102c",
-      border:        "#2e1650",
-      text:          "#f0e8ff",
-      textMuted:     "#8068b0",
-      textSecondary: "#9870c8",
-      accent:        "#a855f7",
-      accentText:    "#0a0610",
-    },
-    particles: {
-      colors: ["#a855f7", "#9333ea", "#d8b4fe"],
-      opacity: 0.58,
-    },
-    glass: {
-      tint:        hexRgba("#0a0610", 0.78),
-      blur:        16,
-      borderAlpha: 0.22,
-      minOpacity:  0.60,
-    },
-    glow: {
-      color:   hexRgba("#a855f7", 0.18),
-      opacity: 0.18,
-      radius:  32,
-    },
-    shimmerColor: hexRgba("#a855f7", 0.08),
-  },
-
-  light: {
-    colors: {
-      base:          "#faf5ff",
-      card:          "#ffffff",
-      cardHover:     "#f3e8ff",
-      border:        "#ddb6f8",
-      text:          "#1a0530",
-      textMuted:     "#7048a0",
-      textSecondary: "#5b2e8a",
-      accent:        "#7c3aed",    // Darker violet — WCAG AA on #faf5ff
-      accentText:    "#ffffff",
-    },
-    particles: {
-      colors: ["#7c3aed", "#9333ea", "#d8b4fe"],
-      opacity: 0.32,
-    },
-    glass: {
-      tint:        hexRgba("#faf5ff", 0.82),
-      blur:        12,
-      borderAlpha: 0.20,
-      minOpacity:  0.70,
-    },
-    glow: {
-      color:   hexRgba("#7c3aed", 0.10),
-      opacity: 0.10,
-      radius:  22,
-    },
-    shimmerColor: hexRgba("#7c3aed", 0.06),
-  },
-
-  shared: {
-    profit: "#22c55e",
-    loss:   "#ef4444",
-    shimmer: { speed: "1.8s" },
-    particles: {
-      quantity:  50,
-      sizeRange: [1, 3],
-      behavior:  "pulse",
-      maxPulseFrequencyHz: 2.0,
-      pulseTransitionMs:   500,
-    },
-  },
-};
-
-// ---------------------------------------------------------------------------
-// 5. Arctic Frost
+// 3. Arctic Frost
 // ---------------------------------------------------------------------------
 const arcticFrost: CinematicTheme = {
   id: "arctic-frost",
@@ -545,80 +390,244 @@ const arcticFrost: CinematicTheme = {
 };
 
 // ---------------------------------------------------------------------------
-// 6. Blood Moon
+// 4. Monochrome
 // ---------------------------------------------------------------------------
-const bloodMoon: CinematicTheme = {
-  id: "blood-moon",
-  name: "Blood Moon",
-  description: "Crimson-tinged dark for high-intensity sessions",
-  icon: "moon",
+const monochrome: CinematicTheme = {
+  id: "monochrome",
+  name: "Monochrome",
+  description: "Pure black and white — zero color distraction",
+  icon: "circle",
 
   dark: {
     colors: {
-      base:          "#0a0606",
-      card:          "#170808",
-      cardHover:     "#220c0c",
-      border:        "#3a1010",
-      text:          "#ffe8e8",
-      textMuted:     "#9a5050",
-      textSecondary: "#c05050",
-      accent:        "#dc2626",
-      accentText:    "#fff0f0",
+      base:          "#0a0a0a",
+      card:          "#141414",
+      cardHover:     "#1e1e1e",
+      border:        "#2e2e2e",
+      text:          "#f0f0f0",
+      textMuted:     "#888888",
+      textSecondary: "#666666",
+      accent:        "#d0d0d0",
+      accentText:    "#0a0a0a",
     },
     particles: {
-      colors: ["#dc2626", "#b91c1c", "#fca5a5"],
-      opacity: 0.50,
+      colors: ["#d0d0d0", "#888888", "#f0f0f0"],
+      opacity: 0.25,
     },
     glass: {
-      tint:        hexRgba("#0a0606", 0.76),
-      blur:        12,
-      borderAlpha: 0.22,
-      minOpacity:  0.60,
+      tint:        hexRgba("#0a0a0a", 0.85),
+      blur:        10,
+      borderAlpha: 0.12,
+      minOpacity:  0.80,
     },
     glow: {
-      color:   hexRgba("#dc2626", 0.16),
-      opacity: 0.16,
-      radius:  28,
+      color:   hexRgba("#d0d0d0", 0.06),
+      opacity: 0.06,
+      radius:  160,
     },
-    shimmerColor: hexRgba("#dc2626", 0.07),
+    shimmerColor: hexRgba("#d0d0d0", 0.05),
   },
 
   light: {
     colors: {
-      base:          "#fff5f5",
+      base:          "#f9f9f9",
       card:          "#ffffff",
-      cardHover:     "#ffe8e8",
-      border:        "#fcc0c0",
-      text:          "#200808",
-      textMuted:     "#8a3030",
-      textSecondary: "#6b1818",
-      accent:        "#b91c1c",    // Darker red — WCAG AA on #fff5f5
+      cardHover:     "#f0f0f0",
+      border:        "#d8d8d8",
+      text:          "#0a0a0a",
+      textMuted:     "#707070",
+      textSecondary: "#505050",
+      accent:        "#303030",   // Dark charcoal — WCAG AA on #f9f9f9
       accentText:    "#ffffff",
     },
     particles: {
-      colors: ["#b91c1c", "#dc2626", "#fca5a5"],
-      opacity: 0.28,
+      colors: ["#303030", "#606060", "#a0a0a0"],
+      opacity: 0.18,
     },
     glass: {
-      tint:        hexRgba("#fff5f5", 0.83),
-      blur:        10,
-      borderAlpha: 0.18,
-      minOpacity:  0.70,
+      tint:        hexRgba("#f9f9f9", 0.88),
+      blur:        8,
+      borderAlpha: 0.10,
+      minOpacity:  0.88,
     },
     glow: {
-      color:   hexRgba("#b91c1c", 0.08),
-      opacity: 0.08,
-      radius:  18,
+      color:   hexRgba("#303030", 0.04),
+      opacity: 0.04,
+      radius:  120,
     },
-    shimmerColor: hexRgba("#b91c1c", 0.05),
+    shimmerColor: hexRgba("#303030", 0.04),
   },
 
   shared: {
     profit: "#22c55e",
     loss:   "#ef4444",
-    shimmer: { speed: "2.0s" },
+    shimmer: { speed: "3.0s" },
     particles: {
-      quantity:  38,
+      quantity:  25,
+      sizeRange: [1, 2],
+      behavior:  "drift",
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// 5. Solarized Dark
+// ---------------------------------------------------------------------------
+const solarizedDark: CinematicTheme = {
+  id: "solarized-dark",
+  name: "Solarized Dark",
+  description: "Warm teal canvas with Solarized palette fidelity",
+  icon: "sun",
+
+  dark: {
+    colors: {
+      base:          "#002b36",  // solarized base03
+      card:          "#073642",  // solarized base02
+      cardHover:     "#0d4050",
+      border:        "#124f5e",
+      text:          "#839496",  // solarized base0
+      textMuted:     "#657b83",  // solarized base00
+      textSecondary: "#586e75",  // solarized base01
+      accent:        "#268bd2",  // solarized blue
+      accentText:    "#fdf6e3",
+    },
+    particles: {
+      colors: ["#268bd2", "#2aa198", "#859900"],
+      opacity: 0.35,
+    },
+    glass: {
+      tint:        hexRgba("#002b36", 0.82),
+      blur:        12,
+      borderAlpha: 0.16,
+      minOpacity:  0.75,
+    },
+    glow: {
+      color:   hexRgba("#268bd2", 0.10),
+      opacity: 0.10,
+      radius:  180,
+    },
+    shimmerColor: hexRgba("#268bd2", 0.07),
+  },
+
+  light: {
+    colors: {
+      base:          "#fdf6e3",  // solarized base3
+      card:          "#eee8d5",  // solarized base2
+      cardHover:     "#e6e0cc",
+      border:        "#d4cdb8",
+      text:          "#657b83",  // solarized base00
+      textMuted:     "#839496",  // solarized base0
+      textSecondary: "#93a1a1",  // solarized base1
+      accent:        "#268bd2",  // solarized blue — WCAG AA on #fdf6e3 (~4.6:1)
+      accentText:    "#fdf6e3",
+    },
+    particles: {
+      colors: ["#268bd2", "#2aa198", "#859900"],
+      opacity: 0.20,
+    },
+    glass: {
+      tint:        hexRgba("#fdf6e3", 0.88),
+      blur:        10,
+      borderAlpha: 0.14,
+      minOpacity:  0.85,
+    },
+    glow: {
+      color:   hexRgba("#268bd2", 0.06),
+      opacity: 0.06,
+      radius:  140,
+    },
+    shimmerColor: hexRgba("#268bd2", 0.05),
+  },
+
+  shared: {
+    profit: "#22c55e",
+    loss:   "#ef4444",
+    shimmer: { speed: "2.8s" },
+    particles: {
+      quantity:  30,
+      sizeRange: [1, 3],
+      behavior:  "float",
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// 6. Light
+// ---------------------------------------------------------------------------
+const light: CinematicTheme = {
+  id: "light",
+  name: "Light",
+  description: "Clean white canvas with indigo accent — maximum readability",
+  icon: "sun",
+
+  dark: {
+    // Dark variant of the "Light" theme — soft off-white for reduced-glare environments
+    colors: {
+      base:          "#1a1a24",
+      card:          "#22222e",
+      cardHover:     "#2a2a38",
+      border:        "#38384a",
+      text:          "#e8e8f0",
+      textMuted:     "#9090a8",
+      textSecondary: "#686880",
+      accent:        "#818cf8",   // indigo-400 — vivid on dark base
+      accentText:    "#ffffff",
+    },
+    particles: {
+      colors: ["#818cf8", "#6366f1", "#a5b4fc"],
+      opacity: 0.25,
+    },
+    glass: {
+      tint:        hexRgba("#1a1a24", 0.88),
+      blur:        12,
+      borderAlpha: 0.10,
+      minOpacity:  0.82,
+    },
+    glow: {
+      color:   hexRgba("#818cf8", 0.06),
+      opacity: 0.06,
+      radius:  180,
+    },
+    shimmerColor: hexRgba("#818cf8", 0.06),
+  },
+
+  light: {
+    // Light variant is the primary mode for this theme
+    colors: {
+      base:          "#ffffff",
+      card:          "#f9f9fb",
+      cardHover:     "#f0f0f8",
+      border:        "#e0e0ec",
+      text:          "#18181b",
+      textMuted:     "#71717a",
+      textSecondary: "#52525b",
+      accent:        "#4f46e5",   // indigo-600 — WCAG AA on #ffffff (~7:1)
+      accentText:    "#ffffff",
+    },
+    particles: {
+      colors: ["#4f46e5", "#6366f1", "#a5b4fc"],
+      opacity: 0.18,
+    },
+    glass: {
+      tint:        "rgba(255,255,255,0.92)",
+      blur:        10,
+      borderAlpha: 0.08,
+      minOpacity:  0.92,
+    },
+    glow: {
+      color:   hexRgba("#4f46e5", 0.04),
+      opacity: 0.04,
+      radius:  160,
+    },
+    shimmerColor: hexRgba("#4f46e5", 0.05),
+  },
+
+  shared: {
+    profit: "#22c55e",
+    loss:   "#ef4444",
+    shimmer: { speed: "2.5s" },
+    particles: {
+      quantity:  30,
       sizeRange: [1, 3],
       behavior:  "drift",
     },
@@ -626,16 +635,16 @@ const bloodMoon: CinematicTheme = {
 };
 
 // ---------------------------------------------------------------------------
-// Registry
+// Registry (v3 — exactly 6 canonical themes)
 // ---------------------------------------------------------------------------
 
 export const CINEMATIC_THEMES: readonly CinematicTheme[] = [
-  emeraldNight,
-  oceanDepth,
-  solarFlare,
-  neonPulse,
+  graphite,       // index 0 — default fallback
+  midnight,
   arcticFrost,
-  bloodMoon,
+  monochrome,
+  solarizedDark,
+  light,
 ] as const;
 
 /** Look up a cinematic theme by id. Returns undefined if not found. */

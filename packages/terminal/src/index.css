@@ -1,7 +1,4 @@
 @import "tailwindcss";
-@import "./themes/obsidian.css";
-@import "./themes/terminal-green.css";
-@import "./themes/ocean-blue.css";
 @import "./themes/light.css";
 
 /* ---------- Geist font (variable, from geist npm package) ---------- */
@@ -81,6 +78,20 @@
     --color-neutral-text: #3b82f6;
     --color-itm-text: #22c55e;
     --color-otm-text: #f97315;
+
+    /* Surface hierarchy — Structured Calm (v0.3.0) */
+    --color-surface-floating: #242430;
+    --shadow-raised: none;
+    --shadow-elevated: 0 4px 16px rgba(0,0,0,0.4);
+    --shadow-floating: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+
+    /* Typography scale */
+    --data-hero: 2.25rem;
+    --data-primary: 1.25rem;
+    --data-cell: 0.8125rem;
+    --title-route: 1.5rem;
+    --title-section: 1.125rem;
+    --title-card: 0.9375rem;
   }
 
   /* Prevent flash of dark colors when OS preference is light.
@@ -99,6 +110,10 @@
       /* WCAG AA contrast on white backgrounds (4.5:1 minimum) */
       --color-profit: #16a34a;
       --color-loss: #dc2626;
+      --color-surface-floating: #ffffff;
+      --shadow-raised: 0 1px 3px rgba(0,0,0,0.08);
+      --shadow-elevated: 0 4px 12px rgba(0,0,0,0.12);
+      --shadow-floating: 0 8px 24px rgba(0,0,0,0.16);
     }
   }
 }
@@ -181,6 +196,43 @@
 
   --color-itm-text: var(--color-itm-text);
   --color-otm-text: var(--color-otm-text);
+
+  /* --- Surface hierarchy (v0.3.0) --- */
+  --color-surface-floating: var(--color-surface-floating);
+
+  /* --- Shadow scale --- */
+  --shadow-raised: var(--shadow-raised);
+  --shadow-elevated: var(--shadow-elevated);
+  --shadow-floating: var(--shadow-floating);
+
+  /* --- Typography scale --- */
+  --data-hero: var(--data-hero);
+  --data-primary: var(--data-primary);
+  --data-cell: var(--data-cell);
+  --title-route: var(--title-route);
+  --title-section: var(--title-section);
+  --title-card: var(--title-card);
+}
+
+/* ---------- Density overrides for typography scale ---------- */
+[data-density="compact"] {
+  --data-hero: 1.75rem;
+  --data-primary: 1rem;
+  --title-route: 1.25rem;
+}
+
+/* ---------- Elevation layers ---------- */
+[data-elevation="1"] {
+  background-color: var(--color-surface-card);
+}
+[data-elevation="2"] {
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-elevated);
+}
+[data-elevation="3"] {
+  background-color: var(--color-surface-floating);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(8px);
 }
 
 /* ---------- Responsive breakpoints ---------- */
@@ -291,14 +343,6 @@ html.density-compact {
   animation: fade-in-scale 0.3s ease-out both;
 }
 
-@utility hover-lift {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  }
-}
-
 /* ---------- Option chain cell flash animations ---------- */
 @keyframes cell-flash-up {
   0% { background-color: rgba(34, 197, 94, 0.3); }
@@ -308,8 +352,8 @@ html.density-compact {
   0% { background-color: rgba(239, 68, 68, 0.3); }
   100% { background-color: transparent; }
 }
-.cell-flash-up { animation: cell-flash-up 0.5s ease-out; }
-.cell-flash-down { animation: cell-flash-down 0.5s ease-out; }
+.cell-flash-up { animation: cell-flash-up 0.3s ease-out; }
+.cell-flash-down { animation: cell-flash-down 0.3s ease-out; }
 
 /* ---------- Dockview theme overrides — compact, content-first ---------- */
 .dockview-theme-dark {
@@ -365,6 +409,46 @@ html.theme-light .dockview-theme-dark {
   --dv-paneview-header-border-color: var(--color-border-default);
   --dv-background-color: var(--color-surface-base);
   --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* ---------- react-resizable-panels separator (sash) styling ---------- */
+/* The Separator component renders a div with data-separator attribute.
+   These rules give visual feedback on hover/drag without relying on inline
+   Tailwind classes that might be purged in production builds. */
+[data-separator] {
+  background-color: var(--color-border-default);
+  transition: background-color 150ms ease;
+  position: relative;
+  z-index: 10;
+  /* Widen the interactive hit area beyond the visual 1px/4px rule */
+  flex-shrink: 0;
+}
+[data-separator]:hover,
+[data-separator]:focus-visible {
+  background-color: var(--color-primary);
+  opacity: 0.5;
+}
+[data-separator][data-resize-handle-state="drag"] {
+  background-color: var(--color-primary);
+  opacity: 0.8;
+}
+/* Reduce motion: skip transitions on the drag handle */
+@media (prefers-reduced-motion: reduce) {
+  [data-separator] {
+    transition: none;
+  }
+}
+
+/* ---------- Focus ring animation (WCAG 2.4.7) ---------- */
+@keyframes ring-scale-in {
+  from { outline-width: 0; outline-offset: 4px; }
+  to { outline-width: 3px; outline-offset: 2px; }
+}
+
+*:focus-visible {
+  animation: ring-scale-in 200ms ease-out forwards;
+  outline-color: var(--color-accent);
+  outline-style: solid;
 }
 
 /* ---------- Reduced motion respect (WCAG 2.3.3) ---------- */

@@ -4,9 +4,6 @@ import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { motion, AnimatePresence } from "framer-motion";
-import { CinematicLayout } from "@/components/layout/CinematicLayout";
-import { BlurFade } from "@/components/magicui/blur-fade";
-import { TextGenerateEffect } from "@/components/aceternity/text-generate-effect";
 import {
   BookOpen,
   GraduationCap,
@@ -27,7 +24,6 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { GlassCard } from "@/components/ui/GlassCard";
 import TabTransition from "@/components/motion/TabTransition";
-import { StaggeredList } from "@/components/motion/StaggeredList";
 import { motionConfig } from "@/lib/motion";
 
 // ---------------------------------------------------------------------------
@@ -244,11 +240,11 @@ function difficultyColor(d: "Beginner" | "Intermediate" | "Advanced"): string {
 
 function BasicsTab() {
   return (
-    <StaggeredList className="space-y-5" staggerDelay={50}>
+    <div className="space-y-5 animate-fade-in">
       {BASICS_SECTIONS.map((section) => (
         <GlassCard
           key={section.title}
-          className="rounded-lg p-6 hover:-translate-y-0.5 transition-transform duration-200 cursor-default"
+          className="rounded-lg p-6 hover:border-border-strong transition-colors duration-150 cursor-default"
         >
           {/* Header row */}
           <div className="flex items-start justify-between gap-3 mb-3">
@@ -268,7 +264,7 @@ function BasicsTab() {
           <p className="text-sm text-text-secondary leading-relaxed">{section.content}</p>
         </GlassCard>
       ))}
-    </StaggeredList>
+    </div>
   );
 }
 
@@ -290,7 +286,7 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
       aria-expanded={open}
       className="w-full text-left"
     >
-      <GlassCard className="rounded-lg p-0 overflow-hidden hover:-translate-y-0.5 transition-transform duration-200">
+      <GlassCard className="rounded-lg p-0 overflow-hidden hover:border-border-strong transition-colors duration-150">
         {/* Accordion header */}
         <div className="flex items-center gap-3 px-4 py-3">
           <span className="text-sm font-mono font-semibold text-accent shrink-0 w-28 truncate">
@@ -353,14 +349,14 @@ function GlossaryTab() {
         />
       </div>
 
-      <StaggeredList className="space-y-2" staggerDelay={30}>
+      <div className="space-y-2 animate-fade-in">
         {filtered.map((entry) => (
           <GlossaryItem key={entry.term} entry={entry} />
         ))}
         {filtered.length === 0 && (
           <p className="text-sm text-text-muted text-center py-8">No matching terms</p>
         )}
-      </StaggeredList>
+      </div>
     </div>
   );
 }
@@ -383,7 +379,7 @@ function StrategyCardItem({ s }: StrategyCardItemProps) {
       aria-expanded={expanded}
       className="w-full text-left"
     >
-      <GlassCard className="rounded-lg p-4 hover:-translate-y-0.5 transition-transform duration-200 cursor-pointer">
+      <GlassCard className="rounded-lg p-4 hover:border-border-strong transition-colors duration-150 cursor-pointer">
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-semibold text-text-primary">{s.name}</h4>
           <div className="flex items-center gap-2">
@@ -443,18 +439,18 @@ function StrategiesTab() {
         ))}
       </div>
 
-      <StaggeredList className="grid grid-cols-1 md:grid-cols-2 gap-3" staggerDelay={40}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
         {filtered.map((s) => (
           <StrategyCardItem key={s.name} s={s} />
         ))}
-      </StaggeredList>
+      </div>
     </div>
   );
 }
 
 function PaperTradingTab() {
   return (
-    <StaggeredList className="space-y-6" staggerDelay={60}>
+    <div className="space-y-6 animate-fade-in">
       <GlassCard className="rounded-lg p-6">
         <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">
           What is Paper Trading?
@@ -496,13 +492,13 @@ function PaperTradingTab() {
           </div>
         </div>
       </GlassCard>
-    </StaggeredList>
+    </div>
   );
 }
 
 function VideoHubTab() {
   return (
-    <StaggeredList className="grid grid-cols-1 md:grid-cols-2 gap-3" staggerDelay={50}>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
       {VIDEOS.map((v) => (
         <a
           key={v.title}
@@ -511,7 +507,7 @@ function VideoHubTab() {
           rel="noopener noreferrer"
           className="block"
         >
-          <GlassCard className="rounded-lg p-4 hover:-translate-y-0.5 transition-transform duration-200 cursor-pointer">
+          <GlassCard className="rounded-lg p-4 hover:border-border-strong transition-colors duration-150 cursor-pointer">
             <div className="flex items-start gap-3">
               <PlayCircle className="w-8 h-8 text-red-500 shrink-0 mt-0.5" />
               <div className="min-w-0">
@@ -526,7 +522,7 @@ function VideoHubTab() {
           </GlassCard>
         </a>
       ))}
-    </StaggeredList>
+    </div>
   );
 }
 
@@ -642,19 +638,15 @@ export default function LearnRoute() {
   }), []);
 
   return (
-    <CinematicLayout mode="cinematic">
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <BlurFade delay={0} duration={0.5}>
-        <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm px-6 py-4" data-tour-target="course-list">
+      <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm px-6 py-4" data-tour-target="course-list">
           <div className="flex items-center gap-3">
             <GraduationCap className="w-6 h-6 text-accent" />
             <div>
-              <TextGenerateEffect
-                words={level === "beginner" ? "Getting Started" : "Learning Center"}
-                className="font-bold text-lg text-text-primary"
-                duration={0.3}
-              />
+              <h1 className="font-heading font-bold text-lg text-text-primary">
+                {level === "beginner" ? "Getting Started" : "Learning Center"}
+              </h1>
               <p className="text-xxs text-text-muted">
                 {level === "beginner"
                   ? "Learn the basics of trading — one lesson at a time"
@@ -662,8 +654,7 @@ export default function LearnRoute() {
               </p>
             </div>
           </div>
-        </div>
-      </BlurFade>
+      </div>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Collapsible sidebar */}
@@ -707,7 +698,7 @@ export default function LearnRoute() {
 
         {/* Content area */}
         <ScrollArea className="flex-1">
-          <div role="tabpanel" className="p-6 max-w-4xl">
+          <div role="tabpanel" className="p-6 max-w-4xl mx-auto">
             <TabTransition tabKey={activeTab}>
               {tabContent[activeTab]}
             </TabTransition>
@@ -723,6 +714,5 @@ export default function LearnRoute() {
         />
       )}
     </div>
-    </CinematicLayout>
   );
 }

@@ -7,23 +7,20 @@
 
 import { useNavigate } from "react-router-dom";
 import { LogoIcon } from "@/components/brand/Logo";
-import { BlurFade } from "@/components/magicui/blur-fade";
 
 export default function NotFoundRoute() {
   const navigate = useNavigate();
 
   return (
     <main aria-label="Page not found" className="fixed inset-0 bg-surface-base flex items-center justify-center p-6 overflow-y-auto">
-      <BlurFade delay={0} duration={0.4}>
-        <div className="max-w-md w-full text-center space-y-6">
+      <div className="max-w-md w-full text-center space-y-6 animate-fade-in">
           {/* Logo */}
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-text-muted" />
           </div>
 
           {/* Status code */}
-          <BlurFade delay={0.1} duration={0.4}>
-            <div className="space-y-2">
+          <div className="space-y-2">
               <p className="font-heading font-bold text-text-disabled text-7xl tracking-tight select-none">
                 404
               </p>
@@ -33,12 +30,10 @@ export default function NotFoundRoute() {
               <p className="text-text-muted text-sm leading-relaxed">
                 The page you&apos;re looking for doesn&apos;t exist.
               </p>
-            </div>
-          </BlurFade>
+          </div>
 
           {/* Actions */}
-          <BlurFade delay={0.2} duration={0.4}>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
               <button
                 type="button"
                 onClick={() => navigate("/")}
@@ -53,10 +48,8 @@ export default function NotFoundRoute() {
               >
                 Explore
               </button>
-            </div>
-          </BlurFade>
-        </div>
-      </BlurFade>
+          </div>
+      </div>
     </main>
   );
 }
