@@ -108,7 +108,9 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
   }
 
   const ltp = tick.ltp ?? 0;
-  const prevClose = tick.close ?? 0;
+  // Prefer prevClose (REST-fetched by usePrevClose) — tick.close is undefined
+  // in LTP WebSocket mode. Fall back to tick.close for quote/fallback modes.
+  const prevClose = tick.prevClose ?? tick.close ?? 0;
   const open = tick.open ?? prevClose;
   const high = tick.high ?? ltp;
   const low = tick.low ?? ltp;

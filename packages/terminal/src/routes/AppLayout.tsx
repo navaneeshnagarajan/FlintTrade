@@ -6,6 +6,7 @@ import TickerBar from "@/chrome/TickerBar";
 import InteractiveTour from "@/components/tour/InteractiveTour";
 import { useWsBridge } from "@/hooks/useWsBridge";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
+import { usePrevClose } from "@/hooks/usePrevClose";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 
@@ -55,6 +56,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
 export default function AppLayout() {
   useWsBridge();         // WebSocket connection (no-ops if no apiKey)
   useTickerFallback();   // REST polling fallback when WS is disconnected
+  usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   const location = useLocation();
   const [showWelcome, setShowWelcome] = useState(true);
   const [tourComplete, setTourComplete] = useState(

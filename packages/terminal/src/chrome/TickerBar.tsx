@@ -16,9 +16,20 @@ function hasAnyLiveData(indices: { data: WsTick | null }[]): boolean {
 
 function IndexChip({ name, data }: IndexChipProps) {
   const ltp = data?.ltp ?? null;
-  const change = data?.change ?? 0;
-  const pct = data?.pct ?? 0;
-  const isUp = change >= 0;
+  // Prefer prevClose (fetched from REST by usePrevClose hook) for accurate change%.
+  // LTP-mode WebSocket does not send close/change/pct — those fields are always
+  // undefined in real-time mode. Fall back to data.change/pct only if prevClose
+  // is not yet available (e.g. first render before REST resolves).
+  const prevClose = data?.prevClose ?? data?.close ?? null;
+  const change =
+    prevClose !== null && prevClose > 0 && ltp !== null
+      ? ltp - prevClose
+      : (data?.change ?? null);
+  const pct =
+    prevClose !== null && prevClose > 0 && ltp !== null
+      ? ((ltp - prevClose) / prevClose) * 100
+      : (data?.pct ?? null);
+  const isUp = (change ?? 0) >= 0;
 
   // Track previous LTP to detect price direction changes
   const prevLtpRef = useRef<number | null>(null);
@@ -76,7 +87,7 @@ function IndexChip({ name, data }: IndexChipProps) {
             })
           : "\u2014"}
       </span>
-      {ltp !== null && (
+      {ltp !== null && pct !== null ? (
         <span
           className={`text-xs font-mono tabular-nums rounded px-1 ${
             isUp ? "bg-bullish-bg text-bullish-text" : "bg-bearish-bg text-bearish-text"
@@ -84,7 +95,9 @@ function IndexChip({ name, data }: IndexChipProps) {
         >
           {isUp ? "\u25b2" : "\u25bc"}{Math.abs(pct).toFixed(2)}%
         </span>
-      )}
+      ) : ltp !== null ? (
+        <span className="text-xs text-text-disabled">\u2014</span>
+      ) : null}
     </div>
   );
 }

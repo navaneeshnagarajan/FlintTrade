@@ -333,6 +333,12 @@ export interface WsTick {
   volume?: number;
   change?: number;
   pct?: number;
+  /**
+   * Previous session close price, fetched from REST /quotes on mount.
+   * Not sent by WebSocket LTP mode — populated by usePrevClose hook.
+   * Used to compute change% = (ltp - prevClose) / prevClose * 100.
+   */
+  prevClose?: number;
 }
 
 export type WsMode = "ltp" | "quote" | "depth";

@@ -71,7 +71,13 @@ function PriceChip({ instrument }: PriceChipProps) {
   const tick = useAtomValue(tickAtomFamily(key));
 
   const ltp = tick?.ltp ?? null;
-  const pct = tick?.pct ?? null;
+  // Prefer prevClose (from usePrevClose REST fetch) for accurate change%.
+  // LTP-mode WebSocket does not send close/pct — compute from prevClose + live LTP.
+  const prevClose = tick?.prevClose ?? tick?.close ?? null;
+  const pct =
+    prevClose !== null && prevClose > 0 && ltp !== null
+      ? ((ltp - prevClose) / prevClose) * 100
+      : (tick?.pct ?? null);
   const isUp = pct == null ? null : pct >= 0;
 
   const priceColor =
