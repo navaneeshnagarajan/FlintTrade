@@ -18,6 +18,16 @@
  *   - On failure we log a warning and leave atoms unchanged — TickerBar will
  *     show "—" instead of a misleading 0.00%.
  *
+ * Field mapping:
+ *   OpenAlgo returns `prev_close` (previous session close) and `close`
+ *   (current session OHLC close). We read `prev_close` first; if absent we
+ *   fall back to `close`. This handles broker adapters that conflate the two.
+ *
+ * Fallback strategy:
+ *   If `multiquotes` fails (network error, rate limit) or returns fewer
+ *   results than expected, we retry with individual `getQuotes()` calls
+ *   staggered at 100ms intervals to stay within the 50/s general rate limit.
+ *
  * This hook is called in AppLayout.tsx alongside useWsBridge and
  * useTickerFallback. It is a no-op when the API key is not configured.
  */
@@ -27,8 +37,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useStore } from "jotai";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { getMultiQuotes } from "@/services/api";
-import type { WsInstrument } from "@/types/api";
+import { getMultiQuotes, getQuotes } from "@/services/api";
+import type { Quote, WsInstrument } from "@/types/api";
 
 /** All instruments shown in TickerBar — must match useWsBridge INDEX_INSTRUMENTS + MCX list. */
 const TICKER_INSTRUMENTS: WsInstrument[] = [
@@ -49,19 +59,80 @@ const TICKER_INSTRUMENTS: WsInstrument[] = [
 const STALE_TIME_MS = 5 * 60 * 1000;
 
 /**
- * Fetches previous close for TICKER_INSTRUMENTS.
- * Returns a map of "{exchange}:{symbol}" → prevClose (number).
- * Instruments that fail are omitted silently.
+ * Extracts the previous close price from a Quote response.
+ * OpenAlgo returns `prev_close` (previous session close). Some broker
+ * adapters omit it and use `close` instead — we fall back to that.
+ * Returns undefined if neither field is a positive number.
  */
-async function fetchPrevClose(): Promise<Map<string, number>> {
-  const quotes = await getMultiQuotes(TICKER_INSTRUMENTS);
+function extractPrevClose(q: Quote): number | undefined {
+  if (typeof q.prev_close === "number" && q.prev_close > 0) return q.prev_close;
+  if (typeof q.close === "number" && q.close > 0) return q.close;
+  return undefined;
+}
+
+/**
+ * Fallback: fetch previous close for each instrument individually.
+ * Staggered at 100ms intervals to avoid saturating the 50/s rate limit
+ * when multiquotes is unavailable or returns partial data.
+ */
+async function fetchPrevCloseIndividually(
+  missing: WsInstrument[],
+): Promise<Map<string, number>> {
   const map = new Map<string, number>();
-  if (!Array.isArray(quotes)) return map;
-  for (const q of quotes) {
-    if (q.symbol && q.exchange && typeof q.close === "number" && q.close > 0) {
-      map.set(`${q.exchange}:${q.symbol}`, q.close);
+  for (let i = 0; i < missing.length; i++) {
+    const { symbol, exchange } = missing[i];
+    try {
+      // Stagger requests: 0ms, 100ms, 200ms …
+      if (i > 0) await new Promise((r) => setTimeout(r, 100));
+      const q = await getQuotes(symbol, exchange);
+      const prevClose = extractPrevClose(q);
+      if (prevClose !== undefined) {
+        map.set(`${exchange}:${symbol}`, prevClose);
+      }
+    } catch {
+      // Skip this instrument — not a fatal error
     }
   }
+  return map;
+}
+
+/**
+ * Fetches previous close for TICKER_INSTRUMENTS.
+ * Tries multiquotes first; falls back to individual getQuotes calls if
+ * multiquotes fails or returns an empty array.
+ * Returns a map of "{exchange}:{symbol}" → prevClose (number).
+ */
+async function fetchPrevClose(): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+
+  // --- Primary path: multiquotes ---
+  let quotes: Quote[] = [];
+  try {
+    const result = await getMultiQuotes(TICKER_INSTRUMENTS);
+    if (Array.isArray(result)) quotes = result;
+  } catch {
+    // multiquotes failed — fall through to individual fallback below
+  }
+
+  for (const q of quotes) {
+    if (!q.symbol || !q.exchange) continue;
+    const prevClose = extractPrevClose(q);
+    if (prevClose !== undefined) {
+      map.set(`${q.exchange}:${q.symbol}`, prevClose);
+    }
+  }
+
+  // --- Fallback path: individual getQuotes for any missing instruments ---
+  const missing = TICKER_INSTRUMENTS.filter(
+    ({ symbol, exchange }) => !map.has(`${exchange}:${symbol}`),
+  );
+  if (missing.length > 0) {
+    const fallbackMap = await fetchPrevCloseIndividually(missing);
+    for (const [key, val] of fallbackMap) {
+      map.set(key, val);
+    }
+  }
+
   return map;
 }
 
