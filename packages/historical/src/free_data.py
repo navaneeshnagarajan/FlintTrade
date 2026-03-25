@@ -118,18 +118,22 @@ class NSEData:
                 result.error = "No data returned from OpenChart"
                 return result
 
-            for _, row in df.iterrows():
-                bar = FreeBar(
-                    timestamp=str(row.get("datetime", row.name if hasattr(row, "name") else "")),
-                    open=float(row.get("open", 0)),
-                    high=float(row.get("high", 0)),
-                    low=float(row.get("low", 0)),
-                    close=float(row.get("close", 0)),
-                    volume=int(row.get("volume", 0)),
-                    oi=int(row.get("oi", 0)) if "oi" in row.index else 0,
-                    source="openchart",
-                )
-                result.bars.append(bar)
+            if "datetime" in df.columns:
+                ts = df["datetime"].astype(str).tolist()
+            else:
+                ts = df.index.astype(str).tolist()
+
+            opens = df["open"].astype(float).tolist() if "open" in df.columns else [0.0] * len(df)
+            highs = df["high"].astype(float).tolist() if "high" in df.columns else [0.0] * len(df)
+            lows = df["low"].astype(float).tolist() if "low" in df.columns else [0.0] * len(df)
+            closes = df["close"].astype(float).tolist() if "close" in df.columns else [0.0] * len(df)
+            volumes = df["volume"].fillna(0).astype(int).tolist() if "volume" in df.columns else [0] * len(df)
+            ois = df["oi"].fillna(0).astype(int).tolist() if "oi" in df.columns else [0] * len(df)
+
+            result.bars.extend(
+                FreeBar(t, o, h, l, c, v, oi, "openchart")
+                for t, o, h, l, c, v, oi in zip(ts, opens, highs, lows, closes, volumes, ois)
+            )
 
             logger.info(
                 "OpenChart: %s %s — %d bars (%s to %s)",
@@ -251,17 +255,18 @@ class CommodityData:
                     inr_rate = 83.0  # Fallback approximate rate
                     logger.warning("USDINR fetch failed, using fallback rate %.1f", inr_rate)
 
-            for idx, row in data.iterrows():
-                bar = FreeBar(
-                    timestamp=str(idx),
-                    open=float(row["Open"]) * inr_rate,
-                    high=float(row["High"]) * inr_rate,
-                    low=float(row["Low"]) * inr_rate,
-                    close=float(row["Close"]) * inr_rate,
-                    volume=int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,
-                    source="yfinance",
-                )
-                result.bars.append(bar)
+            ts = data.index.astype(str).tolist()
+
+            opens = (data["Open"] * inr_rate).astype(float).tolist() if "Open" in data.columns else [0.0] * len(data)
+            highs = (data["High"] * inr_rate).astype(float).tolist() if "High" in data.columns else [0.0] * len(data)
+            lows = (data["Low"] * inr_rate).astype(float).tolist() if "Low" in data.columns else [0.0] * len(data)
+            closes = (data["Close"] * inr_rate).astype(float).tolist() if "Close" in data.columns else [0.0] * len(data)
+            volumes = data["Volume"].fillna(0).astype(int).tolist() if "Volume" in data.columns else [0] * len(data)
+
+            result.bars.extend(
+                FreeBar(t, o, h, l, c, v, 0, "yfinance")
+                for t, o, h, l, c, v in zip(ts, opens, highs, lows, closes, volumes)
+            )
 
             logger.info(
                 "yfinance: %s (%s) — %d bars, INR rate=%.2f",
