@@ -206,13 +206,17 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
   const isRecovery = wasCrash.current && positionCount > 0;
 
   // If crash recovery, show the red card regardless of market hours
-  if (!isRecovery) {
-    const ctx = getTimeContext();
-    if (!ctx) {
-      // Market hours -- don't render
-      onDismiss();
-      return null;
-    }
+  // Dismiss via useEffect to avoid React "Cannot update component during render" error
+  const ctx = !isRecovery ? getTimeContext() : null;
+  const shouldDismiss = !isRecovery && !ctx;
+
+  useEffect(() => {
+    if (shouldDismiss) onDismiss();
+  }, [shouldDismiss, onDismiss]);
+
+  if (shouldDismiss) return null;
+
+  if (!isRecovery && ctx) {
 
     const displayName = name && name !== "Trader" ? name : "";
     const { todayHoliday, tomorrowHoliday, upcomingHoliday } =

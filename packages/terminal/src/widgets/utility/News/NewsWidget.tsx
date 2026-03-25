@@ -31,7 +31,7 @@ import { getNews } from "@/services/ftApi";
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** CORS proxy + RSS-to-JSON conversion */
-const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+const CORS_PROXY = "https://corsproxy.io/?url=";
 
 interface FeedSource {
   name: string;
