@@ -41,16 +41,17 @@ export interface TradingState {
 
 export interface SettingsState {
   persona: "trader" | "investor" | "beginner";
-  theme: "dark";
   density: "compact" | "comfortable";
   defaultExchange: string;
   defaultProduct: string;
   defaultQty: number;
+  defaultOrderType: string;
+  fontSize: "small" | "normal" | "large";
   riskLimits: {
     maxPositionLots: number;
     mtmStoploss: number;
     mtmTarget: number;
-    maxOrdersPerMin: number;
+    maxOrdersPerMinute: number;
   };
 }
 

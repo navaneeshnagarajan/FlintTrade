@@ -222,16 +222,8 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
   const activeThemeId = useThemeStore((s) => s.activeThemeId);
   const setTheme = useThemeStore((s) => s.setTheme);
 
-  // Phase B: mode/setMode do not exist in ThemeState yet.
-  // Using type-cast fallback. Phase C will add these to the store.
-  const mode = useThemeStore(
-    (s) => (s as unknown as { mode?: ColorMode }).mode ?? "dark",
-  );
-  const setMode = useThemeStore(
-    (s) =>
-      (s as unknown as { setMode?: (m: ColorMode) => void }).setMode ??
-      (() => { /* noop until Phase C */ }),
-  );
+  const mode = useThemeStore((s) => s.mode);
+  const setMode = useThemeStore((s) => s.setMode);
 
   // Move focus to the first interactive element on mount
   useEffect(() => {

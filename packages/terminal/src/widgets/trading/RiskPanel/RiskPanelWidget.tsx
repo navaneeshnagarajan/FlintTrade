@@ -8,7 +8,7 @@
  * Data sources:
  *   - useFunds()     → margin used / available
  *   - usePositions() → active position count
- *   - useSettingsStore() → riskLimits (maxPositionLots, mtmStoploss, mtmTarget, maxOrdersPerMin)
+ *   - useSettingsStore() → riskLimits (maxPositionLots, mtmStoploss, mtmTarget, maxOrdersPerMinute)
  *   - useTradingStore()  → totalPnl, openOrderCount
  *
  * Visual:

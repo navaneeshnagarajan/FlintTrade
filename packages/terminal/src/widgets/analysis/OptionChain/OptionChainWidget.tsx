@@ -80,6 +80,8 @@ export default function OptionChainWidget() {
   useEffect(() => () => {
     clearTimeout(orderMsgTimerRef.current);
     clearTimeout(scrollTimerRef.current);
+    flashTimersRef.current.forEach(clearTimeout);
+    flashTimersRef.current.clear();
   }, []);
 
   const exchange = exchangeOverride ?? symDef.exchange;

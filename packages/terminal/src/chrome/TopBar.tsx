@@ -221,16 +221,8 @@ export default function TopBar() {
 
   const connected = status === "connected";
 
-  // Phase B: themeStore.mode / setMode not yet in ThemeState — use cast fallback.
-  // Phase C will add these fields to the store.
-  const themeMode = useThemeStore(
-    (s) => (s as unknown as { mode?: "dark" | "light" | "system" }).mode ?? "dark",
-  ) as "dark" | "light" | "system";
-  const setThemeMode = useThemeStore(
-    (s) =>
-      (s as unknown as { setMode?: (m: string) => void }).setMode ??
-      (() => { /* noop until Phase C */ }),
-  );
+  const themeMode = useThemeStore((s) => s.mode);
+  const setThemeMode = useThemeStore((s) => s.setMode);
 
   // Pending action center orders — poll every 5s for badge count
   const { data: pendingOrders } = useQuery({
