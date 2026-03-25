@@ -66,6 +66,13 @@ class TestGetPending:
 
 
 class TestGetAll:
+    def test_all_returns_empty_list(self, client):
+        resp = client.get("/ft-api/v1/action-center/all")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert data["data"]["orders"] == []
+
     def test_all_includes_approved(self, client, action_center):
         _submit(action_center)
         action_center.approve("ord-1")
@@ -73,6 +80,40 @@ class TestGetAll:
         data = resp.get_json()
         assert len(data["data"]["orders"]) == 1
         assert data["data"]["orders"][0]["status"] == "approved"
+
+    def test_all_includes_all_statuses(self, client, action_center):
+        import time
+        from packages.engine.src.action_center import OrderApprovalStatus
+
+        # Pending
+        _submit(action_center, "ord-1")
+
+        # Approved
+        _submit(action_center, "ord-2")
+        action_center.approve("ord-2")
+
+        # Rejected
+        _submit(action_center, "ord-3")
+        action_center.reject("ord-3")
+
+        # Expired
+        _submit(action_center, "ord-4")
+        # Manually backdate the created_at timestamp to make it expired when evaluated
+        with action_center._lock:
+            po = action_center._get_or_raise("ord-4")
+            po.created_at = time.time() - action_center.ttl_seconds - 10
+
+        resp = client.get("/ft-api/v1/action-center/all")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        orders = data["data"]["orders"]
+        assert len(orders) == 4
+
+        statuses = {o["order_id"]: o["status"] for o in orders}
+        assert statuses["ord-1"] == OrderApprovalStatus.PENDING
+        assert statuses["ord-2"] == OrderApprovalStatus.APPROVED
+        assert statuses["ord-3"] == OrderApprovalStatus.REJECTED
+        assert statuses["ord-4"] == OrderApprovalStatus.EXPIRED
 
 
 # ---------------------------------------------------------------------------
