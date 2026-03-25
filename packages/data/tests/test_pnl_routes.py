@@ -25,7 +25,6 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def app_client(monkeypatch_module):
     """Return a Flask test client with a pre-populated PnLTracker."""
-    import os
     from packages.core.src.app import create_flask_app
     from packages.data.src.pnl_tracker import PnLTracker
     from packages.data.src.pnl_routes import init_pnl_routes
@@ -84,3 +83,20 @@ class TestPnLRoutes:
         data = json.loads(resp.data)
         assert data["status"] == "ok"
         assert data["data"] == []
+
+    def test_init_pnl_routes(self, monkeypatch):
+        from packages.data.src.pnl_routes import init_pnl_routes
+        from packages.data.src.pnl_tracker import PnLTracker
+        import packages.data.src.pnl_routes as pnl_routes_module
+
+        tracker = PnLTracker()
+        monkeypatch.setattr(pnl_routes_module, "_tracker", None)
+        init_pnl_routes(tracker)
+        assert pnl_routes_module._tracker is tracker
+
+    def test_series_since_invalid(self, app_client):
+        resp = _get(app_client, "/ft-api/v1/pnl-tracker?since=abc")
+        assert resp.status_code == 400
+        data = json.loads(resp.data)
+        assert data["status"] == "error"
+        assert "since must be a float" in data["message"]
