@@ -107,6 +107,52 @@ class TestStrategyRoutes:
         )
         assert resp.status_code == 400
 
+    def test_upload_strategy_with_file_derive_name(self, client):
+        import io
+        data = {
+            "file": (io.BytesIO(SAFE_CODE.encode("utf-8")), "my_auto_named_strat.py")
+        }
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            data=data,
+            content_type="multipart/form-data"
+        )
+        assert resp.status_code == 201
+        resp_data = resp.get_json()
+        assert resp_data["status"] == "success"
+        assert "my_auto_named_strat" in resp_data["message"]
+
+    def test_upload_strategy_with_file_explicit_name(self, client):
+        import io
+        data = {
+            "name": "explicit_name",
+            "file": (io.BytesIO(SAFE_CODE.encode("utf-8")), "some_filename.py")
+        }
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            data=data,
+            content_type="multipart/form-data"
+        )
+        assert resp.status_code == 201
+        resp_data = resp.get_json()
+        assert resp_data["status"] == "success"
+        assert "explicit_name" in resp_data["message"]
+
+    def test_upload_strategy_with_file_no_filename(self, client):
+        import io
+        data = {
+            "file": (io.BytesIO(SAFE_CODE.encode("utf-8")), "")
+        }
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            data=data,
+            content_type="multipart/form-data"
+        )
+        assert resp.status_code == 201
+        resp_data = resp.get_json()
+        assert resp_data["status"] == "success"
+        assert "strategy" in resp_data["message"]
+
     def test_list_strategies_empty(self, client):
         resp = client.get("/ft-api/v1/strategies")
         assert resp.status_code == 200
