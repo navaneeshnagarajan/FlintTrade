@@ -107,6 +107,59 @@ class TestStrategyRoutes:
         )
         assert resp.status_code == 400
 
+    def test_upload_missing_code_returns_400(self, client):
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            json={"name": "no_code_strat"},
+        )
+        assert resp.status_code == 400
+
+    def test_upload_multipart_file(self, client):
+        import io
+        data = {
+            "name": "multipart_strat",
+            "file": (io.BytesIO(b"def on_tick(ltp):\n    pass\n"), "strategy.py")
+        }
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            data=data,
+            content_type="multipart/form-data"
+        )
+        assert resp.status_code == 201
+
+    def test_upload_multipart_file_no_name(self, client):
+        import io
+        data = {
+            "file": (io.BytesIO(b"def on_tick(ltp):\n    pass\n"), "my_auto_named_strat.py")
+        }
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            data=data,
+            content_type="multipart/form-data"
+        )
+        assert resp.status_code == 201
+        assert resp.get_json()["message"] == "Strategy 'my_auto_named_strat' uploaded successfully"
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.upload")
+    def test_upload_value_error_returns_422(self, mock_upload, client):
+        mock_upload.side_effect = ValueError("Invalid strategy format")
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            json={"name": "value_error_strat", "code": SAFE_CODE},
+        )
+        assert resp.status_code == 422
+        assert resp.get_json()["message"] == "Invalid strategy format"
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.upload")
+    def test_upload_generic_exception_returns_500(self, mock_upload, client):
+        mock_upload.side_effect = Exception("System failure")
+        resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            json={"name": "error_strat", "code": SAFE_CODE},
+        )
+        assert resp.status_code == 500
+        assert "System failure" in resp.get_json()["message"]
+
     def test_list_strategies_empty(self, client):
         resp = client.get("/ft-api/v1/strategies")
         assert resp.status_code == 200
@@ -134,6 +187,25 @@ class TestStrategyRoutes:
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "success"
 
+    def test_start_strategy_not_found(self, client):
+        resp = client.post("/ft-api/v1/strategies/unknown_id/start")
+        assert resp.status_code == 404
+        assert "not found" in resp.get_json()["message"].lower()
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.start")
+    def test_start_strategy_runtime_error_returns_409(self, mock_start, client):
+        mock_start.side_effect = RuntimeError("Strategy already running")
+        resp = client.post("/ft-api/v1/strategies/some_id/start")
+        assert resp.status_code == 409
+        assert "already running" in resp.get_json()["message"]
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.start")
+    def test_start_strategy_generic_exception_returns_500(self, mock_start, client):
+        mock_start.side_effect = Exception("Failed to fork")
+        resp = client.post("/ft-api/v1/strategies/some_id/start")
+        assert resp.status_code == 500
+        assert "Start failed: Failed to fork" in resp.get_json()["message"]
+
     def test_stop_not_running_returns_success(self, client):
         upload_resp = client.post(
             "/ft-api/v1/strategies/upload",
@@ -143,6 +215,27 @@ class TestStrategyRoutes:
         resp = client.post(f"/ft-api/v1/strategies/{strategy_id}/stop")
         # Not running — treated as no-op success
         assert resp.status_code == 200
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.stop")
+    def test_stop_strategy_not_found(self, mock_stop, client):
+        mock_stop.side_effect = FileNotFoundError("Strategy file not found")
+        resp = client.post("/ft-api/v1/strategies/unknown_id/stop")
+        assert resp.status_code == 404
+        assert "not found" in resp.get_json()["message"].lower()
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.stop")
+    def test_stop_strategy_runtime_error_returns_success(self, mock_stop, client):
+        mock_stop.side_effect = RuntimeError("Strategy not running")
+        resp = client.post("/ft-api/v1/strategies/some_id/stop")
+        assert resp.status_code == 200
+        assert "not running" in resp.get_json()["message"]
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.stop")
+    def test_stop_strategy_generic_exception_returns_500(self, mock_stop, client):
+        mock_stop.side_effect = Exception("Failed to send signal")
+        resp = client.post("/ft-api/v1/strategies/some_id/stop")
+        assert resp.status_code == 500
+        assert "Stop failed: Failed to send signal" in resp.get_json()["message"]
 
     def test_delete_strategy(self, client):
         upload_resp = client.post(
@@ -158,6 +251,18 @@ class TestStrategyRoutes:
         list_resp = client.get("/ft-api/v1/strategies")
         ids = [s["strategy_id"] for s in list_resp.get_json()["strategies"]]
         assert strategy_id not in ids
+
+    def test_delete_strategy_not_found(self, client):
+        resp = client.delete("/ft-api/v1/strategies/unknown_id")
+        assert resp.status_code == 404
+        assert "not found" in resp.get_json()["message"].lower()
+
+    @patch("packages.engine.src.strategy_runner.UserStrategyRunner.delete")
+    def test_delete_strategy_generic_exception_returns_500(self, mock_delete, client):
+        mock_delete.side_effect = Exception("Failed to delete files")
+        resp = client.delete("/ft-api/v1/strategies/some_id")
+        assert resp.status_code == 500
+        assert "Delete failed: Failed to delete files" in resp.get_json()["message"]
 
     def test_get_status_stopped(self, client):
         upload_resp = client.post(
@@ -181,10 +286,45 @@ class TestStrategyRoutes:
         assert resp.status_code == 200
         assert resp.get_json()["lines"] == []
 
+    def test_get_logs_invalid_lines_param(self, client):
+        upload_resp = client.post(
+            "/ft-api/v1/strategies/upload",
+            json={"name": "log_check_invalid_lines", "code": SAFE_CODE},
+        )
+        strategy_id = upload_resp.get_json()["strategy_id"]
+
+        resp = client.get(f"/ft-api/v1/strategies/{strategy_id}/logs?lines=abc")
+        assert resp.status_code == 200
+        assert resp.get_json()["lines"] == []
+
+    def test_get_logs_not_found(self, client):
+        resp = client.get("/ft-api/v1/strategies/unknown_id/logs")
+        assert resp.status_code == 404
+        assert "not found" in resp.get_json()["message"].lower()
+
     def test_no_runner_returns_503(self, client_no_runner):
         resp = client_no_runner.get("/ft-api/v1/strategies")
+        assert resp.status_code == 503
+
+        resp = client_no_runner.post("/ft-api/v1/strategies/upload", json={"name": "test", "code": SAFE_CODE})
+        assert resp.status_code == 503
+
+        resp = client_no_runner.post("/ft-api/v1/strategies/some_id/start")
+        assert resp.status_code == 503
+
+        resp = client_no_runner.post("/ft-api/v1/strategies/some_id/stop")
+        assert resp.status_code == 503
+
+        resp = client_no_runner.delete("/ft-api/v1/strategies/some_id")
+        assert resp.status_code == 503
+
+        resp = client_no_runner.get("/ft-api/v1/strategies/some_id/status")
+        assert resp.status_code == 503
+
+        resp = client_no_runner.get("/ft-api/v1/strategies/some_id/logs")
         assert resp.status_code == 503
 
     def test_status_nonexistent_returns_404(self, client):
         resp = client.get("/ft-api/v1/strategies/nonexistent-id/status")
         assert resp.status_code == 404
+        assert "not found" in resp.get_json()["message"].lower()
