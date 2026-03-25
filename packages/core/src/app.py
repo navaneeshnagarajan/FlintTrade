@@ -168,10 +168,13 @@ def create_flask_app(
         flinttrade_dir.mkdir(exist_ok=True)
         master_password = os.environ.get("MASTER_PASSWORD", "")
         if not master_password:
-            master_password = "flinttrade-dev-default"
-            logger.warning(
-                "MASTER_PASSWORD not set — using development default. Set it for production."
-            )
+            if os.environ.get("FLINTTRADE_DEV") or app.debug or "pytest" in sys.modules:
+                master_password = "flinttrade-dev-default"
+                logger.warning(
+                    "MASTER_PASSWORD not set — using development default. Set it for production."
+                )
+            else:
+                raise ValueError("MASTER_PASSWORD environment variable must be set for secure credential storage.")
         credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
 
     if contract_manager is None:
@@ -1697,10 +1700,13 @@ class FlintTradeApp:
         flinttrade_dir.mkdir(exist_ok=True)
         master_password = os.environ.get("MASTER_PASSWORD", "")
         if not master_password:
-            master_password = "flinttrade-dev-default"
-            logger.warning(
-                "MASTER_PASSWORD not set — using development default. Set it for production."
-            )
+            if os.environ.get("FLINTTRADE_DEV") or "pytest" in sys.modules:
+                master_password = "flinttrade-dev-default"
+                logger.warning(
+                    "MASTER_PASSWORD not set — using development default. Set it for production."
+                )
+            else:
+                raise ValueError("MASTER_PASSWORD environment variable must be set for secure credential storage.")
         self.credential_store = CredentialStore(
             flinttrade_dir / "credentials.db", master_password
         )
