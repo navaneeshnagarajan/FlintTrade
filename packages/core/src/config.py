@@ -52,8 +52,8 @@ class Settings(BaseModel):
 
         host = os.getenv("OPENALGO_HOST", "")
         key = os.getenv("OPENALGO_API_KEY", "")
-        port = os.getenv("OPENALGO_PORT", "5000")
-        ws_port = os.getenv("OPENALGO_WS_PORT", "8765")
+        port = os.getenv("OPENALGO_PORT", "") or "5000"
+        ws_port = os.getenv("OPENALGO_WS_PORT", "") or "8765"
 
         if not host:
             raise ConfigError("OPENALGO_HOST environment variable is required")
