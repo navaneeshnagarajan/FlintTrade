@@ -5,7 +5,7 @@
 import { memo, useMemo } from "react";
 import Plot from "react-plotly.js";
 import type { Data, Layout, Config } from "plotly.js";
-import { useThemeStore } from "@/stores/themeStore";
+import { usePlotlyTheme } from "@/hooks/usePlotlyTheme";
 
 interface PlotlyChartProps {
   data: Data[];
@@ -33,34 +33,18 @@ export const PlotlyChart = memo(function PlotlyChart({
   onHover,
   onClick,
 }: PlotlyChartProps) {
-  const resolvedMode = useThemeStore((s) => s.getResolvedMode());
+  const baseTheme = usePlotlyTheme();
 
   const themedLayout = useMemo<Partial<Layout>>(() => {
-    const isDark = resolvedMode === "dark";
     return {
-      paper_bgcolor: "transparent",
-      plot_bgcolor: "transparent",
-      font: {
-        family: "Inter, system-ui, sans-serif",
-        color: isDark ? "#a0a0b0" : "#404050",
-        size: 11,
-      },
+      ...baseTheme,
       margin: { t: 30, r: 20, b: 40, l: 50 },
-      xaxis: {
-        gridcolor: isDark ? "#1e1e2e" : "#e5e7eb",
-        zerolinecolor: isDark ? "#2a2a3a" : "#d1d5db",
-      },
-      yaxis: {
-        gridcolor: isDark ? "#1e1e2e" : "#e5e7eb",
-        zerolinecolor: isDark ? "#2a2a3a" : "#d1d5db",
-      },
-      legend: {
-        bgcolor: "transparent",
-        font: { size: 10 },
-      },
+      // userLayout values override base theme, but xaxis/yaxis need merging
       ...userLayout,
+      xaxis: { ...baseTheme.xaxis, ...userLayout?.xaxis },
+      yaxis: { ...baseTheme.yaxis, ...userLayout?.yaxis },
     };
-  }, [resolvedMode, userLayout]);
+  }, [baseTheme, userLayout]);
 
   const mergedConfig = useMemo(
     () => ({

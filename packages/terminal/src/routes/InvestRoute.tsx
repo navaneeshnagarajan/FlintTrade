@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useTremorTheme } from "@/hooks/useTremorTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { DonutChart, AreaChart, BarList } from "@tremor/react";
@@ -187,6 +188,7 @@ function DashboardTab({
   totalPnlPercent: number;
   isLoading: boolean;
 }) {
+  const tremorColors = useTremorTheme();
   const netWorth = currentValue + availableCash;
 
   const equityValue = useMemo(
@@ -402,7 +404,7 @@ function DashboardTab({
               category="value"
               index="name"
               valueFormatter={(v: number) => formatINR(v)}
-              colors={["blue", "amber", "emerald"]}
+              colors={tremorColors.slice(0, 3) as string[]}
               className="h-36 shrink-0"
               showLabel={false}
             />
@@ -759,13 +761,14 @@ function buildEquityTrend(currentValue: number): { month: string; value: number 
 }
 
 function NetWorthMonthlyBar({ trend }: { trend: { month: string; value: number }[] }) {
+  const tremorColors = useTremorTheme();
   const chartData = trend.map((t) => ({ month: t.month, "Portfolio Value": t.value }));
   return (
     <AreaChart
       data={chartData}
       index="month"
       categories={["Portfolio Value"]}
-      colors={["emerald"]}
+      colors={[tremorColors[1] ?? "#22c55e"]}
       valueFormatter={(v: number) => formatINRCompact(v)}
       showLegend={false}
       showYAxis={false}
@@ -790,6 +793,7 @@ function NetWorthTab({
   totalPnlPercent: number;
   isLoading: boolean;
 }) {
+  const tremorColors = useTremorTheme();
   const knownTotal = currentValue + availableCash;
   const trend = useMemo(() => buildEquityTrend(currentValue), [currentValue]);
 
@@ -919,7 +923,7 @@ function NetWorthTab({
                   category="value"
                   index="name"
                   valueFormatter={(v: number) => formatINRCompact(v)}
-                  colors={["blue", "emerald", "violet", "amber", "cyan"]}
+                  colors={tremorColors as string[]}
                   className="h-36"
                   showLabel={false}
                 />

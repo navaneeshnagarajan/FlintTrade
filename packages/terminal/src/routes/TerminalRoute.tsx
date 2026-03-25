@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
@@ -13,6 +13,7 @@ import PresetPicker from "@/chrome/PresetPicker";
 import { widgetComponents } from "@/layout/widgetFactory";
 import { applyPreset } from "@/layout/workspacePresets";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useDockviewTheme } from "@/hooks/useDockviewTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
@@ -92,6 +93,11 @@ export default function TerminalRoute() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const level = useSkillLevel("trade");
+  const dockviewThemeCssVars = useDockviewTheme();
+  const dockviewStyle = useMemo(
+    () => dockviewThemeCssVars as React.CSSProperties,
+    [dockviewThemeCssVars],
+  );
 
   const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
   const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
@@ -245,6 +251,7 @@ export default function TerminalRoute() {
         <div
           className="flex-1 relative overflow-hidden"
           data-tour-target="workspace"
+          style={dockviewStyle}
         >
           <DockviewReact
             className="dockview-theme-dark"

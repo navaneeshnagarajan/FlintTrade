@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { isMarketHours } from "@/lib/market";
 import type { Time } from "lightweight-charts";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import {
   Search,
   X,
@@ -315,6 +316,18 @@ export default function ChartWidget() {
   // Initialise chart (once)
   const { containerRef, chartRef, candleRef, volumeRef, markersPluginRef, indRef } =
     useChartInit(setLegend);
+
+  // Apply theme from CSS vars whenever the active theme changes
+  const chartTheme = useLightweightChartTheme();
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const { candle: _candle, ...chartOptions } = chartTheme;
+    chart.applyOptions(chartOptions);
+    if (candleRef.current) {
+      candleRef.current.applyOptions(chartTheme.candle);
+    }
+  }, [chartTheme, chartRef, candleRef]);
 
   // Drawing tools
   const { toggleDrawMode, clearAllDrawings, undoLastDrawing } = useDrawingTools({

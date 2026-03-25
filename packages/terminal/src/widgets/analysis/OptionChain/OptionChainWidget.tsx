@@ -38,7 +38,8 @@ import { isMarketHours } from "@/lib/market";
 import { useOptionChainData } from "./useOptionChainData";
 import SymbolSearch from "./SymbolSearch";
 import BasketPanel from "./BasketPanel";
-import { getColumns, buildGetCellContent, GLIDE_THEME, ATM_ROW_THEME } from "./gridConfig";
+import { getColumns, buildGetCellContent, ATM_ROW_THEME } from "./gridConfig";
+import { useGlideTheme } from "@/hooks/useGlideTheme";
 import { NUM, NUM0, fmtExpiry, fmtOI, oiSignalStyle, oiSignalShort } from "./formatters";
 import ExchangeSelector from "./ExchangeSelector";
 import type {
@@ -57,6 +58,7 @@ import { SYMBOLS, VIEWS, OPTION_CHAIN_EXCHANGES } from "./types";
 // ---------------------------------------------------------------------------
 
 export default function OptionChainWidget() {
+  const glideTheme = useGlideTheme();
   const [symDef, setSymDef]                     = useState<SymbolDef>(SYMBOLS[0]);
   const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
   const [view, setView]                         = useState<ViewType>("LTP");
@@ -526,7 +528,7 @@ export default function OptionChainWidget() {
             rows={strikes.length}
             getCellContent={getCellContent}
             onCellClicked={handleCellClicked}
-            theme={GLIDE_THEME}
+            theme={glideTheme}
             rowHeight={24}
             headerHeight={26}
             smoothScrollX
