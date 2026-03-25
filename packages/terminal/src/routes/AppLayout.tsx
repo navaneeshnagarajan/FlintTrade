@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import TopBar from "@/chrome/TopBar";
 import PageTransition from "@/components/motion/PageTransition";
 import TickerBar from "@/chrome/TickerBar";
@@ -58,6 +58,18 @@ export default function AppLayout() {
   useTickerFallback();   // REST polling fallback when WS is disconnected
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Global navigation event listener — widgets (e.g. AIAdvisor) dispatch this
+  // because they can't use useNavigate() inside Dockview panels
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const path = (e as CustomEvent<string>).detail;
+      if (path) navigate(path);
+    };
+    window.addEventListener("flinttrade:navigate", handler);
+    return () => window.removeEventListener("flinttrade:navigate", handler);
+  }, [navigate]);
   const [showWelcome, setShowWelcome] = useState(true);
   const [tourComplete, setTourComplete] = useState(
     () => localStorage.getItem(TOUR_STORAGE_KEY) === "true",

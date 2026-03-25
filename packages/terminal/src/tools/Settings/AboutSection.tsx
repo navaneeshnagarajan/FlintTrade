@@ -16,7 +16,7 @@ export function AboutSection() {
         </div>
         <div>
           <div className="text-sm font-semibold text-text-primary">FlintTrade</div>
-          <div className="text-xs text-text-muted">Version 0.1.0-alpha</div>
+          <div className="text-xs text-text-muted">Version 0.2.0-alpha</div>
         </div>
       </div>
 
@@ -70,7 +70,7 @@ export function AboutSection() {
           <table className="w-full text-xs">
             <tbody>
               {[
-                ["Version",  "0.1.0-alpha"],
+                ["Version",  "0.2.0-alpha"],
                 ["React",    "19"          ],
                 ["Dockview", "5.1"         ],
                 ["License",  "AGPL-3.0"   ],
