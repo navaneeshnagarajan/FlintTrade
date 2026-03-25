@@ -1,0 +1,11 @@
+/**
+ * Barrel export for all Invest tab components.
+ * Import from here rather than individual files.
+ */
+
+export { DashboardTab } from "./DashboardTab";
+export { HoldingsTab } from "./HoldingsTab";
+export { NetWorthTab } from "./NetWorthTab";
+export { SipTab } from "./SipTab";
+export { SectorTab } from "./SectorTab";
+export { EtfTab, StocksTab, IpoTab } from "./LockedTabs";

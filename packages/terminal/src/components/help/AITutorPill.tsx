@@ -100,11 +100,12 @@ async function streamAdvisorMessage(
   route: string,
   onToken: (token: string, fullText: string) => void,
   signal?: AbortSignal,
+  activeWidget?: string | null,
 ): Promise<string> {
   const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context: { route } }),
+    body: JSON.stringify({ messages, context: { route, activeWidget: activeWidget ?? null } }),
     signal,
   });
 
@@ -161,6 +162,7 @@ async function postAdvisorMessage(
   messages: Array<{ role: string; content: string }>,
   route: string,
   signal?: AbortSignal,
+  activeWidget?: string | null,
 ): Promise<string> {
   const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor`, {
     method: "POST",
@@ -168,7 +170,7 @@ async function postAdvisorMessage(
     body: JSON.stringify({
       messages,
       message: messages[messages.length - 1]?.content ?? "",
-      context: { route },
+      context: { route, activeWidget: activeWidget ?? null },
     }),
     signal,
   });
@@ -200,6 +202,30 @@ function routeLabel(pathname: string): string {
     ai: "AI Center",
   };
   return labels[segment] ?? segment.charAt(0).toUpperCase() + segment.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// useActiveWidgetContext — subscribes to Dockview panel focus events
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the id of the currently focused Dockview panel, or null.
+ * Listens for "flinttrade:active-widget" CustomEvents dispatched from
+ * TerminalRoute's onDockviewReady / onDidActivePanelChange handler.
+ */
+function useActiveWidgetContext(): string | null {
+  const [activeWidget, setActiveWidget] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      setActiveWidget(detail ?? null);
+    };
+    window.addEventListener("flinttrade:active-widget", handler);
+    return () => window.removeEventListener("flinttrade:active-widget", handler);
+  }, []);
+
+  return activeWidget;
 }
 
 // ---------------------------------------------------------------------------
@@ -353,9 +379,10 @@ interface ExpandedPanelProps {
   routeName: string;
   currentRoute: string;
   isConfigured: boolean;
+  activeWidget: string | null;
 }
 
-function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured }: ExpandedPanelProps) {
+function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured, activeWidget }: ExpandedPanelProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollEndRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -447,6 +474,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured }: Expan
           updateMessageContent(placeholderId, fullText);
         },
         controller.signal,
+        activeWidget,
       );
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -462,6 +490,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured }: Expan
             conversationPayload,
             currentRoute,
             controller.signal,
+            activeWidget,
           );
           addMessage("assistant", reply);
         } catch (fallbackErr: unknown) {
@@ -479,7 +508,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured }: Expan
       setStreaming(false);
       inputRef.current?.focus();
     }
-  }, [inputValue, isStreaming, addMessage, setStreaming, currentRoute, updateMessageContent]);
+  }, [inputValue, isStreaming, addMessage, setStreaming, currentRoute, updateMessageContent, activeWidget]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -518,7 +547,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured }: Expan
             </span>
             {/* Route context badge */}
             <span className="text-xs text-text-muted bg-surface-base border border-border-default rounded-full px-2 py-0.5 font-mono truncate shrink-0">
-              {routeName}
+              {activeWidget ? activeWidget : routeName}
             </span>
           </div>
           <button
@@ -618,6 +647,7 @@ export function AITutorPill() {
   const aiTutorEnabled = useSkillStore((state) => state.helpPrefs.aiTutor);
   const setCurrentRoute = useAIConversationStore((state) => state.setCurrentRoute);
   const isConfigured = useSettingsStore((s) => s.llm.provider.length > 0);
+  const activeWidget = useActiveWidgetContext();
 
   // Keep route in the conversation store in sync
   useEffect(() => {
@@ -662,6 +692,7 @@ export function AITutorPill() {
               routeName={routeName}
               currentRoute={location.pathname}
               isConfigured={isConfigured}
+              activeWidget={activeWidget}
             />
           </motion.div>
         ) : (

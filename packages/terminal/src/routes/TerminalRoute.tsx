@@ -236,6 +236,15 @@ export default function TerminalRoute() {
       const d2 = event.api.onDidRemovePanel(() => setPanelCount(event.api.panels.length));
       readyDisposablesRef.current.push(d1, d2);
 
+      // Dispatch active-widget context for AITutorPill whenever a panel gains focus.
+      // AITutorPill subscribes via window.addEventListener("flinttrade:active-widget").
+      const d3aw = event.api.onDidActivePanelChange((panel) => {
+        window.dispatchEvent(
+          new CustomEvent("flinttrade:active-widget", { detail: panel?.id ?? null }),
+        );
+      });
+      readyDisposablesRef.current.push(d3aw);
+
       // Re-apply ARIA attributes after every Dockview layout mutation so that
       // newly added/removed tabs and panels stay annotated.
       // rAF coalescing prevents redundant DOM queries on every drag frame.

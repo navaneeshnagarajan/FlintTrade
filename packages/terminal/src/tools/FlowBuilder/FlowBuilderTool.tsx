@@ -202,6 +202,10 @@ const NODE_CATEGORIES: NodeCategoryDef[] = [
       { type: "andGate", label: "AND Gate", description: "All inputs must be true" },
       { type: "orGate", label: "OR Gate", description: "Any input must be true" },
       { type: "notGate", label: "NOT Gate", description: "Invert boolean signal" },
+      { type: "ifElse", label: "If / Else", description: "Two-branch conditional: true path and false path" },
+      { type: "switch", label: "Switch", description: "Multi-branch selector on a named variable value" },
+      { type: "loop", label: "Loop", description: "Repeat a sub-flow N times or while condition holds" },
+      { type: "schedule", label: "Schedule", description: "Cron-style timed trigger within a flow (e.g. every 5 min)" },
     ],
   },
   {
@@ -259,6 +263,8 @@ const NODE_CATEGORIES: NodeCategoryDef[] = [
     color: "#a78bfa",
     nodes: [
       { type: "telegramAlert", label: "Telegram Alert", description: "Send signal to Telegram bot" },
+      { type: "webhookAlert", label: "Webhook (Outgoing)", description: "POST JSON payload to any external URL" },
+      { type: "emailAlert", label: "Email Alert", description: "Send email notification via SMTP or provider" },
       { type: "delay", label: "Delay", description: "Wait N seconds before next node" },
       { type: "waitUntil", label: "Wait Until", description: "Pause until condition is met" },
       { type: "group", label: "Group", description: "Bundle nodes into a sub-flow" },
