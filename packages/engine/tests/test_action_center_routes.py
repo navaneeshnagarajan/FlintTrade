@@ -59,6 +59,25 @@ class TestGetPending:
         assert len(data["data"]["orders"]) == 1
         assert data["data"]["orders"][0]["order_id"] == "ord-1"
 
+    def test_get_pending_filters_non_pending(self, client, action_center):
+        """Verify that get_pending only returns orders in PENDING status."""
+        _submit(action_center, "pending-ord")
+        _submit(action_center, "approved-ord")
+        _submit(action_center, "rejected-ord")
+
+        action_center.approve("approved-ord")
+        action_center.reject("rejected-ord")
+
+        resp = client.get("/ft-api/v1/action-center/pending")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert data["status"] == "success"
+        orders = data["data"]["orders"]
+        assert len(orders) == 1
+        assert orders[0]["order_id"] == "pending-ord"
+        assert orders[0]["status"] == "pending"
+
 
 # ---------------------------------------------------------------------------
 # GET /all
@@ -169,3 +188,24 @@ class TestConfigEndpoints:
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+    def test_post_config_invalid_ttl_value_returns_400(self, client):
+        resp = client.post(
+            "/ft-api/v1/action-center/config",
+            json={"ttl_seconds": 0},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["status"] == "error"
+        assert "ttl_seconds must be >= 1" in resp.get_json()["message"]
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+class TestInternalHelpers:
+    def test_get_ac_outside_app_context(self):
+        from packages.engine.src.action_center_routes import _get_ac, _default_action_center  # noqa: PLC0415
+        # Since we are outside any Flask test client context, current_app will raise RuntimeError
+        ac = _get_ac()
+        assert ac is _default_action_center
