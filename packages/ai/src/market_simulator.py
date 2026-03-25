@@ -15,7 +15,7 @@ import asyncio
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger("flinttrade.ai.market_simulator")
