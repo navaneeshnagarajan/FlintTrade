@@ -152,6 +152,34 @@ export function formatPercent(value: number | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// formatIndianNumber  (shared utility for DataNumber / DataDirection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a number with the Indian comma grouping (en-IN locale).
+ *
+ * For "percent" and "currency" formats: always 2 decimal places.
+ * For "number" format: decimals shown only when present.
+ * Sign is stripped — callers are responsible for prepending +/−.
+ *
+ * @param value  - Absolute numeric value (pass Math.abs() result if needed)
+ * @param format - "number" | "currency" | "percent"
+ */
+export function formatIndianNumber(
+  value: number,
+  format: "number" | "currency" | "percent",
+): string {
+  const hasFraction = value % 1 !== 0;
+  const fractionDigits =
+    format !== "number" || hasFraction ? 2 : 0;
+
+  return new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
+// ---------------------------------------------------------------------------
 // formatINR  (alias matching the InvestRoute inline helper)
 // ---------------------------------------------------------------------------
 

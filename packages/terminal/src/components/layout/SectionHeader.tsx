@@ -17,6 +17,7 @@
  */
 
 import * as React from "react";
+import { useId } from "react";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -44,8 +45,12 @@ export function SectionHeader({
   as: Tag = "h2",
   className,
 }: SectionHeaderProps) {
+  const headingId = useId();
+
   return (
     <div
+      role="group"
+      aria-labelledby={headingId}
       className={cn(
         "flex items-start justify-between gap-4 mb-4",
         className
@@ -53,6 +58,7 @@ export function SectionHeader({
     >
       <div>
         <Tag
+          id={headingId}
           className="text-lg font-heading font-semibold text-text-primary"
         >
           {title}

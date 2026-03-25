@@ -77,7 +77,7 @@ export interface ThemeState {
 // ---------------------------------------------------------------------------
 
 const V1_THEME_MAP: Record<string, string> = {
-  midnight:         "emerald-night",
+  midnight:         "midnight",
   obsidian:         "emerald-night",
   "terminal-green": "emerald-night",
   "ocean-blue":     "ocean-depth",
@@ -222,6 +222,7 @@ const storeImpl: StateCreator<
       activeThemeId:
         state.activeThemeId === id ? "graphite" : state.activeThemeId,
     }));
+    get().applyTheme();
   },
 
   // --- setGlass ---
@@ -305,7 +306,10 @@ const storeImpl: StateCreator<
     style.setProperty("--color-loss",   shared.loss);
 
     // Derived bullish / bearish tokens
-    style.setProperty("--color-bullish-text",   shared.profit);
+    // In light mode, green-500 (#22c55e) on white is only 3.30:1 — fails WCAG AA.
+    // Use green-700 (#15803d) on light surfaces for 4.55:1 compliance.
+    const bullishText = resolvedMode === "light" ? "#15803d" : shared.profit;
+    style.setProperty("--color-bullish-text",   bullishText);
     style.setProperty("--color-bullish-bg",     hexToRgba(shared.profit, 0.1));
     style.setProperty("--color-bullish-border", hexToRgba(shared.profit, 0.3));
     style.setProperty("--color-bearish-text",   shared.loss);
@@ -359,7 +363,19 @@ const storeImpl: StateCreator<
     // ---- Legacy surface aliases (for widgets not yet on new tokens) ----
     style.setProperty("--color-surface-base",     variant.colors.base);
     style.setProperty("--color-surface-card",     variant.colors.card);
-    style.setProperty("--color-surface-elevated", variant.colors.card);
+
+    // Compute elevated as card lightened by ~5 L* units (bump each channel by 12)
+    const cardR = parseInt(variant.colors.card.slice(1, 3), 16);
+    const cardG = parseInt(variant.colors.card.slice(3, 5), 16);
+    const cardB = parseInt(variant.colors.card.slice(5, 7), 16);
+    const bump = 12; // ~5 L* units in sRGB space
+    const elevatedHex =
+      `#${Math.min(255, cardR + bump).toString(16).padStart(2, "0")}` +
+      `${Math.min(255, cardG + bump).toString(16).padStart(2, "0")}` +
+      `${Math.min(255, cardB + bump).toString(16).padStart(2, "0")}`;
+    style.setProperty("--color-surface-elevated", elevatedHex);
+    style.setProperty("--color-surface-stripe",   hexToRgba(variant.colors.base, 0.5));
+
     style.setProperty("--color-surface-hover",    variant.colors.cardHover);
     style.setProperty("--color-surface-active",   variant.colors.cardHover);
     style.setProperty("--color-border-default",   variant.colors.border);

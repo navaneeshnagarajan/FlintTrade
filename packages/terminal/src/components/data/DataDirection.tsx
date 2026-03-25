@@ -1,5 +1,6 @@
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatIndianNumber } from "@/lib/formatters";
 
 interface DataDirectionProps {
   value: number | null | undefined;
@@ -21,23 +22,6 @@ const SIZE_TEXT: Record<NonNullable<DataDirectionProps["size"]>, string> = {
 };
 
 /**
- * Formats a number using the Indian numbering locale (en-IN).
- * Always renders 2 decimal places for currency and percent; integer-aware for number.
- */
-function formatIndian(
-  value: number,
-  format: NonNullable<DataDirectionProps["format"]>
-): string {
-  const hasFraction = value % 1 !== 0;
-  const fractionDigits = format !== "number" || hasFraction ? 2 : 0;
-
-  return new Intl.NumberFormat("en-IN", {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  }).format(Math.abs(value));
-}
-
-/**
  * Profit/loss direction indicator.
  *
  * Always renders: icon + color + sign + background tint.
@@ -55,8 +39,8 @@ export function DataDirection({
   if (value == null) {
     return (
       <span
-        role="text"
-        aria-label="—"
+        role="img"
+        aria-label="No data available"
         className={cn(
           "inline-flex items-center gap-1 rounded px-1.5 py-0.5",
           "text-text-muted bg-surface-elevated font-mono tabular-nums",
@@ -73,7 +57,7 @@ export function DataDirection({
   const isNegative = value < 0;
   const isZero = value === 0;
 
-  const formatted = formatIndian(value, format);
+  const formatted = formatIndianNumber(Math.abs(value), format);
   const prefix = format === "currency" ? "₹" : "";
   const suffix = format === "percent" ? "%" : "";
   const sign = isPositive ? "+" : isNegative ? "-" : "";
@@ -102,7 +86,7 @@ export function DataDirection({
 
   return (
     <span
-      role="text"
+      role="img"
       aria-label={ariaLabel}
       className={cn(
         "inline-flex items-center gap-1 rounded px-1.5 py-0.5",

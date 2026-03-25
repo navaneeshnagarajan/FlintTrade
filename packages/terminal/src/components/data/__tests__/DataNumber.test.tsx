@@ -60,7 +60,7 @@ describe("DataNumber", () => {
 
   it("aria-label includes the formatted value", () => {
     render(<DataNumber value={1234} />);
-    const el = screen.getByRole("text");
+    const el = screen.getByRole("img");
     expect(el.getAttribute("aria-label")).toMatch(/1,234/);
   });
 });

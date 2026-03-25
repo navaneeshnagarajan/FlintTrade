@@ -39,13 +39,13 @@ describe("DataDirection", () => {
 
   it("aria-label includes '+₹1,234.56 profit' for positive currency", () => {
     render(<DataDirection value={1234.56} format="currency" />);
-    const el = screen.getByRole("text");
+    const el = screen.getByRole("img");
     expect(el.getAttribute("aria-label")).toMatch(/\+.*1,234\.56.*profit/i);
   });
 
   it("aria-label includes '-₹1,234.56 loss' for negative currency", () => {
     render(<DataDirection value={-1234.56} format="currency" />);
-    const el = screen.getByRole("text");
+    const el = screen.getByRole("img");
     expect(el.getAttribute("aria-label")).toMatch(/-.*1,234\.56.*loss/i);
   });
 

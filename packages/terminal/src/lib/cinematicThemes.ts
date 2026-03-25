@@ -164,7 +164,8 @@ const graphite: CinematicTheme = {
       textMuted:     "#9898a5",
       textSecondary: "#6b6b78",
       accent:        "#7c8be8",
-      accentText:    "#ffffff",
+      // Dark text on light-indigo accent: #0b0b0f on #7c8be8 = 6.28:1 (WCAG AA pass)
+      accentText:    "#0b0b0f",
     },
     particles: {
       colors: ["#7c8be8", "#5c6bc0", "#9fa8da"],
