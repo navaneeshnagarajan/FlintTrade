@@ -122,6 +122,15 @@ export function useChartInit(
     candleRef.current = candleSeries;
     volumeRef.current = volumeSeries;
 
+    // Accessibility: lightweight-charts renders raw <canvas> elements with no
+    // text alternative. Annotate the first canvas found in the container so
+    // screen readers surface a meaningful description (WCAG SC 1.1.1, Issue #49).
+    const canvas = containerRef.current?.querySelector("canvas");
+    if (canvas) {
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", "Price chart");
+    }
+
     // Crosshair OHLCV legend
     chart.subscribeCrosshairMove((param: MouseEventParams) => {
       if (!param || !param.time || !candleSeries) {

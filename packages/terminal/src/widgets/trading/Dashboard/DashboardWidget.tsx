@@ -26,6 +26,7 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { WsTick } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 
@@ -101,8 +102,8 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
         <div className="text-xxs uppercase tracking-wider text-text-muted font-sans mb-1.5">
           {name}
         </div>
-        <div className="text-lg font-mono font-bold text-text-muted">&mdash;</div>
-        <div className="h-4" />
+        <Skeleton className="h-6 w-24 mb-1" />
+        <Skeleton className="h-4 w-16 mt-1" />
       </div>
     );
   }
@@ -171,9 +172,9 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 export default function DashboardWidget(_props: WidgetProps) {
-  const { data: fundsData, dataUpdatedAt } = useFunds();
-  const { data: positionsData } = usePositions();
-  const { data: ordersData } = useOrders();
+  const { data: fundsData, dataUpdatedAt, isPending: fundsPending } = useFunds();
+  const { data: positionsData, isPending: positionsPending } = usePositions();
+  const { data: ordersData, isPending: ordersPending } = useOrders();
 
   const funds = fundsData as RawFunds | undefined;
   const positions = (positionsData ?? []) as RawPosition[];
@@ -215,7 +216,13 @@ export default function DashboardWidget(_props: WidgetProps) {
               availableCash >= 0 ? "text-profit" : "text-loss"
             }`}
           >
-            {funds ? `\u20B9${INR0.format(availableCash)}` : "\u2014"}
+            {fundsPending ? (
+              <Skeleton className="h-7 w-28" />
+            ) : funds ? (
+              `\u20B9${INR0.format(availableCash)}`
+            ) : (
+              "\u2014"
+            )}
           </div>
         </div>
 
@@ -225,7 +232,13 @@ export default function DashboardWidget(_props: WidgetProps) {
             Margin Used
           </div>
           <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-            {funds ? `\u20B9${INR0.format(usedMargin)}` : "\u2014"}
+            {fundsPending ? (
+              <Skeleton className="h-7 w-24" />
+            ) : funds ? (
+              `\u20B9${INR0.format(usedMargin)}`
+            ) : (
+              "\u2014"
+            )}
           </div>
         </div>
 
@@ -239,9 +252,13 @@ export default function DashboardWidget(_props: WidgetProps) {
               totalPnl >= 0 ? "text-profit" : "text-loss"
             }`}
           >
-            {positions.length > 0 || funds
-              ? `${totalPnl >= 0 ? "+" : ""}\u20B9${INR0.format(Math.abs(totalPnl))}`
-              : "\u2014"}
+            {positionsPending ? (
+              <Skeleton className="h-7 w-28" />
+            ) : positions.length > 0 || funds ? (
+              `${totalPnl >= 0 ? "+" : ""}\u20B9${INR0.format(Math.abs(totalPnl))}`
+            ) : (
+              "\u2014"
+            )}
           </div>
         </div>
       </div>
@@ -286,7 +303,13 @@ export default function DashboardWidget(_props: WidgetProps) {
             </div>
           )}
         </div>
-        {positions.length === 0 ? (
+        {positionsPending ? (
+          <div className="p-4 space-y-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-8 w-full" />
+            ))}
+          </div>
+        ) : positions.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <Minus size={16} className="mx-auto mb-1 text-text-disabled" />
             <p className="text-xs text-text-muted font-sans">No open positions</p>
@@ -379,7 +402,13 @@ export default function DashboardWidget(_props: WidgetProps) {
             Orders
           </h3>
         </div>
-        {orders.length === 0 ? (
+        {ordersPending ? (
+          <div className="p-4 space-y-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-8 w-full" />
+            ))}
+          </div>
+        ) : orders.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <Minus size={16} className="mx-auto mb-1 text-text-disabled" />
             <p className="text-xs text-text-muted font-sans">No orders today</p>

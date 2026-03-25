@@ -1,5 +1,6 @@
 import { useAtomValue } from "jotai";
 import { useRef, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import type { WsTick } from "@/types/api";
 
@@ -110,6 +111,7 @@ function IndexChip({ name, data }: IndexChipProps) {
 export default function TickerBar() {
   const indices = useAtomValue(indicesSummaryAtom);
   const hasData = hasAnyLiveData(indices);
+  const navigate = useNavigate();
 
   return (
     <div
@@ -121,10 +123,27 @@ export default function TickerBar() {
         <IndexChip key={idx.name} name={idx.name} data={idx.data} />
       ))}
       {!hasData && (
-        <span className="text-xxs text-text-disabled px-3 select-none">
-          Connect OpenAlgo for live prices
-        </span>
+        <button
+          onClick={() => navigate("/settings#api")}
+          className="text-xxs text-text-disabled hover:text-accent px-3 select-none transition-colors cursor-pointer"
+        >
+          Connect OpenAlgo for live prices →
+        </button>
       )}
+      {/* Accessibility: one polite live region summarises all index prices for
+          screen readers (Issue #50). Individual IndexChip spans stay aria-live="off"
+          to prevent per-tick noise. aria-atomic ensures the whole summary is
+          re-read together when any price updates. */}
+      <span
+        className="sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {indices
+          .filter((i) => i.data?.ltp != null && (i.data.ltp ?? 0) > 0)
+          .map((i) => `${i.name} ${i.data!.ltp}`)
+          .join(", ")}
+      </span>
     </div>
   );
 }

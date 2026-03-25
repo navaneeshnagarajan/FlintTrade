@@ -564,6 +564,14 @@ export default function ExploreRoute() {
 
   return (
     <>
+      {/* Skip link for /explore — this route renders outside AppLayout so it
+          needs its own skip navigation (Issue #63). Matches AppLayout's style. */}
+      <a
+        href="#explore-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:z-[200] focus:top-2 focus:left-2 focus:bg-accent focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-medium focus:shadow-lg"
+      >
+        Skip to main content
+      </a>
       <div className="fixed inset-0 bg-surface-base overflow-y-auto">
         {/* ------------------------------------------------------------------ */}
         {/* Top bar                                                              */}
@@ -606,7 +614,7 @@ export default function ExploreRoute() {
           </p>
         </div>
 
-        <main className="max-w-6xl mx-auto px-6 py-12 space-y-12">
+        <main id="explore-main" aria-label="Explore demo mode" className="max-w-6xl mx-auto px-6 py-12 space-y-12">
           {/* ---------------------------------------------------------------- */}
           {/* Hero — Particles background + TextGenerateEffect heading          */}
           {/* ---------------------------------------------------------------- */}

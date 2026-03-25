@@ -14,6 +14,8 @@
 import { useEffect, useRef, useCallback, forwardRef, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useMutation } from "@tanstack/react-query";
+import { toggleSandbox } from "@/services/ftApi";
 import {
   Settings,
   X,
@@ -217,6 +219,11 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
   const setDensity = useSettingsStore((s) => s.setDensity);
   const sandboxMode = useSettingsStore((s) => s.sandboxMode);
   const setSandboxMode = useSettingsStore((s) => s.setSandboxMode);
+
+  const sandboxMutation = useMutation({
+    mutationFn: (enabled: boolean) => toggleSandbox(enabled),
+    onSuccess: (data) => setSandboxMode(data.enabled),
+  });
 
   // Theme store — active theme for dot selection
   const activeThemeId = useThemeStore((s) => s.activeThemeId);
@@ -487,7 +494,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
           </div>
           <SandboxSwitch
             enabled={sandboxMode}
-            onToggle={() => setSandboxMode(!sandboxMode)}
+            onToggle={() => sandboxMutation.mutate(!sandboxMode)}
           />
         </div>
 

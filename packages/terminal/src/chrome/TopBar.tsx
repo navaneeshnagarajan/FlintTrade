@@ -27,6 +27,8 @@ import type { MarketTiming } from "@/types/api";
 import AccountSwitcher from "./AccountSwitcher";
 import SandboxToggle from "./SandboxToggle";
 import QuickAccessPanel from "./QuickAccessPanel";
+import ToolsDropdown from "./ToolsDropdown";
+import type { ToolId } from "@/types/widgets";
 
 function ISTClock() {
   const [time, setTime] = useState("");
@@ -133,14 +135,14 @@ function MarketStatusBadge() {
 
   return (
     <div
-      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-hover"
+      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-hover shrink-0"
       aria-label={`Market status: ${statusInfo.label}`}
     >
       <div
         className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass[statusInfo.status]}`}
         aria-hidden="true"
       />
-      <span className={`text-xs font-medium tabular-nums ${textClass[statusInfo.status]}`}>
+      <span className={`text-xs font-medium tabular-nums whitespace-nowrap ${textClass[statusInfo.status]}`}>
         {statusInfo.label}
       </span>
     </div>
@@ -218,6 +220,8 @@ export default function TopBar() {
   /** Quick settings panel open state */
   const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
   const gearRef = useRef<HTMLButtonElement>(null);
+  /** TOOLS button ref — used to anchor the ToolsDropdown portal (Issue #39) */
+  const toolsButtonRef = useRef<HTMLButtonElement>(null);
 
   const connected = status === "connected";
 
@@ -235,6 +239,18 @@ export default function TopBar() {
     throwOnError: false,
   });
   const pendingCount = (pendingOrders ?? []).length;
+
+  /**
+   * Handle tool selection from ToolsDropdown (Issue #75).
+   * On /trade: dispatch flinttrade:open-tool so TerminalRoute opens the overlay.
+   * On other routes: ToolsDropdown handles navigation to /settings itself.
+   */
+  const handleSelectTool = useCallback((toolId: ToolId) => {
+    window.dispatchEvent(
+      new CustomEvent("flinttrade:open-tool", { detail: { toolId } }),
+    );
+    setToolsMenuOpen(false);
+  }, [setToolsMenuOpen]);
 
   const handleNewBlank = useCallback(() => {
     addTab();
@@ -595,8 +611,9 @@ export default function TopBar() {
 
       {/* Right: TOOLS (all routes) + WIDGETS (/trade only) + AccountSwitcher + SandboxToggle + Connection status + Clock */}
       <div className="flex items-center gap-2">
-        {/* TOOLS: always visible — shows route-relevant tools via ToolsDropdown */}
+        {/* TOOLS: always visible — shows route-relevant tools via ToolsDropdown (portal) */}
         <Button
+          ref={toolsButtonRef}
           variant="ghost"
           size="sm"
           onClick={() => setToolsMenuOpen(!toolsMenuOpen)}
@@ -616,6 +633,14 @@ export default function TopBar() {
             </span>
           )}
         </Button>
+        {/* ToolsDropdown portal — renders outside TopBar so it is never clipped
+            by parent overflow (Issue #39). Visible on all app routes (Issue #75). */}
+        <ToolsDropdown
+          isOpen={toolsMenuOpen}
+          onClose={() => setToolsMenuOpen(false)}
+          onSelectTool={handleSelectTool}
+          anchorRect={toolsButtonRef.current?.getBoundingClientRect()}
+        />
 
         {/* WIDGETS: only on /trade (Dockview canvas) */}
         {isTerminal && (

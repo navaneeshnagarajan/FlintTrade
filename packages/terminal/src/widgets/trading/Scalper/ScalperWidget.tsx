@@ -14,6 +14,14 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import Chart from "@/components/Chart";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   placeOrder,
   cancelAllOrders,
@@ -204,13 +212,13 @@ function NumberInput({
       <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">
         {label}
       </span>
-      <input
+      <Input
         type="number"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         min={min}
         placeholder={placeholder}
-        className="w-16 h-8 bg-surface-card border border-border-default rounded-md px-2 text-sm font-mono text-text-primary focus:outline-none focus:border-accent placeholder:text-text-disabled"
+        className="w-16 h-8 text-sm font-mono"
       />
     </div>
   );
@@ -324,6 +332,7 @@ export default function ScalperWidget(_props: WidgetProps) {
   const [interval, setInterval_] = useState<IntervalValue>("5m");
 
   const [expiries, setExpiries] = useState<string[]>([]);
+  const [expiriesError, setExpiriesError] = useState(false);
   const [expiry, setExpiry] = useState("");
   const [atmStrike, setAtmStrike] = useState<number | null>(null);
   const [ceOffset, setCeOffset] = useState(0);
@@ -361,29 +370,33 @@ export default function ScalperWidget(_props: WidgetProps) {
   const spotLtp = spotTick?.ltp ?? spotTick?.close ?? null;
 
   // Fetch expiries on symbol change
-  useEffect(() => {
-    let cancelled = false;
-    setExpiries([]);
-    setExpiry("");
-    setAtmStrike(null);
-
-    async function fetchExpiries() {
+  const fetchExpiries = useCallback(
+    async (signal?: { cancelled: boolean }) => {
+      setExpiriesError(false);
+      setExpiries([]);
+      setExpiry("");
       try {
         const data = await getExpiry(symbol, optExch);
-        if (cancelled) return;
+        if (signal?.cancelled) return;
         const list = Array.isArray(data) ? data : (data?.expiry ?? []);
         setExpiries(list);
         if (list.length > 0) setExpiry(list[0]);
       } catch {
-        // silently ignore — API may be offline
+        if (signal?.cancelled) return;
+        setExpiriesError(true);
       }
-    }
+    },
+    [symbol, optExch],
+  );
 
-    void fetchExpiries();
+  useEffect(() => {
+    const signal = { cancelled: false };
+    setAtmStrike(null);
+    void fetchExpiries(signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
     };
-  }, [symbol, optExch]);
+  }, [fetchExpiries]);
 
   // Resolve ATM from spot tick (fast path)
   useEffect(() => {
@@ -538,33 +551,47 @@ export default function ScalperWidget(_props: WidgetProps) {
           {/* Index selector */}
           <div className="flex flex-col gap-0.5">
             <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">Index</span>
-            <select
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              className="h-8 bg-surface-card border border-border-default rounded-md px-2 text-sm font-mono font-bold text-text-primary focus:outline-none focus:border-accent"
-            >
-              {SYMBOLS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <Select value={symbol} onValueChange={setSymbol}>
+              <SelectTrigger size="sm" className="font-mono font-bold min-w-[9rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SYMBOLS.map((s) => (
+                  <SelectItem key={s} value={s} className="font-mono font-bold">{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Expiry selector */}
           <div className="flex flex-col gap-0.5">
             <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">Expiry</span>
-            <select
-              value={expiry}
-              onChange={(e) => setExpiry(e.target.value)}
-              className="h-8 bg-surface-card border border-border-default rounded-md px-2 text-sm font-mono font-bold text-text-primary focus:outline-none focus:border-accent"
-            >
-              {expiries.length === 0 ? (
-                <option value="">loading…</option>
-              ) : (
-                expiries.map((ex) => (
-                  <option key={ex} value={ex}>{ex}</option>
-                ))
-              )}
-            </select>
+            {expiriesError ? (
+              <button
+                type="button"
+                onClick={() => void fetchExpiries()}
+                className="h-8 flex items-center gap-1.5 px-2 text-xs font-mono text-loss border border-loss/30 rounded-md bg-loss/5 hover:bg-loss/10 transition-colors"
+              >
+                <AlertTriangle size={10} />
+                Failed to load
+                <RefreshCw size={10} />
+              </button>
+            ) : (
+              <Select
+                value={expiry}
+                onValueChange={setExpiry}
+                disabled={expiries.length === 0}
+              >
+                <SelectTrigger size="sm" className="font-mono font-bold min-w-[9rem]">
+                  <SelectValue placeholder={expiries.length === 0 ? "Loading…" : "Select expiry"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {expiries.map((ex) => (
+                    <SelectItem key={ex} value={ex} className="font-mono">{ex}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {/* CE Strike stepper */}
@@ -670,7 +697,7 @@ export default function ScalperWidget(_props: WidgetProps) {
           {/* CE header */}
           <div className="shrink-0 px-3 py-2 bg-surface-card border-b border-border-subtle">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-mono text-loss font-bold uppercase tracking-wider">
+              <span className="text-xs font-mono text-profit font-bold uppercase tracking-wider">
                 {ceSymbol ?? `${symbol} CE`}
               </span>
               <span className="text-xxs text-text-disabled font-sans uppercase">Call</span>
@@ -787,7 +814,7 @@ export default function ScalperWidget(_props: WidgetProps) {
           {/* PE header */}
           <div className="shrink-0 px-3 py-2 bg-surface-card border-b border-border-subtle">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-mono text-profit font-bold uppercase tracking-wider">
+              <span className="text-xs font-mono text-loss font-bold uppercase tracking-wider">
                 {peSymbol ?? `${symbol} PE`}
               </span>
               <span className="text-xxs text-text-disabled font-sans uppercase">Put</span>

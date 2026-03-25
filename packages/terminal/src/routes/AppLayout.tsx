@@ -12,6 +12,16 @@ import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
 
+const ROUTE_TITLES: Record<string, string> = {
+  "/trade": "Trading Workspace",
+  "/invest": "Investment Dashboard",
+  "/learn": "Learning Center",
+  "/lab": "Strategy Lab",
+  "/automate": "Automation Hub",
+  "/ai": "AI Center",
+  "/settings": "Settings",
+};
+
 function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div
@@ -58,6 +68,8 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const routeTitle = ROUTE_TITLES[location.pathname] ?? "FlintTrade";
+
   // Global navigation event listener — widgets (e.g. AIAdvisor) dispatch this
   // because they can't use useNavigate() inside Dockview panels
   useEffect(() => {
@@ -98,9 +110,11 @@ export default function AppLayout() {
       {showSmallScreenWarning && (
         <SmallScreenOverlay onDismiss={handleDismissSmallScreen} />
       )}
+      {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
+          bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:z-100 focus:top-2 focus:left-2 focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm"
+        className="sr-only focus:not-sr-only focus:fixed focus:z-100 focus:top-2 focus:left-2 focus:bg-accent focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-medium focus:shadow-lg"
       >
         Skip to main content
       </a>
@@ -108,7 +122,10 @@ export default function AppLayout() {
         <TopBar />
         <TickerBar />
       </header>
-      <main id="main-content" className="flex-1 overflow-hidden">
+      {/* Issue #47: visually-hidden H1 for screen readers reflecting the current route */}
+      {/* Issue #54: aria-label on main landmark mirrors the route title */}
+      <main id="main-content" aria-label={routeTitle} className="flex-1 overflow-hidden">
+        <h1 className="sr-only">{routeTitle}</h1>
         <PageTransition locationKey={location.pathname}>
           <Outlet />
         </PageTransition>

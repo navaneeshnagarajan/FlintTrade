@@ -231,9 +231,25 @@ export default function OptionChainWidget() {
     setBasket((prev) => prev.filter((b) => !(b.strike === strike && b.optionType === optionType)));
   }
 
+  // Normalize an expiry string (YYYY-MM-DD or ISO) to DDMMMYY (e.g. 27MAR25)
+  // as required by the OpenAlgo fallback symbol format.
+  function normalizeExpiryForSymbol(expiry: string): string {
+    try {
+      const d = new Date(expiry);
+      if (isNaN(d.getTime())) return expiry;
+      const dd  = String(d.getDate()).padStart(2, "0");
+      const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
+      const yy  = String(d.getUTCFullYear()).slice(-2);
+      return `${dd}${mon}${yy}`;
+    } catch {
+      return expiry;
+    }
+  }
+
   // Order placement — resolves canonical trading symbol via getOptionSymbol
   async function handleOrder({ strike, optionType, expiry, action }: OrderParams) {
-    let orderSymbol   = `${symDef.label}${expiry}${strike}${optionType}`;
+    const normalizedExpiry = normalizeExpiryForSymbol(expiry);
+    let orderSymbol   = `${symDef.label}${normalizedExpiry}${strike}${optionType}`;
     let orderExchange = exchange;
     try {
       const resolved = await getOptionSymbol(symDef.label, exchange, expiry, optionType, String(strike));

@@ -66,6 +66,19 @@ export default function Chart({
     };
   }, [height]);
 
+  // Re-apply theme whenever it changes (without recreating the chart)
+  useEffect(() => {
+    if (!chartRef.current || !candleRef.current) return;
+    chartRef.current.applyOptions({
+      layout: chartTheme.layout,
+      grid: chartTheme.grid,
+      crosshair: chartTheme.crosshair,
+      rightPriceScale: chartTheme.rightPriceScale,
+      timeScale: chartTheme.timeScale,
+    });
+    candleRef.current.applyOptions(chartTheme.candle);
+  }, [chartTheme]);
+
   // Fetch historical data
   useEffect(() => {
     if (!candleRef.current || !volumeRef.current) return;

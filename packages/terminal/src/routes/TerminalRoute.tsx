@@ -10,7 +10,6 @@ import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
-import ToolsDropdown from "@/chrome/ToolsDropdown";
 import PresetPicker from "@/chrome/PresetPicker";
 import { widgetComponents } from "@/layout/widgetFactory";
 import { applyPreset } from "@/layout/workspacePresets";
@@ -80,7 +79,7 @@ function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
 // Full-page tools available from the TOOLS dropdown on /trade.
 // backtest-lab → /lab, strategy-builder → /lab, flow-builder → /automate
 // are full routes now and are no longer overlaid on the /trade canvas.
-// "settings" has been removed: it now navigates to /settings (handled in handleSelectTool).
+// "settings" navigates to /settings (handled in flinttrade:open-tool event listener).
 const tools: Omit<Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>, "settings"> = {
   "trade-journal": lazy(() => import("../tools/TradeJournal/TradeJournalTool")),
   "pnl-dashboard": lazy(() => import("../tools/PnLDashboard/PnLDashboardTool")),
@@ -106,8 +105,6 @@ export default function TerminalRoute() {
   const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
   const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
   const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
-  const toolsMenuOpen = useLayoutStore((s) => s.toolsMenuOpen);
-  const setToolsMenuOpen = useLayoutStore((s) => s.setToolsMenuOpen);
   const presetPickerOpen = useLayoutStore((s) => s.presetPickerOpen);
   const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
 
@@ -117,12 +114,34 @@ export default function TerminalRoute() {
       if (activeTool) { setActiveTool(null); return; }
       if (presetPickerOpen) { setPresetPickerOpen(false); return; }
       if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
-      if (toolsMenuOpen) { setToolsMenuOpen(false); return; }
-    }, [activeTool, presetPickerOpen, widgetPickerOpen, toolsMenuOpen, setPresetPickerOpen, setWidgetPickerOpen, setToolsMenuOpen]),
+    }, [activeTool, presetPickerOpen, widgetPickerOpen, setPresetPickerOpen, setWidgetPickerOpen]),
     onCommandPalette: useCallback(() => {
       // Future: open command palette (Ctrl+K)
     }, []),
   });
+
+  // ---------------------------------------------------------------------------
+  // ARIA injection for Dockview panels (Issue #46)
+  // Dockview v5 does not expose ARIA props. We patch the DOM after every
+  // layout change so that tabs satisfy WCAG 2.1 SC 4.1.2 (name, role, value).
+  // ---------------------------------------------------------------------------
+  const applyDockviewAria = useCallback(() => {
+    // tablist role on every tab strip container
+    document.querySelectorAll(".dv-tabs-container").forEach((container) => {
+      container.setAttribute("role", "tablist");
+      container.querySelectorAll(".dv-tab").forEach((tab) => {
+        tab.setAttribute("role", "tab");
+        tab.setAttribute(
+          "aria-selected",
+          tab.classList.contains("dv-active-tab") ? "true" : "false",
+        );
+      });
+    });
+    // tabpanel role on every panel content container
+    document.querySelectorAll(".dv-content-container").forEach((panel) => {
+      panel.setAttribute("role", "tabpanel");
+    });
+  }, []);
 
   const onDockviewReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -133,6 +152,14 @@ export default function TerminalRoute() {
       const d1 = event.api.onDidAddPanel(() => setPanelCount(event.api.panels.length));
       const d2 = event.api.onDidRemovePanel(() => setPanelCount(event.api.panels.length));
       disposablesRef.current.push(d1, d2);
+
+      // Re-apply ARIA attributes after every Dockview layout mutation so that
+      // newly added/removed tabs and panels stay annotated.
+      const d4 = event.api.onDidLayoutChange(() => applyDockviewAria());
+      disposablesRef.current.push(d4);
+      // Apply once immediately after Dockview finishes its initial render.
+      // rAF ensures the DOM has been painted before we query it.
+      requestAnimationFrame(applyDockviewAria);
 
       const activeTabId = useLayoutStore.getState().activeTabId;
       const savedLayout = useLayoutStore.getState().getTabLayout(activeTabId);
@@ -176,7 +203,7 @@ export default function TerminalRoute() {
     // level intentionally omitted — we only use it for the initial layout decision.
     // Re-running onDockviewReady on every skill change would reset the layout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setDockviewApi]
+    [setDockviewApi, applyDockviewAria]
   );
 
   // Auto-save layout on changes (debounced 500ms to avoid thrashing on rapid panel ops)
@@ -199,16 +226,8 @@ export default function TerminalRoute() {
     };
   }, []);
 
-  const handleSelectTool = useCallback((toolId: ToolId) => {
-    // "settings" is now a dedicated route — navigate instead of overlaying the canvas.
-    if (toolId === "settings") {
-      navigate("/settings");
-      return;
-    }
-    setActiveTool(toolId);
-  }, [navigate]);
-
-  // Listen for the custom event dispatched by DailyWelcome's "Open Trade Journal" link.
+  // Listen for the custom event dispatched by DailyWelcome's "Open Trade Journal" link,
+  // and also by TopBar's ToolsDropdown (which replaced the old inline ToolsDropdown).
   useEffect(() => {
     function onOpenTool(e: Event) {
       const detail = (e as CustomEvent<{ toolId: ToolId }>).detail;
@@ -232,13 +251,6 @@ export default function TerminalRoute() {
   return (
     <CinematicLayout mode="focused">
     <div className="h-full flex flex-col text-text-primary overflow-hidden select-none">
-      {/* Tools dropdown (absolute positioned) */}
-      <ToolsDropdown
-        isOpen={toolsMenuOpen}
-        onClose={() => setToolsMenuOpen(false)}
-        onSelectTool={handleSelectTool}
-      />
-
       {/* Main content: Dockview canvas OR full-page tool */}
       {activeTool && ToolComponent ? (
         <div className="flex-1 overflow-auto">

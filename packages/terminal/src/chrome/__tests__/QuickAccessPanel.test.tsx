@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import QuickAccessPanel from "../QuickAccessPanel";
 
 // ---------------------------------------------------------------------------
@@ -85,7 +86,14 @@ beforeEach(() => {
 // Helper
 // ---------------------------------------------------------------------------
 function renderPanel(onClose = vi.fn()) {
-  return render(<QuickAccessPanel onClose={onClose} />);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <QuickAccessPanel onClose={onClose} />
+    </QueryClientProvider>,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +132,14 @@ describe("QuickAccessPanel", () => {
 
   it("closes on Escape key", () => {
     const onClose = vi.fn();
-    const { container } = render(<QuickAccessPanel onClose={onClose} />);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <QuickAccessPanel onClose={onClose} />
+      </QueryClientProvider>,
+    );
     const dialog = container.querySelector("[role='dialog']") as HTMLElement;
     expect(dialog).not.toBeNull();
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -139,7 +154,14 @@ describe("QuickAccessPanel", () => {
 
   it('navigates to /settings when "Open Full Settings" is clicked', () => {
     const onClose = vi.fn();
-    render(<QuickAccessPanel onClose={onClose} />);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QuickAccessPanel onClose={onClose} />
+      </QueryClientProvider>,
+    );
     const btn = screen.getByRole("button", { name: /open full settings/i });
     fireEvent.click(btn);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -148,7 +170,14 @@ describe("QuickAccessPanel", () => {
 
   it("calls onClose when close button is clicked", () => {
     const onClose = vi.fn();
-    render(<QuickAccessPanel onClose={onClose} />);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QuickAccessPanel onClose={onClose} />
+      </QueryClientProvider>,
+    );
     const closeBtn = screen.getByRole("button", { name: /close quick settings/i });
     fireEvent.click(closeBtn);
     expect(onClose).toHaveBeenCalledTimes(1);

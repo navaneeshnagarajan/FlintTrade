@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   PieChart,
@@ -38,22 +39,29 @@ interface ToolsDropdownProps {
   onClose: () => void;
   /** Called only when on /trade. On other routes, Settings navigates directly. */
   onSelectTool: (toolId: ToolId) => void;
+  /**
+   * Bounding rect of the TOOLS button — used for fixed portal positioning so
+   * the dropdown escapes any parent overflow/stacking context (Issue #39).
+   */
+  anchorRect?: DOMRect;
 }
 
 /**
- * ToolsDropdown — absolute-positioned dropdown.
+ * ToolsDropdown — portal-rendered dropdown anchored to the TOOLS button rect.
  *
  * Route-aware behaviour:
  * - /trade   → shows all 4 trade tools; clicking any calls onSelectTool (canvas overlay)
  * - other    → shows Settings only; clicking navigates to /settings
  *
- * Closes when clicking outside (mousedown listener).
- * Positioned right-24 top-10 to sit beneath the TOOLS button in TopBar.
+ * Rendered via createPortal into document.body so it escapes any overflow or
+ * stacking context in TopBar / AppLayout (Issue #39).
+ * Closes when clicking outside (mousedown listener, Issue #75).
  */
 export default function ToolsDropdown({
   isOpen,
   onClose,
   onSelectTool,
+  anchorRect,
 }: ToolsDropdownProps) {
   const ref = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -110,11 +118,26 @@ export default function ToolsDropdown({
     onClose();
   }
 
-  return (
+  // Fixed positioning anchored to the button's bounding rect (portal mode).
+  // Falls back to a sensible default when no anchor rect is supplied.
+  const positionStyle: React.CSSProperties = anchorRect
+    ? {
+        position: "fixed",
+        top: anchorRect.bottom + 4,
+        right: window.innerWidth - anchorRect.right,
+      }
+    : {
+        position: "fixed",
+        top: 44,
+        right: 96,
+      };
+
+  return createPortal(
     <div
       ref={ref}
       role="menu"
-      className="absolute right-24 top-10 z-40 bg-surface-card border border-border-default rounded-lg shadow-xl py-1 w-52 animate-fade-in-scale"
+      className="z-50 bg-surface-card border border-border-default rounded-lg shadow-xl py-1 w-52 animate-fade-in-scale"
+      style={positionStyle}
       onKeyDown={handleKeyDown}
     >
       {tools.map((tool) => {
@@ -131,6 +154,7 @@ export default function ToolsDropdown({
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }

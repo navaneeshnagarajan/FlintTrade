@@ -97,6 +97,16 @@ export default function WelcomeRoute() {
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      // Only intercept Space/Enter when no interactive element (button, a, input) is focused.
+      // This prevents the handler from swallowing native button activation events.
+      const active = document.activeElement;
+      const isInteractive =
+        active instanceof HTMLButtonElement ||
+        active instanceof HTMLAnchorElement ||
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLSelectElement ||
+        active instanceof HTMLTextAreaElement;
+      if (isInteractive && (e.key === "Enter" || e.key === " ")) return;
       if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
         e.preventDefault();
         skipToEnd();

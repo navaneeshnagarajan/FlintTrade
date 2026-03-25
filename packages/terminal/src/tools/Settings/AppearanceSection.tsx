@@ -55,7 +55,7 @@ export function AppearanceSection() {
             onClick={() => handleMode("light")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               mode === "light"
-                ? "bg-accent/15 text-accent border border-accent/30"
+                ? "bg-accent/20 text-text-primary border border-accent/40"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
             }`}
           >
@@ -69,7 +69,7 @@ export function AppearanceSection() {
             onClick={() => handleMode("dark")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               mode === "dark"
-                ? "bg-accent/15 text-accent border border-accent/30"
+                ? "bg-accent/20 text-text-primary border border-accent/40"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
             }`}
           >
@@ -83,7 +83,7 @@ export function AppearanceSection() {
             onClick={() => handleMode("system")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               mode === "system"
-                ? "bg-accent/15 text-accent border border-accent/30"
+                ? "bg-accent/20 text-text-primary border border-accent/40"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
             }`}
           >
