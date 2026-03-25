@@ -307,17 +307,21 @@ class DataPipeline:
     ) -> list[dict[str, Any]]:
         """Query OHLCV bars from a table."""
         _validate_table(table)
-        query = f"SELECT * FROM {table} WHERE symbol = ? AND exchange = ?"
-        params: list[Any] = [symbol, exchange]
 
-        if start_date:
-            query += " AND timestamp >= ?"
-            params.append(start_date)
-        if end_date:
-            query += " AND timestamp <= ?::DATE + INTERVAL '1 day'"
-            params.append(end_date)
+        query = f"""
+            SELECT * FROM {table}
+            WHERE symbol = ?
+              AND exchange = ?
+              AND (CAST(? AS VARCHAR) IS NULL OR CAST(? AS VARCHAR) = '' OR timestamp >= CAST(? AS TIMESTAMP))
+              AND (CAST(? AS VARCHAR) IS NULL OR CAST(? AS VARCHAR) = '' OR timestamp <= CAST(? AS DATE) + INTERVAL '1 day')
+            ORDER BY timestamp
+        """
 
-        query += " ORDER BY timestamp"
+        params: list[Any] = [
+            symbol, exchange,
+            start_date, start_date, start_date,
+            end_date, end_date, end_date
+        ]
 
         result = self.connection.execute(query, params)
         columns = [desc[0] for desc in result.description]
