@@ -6,6 +6,29 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- 43 audit findings resolved (4 critical, 12 high, 15 medium, 12 low)
+- Ticker -100% on WS disconnect (LTP=0 guard)
+- Stale API key in WS singleton (updateCredentials + reactive hooks)
+- Silent widget failures (error banners with retry in Orders/Positions/Holdings)
+- ForwardTestSection useState-as-effect → useEffect
+- Hardcoded dark colors in 8 chart/tool widgets → CSS var reads
+- Route nav buttons → Links (WCAG 2.4.4)
+- text-muted contrast brightened on all 6 dark themes (WCAG AA)
+- Theme toggle 3-way cycle (dark/light/system)
+- Dockview ARIA roles (tablist/tab/tabpanel)
+- Dashboard loading skeletons
+- Scalper CE/PE color inversion, shadcn/ui migration, error states
+- 8 unused API functions removed
+- Dead InteractiveTour removed
+- DailyWelcome session persistence
+- Setup mode cards keyboard accessible
+- Option chain 30s refetchInterval during market hours
+- NoConnectionOverlay focus trap + route suppression
+- Light-mode flash prevention (prefers-color-scheme CSS)
+- ToolsDropdown portal rendering
+- Chart canvas aria-label, TickerBar screen reader summary
+
 ## [0.2.0-alpha] — 2026-03-25
 
 OpenAlgo absorption: direct broker connections, analysis tools, platform features.

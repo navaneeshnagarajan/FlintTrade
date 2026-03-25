@@ -4,7 +4,7 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-1021%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1400%2B%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
@@ -19,7 +19,7 @@ Open-source modular trading platform for Indian markets with direct broker conne
 
 FlintTrade is a self-hosted trading platform with direct broker connections via the gateway package (31 brokers, adapter pattern) and OpenAlgo compatibility. FlintTrade handles strategy execution, risk management, backtesting, real-time analysis, AI-powered signals, and multi-account orchestration.
 
-The platform is organized into 14 independent packages (12 Python + 1 React + 1 Rust/PyO3). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
+The platform is organized into 15 independent packages (13 Python + 1 React + 1 Rust/PyO3). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
 
 FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a platform you run on your own hardware, with your own broker accounts, under your own control. It's designed for SEBI-compliant algorithmic trading in India.
 
@@ -88,7 +88,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 ## Current State
 
 **What works:**
-- 14 packages (12 Python + 1 React + 1 Rust/PyO3) with **1,021 passing tests** (985 Python + 36 terminal)
+- 15 packages (13 Python + 1 React + 1 Rust/PyO3) with **1,400+ passing tests** (~1,100 Python + 309 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
@@ -99,12 +99,12 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 
 **What's complete:**
 - TypeScript strict mode migration (zero JSX/JS files remain)
-- Dockview v5.1 widget-composable workspace with 26 widgets + 7 tools
-- 10 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai
+- Dockview v5.1 widget-composable workspace with 27 widgets + 6 tools
+- 12 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /admin, 404
 - State architecture: Zustand 5 + Jotai + TanStack Query 5
 - Cinematic welcome (/welcome), Explore mode (/explore), Setup wizard (/setup)
 - Investor dashboard (/invest), Strategy Lab (/lab), Automation Hub (/automate), AI Center (/ai)
-- 5 built-in themes (Midnight, Obsidian, Terminal Green, Ocean Blue, Light)
+- 6 cinematic themes with dark/light variants (Midnight, Obsidian, Terminal Green, Ocean Blue, Sunset, Neon)
 - 3 UI libraries: Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
 - Full accessibility: WCAG AA landmarks, skip nav, ARIA tabs, reduced-motion support
 - 100% OpenAlgo API coverage (45+ endpoints wired to UI)
@@ -144,10 +144,10 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 14 packages, 1,021 tests, CI | ✅ Complete |
+| Foundation | Monorepo, 15 packages, 1,400+ tests, CI | ✅ Complete |
 | Infrastructure | Makefile, systemd, Docker, deploy scripts, git submodules | ✅ Complete |
 | Live Connection | OpenAlgo sandbox trading, WebSocket data, REST fallback | ✅ Complete |
-| Terminal UI | 26 widgets, 7 tools, 10 routes, Dockview v5.1, 6 presets | ✅ Complete |
+| Terminal UI | 27 widgets, 6 tools, 12 routes, Dockview v5.1, 6 presets | ✅ Complete |
 | Full-Stack Wiring | 20 backend endpoints, all routes functional, 5 themes | ✅ Complete |
 | UI/UX Polish | Accessibility, animations, responsive, error handling | ✅ Complete |
 | AI Integration | OpenClaw agent skills, autonomous signals | 📋 Planned |

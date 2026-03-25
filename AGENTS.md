@@ -7,7 +7,7 @@
 ## What This Is
 
 Open-source modular trading platform for Indian F&O, commodities, crypto.
-Built on OpenAlgo (31 broker gateway). 14 packages (12 Python + 1 Rust/PyO3 + 1 React), monorepo, AGPL-3.0.
+Built on OpenAlgo (31 broker gateway). 15 packages (13 Python + 1 Rust/PyO3 + 1 React), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.2.0-alpha
 
 ## Architecture
@@ -26,15 +26,15 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.2.0-alpha
 
 ## Packages
 
-**Python (12):** gateway, core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, indicators
+**Python (13):** gateway, core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, indicators, tick-engine (PyO3 bindings)
 **Rust/PyO3 (1):** tick-engine (high-performance tick processing, Python bindings via PyO3)
 **React (1):** terminal (5173)
 
 ## Current State (v0.2.0-alpha, released 2026-03-25)
 
-- 1,021 tests passing (985 Python + 36 terminal)
-- Terminal: 26 widgets (TSX), 7 tools (4 canvas overlays + 3 full-page), 10 routes, 6 workspace presets, 5 themes
-- Routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai
+- 1,400+ tests passing (~1,100 Python + 309 terminal)
+- Terminal: 27 widgets (TSX), 6 tools (3 canvas overlays + 3 full-page), 12 routes, 6 workspace presets, 6 cinematic themes (dark/light variants)
+- Routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /admin, 404
 - 20 FlintTrade backend endpoints, 100% OpenAlgo API coverage
 - Read PLAN.md for next tasks
 
