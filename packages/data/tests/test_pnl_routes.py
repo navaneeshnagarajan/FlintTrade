@@ -48,6 +48,20 @@ def _get(client, url):
     return client.get(url, headers={"X-API-Key": _TEST_API_KEY})
 
 
+def test_init_pnl_routes():
+    from packages.data.src.pnl_tracker import PnLTracker
+    from packages.data.src.pnl_routes import init_pnl_routes, _tracker
+    import packages.data.src.pnl_routes as pnl_routes
+
+    old_tracker = pnl_routes._tracker
+    new_tracker = PnLTracker()
+    try:
+        init_pnl_routes(new_tracker)
+        assert pnl_routes._tracker is new_tracker
+    finally:
+        init_pnl_routes(old_tracker)
+
+
 class TestPnLRoutes:
 
     def test_series_returns_ok(self, app_client):
@@ -74,8 +88,28 @@ class TestPnLRoutes:
         data = json.loads(resp.data)
         assert data["status"] == "ok"
         assert "realized" in data["data"]
+        assert "unrealized" in data["data"]
         assert "total" in data["data"]
+        assert "max_total" in data["data"]
+        assert "min_total" in data["data"]
+        assert "trade_count" in data["data"]
         assert data["data"]["data_points"] >= 1
+
+    def test_summary_empty_tracker(self, app_client):
+        import packages.data.src.pnl_routes as pnl_routes
+        pnl_routes._tracker.reset()
+
+        resp = _get(app_client, "/ft-api/v1/pnl-tracker/summary")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["status"] == "ok"
+        assert data["data"]["realized"] == 0.0
+        assert data["data"]["unrealized"] == 0.0
+        assert data["data"]["total"] == 0.0
+        assert data["data"]["max_total"] == 0.0
+        assert data["data"]["min_total"] == 0.0
+        assert data["data"]["trade_count"] == 0
+        assert data["data"]["data_points"] == 0
 
     def test_series_since_filter(self, app_client):
         import time
@@ -84,3 +118,10 @@ class TestPnLRoutes:
         data = json.loads(resp.data)
         assert data["status"] == "ok"
         assert data["data"] == []
+
+    def test_series_since_filter_invalid(self, app_client):
+        resp = _get(app_client, "/ft-api/v1/pnl-tracker?since=invalid")
+        assert resp.status_code == 400
+        data = json.loads(resp.data)
+        assert data["status"] == "error"
+        assert data["message"] == "since must be a float"
