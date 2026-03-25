@@ -3,6 +3,9 @@ import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { motion, AnimatePresence } from "framer-motion";
+import { CinematicLayout } from "@/components/layout/CinematicLayout";
+import { BlurFade } from "@/components/magicui/blur-fade";
+import { TextGenerateEffect } from "@/components/aceternity/text-generate-effect";
 import {
   BookOpen,
   GraduationCap,
@@ -636,23 +639,28 @@ export default function LearnRoute() {
   };
 
   return (
-    <div className="h-full bg-surface-base flex flex-col overflow-hidden">
+    <CinematicLayout mode="cinematic">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border-default bg-surface-card px-6 py-4" data-tour-target="course-list">
-        <div className="flex items-center gap-3">
-          <GraduationCap className="w-6 h-6 text-accent" />
-          <div>
-            <h1 className="font-heading font-bold text-lg text-text-primary">
-              {level === "beginner" ? "Getting Started" : "Learning Center"}
-            </h1>
-            <p className="text-xxs text-text-muted">
-              {level === "beginner"
-                ? "Learn the basics of trading — one lesson at a time"
-                : "Market basics, strategies, and paper trading guides"}
-            </p>
+      <BlurFade delay={0} duration={0.5}>
+        <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm px-6 py-4" data-tour-target="course-list">
+          <div className="flex items-center gap-3">
+            <GraduationCap className="w-6 h-6 text-accent" />
+            <div>
+              <TextGenerateEffect
+                words={level === "beginner" ? "Getting Started" : "Learning Center"}
+                className="font-bold text-lg text-text-primary"
+                duration={0.3}
+              />
+              <p className="text-xxs text-text-muted">
+                {level === "beginner"
+                  ? "Learn the basics of trading — one lesson at a time"
+                  : "Market basics, strategies, and paper trading guides"}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </BlurFade>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Collapsible sidebar */}
@@ -712,5 +720,6 @@ export default function LearnRoute() {
         />
       )}
     </div>
+    </CinematicLayout>
   );
 }

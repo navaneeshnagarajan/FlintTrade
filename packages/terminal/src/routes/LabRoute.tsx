@@ -46,6 +46,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import TabTransition from "@/components/motion/TabTransition";
 import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { motionConfig } from "@/lib/motion";
+import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import {
   runBacktest,
   getStrategies,
@@ -1682,7 +1683,8 @@ export default function LabRoute() {
   }
 
   return (
-    <div className="h-full bg-surface-base flex flex-col overflow-hidden">
+    <CinematicLayout mode="focused">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 pt-4 pb-0">
         <div className="flex items-center gap-3 pb-3" data-tour-target="strategy-picker">
@@ -1719,5 +1721,6 @@ export default function LabRoute() {
         />
       )}
     </div>
+    </CinematicLayout>
   );
 }

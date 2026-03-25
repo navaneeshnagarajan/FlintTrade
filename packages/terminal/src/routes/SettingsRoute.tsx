@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useEffect, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
+import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { InlineToast } from "@/tools/Settings/shared";
@@ -89,9 +90,10 @@ export default function SettingsRoute() {
   }
 
   return (
+    <CinematicLayout mode="focused" className="fixed inset-0">
     <main
       aria-label="Settings"
-      className="fixed inset-0 bg-surface-base flex flex-col overflow-hidden animate-fade-in"
+      className="h-full flex flex-col overflow-hidden animate-fade-in"
     >
       {/* Slim header */}
       <div className="flex items-center gap-3 px-4 h-10 border-b border-border-default bg-surface-card shrink-0">
@@ -162,5 +164,6 @@ export default function SettingsRoute() {
         <span className="text-xs text-text-muted">Changes saved automatically</span>
       </div>
     </main>
+    </CinematicLayout>
   );
 }

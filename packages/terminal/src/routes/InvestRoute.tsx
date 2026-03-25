@@ -61,6 +61,9 @@ import { useFunds } from "@/hooks/useFunds";
 import type { Holding } from "@/types/api";
 import { cn } from "@/lib/utils";
 import { FeatureLockCard } from "@/components/teasers";
+import { CinematicLayout } from "@/components/layout/CinematicLayout";
+import { BlurFade } from "@/components/magicui/blur-fade";
+import { TextGenerateEffect } from "@/components/aceternity/text-generate-effect";
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 
@@ -1361,17 +1364,21 @@ export default function InvestRoute() {
   };
 
   return (
-    <div className="h-full bg-surface-base flex flex-col overflow-hidden">
+    <CinematicLayout mode="cinematic">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Header with horizontal tab bar */}
-      <div className="border-b border-border-default bg-surface-card shrink-0">
+      <BlurFade delay={0} duration={0.5}>
+        <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm shrink-0">
         {/* Title row */}
         <div className="flex items-center justify-between px-6 pt-4 pb-3">
           <div className="flex items-center gap-3" data-tour-target="holdings">
             <TrendingUp className="w-5 h-5 text-profit" />
             <div>
-              <h1 className="font-heading font-bold text-base text-text-primary">
-                {level === "beginner" ? "Your Journey" : "Investor Dashboard"}
-              </h1>
+              <TextGenerateEffect
+                words={level === "beginner" ? "Your Journey" : "Investor Dashboard"}
+                className="font-bold text-base text-text-primary"
+                duration={0.3}
+              />
               <p className="text-xxs text-text-muted">
                 {level === "beginner"
                   ? "Track your holdings and build your wealth over time"
@@ -1418,7 +1425,8 @@ export default function InvestRoute() {
             );
           })}
         </nav>
-      </div>
+        </div>
+      </BlurFade>
 
       {/* Content */}
       {fullHeightTabs.includes(activeTab) ? (
@@ -1441,5 +1449,6 @@ export default function InvestRoute() {
         />
       )}
     </div>
+    </CinematicLayout>
   );
 }

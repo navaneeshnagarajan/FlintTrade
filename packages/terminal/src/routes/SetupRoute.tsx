@@ -13,6 +13,8 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { motionConfig } from "@/lib/motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { CinematicLayout } from "@/components/layout/CinematicLayout";
+import { BlurFade } from "@/components/magicui/blur-fade";
 
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -201,9 +203,11 @@ export default function SetupRoute() {
   // ---------- Mode selection ----------
   if (!mode) {
     return (
-      <ModeSelection
-        onSelect={(m) => { setMode(m); setStep(0); }}
-      />
+      <CinematicLayout mode="cinematic">
+        <ModeSelection
+          onSelect={(m) => { setMode(m); setStep(0); }}
+        />
+      </CinematicLayout>
     );
   }
 
@@ -348,62 +352,66 @@ export default function SetupRoute() {
   };
 
   return (
-    <main aria-label="Setup wizard" className="min-h-screen bg-surface-base flex items-center justify-center p-4">
-      <div className="max-w-lg w-full space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-1">
-          <p className="text-text-muted text-xxs uppercase tracking-widest">FlintTrade Setup</p>
-          <AnimatePresence mode="wait">
-            <motion.h2
-              key={`label-${step}`}
-              initial={{ opacity: 0, y: reduced ? 0 : -4 }}
-              animate={{ opacity: 1, y: 0, transition: { duration: motionConfig.duration.normal, ease: motionConfig.ease.enter } }}
-              exit={{ opacity: 0, y: reduced ? 0 : 4, transition: { duration: motionConfig.duration.fast, ease: motionConfig.ease.exit } }}
-              className="font-heading font-bold text-lg text-text-primary"
-            >
-              {stepLabel}
-            </motion.h2>
-          </AnimatePresence>
-        </div>
+    <CinematicLayout mode="cinematic">
+      <main aria-label="Setup wizard" className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-lg w-full space-y-6">
+          {/* Header */}
+          <BlurFade delay={0} duration={0.4}>
+            <div className="text-center space-y-1">
+              <p className="text-text-muted text-xxs uppercase tracking-widest">FlintTrade Setup</p>
+              <AnimatePresence mode="wait">
+                <motion.h2
+                  key={`label-${step}`}
+                  initial={{ opacity: 0, y: reduced ? 0 : -4 }}
+                  animate={{ opacity: 1, y: 0, transition: { duration: motionConfig.duration.normal, ease: motionConfig.ease.enter } }}
+                  exit={{ opacity: 0, y: reduced ? 0 : 4, transition: { duration: motionConfig.duration.fast, ease: motionConfig.ease.exit } }}
+                  className="font-heading font-bold text-lg text-text-primary"
+                >
+                  {stepLabel}
+                </motion.h2>
+              </AnimatePresence>
+            </div>
+          </BlurFade>
 
-        {/* Progress dots */}
-        <StepIndicator total={totalSteps} current={step} onStepClick={(i) => setStep(i)} />
+          {/* Progress dots */}
+          <StepIndicator total={totalSteps} current={step} onStepClick={(i) => setStep(i)} />
 
-        {/* Card with slide transitions */}
-        <Card className="bg-surface-card border-border-default overflow-hidden">
-          <CardContent className="pt-6 pb-6 px-6">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={step}
-                variants={stepVariants}
-                initial="initial"
-                animate="animate"
-                exit="exit"
+          {/* Card with slide transitions */}
+          <Card className="bg-surface-card border-border-default overflow-hidden">
+            <CardContent className="pt-6 pb-6 px-6">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={step}
+                  variants={stepVariants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                >
+                  {renderStep()}
+                </motion.div>
+              </AnimatePresence>
+            </CardContent>
+          </Card>
+
+          {/* Navigation */}
+          {!isDoneStep && (
+            <div className="flex justify-between items-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={back}
+                className="text-sm text-text-muted hover:text-text-primary"
               >
-                {renderStep()}
-              </motion.div>
-            </AnimatePresence>
-          </CardContent>
-        </Card>
-
-        {/* Navigation */}
-        {!isDoneStep && (
-          <div className="flex justify-between items-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={back}
-              className="text-sm text-text-muted hover:text-text-primary"
-            >
-              <ArrowLeft className="size-3.5 mr-1.5" />
-              {step === 0 ? "Change mode" : "Back"}
-            </Button>
-            <span className="font-mono text-xs text-text-muted">
-              {step + 1} / {totalSteps}
-            </span>
-          </div>
-        )}
-      </div>
-    </main>
+                <ArrowLeft className="size-3.5 mr-1.5" />
+                {step === 0 ? "Change mode" : "Back"}
+              </Button>
+              <span className="font-mono text-xs text-text-muted">
+                {step + 1} / {totalSteps}
+              </span>
+            </div>
+          )}
+        </div>
+      </main>
+    </CinematicLayout>
   );
 }

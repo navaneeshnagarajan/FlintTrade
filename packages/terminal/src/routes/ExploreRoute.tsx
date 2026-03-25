@@ -7,7 +7,7 @@
  * connect OpenAlgo for live data.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { LogoIcon } from "@/components/brand/Logo";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { motionConfig } from "@/lib/motion";
+import { useThemeStore } from "@/stores/themeStore";
 
 // Magic UI
 import { Particles } from "@/components/magicui/particles";
@@ -525,6 +526,17 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
 export default function ExploreRoute() {
   const navigate = useNavigate();
   const [toast, setToast] = useState<ToastState>({ visible: false, message: "" });
+  const theme = useThemeStore((s) => s.activeThemeId);
+
+  // Read primary particle color from CSS vars — reactive to theme changes
+  const particlePrimary = useMemo(() => {
+    if (typeof window === "undefined") return "#22c55e";
+    return (
+      getComputedStyle(document.documentElement).getPropertyValue("--particle-primary").trim() ||
+      "#22c55e"
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]);
 
   const dismissToast = useCallback(() => {
     setToast({ visible: false, message: "" });
@@ -603,7 +615,7 @@ export default function ExploreRoute() {
               {/* Particles layer — behind everything */}
               <Particles
                 quantity={40}
-                color="#22c55e"
+                color={particlePrimary}
                 size={1.5}
                 className="rounded-2xl"
               />

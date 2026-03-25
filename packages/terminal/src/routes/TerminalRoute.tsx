@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
@@ -226,7 +227,8 @@ export default function TerminalRoute() {
     : null;
 
   return (
-    <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden select-none">
+    <CinematicLayout mode="focused">
+    <div className="h-full flex flex-col text-text-primary overflow-hidden select-none">
       {/* Tools dropdown (absolute positioned) */}
       <ToolsDropdown
         isOpen={toolsMenuOpen}
@@ -323,5 +325,6 @@ export default function TerminalRoute() {
         />
       )}
     </div>
+    </CinematicLayout>
   );
 }

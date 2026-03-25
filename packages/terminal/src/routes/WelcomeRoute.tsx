@@ -14,7 +14,7 @@
  * Skip → navigates to /explore.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Moon, Circle, Leaf, Waves, Sun } from "lucide-react";
@@ -29,6 +29,16 @@ import { ShimmerButton } from "@/components/magicui/shimmer-button";
 
 // Aceternity UI
 import { Meteors } from "@/components/aceternity/meteors";
+
+// ---------------------------------------------------------------------------
+// CSS var reader — reactive to theme changes
+// ---------------------------------------------------------------------------
+function cssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -64,6 +74,19 @@ export default function WelcomeRoute() {
   const [step, setStep] = useState(0);
   const theme = useThemeStore((s) => s.activeThemeId);
   const reducedMotion = motionConfig.prefersReducedMotion();
+
+  // Read particle colors from CSS vars so they react to theme changes.
+  // Re-computed when activeThemeId changes (theme token updates happen synchronously).
+  const particleColors = useMemo(() => {
+    return {
+      primary:   cssVar("--particle-primary",   "#22c55e"),
+      secondary: cssVar("--particle-secondary",  "#86efac"),
+      tertiary:  cssVar("--particle-tertiary",   "#a3e635"),
+      warm:      cssVar("--glow-color",          "#fef08a").replace(/rgba?\(.*?\)/, "#fef08a"),
+      white:     "#ffffff",
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]);
 
   const skipToEnd = useCallback(() => setStep(5), []);
 
@@ -243,11 +266,11 @@ export default function WelcomeRoute() {
         {/* ====== SPACE BACKGROUND — always visible ====== */}
 
         {/* Deep space — multi-layer particles as distant stars and planets */}
-        <Particles quantity={50} color="#22c55e" size={0.4} className="opacity-10" />
-        <Particles quantity={15} color="#86efac" size={1.5} className="opacity-20" />
-        <Particles quantity={6} color="#a3e635" size={2.5} className="opacity-15" />
-        <Particles quantity={4} color="#fef08a" size={3.0} className="opacity-10" />
-        <Particles quantity={3} color="#ffffff" size={2.0} className="opacity-8" />
+        <Particles quantity={50} color={particleColors.primary}   size={0.4} className="opacity-10" />
+        <Particles quantity={15} color={particleColors.secondary} size={1.5} className="opacity-20" />
+        <Particles quantity={6}  color={particleColors.tertiary}  size={2.5} className="opacity-15" />
+        <Particles quantity={4}  color={particleColors.warm}      size={3.0} className="opacity-10" />
+        <Particles quantity={3}  color={particleColors.white}     size={2.0} className="opacity-8" />
 
         {/* Continuous meteor shower — always falling */}
         <Meteors number={15} />

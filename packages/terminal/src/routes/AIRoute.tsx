@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { CinematicLayout } from "@/components/layout/CinematicLayout";
+import { BlurFade } from "@/components/magicui/blur-fade";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -904,25 +906,28 @@ export default function AIRoute() {
   }
 
   return (
-    <div className="h-full bg-surface-base flex flex-col overflow-hidden">
+    <CinematicLayout mode="focused">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Top header bar */}
-      <div className="border-b border-border-default bg-surface-card px-5 py-3 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <Bot className="w-5 h-5 text-accent" />
-          <div>
-            <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
-              AI Center
-            </h1>
-            <p className="text-xxs text-text-muted mt-0.5">
-              {level === "beginner"
-                ? "Ask me anything about markets, stocks, or how to trade"
-                : level === "intermediate"
-                  ? "Local LLM advisor · ML signals"
-                  : "Local LLM advisor · ML signals · Sentiment · Knowledge base"}
-            </p>
+      <BlurFade delay={0} duration={0.4}>
+        <div className="border-b border-border-default bg-surface-card px-5 py-3 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Bot className="w-5 h-5 text-accent" />
+            <div>
+              <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
+                AI Center
+              </h1>
+              <p className="text-xxs text-text-muted mt-0.5">
+                {level === "beginner"
+                  ? "Ask me anything about markets, stocks, or how to trade"
+                  : level === "intermediate"
+                    ? "Local LLM advisor · ML signals"
+                    : "Local LLM advisor · ML signals · Sentiment · Knowledge base"}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </BlurFade>
 
       {/* Main content area — relative for overlay positioning */}
       <div className="flex-1 relative overflow-hidden">
@@ -955,5 +960,6 @@ export default function AIRoute() {
         )}
       </div>
     </div>
+    </CinematicLayout>
   );
 }
