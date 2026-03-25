@@ -202,7 +202,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
   const overallLabel = overallLevel === "danger" ? "High Risk" : overallLevel === "warning" ? "Caution" : "Safe";
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
+    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base" data-tour-target="risk-panel">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0">
         <div className="flex items-center gap-1.5">

@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { motion, AnimatePresence } from "framer-motion";
@@ -615,6 +616,9 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
 // ---------------------------------------------------------------------------
 
 export default function LearnRoute() {
+  const track = useTrackBehavior();
+  useEffect(() => { track("learn", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [activeTab, setActiveTab] = useState<TabId>("basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const level = useSkillLevel("learn");

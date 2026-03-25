@@ -4,10 +4,12 @@ import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { LayoutGrid, Layers } from "lucide-react";
+import { LayoutGrid, Layers, ShieldOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { useTradingStore } from "@/stores/tradingStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import PresetPicker from "@/chrome/PresetPicker";
@@ -18,6 +20,82 @@ import { useDockviewTheme } from "@/hooks/useDockviewTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
+
+// ---------------------------------------------------------------------------
+// Kill Switch Pill — floating daily loss monitor
+// ---------------------------------------------------------------------------
+
+/**
+ * Shown in the bottom-left when daily P&L exceeds 50% of the configured
+ * MTM stop-loss threshold. Provides a one-click emergency kill switch that
+ * calls POST /api/v1/safety/kill-switch to cancel all orders and close all
+ * positions via the backend SafetySystem (Layer 5).
+ */
+function KillSwitchPill() {
+  const totalPnl = useTradingStore((s) => s.totalPnl);
+  // mtmStoploss is stored as a positive rupee value, e.g. 5000 = ₹5,000 daily loss limit
+  const mtmStoploss = useSettingsStore((s) => s.riskLimits.mtmStoploss);
+  const [isTriggering, setIsTriggering] = useState(false);
+  const [triggered, setTriggered] = useState(false);
+
+  // Show pill when loss exceeds 50% of configured MTM stop-loss
+  const threshold = mtmStoploss > 0 ? mtmStoploss * 0.5 : Infinity;
+  const isNearLimit = totalPnl < 0 && Math.abs(totalPnl) >= threshold;
+
+  if (!isNearLimit) return null;
+
+  const isAtLimit = mtmStoploss > 0 && Math.abs(totalPnl) >= mtmStoploss;
+
+  async function handleKillSwitch() {
+    if (isTriggering || triggered) return;
+    setIsTriggering(true);
+    try {
+      await fetch("/api/v1/safety/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Manual kill switch — trader initiated from terminal" }),
+      });
+      setTriggered(true);
+    } catch {
+      // Silent — the pill remains visible so the user can retry
+    } finally {
+      setIsTriggering(false);
+    }
+  }
+
+  return (
+    <div
+      role="status"
+      aria-live="assertive"
+      aria-atomic="true"
+      aria-label={`Daily loss alert: ₹${Math.abs(totalPnl).toFixed(0)}`}
+      className="fixed bottom-4 left-4 z-40 bg-surface-card border border-loss/30 rounded-lg p-3 backdrop-blur-sm shadow-lg max-w-[180px]"
+    >
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <ShieldOff size={13} className="text-loss shrink-0" aria-hidden="true" />
+        <span className="text-xs text-loss font-medium font-mono">
+          -₹{Math.abs(totalPnl).toFixed(0)}
+        </span>
+      </div>
+      <div className="text-xxs text-text-muted mb-2 leading-tight">
+        {isAtLimit
+          ? "MTM limit reached"
+          : `${((Math.abs(totalPnl) / mtmStoploss) * 100).toFixed(0)}% of daily limit`}
+      </div>
+      <Button
+        size="sm"
+        variant="destructive"
+        className="w-full h-7 text-xs gap-1"
+        onClick={handleKillSwitch}
+        disabled={isTriggering || triggered}
+        aria-label="Activate emergency kill switch to cancel all orders and close all positions"
+      >
+        <ShieldOff size={11} aria-hidden="true" />
+        {triggered ? "Kill Active" : isTriggering ? "Activating..." : "Kill Switch"}
+      </Button>
+    </div>
+  );
+}
 
 /**
  * Returns the best default preset for the given skill level on /trade.
@@ -339,6 +417,9 @@ export default function TerminalRoute() {
           steps={TOUR_DEFINITIONS["trade-beginner"] ?? []}
         />
       )}
+
+      {/* Kill switch pill — floats over the canvas when daily loss threshold is reached */}
+      <KillSwitchPill />
     </div>
     </CinematicLayout>
   );

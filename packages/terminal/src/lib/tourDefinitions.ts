@@ -107,4 +107,38 @@ export const TOUR_DEFINITIONS: Record<string, TourStep[]> = {
       position: "top",
     },
   ],
+
+  "automate-beginner": [
+    {
+      target: "flow-builder",
+      title: "Flow Builder",
+      description:
+        "Create automated trading flows with visual drag-and-drop. Connect triggers, conditions, and actions without writing code.",
+      position: "bottom",
+    },
+    {
+      target: "cron-manager",
+      title: "Scheduled Tasks",
+      description:
+        "Set up recurring tasks like pre-market scans or end-of-day reports. Runs even when the terminal is closed.",
+      position: "right",
+    },
+  ],
+
+  "ai-beginner": [
+    {
+      target: "ai-chat",
+      title: "AI Chat",
+      description:
+        "Ask questions about markets, strategies, or your portfolio. Powered by your local LLM — fully private.",
+      position: "bottom",
+    },
+    {
+      target: "ai-signals",
+      title: "AI Signals",
+      description:
+        "Get AI-generated trading signals based on technical analysis. Review confidence scores before acting.",
+      position: "left",
+    },
+  ],
 };

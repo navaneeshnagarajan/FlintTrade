@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -1651,6 +1652,9 @@ function LabTabBar({ active, onChange, tabs = TABS }: LabTabBarProps) {
 // ---------------------------------------------------------------------------
 
 export default function LabRoute() {
+  const track = useTrackBehavior();
+  useEffect(() => { track("lab", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [activeTab, setActiveTab] = useState<TabId>("backtest");
   const [lastResult, setLastResult] = useState<BacktestResult | null>(null);
   const level = useSkillLevel("lab");

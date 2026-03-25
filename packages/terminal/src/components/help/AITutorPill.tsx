@@ -10,13 +10,13 @@
  *
  * Behaviour:
  *   - Only renders when skillStore.helpPrefs.aiTutor === true.
- *   - Reads/writes to aiConversationStore (shared with /ai route).
- *   - Context-aware: reads the current route via useLocation() and stores it
- *     so assistant responses can be contextualised per-route.
+ *   - Reads/writes to aiConversationStore (shared with /ai route and AIAdvisorWidget).
+ *   - Context-aware: reads the current route via useLocation() and passes it
+ *     as context on every API request so responses are route-aware.
  *   - Minimized by default; expands/collapses on click.
  *   - Escape key collapses the panel.
  *   - Hidden on small screens (< sm breakpoint) to avoid obscuring content.
- *   - Stub responses until Sub-project 6 wires the real backend.
+ *   - SSE streaming from /ft-api/api/v1/advisor/stream with non-streaming fallback.
  *
  * Animation:
  *   - Pill uses scale + opacity spring for hover glow.
@@ -35,7 +35,7 @@
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
 import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles, X, Send, Bot } from "lucide-react";
+import { Sparkles, X, Send, Bot, Settings } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSkillStore } from "@/stores/skillStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { motionConfig, EASE_ENTER, EASE_EXIT, DURATION } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -53,10 +54,131 @@ import { cn } from "@/lib/utils";
 /** Maximum number of messages visible in the pill panel (scroll for older) */
 const VISIBLE_MESSAGE_COUNT = 50;
 
-/** Stub response while the real AI backend integration is pending */
-const STUB_RESPONSE =
-  "I'm the AI tutor. This feature is coming soon! I'll be able to help you understand " +
-  "trading concepts, explain indicators, and guide you through the platform.";
+// ---------------------------------------------------------------------------
+// API helpers — mirror the pattern used in AIAdvisorWidget
+// ---------------------------------------------------------------------------
+
+function getApiBase(): string {
+  return import.meta.env.DEV ? "/ft-api" : "";
+}
+
+interface AdvisorStatusResponse {
+  status: "success" | "error";
+  data?: { configured: boolean; provider: string; model: string };
+}
+
+interface AdvisorResponse {
+  status: "success" | "error";
+  data?: { response: string };
+  message?: string;
+}
+
+/**
+ * Fetch advisor status from the backend and sync LLM settings into the store.
+ * Silently no-ops if the backend is not running.
+ */
+async function fetchAdvisorStatus(): Promise<void> {
+  try {
+    const resp = await fetch(`${getApiBase()}/api/v1/advisor/status`);
+    if (!resp.ok) return;
+    const json = (await resp.json()) as AdvisorStatusResponse;
+    if (json.status === "success" && json.data) {
+      useSettingsStore.getState().setLLM({
+        provider: json.data.provider,
+        model: json.data.model,
+      });
+    }
+  } catch {
+    // Backend not running — leave settings as-is
+  }
+}
+
+/**
+ * POST conversation history to the SSE streaming endpoint.
+ * Calls onToken for each incremental chunk. Returns the full assembled text.
+ * Throws "STREAMING_NOT_AVAILABLE" (string) on 404 so the caller can fall back.
+ */
+async function streamAdvisorMessage(
+  messages: Array<{ role: string; content: string }>,
+  route: string,
+  onToken: (token: string, fullText: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const resp = await fetch(`${getApiBase()}/api/v1/advisor/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, context: { route } }),
+    signal,
+  });
+
+  if (resp.status === 404) {
+    throw new Error("STREAMING_NOT_AVAILABLE");
+  }
+
+  if (!resp.ok) {
+    throw new Error(`Advisor API: HTTP ${resp.status}`);
+  }
+
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error("No readable stream in response");
+
+  const decoder = new TextDecoder();
+  let assistantText = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (!raw || raw === "[DONE]") continue;
+        try {
+          const data = JSON.parse(raw) as { done?: boolean; token?: string };
+          if (data.done) break;
+          if (data.token) {
+            assistantText += data.token;
+            onToken(data.token, assistantText);
+          }
+        } catch {
+          // Malformed SSE line — skip
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return assistantText;
+}
+
+/**
+ * POST conversation history to the non-streaming advisor endpoint.
+ * Used as fallback when streaming returns 404.
+ */
+async function postAdvisorMessage(
+  messages: Array<{ role: string; content: string }>,
+  route: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const resp = await fetch(`${getApiBase()}/api/v1/advisor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages,
+      message: messages[messages.length - 1]?.content ?? "",
+      context: { route },
+    }),
+    signal,
+  });
+
+  if (!resp.ok) throw new Error(`Advisor API: HTTP ${resp.status}`);
+
+  const json = (await resp.json()) as AdvisorResponse;
+  if (json.status === "error") return json.message ?? "Unknown error from advisor.";
+  return json.data?.response ?? "No response from advisor.";
+}
 
 // ---------------------------------------------------------------------------
 // Route label helper — returns a human-readable context string
@@ -228,12 +350,17 @@ function Pill({ onClick }: PillProps) {
 interface ExpandedPanelProps {
   onClose: () => void;
   routeName: string;
+  currentRoute: string;
+  isConfigured: boolean;
 }
 
-function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
+function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured }: ExpandedPanelProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollEndRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [inputValue, setInputValue] = useState("");
+  // Tracks the id of the streaming placeholder so we can update it in-place
+  const streamingIdRef = useRef<string | null>(null);
 
   const { messages, isStreaming, addMessage, setStreaming } = useAIConversationStore(
     useShallow((state) => ({
@@ -243,6 +370,16 @@ function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
       setStreaming: state.setStreaming,
     })),
   );
+
+  // We also need the low-level setState for in-place streaming updates.
+  // Grab the store instance directly for the partial-update pattern.
+  const updateMessageContent = useCallback((id: string, content: string) => {
+    useAIConversationStore.setState((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === id ? { ...m, content } : m,
+      ),
+    }));
+  }, []);
 
   // Focus input when panel mounts
   useEffect(() => {
@@ -263,7 +400,14 @@ function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
     scrollEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isStreaming]);
 
-  const handleSend = useCallback(() => {
+  // Abort in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const handleSend = useCallback(async () => {
     const text = inputValue.trim();
     if (!text || isStreaming) return;
 
@@ -271,20 +415,77 @@ function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
     addMessage("user", text);
     setStreaming(true);
 
-    // Stub: simulate a short response delay, then add assistant message
-    const delay = 600 + Math.random() * 400;
-    setTimeout(() => {
-      addMessage("assistant", STUB_RESPONSE);
-      setStreaming(false);
-    }, delay);
-  }, [inputValue, isStreaming, addMessage, setStreaming]);
+    // Build the conversation payload from the current store snapshot + the new user message
+    const snapshot = useAIConversationStore.getState().messages;
+    const conversationPayload = snapshot.map((m) => ({ role: m.role, content: m.content }));
 
-  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Add a placeholder assistant message that will be filled by streaming tokens
+    const placeholderId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    streamingIdRef.current = placeholderId;
+    useAIConversationStore.setState((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: placeholderId,
+          role: "assistant" as const,
+          content: "",
+          timestamp: Date.now(),
+          route: currentRoute,
+        },
+      ],
+    }));
+
+    try {
+      await streamAdvisorMessage(
+        conversationPayload,
+        currentRoute,
+        (_token, fullText) => {
+          updateMessageContent(placeholderId, fullText);
+        },
+        controller.signal,
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      if (errMsg === "STREAMING_NOT_AVAILABLE") {
+        // Remove the empty placeholder, then call the non-streaming fallback
+        useAIConversationStore.setState((state) => ({
+          messages: state.messages.filter((m) => m.id !== placeholderId),
+        }));
+
+        try {
+          const reply = await postAdvisorMessage(
+            conversationPayload,
+            currentRoute,
+            controller.signal,
+          );
+          addMessage("assistant", reply);
+        } catch (fallbackErr: unknown) {
+          const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          addMessage("assistant", `Error: ${msg}`);
+        }
+      } else if (!controller.signal.aborted) {
+        // Real streaming error — replace empty placeholder with error text
+        updateMessageContent(placeholderId, `Error: ${errMsg}`);
+      }
+      // If aborted the component is unmounting — do nothing
+    } finally {
+      streamingIdRef.current = null;
+      abortRef.current = null;
+      setStreaming(false);
+      inputRef.current?.focus();
+    }
+  }, [inputValue, isStreaming, addMessage, setStreaming, currentRoute, updateMessageContent]);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
-  }
+  }, [handleSend]);
 
   const visibleMessages = messages.slice(-VISIBLE_MESSAGE_COUNT);
   const reduced = motionConfig.prefersReducedMotion();
@@ -332,12 +533,24 @@ function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
         <ScrollArea className="flex-1 min-h-0">
           <div className="px-3 py-3 space-y-2.5">
             {visibleMessages.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
-                <Sparkles className="w-5 h-5 text-accent/60" />
-                <p className="text-xs text-text-muted leading-relaxed">
-                  Ask me anything about trading, indicators, or how to use FlintTrade.
-                </p>
-              </div>
+              isConfigured ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
+                  <Sparkles className="w-5 h-5 text-accent/60" />
+                  <p className="text-xs text-text-muted leading-relaxed">
+                    Ask me anything about trading, indicators, or how to use FlintTrade.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
+                  <Settings className="w-5 h-5 text-text-muted/60" />
+                  <p className="text-xs text-text-muted leading-relaxed">
+                    LLM not configured.
+                  </p>
+                  <p className="text-[10px] text-text-muted/60 leading-relaxed">
+                    Open Settings &rarr; AI to set up your provider.
+                  </p>
+                </div>
+              )
             )}
             {visibleMessages.map((msg, idx) => (
               <MessageBubble
@@ -360,8 +573,8 @@ function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask the AI tutor..."
-              disabled={isStreaming}
+              placeholder={isConfigured ? "Ask the AI tutor..." : "Configure LLM in Settings first..."}
+              disabled={isStreaming || !isConfigured}
               className={cn(
                 "bg-surface-base border-border-default text-text-primary text-xs h-8",
                 "placeholder:text-text-muted focus-visible:ring-accent/50",
@@ -371,8 +584,8 @@ function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
             <Button
               type="button"
               size="icon"
-              onClick={handleSend}
-              disabled={!inputValue.trim() || isStreaming}
+              onClick={() => void handleSend()}
+              disabled={!inputValue.trim() || isStreaming || !isConfigured}
               aria-label="Send message"
               className="h-8 w-8 shrink-0 bg-accent hover:bg-accent/90 disabled:opacity-40"
             >
@@ -384,7 +597,7 @@ function ExpandedPanel({ onClose, routeName }: ExpandedPanelProps) {
         {/* Footer */}
         <div className="px-3.5 py-1.5 border-t border-border-default shrink-0">
           <p className="text-center text-[10px] text-text-muted/60 leading-none">
-            Powered by AI — backend integration in v0.2.0
+            Powered by FlintTrade AI
           </p>
         </div>
       </GlassCard>
@@ -402,11 +615,17 @@ export function AITutorPill() {
 
   const aiTutorEnabled = useSkillStore((state) => state.helpPrefs.aiTutor);
   const setCurrentRoute = useAIConversationStore((state) => state.setCurrentRoute);
+  const isConfigured = useSettingsStore((s) => s.llm.provider.length > 0);
 
   // Keep route in the conversation store in sync
   useEffect(() => {
     setCurrentRoute(location.pathname);
   }, [location.pathname, setCurrentRoute]);
+
+  // Sync LLM config from backend once on mount
+  useEffect(() => {
+    void fetchAdvisorStatus();
+  }, []);
 
   const handleClose = useCallback(() => setIsOpen(false), []);
   const handleOpen = useCallback(() => setIsOpen(true), []);
@@ -436,7 +655,12 @@ export function AITutorPill() {
             exit={reduced ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.95 }}
             transition={{ duration: DURATION.normal, ease: isOpen ? EASE_ENTER : EASE_EXIT }}
           >
-            <ExpandedPanel onClose={handleClose} routeName={routeName} />
+            <ExpandedPanel
+              onClose={handleClose}
+              routeName={routeName}
+              currentRoute={location.pathname}
+              isConfigured={isConfigured}
+            />
           </motion.div>
         ) : (
           <motion.div

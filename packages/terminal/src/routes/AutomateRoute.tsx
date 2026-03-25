@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Workflow } from "lucide-react";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { useQuery } from "@tanstack/react-query";
@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
 import { getSafetyConfig, getRunningStrategies, getUploadedStrategies } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 import AutomateSidebar, { SECTIONS, type SectionId } from "./automate/AutomateSidebar";
 import FlowsSection       from "./automate/FlowsSection";
@@ -16,6 +17,9 @@ import StrategiesSection  from "./automate/StrategiesSection";
 import SettingsSection    from "./automate/SettingsSection";
 
 export default function AutomateRoute() {
+  const track = useTrackBehavior();
+  useEffect(() => { track("automate", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const level = useSkillLevel("automate");
 
   // Density adaptation:

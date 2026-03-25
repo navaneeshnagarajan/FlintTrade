@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useTremorTheme } from "@/hooks/useTremorTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
@@ -1283,6 +1284,9 @@ function IpoTrackerTab() {
 // ─── Root ──────────────────────────────────────────────────────────────────────
 
 export default function InvestRoute() {
+  const track = useTrackBehavior();
+  useEffect(() => { track("invest", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const level = useSkillLevel("invest");
 

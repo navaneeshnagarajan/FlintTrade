@@ -4,7 +4,7 @@
  * Wired to the FlintTrade Python backend at /ft-api/api/v1/advisor.
  * Features:
  *   - Conversation memory: full message history sent on each request
- *   - localStorage persistence (flinttrade:chat-history)
+ *   - Shared store (aiConversationStore) — persisted via Zustand, shared with AITutorPill
  *   - SSE streaming responses with token-by-token rendering
  *   - Fallback to non-streaming endpoint on 404
  *   - MCP tool confirmation cards (Approve / Reject)
@@ -19,12 +19,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useAIConversationStore } from "@/stores/aiConversationStore";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = "flinttrade:chat-history";
 const TOOL_CALL_PATTERN = /\[TOOL_CALL:([\s\S]*?)\]/;
 
 // ---------------------------------------------------------------------------
@@ -122,31 +122,6 @@ function parseToolCall(content: string): ToolCall | undefined {
   }
 
   return undefined;
-}
-
-/**
- * Load chat messages from localStorage.
- */
-function loadMessages(): ChatMessage[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as ChatMessage[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Save chat messages to localStorage.
- */
-function saveMessages(messages: ChatMessage[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-  } catch {
-    // Storage full or unavailable — silently ignore
-  }
 }
 
 /**
@@ -397,10 +372,31 @@ interface AIAdvisorWidgetProps {
 }
 
 export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>(loadMessages);
+  // ---------------------------------------------------------------------------
+  // Shared conversation store (synced with AITutorPill)
+  // ---------------------------------------------------------------------------
+  const storeMessages = useAIConversationStore((s) => s.messages);
+  const storeIsStreaming = useAIConversationStore((s) => s.isStreaming);
+  const addMessage = useAIConversationStore((s) => s.addMessage);
+  const setStreaming = useAIConversationStore((s) => s.setStreaming);
+  const clearMessages = useAIConversationStore((s) => s.clearMessages);
+
+  // ---------------------------------------------------------------------------
+  // Local state for tool call augmentation — per-session, not persisted
+  // toolMeta maps message id → { toolCall, toolStatus }
+  // ---------------------------------------------------------------------------
+  const [toolMeta, setToolMeta] = useState<Map<string, { toolCall?: ToolCall; toolStatus?: "pending" | "approved" | "rejected" }>>(
+    () => new Map(),
+  );
+
+  // Merge store messages with local tool meta for rendering
+  const messages: ChatMessage[] = storeMessages.map((m) => {
+    const meta = toolMeta.get(m.id);
+    return { ...m, toolCall: meta?.toolCall, toolStatus: meta?.toolStatus };
+  });
+
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -411,32 +407,29 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
     void fetchAdvisorStatus();
   }, []);
 
-  // Persist messages to localStorage whenever they change
-  useEffect(() => {
-    saveMessages(messages);
-  }, [messages]);
-
   // Auto-scroll to bottom whenever messages change
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [storeMessages]);
 
   const clearChat = useCallback(() => {
-    setMessages([]);
-    localStorage.removeItem(STORAGE_KEY);
+    clearMessages();
+    setToolMeta(new Map());
     inputRef.current?.focus();
-  }, []);
+  }, [clearMessages]);
 
   const handleApprove = useCallback(
     async (msg: ChatMessage) => {
       if (!msg.toolCall) return;
 
-      // Mark as approved
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msg.id ? { ...m, toolStatus: "approved" as const } : m)),
-      );
+      // Mark as approved in local tool meta
+      setToolMeta((prev) => {
+        const next = new Map(prev);
+        next.set(msg.id, { ...prev.get(msg.id), toolCall: msg.toolCall, toolStatus: "approved" });
+        return next;
+      });
 
       const base = getApiBase();
       const endpoint = msg.toolCall.endpoint.startsWith("/")
@@ -450,111 +443,98 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
           body: JSON.stringify(msg.toolCall.payload),
         });
         const json = (await resp.json()) as Record<string, unknown>;
-        const resultMsg: ChatMessage = {
-          id: generateId(),
-          role: "assistant",
-          content: `Action executed successfully.\n\n\`\`\`json\n${JSON.stringify(json, null, 2)}\n\`\`\``,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, resultMsg]);
+        addMessage(
+          "assistant",
+          `Action executed successfully.\n\n\`\`\`json\n${JSON.stringify(json, null, 2)}\n\`\`\``,
+        );
       } catch (err: unknown) {
         const errText = err instanceof Error ? err.message : String(err);
-        const errorMsg: ChatMessage = {
-          id: generateId(),
-          role: "assistant",
-          content: `Action failed: ${errText}`,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, errorMsg]);
+        addMessage("assistant", `Action failed: ${errText}`);
       }
     },
-    [],
+    [addMessage],
   );
 
   const handleReject = useCallback((msgId: string) => {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msgId ? { ...m, toolStatus: "rejected" as const } : m)),
-    );
-
-    const rejectMsg: ChatMessage = {
-      id: generateId(),
-      role: "assistant",
-      content: "Order cancelled by user.",
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, rejectMsg]);
-  }, []);
+    setToolMeta((prev) => {
+      const next = new Map(prev);
+      const existing = prev.get(msgId);
+      next.set(msgId, { ...existing, toolStatus: "rejected" });
+      return next;
+    });
+    addMessage("assistant", "Order cancelled by user.");
+  }, [addMessage]);
 
   const sendMessage = useCallback(async () => {
     const text = draft.trim();
     if (!text || sending) return;
 
-    const userMsg: ChatMessage = {
-      id: generateId(),
-      role: "user",
-      content: text,
-      timestamp: Date.now(),
-    };
-
-    const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
     setDraft("");
     setSending(true);
+    addMessage("user", text);
 
-    // Prepare conversation payload
-    const conversationPayload = updatedMessages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Build conversation payload from the store snapshot after adding the user message
+    const snapshot = useAIConversationStore.getState().messages;
+    const conversationPayload = snapshot.map((m) => ({ role: m.role, content: m.content }));
 
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Add placeholder assistant message for streaming token updates
+    const assistantId = generateId();
+    useAIConversationStore.setState((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          content: "",
+          timestamp: Date.now(),
+          route: state.currentRoute,
+        },
+      ],
+    }));
+    setStreaming(true);
+
     let replyContent = "";
 
-    // Try streaming first, fallback to non-streaming
     try {
-      // Create placeholder assistant message for streaming
-      const assistantId = generateId();
-      const placeholderMsg: ChatMessage = {
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, placeholderMsg]);
-      setStreaming(true);
-
       replyContent = await streamAdvisorMessage(
         conversationPayload,
         (_token, fullText) => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: fullText } : m)),
-          );
+          useAIConversationStore.setState((state) => ({
+            messages: state.messages.map((m) =>
+              m.id === assistantId ? { ...m, content: fullText } : m,
+            ),
+          }));
         },
         controller.signal,
       );
 
-      // Final update with complete text
+      // Detect tool calls in the final reply and store in local meta
       const toolCall = parseToolCall(replyContent);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content: replyContent,
-                toolCall,
-                toolStatus: toolCall ? ("pending" as const) : undefined,
-              }
-            : m,
+      if (toolCall) {
+        setToolMeta((prev) => {
+          const next = new Map(prev);
+          next.set(assistantId, { toolCall, toolStatus: "pending" });
+          return next;
+        });
+      }
+
+      // Finalize content in store
+      useAIConversationStore.setState((state) => ({
+        messages: state.messages.map((m) =>
+          m.id === assistantId ? { ...m, content: replyContent } : m,
         ),
-      );
+      }));
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
 
       if (errMsg === "STREAMING_NOT_AVAILABLE") {
-        // Fallback: remove the streaming placeholder, use non-streaming
-        setMessages(updatedMessages); // reset to before placeholder
+        // Remove empty placeholder, fall back to non-streaming
+        useAIConversationStore.setState((state) => ({
+          messages: state.messages.filter((m) => m.id !== assistantId),
+        }));
         setStreaming(false);
 
         try {
@@ -565,32 +545,35 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         }
 
         const toolCall = parseToolCall(replyContent);
-        const assistantMsg: ChatMessage = {
-          id: generateId(),
-          role: "assistant",
-          content: replyContent,
-          timestamp: Date.now(),
-          toolCall,
-          toolStatus: toolCall ? "pending" : undefined,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-      } else if (controller.signal.aborted) {
-        // User navigated away or component unmounted — do nothing
-      } else {
-        // Stream failed with a real error — show it
-        // Remove the empty placeholder and add error message
-        setMessages((prev) => {
-          const filtered = prev.filter((m) => m.content !== "" || m.role !== "assistant");
-          return [
-            ...filtered,
+        const newId = generateId();
+        useAIConversationStore.setState((state) => ({
+          messages: [
+            ...state.messages,
             {
-              id: generateId(),
+              id: newId,
               role: "assistant" as const,
-              content: `Error: ${errMsg}`,
+              content: replyContent,
               timestamp: Date.now(),
+              route: state.currentRoute,
             },
-          ];
-        });
+          ],
+        }));
+        if (toolCall) {
+          setToolMeta((prev) => {
+            const next = new Map(prev);
+            next.set(newId, { toolCall, toolStatus: "pending" });
+            return next;
+          });
+        }
+      } else if (controller.signal.aborted) {
+        // Component unmounted — do nothing
+      } else {
+        // Real error — replace empty placeholder with error text
+        useAIConversationStore.setState((state) => ({
+          messages: state.messages.map((m) =>
+            m.id === assistantId ? { ...m, content: `Error: ${errMsg}` } : m,
+          ),
+        }));
       }
     } finally {
       setSending(false);
@@ -598,7 +581,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
       abortRef.current = null;
       inputRef.current?.focus();
     }
-  }, [draft, sending, messages]);
+  }, [draft, sending, addMessage, setStreaming]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -617,7 +600,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
     };
   }, []);
 
-  const isEmpty = messages.length === 0;
+  const isEmpty = storeMessages.length === 0;
 
   return (
     <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden">
@@ -702,7 +685,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
                   onReject={handleReject}
                 />
               ))}
-              {sending && !streaming && (
+              {sending && !storeIsStreaming && (
                 <div className="flex gap-2 px-3 py-2">
                   <div className="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center shrink-0 mt-0.5">
                     <Bot size={10} className="text-text-secondary" />

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { BlurFade } from "@/components/magicui/blur-fade";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -879,6 +880,9 @@ const SECTION_LABELS: Record<SectionId, string> = {
 // ---------------------------------------------------------------------------
 
 export default function AIRoute() {
+  const track = useTrackBehavior();
+  useEffect(() => { track("ai", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
   const level = useSkillLevel("ai");
 

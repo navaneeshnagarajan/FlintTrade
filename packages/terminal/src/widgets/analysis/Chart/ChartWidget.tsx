@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { isMarketHours } from "@/lib/market";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import type { Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import {
@@ -292,6 +293,9 @@ function PeriodInput({ value, onChange }: { value: number; onChange: (v: number)
 // ---------------------------------------------------------------------------
 
 export default function ChartWidget() {
+  const track = useTrackBehavior();
+  useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
   const [exchange, setExchange] = useState(DEFAULT_EXCHANGE);
   const [interval, setInterval] = useState("5m");
@@ -490,7 +494,7 @@ export default function ChartWidget() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex flex-col h-full w-full bg-surface-base overflow-hidden">
+    <div className="flex flex-col h-full w-full bg-surface-base overflow-hidden" data-tour-target="chart">
 
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-1 bg-surface-base border-b border-border-default shrink-0">

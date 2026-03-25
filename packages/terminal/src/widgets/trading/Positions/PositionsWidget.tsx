@@ -122,7 +122,7 @@ export default function PositionsWidget(_props: WidgetProps) {
   });
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
+    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base" data-tour-target="positions">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0">
         <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">

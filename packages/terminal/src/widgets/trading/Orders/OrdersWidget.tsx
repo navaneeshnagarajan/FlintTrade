@@ -1,7 +1,7 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getOrderbook() call with useOrders() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table + shadcn Badge for status.
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { RefreshCw, FileText } from "lucide-react";
 import {
   type ColumnDef,
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useOrders } from "@/hooks/useOrders";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import type { WidgetProps } from "@/types/widgets";
 
 // OpenAlgo REST returns snake_case at runtime
@@ -53,6 +54,7 @@ function statusVariant(
 export default function OrdersWidget(_props: WidgetProps) {
   const { data: ordersData, refetch, isFetching, isError, error } = useOrders();
   const [sorting, setSorting] = useState<SortingState>([]);
+  const track = useTrackBehavior();
 
   const rows = useMemo<OrderRow[]>(() => {
     const raw = (ordersData ?? []) as RawOrder[];
@@ -64,6 +66,10 @@ export default function OrdersWidget(_props: WidgetProps) {
       orderStatus: o.order_status ?? o.status ?? "—",
     }));
   }, [ordersData]);
+
+  useEffect(() => {
+    if (rows.length > 0) track("trade", "ordersPlaced");
+  }, [rows.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const columns = useMemo<ColumnDef<OrderRow>[]>(
     () => [
