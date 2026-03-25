@@ -96,7 +96,7 @@ function IndexChip({ name, data }: IndexChipProps) {
           {isUp ? "\u25b2" : "\u25bc"}{Math.abs(pct).toFixed(2)}%
         </span>
       ) : ltp !== null ? (
-        <span className="text-xs text-text-disabled">\u2014</span>
+        <span className="text-xs text-text-disabled">{"\u2014"}</span>
       ) : null}
     </div>
   );

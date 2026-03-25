@@ -106,20 +106,33 @@ async function fetchPrevClose(): Promise<Map<string, number>> {
   const map = new Map<string, number>();
 
   // --- Primary path: multiquotes ---
-  let quotes: Quote[] = [];
+  // OpenAlgo returns { results: [{ symbol, exchange, data: { prev_close, ... } }], status }
+  // The post<T> helper returns json.data ?? json, so we get the raw response object.
   try {
-    const result = await getMultiQuotes(TICKER_INSTRUMENTS);
-    if (Array.isArray(result)) quotes = result;
+    const result = await getMultiQuotes(TICKER_INSTRUMENTS) as unknown;
+    // Handle both array and { results: [] } shapes
+    const items: Array<Record<string, unknown>> =
+      Array.isArray(result) ? result
+      : (result && typeof result === "object" && "results" in result && Array.isArray((result as Record<string, unknown>).results))
+        ? (result as Record<string, unknown>).results as Array<Record<string, unknown>>
+        : [];
+
+    for (const item of items) {
+      // Each item may be { symbol, exchange, data: { prev_close, close, ltp, ... } }
+      // or a flat quote object { symbol, exchange, prev_close, close, ltp, ... }
+      const sym = (item.symbol as string) || "";
+      const exch = (item.exchange as string) || "";
+      if (!sym || !exch) continue;
+
+      // The quote data may be nested under 'data' or flat
+      const quoteData = (item.data && typeof item.data === "object" ? item.data : item) as Record<string, unknown>;
+      const prevClose = extractPrevClose(quoteData as Quote);
+      if (prevClose !== undefined) {
+        map.set(`${exch}:${sym}`, prevClose);
+      }
+    }
   } catch {
     // multiquotes failed — fall through to individual fallback below
-  }
-
-  for (const q of quotes) {
-    if (!q.symbol || !q.exchange) continue;
-    const prevClose = extractPrevClose(q);
-    if (prevClose !== undefined) {
-      map.set(`${q.exchange}:${q.symbol}`, prevClose);
-    }
   }
 
   // --- Fallback path: individual getQuotes for any missing instruments ---
