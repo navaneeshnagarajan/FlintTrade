@@ -8,10 +8,19 @@ skew). Predicts BUY/SELL/HOLD for next N candles with a confidence score.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+try:
+    from numpy.typing import NDArray
+    import numpy as np
+    _NUMPY_AVAILABLE = True
+except ImportError:  # numpy not installed — use plain lists throughout
+    _NUMPY_AVAILABLE = False
+    NDArray = list  # type: ignore[misc,assignment]
 
 logger = logging.getLogger("flinttrade.ai.signals")
 
@@ -203,6 +212,172 @@ def generate_labels(
         else:
             labels.append(1)  # HOLD
     return labels
+
+
+# ---------------------------------------------------------------------------
+# Sharpe labels
+# ---------------------------------------------------------------------------
+
+
+def generate_sharpe_labels(
+    closes: NDArray,
+    lookahead: int = 5,
+    min_sharpe: float = 0.5,
+    offset: int = 20,
+) -> NDArray:
+    """Alternative labeling: BUY only if forward Sharpe exceeds threshold.
+
+    Computes the Sharpe ratio of forward returns over *lookahead* bars and
+    labels each bar:
+    - ``1``  — forward Sharpe > min_sharpe  (BUY)
+    - ``0``  — forward Sharpe < -min_sharpe (SELL)
+    - ``-1`` — otherwise                    (HOLD)
+
+    Args:
+        closes: 1-D sequence of close prices (list or numpy array).
+        lookahead: Number of forward bars used to compute returns.
+        min_sharpe: Sharpe ratio threshold that triggers a directional label.
+        offset: Skip this many bars at the start (indicators warm-up).
+
+    Returns:
+        Integer array of length ``len(closes) - offset`` with values in
+        ``{-1, 0, 1}``.
+    """
+    n = len(closes)
+    labels: list[int] = []
+
+    for i in range(offset, n):
+        end_idx = i + lookahead
+        if end_idx >= n:
+            labels.append(-1)  # HOLD — not enough future data
+            continue
+
+        # Forward returns over the lookahead window
+        fwd_returns: list[float] = []
+        for j in range(i, end_idx):
+            c_cur = float(closes[j])
+            c_nxt = float(closes[j + 1])
+            fwd_returns.append((c_nxt - c_cur) / c_cur if c_cur != 0 else 0.0)
+
+        if not fwd_returns:
+            labels.append(-1)
+            continue
+
+        mean_ret = sum(fwd_returns) / len(fwd_returns)
+        variance = sum((r - mean_ret) ** 2 for r in fwd_returns) / ((len(fwd_returns) - 1) if len(fwd_returns) > 1 else 1)
+        std_ret = math.sqrt(variance) if variance > 0 else 0.0
+
+        if std_ret == 0:
+            # Zero volatility — label by direction of mean return
+            if mean_ret > 0:
+                labels.append(1)
+            elif mean_ret < 0:
+                labels.append(0)
+            else:
+                labels.append(-1)
+            continue
+
+        sharpe = mean_ret / std_ret
+
+        if sharpe > min_sharpe:
+            labels.append(1)   # BUY
+        elif sharpe < -min_sharpe:
+            labels.append(0)   # SELL
+        else:
+            labels.append(-1)  # HOLD
+
+    if _NUMPY_AVAILABLE:
+        return np.array(labels, dtype=np.int8)
+    return labels  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# Turbulence index
+# ---------------------------------------------------------------------------
+
+
+def compute_turbulence(
+    returns: NDArray,
+    window: int = 60,
+) -> NDArray:
+    """Mahalanobis-distance-based turbulence index per bar.
+
+    Measures how abnormal the current return is relative to the recent
+    historical distribution.  High values indicate unusual / stressed market
+    conditions.
+
+    Single-asset formula (simplified Mahalanobis):
+        turbulence[t] = (r[t] - mu)^2 / variance
+
+    Multi-asset formula (full Mahalanobis, requires numpy):
+        turbulence[t] = (r[t] - mu)^T * Sigma^{-1} * (r[t] - mu)
+
+    Args:
+        returns: 1-D (single asset) or 2-D (multi-asset, shape N x M) array
+            of returns.  Plain Python lists treated as single-asset.
+        window: Rolling window length for computing mean / covariance.
+
+    Returns:
+        1-D float array of turbulence scores, same length as the returns
+        time-axis.  Values before the first full window are ``0.0``.
+    """
+    # Determine if multi-asset (2-D numpy array)
+    is_multi = (
+        _NUMPY_AVAILABLE
+        and isinstance(returns, np.ndarray)
+        and returns.ndim == 2
+    )
+
+    if is_multi:
+        return _compute_turbulence_multi(returns, window)  # type: ignore[arg-type]
+    return _compute_turbulence_single(returns, window)
+
+
+def _compute_turbulence_single(returns: NDArray, window: int) -> NDArray:
+    """Single-asset turbulence: (r - mean)^2 / variance over rolling window."""
+    n = len(returns)
+    scores: list[float] = [0.0] * n
+
+    for i in range(window, n):
+        hist = [float(returns[j]) for j in range(i - window, i)]
+        mu = sum(hist) / window
+        var = sum((r - mu) ** 2 for r in hist) / window
+        r_cur = float(returns[i])
+        scores[i] = (r_cur - mu) ** 2 / var if var > 0 else 0.0
+
+    if _NUMPY_AVAILABLE:
+        return np.array(scores, dtype=np.float64)
+    return scores  # type: ignore[return-value]
+
+
+def _compute_turbulence_multi(returns: "np.ndarray", window: int) -> "np.ndarray":
+    """Multi-asset turbulence: full Mahalanobis distance over rolling window.
+
+    Requires numpy.  ``returns`` must have shape (N, M) — N bars, M assets.
+    """
+    import numpy as np  # noqa: F811
+
+    n, m = returns.shape
+    scores = np.zeros(n, dtype=np.float64)
+
+    for i in range(window, n):
+        hist = returns[i - window: i]          # (window, M)
+        mu = hist.mean(axis=0)                  # (M,)
+        cov = np.cov(hist, rowvar=False)        # (M, M)
+
+        # Add small jitter to avoid singular covariance matrix
+        cov += np.eye(m) * 1e-8
+
+        try:
+            cov_inv = np.linalg.inv(cov)
+        except np.linalg.LinAlgError:
+            scores[i] = 0.0
+            continue
+
+        diff = returns[i] - mu                  # (M,)
+        scores[i] = float(diff @ cov_inv @ diff)
+
+    return scores
 
 
 # ---------------------------------------------------------------------------

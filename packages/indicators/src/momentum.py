@@ -1,5 +1,5 @@
 """Momentum indicators — RSI, MACD, Stochastic, Williams %R, CCI, ROC, CMO,
-TRIX, StochRSI, BOP, MOM, Awesome Oscillator.
+TRIX, StochRSI, BOP, MOM, Awesome Oscillator, Squeeze Momentum, DPO.
 
 All functions:
 - Accept numpy float64 arrays
@@ -490,3 +490,143 @@ def awesome_oscillator(
 
     midpoint = (high + low) / 2.0
     return _sma(midpoint, fast) - _sma(midpoint, slow)
+
+
+def squeeze_momentum(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    bb_period: int = 20,
+    bb_mult: float = 2.0,
+    kc_period: int = 20,
+    kc_mult: float = 1.5,
+    mom_period: int = 12,
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Squeeze Momentum Indicator (LazyBear).
+
+    Detects market "squeezes" — periods where Bollinger Bands contract inside
+    Keltner Channels. When bands expand back out, explosive momentum often
+    follows in the direction of the momentum histogram.
+
+    Squeeze: when BB upper < KC upper AND BB lower > KC lower.
+    Momentum: linear regression of delta, where:
+        delta = close - (highest(high, mom_period) + lowest(low, mom_period)
+                         + sma(close, mom_period)) / 3
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        close: Close prices, shape (n,).
+        bb_period: Bollinger Bands period (default 20).
+        bb_mult: Bollinger Bands standard deviation multiplier (default 2.0).
+        kc_period: Keltner Channels EMA period (default 20).
+        kc_mult: Keltner Channels ATR multiplier (default 1.5).
+        mom_period: Period for the momentum midline and linear regression (default 12).
+
+    Returns:
+        Tuple of:
+        - momentum: Linear-regression momentum histogram values, shape (n,).
+          NaN where insufficient history.
+        - squeeze_on: Boolean array, shape (n,). True = squeeze is active
+          (BB inside KC). False = squeeze is released.
+    """
+    from packages.indicators.src.volatility import bollinger_bands, keltner_channels
+    from packages.indicators.src.trend import sma as _sma, linreg as _linreg
+
+    validate_ohlcv(high, low, close, min_length=max(bb_period, kc_period, mom_period))
+
+    n = len(close)
+
+    # Bollinger Bands
+    bb_upper, _bb_mid, bb_lower = bollinger_bands(close, bb_period, bb_mult)
+
+    # Keltner Channels (use kc_period for both EMA and ATR periods)
+    kc_upper, _kc_mid, kc_lower = keltner_channels(
+        high, low, close, ema_period=kc_period, atr_period=kc_period, multiplier=kc_mult
+    )
+
+    # Squeeze: BB inside KC
+    squeeze_on = np.zeros(n, dtype=np.bool_)
+    for i in range(n):
+        if (
+            not np.isnan(bb_upper[i])
+            and not np.isnan(kc_upper[i])
+            and bb_upper[i] < kc_upper[i]
+            and bb_lower[i] > kc_lower[i]
+        ):
+            squeeze_on[i] = True
+
+    # Momentum delta: close minus the midline
+    # midline = (highest(high, mom_period) + lowest(low, mom_period) + sma(close, mom_period)) / 3
+    sma_close = _sma(close, mom_period)
+    delta = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(mom_period - 1, n):
+        highest_high = float(np.max(high[i - mom_period + 1 : i + 1]))
+        lowest_low = float(np.min(low[i - mom_period + 1 : i + 1]))
+        if np.isnan(sma_close[i]):
+            continue
+        midline = (highest_high + lowest_low + sma_close[i]) / 3.0
+        delta[i] = close[i] - midline
+
+    # Momentum = linear regression of delta
+    # Only compute over valid (non-NaN) portion of delta
+    valid_mask = ~np.isnan(delta)
+    valid_delta = delta[valid_mask]
+    momentum = np.full(n, np.nan, dtype=np.float64)
+
+    if len(valid_delta) >= mom_period:
+        linreg_vals = _linreg(valid_delta, mom_period)
+        valid_indices = np.where(valid_mask)[0]
+        momentum[valid_indices] = linreg_vals
+
+    return momentum, squeeze_on
+
+
+def dpo(close: NDArray[np.float64], period: int = 20) -> NDArray[np.float64]:
+    """Detrended Price Oscillator — removes trend to show cycles.
+
+    DPO eliminates the long-term trend from price so that underlying cycles
+    can be identified more easily. It compares past price to a past SMA.
+
+    Formula:
+        shift = period // 2 + 1
+        DPO[i] = close[i - shift] - SMA(close, period)[i - shift]
+
+    The result is aligned to the CURRENT bar index, meaning:
+        result[i] = close[i - shift] - SMA(close, period)[i - shift]
+
+    This is equivalent to the standard DPO definition used in TradingView
+    and most charting platforms.
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Lookback period (default 20).
+
+    Returns:
+        DPO values, shape (n,). First ``period - 1 + shift`` values are NaN,
+        where shift = period // 2 + 1.
+
+    Raises:
+        ValueError: If period < 2.
+    """
+    from packages.indicators.src.trend import sma as _sma
+
+    validate_series(close, min_length=period)
+    if period < 2:
+        raise ValueError(f"dpo period must be >= 2, got {period}")
+
+    n = len(close)
+    shift = period // 2 + 1
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    sma_vals = _sma(close, period)
+
+    # DPO[i] = close[i - shift] - SMA[i - shift], reported at bar i
+    for i in range(shift, n):
+        past_idx = i - shift
+        sma_past = sma_vals[past_idx]
+        if not np.isnan(sma_past):
+            result[i] = close[past_idx] - sma_past
+
+    return result

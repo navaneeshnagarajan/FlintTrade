@@ -1,4 +1,4 @@
-"""Volume indicators — OBV, AD, CMF, MFI, VWMA.
+"""Volume indicators — OBV, AD, CMF, MFI, VWMA, Elder Force Index, Price Volume Trend.
 
 All functions:
 - Accept numpy float64 arrays
@@ -248,5 +248,107 @@ def vwma(
         vl = volume[i - period + 1 : i + 1]
         sum_vol = float(np.sum(vl))
         result[i] = float(np.sum(cv * vl)) / sum_vol if sum_vol > 0.0 else np.nan
+
+    return result
+
+
+def efi(
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+    period: int = 13,
+) -> NDArray[np.float64]:
+    """Elder Force Index — price change times volume, EMA smoothed.
+
+    Developed by Alexander Elder. Combines price direction, magnitude, and
+    volume into a single oscillator. Positive values indicate buying pressure;
+    negative values indicate selling pressure.
+
+    Formula:
+        raw[i] = (close[i] - close[i - 1]) * volume[i]
+        EFI[i] = EMA(raw, period)
+
+    Args:
+        close: Close prices, shape (n,).
+        volume: Volume, shape (n,). Must be same length as close.
+        period: EMA smoothing period (default 13).
+
+    Returns:
+        EFI values, shape (n,). Index 0 is NaN (no prior close).
+        First ``period`` values total are NaN (1 for diff + period-1 for EMA warmup).
+
+    Raises:
+        ValueError: If close and volume lengths differ.
+    """
+    from packages.indicators.src.trend import ema as _ema
+
+    validate_series(close, min_length=2)
+    validate_series(volume, min_length=2)
+    if len(close) != len(volume):
+        raise ValueError(
+            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
+        )
+    if period < 1:
+        raise ValueError(f"efi period must be >= 1, got {period}")
+
+    n = len(close)
+    raw = np.full(n, np.nan, dtype=np.float64)
+    raw[1:] = (close[1:] - close[:-1]) * volume[1:]
+
+    # Compute EMA over the valid (non-NaN) portion of raw
+    valid_mask = ~np.isnan(raw)
+    valid_raw = raw[valid_mask]
+
+    result = np.full(n, np.nan, dtype=np.float64)
+    if len(valid_raw) >= period:
+        ema_vals = _ema(valid_raw, period)
+        valid_indices = np.where(valid_mask)[0]
+        result[valid_indices] = ema_vals
+
+    return result
+
+
+def pvt(
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Price Volume Trend — cumulative (percentage change * volume).
+
+    PVT is similar to OBV but uses the percentage price change rather than
+    a binary up/down signal, giving proportional weight to the magnitude of
+    price moves.
+
+    Formula:
+        PVT[0] = 0
+        PVT[i] = PVT[i-1] + ((close[i] - close[i-1]) / close[i-1]) * volume[i]
+
+    When close[i-1] is 0, the contribution for that bar is treated as 0.
+
+    Args:
+        close: Close prices, shape (n,). All values should be > 0 for meaningful results.
+        volume: Volume, shape (n,). Must be same length as close.
+
+    Returns:
+        PVT values, shape (n,). No NaN warmup — starts at 0 for bar 0.
+
+    Raises:
+        ValueError: If close and volume lengths differ.
+    """
+    validate_series(close, min_length=1)
+    validate_series(volume, min_length=1)
+    if len(close) != len(volume):
+        raise ValueError(
+            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
+        )
+
+    n = len(close)
+    result = np.zeros(n, dtype=np.float64)
+
+    for i in range(1, n):
+        prev_close = close[i - 1]
+        if prev_close != 0.0:
+            pct_change = (close[i] - prev_close) / prev_close
+        else:
+            pct_change = 0.0
+        result[i] = result[i - 1] + pct_change * volume[i]
 
     return result

@@ -1,5 +1,5 @@
 """Volatility indicators — ATR, Bollinger Bands, Keltner Channels, Donchian
-Channel, NATR, Historical Volatility.
+Channel, NATR, Historical Volatility, Williams VIX Fix, Chaikin Volatility.
 
 All functions:
 - Accept numpy float64 arrays
@@ -230,5 +230,109 @@ def historical_volatility(
         if np.any(np.isnan(window)):
             continue
         result[i] = float(np.std(window, ddof=0)) * ann_factor * 100.0
+
+    return result
+
+
+def williams_vix_fix(
+    close: NDArray[np.float64],
+    low: NDArray[np.float64],
+    period: int = 22,
+) -> NDArray[np.float64]:
+    """Williams VIX Fix — volatility proxy using highest close vs current low.
+
+    Developed by Larry Williams as a synthetic VIX. Measures fear/volatility
+    using freely available OHLC data rather than options prices.
+
+    Formula:
+        WVF[i] = (highest(close, period)[i] - low[i]) / highest(close, period)[i] * 100
+
+    Higher values indicate more fear/volatility (similar to VIX spikes).
+    Values near 0 suggest low fear; values near 100 are extreme panic readings.
+
+    Args:
+        close: Close prices, shape (n,).
+        low: Low prices, shape (n,). Must be same length as close.
+        period: Lookback for highest close (default 22, approx one month of daily bars).
+
+    Returns:
+        WVF values as percentages, shape (n,). First ``period - 1`` values are NaN.
+
+    Raises:
+        ValueError: If close and low lengths differ.
+    """
+    validate_series(close, min_length=period)
+    validate_series(low, min_length=period)
+    if len(close) != len(low):
+        raise ValueError(
+            f"Array length mismatch: close={len(close)}, low={len(low)}"
+        )
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(period - 1, n):
+        highest_close = float(np.max(close[i - period + 1 : i + 1]))
+        if highest_close == 0.0:
+            result[i] = 0.0
+        else:
+            result[i] = (highest_close - low[i]) / highest_close * 100.0
+
+    return result
+
+
+def chaikin_volatility(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    period: int = 10,
+    roc_period: int = 10,
+) -> NDArray[np.float64]:
+    """Chaikin Volatility — EMA of the high-low range, then Rate of Change.
+
+    Developed by Marc Chaikin. Measures the rate of change in a smoothed
+    high-low range. Rising values indicate increasing volatility (range
+    expansion); falling values indicate narrowing volatility.
+
+    Formula:
+        hl_ema[i] = EMA(high - low, period)
+        CV[i] = (hl_ema[i] - hl_ema[i - roc_period]) / hl_ema[i - roc_period] * 100
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,). Must be same length as high.
+        period: EMA period for smoothing the high-low range (default 10).
+        roc_period: Lookback period for the rate of change (default 10).
+
+    Returns:
+        Chaikin Volatility values as percentages, shape (n,).
+        First ``period - 1 + roc_period`` values are NaN.
+
+    Raises:
+        ValueError: If high and low lengths differ.
+    """
+    from packages.indicators.src.trend import ema as _ema
+
+    validate_series(high, min_length=period)
+    validate_series(low, min_length=period)
+    if len(high) != len(low):
+        raise ValueError(
+            f"Array length mismatch: high={len(high)}, low={len(low)}"
+        )
+    if period < 1:
+        raise ValueError(f"chaikin_volatility period must be >= 1, got {period}")
+    if roc_period < 1:
+        raise ValueError(f"chaikin_volatility roc_period must be >= 1, got {roc_period}")
+
+    hl_range = (high - low).astype(np.float64)
+    hl_ema = _ema(hl_range, period)
+
+    n = len(high)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(roc_period, n):
+        prev = hl_ema[i - roc_period]
+        if np.isnan(hl_ema[i]) or np.isnan(prev) or prev == 0.0:
+            continue
+        result[i] = (hl_ema[i] - prev) / prev * 100.0
 
     return result

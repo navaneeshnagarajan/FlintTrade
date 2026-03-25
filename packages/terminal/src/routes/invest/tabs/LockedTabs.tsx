@@ -1,27 +1,16 @@
 /**
  * LockedTabs.tsx
  *
- * Feature-locked placeholder tabs: Stocks, IPO.
+ * Feature-locked placeholder tabs: IPO.
  * These render a FeatureLockCard until their backends are built.
- * EtfTab has been moved to its own file (EtfTab.tsx).
- * Colocated in one file since each is trivially small.
+ *
+ * StocksTab has been moved to StocksTab.tsx (real implementation).
+ * EtfTab has been moved to EtfTab.tsx.
+ * Colocated in one file since each remaining tab is trivially small.
  */
 
-import { Search, TrendingUp } from "lucide-react";
+import { TrendingUp } from "lucide-react";
 import { FeatureLockCard } from "@/components/teasers";
-
-export function StocksTab() {
-  return (
-    <div className="flex items-center justify-center h-full min-h-80 px-8">
-      <FeatureLockCard
-        config={{ featureName: "Stock Screener", status: "in_dev", version: "v0.3.0" }}
-        description="Filter stocks by technical indicators, fundamentals, and custom criteria."
-        icon={<Search className="w-8 h-8" />}
-        className="max-w-sm w-full"
-      />
-    </div>
-  );
-}
 
 export function IpoTab() {
   return (

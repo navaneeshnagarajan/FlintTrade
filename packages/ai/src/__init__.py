@@ -13,8 +13,15 @@ from .sentiment import (
     SentimentAnalyzer,
     SentimentScore,
 )
+from .market_simulator import (
+    DEFAULT_PARTICIPANTS,
+    MarketParticipant,
+    MarketSimulator,
+    ParticipantAction,
+    SimulationResult,
+)
 from .pipeline import SignalPipeline
-from .signals import Signal, SignalGenerator
+from .signals import Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
 
 __all__ = [
     # LLM
@@ -53,4 +60,13 @@ __all__ = [
     # Analyst chain
     "AnalystChain",
     "AnalysisState",
+    # Market simulator
+    "MarketSimulator",
+    "MarketParticipant",
+    "ParticipantAction",
+    "SimulationResult",
+    "DEFAULT_PARTICIPANTS",
+    # Extended signal functions
+    "generate_sharpe_labels",
+    "compute_turbulence",
 ]

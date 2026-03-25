@@ -22,6 +22,9 @@ class SignalPipeline:
         model_path: str = "",
         instruments: list[dict] | None = None,
         interval: str = "5m",
+        turbulence_enabled: bool = False,
+        turbulence_threshold: float = 3.0,
+        turbulence_window: int = 60,
     ) -> None:
         self.host = openalgo_host
         self.api_key = openalgo_api_key
@@ -35,6 +38,9 @@ class SignalPipeline:
         self.interval = interval
         self.latest_signals: dict[str, dict[str, Any]] = {}
         self._generator: Any = None
+        self._turbulence_enabled: bool = turbulence_enabled
+        self._turbulence_threshold: float = turbulence_threshold
+        self._turbulence_window: int = turbulence_window
 
     def _ensure_generator(self) -> None:
         """Lazy-load signal generator with trained model."""
@@ -103,30 +109,50 @@ class SignalPipeline:
                     continue
 
                 # Use ML model if trained, otherwise fall back to EMA crossover
+                closes = [float(b.get("close", 0)) for b in bars]
                 if self._generator is not None and self._generator.is_trained:
                     signal = self._generator.predict(bars, symbol=inst["symbol"])
-                    results[key] = {
-                        "symbol": inst["symbol"],
-                        "exchange": inst["exchange"],
-                        "signal": signal.action,
-                        "confidence": signal.confidence,
-                        "ltp": float(bars[-1].get("close", 0)),
-                        "timestamp": datetime.now().isoformat(),
-                        "method": "ml_model",
-                    }
+                    raw_signal = signal.action
+                    confidence = signal.confidence
+                    method = "ml_model"
                 else:
                     # Fallback: simple EMA crossover
-                    closes = [float(b.get("close", 0)) for b in bars]
-                    sig = self._ema_crossover_signal(closes)
-                    results[key] = {
-                        "symbol": inst["symbol"],
-                        "exchange": inst["exchange"],
-                        "signal": sig,
-                        "confidence": 0.0,
-                        "ltp": float(closes[-1]),
-                        "timestamp": datetime.now().isoformat(),
-                        "method": "ema_crossover_fallback",
-                    }
+                    raw_signal = self._ema_crossover_signal(closes)
+                    confidence = 0.0
+                    method = "ema_crossover_fallback"
+
+                # Turbulence override — suppress directional signal when market
+                # conditions are abnormal (high Mahalanobis distance).
+                turbulence_score: float = 0.0
+                if self._turbulence_enabled and len(closes) >= self._turbulence_window + 1:
+                    from packages.ai.src.signals import compute_turbulence
+
+                    # Compute per-bar returns for the last window+1 bars
+                    tail = closes[-(self._turbulence_window + 1):]
+                    recent_returns = [
+                        (tail[i + 1] - tail[i]) / tail[i] if tail[i] != 0 else 0.0
+                        for i in range(len(tail) - 1)
+                    ]
+                    turb = compute_turbulence(recent_returns, window=self._turbulence_window)
+                    turbulence_score = float(turb[-1]) if len(turb) > 0 else 0.0
+                    if turbulence_score > self._turbulence_threshold:
+                        logger.info(
+                            "Turbulence override for %s: score=%.3f > threshold=%.3f — forcing HOLD",
+                            key, turbulence_score, self._turbulence_threshold,
+                        )
+                        raw_signal = "HOLD"
+                        method = f"{method}+turbulence_override"
+
+                results[key] = {
+                    "symbol": inst["symbol"],
+                    "exchange": inst["exchange"],
+                    "signal": raw_signal,
+                    "confidence": confidence,
+                    "ltp": float(closes[-1]),
+                    "timestamp": datetime.now().isoformat(),
+                    "method": method,
+                    "turbulence_score": turbulence_score,
+                }
             except Exception:
                 logger.exception("Signal cycle error for %s", key)
 

@@ -33,7 +33,14 @@ export type WidgetId =
   | "calculator"
   | "news"
   | "ticker"
-  | "aiadvisor";
+  | "aiadvisor"
+  | "orderflow"
+  | "actioncenter"
+  | "gex"
+  | "volsurface"
+  | "ivsmile"
+  | "straddlepnl"
+  | "oiprofile";
 
 export type ToolId =
   | "settings"

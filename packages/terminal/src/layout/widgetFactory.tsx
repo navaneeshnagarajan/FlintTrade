@@ -43,6 +43,7 @@ const lazyWidgets = {
   ivsmile: lazy(() => import("@/widgets/analysis/IVSmile/IVSmileWidget")),
   straddlepnl: lazy(() => import("@/widgets/analysis/StraddlePnL/StraddlePnLWidget")),
   oiprofile: lazy(() => import("@/widgets/analysis/OIProfile/OIProfileWidget")),
+  orderflow: lazy(() => import("@/widgets/analysis/OrderFlow/OrderFlowWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -76,6 +77,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "ivsmile", name: "IV Smile", icon: "TrendingUp", category: "Analysis" },
   { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis" },
   { id: "oiprofile", name: "OI Profile", icon: "BarChart", category: "Analysis" },
+  { id: "orderflow", name: "Order Flow", icon: "BarChart2", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------

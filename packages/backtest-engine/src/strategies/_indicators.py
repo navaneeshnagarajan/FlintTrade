@@ -246,4 +246,151 @@ def atr(
     return result
 
 
-__all__ = ["ema", "sma", "rsi", "bollinger_bands", "macd", "supertrend", "atr"]
+def laguerre_rsi(closes: list[float], gamma: float = 0.5) -> list[float]:
+    """Laguerre RSI — smooth RSI oscillator bounded in [0, 1].
+
+    Applies a 4-pole Laguerre filter to derive an RSI-like momentum oscillator.
+    The gamma parameter controls smoothing: higher gamma = more smoothing.
+
+    Args:
+        closes: Close price series.
+        gamma: Damping factor in (0, 1). Default 0.5.
+
+    Returns:
+        Laguerre RSI series in range [0, 1]; same length as closes.
+        Leading values where the filter has not yet seeded are 0.5.
+    """
+    n = len(closes)
+    if n < 2:
+        return [0.5] * n
+
+    result: list[float] = []
+    l0_prev = l1_prev = l2_prev = l3_prev = closes[0]
+
+    for price in closes:
+        l0 = (1 - gamma) * price + gamma * l0_prev
+        l1 = -gamma * l0 + l0_prev + gamma * l1_prev
+        l2 = -gamma * l1 + l1_prev + gamma * l2_prev
+        l3 = -gamma * l2 + l2_prev + gamma * l3_prev
+
+        cu = 0.0
+        cd = 0.0
+        if l0 >= l1:
+            cu += l0 - l1
+        else:
+            cd += l1 - l0
+        if l1 >= l2:
+            cu += l1 - l2
+        else:
+            cd += l2 - l1
+        if l2 >= l3:
+            cu += l2 - l3
+        else:
+            cd += l3 - l2
+
+        denom = cu + cd
+        result.append(cu / denom if denom != 0 else 0.5)
+
+        l0_prev, l1_prev, l2_prev, l3_prev = l0, l1, l2, l3
+
+    return result
+
+
+def pivot_points(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+) -> tuple[float, float, float, float, float]:
+    """Classic floor-trader pivot points (single period).
+
+    Computes pivot levels from a window of H/L/C values (usually 1 bar, but
+    any window is accepted — the max/min/last are used).
+
+        P  = (H + L + C) / 3
+        R1 = 2 * P - L
+        S1 = 2 * P - H
+        R2 = P + (H - L)
+        S2 = P - (H - L)
+
+    Args:
+        highs: High prices for the pivot period.
+        lows: Low prices for the pivot period.
+        closes: Close prices for the pivot period.
+
+    Returns:
+        Tuple of (P, R1, S1, R2, S2).
+    """
+    if not highs or not lows or not closes:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    h = max(highs)
+    lo = min(lows)
+    c = closes[-1]
+    p = (h + lo + c) / 3
+    r1 = 2 * p - lo
+    s1 = 2 * p - h
+    r2 = p + (h - lo)
+    s2 = p - (h - lo)
+    return p, r1, s1, r2, s2
+
+
+def heikin_ashi(
+    opens: list[float],
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    """Heikin-Ashi candle conversion.
+
+    Transforms standard OHLCV candles into Heikin-Ashi candles which
+    smooth price action and make trends easier to identify.
+
+        HA_close = (O + H + L + C) / 4
+        HA_open  = (prev_HA_open + prev_HA_close) / 2   (seed: (O[0] + C[0]) / 2)
+        HA_high  = max(H, HA_open, HA_close)
+        HA_low   = min(L, HA_open, HA_close)
+
+    Args:
+        opens: Open prices.
+        highs: High prices.
+        lows: Low prices.
+        closes: Close prices.
+
+    Returns:
+        Tuple of (ha_opens, ha_highs, ha_lows, ha_closes) lists.
+    """
+    n = len(closes)
+    if n == 0:
+        return [], [], [], []
+
+    ha_opens: list[float] = [0.0] * n
+    ha_highs: list[float] = [0.0] * n
+    ha_lows: list[float] = [0.0] * n
+    ha_closes: list[float] = [0.0] * n
+
+    # Seed first bar
+    ha_closes[0] = (opens[0] + highs[0] + lows[0] + closes[0]) / 4
+    ha_opens[0] = (opens[0] + closes[0]) / 2
+    ha_highs[0] = max(highs[0], ha_opens[0], ha_closes[0])
+    ha_lows[0] = min(lows[0], ha_opens[0], ha_closes[0])
+
+    for i in range(1, n):
+        ha_closes[i] = (opens[i] + highs[i] + lows[i] + closes[i]) / 4
+        ha_opens[i] = (ha_opens[i - 1] + ha_closes[i - 1]) / 2
+        ha_highs[i] = max(highs[i], ha_opens[i], ha_closes[i])
+        ha_lows[i] = min(lows[i], ha_opens[i], ha_closes[i])
+
+    return ha_opens, ha_highs, ha_lows, ha_closes
+
+
+__all__ = [
+    "ema",
+    "sma",
+    "rsi",
+    "bollinger_bands",
+    "macd",
+    "supertrend",
+    "atr",
+    "laguerre_rsi",
+    "pivot_points",
+    "heikin_ashi",
+]

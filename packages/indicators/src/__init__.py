@@ -36,10 +36,12 @@ from packages.indicators.src.momentum import (
     bop,
     cci,
     cmo,
+    dpo,
     macd,
     mom,
     roc,
     rsi,
+    squeeze_momentum,
     stoch_rsi,
     stochastic,
     trix,
@@ -50,18 +52,22 @@ from packages.indicators.src.momentum import (
 from packages.indicators.src.volatility import (
     atr,
     bollinger_bands,
+    chaikin_volatility,
     donchian_channels,
     historical_volatility,
     keltner_channels,
     natr,
+    williams_vix_fix,
 )
 
 # Volume
 from packages.indicators.src.volume import (
     ad,
     cmf,
+    efi,
     mfi,
     obv,
+    pvt,
     vwma,
 )
 
@@ -113,6 +119,8 @@ __all__ = [
     "bop",
     "mom",
     "awesome_oscillator",
+    "squeeze_momentum",
+    "dpo",
     # volatility
     "atr",
     "bollinger_bands",
@@ -120,12 +128,16 @@ __all__ = [
     "donchian_channels",
     "natr",
     "historical_volatility",
+    "williams_vix_fix",
+    "chaikin_volatility",
     # volume
     "obv",
     "ad",
     "cmf",
     "mfi",
     "vwma",
+    "efi",
+    "pvt",
     # signals
     "crossover",
     "crossunder",
