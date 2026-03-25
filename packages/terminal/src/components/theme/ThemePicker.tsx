@@ -3,14 +3,26 @@
  *
  * Theme selection grid and custom theme builder for AppearanceSection.
  * Phase C: migrated from FlintTradeTheme to CinematicTheme.
+ * Phase H: enhanced with contrast validation, dark/light split preview,
+ *           stricter import validation, and hover-preview on preset cards.
  *
  * Sections:
  *   1. Built-in theme grid — icon + name + description + dark/light accent dots
+ *      Hover-preview: temporarily applies hovered theme's CSS vars.
  *   2. Custom builder (collapsible) — dark + light variant color editors
+ *      WCAG AA contrast indicators per accent/base pair.
+ *      Dark/Light split preview cards shown side by side.
  *   3. Import / Export — JSON clipboard round-trip for CinematicTheme
+ *      Import validates that both "dark" and "light" variant fields exist.
  */
 
-import { useState, useCallback, type ChangeEvent } from "react";
+import {
+  useState,
+  useCallback,
+  useRef,
+  type ChangeEvent,
+  type MouseEvent,
+} from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -24,6 +36,8 @@ import {
   Zap,
   Snowflake,
   Moon,
+  ShieldCheck,
+  ShieldX,
   type LucideProps,
 } from "lucide-react";
 import type { ForwardRefExoticComponent, RefAttributes } from "react";
@@ -33,6 +47,7 @@ import {
   type CinematicTheme,
   type ThemeVariant,
 } from "@/lib/cinematicThemes";
+import { evaluateContrast, type ContrastResult } from "@/lib/contrastUtils";
 
 // ---------------------------------------------------------------------------
 // Icon resolver — maps theme.icon string to a Lucide component
@@ -89,8 +104,166 @@ function buildCustomTheme(
   };
 }
 
+/**
+ * Validate that a parsed JSON value has the minimum shape of a CinematicTheme:
+ * an object with id (string), name (string), dark (object), and light (object).
+ */
+function isCinematicThemeShape(value: unknown): value is CinematicTheme {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v["id"] === "string" &&
+    typeof v["name"] === "string" &&
+    typeof v["dark"] === "object" && v["dark"] !== null &&
+    typeof v["light"] === "object" && v["light"] !== null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: ContrastBadge
+// Displays a WCAG AA pass/fail indicator with the numeric ratio.
+// ---------------------------------------------------------------------------
+
+interface ContrastBadgeProps {
+  fg: string;
+  bg: string;
+  label: string;
+}
+
+function ContrastBadge({ fg, bg, label }: ContrastBadgeProps) {
+  const result: ContrastResult = evaluateContrast(fg, bg);
+
+  return (
+    <div
+      className="flex items-center gap-1"
+      title={`${label}: ${result.ratio}:1 — ${result.label}`}
+    >
+      <span className="text-[9px] text-text-muted">{label}</span>
+      {result.passes ? (
+        <ShieldCheck
+          size={10}
+          className="text-profit shrink-0"
+          aria-label={`${label} passes WCAG AA (${result.ratio}:1)`}
+        />
+      ) : (
+        <ShieldX
+          size={10}
+          className="text-loss shrink-0"
+          aria-label={`${label} fails WCAG AA (${result.ratio}:1)`}
+        />
+      )}
+      <span
+        className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}
+      >
+        {result.ratio}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: VariantPreviewCard
+// Shows a compact visual preview for one ThemeVariant (dark OR light).
+// ---------------------------------------------------------------------------
+
+interface VariantPreviewCardProps {
+  variant: ThemeVariant;
+  mode: "dark" | "light";
+}
+
+function VariantPreviewCard({ variant, mode }: VariantPreviewCardProps) {
+  const { colors } = variant;
+  const glassStyle: React.CSSProperties = {
+    backgroundColor: variant.glass.tint,
+    border: `1px solid ${colors.accent}${Math.round(variant.glass.borderAlpha * 255).toString(16).padStart(2, "0")}`,
+  };
+
+  return (
+    <div
+      className="rounded-lg border p-3 space-y-2 flex-1 min-w-0"
+      style={{ backgroundColor: colors.base, borderColor: colors.border }}
+      aria-label={`${mode} variant preview`}
+    >
+      {/* Mode label */}
+      <div className="flex items-center justify-between">
+        <span
+          className="text-[9px] uppercase tracking-widest font-medium"
+          style={{ color: colors.textMuted }}
+        >
+          {mode}
+        </span>
+        <div
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: colors.accent }}
+        />
+      </div>
+
+      {/* Sample card */}
+      <div
+        className="rounded p-2 space-y-1.5"
+        style={{ backgroundColor: colors.card, borderColor: colors.border, border: `1px solid ${colors.border}` }}
+      >
+        {/* Primary + muted text */}
+        <div
+          className="text-[10px] font-semibold leading-none"
+          style={{ color: colors.text }}
+        >
+          NIFTY 25,150.00
+        </div>
+        <div
+          className="text-[9px] leading-none"
+          style={{ color: colors.textMuted }}
+        >
+          Last updated 09:30 IST
+        </div>
+
+        {/* Accent-colored element */}
+        <div
+          className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-mono"
+          style={{
+            backgroundColor: `${colors.accent}22`,
+            color:            colors.accent,
+            border:           `1px solid ${colors.accent}44`,
+          }}
+        >
+          +1.42%
+        </div>
+      </div>
+
+      {/* Glass morphism strip */}
+      <div
+        className="rounded px-2 py-1 text-[9px]"
+        style={{ ...glassStyle, color: colors.textSecondary }}
+      >
+        Glass surface
+      </div>
+
+      {/* Color swatch strip */}
+      <div className="flex items-center gap-1">
+        {[
+          colors.base,
+          colors.card,
+          colors.accent,
+          colors.text,
+          colors.border,
+        ].map((c, i) => (
+          <div
+            key={i}
+            className="h-2 flex-1 rounded-sm"
+            style={{ backgroundColor: c }}
+          />
+        ))}
+      </div>
+
+      {/* Contrast indicator for the key pair: accent on base */}
+      <ContrastBadge fg={colors.accent} bg={colors.base} label="accent/base" />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Sub-component: ThemeCard
+// Supports hover-preview: temporarily apply the hovered theme's CSS vars.
 // ---------------------------------------------------------------------------
 
 interface ThemeCardProps {
@@ -100,10 +273,44 @@ interface ThemeCardProps {
 }
 
 function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
+  const previewActive = useRef(false);
+
+  function handleMouseEnter(_e: MouseEvent<HTMLButtonElement>) {
+    previewActive.current = true;
+    // Temporarily apply this theme's CSS vars without persisting to store state.
+    // We do this by grabbing the store's applyTheme mechanism but swapping the
+    // active theme id for the preview id only in the DOM, then restoring it.
+    const store = useThemeStore.getState();
+    const previousId = store.activeThemeId;
+
+    // Only preview if this isn't already the active theme
+    if (theme.id === previousId) return;
+
+    // Temporarily write the preview theme's vars to document
+    store.setTheme(theme.id);
+
+    // Stash the previous id so we can restore on leave
+    (handleMouseEnter as { _prevId?: string })._prevId = previousId;
+  }
+
+  function handleMouseLeave(_e: MouseEvent<HTMLButtonElement>) {
+    if (!previewActive.current) return;
+    previewActive.current = false;
+
+    const prevId = (handleMouseEnter as { _prevId?: string })._prevId;
+    if (prevId) {
+      // Restore the previously active theme
+      useThemeStore.getState().setTheme(prevId);
+      (handleMouseEnter as { _prevId?: string })._prevId = undefined;
+    }
+  }
+
   return (
     <button
       type="button"
       onClick={onSelect}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       aria-label={theme.name}
       aria-pressed={isActive}
       className={`group relative flex flex-col gap-2 p-3 rounded-lg border transition-all text-left ${
@@ -241,9 +448,14 @@ export function ThemePicker() {
   // --- Custom builder state ---
   const [builderOpen, setBuilderOpen] = useState(false);
   const [customName,  setCustomName]  = useState("My Theme");
-  const [darkVariant,  setDarkVariant]  = useState<ThemeVariant>(() => ({ ...DEFAULT_DARK_VARIANT, colors: { ...DEFAULT_DARK_VARIANT.colors } }));
-  const [lightVariant, setLightVariant] = useState<ThemeVariant>(() => ({ ...DEFAULT_LIGHT_VARIANT, colors: { ...DEFAULT_LIGHT_VARIANT.colors } }));
-  const [editingVariant, setEditingVariant] = useState<"dark" | "light">("dark");
+  const [darkVariant,  setDarkVariant]  = useState<ThemeVariant>(() => ({
+    ...DEFAULT_DARK_VARIANT,
+    colors: { ...DEFAULT_DARK_VARIANT.colors },
+  }));
+  const [lightVariant, setLightVariant] = useState<ThemeVariant>(() => ({
+    ...DEFAULT_LIGHT_VARIANT,
+    colors: { ...DEFAULT_LIGHT_VARIANT.colors },
+  }));
 
   // --- Import/Export state ---
   const [importText,  setImportText]  = useState("");
@@ -253,19 +465,26 @@ export function ThemePicker() {
   // All themes (built-in + custom)
   const allThemes: CinematicTheme[] = [...CINEMATIC_THEMES, ...customThemes];
 
-  // The currently-edited variant object
-  const currentVariant = editingVariant === "dark" ? darkVariant : lightVariant;
-  const setCurrentVariant = editingVariant === "dark" ? setDarkVariant : setLightVariant;
-
-  // --- Color updater for current variant ---
-  const updateColor = useCallback(
+  // --- Color updater for dark variant ---
+  const updateDarkColor = useCallback(
     (key: keyof ThemeVariant["colors"], val: string) => {
-      setCurrentVariant((prev) => ({
+      setDarkVariant((prev) => ({
         ...prev,
         colors: { ...prev.colors, [key]: val },
       }));
     },
-    [setCurrentVariant],
+    [],
+  );
+
+  // --- Color updater for light variant ---
+  const updateLightColor = useCallback(
+    (key: keyof ThemeVariant["colors"], val: string) => {
+      setLightVariant((prev) => ({
+        ...prev,
+        colors: { ...prev.colors, [key]: val },
+      }));
+    },
+    [],
   );
 
   // --- Apply custom theme ---
@@ -290,26 +509,20 @@ export function ThemePicker() {
     }
   }
 
-  // --- Import ---
+  // --- Import (validates CinematicTheme shape: must have dark + light) ---
   function handleImport() {
     setImportError("");
     try {
       const parsed = JSON.parse(importText) as unknown;
-      if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        !("id" in parsed) ||
-        !("name" in parsed) ||
-        !("dark" in parsed) ||
-        !("light" in parsed)
-      ) {
-        setImportError("Invalid CinematicTheme JSON — must have id, name, dark, and light fields.");
+      if (!isCinematicThemeShape(parsed)) {
+        setImportError(
+          "Invalid CinematicTheme JSON — must have id (string), name (string), dark (object), and light (object) fields.",
+        );
         return;
       }
-      const theme = parsed as CinematicTheme;
       const importedTheme: CinematicTheme = {
-        ...theme,
-        id: theme.id.startsWith("custom-") ? theme.id : `custom-${theme.id}`,
+        ...parsed,
+        id: parsed.id.startsWith("custom-") ? parsed.id : `custom-${parsed.id}`,
       };
       addCustomTheme(importedTheme);
       setTheme(importedTheme.id);
@@ -318,6 +531,16 @@ export function ThemePicker() {
       setImportError("Could not parse JSON. Check formatting and try again.");
     }
   }
+
+  // --- Contrast summary for the builder ---
+  // Show a compact panel with accent-on-base and text-on-base checks for
+  // both dark and light variants simultaneously.
+  const contrastPairs: Array<{ fg: string; bg: string; label: string; variant: "dark" | "light" }> = [
+    { fg: darkVariant.colors.accent,  bg: darkVariant.colors.base, label: "accent/base", variant: "dark" },
+    { fg: darkVariant.colors.text,    bg: darkVariant.colors.base, label: "text/base",   variant: "dark" },
+    { fg: lightVariant.colors.accent, bg: lightVariant.colors.base, label: "accent/base", variant: "light" },
+    { fg: lightVariant.colors.text,   bg: lightVariant.colors.base, label: "text/base",   variant: "light" },
+  ];
 
   return (
     <div className="space-y-5">
@@ -367,95 +590,87 @@ export function ThemePicker() {
               />
             </div>
 
-            {/* Variant selector (dark / light) */}
-            <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Editing variant</p>
-              <div className="flex items-center gap-1 p-0.5 rounded-md border border-border-default bg-surface-base w-fit">
-                {(["dark", "light"] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setEditingVariant(v)}
-                    className={`px-3 py-1 text-xs rounded transition-colors ${
-                      editingVariant === v
-                        ? "bg-accent/15 text-accent border border-accent/20"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                  >
-                    {v === "dark" ? "Dark" : "Light"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Colors grid for current variant */}
+            {/* --- Dark variant color editor --- */}
             <div>
               <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
-                {editingVariant === "dark" ? "Dark" : "Light"} variant colors
+                Dark variant colors
               </p>
               <div className="grid grid-cols-2 gap-3">
-                <ColorField label="Base"           value={currentVariant.colors.base}          onChange={(v) => updateColor("base",          v)} />
-                <ColorField label="Card"           value={currentVariant.colors.card}          onChange={(v) => updateColor("card",          v)} />
-                <ColorField label="Accent"         value={currentVariant.colors.accent}        onChange={(v) => updateColor("accent",        v)} />
-                <ColorField label="Accent text"    value={currentVariant.colors.accentText}    onChange={(v) => updateColor("accentText",    v)} />
-                <ColorField label="Border"         value={currentVariant.colors.border}        onChange={(v) => updateColor("border",        v)} />
-                <ColorField label="Text"           value={currentVariant.colors.text}          onChange={(v) => updateColor("text",          v)} />
-                <ColorField label="Text muted"     value={currentVariant.colors.textMuted}     onChange={(v) => updateColor("textMuted",     v)} />
-                <ColorField label="Text secondary" value={currentVariant.colors.textSecondary} onChange={(v) => updateColor("textSecondary", v)} />
+                <ColorField label="Base"           value={darkVariant.colors.base}          onChange={(v) => updateDarkColor("base",          v)} />
+                <ColorField label="Card"           value={darkVariant.colors.card}          onChange={(v) => updateDarkColor("card",          v)} />
+                <ColorField label="Accent"         value={darkVariant.colors.accent}        onChange={(v) => updateDarkColor("accent",        v)} />
+                <ColorField label="Accent text"    value={darkVariant.colors.accentText}    onChange={(v) => updateDarkColor("accentText",    v)} />
+                <ColorField label="Border"         value={darkVariant.colors.border}        onChange={(v) => updateDarkColor("border",        v)} />
+                <ColorField label="Text"           value={darkVariant.colors.text}          onChange={(v) => updateDarkColor("text",          v)} />
+                <ColorField label="Text muted"     value={darkVariant.colors.textMuted}     onChange={(v) => updateDarkColor("textMuted",     v)} />
+                <ColorField label="Text secondary" value={darkVariant.colors.textSecondary} onChange={(v) => updateDarkColor("textSecondary", v)} />
               </div>
             </div>
 
-            {/* Live preview */}
+            {/* --- Light variant color editor --- */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Preview ({editingVariant})</p>
-              <div
-                className="rounded-lg border p-3 space-y-2"
-                style={{ backgroundColor: currentVariant.colors.card, borderColor: currentVariant.colors.border }}
-              >
-                <div className="flex items-center justify-between">
-                  <span style={{ color: currentVariant.colors.text, fontSize: "11px", fontWeight: 600 }}>
-                    Preview
-                  </span>
-                  <span style={{ color: currentVariant.colors.accent, fontSize: "10px" }}>Active</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div
-                    className="rounded px-2 py-0.5 text-[10px] font-mono"
-                    style={{
-                      backgroundColor: `${currentVariant.colors.accent}22`,
-                      color:            currentVariant.colors.accent,
-                      border:          `1px solid ${currentVariant.colors.accent}44`,
-                    }}
-                  >
-                    +1.42%
-                  </div>
-                  <div
-                    className="rounded px-2 py-0.5 text-[10px] font-mono"
-                    style={{
-                      backgroundColor: "rgba(239,68,68,0.13)",
-                      color:           "#ef4444",
-                      border:          "1px solid rgba(239,68,68,0.27)",
-                    }}
-                  >
-                    -0.68%
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {[
-                    currentVariant.colors.base,
-                    currentVariant.colors.card,
-                    currentVariant.colors.accent,
-                    "#22c55e",
-                    "#ef4444",
-                    currentVariant.colors.border,
-                  ].map((c, i) => (
+              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
+                Light variant colors
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <ColorField label="Base"           value={lightVariant.colors.base}          onChange={(v) => updateLightColor("base",          v)} />
+                <ColorField label="Card"           value={lightVariant.colors.card}          onChange={(v) => updateLightColor("card",          v)} />
+                <ColorField label="Accent"         value={lightVariant.colors.accent}        onChange={(v) => updateLightColor("accent",        v)} />
+                <ColorField label="Accent text"    value={lightVariant.colors.accentText}    onChange={(v) => updateLightColor("accentText",    v)} />
+                <ColorField label="Border"         value={lightVariant.colors.border}        onChange={(v) => updateLightColor("border",        v)} />
+                <ColorField label="Text"           value={lightVariant.colors.text}          onChange={(v) => updateLightColor("text",          v)} />
+                <ColorField label="Text muted"     value={lightVariant.colors.textMuted}     onChange={(v) => updateLightColor("textMuted",     v)} />
+                <ColorField label="Text secondary" value={lightVariant.colors.textSecondary} onChange={(v) => updateLightColor("textSecondary", v)} />
+              </div>
+            </div>
+
+            {/* --- WCAG AA contrast checker --- */}
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
+                WCAG AA contrast check
+              </p>
+              <div className="rounded-lg border border-border-default bg-surface-base p-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {contrastPairs.map((pair) => {
+                  const result = evaluateContrast(pair.fg, pair.bg);
+                  return (
                     <div
-                      key={i}
-                      className="h-3 w-3 rounded-sm border border-black/10"
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                </div>
+                      key={`${pair.variant}-${pair.label}`}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="text-[9px] text-text-muted capitalize">
+                        {pair.variant} {pair.label}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {result.passes ? (
+                          <ShieldCheck size={10} className="text-profit shrink-0" aria-label="passes AA" />
+                        ) : (
+                          <ShieldX size={10} className="text-loss shrink-0" aria-label="fails AA" />
+                        )}
+                        <span
+                          className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}
+                        >
+                          {result.ratio}:1
+                        </span>
+                        <span
+                          className={`text-[9px] ${result.passes ? "text-profit" : "text-loss"}`}
+                        >
+                          {result.label}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* --- Dark / Light split preview --- */}
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
+                Preview — dark / light
+              </p>
+              <div className="flex gap-2">
+                <VariantPreviewCard variant={darkVariant}  mode="dark"  />
+                <VariantPreviewCard variant={lightVariant} mode="light" />
               </div>
             </div>
 
@@ -501,7 +716,7 @@ export function ThemePicker() {
                 setImportText(e.target.value);
                 setImportError("");
               }}
-              placeholder="Paste CinematicTheme JSON here…"
+              placeholder="Paste CinematicTheme JSON here — must have id, name, dark, and light fields."
               rows={4}
               spellCheck={false}
               className="w-full px-3 py-2 text-xs font-mono bg-surface-base border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 resize-none"
