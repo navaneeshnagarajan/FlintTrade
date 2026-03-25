@@ -56,12 +56,12 @@ type ColorMode = "dark" | "light" | "system";
 // ---------------------------------------------------------------------------
 
 const THEME_DOTS = [
-  { id: "emerald", label: "Emerald", color: "#22c55e" },
-  { id: "sky", label: "Sky", color: "#38bdf8" },
-  { id: "orange", label: "Orange", color: "#fb923c" },
-  { id: "violet", label: "Violet", color: "#a855f7" },
-  { id: "slate", label: "Slate", color: "#94a3b8" },
-  { id: "red", label: "Red", color: "#dc2626" },
+  { id: "emerald-night", label: "Emerald Night", color: "#22c55e" },
+  { id: "ocean-depth", label: "Ocean Depth", color: "#38bdf8" },
+  { id: "solar-flare", label: "Solar Flare", color: "#fb923c" },
+  { id: "neon-pulse", label: "Neon Pulse", color: "#a855f7" },
+  { id: "arctic-frost", label: "Arctic Frost", color: "#94a3b8" },
+  { id: "blood-moon", label: "Blood Moon", color: "#dc2626" },
 ] as const;
 
 // ---------------------------------------------------------------------------

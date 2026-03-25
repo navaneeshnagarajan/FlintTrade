@@ -156,7 +156,7 @@ describe("QuickAccessPanel", () => {
 
   it("theme dots have correct aria-label attributes", () => {
     renderPanel();
-    const expectedLabels = ["Emerald", "Sky", "Orange", "Violet", "Slate", "Red"];
+    const expectedLabels = ["Emerald Night", "Ocean Depth", "Solar Flare", "Neon Pulse", "Arctic Frost", "Blood Moon"];
     for (const label of expectedLabels) {
       expect(screen.getByRole("radio", { name: label })).toBeInTheDocument();
     }

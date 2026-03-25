@@ -44,21 +44,16 @@ export default function SandboxToggle() {
   });
 
   const handleToggle = useCallback(() => {
-    if (!sandboxMode) {
-      // Switching live → paper: require confirmation
-      setConfirmOpen(true);
-    } else {
-      // Switching paper → live: immediate
-      mutation.mutate(false);
-    }
+    // Both directions require confirmation — switching to live can cause real orders
+    setConfirmOpen(true);
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    setConfirmOpen(false);
+    mutation.mutate(!sandboxMode);
   }, [sandboxMode, mutation]);
 
-  const handleConfirmPaper = useCallback(() => {
-    setConfirmOpen(false);
-    mutation.mutate(true);
-  }, [mutation]);
-
-  const handleCancelPaper = useCallback(() => {
+  const handleCancel = useCallback(() => {
     setConfirmOpen(false);
   }, []);
 
@@ -75,8 +70,20 @@ export default function SandboxToggle() {
           PAPER
         </button>
 
-        <AlertDialog open={false}>
-          <AlertDialogContent />
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Switch to Live Trading?</AlertDialogTitle>
+              <AlertDialogDescription>
+                You are about to switch from paper trading to live mode.
+                All orders will be executed with real money.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={handleCancel}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirm}>Switch to Live</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
         </AlertDialog>
       </>
     );
@@ -108,11 +115,11 @@ export default function SandboxToggle() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancelPaper}>
+            <AlertDialogCancel onClick={handleCancel}>
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleConfirmPaper}
+              onClick={handleConfirm}
               className="bg-amber-500 hover:bg-amber-600 text-white"
             >
               Switch to Paper
