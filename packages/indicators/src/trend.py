@@ -13,7 +13,12 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from packages.indicators.src.numba_kernels import HAS_NUMBA, _ema_core
 from packages.indicators.src.utils import validate_ohlcv, validate_series
+
+# Threshold: use Numba JIT only when array length exceeds this value.
+# Below this, JIT compilation overhead exceeds the loop speedup.
+_NUMBA_THRESHOLD = 1000
 
 
 def ema(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
@@ -21,6 +26,9 @@ def ema(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
 
     Seeded with the simple mean of the first ``period`` bars. Each subsequent
     bar uses the standard EMA multiplier k = 2 / (period + 1).
+
+    When numba is installed and the array is large enough (> 1000 elements),
+    the inner loop is JIT-compiled for a ~5-10x speedup.
 
     Args:
         close: Close prices, shape (n,).
@@ -43,9 +51,18 @@ def ema(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
         return result
 
     k = 2.0 / (period + 1)
-    result[period - 1] = np.mean(close[:period])
-    for i in range(period, n):
-        result[i] = close[i] * k + result[i - 1] * (1.0 - k)
+    seed = float(np.nanmean(close[:period]))
+
+    if HAS_NUMBA and n > _NUMBA_THRESHOLD:
+        # JIT path: run inner loop through Numba kernel
+        sliced = np.ascontiguousarray(close[period - 1 :], dtype=np.float64)
+        jit_values = _ema_core(sliced, k, seed)
+        result[period - 1 :] = jit_values
+    else:
+        # Pure-Python path
+        result[period - 1] = seed
+        for i in range(period, n):
+            result[i] = close[i] * k + result[i - 1] * (1.0 - k)
 
     return result
 

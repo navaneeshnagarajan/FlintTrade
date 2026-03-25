@@ -10,4 +10,4 @@ export { SipTab } from "./SipTab";
 export { SectorTab } from "./SectorTab";
 export { EtfTab } from "./EtfTab";
 export { StocksTab } from "./StocksTab";
-export { IpoTab } from "./LockedTabs";
+export { IpoTab } from "./IpoTab";

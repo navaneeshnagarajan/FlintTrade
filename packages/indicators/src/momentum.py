@@ -13,7 +13,11 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from packages.indicators.src.numba_kernels import HAS_NUMBA, _rsi_core
 from packages.indicators.src.utils import validate_ohlcv, validate_series
+
+# Threshold: use Numba JIT only when array length exceeds this value.
+_NUMBA_THRESHOLD = 1000
 
 
 def rsi(close: NDArray[np.float64], period: int = 14) -> NDArray[np.float64]:
@@ -22,6 +26,9 @@ def rsi(close: NDArray[np.float64], period: int = 14) -> NDArray[np.float64]:
     RSI oscillates between 0 and 100. Values above 70 are traditionally
     overbought; values below 30 are oversold. Uses Wilder's smoothing (RMA),
     matching TradingView behaviour.
+
+    When numba is installed and the array is large enough (> 1000 elements),
+    the inner loop is JIT-compiled for a ~5-10x speedup.
 
     Args:
         close: Close prices, shape (n,).
@@ -32,9 +39,16 @@ def rsi(close: NDArray[np.float64], period: int = 14) -> NDArray[np.float64]:
     """
     validate_series(close, min_length=period + 1)
     n = len(close)
-    result = np.full(n, np.nan, dtype=np.float64)
 
     delta = np.diff(close)
+
+    if HAS_NUMBA and n > _NUMBA_THRESHOLD:
+        # JIT path: delegate entire loop to Numba kernel
+        delta_c = np.ascontiguousarray(delta, dtype=np.float64)
+        return _rsi_core(delta_c, period)
+
+    # Pure-Python path
+    result = np.full(n, np.nan, dtype=np.float64)
     gain = np.where(delta > 0, delta, 0.0)
     loss = np.where(delta < 0, -delta, 0.0)
 

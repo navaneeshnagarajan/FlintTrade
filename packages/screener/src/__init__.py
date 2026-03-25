@@ -2,6 +2,8 @@
 
 __version__ = "0.1.0-alpha"
 
+from .stock_cache import StockCache, StockFundamentals
+
 from .futures_quadrant import FuturesQuadrant, FuturesSnapshot, Quadrant, QuadrantResult
 from .greeks import OptionPosition, PortfolioGreeks, PortfolioGreeksResult, PositionGreeks
 from .iv_analysis import IVAnalysis, IVPercentileResult, IVSkewResult, IVTermStructure
@@ -29,6 +31,9 @@ from .rrg import (
 )
 
 __all__ = [
+    # Stock cache
+    "StockCache",
+    "StockFundamentals",
     # Option chain
     "OptionChainAnalyzer",
     "OptionChainSnapshot",

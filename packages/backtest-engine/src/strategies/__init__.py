@@ -49,9 +49,16 @@ Sub-modules (38 additional strategies across 6 categories):
         volume_breakout       — VolumeBreakout
         volume_vwma           — VWMACrossover
 
-    Pattern (2):
-        pattern_engulfing — EngulfingPattern
-        pattern_hammer    — HammerShootingStar
+    Pattern (7):
+        pattern_engulfing        — EngulfingPattern
+        pattern_hammer           — HammerShootingStar
+        pattern_doji             — DojiReversal
+        pattern_morning_star     — MorningStar
+        pattern_evening_star     — EveningStar
+        pattern_three_soldiers   — ThreeWhiteSoldiers
+
+    Momentum + (1 new):
+        momentum_macd_divergence — MACDDivergence
 
     Trend + (1 new):
         trend_triple_ma   — TripleMA
@@ -173,6 +180,13 @@ from .volume_vwma import VWMACrossover  # noqa: E402
 # Pattern (new)
 from .pattern_engulfing import EngulfingPattern  # noqa: E402
 from .pattern_hammer import HammerShootingStar  # noqa: E402
+from .pattern_doji import DojiReversal  # noqa: E402
+from .pattern_morning_star import MorningStar  # noqa: E402
+from .pattern_evening_star import EveningStar  # noqa: E402
+from .pattern_three_soldiers import ThreeWhiteSoldiers  # noqa: E402
+
+# Momentum (new — divergence)
+from .momentum_macd_divergence import MACDDivergence  # noqa: E402
 
 # Trend (new)
 from .trend_triple_ma import TripleMA  # noqa: E402
@@ -244,9 +258,15 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "IndiaVIXRegime": IndiaVIXRegime,
     # Volume — absorbed batch (1 new)
     "VWMACrossover": VWMACrossover,
-    # Pattern — absorbed batch (2 new)
+    # Pattern — absorbed batch (2 legacy + 4 new candlestick)
     "EngulfingPattern": EngulfingPattern,
     "HammerShootingStar": HammerShootingStar,
+    "DojiReversal": DojiReversal,
+    "MorningStar": MorningStar,
+    "EveningStar": EveningStar,
+    "ThreeWhiteSoldiers": ThreeWhiteSoldiers,
+    # Momentum — MACD divergence
+    "MACDDivergence": MACDDivergence,
     # Trend — absorbed batch (1 new)
     "TripleMA": TripleMA,
 }

@@ -2,8 +2,8 @@
 //   openalgo-chart/src/components/OptionChainPicker/OptionChainPicker.jsx — multi-leg state, strategy templates, direction (buy/sell), net premium calc
 //   openalgo-chart/src/services/strategyTemplates.js — STRATEGY_TEMPLATES, calculateNetPremium, validateStrategy, formatStrategyName
 
-import { useState, useMemo } from "react";
-import { Brain, X, Plus, Trash2, AlertCircle, TrendingUp, Zap } from "lucide-react";
+import { useState, useMemo, useRef } from "react";
+import { Brain, X, Plus, Trash2, AlertCircle, TrendingUp, Zap, Code2, Play, RotateCcw, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { usePineRunner } from "./usePineRunner";
+import type { PineRunnerOptions } from "./usePineRunner";
 
 interface Props {
   onClose?: () => void;
@@ -669,6 +671,558 @@ function MarginTab({ legs, underlying }: { legs: Leg[]; underlying: typeof UNDER
   );
 }
 
+// ---- Pine Script tab ----
+
+// Exchange options aligned with FlintTrade multi-exchange support
+const EXCHANGES = [
+  "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX",
+  "NSE_INDEX", "BSE_INDEX",
+];
+
+// Interval labels — OpenAlgo supported intervals
+const INTERVALS = ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"];
+
+// Pine Script template library
+const PINE_TEMPLATES: Record<string, { label: string; description: string; code: string }> = {
+  ema_crossover: {
+    label: "EMA Crossover",
+    description: "Fast EMA(20) crosses above/below slow EMA(50)",
+    code: `//@version=5
+strategy("EMA Crossover", overlay=true)
+fast = ta.ema(close, 20)
+slow = ta.ema(close, 50)
+if ta.crossover(fast, slow)
+    strategy.entry("Long", strategy.long)
+if ta.crossunder(fast, slow)
+    strategy.close("Long")
+plot(fast, title="EMA 20", color=color.blue)
+plot(slow, title="EMA 50", color=color.red)`,
+  },
+  sma_crossover: {
+    label: "SMA Crossover",
+    description: "Fast SMA(20) crosses above/below slow SMA(50)",
+    code: `//@version=5
+strategy("SMA Crossover", overlay=true)
+fast = ta.sma(close, 20)
+slow = ta.sma(close, 50)
+if ta.crossover(fast, slow)
+    strategy.entry("Long", strategy.long)
+if ta.crossunder(fast, slow)
+    strategy.close("Long")
+plot(fast, title="SMA 20", color=color.green)
+plot(slow, title="SMA 50", color=color.orange)`,
+  },
+  rsi_mean_reversion: {
+    label: "RSI Mean Reversion",
+    description: "Buy when RSI dips below 30, exit when above 70",
+    code: `//@version=5
+strategy("RSI Mean Reversion", overlay=false)
+myRsi = ta.rsi(close, 14)
+if myRsi < 30
+    strategy.entry("Long", strategy.long)
+if myRsi > 70
+    strategy.close("Long")
+plot(myRsi, title="RSI", color=color.purple)`,
+  },
+  ema_ribbon: {
+    label: "EMA Ribbon",
+    description: "Three EMAs — 9, 21, 55. Plot only, no signals.",
+    code: `//@version=5
+strategy("EMA Ribbon", overlay=true)
+e9  = ta.ema(close, 9)
+e21 = ta.ema(close, 21)
+e55 = ta.ema(close, 55)
+plot(e9,  title="EMA 9",  color=color.lime)
+plot(e21, title="EMA 21", color=color.blue)
+plot(e55, title="EMA 55", color=color.orange)`,
+  },
+  macd_signal: {
+    label: "MACD Signal",
+    description: "Entry on MACD crossover the signal line",
+    code: `//@version=5
+strategy("MACD Signal", overlay=false)
+myMacd = ta.macd(close, 12, 26, 9)
+if ta.crossover(myMacd, myMacd_signal)
+    strategy.entry("Long", strategy.long)
+if ta.crossunder(myMacd, myMacd_signal)
+    strategy.close("Long")
+plot(myMacd,        title="MACD",   color=color.blue)
+plot(myMacd_signal, title="Signal", color=color.orange)`,
+  },
+};
+
+// Equity curve computation from bar closes + signals
+interface EquityPoint { bar: number; equity: number }
+
+function computeEquityCurve(
+  bars: { close: number }[],
+  signals: { bar: number; type: "BUY" | "SELL" }[],
+): EquityPoint[] {
+  let inTrade = false;
+  let entryPrice = 0;
+  let equity = 10000; // notional starting capital
+  const curve: EquityPoint[] = [{ bar: 0, equity }];
+
+  const signalMap = new Map(signals.map((s) => [s.bar, s.type]));
+
+  for (let i = 1; i < bars.length; i++) {
+    const sig = signalMap.get(i);
+    if (sig === "BUY" && !inTrade) {
+      inTrade = true;
+      entryPrice = bars[i].close;
+    } else if (sig === "SELL" && inTrade) {
+      const pct = (bars[i].close - entryPrice) / entryPrice;
+      equity *= 1 + pct;
+      inTrade = false;
+      curve.push({ bar: i, equity });
+    }
+  }
+
+  // Close any open position at last bar
+  if (inTrade && bars.length > 0) {
+    const lastClose = bars[bars.length - 1].close;
+    const pct = (lastClose - entryPrice) / entryPrice;
+    equity *= 1 + pct;
+    curve.push({ bar: bars.length - 1, equity });
+  }
+
+  return curve;
+}
+
+// Performance metrics
+interface PerfMetrics {
+  totalReturn: number;
+  totalSignals: number;
+  buySignals: number;
+  sellSignals: number;
+  sharpeApprox: number;
+}
+
+function computeMetrics(
+  bars: { close: number }[],
+  signals: { bar: number; type: "BUY" | "SELL" }[],
+): PerfMetrics {
+  const buys = signals.filter((s) => s.type === "BUY").length;
+  const sells = signals.filter((s) => s.type === "SELL").length;
+
+  // Simple trade returns
+  let inTrade = false;
+  let entryPrice = 0;
+  const tradeReturns: number[] = [];
+  const signalMap = new Map(signals.map((s) => [s.bar, s.type]));
+
+  for (let i = 1; i < bars.length; i++) {
+    const sig = signalMap.get(i);
+    if (sig === "BUY" && !inTrade) {
+      inTrade = true;
+      entryPrice = bars[i].close;
+    } else if (sig === "SELL" && inTrade) {
+      const ret = (bars[i].close - entryPrice) / entryPrice;
+      tradeReturns.push(ret);
+      inTrade = false;
+    }
+  }
+
+  const totalReturn =
+    tradeReturns.length > 0
+      ? tradeReturns.reduce((acc, r) => acc * (1 + r), 1) - 1
+      : 0;
+
+  const mean =
+    tradeReturns.length > 0
+      ? tradeReturns.reduce((a, b) => a + b, 0) / tradeReturns.length
+      : 0;
+  const variance =
+    tradeReturns.length > 1
+      ? tradeReturns.reduce((a, r) => a + (r - mean) ** 2, 0) / tradeReturns.length
+      : 0;
+  const stdDev = Math.sqrt(variance);
+  const sharpeApprox = stdDev > 0 ? (mean / stdDev) * Math.sqrt(tradeReturns.length) : 0;
+
+  return {
+    totalReturn,
+    totalSignals: signals.length,
+    buySignals: buys,
+    sellSignals: sells,
+    sharpeApprox,
+  };
+}
+
+function PineTab() {
+  // Pine editor state
+  const [code, setCode] = useState(PINE_TEMPLATES.ema_crossover.code);
+  const [symbol, setSymbol] = useState("NIFTY");
+  const [exchange, setExchange] = useState("NSE_INDEX");
+  const [interval, setInterval] = useState("1d");
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [dateOpts] = useState<PineRunnerOptions>({});
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { result, bars, isRunning, error, run, reset } = usePineRunner();
+
+  const handleRun = () => {
+    void run(code, symbol, exchange, interval, dateOpts);
+  };
+
+  const handleReset = () => {
+    reset();
+  };
+
+  const handleCopyCode = () => {
+    void navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  const handleTemplate = (key: string) => {
+    const tmpl = PINE_TEMPLATES[key];
+    if (tmpl) {
+      setCode(tmpl.code);
+      setShowTemplates(false);
+      reset();
+    }
+  };
+
+  const equityCurve = useMemo(
+    () => (result && bars.length > 0 ? computeEquityCurve(bars, result.signals) : []),
+    [result, bars],
+  );
+
+  const metrics = useMemo(
+    () => (result && bars.length > 0 ? computeMetrics(bars, result.signals) : null),
+    [result, bars],
+  );
+
+  const hasErrors = result && result.errors.length > 0;
+
+  return (
+    <div className="flex flex-col h-full gap-0 overflow-hidden">
+      {/* Symbol / interval config bar */}
+      <div className="flex items-center gap-2 px-3 pt-2 pb-1 flex-wrap shrink-0 border-b border-border-subtle">
+        <Input
+          className="w-24 h-7 text-xs bg-surface-base border-border-default text-text-primary font-mono"
+          placeholder="NIFTY"
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+          aria-label="Symbol"
+        />
+        <Select value={exchange} onValueChange={setExchange}>
+          <SelectTrigger className="w-28 h-7 text-xs bg-surface-base border-border-default text-text-primary" aria-label="Exchange">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-surface-card border-border-default text-text-primary">
+            {EXCHANGES.map((ex) => (
+              <SelectItem key={ex} value={ex} className="text-xs hover:bg-surface-elevated">{ex}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={interval} onValueChange={setInterval}>
+          <SelectTrigger className="w-16 h-7 text-xs bg-surface-base border-border-default text-text-primary" aria-label="Interval">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-surface-card border-border-default text-text-primary">
+            {INTERVALS.map((iv) => (
+              <SelectItem key={iv} value={iv} className="text-xs hover:bg-surface-elevated">{iv}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs border border-border-default text-text-muted hover:text-text-primary hover:bg-surface-elevated"
+            onClick={handleCopyCode}
+            title="Copy code"
+            aria-label="Copy Pine Script code"
+          >
+            {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs border border-border-default text-text-muted hover:text-text-primary hover:bg-surface-elevated"
+            onClick={handleReset}
+            title="Clear results"
+            aria-label="Clear results"
+          >
+            <RotateCcw size={11} />
+          </Button>
+          <Button
+            size="sm"
+            className="h-7 text-xs bg-primary text-primary-foreground hover:bg-primary/90 font-medium px-3"
+            onClick={handleRun}
+            disabled={isRunning}
+            aria-label="Run Pine Script backtest"
+          >
+            {isRunning ? (
+              <span className="flex items-center gap-1.5">
+                <span className="animate-spin inline-block w-2.5 h-2.5 border border-current border-t-transparent rounded-full" aria-hidden="true" />
+                Running
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <Play size={10} aria-hidden="true" />
+                Run Backtest
+              </span>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* Template picker */}
+      <div className="px-3 py-1 shrink-0 border-b border-border-subtle">
+        <button
+          className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
+          onClick={() => setShowTemplates((v) => !v)}
+          aria-expanded={showTemplates}
+          aria-controls="pine-templates"
+        >
+          <Code2 size={10} aria-hidden="true" />
+          Templates
+          {showTemplates ? <ChevronUp size={10} aria-hidden="true" /> : <ChevronDown size={10} aria-hidden="true" />}
+        </button>
+        {showTemplates && (
+          <div id="pine-templates" className="flex flex-wrap gap-1 mt-1.5" role="list">
+            {Object.entries(PINE_TEMPLATES).map(([key, tmpl]) => (
+              <Button
+                key={key}
+                variant="ghost"
+                size="sm"
+                role="listitem"
+                className="h-6 px-2 text-xs text-text-muted hover:text-text-primary hover:bg-surface-elevated border border-border-default"
+                onClick={() => handleTemplate(key)}
+                title={tmpl.description}
+              >
+                {tmpl.label}
+              </Button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Code editor */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <textarea
+          ref={textareaRef}
+          className="flex-1 min-h-0 w-full resize-none bg-[#0d0d14] text-[#e2e8f0] font-mono text-xs p-3 leading-5 border-0 border-b border-border-subtle outline-none focus:ring-1 focus:ring-primary/30 placeholder:text-text-muted"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          spellCheck={false}
+          aria-label="Pine Script editor"
+          aria-multiline="true"
+          role="textbox"
+          style={{ tabSize: 4 }}
+        />
+      </div>
+
+      {/* Results panel */}
+      {(result || error) && (
+        <div className="shrink-0 max-h-64 overflow-y-auto border-t border-border-default bg-surface-base">
+          {/* Top-level API error */}
+          {error && (
+            <div className="flex items-start gap-2 px-3 py-2 text-xs text-red-400 bg-red-900/10 border-b border-border-subtle">
+              <AlertCircle size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span role="alert">{error}</span>
+            </div>
+          )}
+
+          {/* Pine execution errors (non-fatal warnings) */}
+          {hasErrors && (
+            <div className="px-3 py-1.5 space-y-0.5 border-b border-border-subtle">
+              {result.errors.map((err, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-xs text-yellow-400">
+                  <AlertCircle size={10} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>{err}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {result && (
+            <>
+              {/* Performance metrics */}
+              {metrics && (
+                <div className="grid grid-cols-5 gap-px bg-border-subtle border-b border-border-default" role="region" aria-label="Performance metrics">
+                  {[
+                    {
+                      label: "Total Return",
+                      value: `${metrics.totalReturn >= 0 ? "+" : ""}${(metrics.totalReturn * 100).toFixed(2)}%`,
+                      color: metrics.totalReturn >= 0 ? "text-emerald-400" : "text-red-400",
+                    },
+                    {
+                      label: "Signals",
+                      value: String(metrics.totalSignals),
+                      color: "text-text-primary",
+                    },
+                    {
+                      label: "Buy",
+                      value: String(metrics.buySignals),
+                      color: "text-emerald-400",
+                    },
+                    {
+                      label: "Sell",
+                      value: String(metrics.sellSignals),
+                      color: "text-red-400",
+                    },
+                    {
+                      label: "Sharpe~",
+                      value: metrics.sharpeApprox.toFixed(2),
+                      color: metrics.sharpeApprox >= 1 ? "text-emerald-400" : "text-text-secondary",
+                    },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="bg-surface-card px-2 py-2">
+                      <div className="text-xxs text-text-muted uppercase tracking-wider">{label}</div>
+                      <div className={`text-sm font-mono font-bold tabular-nums ${color}`}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Equity curve — inline SVG sparkline */}
+              {equityCurve.length >= 2 && (
+                <div className="px-3 py-2 border-b border-border-subtle" role="img" aria-label="Equity curve chart">
+                  <div className="text-xxs text-text-muted uppercase tracking-wider mb-1">Equity Curve</div>
+                  <EquityCurveSparkline curve={equityCurve} />
+                </div>
+              )}
+
+              {/* Plot legend */}
+              {result.plots.length > 0 && (
+                <div className="px-3 py-1.5 flex flex-wrap gap-2 border-b border-border-subtle" role="list" aria-label="Plot indicators">
+                  {result.plots.map((plot) => (
+                    <div key={plot.name} className="flex items-center gap-1" role="listitem">
+                      <span
+                        className="inline-block w-3 h-0.5 rounded-full"
+                        style={{ backgroundColor: plot.color }}
+                        aria-hidden="true"
+                      />
+                      <span className="text-xxs text-text-secondary">{plot.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Signals table */}
+              {result.signals.length > 0 && (
+                <div className="px-0">
+                  <div className="text-xxs text-text-muted uppercase tracking-wider px-3 py-1">Signals ({result.signals.length})</div>
+                  <div className="max-h-28 overflow-y-auto" role="region" aria-label="Trade signals">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-border-subtle hover:bg-transparent">
+                          <TableHead className="text-xxs text-text-muted h-6 pl-3 font-normal">Bar</TableHead>
+                          <TableHead className="text-xxs text-text-muted h-6 font-normal">Date</TableHead>
+                          <TableHead className="text-xxs text-text-muted h-6 font-normal">Signal</TableHead>
+                          <TableHead className="text-xxs text-text-muted h-6 font-normal">Label</TableHead>
+                          <TableHead className="text-xxs text-text-muted h-6 text-right pr-3 font-normal">Price</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {result.signals.slice(0, 50).map((sig, idx) => {
+                          const bar = bars[sig.bar];
+                          const dateStr = bar
+                            ? new Date(bar.time * 1000).toLocaleDateString("en-IN", {
+                                day: "2-digit",
+                                month: "short",
+                                year: "2-digit",
+                              })
+                            : "-";
+                          return (
+                            <TableRow key={idx} className="border-border-subtle hover:bg-surface-card">
+                              <TableCell className="py-0.5 pl-3 text-xxs font-mono text-text-muted">{sig.bar}</TableCell>
+                              <TableCell className="py-0.5 text-xxs text-text-secondary">{dateStr}</TableCell>
+                              <TableCell className="py-0.5">
+                                <Badge
+                                  variant="outline"
+                                  className={`text-xxs px-1 py-0 border-0 font-mono ${sig.type === "BUY" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
+                                >
+                                  {sig.type}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="py-0.5 text-xxs text-text-secondary">{sig.label}</TableCell>
+                              <TableCell className="py-0.5 text-xxs font-mono text-right pr-3 text-text-primary">
+                                {bar ? bar.close.toFixed(2) : "-"}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                        {result.signals.length > 50 && (
+                          <TableRow className="border-border-subtle">
+                            <TableCell colSpan={5} className="py-1 pl-3 text-xxs text-text-muted">
+                              ... and {result.signals.length - 50} more signals
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+
+              {result.signals.length === 0 && !error && (
+                <div className="px-3 py-3 text-xs text-text-muted">
+                  No signals generated. Check your strategy logic or try a different date range / interval.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Equity curve sparkline rendered as an inline SVG — no charting library needed
+function EquityCurveSparkline({ curve }: { curve: { bar: number; equity: number }[] }) {
+  const W = 600;
+  const H = 40;
+  const pad = 2;
+
+  const minE = Math.min(...curve.map((p) => p.equity));
+  const maxE = Math.max(...curve.map((p) => p.equity));
+  const rangeE = maxE - minE || 1;
+  const minB = curve[0].bar;
+  const maxB = curve[curve.length - 1].bar || 1;
+  const rangeB = maxB - minB || 1;
+
+  const toX = (b: number) => pad + ((b - minB) / rangeB) * (W - pad * 2);
+  const toY = (e: number) => H - pad - ((e - minE) / rangeE) * (H - pad * 2);
+
+  const pathD = curve
+    .map((p, i) => `${i === 0 ? "M" : "L"}${toX(p.bar).toFixed(1)},${toY(p.equity).toFixed(1)}`)
+    .join(" ");
+
+  const finalEquity = curve[curve.length - 1].equity;
+  const isPositive = finalEquity >= 10000;
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full h-10"
+      aria-hidden="true"
+      preserveAspectRatio="none"
+    >
+      {/* Zero baseline at 10000 */}
+      <line
+        x1={pad}
+        y1={toY(10000).toFixed(1)}
+        x2={W - pad}
+        y2={toY(10000).toFixed(1)}
+        stroke="#2a2a3a"
+        strokeWidth="0.5"
+      />
+      <path
+        d={pathD}
+        fill="none"
+        stroke={isPositive ? "#22c55e" : "#ef4444"}
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
 // ---- Main component ----
 
 export default function StrategyBuilderTool({ onClose }: Props) {
@@ -745,13 +1299,16 @@ export default function StrategyBuilderTool({ onClose }: Props) {
       <Tabs defaultValue="legs" className="flex-1 flex flex-col min-h-0">
         <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
           <TabsTrigger value="legs" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
-            <Brain size={11} className="mr-1" />Strategy Legs
+            <Brain size={11} className="mr-1" aria-hidden="true" />Strategy Legs
           </TabsTrigger>
           <TabsTrigger value="payoff" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
-            <TrendingUp size={11} className="mr-1" />Payoff
+            <TrendingUp size={11} className="mr-1" aria-hidden="true" />Payoff
           </TabsTrigger>
           <TabsTrigger value="margin" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
-            <Zap size={11} className="mr-1" />Margin
+            <Zap size={11} className="mr-1" aria-hidden="true" />Margin
+          </TabsTrigger>
+          <TabsTrigger value="pine" className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
+            <Code2 size={11} className="mr-1" aria-hidden="true" />Pine Script
           </TabsTrigger>
         </TabsList>
 
@@ -777,6 +1334,10 @@ export default function StrategyBuilderTool({ onClose }: Props) {
 
         <TabsContent value="margin" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
           <MarginTab legs={legs} underlying={underlying} />
+        </TabsContent>
+
+        <TabsContent value="pine" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
+          <PineTab />
         </TabsContent>
       </Tabs>
     </div>

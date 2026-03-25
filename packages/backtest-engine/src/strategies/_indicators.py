@@ -382,6 +382,105 @@ def heikin_ashi(
     return ha_opens, ha_highs, ha_lows, ha_closes
 
 
+def donchian_channel(
+    highs: list[float],
+    lows: list[float],
+    period: int = 20,
+) -> tuple[list[float], list[float], list[float]]:
+    """Donchian Channel — N-period high/low band.
+
+    Args:
+        highs: High prices.
+        lows: Low prices.
+        period: Lookback period (default 20).
+
+    Returns:
+        Tuple of (upper, middle, lower) channels.
+        Leading values (before ``period`` bars) are 0.0.
+    """
+    n = len(highs)
+    upper: list[float] = [0.0] * n
+    lower: list[float] = [0.0] * n
+    middle: list[float] = [0.0] * n
+
+    for i in range(period - 1, n):
+        u = max(highs[i - period + 1: i + 1])
+        lo = min(lows[i - period + 1: i + 1])
+        upper[i] = u
+        lower[i] = lo
+        middle[i] = (u + lo) / 2
+
+    return upper, middle, lower
+
+
+def ichimoku(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    tenkan_period: int = 9,
+    kijun_period: int = 26,
+    senkou_b_period: int = 52,
+    displacement: int = 26,
+) -> tuple[list[float], list[float], list[float], list[float], list[float]]:
+    """Ichimoku Kinko Hyo components.
+
+    Computes the five Ichimoku lines aligned to the current bar index.
+
+    Args:
+        highs: High prices.
+        lows: Low prices.
+        closes: Close prices.
+        tenkan_period: Conversion line (Tenkan-sen) period (default 9).
+        kijun_period: Base line (Kijun-sen) period (default 26).
+        senkou_b_period: Leading Span B lookback period (default 52).
+        displacement: Cloud displacement forward in bars (default 26).
+
+    Returns:
+        Tuple of (tenkan, kijun, senkou_a, senkou_b, chikou) lists.
+        All lists have the same length as closes. Values before warm-up
+        are 0.0.
+    """
+    n = len(closes)
+
+    def mid_range(period: int, i: int) -> float:
+        if i < period - 1:
+            return 0.0
+        window_h = highs[i - period + 1: i + 1]
+        window_l = lows[i - period + 1: i + 1]
+        return (max(window_h) + min(window_l)) / 2
+
+    tenkan: list[float] = [mid_range(tenkan_period, i) for i in range(n)]
+    kijun: list[float] = [mid_range(kijun_period, i) for i in range(n)]
+
+    # Senkou A displaced forward by 'displacement'
+    senkou_a: list[float] = [0.0] * n
+    for i in range(n):
+        ta = tenkan[i]
+        ki = kijun[i]
+        if ta and ki:
+            fwd = i + displacement
+            if fwd < n:
+                senkou_a[fwd] = (ta + ki) / 2
+
+    # Senkou B displaced forward
+    senkou_b: list[float] = [0.0] * n
+    for i in range(n):
+        sb = mid_range(senkou_b_period, i)
+        if sb:
+            fwd = i + displacement
+            if fwd < n:
+                senkou_b[fwd] = sb
+
+    # Chikou: current close plotted 'displacement' bars back
+    chikou: list[float] = [0.0] * n
+    for i in range(n):
+        back = i - displacement
+        if back >= 0:
+            chikou[i] = closes[back]
+
+    return tenkan, kijun, senkou_a, senkou_b, chikou
+
+
 __all__ = [
     "ema",
     "sma",
@@ -393,4 +492,6 @@ __all__ = [
     "laguerre_rsi",
     "pivot_points",
     "heikin_ashi",
+    "donchian_channel",
+    "ichimoku",
 ]

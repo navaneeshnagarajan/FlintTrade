@@ -13,7 +13,11 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from packages.indicators.src.numba_kernels import HAS_NUMBA, _atr_core
 from packages.indicators.src.utils import validate_ohlcv, validate_series
+
+# Threshold: use Numba JIT only when array length exceeds this value.
+_NUMBA_THRESHOLD = 1000
 
 
 def atr(
@@ -27,6 +31,9 @@ def atr(
     ATR measures market volatility. It uses Wilder's smoothing (RMA),
     identical to the method used in TradingView and most platforms.
 
+    When numba is installed and the array is large enough (> 1000 elements),
+    the inner loop is JIT-compiled for a ~5-10x speedup.
+
     Args:
         high: High prices, shape (n,).
         low: Low prices, shape (n,).
@@ -38,6 +45,20 @@ def atr(
     """
     validate_ohlcv(high, low, close, min_length=2)
     n = len(close)
+
+    if n < period:
+        return np.full(n, np.nan, dtype=np.float64)
+
+    if HAS_NUMBA and n > _NUMBA_THRESHOLD:
+        # JIT path: delegate entire computation to Numba kernel
+        return _atr_core(
+            np.ascontiguousarray(high, dtype=np.float64),
+            np.ascontiguousarray(low, dtype=np.float64),
+            np.ascontiguousarray(close, dtype=np.float64),
+            period,
+        )
+
+    # Pure-Python path
     result = np.full(n, np.nan, dtype=np.float64)
 
     # True Range: max of three ranges
@@ -50,9 +71,6 @@ def atr(
             np.abs(low[1:] - close[:-1]),
         ),
     )
-
-    if n < period:
-        return result
 
     # Seed: simple mean of first 'period' TR values
     result[period - 1] = np.mean(tr[:period])
