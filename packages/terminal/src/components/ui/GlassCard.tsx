@@ -101,8 +101,24 @@ export function GlassCard({
     );
   }
 
-  // Glass mode: compute dynamic values from store + active theme variant
-  const blurPx = glassStore.blur > 0 ? glassStore.blur : variant.glass.blur;
+  // Glass mode: compute dynamic values.
+  // Priority: store explicit values > CSS vars > theme variant defaults.
+  function readCssVar(name: string): string {
+    if (typeof window === "undefined") return "";
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  const cssBlur = readCssVar("--glass-blur");
+  const cssTint = readCssVar("--glass-tint");
+  const cssBorderAlpha = readCssVar("--glass-border-alpha");
+
+  const blurPx =
+    glassStore.blur > 0
+      ? glassStore.blur
+      : cssBlur
+      ? parseFloat(cssBlur)
+      : variant.glass.blur;
+
   const transparencyPct =
     glassStore.transparency > 0
       ? glassStore.transparency
@@ -110,12 +126,16 @@ export function GlassCard({
 
   // transparency is 0–100; convert to 0–1 alpha.
   // We invert: 100% transparency = fully transparent (alpha 0), 0% = opaque.
-  // Clamp to a sensible glass range: keep minimum alpha of 0.05 so the card
-  // surface is always visible.
-  const alpha = Math.max(0.05, 1 - transparencyPct / 100);
+  // Clamp minimum alpha to 0.60 so text-bearing glass surfaces remain readable
+  // per WCAG contrast requirements. Prior floor was 0.05.
+  const alpha = Math.max(0.60, 1 - transparencyPct / 100);
 
-  const cardBg = hexToRgba(variant.colors.card, alpha);
-  const borderColor = hexToRgba(variant.colors.border, 0.4);
+  // Use CSS var tint when present, otherwise fall back to theme variant
+  const tintSource = cssTint || variant.colors.card;
+  const borderAlpha = cssBorderAlpha ? parseFloat(cssBorderAlpha) : 0.4;
+
+  const cardBg = hexToRgba(tintSource, alpha);
+  const borderColor = hexToRgba(variant.colors.border, borderAlpha);
   const hoverBg = hexToRgba(variant.colors.cardHover, alpha + 0.05 > 1 ? 1 : alpha + 0.05);
 
   const glassStyle: React.CSSProperties = {

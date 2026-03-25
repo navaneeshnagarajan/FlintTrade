@@ -147,9 +147,11 @@ const variantsScaleIn: Variants = {
 /**
  * Returns a Framer Motion transition with a staggered delay based on index.
  *
- * @param index  — zero-based position in the list
- * @param base   — base transition to extend (defaults to slideUp's animate transition)
- * @param step   — seconds of delay added per index step (default: 0.06s)
+ * @param index     — zero-based position in the list
+ * @param base      — base transition to extend (defaults to slideUp's animate transition)
+ * @param step      — seconds of delay added per index step (default: 0.06s)
+ * @param maxIndex  — items at index >= maxIndex render instantly (delay: 0).
+ *                    Prevents excessive delay for long lists. Default: 8.
  *
  * @example
  *   items.map((item, i) => (
@@ -164,7 +166,11 @@ function stagger(
   index: number,
   base: Transition = { duration: DURATION.slow, ease: EASE_ENTER },
   step = 0.06,
+  maxIndex = 8,
 ): Transition {
+  if (index >= maxIndex) {
+    return { ...base, delay: 0 };
+  }
   return {
     ...base,
     delay: index * step,
@@ -184,6 +190,7 @@ function stagger(
  */
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
+  if (typeof window.matchMedia !== "function") return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 

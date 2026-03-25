@@ -37,6 +37,12 @@ export interface StaggeredListProps {
    * Default: 40 ms (converted to 0.04 s when passed to Framer Motion).
    */
   staggerDelay?: number;
+  /**
+   * Items at index >= maxIndex render instantly (no stagger delay).
+   * Prevents excessive delay for long lists.
+   * Default: 8 (matches motionConfig.stagger default).
+   */
+  maxIndex?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +53,7 @@ export function StaggeredList({
   children,
   className,
   staggerDelay = 40,
+  maxIndex = 8,
 }: StaggeredListProps) {
   const reducedMotion = motionConfig.prefersReducedMotion();
 
@@ -70,6 +77,7 @@ export function StaggeredList({
             index,
             { duration: motionConfig.duration.slow, ease: motionConfig.ease.enter },
             stepSeconds,
+            maxIndex,
           );
 
           return (
