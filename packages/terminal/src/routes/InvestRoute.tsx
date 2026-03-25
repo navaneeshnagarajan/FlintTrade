@@ -4,7 +4,7 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useTremorTheme } from "@/hooks/useTremorTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
-import { DonutChart, AreaChart, BarList } from "@tremor/react";
+import { DonutChart, BarList } from "@tremor/react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -315,80 +315,78 @@ function DashboardTab({
       </GlassCard>
 
       {/* ── Row 2: 3 KPI cards ─── */}
-      <StaggeredList className="contents" staggerDelay={50}>
-        <GlassCard className="p-4 gap-2">
-          <div className="flex items-center gap-2">
-            <div className="size-7 rounded-lg flex items-center justify-center bg-bullish-bg">
-              <Wallet className="size-3.5 text-profit" />
-            </div>
-            <span className="text-xxs text-text-muted uppercase tracking-wider">
-              Available Funds
-            </span>
+      <GlassCard className="p-4 gap-2">
+        <div className="flex items-center gap-2">
+          <div className="size-7 rounded-lg flex items-center justify-center bg-bullish-bg">
+            <Wallet className="size-3.5 text-profit" />
           </div>
-          <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-            <AnimatedCounter
-              value={availableCash}
-              formatter={formatINRCompact}
-              duration={1.0}
-            />
-          </div>
-          <p className="text-xs text-text-muted">Withdrawable cash</p>
-        </GlassCard>
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
+            Available Funds
+          </span>
+        </div>
+        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
+          <AnimatedCounter
+            value={availableCash}
+            formatter={formatINRCompact}
+            duration={1.0}
+          />
+        </div>
+        <p className="text-xs text-text-muted">Withdrawable cash</p>
+      </GlassCard>
 
-        <GlassCard className="p-4 gap-2">
-          <div className="flex items-center gap-2">
-            <div className="size-7 rounded-lg flex items-center justify-center bg-surface-elevated">
-              <DollarSign className="size-3.5 text-text-secondary" />
-            </div>
-            <span className="text-xxs text-text-muted uppercase tracking-wider">
-              Margin Used
-            </span>
+      <GlassCard className="p-4 gap-2">
+        <div className="flex items-center gap-2">
+          <div className="size-7 rounded-lg flex items-center justify-center bg-surface-elevated">
+            <DollarSign className="size-3.5 text-text-secondary" />
           </div>
-          <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-            <AnimatedCounter
-              value={totalInvested}
-              formatter={formatINRCompact}
-              duration={1.0}
-            />
-          </div>
-          <p className="text-xs text-text-muted">Cost basis of holdings</p>
-        </GlassCard>
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
+            Margin Used
+          </span>
+        </div>
+        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
+          <AnimatedCounter
+            value={totalInvested}
+            formatter={formatINRCompact}
+            duration={1.0}
+          />
+        </div>
+        <p className="text-xs text-text-muted">Cost basis of holdings</p>
+      </GlassCard>
 
-        <GlassCard className="p-4 gap-2">
-          <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                "size-7 rounded-lg flex items-center justify-center",
-                totalPnl >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
-              )}
-            >
-              {totalPnl >= 0 ? (
-                <TrendingUp className="size-3.5 text-profit" />
-              ) : (
-                <TrendingDown className="size-3.5 text-loss" />
-              )}
-            </div>
-            <span className="text-xxs text-text-muted uppercase tracking-wider">
-              Day P&amp;L
-            </span>
-          </div>
+      <GlassCard className="p-4 gap-2">
+        <div className="flex items-center gap-2">
           <div
             className={cn(
-              "text-2xl font-mono font-bold tabular-nums",
-              totalPnl >= 0 ? "text-profit" : "text-loss",
+              "size-7 rounded-lg flex items-center justify-center",
+              totalPnl >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
             )}
           >
-            <AnimatedCounter
-              value={Math.abs(totalPnl)}
-              formatter={(v) => (totalPnl >= 0 ? "+" : "-") + formatINRCompact(v)}
-              duration={1.0}
-            />
+            {totalPnl >= 0 ? (
+              <TrendingUp className="size-3.5 text-profit" />
+            ) : (
+              <TrendingDown className="size-3.5 text-loss" />
+            )}
           </div>
-          <p className="text-xs text-text-muted">
-            {formatPercent(totalPnlPercent)} unrealised
-          </p>
-        </GlassCard>
-      </StaggeredList>
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
+            Day P&amp;L
+          </span>
+        </div>
+        <div
+          className={cn(
+            "text-2xl font-mono font-bold tabular-nums",
+            totalPnl >= 0 ? "text-profit" : "text-loss",
+          )}
+        >
+          <AnimatedCounter
+            value={Math.abs(totalPnl)}
+            formatter={(v) => (totalPnl >= 0 ? "+" : "-") + formatINRCompact(v)}
+            duration={1.0}
+          />
+        </div>
+        <p className="text-xs text-text-muted">
+          {formatPercent(totalPnlPercent)} unrealised
+        </p>
+      </GlassCard>
 
       {/* ── Row 3: Allocation chart + Top Movers (2-col) ─── */}
       <GlassCard className="lg:col-span-2 p-5 gap-3">
@@ -481,40 +479,38 @@ function DashboardTab({
       </GlassCard>
 
       {/* ── Row 4: 3 stat pills ─── */}
-      <StaggeredList className="contents" staggerDelay={40}>
-        <GlassCard className="p-4 gap-1.5">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="size-4 text-text-muted" />
-            <span className="text-xxs text-text-muted uppercase tracking-wider">Holdings</span>
-          </div>
-          <div className="text-3xl font-mono font-bold tabular-nums text-text-primary">
-            {holdings.length}
-          </div>
-          <p className="text-xs text-text-muted">Stocks in portfolio</p>
-        </GlassCard>
+      <GlassCard className="p-4 gap-1.5">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="size-4 text-text-muted" />
+          <span className="text-xxs text-text-muted uppercase tracking-wider">Holdings</span>
+        </div>
+        <div className="text-3xl font-mono font-bold tabular-nums text-text-primary">
+          {holdings.length}
+        </div>
+        <p className="text-xs text-text-muted">Stocks in portfolio</p>
+      </GlassCard>
 
-        <GlassCard className="p-4 gap-1.5">
-          <div className="flex items-center gap-2">
-            <Calculator className="size-4 text-text-muted" />
-            <span className="text-xxs text-text-muted uppercase tracking-wider">Active SIPs</span>
-          </div>
-          <div className="text-3xl font-mono font-bold tabular-nums text-text-muted">—</div>
-          <p className="text-xs text-text-muted">NAV feed required</p>
-        </GlassCard>
+      <GlassCard className="p-4 gap-1.5">
+        <div className="flex items-center gap-2">
+          <Calculator className="size-4 text-text-muted" />
+          <span className="text-xxs text-text-muted uppercase tracking-wider">Active SIPs</span>
+        </div>
+        <div className="text-3xl font-mono font-bold tabular-nums text-text-muted">—</div>
+        <p className="text-xs text-text-muted">NAV feed required</p>
+      </GlassCard>
 
-        <GlassCard className="p-4 gap-1.5">
-          <div className="flex items-center gap-2">
-            <PieChart className="size-4 text-text-muted" />
-            <span className="text-xxs text-text-muted uppercase tracking-wider">
-              Sector Breakdown
-            </span>
-          </div>
-          <div className="text-3xl font-mono font-bold tabular-nums text-text-primary">
-            {sectorCount}
-          </div>
-          <p className="text-xs text-text-muted">Sectors represented</p>
-        </GlassCard>
-      </StaggeredList>
+      <GlassCard className="p-4 gap-1.5">
+        <div className="flex items-center gap-2">
+          <PieChart className="size-4 text-text-muted" />
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
+            Sector Breakdown
+          </span>
+        </div>
+        <div className="text-3xl font-mono font-bold tabular-nums text-text-primary">
+          {sectorCount}
+        </div>
+        <p className="text-xs text-text-muted">Sectors represented</p>
+      </GlassCard>
 
       <p className="lg:col-span-3 text-xs text-text-muted">
         Holdings refresh every 60s. Cash refreshes every 30s from OpenAlgo.
@@ -751,35 +747,36 @@ interface AssetCategory {
   addTooltip: string;
 }
 
-// Approximate monthly equity value trend from holdings — uses current value
-// as baseline and back-fills 5 months with illustrative relative fluctuations.
-// Real historical values will come from trade history in v0.2.0.
-function buildEquityTrend(currentValue: number): { month: string; value: number }[] {
-  const months = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-  // Synthetic growth: each prior month is ~2–5% less than next (simple illustrative)
-  const factors = [0.88, 0.91, 0.94, 0.96, 0.98, 1.0];
-  return months.map((month, i) => ({
-    month,
-    value: currentValue * factors[i],
-  }));
+/** Invested vs current comparison derived from live holdings data. */
+interface PortfolioComparison {
+  label: string;
+  value: number;
 }
 
-function NetWorthMonthlyBar({ trend }: { trend: { month: string; value: number }[] }) {
+function buildPortfolioComparison(
+  totalInvested: number,
+  totalCurrent: number,
+): PortfolioComparison[] {
+  return [
+    { label: "Invested", value: totalInvested },
+    { label: "Current", value: totalCurrent },
+    { label: "P&L", value: totalCurrent - totalInvested },
+  ];
+}
+
+function NetWorthComparisonBar({
+  comparison,
+}: {
+  comparison: PortfolioComparison[];
+}) {
   const tremorColors = useTremorTheme();
-  const chartData = trend.map((t) => ({ month: t.month, "Portfolio Value": t.value }));
+  const barData = comparison.map((c) => ({ name: c.label, value: c.value }));
   return (
-    <AreaChart
-      data={chartData}
-      index="month"
-      categories={["Portfolio Value"]}
-      colors={[tremorColors[1] ?? "#22c55e"]}
+    <BarList
+      data={barData}
       valueFormatter={(v: number) => formatINRCompact(v)}
-      showLegend={false}
-      showYAxis={false}
-      showXAxis={true}
-      showGridLines={false}
-      className="h-20 text-xs"
-      curveType="monotone"
+      color={tremorColors[1] ?? "emerald"}
+      className="text-xs"
     />
   );
 }
@@ -787,19 +784,24 @@ function NetWorthMonthlyBar({ trend }: { trend: { month: string; value: number }
 function NetWorthTab({
   currentValue,
   availableCash,
+  totalInvested,
   totalPnl,
   totalPnlPercent,
   isLoading,
 }: {
   currentValue: number;
   availableCash: number;
+  totalInvested: number;
   totalPnl: number;
   totalPnlPercent: number;
   isLoading: boolean;
 }) {
   const tremorColors = useTremorTheme();
   const knownTotal = currentValue + availableCash;
-  const trend = useMemo(() => buildEquityTrend(currentValue), [currentValue]);
+  const comparison = useMemo(
+    () => buildPortfolioComparison(totalInvested, currentValue),
+    [totalInvested, currentValue],
+  );
 
   const categories: AssetCategory[] = [
     {
@@ -900,16 +902,13 @@ function NetWorthTab({
             </div>
           )}
 
-          {/* Monthly equity trend */}
+          {/* Invested vs current comparison */}
           {!isLoading && currentValue > 0 && (
             <div className="pt-2 border-t border-border-default">
               <div className="text-xxs text-text-muted mb-2 uppercase tracking-wider">
-                Equity trend (6M illustrative)
+                Invested vs Current
               </div>
-              <NetWorthMonthlyBar trend={trend} />
-              <p className="text-xxs text-text-muted mt-1">
-                Historical values from trade journal available in v0.2.0.
-              </p>
+              <NetWorthComparisonBar comparison={comparison} />
             </div>
           )}
         </GlassCard>
@@ -1356,6 +1355,7 @@ export default function InvestRoute() {
       <NetWorthTab
         currentValue={currentValue}
         availableCash={availableCash}
+        totalInvested={totalInvested}
         totalPnl={totalPnl}
         totalPnlPercent={totalPnlPercent}
         isLoading={isLoading}
