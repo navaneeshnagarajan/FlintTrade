@@ -35,12 +35,18 @@ INTERVAL_TABLES: dict[str, str] = {
 VALID_TABLES: frozenset[str] = frozenset(INTERVAL_TABLES.values())
 
 
-def _validate_table(table: str) -> None:
-    """Validate table name against allowlist to prevent SQL injection."""
-    if VALID_TABLES and table not in VALID_TABLES:
-        raise ValueError(
-            f"Invalid table name: {table!r}. Must be one of: {sorted(VALID_TABLES)}"
-        )
+def _validate_table(table: str) -> str:
+    """Validate table name against allowlist to prevent SQL injection.
+
+    Returns the exact matching string from the allowlist to ensure safe interpolation.
+    """
+    for valid in VALID_TABLES:
+        if valid == table:
+            return valid
+
+    raise ValueError(
+        f"Invalid table name: {table!r}. Must be one of: {sorted(VALID_TABLES)}"
+    )
 
 
 def _validate_path(path: str, base_dir: str | None = None) -> Path:
@@ -246,7 +252,7 @@ class DataPipeline:
         bars: list[dict[str, Any]],
     ) -> int:
         """Store raw bar dicts into a table with dedup."""
-        _validate_table(table)
+        table = _validate_table(table)
         return self._merge_bars(table, symbol, exchange, bars)
 
     def _merge_bars(
@@ -260,7 +266,7 @@ class DataPipeline:
 
         Returns number of new rows inserted.
         """
-        _validate_table(table)
+        table = _validate_table(table)
         if not bars:
             return 0
 
@@ -306,7 +312,7 @@ class DataPipeline:
         end_date: str | None = None,
     ) -> list[dict[str, Any]]:
         """Query OHLCV bars from a table."""
-        _validate_table(table)
+        table = _validate_table(table)
         query = f"SELECT * FROM {table} WHERE symbol = ? AND exchange = ?"
         params: list[Any] = [symbol, exchange]
 
@@ -325,7 +331,7 @@ class DataPipeline:
 
     def count_bars(self, table: str, symbol: str, exchange: str) -> int:
         """Count bars in a table for a symbol."""
-        _validate_table(table)
+        table = _validate_table(table)
         result = self.connection.execute(
             f"SELECT COUNT(*) FROM {table} WHERE symbol = ? AND exchange = ?",
             [symbol, exchange],
@@ -390,7 +396,7 @@ class DataPipeline:
 
         Returns the output path.
         """
-        _validate_table(table)
+        table = _validate_table(table)
         safe_output = _validate_path(output_path)
         safe_output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -419,11 +425,12 @@ class DataPipeline:
 
     def import_parquet(self, table: str, parquet_path: str) -> int:
         """Import a Parquet file into a table. Returns rows imported."""
-        _validate_table(table)
+        table = _validate_table(table)
         safe_parquet = _validate_path(parquet_path)
         before = self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         self.connection.execute(
-            f"INSERT INTO {table} SELECT * FROM read_parquet('{safe_parquet!s}')"
+            f"INSERT INTO {table} SELECT * FROM read_parquet(?)",
+            [str(safe_parquet)],
         )
         after = self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         imported = after - before
