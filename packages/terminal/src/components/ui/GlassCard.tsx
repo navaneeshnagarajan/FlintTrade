@@ -19,6 +19,7 @@ import * as React from "react";
 import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/lib/utils";
 import { useThemeStore } from "@/stores/themeStore";
+import { getResolvedVariant } from "@/lib/cinematicThemes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,12 +63,23 @@ export function GlassCard({
   ...rest
 }: GlassCardProps) {
   const glassStore = useThemeStore(useShallow((state) => state.glass));
-  // getActiveTheme() returns a new object on every invocation; subscribe to
-  // the stable source fields so the selector only re-renders when the active
-  // theme ID or custom themes list actually changes.
-  const activeTheme = useThemeStore(
-    useShallow((state) => state.getActiveTheme())
+  // Subscribe to stable source fields so the selector only re-renders when
+  // the active theme ID or mode actually changes.
+  const { activeThemeId, storeMode, customThemes } = useThemeStore(
+    useShallow((state) => ({
+      activeThemeId: state.activeThemeId,
+      storeMode:     state.mode,
+      customThemes:  state.customThemes,
+    }))
   );
+
+  // Resolve the active CinematicTheme and its variant
+  const activeTheme = useThemeStore((state) => state.getActiveTheme());
+  const resolvedMode = useThemeStore((state) => state.getResolvedMode());
+  // Suppress unused-variable warnings for subscription fields
+  void activeThemeId; void storeMode; void customThemes;
+
+  const variant = getResolvedVariant(activeTheme, resolvedMode);
 
   // Resolve whether glass mode is active for this instance
   const isGlass = glass !== undefined ? glass : glassStore.enabled;
@@ -89,12 +101,12 @@ export function GlassCard({
     );
   }
 
-  // Glass mode: compute dynamic values from store + active theme
-  const blurPx = glassStore.blur > 0 ? glassStore.blur : activeTheme.effects.blur;
+  // Glass mode: compute dynamic values from store + active theme variant
+  const blurPx = glassStore.blur > 0 ? glassStore.blur : variant.glass.blur;
   const transparencyPct =
     glassStore.transparency > 0
       ? glassStore.transparency
-      : activeTheme.effects.transparency;
+      : Math.round((1 - variant.glass.minOpacity) * 100);
 
   // transparency is 0–100; convert to 0–1 alpha.
   // We invert: 100% transparency = fully transparent (alpha 0), 0% = opaque.
@@ -102,9 +114,9 @@ export function GlassCard({
   // surface is always visible.
   const alpha = Math.max(0.05, 1 - transparencyPct / 100);
 
-  const cardBg = hexToRgba(activeTheme.colors.card, alpha);
-  const borderColor = hexToRgba(activeTheme.colors.border, 0.4);
-  const hoverBg = hexToRgba(activeTheme.colors.cardHover, alpha + 0.05 > 1 ? 1 : alpha + 0.05);
+  const cardBg = hexToRgba(variant.colors.card, alpha);
+  const borderColor = hexToRgba(variant.colors.border, 0.4);
+  const hoverBg = hexToRgba(variant.colors.cardHover, alpha + 0.05 > 1 ? 1 : alpha + 0.05);
 
   const glassStyle: React.CSSProperties = {
     backdropFilter: `blur(${blurPx}px)`,

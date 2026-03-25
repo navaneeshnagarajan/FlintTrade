@@ -33,10 +33,10 @@ export const PlotlyChart = memo(function PlotlyChart({
   onHover,
   onClick,
 }: PlotlyChartProps) {
-  const theme = useThemeStore((s) => s.getActiveTheme());
+  const resolvedMode = useThemeStore((s) => s.getResolvedMode());
 
   const themedLayout = useMemo<Partial<Layout>>(() => {
-    const isDark = theme.mode === "dark";
+    const isDark = resolvedMode === "dark";
     return {
       paper_bgcolor: "transparent",
       plot_bgcolor: "transparent",
@@ -60,7 +60,7 @@ export const PlotlyChart = memo(function PlotlyChart({
       },
       ...userLayout,
     };
-  }, [theme, userLayout]);
+  }, [resolvedMode, userLayout]);
 
   const mergedConfig = useMemo(
     () => ({

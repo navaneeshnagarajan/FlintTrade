@@ -1,17 +1,10 @@
 /**
- * GeneralSection — persona, font size, density settings.
+ * GeneralSection — persona, font size, and density settings.
+ *
+ * Phase C: theme picker removed — it lives exclusively in AppearanceSection.
  */
 
-import { useThemeStore } from "@/stores/themeStore";
 import { FieldRow, SegmentControl, SectionTitle } from "./shared";
-
-const THEMES = [
-  { id: "midnight",        label: "Midnight",       desc: "Cool dark (default)"      },
-  { id: "obsidian",        label: "Obsidian",       desc: "Ultra-dark, OLED-friendly" },
-  { id: "terminal-green",  label: "Terminal Green",  desc: "Matrix hacker style"      },
-  { id: "ocean-blue",      label: "Ocean Blue",      desc: "Calm professional blue"   },
-  { id: "light",           label: "Light",           desc: "Daytime high-visibility"  },
-] as const;
 
 interface GeneralSettings {
   fontSize: "small" | "normal" | "large";
@@ -24,33 +17,9 @@ interface GeneralSectionProps {
 }
 
 export function GeneralSection({ settings, onChange }: GeneralSectionProps) {
-  const activeThemeId = useThemeStore((s) => s.activeThemeId);
-  const setTheme      = useThemeStore((s) => s.setTheme);
-
   return (
     <div className="space-y-5">
       <SectionTitle>General</SectionTitle>
-
-      <FieldRow label="Theme">
-        <div className="grid grid-cols-5 gap-2">
-          {THEMES.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              aria-label={`Select ${t.label} theme`}
-              onClick={() => setTheme(t.id)}
-              className={`p-3 rounded-lg border text-center transition-all ${
-                activeThemeId === t.id
-                  ? "border-accent bg-accent/10 ring-1 ring-accent/20"
-                  : "border-border-default bg-surface-card hover:bg-surface-hover"
-              }`}
-            >
-              <div className="text-xs font-heading font-semibold text-text-primary">{t.label}</div>
-              <div className="text-[10px] text-text-muted mt-1">{t.desc}</div>
-            </button>
-          ))}
-        </div>
-      </FieldRow>
 
       <FieldRow
         label="Font Size"

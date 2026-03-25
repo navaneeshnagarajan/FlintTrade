@@ -1,66 +1,97 @@
 /**
- * AppearanceSection — theme picker, background, glass morphism, and layout density.
+ * AppearanceSection — color mode toggle, theme picker, background,
+ * glass morphism, and layout density.
+ *
+ * Phase C: dark/light/system mode control added at top.
+ * density and reduceMotion now read from stores (not localStorage).
+ * flinttrade:appearance localStorage key fully eliminated.
  */
 
-import { useState, useEffect } from "react";
+import { Sun, Moon, Monitor } from "lucide-react";
 import { useThemeStore } from "@/stores/themeStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { ThemePicker } from "@/components/theme/ThemePicker";
 import { BackgroundPicker } from "@/components/theme/BackgroundPicker";
 import { FieldRow, SegmentControl, Toggle, SectionTitle } from "./shared";
 
 export function AppearanceSection() {
   const { glass, setGlass } = useThemeStore();
-  const [density, setDensity]           = useState<"compact" | "comfortable">("comfortable");
-  const [reduceMotion, setReduceMotion] = useState(false);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("flinttrade:appearance");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { density?: string; reduceMotion?: boolean };
-        if (parsed.density === "compact" || parsed.density === "comfortable") {
-          setDensity(parsed.density);
-        }
-        if (typeof parsed.reduceMotion === "boolean") {
-          setReduceMotion(parsed.reduceMotion);
-        }
-      }
-    } catch {
-      // Ignore parse errors
-    }
-  }, []);
+  // Color mode — from themeStore
+  const mode         = useThemeStore((s) => s.mode);
+  const reduceMotion = useThemeStore((s) => s.reduceMotion);
 
-  function saveMeta(newDensity: "compact" | "comfortable", newReduceMotion: boolean) {
-    try {
-      localStorage.setItem(
-        "flinttrade:appearance",
-        JSON.stringify({ density: newDensity, reduceMotion: newReduceMotion }),
-      );
-    } catch {
-      // Ignore storage errors
+  // Density — from settingsStore
+  const density = useSettingsStore((s) => s.density);
+
+  function handleMode(v: string) {
+    if (v === "dark" || v === "light" || v === "system") {
+      useThemeStore.getState().setMode(v);
     }
   }
 
   function handleDensity(v: string) {
     const val = v as "compact" | "comfortable";
-    setDensity(val);
-    saveMeta(val, reduceMotion);
+    useSettingsStore.getState().setDensity(val);
     document.documentElement.setAttribute("data-density", val);
   }
 
   function handleReduceMotion(v: boolean) {
-    setReduceMotion(v);
-    saveMeta(density, v);
-    if (v) {
-      document.documentElement.classList.add("reduce-motion");
-    } else {
-      document.documentElement.classList.remove("reduce-motion");
-    }
+    useThemeStore.getState().setReduceMotion(v);
   }
 
   return (
     <div className="space-y-6">
       <SectionTitle>Appearance</SectionTitle>
+
+      {/* Dark / Light / System mode toggle */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-text-secondary">Color Mode</p>
+        <div className="flex items-center gap-1 p-1 rounded-lg border border-border-default bg-surface-card w-fit">
+          <button
+            type="button"
+            aria-label="Light mode"
+            aria-pressed={mode === "light"}
+            onClick={() => handleMode("light")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              mode === "light"
+                ? "bg-accent/15 text-accent border border-accent/30"
+                : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+            }`}
+          >
+            <Sun size={13} aria-hidden="true" />
+            Light
+          </button>
+          <button
+            type="button"
+            aria-label="Dark mode"
+            aria-pressed={mode === "dark"}
+            onClick={() => handleMode("dark")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              mode === "dark"
+                ? "bg-accent/15 text-accent border border-accent/30"
+                : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+            }`}
+          >
+            <Moon size={13} aria-hidden="true" />
+            Dark
+          </button>
+          <button
+            type="button"
+            aria-label="System mode"
+            aria-pressed={mode === "system"}
+            onClick={() => handleMode("system")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              mode === "system"
+                ? "bg-accent/15 text-accent border border-accent/30"
+                : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+            }`}
+          >
+            <Monitor size={13} aria-hidden="true" />
+            System
+          </button>
+        </div>
+      </div>
 
       {/* Theme */}
       <div className="space-y-2">

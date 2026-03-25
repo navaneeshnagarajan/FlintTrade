@@ -502,3 +502,21 @@ export const BUILTIN_THEMES: readonly FlintTradeTheme[] = [
 export function findBuiltinTheme(id: string): FlintTradeTheme | undefined {
   return BUILTIN_THEMES.find((t) => t.id === id);
 }
+
+// ---------------------------------------------------------------------------
+// CinematicTheme re-exports (Phase C transition shim)
+// Components that have been migrated to CinematicTheme import directly from
+// @/lib/cinematicThemes; these re-exports exist only for backward compat
+// during the transition so nothing breaks if still using this file as a hub.
+// ---------------------------------------------------------------------------
+export type {
+  CinematicTheme,
+  ThemeVariant,
+  ColorMode,
+  ParticleBehavior,
+} from "@/lib/cinematicThemes";
+export {
+  CINEMATIC_THEMES,
+  findCinematicTheme,
+  getResolvedVariant,
+} from "@/lib/cinematicThemes";
