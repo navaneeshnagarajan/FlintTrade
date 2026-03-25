@@ -143,6 +143,38 @@ class TestAccountManager:
         decrypted = decrypt_value(encrypted, key)
         assert decrypted == plaintext
 
+    def test_encryption_missing_key(self, monkeypatch):
+        from packages.ditto.src.account_manager import encrypt_value
+        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", "")
+        with pytest.raises(ValueError, match="DITTO_ENCRYPTION_KEY environment variable is required"):
+            encrypt_value("test")
+
+    def test_encryption_missing_cryptography(self, monkeypatch):
+        from packages.ditto.src.account_manager import encrypt_value
+        import builtins
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "cryptography.fernet":
+                raise ImportError("No module named 'cryptography'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        with pytest.raises(ImportError, match="cryptography required — pip install cryptography"):
+            encrypt_value("test", key="test_key")
+
+    def test_encryption_with_env_key(self, monkeypatch):
+        from packages.ditto.src.account_manager import decrypt_value, encrypt_value
+        from cryptography.fernet import Fernet
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", key)
+        plaintext = "env_secret_key"
+        encrypted = encrypt_value(plaintext)
+        assert encrypted != plaintext
+        decrypted = decrypt_value(encrypted)
+        assert decrypted == plaintext
+
 
 # ======================================================================
 # Mirror — allocation modes
