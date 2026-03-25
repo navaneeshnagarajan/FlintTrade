@@ -38,6 +38,11 @@ const SYMBOL_EXCHANGE: Record<string, string> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Read a CSS custom property from the document root at call time. */
+function getThemeColor(varName: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || fallback;
+}
+
 function fmtGEX(v: number): string {
   const abs = Math.abs(v);
   const sign = v < 0 ? "-" : "+";
@@ -244,7 +249,7 @@ export default function GEXWidget() {
           xref: "paper" as const,
           y0: 0,
           y1: 0,
-          line: { color: "#2a2a3a", width: 1 },
+          line: { color: getThemeColor("--color-border", "#2a2a3a"), width: 1 },
         },
         ...(data.gamma_flip_strike != null
           ? [

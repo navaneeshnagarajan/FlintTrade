@@ -39,13 +39,12 @@ describe("useSettingsState", () => {
     resetStores();
   });
 
-  it("returns general with fontSize and density from settingsStore", () => {
-    useSettingsStore.setState({ fontSize: "large", density: "comfortable" });
+  it("returns general with fontSize from settingsStore", () => {
+    useSettingsStore.setState({ fontSize: "large" });
 
     const { result } = renderHook(() => useSettingsState());
 
     expect(result.current.general.fontSize).toBe("large");
-    expect(result.current.general.density).toBe("comfortable");
   });
 
   it("returns trading defaults from settingsStore", () => {

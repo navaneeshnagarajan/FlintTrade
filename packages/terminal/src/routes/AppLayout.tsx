@@ -1,16 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import TopBar from "@/chrome/TopBar";
 import PageTransition from "@/components/motion/PageTransition";
 import TickerBar from "@/chrome/TickerBar";
-import InteractiveTour from "@/components/tour/InteractiveTour";
 import { useWsBridge } from "@/hooks/useWsBridge";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 
-const TOUR_STORAGE_KEY = "flinttrade:tourComplete";
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
 
@@ -70,10 +68,9 @@ export default function AppLayout() {
     window.addEventListener("flinttrade:navigate", handler);
     return () => window.removeEventListener("flinttrade:navigate", handler);
   }, [navigate]);
-  const [showWelcome, setShowWelcome] = useState(true);
-  const [tourComplete, setTourComplete] = useState(
-    () => localStorage.getItem(TOUR_STORAGE_KEY) === "true",
-  );
+  const [showWelcome, setShowWelcome] = useState(() => {
+    return sessionStorage.getItem("flinttrade:dailyWelcomeDismissed") !== "true";
+  });
 
   const [showSmallScreenWarning, setShowSmallScreenWarning] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -117,15 +114,10 @@ export default function AppLayout() {
         </PageTransition>
       </main>
       {showWelcome && (
-        <DailyWelcome onDismiss={() => setShowWelcome(false)} />
-      )}
-      {!tourComplete && (
-        <InteractiveTour
-          onComplete={() => {
-            localStorage.setItem(TOUR_STORAGE_KEY, "true");
-            setTourComplete(true);
-          }}
-        />
+        <DailyWelcome onDismiss={() => {
+          sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
+          setShowWelcome(false);
+        }} />
       )}
       <NoConnectionOverlay />
     </div>

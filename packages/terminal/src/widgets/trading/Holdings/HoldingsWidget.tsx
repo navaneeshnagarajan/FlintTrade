@@ -66,7 +66,7 @@ function resolveLtp(h: RawHolding): number {
 
 export default function HoldingsWidget(_props: WidgetProps) {
   // retry:false preserved — some brokers don't have a holdings endpoint
-  const { data: holdingsData, dataUpdatedAt, refetch, isFetching } = useHoldings();
+  const { data: holdingsData, dataUpdatedAt, refetch, isFetching, isError, error } = useHoldings();
   const [sorting, setSorting] = useState<SortingState>([{ id: "symbol", desc: false }]);
   const [globalFilter, setGlobalFilter] = useState("");
 
@@ -226,6 +226,22 @@ export default function HoldingsWidget(_props: WidgetProps) {
           />
         </div>
       </div>
+
+      {/* Error banner */}
+      {isError && (
+        <div className="flex items-center gap-2 px-3 py-2 mx-3 mt-2 bg-loss/10 border border-loss/20 rounded-md text-sm text-loss">
+          <span className="flex-1">
+            Failed to load holdings{error instanceof Error ? `: ${error.message}` : ""}
+          </span>
+          <button
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="shrink-0 text-xs font-medium underline hover:no-underline disabled:opacity-50"
+          >
+            {isFetching ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
 
       {/* Body */}
       {table.getRowModel().rows.length === 0 ? (

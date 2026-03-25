@@ -14,15 +14,20 @@ export function TextGenerateEffect({
   duration = 0.5,
 }: TextGenerateProps) {
   const [scope, animate] = useAnimate();
-  const wordsArray = words.split(" ");
+  const wordsArray = words ? words.split(" ") : [];
 
   useEffect(() => {
+    if (!wordsArray.length) return;
     void animate(
       "span",
       { opacity: 1, filter: "blur(0px)" },
       { duration, delay: stagger(0.08) },
     );
-  }, [animate, duration]);
+  // words drives re-animation when the prop changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animate, duration, words]);
+
+  if (!wordsArray.length) return null;
 
   return (
     <motion.div ref={scope} className={cn("font-heading", className)}>

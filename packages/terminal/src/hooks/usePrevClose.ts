@@ -126,7 +126,7 @@ async function fetchPrevClose(): Promise<Map<string, number>> {
 
       // The quote data may be nested under 'data' or flat
       const quoteData = (item.data && typeof item.data === "object" ? item.data : item) as Record<string, unknown>;
-      const prevClose = extractPrevClose(quoteData as Quote);
+      const prevClose = extractPrevClose(quoteData as unknown as Quote);
       if (prevClose !== undefined) {
         map.set(`${exch}:${sym}`, prevClose);
       }

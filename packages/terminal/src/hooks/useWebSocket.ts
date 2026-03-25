@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getWsService } from "@/services/websocket";
 import { useConnectionStore } from "@/stores/connectionStore";
 import type { WsInstrument, WsTick, WsMode } from "@/types/api";
@@ -19,6 +19,13 @@ export default function useWebSocket(
   const [ticks, setTicks]             = useState<TickMap>({});
   const [connected, setConnected]     = useState(false);
   const prevRef                       = useRef<WsInstrument[]>([]);
+
+  // Stable string key derived from the instruments array — avoids serialising on
+  // every render while still tracking meaningful changes (symbol + exchange pairs).
+  const instrumentsKey = useMemo(
+    () => instruments.map((i) => `${i.exchange}:${i.symbol}`).join(","),
+    [instruments],
+  );
 
   // Subscribe to tick and status callbacks
   useEffect(() => {
@@ -64,7 +71,7 @@ export default function useWebSocket(
       prevRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsUrl, JSON.stringify(instruments), mode]);
+  }, [wsUrl, instrumentsKey, mode]);
 
   return { ticks, connected };
 }

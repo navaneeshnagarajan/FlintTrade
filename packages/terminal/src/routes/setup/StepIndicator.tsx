@@ -24,19 +24,20 @@ export function StepIndicator({ total, current, onStepClick }: StepIndicatorProp
       {Array.from({ length: total }, (_, i) => {
         const isCompleted = i < current;
         const isActive = i === current;
-        const isClickable = isCompleted && onStepClick !== undefined;
+        const isFuture = i > current;
+        const isClickable = i <= current && onStepClick !== undefined;
 
         return (
           <button
             key={i}
             type="button"
-            aria-label={`Step ${i + 1}${isCompleted ? " (completed)" : isActive ? " (current)" : ""}`}
-            disabled={!isClickable}
+            aria-label={`Step ${i + 1}${isCompleted ? " (completed)" : isActive ? " (current)" : " (upcoming)"}`}
+            aria-disabled={isFuture}
+            disabled={isFuture}
             onClick={isClickable ? () => onStepClick(i) : undefined}
             className={[
               "relative flex items-center justify-center rounded-full transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
-              isActive ? "size-5 bg-primary" : isCompleted ? "size-4 bg-profit cursor-pointer hover:ring-2 hover:ring-profit/40" : "size-3 bg-border-default",
-              !isClickable && "cursor-default",
+              isActive ? "size-5 bg-primary cursor-default" : isCompleted ? "size-4 bg-profit cursor-pointer hover:ring-2 hover:ring-profit/40" : "size-3 bg-border-default cursor-not-allowed opacity-50",
             ].join(" ")}
           >
             {isActive && !reduced && (

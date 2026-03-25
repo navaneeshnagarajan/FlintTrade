@@ -1149,7 +1149,7 @@ function ForwardTestSection() {
   const activeRunning =
     runningQuery.data?.find((s) => s.name === activeStrategyName) ?? null;
 
-  useState(() => {
+  useEffect(() => {
     if (ftState === "running" && activeStrategyName && runningQuery.data) {
       const found = runningQuery.data.find(
         (s) => s.name === activeStrategyName,
@@ -1158,7 +1158,7 @@ function ForwardTestSection() {
         setFtState("stopped");
       }
     }
-  });
+  }, [ftState, activeStrategyName, runningQuery.data]);
 
   const strategiesByCategory = (strategiesQuery.data ?? []).reduce<
     Record<string, StrategyInfo[]>

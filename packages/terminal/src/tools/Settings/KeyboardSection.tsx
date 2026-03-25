@@ -73,7 +73,7 @@ export function KeyboardSection() {
         <div className="rounded border border-border-default overflow-hidden px-3">
           <ShortcutRow keys={["Escape"]}            action="Close overlay / dismiss panel"  description="Closes any open tool overlay, basket, or dropdown" />
           <ShortcutRow keys={["Ctrl", "K"]}         action="Command palette / symbol search" description="Open the global symbol and action search bar" />
-          <ShortcutRow keys={["Ctrl", ","]}         action="Open settings"                  description="Open the Settings tool overlay" planned />
+          <ShortcutRow keys={["Ctrl", ","]}         action="Open settings"                  description="Open the Settings tool overlay" />
           <ShortcutRow keys={["Ctrl", "Shift", "P"]} action="Widget picker"                 description="Open the widget picker to add a new panel" planned />
         </div>
       </div>

@@ -15,7 +15,6 @@ import type {
   OHLCVBar,
   OptionChainData,
   PlaceOrderParams,
-  SmartOrderParams,
   Greeks,
   GexEntry,
   IVSmileEntry,
@@ -129,20 +128,10 @@ async function get<T>(endpoint: string): Promise<T> {
 // --- Orders ---
 export const placeOrder = (params: PlaceOrderParams) =>
   post<{ orderId: string }>("placeorder", params);
-export const placeSmartOrder = (params: SmartOrderParams) =>
-  post<{ orderId: string }>("placesmartorder", params);
-export const cancelOrder = (strategy: string, orderid: string) =>
-  post<void>("cancelorder", { strategy, orderid });
 export const cancelAllOrders = (strategy = "Flint") =>
   post<void>("cancelallorder", { strategy });
 export const closePosition = (strategy = "Flint") =>
   post<void>("closeposition", { strategy }); // BUG FIX 2: passes strategy string, was passing { product: "MIS" }
-export const modifyOrder = (params: Record<string, unknown>) =>
-  post<void>("modifyorder", params);
-export const orderStatus = (strategy: string, orderid: string) =>
-  post<Order>("orderstatus", { strategy, orderid });
-export const openPosition = (params: PlaceOrderParams) =>
-  post<Record<string, unknown>>("openposition", params);
 
 // --- Data ---
 export const getQuotes = (symbol: string, exchange = "NSE") =>
@@ -165,8 +154,6 @@ export const getOptionChain = (symbol: string, exchange = "NFO", expiry?: string
     // OpenAlgo expiry format: "24MAR26" (no dashes). Expiry API returns "24-MAR-26".
     ...(expiry ? { expiry_date: expiry.replace(/-/g, "") } : {}),
   });
-export const getOptionGreeks = (symbol: string, exchange = "NFO") =>
-  post<Greeks>("optiongreeks", { symbol, exchange });
 export const getExpiry = (
   symbol: string,
   exchange = "NFO",
@@ -241,8 +228,6 @@ export const getHoldings = async (): Promise<Holding[]> => {
 
 // --- Utility ---
 export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
-export const analyzerStatus = () => get<{ enabled: boolean }>("analyzer/status");
-export const analyzerToggle = () => post<void>("analyzer/toggle");
 export const getHolidays = () => get<Holiday[]>("holidays");
 export const getTimings = () => get<MarketTiming[]>("timings");
 export const sendTelegram = (message: string) =>

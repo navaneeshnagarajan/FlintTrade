@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X, Sun, Moon, Settings } from "lucide-react";
+import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X, Sun, Moon, Monitor, Settings } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -224,11 +224,13 @@ export default function TopBar() {
   const themeMode = useThemeStore((s) => s.mode);
   const setThemeMode = useThemeStore((s) => s.setMode);
 
-  // Pending action center orders — poll every 5s for badge count
+  // Pending action center orders — only poll when connected, every 5s
+  const isConnected = useConnectionStore((s) => s.status === "connected");
   const { data: pendingOrders } = useQuery({
     queryKey: ["actionCenterPending"],
     queryFn: getPendingOrders,
-    refetchInterval: 5_000,
+    enabled: isConnected,
+    refetchInterval: isConnected ? 5_000 : false,
     // Don't throw on error — badge simply won't appear
     throwOnError: false,
   });
@@ -390,18 +392,20 @@ export default function TopBar() {
     >
       {/* Left: Logo + Route Tabs + Separator + Workspace Tabs */}
       <div className="flex items-center gap-3">
-        <LogoIcon size={20} />
+        <Link to="/trade" aria-label="FlintTrade home" className="flex items-center shrink-0">
+          <LogoIcon size={20} />
+        </Link>
 
         {/* Route tabs (always visible) */}
         <nav aria-label="Main navigation" className="flex items-center gap-0.5 ml-3">
           {ROUTE_TABS.map((tab) => {
             const isActive = currentPath === tab.path;
             return (
-              <button
+              <Link
                 key={tab.path}
-                onClick={() => navigate(tab.path)}
+                to={tab.path}
                 aria-current={isActive ? "page" : undefined}
-                className={`relative px-3 py-1 text-xs font-heading font-medium rounded transition-colors ${
+                className={`relative px-3 py-1 text-xs font-heading font-medium rounded transition-colors no-underline ${
                   isActive
                     ? "bg-accent/15 text-accent"
                     : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -416,7 +420,7 @@ export default function TopBar() {
                     transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
                   />
                 )}
-              </button>
+              </Link>
             );
           })}
         </nav>
@@ -634,18 +638,29 @@ export default function TopBar() {
         {/* Sandbox / Live trading toggle */}
         <SandboxToggle />
 
-        {/* Sun/Moon quick mode flip */}
+        {/* Sun/Moon/Monitor quick mode flip — cycles: dark → light → system → dark */}
         <Button
           variant="ghost"
           size="sm"
           className="h-7 w-7 p-0"
-          onClick={() => setThemeMode(themeMode === "dark" ? "light" : "dark")}
-          aria-label={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          onClick={() => {
+            const nextMode = themeMode === "dark" ? "light" : themeMode === "light" ? "system" : "dark";
+            setThemeMode(nextMode);
+          }}
+          aria-label={
+            themeMode === "dark"
+              ? "Switch to light mode"
+              : themeMode === "light"
+                ? "Switch to system mode"
+                : "Switch to dark mode"
+          }
         >
           {themeMode === "dark" ? (
             <Sun className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
+          ) : themeMode === "light" ? (
             <Moon className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Monitor className="h-3.5 w-3.5" aria-hidden="true" />
           )}
         </Button>
 

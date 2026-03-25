@@ -7,6 +7,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { LayoutGrid, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { useThemeStore } from "@/stores/themeStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import ToolsDropdown from "@/chrome/ToolsDropdown";
@@ -94,6 +95,8 @@ export default function TerminalRoute() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const level = useSkillLevel("trade");
+  const resolvedMode = useThemeStore((s) => s.getResolvedMode());
+  const dockviewThemeClass = resolvedMode === "light" ? "dockview-theme-light" : "dockview-theme-dark";
   const dockviewThemeCssVars = useDockviewTheme();
   const dockviewStyle = useMemo(
     () => dockviewThemeCssVars as React.CSSProperties,
@@ -256,7 +259,7 @@ export default function TerminalRoute() {
           style={dockviewStyle}
         >
           <DockviewReact
-            className="dockview-theme-dark"
+            className={dockviewThemeClass}
             onReady={onDockviewReady}
             components={widgetComponents}
             singleTabMode="fullwidth"

@@ -62,7 +62,7 @@
     --color-border-strong: #3a3a4a;
     --color-text-primary: #e4e4e7;
     --color-text-secondary: #8b8b95;
-    --color-text-muted: #7e7e8a;
+    --color-text-muted: #8f8f9b;
     --color-text-disabled: #52525b;
     --color-profit: #22c55e;
     --color-loss: #ef4444;
@@ -81,6 +81,22 @@
     --color-neutral-text: #3b82f6;
     --color-itm-text: #22c55e;
     --color-otm-text: #f97315;
+  }
+
+  /* Prevent flash of dark colors when OS preference is light.
+     themeStore.applyTheme() overrides these once React initialises. */
+  @media (prefers-color-scheme: light) {
+    :root {
+      --color-surface-base: #f8f8fa;
+      --color-surface-card: #ffffff;
+      --color-surface-elevated: #f0f0f5;
+      --color-surface-hover: #e8e8f0;
+      --color-border-default: #d0d0da;
+      --color-text-primary: #18181b;
+      --color-text-secondary: #52525b;
+      --color-text-muted: #71717a;
+      --color-text-disabled: #a1a1aa;
+    }
   }
 }
 

@@ -48,6 +48,14 @@ import type { WidgetProps } from "@/types/widgets";
 import { PnLSummary } from "./PnLSummary";
 
 // ---------------------------------------------------------------------------
+// Theme helper — reads CSS custom properties at call time so charts re-read
+// on each init and respect the active theme.
+// ---------------------------------------------------------------------------
+function getThemeColor(varName: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || fallback;
+}
+
+// ---------------------------------------------------------------------------
 // IST time formatter (absorbed from PnLTracker.tsx)
 // ---------------------------------------------------------------------------
 function istTickFormatter(time: number): string {
@@ -152,30 +160,30 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
       height: container.offsetHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "rgba(255,255,255,0.4)",
+        textColor: getThemeColor("--color-text-muted", "#a0a0b0"),
       },
       grid: {
-        vertLines: { color: "rgba(255,255,255,0.04)" },
-        horzLines: { color: "rgba(255,255,255,0.04)" },
+        vertLines: { color: getThemeColor("--color-border", "#2a2a3a") },
+        horzLines: { color: getThemeColor("--color-border", "#2a2a3a") },
       },
       rightPriceScale: {
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: getThemeColor("--color-border", "#2a2a3a"),
         scaleMargins: { top: 0.15, bottom: 0.15 },
       },
       timeScale: {
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: getThemeColor("--color-border", "#2a2a3a"),
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: istTickFormatter,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "rgba(255,255,255,0.3)", style: 2, width: 1, labelVisible: false },
+        vertLine: { color: getThemeColor("--color-text-muted", "#a0a0b0"), style: 2, width: 1, labelVisible: false },
         horzLine: {
-          color: "rgba(255,255,255,0.3)",
+          color: getThemeColor("--color-text-muted", "#a0a0b0"),
           style: 2,
           width: 1,
-          labelBackgroundColor: "#1e1e2e",
+          labelBackgroundColor: getThemeColor("--color-card", "#16161f"),
         },
       },
     });

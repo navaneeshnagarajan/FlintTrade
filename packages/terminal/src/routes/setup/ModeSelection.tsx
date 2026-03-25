@@ -22,8 +22,16 @@ interface ModeCardProps {
 function ModeCard({ title, subtitle, description, badge, icon, onClick }: ModeCardProps) {
   return (
     <Card
-      className="bg-surface-card border border-border-default rounded-lg p-6 shadow-sm cursor-pointer hover:border-accent/40 hover:bg-surface-hover transition-all duration-200 group"
+      role="button"
+      tabIndex={0}
+      className="bg-surface-card border border-border-default rounded-lg p-6 shadow-sm cursor-pointer hover:border-accent/40 hover:bg-surface-hover transition-all duration-200 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between mb-2">

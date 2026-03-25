@@ -54,6 +54,14 @@ import { getExpiry } from "@/services/api";
 import type { OIProfileEntry } from "@/types/api";
 
 // ---------------------------------------------------------------------------
+// Theme helper — reads CSS custom properties at call time so components
+// respect the active theme (dark / light / custom).
+// ---------------------------------------------------------------------------
+function getThemeColor(varName: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || fallback;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -583,7 +591,7 @@ function SectorHeatmapTab() {
   const [selectedTf, setSelectedTf] = useState<TF>("1D");
 
   function getCellColor(v: number | null): string {
-    if (v === null) return "#1e1e2e";
+    if (v === null) return getThemeColor("--color-card", "#16161f");
     if (v >= 3) return "#064e3b";
     if (v >= 1.5) return "#065f46";
     if (v >= 0.5) return "#047857";
@@ -1139,7 +1147,7 @@ function CorrelationMatrixTab() {
     if (v >= 0.7) return { bg: "#064e3b", text: "#a7f3d0" };
     if (v >= 0.4) return { bg: "#065f46", text: "#6ee7b7" };
     if (v >= 0.1) return { bg: "#047857", text: "#d1fae5" };
-    if (v >= -0.1) return { bg: "#1e1e2e", text: "#9090b0" };
+    if (v >= -0.1) return { bg: getThemeColor("--color-card", "#16161f"), text: getThemeColor("--color-text-muted", "#9090b0") };
     if (v >= -0.4) return { bg: "#7f1d1d", text: "#fca5a5" };
     if (v >= -0.7) return { bg: "#991b1b", text: "#f87171" };
     return { bg: "#450a0a", text: "#fca5a5" };
@@ -1196,7 +1204,7 @@ function CorrelationMatrixTab() {
               { range: "0.7 to 1.0", desc: "Strong positive — move together", bg: "#064e3b", text: "#a7f3d0" },
               { range: "0.4 to 0.7", desc: "Moderate positive correlation", bg: "#065f46", text: "#6ee7b7" },
               { range: "0.1 to 0.4", desc: "Weak positive correlation", bg: "#047857", text: "#d1fae5" },
-              { range: "-0.1 to 0.1", desc: "Uncorrelated / neutral", bg: "#1e1e2e", text: "#9090b0" },
+              { range: "-0.1 to 0.1", desc: "Uncorrelated / neutral", bg: getThemeColor("--color-card", "#16161f"), text: getThemeColor("--color-text-muted", "#9090b0") },
               { range: "-0.4 to -0.1", desc: "Weak negative correlation", bg: "#7f1d1d", text: "#fca5a5" },
               { range: "-1.0 to -0.4", desc: "Strong negative — move oppositely", bg: "#450a0a", text: "#fca5a5" },
             ].map((l) => (

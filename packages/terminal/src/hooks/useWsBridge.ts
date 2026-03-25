@@ -49,10 +49,11 @@ async function resolveMcxFutures(): Promise<Map<string, string>> {
 
 export function useWsBridge(): void {
   const setWsConnected = useConnectionStore((s) => s.setWsConnected);
+  const apiKey = useConnectionStore((s) => s.apiKey);
+  const wsUrl = useConnectionStore((s) => s.wsUrl);
   const store = useStore();
 
   useEffect(() => {
-    const { wsUrl, apiKey } = useConnectionStore.getState();
     if (!wsUrl) return;
     const ws = getWsService(wsUrl, apiKey);
     if (!ws) return;
@@ -125,5 +126,5 @@ export function useWsBridge(): void {
       unsubTick();
       unsubStatus();
     };
-  }, [setWsConnected, store]);
+  }, [setWsConnected, store, apiKey, wsUrl]);
 }

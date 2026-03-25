@@ -417,7 +417,7 @@ function DashboardTab({
                   .filter((b) => b.value > 0)
                   .map((b) => ({ name: b.label, value: b.value }))}
                 valueFormatter={(v: number) => formatINR(v)}
-                color="blue"
+                color="slate"
                 className="text-xs"
               />
             </div>

@@ -236,6 +236,25 @@ export class WebSocketService {
     this.connected = value;
     this.statusCallbacks.forEach((cb) => cb(value));
   }
+
+  /**
+   * Update the WS URL and API key without losing existing subscriptions.
+   * If the service is currently connected, it disconnects and reconnects
+   * immediately so the new credentials take effect.
+   */
+  updateCredentials(url: string, apiKey: string): void {
+    const credentialsChanged = this.url !== url || this.apiKey !== apiKey;
+    if (!credentialsChanged) return;
+    this.url = url;
+    this.apiKey = apiKey;
+    if (this.shouldConnect) {
+      // Tear down the existing connection — doConnect will be called by
+      // scheduleReconnect → but we want immediate reconnection, so call
+      // disconnect (clears shouldConnect) then connect() again.
+      this.disconnect();
+      this.connect();
+    }
+  }
 }
 
 let instance: WebSocketService | null = null;
@@ -243,6 +262,8 @@ let instance: WebSocketService | null = null;
 export function getWsService(url?: string, apiKey?: string): WebSocketService | null {
   if (!instance && url) {
     instance = new WebSocketService(url, apiKey || "");
+  } else if (instance && url && apiKey !== undefined) {
+    instance.updateCredentials(url, apiKey);
   }
   return instance;
 }

@@ -22,11 +22,11 @@ function IndexChip({ name, data }: IndexChipProps) {
   // is not yet available (e.g. first render before REST resolves).
   const prevClose = data?.prevClose ?? data?.close ?? null;
   const change =
-    prevClose !== null && prevClose > 0 && ltp !== null
+    prevClose !== null && prevClose > 0 && ltp !== null && ltp > 0
       ? ltp - prevClose
       : (data?.change ?? null);
   const pct =
-    prevClose !== null && prevClose > 0 && ltp !== null
+    prevClose !== null && prevClose > 0 && ltp !== null && ltp > 0
       ? ((ltp - prevClose) / prevClose) * 100
       : (data?.pct ?? null);
   const isUp = (change ?? 0) >= 0;
@@ -80,14 +80,14 @@ function IndexChip({ name, data }: IndexChipProps) {
         aria-live="off"
         className={`text-xs font-mono tabular-nums transition-colors duration-200 ${ltpColorClass}`}
       >
-        {ltp !== null
+        {ltp !== null && ltp > 0
           ? ltp.toLocaleString("en-IN", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })
           : "\u2014"}
       </span>
-      {ltp !== null && pct !== null ? (
+      {ltp !== null && ltp > 0 && pct !== null ? (
         <span
           className={`text-xs font-mono tabular-nums rounded px-1 ${
             isUp ? "bg-bullish-bg text-bullish-text" : "bg-bearish-bg text-bearish-text"
@@ -95,7 +95,7 @@ function IndexChip({ name, data }: IndexChipProps) {
         >
           {isUp ? "\u25b2" : "\u25bc"}{Math.abs(pct).toFixed(2)}%
         </span>
-      ) : ltp !== null ? (
+      ) : ltp !== null && ltp > 0 ? (
         <span className="text-xs text-text-disabled">{"\u2014"}</span>
       ) : null}
     </div>

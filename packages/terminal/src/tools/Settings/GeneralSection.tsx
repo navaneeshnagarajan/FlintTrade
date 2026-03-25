@@ -1,14 +1,14 @@
 /**
- * GeneralSection — persona, font size, and density settings.
+ * GeneralSection — persona and font size settings.
  *
  * Phase C: theme picker removed — it lives exclusively in AppearanceSection.
+ * Density removed — it lives exclusively in AppearanceSection > Layout.
  */
 
 import { FieldRow, SegmentControl, SectionTitle } from "./shared";
 
 interface GeneralSettings {
   fontSize: "small" | "normal" | "large";
-  density: "compact" | "comfortable";
 }
 
 interface GeneralSectionProps {
@@ -32,20 +32,6 @@ export function GeneralSection({ settings, onChange }: GeneralSectionProps) {
             { value: "small",  label: "Small (12px)"  },
             { value: "normal", label: "Normal (13px)" },
             { value: "large",  label: "Large (14px)"  },
-          ]}
-        />
-      </FieldRow>
-
-      <FieldRow
-        label="Density"
-        hint="Compact reduces row padding for more data on screen."
-      >
-        <SegmentControl
-          value={settings.density}
-          onChange={(v) => onChange("density", v)}
-          options={[
-            { value: "compact",     label: "Compact"     },
-            { value: "comfortable", label: "Comfortable" },
           ]}
         />
       </FieldRow>

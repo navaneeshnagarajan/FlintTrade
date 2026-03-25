@@ -4,20 +4,44 @@
  * Avoids flashing on startup by waiting 5 seconds before becoming visible.
  * Clears immediately when connection is restored.
  * Rendered inside AppLayout so it covers all app routes.
+ *
+ * Issue #72 — Suppressed on routes that don't require a live broker connection
+ * (/settings, /explore) as a defensive guard against future routing changes.
+ *
+ * Issue #56 — Focus is trapped inside the dialog while it is visible, satisfying
+ * WCAG 2.1 SC 2.1.2 (No Keyboard Trap) and the aria-modal contract.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { WifiOff, Settings, RefreshCw } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
 
 const DELAY_MS = 5000;
 
+/**
+ * Routes where a live OpenAlgo connection is not required.
+ * The overlay is suppressed on these paths so users can configure
+ * settings or explore demo data without being interrupted.
+ */
+const SUPPRESSED_ROUTE_PREFIXES = ["/settings", "/explore"];
+
+/** CSS selector for all keyboard-focusable elements inside the dialog. */
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function NoConnectionOverlay() {
   const status = useConnectionStore((s) => s.status);
   const [showOverlay, setShowOverlay] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Issue #72 — Don't interrupt routes that work without a live connection.
+  const isSuppressedRoute = SUPPRESSED_ROUTE_PREFIXES.some((prefix) =>
+    location.pathname.startsWith(prefix),
+  );
 
   useEffect(() => {
     if (status === "disconnected") {
@@ -28,14 +52,59 @@ export function NoConnectionOverlay() {
     setShowOverlay(false);
   }, [status]);
 
-  if (!showOverlay) return null;
+  // Issue #56 — Auto-focus the first interactive element when the overlay opens.
+  useEffect(() => {
+    if (!showOverlay || isSuppressedRoute) return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const firstFocusable = dialog.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    firstFocusable?.focus();
+  }, [showOverlay, isSuppressedRoute]);
+
+  // Issue #56 — Tab/Shift+Tab cycles within the dialog only.
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    ).filter((el) => !el.closest("[aria-hidden='true']"));
+
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+
+    if (e.shiftKey) {
+      // Shift+Tab — wrap backward from first to last
+      if (active === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      // Tab — wrap forward from last to first
+      if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }, []);
+
+  if (!showOverlay || isSuppressedRoute) return null;
 
   return (
     <div
+      ref={dialogRef}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="no-connection-title"
       aria-describedby="no-connection-desc"
+      onKeyDown={handleKeyDown}
       className="fixed inset-0 z-50 bg-surface-base/80 backdrop-blur-sm flex items-center justify-center"
     >
       <div className="bg-surface-card border border-border-default rounded-xl p-8 max-w-md w-full mx-4 text-center space-y-4 shadow-2xl">

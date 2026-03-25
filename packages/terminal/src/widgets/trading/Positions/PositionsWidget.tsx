@@ -45,7 +45,7 @@ function formatPnl(pnl: number): string {
 }
 
 export default function PositionsWidget(_props: WidgetProps) {
-  const { data: positionsData, dataUpdatedAt } = usePositions();
+  const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions();
   const [sorting, setSorting] = useState<SortingState>([]);
 
   const rows = useMemo<PositionRow[]>(() => {
@@ -140,6 +140,22 @@ export default function PositionsWidget(_props: WidgetProps) {
           )}
         </div>
       </div>
+
+      {/* Error banner */}
+      {isError && (
+        <div className="flex items-center gap-2 px-3 py-2 mx-3 mt-2 bg-loss/10 border border-loss/20 rounded-md text-sm text-loss">
+          <span className="flex-1">
+            Failed to load positions{error instanceof Error ? `: ${error.message}` : ""}
+          </span>
+          <button
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="shrink-0 text-xs font-medium underline hover:no-underline disabled:opacity-50"
+          >
+            {isFetching ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
 
       {/* Body */}
       {rows.length === 0 ? (

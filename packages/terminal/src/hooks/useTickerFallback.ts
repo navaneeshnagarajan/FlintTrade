@@ -131,12 +131,8 @@ async function pollAll(
         // Key uses the instrument display name, matching useWsBridge + marketAtoms.
         const key = instrumentKey(inst);
         store.set(tickAtomFamily(key), tick);
-      } catch (err) {
-        // Log at debug level — these are expected during broker downtime / pre-market.
-        console.debug(
-          `[TickerFallback] Poll failed for ${inst.exchange}:${inst.symbol}:`,
-          err,
-        );
+      } catch {
+        // Swallow per-instrument errors — expected during broker downtime / pre-market.
       }
     }),
   );

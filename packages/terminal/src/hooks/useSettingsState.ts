@@ -17,7 +17,6 @@ import { resetWsService } from "@/services/websocket";
 
 export interface GeneralData {
   fontSize: "small" | "normal" | "large";
-  density: "compact" | "comfortable";
 }
 
 export interface ConnectionData {
@@ -105,7 +104,6 @@ export interface SettingsState {
 export function useSettingsState(): SettingsState {
   // ---- settingsStore selectors ----
   const fontSize    = useSettingsStore((s) => s.fontSize);
-  const density     = useSettingsStore((s) => s.density);
 
   const defaultExchange   = useSettingsStore((s) => s.defaultExchange);
   const defaultProduct    = useSettingsStore((s) => s.defaultProduct);
@@ -136,8 +134,6 @@ export function useSettingsState(): SettingsState {
   const updateGeneral = useCallback((field: keyof GeneralData, value: string) => {
     if (field === "fontSize") {
       useSettingsStore.getState().setFontSize(value as GeneralData["fontSize"]);
-    } else if (field === "density") {
-      useSettingsStore.getState().setDensity(value as GeneralData["density"]);
     }
   }, []);
 
@@ -214,8 +210,8 @@ export function useSettingsState(): SettingsState {
   // specific slice of state actually changes.
 
   const general = useMemo<GeneralData>(
-    () => ({ fontSize, density }),
-    [fontSize, density],
+    () => ({ fontSize }),
+    [fontSize],
   );
 
   const trading = useMemo<TradingData>(

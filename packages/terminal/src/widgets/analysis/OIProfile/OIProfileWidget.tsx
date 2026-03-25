@@ -57,6 +57,11 @@ const INTERVAL_MAP: Record<string, string> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Read a CSS custom property from the document root at call time. */
+function getThemeColor(varName: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || fallback;
+}
+
 function fmtOI(v: number): string {
   if (v >= 1e7) return `${(v / 1e7).toFixed(1)}Cr`;
   if (v >= 1e5) return `${(v / 1e5).toFixed(1)}L`;
@@ -104,16 +109,16 @@ export default function OIProfileWidget() {
       height: el.clientHeight,
       layout: {
         background: { color: "transparent" },
-        textColor: "#a0a0b0",
+        textColor: getThemeColor("--color-text-muted", "#a0a0b0"),
         fontFamily: "Inter, system-ui, sans-serif",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: "#1e1e2e" },
-        horzLines: { color: "#1e1e2e" },
+        vertLines: { color: getThemeColor("--color-border", "#2a2a3a") },
+        horzLines: { color: getThemeColor("--color-border", "#2a2a3a") },
       },
-      rightPriceScale: { borderColor: "#2a2a3a" },
-      timeScale: { borderColor: "#2a2a3a", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: getThemeColor("--color-border", "#2a2a3a") },
+      timeScale: { borderColor: getThemeColor("--color-border", "#2a2a3a"), timeVisible: true, secondsVisible: false },
     });
 
     const series = chart.addSeries(CandlestickSeries, {
@@ -247,7 +252,7 @@ export default function OIProfileWidget() {
         title: { text: "Open Interest" },
         tickformat: ".3s",
         zeroline: true,
-        zerolinecolor: "#2a2a3a",
+        zerolinecolor: getThemeColor("--color-border", "#2a2a3a"),
         zerolinewidth: 1,
       },
       yaxis: {
