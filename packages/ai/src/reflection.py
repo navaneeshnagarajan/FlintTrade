@@ -9,7 +9,7 @@ TradedMemory so future analysis can benefit from accumulated experience.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from packages.ai.src.llm_client import LLMClient, LLMMessage
