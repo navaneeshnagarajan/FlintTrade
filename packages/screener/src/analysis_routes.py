@@ -1,17 +1,17 @@
 """Flask blueprint for FlintTrade analysis endpoints.
 
-Provides 6 POST endpoints under /ft-api/v1/ for the 5 new analysis tools
-plus an upgraded max pain endpoint:
+Provides 7 endpoints under /ft-api/v1/ for the analysis tools:
     - POST /ft-api/v1/gex
     - POST /ft-api/v1/volsurface
     - POST /ft-api/v1/ivsmile
     - POST /ft-api/v1/straddlepnl
     - POST /ft-api/v1/oiprofile
     - POST /ft-api/v1/maxpain
+    - GET  /ft-api/v1/rrg/sectors
 
 All endpoints:
-1. Extract params from the JSON request body.
-2. Attempt to get live option chain data from the BrokerRegistry (if connected).
+1. Extract params from the JSON request body (or query string for GET).
+2. Attempt to get live data from the BrokerRegistry (if connected).
 3. Fall back to sample/synthetic data when no broker is connected (dev mode).
 4. Call the relevant screener calculation function.
 5. Return the result as JSON.
@@ -33,6 +33,14 @@ from .iv_smile import calculate_iv_smile
 from .oi_analysis import OIAnalysis
 from .oi_profile import calculate_oi_profile
 from .option_chain import LOT_SIZES, OptionChainSnapshot, StrikeData
+from .rrg import (
+    BENCHMARK_EXCHANGE,
+    BENCHMARK_SYMBOL,
+    NIFTY_SECTORS,
+    SECTOR_EXCHANGE,
+    _Series,
+    build_sector_rrg,
+)
 from .straddle_pnl import simulate_straddle_pnl
 from .vol_surface import calculate_vol_surface
 
@@ -548,6 +556,203 @@ def max_pain_endpoint() -> Any:
             "strike_losses": result.strike_losses,
         },
     })
+
+
+# ---------------------------------------------------------------------------
+# RRG endpoint
+# ---------------------------------------------------------------------------
+
+
+def _make_sample_rrg_series(
+    symbol: str,
+    n_weeks: int = 60,
+    base_level: float = 100.0,
+    drift: float = 0.0,
+    noise: float = 1.2,
+) -> _Series:
+    """Generate synthetic weekly close-price series for dev/fallback RRG.
+
+    Prices are a random walk around base_level, seeded deterministically from
+    the symbol string so the same symbol always produces the same sample path
+    (reproducible dev mode).
+
+    Args:
+        symbol: Sector or benchmark symbol (used to seed the RNG).
+        n_weeks: Number of weekly bars to generate.
+        base_level: Starting index level (default 100 = relative to benchmark).
+        drift: Weekly drift in percent (default 0 = no trend).
+        noise: Weekly volatility in percent (default 1.2%).
+
+    Returns:
+        _Series with ISO-format weekly date strings and synthetic closes.
+    """
+    import hashlib
+    import random
+    from datetime import date, timedelta
+
+    # Deterministic seed from symbol name so results are reproducible
+    seed = int(hashlib.md5(symbol.encode()).hexdigest()[:8], 16)
+    rng = random.Random(seed)
+
+    # Weekly bars ending today, going backwards
+    today = date.today()
+    # Find nearest Monday
+    monday = today - timedelta(days=today.weekday())
+    dates: list[str] = []
+    for i in range(n_weeks - 1, -1, -1):
+        week_start = monday - timedelta(weeks=i)
+        dates.append(week_start.isoformat())
+
+    price = base_level
+    prices: list[float] = []
+    for _ in dates:
+        change_pct = drift / 100.0 + rng.gauss(0, noise / 100.0)
+        price = max(10.0, price * (1 + change_pct))
+        prices.append(round(price, 2))
+
+    return _Series(dates=dates, values=prices)
+
+
+@analysis_bp.route("/rrg/sectors", methods=["GET"])
+def rrg_sectors_endpoint() -> Any:
+    """Relative Rotation Graph data for all 12 NIFTY sector indices.
+
+    Query params:
+        tail_length (int): Number of weekly tail points to return (default 12).
+        interval (str): Price history interval — 'W' weekly (default) or '1M' monthly.
+
+    Returns:
+        JSON with list of SectorRRG objects plus benchmark info:
+        {
+          "status": "ok",
+          "benchmark": "NIFTY 50",
+          "tail_length": 12,
+          "is_sample_data": bool,
+          "sectors": [ { symbol, name, tail: [{date, rs_ratio, rs_momentum}], current_quadrant }, ... ]
+        }
+
+    Notes:
+        - Uses OpenAlgo /history endpoint (weekly) when broker is connected.
+        - Falls back to deterministic synthetic data in dev/disconnected mode.
+        - Benchmark is always NIFTY 50 (NSE_INDEX).
+    """
+    tail_length = int(request.args.get("tail_length", 12))
+    # Clamp tail to 4-52 range
+    tail_length = max(4, min(52, tail_length))
+    n_bars = max(60, tail_length + 52)  # need enough history for 52-bar z-score window
+
+    is_sample_data = True
+    sector_prices: dict[str, _Series] = {}
+    benchmark_prices: _Series | None = None
+
+    registry = _get_registry()
+    if registry and registry.is_connected():
+        try:
+            from datetime import date, timedelta  # noqa: PLC0415
+            end_date = date.today().isoformat()
+            start_date = (date.today() - timedelta(weeks=n_bars + 4)).isoformat()
+
+            # Fetch benchmark (NIFTY 50) weekly history
+            bench_hist = registry.get_history(
+                symbol=BENCHMARK_SYMBOL,
+                exchange=BENCHMARK_EXCHANGE,
+                interval="W",
+                start_date=start_date,
+                end_date=end_date,
+            )
+            bench_candles = bench_hist.get("candles", [])
+            if bench_candles:
+                benchmark_prices = _candles_to_series(bench_candles)
+
+            # Fetch each sector's weekly history
+            if benchmark_prices:
+                for symbol, _name in NIFTY_SECTORS:
+                    try:
+                        sec_hist = registry.get_history(
+                            symbol=symbol,
+                            exchange=SECTOR_EXCHANGE,
+                            interval="W",
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
+                        candles = sec_hist.get("candles", [])
+                        if candles:
+                            sector_prices[symbol] = _candles_to_series(candles)
+                    except Exception as exc:
+                        logger.warning("RRG: sector %s history failed: %s", symbol, exc)
+
+                if len(sector_prices) >= 3:
+                    is_sample_data = False
+
+        except Exception as exc:
+            logger.warning("RRG: live history unavailable, using sample data: %s", exc)
+            sector_prices = {}
+            benchmark_prices = None
+
+    # Fall back to synthetic data
+    if is_sample_data or benchmark_prices is None:
+        logger.info("RRG: using synthetic sample data")
+        benchmark_prices = _make_sample_rrg_series(
+            BENCHMARK_SYMBOL, n_weeks=n_bars, base_level=24000.0, drift=0.08, noise=1.5
+        )
+        # Each sector drifts differently so they end up in different quadrants
+        sector_drifts = [0.12, 0.05, 0.09, -0.02, 0.15, -0.08, 0.03, 0.10, 0.01, -0.05, 0.07, 0.11]
+        for i, (symbol, _name) in enumerate(NIFTY_SECTORS):
+            drift = sector_drifts[i % len(sector_drifts)]
+            sector_prices[symbol] = _make_sample_rrg_series(
+                symbol, n_weeks=n_bars, base_level=24000.0, drift=drift, noise=1.8
+            )
+
+    results = build_sector_rrg(sector_prices, benchmark_prices, tail_length=tail_length)
+
+    return jsonify({
+        "status": "ok",
+        "benchmark": BENCHMARK_SYMBOL,
+        "tail_length": tail_length,
+        "is_sample_data": is_sample_data,
+        "sectors": results,
+    })
+
+
+def _candles_to_series(candles: list[dict[str, Any]]) -> _Series:
+    """Convert OpenAlgo OHLCV candle list to a dated close-price _Series.
+
+    Candle format: {"time": unix_ts, "open": f, "high": f, "low": f, "close": f, "volume": i}
+    or {"timestamp": unix_ts, ...} — handles both field names.
+
+    Args:
+        candles: List of OHLCV candle dicts from registry.get_history().
+
+    Returns:
+        _Series with ISO date strings and close prices, sorted ascending.
+    """
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    dates: list[str] = []
+    closes: list[float] = []
+
+    for c in candles:
+        ts_raw = c.get("time", c.get("timestamp"))
+        close = float(c.get("close", 0))
+        if ts_raw is None or close <= 0:
+            continue
+        try:
+            ts = int(ts_raw)
+            # Handle millisecond timestamps (> year 2100 in seconds)
+            if ts > 4_102_444_800:
+                ts = ts // 1000
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            dates.append(dt.date().isoformat())
+            closes.append(close)
+        except (ValueError, OSError):
+            continue
+
+    # Sort ascending by date
+    paired = sorted(zip(dates, closes), key=lambda x: x[0])
+    if not paired:
+        return _Series(dates=[], values=[])
+    sorted_dates, sorted_closes = zip(*paired)
+    return _Series(dates=list(sorted_dates), values=list(sorted_closes))
 
 
 # ---------------------------------------------------------------------------

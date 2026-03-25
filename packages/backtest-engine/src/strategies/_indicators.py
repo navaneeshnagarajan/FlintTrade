@@ -187,4 +187,63 @@ def supertrend(
     return st, uptrend
 
 
-__all__ = ["ema", "sma", "rsi", "bollinger_bands", "macd", "supertrend"]
+def atr(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 14,
+) -> list[float]:
+    """Average True Range (ATR).
+
+    Computes the Wilder-smoothed ATR using the standard True Range definition:
+
+        TR = max(high - low, |high - prev_close|, |low - prev_close|)
+        ATR[period] = SMA(TR, period)
+        ATR[i]      = (ATR[i-1] * (period - 1) + TR[i]) / period  (Wilder)
+
+    The first ``period`` values use SMA seeding. Values before ``period``
+    bars are returned as 0.0 to maintain list length parity.
+
+    Args:
+        highs: High price series.
+        lows: Low price series.
+        closes: Close price series.
+        period: Smoothing period (default 14).
+
+    Returns:
+        ATR series of the same length as the inputs. Leading values are 0.0.
+    """
+    n = len(closes)
+    if n == 0 or period <= 0:
+        return []
+    if n < 2:
+        return [0.0] * n
+
+    # True Range series (length == n, index 0 uses high - low only)
+    tr: list[float] = [highs[0] - lows[0]]
+    for i in range(1, n):
+        tr.append(max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        ))
+
+    result: list[float] = [0.0] * n
+
+    if n < period:
+        return result
+
+    # Seed: SMA of first `period` TR values
+    seed = sum(tr[:period]) / period
+    result[period - 1] = seed
+
+    # Wilder smoothing for subsequent bars
+    prev_atr = seed
+    for i in range(period, n):
+        prev_atr = (prev_atr * (period - 1) + tr[i]) / period
+        result[i] = prev_atr
+
+    return result
+
+
+__all__ = ["ema", "sma", "rsi", "bollinger_bands", "macd", "supertrend", "atr"]

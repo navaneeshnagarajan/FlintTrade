@@ -16,6 +16,7 @@ import {
   AlignJustify,
   Move,
   Trash2,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,8 @@ import type { LegendState } from "./ChartLegend";
 import { useChartInit } from "./useChartInit";
 import { useDrawingTools } from "./useDrawingTools";
 import { useIndicators } from "./useIndicators";
+import { useChartReplay } from "./useChartReplay";
+import { ReplayBar } from "./ReplayBar";
 import type { OhlcvBar } from "./indicators";
 import type {
   SymbolSearchResult,
@@ -307,15 +310,43 @@ export default function ChartWidget() {
   const [legend, setLegend] = useState<LegendState | null>(null);
 
   const [drawMode, setDrawMode] = useState<DrawToolType | null>(null);
-  const [drawings, setDrawings] = useState<Drawing[]>([]);
+
+  // Task B: Drawing persistence — load from localStorage keyed by symbol+exchange
+  const drawingsStorageKey = `flinttrade:drawings:${symbol}:${exchange}`;
+  const [drawings, setDrawings] = useState<Drawing[]>(() => {
+    try {
+      const saved = localStorage.getItem(`flinttrade:drawings:${DEFAULT_SYMBOL}:${DEFAULT_EXCHANGE}`);
+      return saved ? (JSON.parse(saved) as Drawing[]) : [];
+    } catch { return []; }
+  });
   const [pendingPoint, setPendingPoint] = useState<DrawingPoint | null>(null);
   const [awaitingText, setAwaitingText] = useState<DrawingPoint | null>(null);
 
   const [indicators, setIndicators] = useState<IndicatorState>(DEFAULT_INDICATORS);
   const [periods, setPeriods] = useState<IndicatorPeriods>(DEFAULT_PERIODS);
 
+  // Task B: Persist drawings to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(drawingsStorageKey, JSON.stringify(drawings));
+    } catch { /* localStorage quota exceeded — ignore */ }
+  }, [drawings, drawingsStorageKey]);
+
+  // Task B: Reload drawings from localStorage when symbol/exchange changes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(drawingsStorageKey);
+      setDrawings(saved ? (JSON.parse(saved) as Drawing[]) : []);
+    } catch { setDrawings([]); }
+  // drawingsStorageKey encodes symbol+exchange — run only when the key changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawingsStorageKey]);
+
   const barsRef = useRef<OhlcvBar[]>([]);
   const timesRef = useRef<Time[]>([]);
+  // Stable ref so the OHLCV async closure can read replay state without being
+  // a dep of the effect (which would cause unnecessary re-fetches)
+  const isReplayingRef = useRef(false);
 
   // Initialise chart (once)
   const { containerRef, chartRef, candleRef, volumeRef, markersPluginRef, indRef } =
@@ -348,6 +379,47 @@ export default function ChartWidget() {
     barsRef, timesRef,
     indicators, periods,
   });
+
+  // Task A: Chart replay — barsRef.current is populated by the OHLCV effect below
+  const {
+    isReplaying,
+    isPlaying,
+    replayIndex,
+    replaySpeed,
+    totalBars: replayTotalBars,
+    play: replayPlay,
+    pause: replayPause,
+    reset: replayReset,
+    seek: replaySeek,
+    exitReplay,
+    enterReplay,
+    setSpeed: replaySetSpeed,
+  } = useChartReplay(chartRef, candleRef, barsRef);
+
+  // Keep the ref in sync so the OHLCV closure can gate chart writes during replay
+  useEffect(() => { isReplayingRef.current = isReplaying; }, [isReplaying]);
+
+  // When replay exits, restore the full bar set onto the chart
+  useEffect(() => {
+    if (!isReplaying && candleRef.current && volumeRef.current && barsRef.current.length > 0) {
+      const bars = barsRef.current;
+      const times = timesRef.current;
+      const candles = bars.map((b, i) => ({
+        time: times[i], open: b.open, high: b.high, low: b.low, close: b.close,
+      }));
+      const volumes = bars.map((b, i) => ({
+        time: times[i], value: b.volume || 0,
+        color: b.close >= b.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
+      }));
+      try {
+        candleRef.current.setData(candles);
+        volumeRef.current.setData(volumes);
+        chartRef.current?.timeScale().fitContent();
+      } catch { /* ignore */ }
+    }
+  // Only run when isReplaying transitions to false
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReplaying]);
 
   // Load available intervals from API once
   useEffect(() => {
@@ -386,6 +458,10 @@ export default function ChartWidget() {
       const times: Time[] = data.map((b) => b.timestamp as unknown as Time);
       barsRef.current = data;
       timesRef.current = times;
+      // Task A: Don't touch the chart series while replay is active — the replay
+      // hook owns the series in that mode. The barsRef update above is still needed
+      // so that when replay exits it can restore all bars.
+      if (isReplayingRef.current) return;
       const candles = data.map((b, i) => ({
         time: times[i], open: b.open, high: b.high, low: b.low, close: b.close,
       }));
@@ -626,6 +702,21 @@ export default function ChartWidget() {
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Task A: Replay toggle */}
+        <button
+          onClick={isReplaying ? exitReplay : enterReplay}
+          title={isReplaying ? "Exit replay mode" : "Enter replay mode"}
+          disabled={barsRef.current.length === 0}
+          className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            isReplaying
+              ? "bg-accent/15 text-accent border border-accent/40"
+              : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
+          }`}
+        >
+          <History size={11} />
+          <span>Replay</span>
+        </button>
+
         <div className="w-px h-4 bg-border-default mx-0.5" />
 
         <span className="text-xxs text-text-muted uppercase tracking-wider mr-0.5">Draw</span>
@@ -669,6 +760,22 @@ export default function ChartWidget() {
           <TextInputOverlay onConfirm={handleTextConfirm} onCancel={handleTextCancel} />
         )}
       </div>
+
+      {/* Task A: Replay control bar — only shown while replay mode is active */}
+      {isReplaying && (
+        <ReplayBar
+          isPlaying={isPlaying}
+          replayIndex={replayIndex}
+          totalBars={replayTotalBars}
+          replaySpeed={replaySpeed}
+          onPlay={replayPlay}
+          onPause={replayPause}
+          onReset={replayReset}
+          onSeek={replaySeek}
+          onSetSpeed={replaySetSpeed}
+          onExitReplay={exitReplay}
+        />
+      )}
     </div>
   );
 }

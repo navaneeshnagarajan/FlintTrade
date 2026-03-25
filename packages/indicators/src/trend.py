@@ -1,5 +1,5 @@
 """Trend indicators — EMA, SMA, DEMA, TEMA, WMA, HMA, Ichimoku, Parabolic SAR,
-Supertrend, VWAP.
+Supertrend, VWAP, KAMA, ADX, DMI, LinReg.
 
 All functions:
 - Accept numpy float64 arrays
@@ -484,3 +484,276 @@ def parabolic_sar(
         _sar = _sar_new
 
     return sar, uptrend
+
+
+def kama(
+    close: NDArray[np.float64],
+    period: int = 10,
+    fast_period: int = 2,
+    slow_period: int = 30,
+) -> NDArray[np.float64]:
+    """Kaufman Adaptive Moving Average.
+
+    KAMA adjusts its smoothing constant based on the Efficiency Ratio (ER),
+    which measures directional movement relative to total path length. When
+    price moves efficiently, KAMA tracks closely; in noisy markets it barely
+    moves.
+
+    ER       = abs(close[i] - close[i - period]) / sum(abs(diff(close)), period)
+    fast_sc  = 2 / (fast_period + 1)
+    slow_sc  = 2 / (slow_period + 1)
+    sc       = (ER * (fast_sc - slow_sc) + slow_sc) ** 2
+    KAMA[i]  = KAMA[i-1] + sc * (close[i] - KAMA[i-1])
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Efficiency ratio period (default 10).
+        fast_period: Fast EMA period for SC calculation (default 2).
+        slow_period: Slow EMA period for SC calculation (default 30).
+
+    Returns:
+        KAMA values, shape (n,). First ``period`` values are NaN.
+
+    Raises:
+        ValueError: If period < 1 or fast_period >= slow_period.
+    """
+    validate_series(close, min_length=period + 1)
+    if period < 1:
+        raise ValueError(f"KAMA period must be >= 1, got {period}")
+    if fast_period >= slow_period:
+        raise ValueError(
+            f"fast_period ({fast_period}) must be < slow_period ({slow_period})"
+        )
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    fast_sc = 2.0 / (fast_period + 1.0)
+    slow_sc = 2.0 / (slow_period + 1.0)
+    sc_range = fast_sc - slow_sc
+
+    # Seed KAMA at index `period` with the close value at that bar
+    result[period] = close[period]
+
+    abs_diff = np.abs(np.diff(close))  # shape (n-1,)
+
+    for i in range(period + 1, n):
+        direction = abs(close[i] - close[i - period])
+        # sum of absolute 1-bar changes over last `period` bars
+        noise = float(np.sum(abs_diff[i - period : i]))
+        er = direction / noise if noise != 0.0 else 0.0
+        sc = (er * sc_range + slow_sc) ** 2
+        result[i] = result[i - 1] + sc * (close[i] - result[i - 1])
+
+    return result
+
+
+def adx(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    period: int = 14,
+) -> NDArray[np.float64]:
+    """Average Directional Index.
+
+    ADX measures trend strength without regard to direction.  Values above 25
+    typically indicate a strong trend; below 20 indicates a trendless market.
+
+    Computed via Wilder smoothing of the Directional Movement indices:
+        +DM = max(high - prev_high, 0) if > max(prev_low - low, 0) else 0
+        -DM = max(prev_low - low, 0)   if > max(high - prev_high, 0) else 0
+        TR  = max(high-low, |high-prev_close|, |low-prev_close|)
+        +DI = 100 * Wilder(+DM, period) / Wilder(TR, period)
+        -DI = 100 * Wilder(-DM, period) / Wilder(TR, period)
+        DX  = 100 * |+DI - -DI| / (+DI + -DI)
+        ADX = Wilder(DX, period)
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        close: Close prices, shape (n,).
+        period: Smoothing period (default 14).
+
+    Returns:
+        ADX values, shape (n,). First ``2 * period - 1`` values are NaN.
+    """
+    validate_ohlcv(high, low, close, min_length=2)
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    if n < 2 * period:
+        return result
+
+    # Raw per-bar DM and TR
+    plus_dm = np.zeros(n, dtype=np.float64)
+    minus_dm = np.zeros(n, dtype=np.float64)
+    tr = np.zeros(n, dtype=np.float64)
+    tr[0] = high[0] - low[0]
+
+    for i in range(1, n):
+        up_move = high[i] - high[i - 1]
+        down_move = low[i - 1] - low[i]
+        if up_move > down_move and up_move > 0.0:
+            plus_dm[i] = up_move
+        if down_move > up_move and down_move > 0.0:
+            minus_dm[i] = down_move
+        tr[i] = max(
+            high[i] - low[i],
+            abs(high[i] - close[i - 1]),
+            abs(low[i] - close[i - 1]),
+        )
+
+    # Seed Wilder smoothed values at index `period`
+    s_tr = float(np.sum(tr[1 : period + 1]))
+    s_plus = float(np.sum(plus_dm[1 : period + 1]))
+    s_minus = float(np.sum(minus_dm[1 : period + 1]))
+
+    # Store smoothed arrays
+    sm_tr = np.full(n, np.nan, dtype=np.float64)
+    sm_plus = np.full(n, np.nan, dtype=np.float64)
+    sm_minus = np.full(n, np.nan, dtype=np.float64)
+    dx_arr = np.full(n, np.nan, dtype=np.float64)
+
+    sm_tr[period] = s_tr
+    sm_plus[period] = s_plus
+    sm_minus[period] = s_minus
+
+    def _dx(sp: float, sm: float, t: float) -> float:
+        if t == 0.0:
+            return 0.0
+        pdi = 100.0 * sp / t
+        mdi = 100.0 * sm / t
+        denom = pdi + mdi
+        return 100.0 * abs(pdi - mdi) / denom if denom != 0.0 else 0.0
+
+    dx_arr[period] = _dx(s_plus, s_minus, s_tr)
+
+    for i in range(period + 1, n):
+        s_tr = s_tr - s_tr / period + tr[i]
+        s_plus = s_plus - s_plus / period + plus_dm[i]
+        s_minus = s_minus - s_minus / period + minus_dm[i]
+        sm_tr[i] = s_tr
+        sm_plus[i] = s_plus
+        sm_minus[i] = s_minus
+        dx_arr[i] = _dx(s_plus, s_minus, s_tr)
+
+    # Seed ADX with mean of first `period` DX values (index period..2*period-1)
+    adx_seed_end = 2 * period - 1
+    if adx_seed_end >= n:
+        return result
+
+    result[adx_seed_end] = float(np.mean(dx_arr[period : adx_seed_end + 1]))
+    for i in range(adx_seed_end + 1, n):
+        result[i] = (result[i - 1] * (period - 1) + dx_arr[i]) / period
+
+    return result
+
+
+def dmi(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    period: int = 14,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Directional Movement Index — returns (+DI, -DI).
+
+    +DI and -DI are the smoothed directional indicators that form the basis of
+    ADX. Crossovers between +DI and -DI signal potential trend changes.
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        close: Close prices, shape (n,).
+        period: Wilder smoothing period (default 14).
+
+    Returns:
+        Tuple of (plus_di, minus_di) arrays, each shape (n,).
+        First ``period`` values are NaN in both arrays.
+    """
+    validate_ohlcv(high, low, close, min_length=2)
+    n = len(close)
+    plus_di = np.full(n, np.nan, dtype=np.float64)
+    minus_di = np.full(n, np.nan, dtype=np.float64)
+
+    if n < period + 1:
+        return plus_di, minus_di
+
+    raw_plus_dm = np.zeros(n, dtype=np.float64)
+    raw_minus_dm = np.zeros(n, dtype=np.float64)
+    tr = np.zeros(n, dtype=np.float64)
+    tr[0] = high[0] - low[0]
+
+    for i in range(1, n):
+        up_move = high[i] - high[i - 1]
+        down_move = low[i - 1] - low[i]
+        if up_move > down_move and up_move > 0.0:
+            raw_plus_dm[i] = up_move
+        if down_move > up_move and down_move > 0.0:
+            raw_minus_dm[i] = down_move
+        tr[i] = max(
+            high[i] - low[i],
+            abs(high[i] - close[i - 1]),
+            abs(low[i] - close[i - 1]),
+        )
+
+    s_tr = float(np.sum(tr[1 : period + 1]))
+    s_plus = float(np.sum(raw_plus_dm[1 : period + 1]))
+    s_minus = float(np.sum(raw_minus_dm[1 : period + 1]))
+
+    def _di(s_dm: float, s_t: float) -> float:
+        return 100.0 * s_dm / s_t if s_t != 0.0 else 0.0
+
+    plus_di[period] = _di(s_plus, s_tr)
+    minus_di[period] = _di(s_minus, s_tr)
+
+    for i in range(period + 1, n):
+        s_tr = s_tr - s_tr / period + tr[i]
+        s_plus = s_plus - s_plus / period + raw_plus_dm[i]
+        s_minus = s_minus - s_minus / period + raw_minus_dm[i]
+        plus_di[i] = _di(s_plus, s_tr)
+        minus_di[i] = _di(s_minus, s_tr)
+
+    return plus_di, minus_di
+
+
+def linreg(close: NDArray[np.float64], period: int = 14) -> NDArray[np.float64]:
+    """Linear Regression Value.
+
+    For each bar, fits a least-squares line to the preceding ``period`` bars
+    and returns the endpoint (fitted value at the current bar) of that line.
+    This is equivalent to the TradingView LINREG function.
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Regression window length (default 14).
+
+    Returns:
+        Linear regression values, shape (n,). First ``period - 1`` values are
+        NaN.
+
+    Raises:
+        ValueError: If period < 2.
+    """
+    validate_series(close, min_length=1)
+    if period < 2:
+        raise ValueError(f"linreg period must be >= 2, got {period}")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    # Pre-compute x values and their statistics for the window
+    x = np.arange(period, dtype=np.float64)
+    x_mean = float(np.mean(x))
+    x_var = float(np.sum((x - x_mean) ** 2))  # sum of squared deviations
+
+    if x_var == 0.0:
+        return result
+
+    for i in range(period - 1, n):
+        y = close[i - period + 1 : i + 1]
+        y_mean = float(np.mean(y))
+        cov = float(np.sum((x - x_mean) * (y - y_mean)))
+        slope = cov / x_var
+        result[i] = y_mean + slope * (x[-1] - x_mean)
+
+    return result

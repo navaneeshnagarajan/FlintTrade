@@ -1,4 +1,4 @@
-"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis."""
+"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis, RRG."""
 
 __version__ = "0.1.0-alpha"
 
@@ -18,6 +18,14 @@ from .option_chain import (
     OptionChainAnalyzer,
     OptionChainSnapshot,
     StrikeData,
+)
+from .rrg import (
+    NIFTY_SECTORS,
+    RRGPoint,
+    SectorRRG,
+    build_sector_rrg,
+    classify_quadrant,
+    compute_rrg,
 )
 
 __all__ = [
@@ -48,4 +56,11 @@ __all__ = [
     "IVSkewResult",
     "IVPercentileResult",
     "IVTermStructure",
+    # RRG
+    "RRGPoint",
+    "SectorRRG",
+    "NIFTY_SECTORS",
+    "compute_rrg",
+    "classify_quadrant",
+    "build_sector_rrg",
 ]

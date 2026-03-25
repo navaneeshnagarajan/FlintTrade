@@ -1,0 +1,189 @@
+"""Signal generation — crossover detection, pivot highs/lows.
+
+All functions:
+- Accept numpy float64 arrays
+- Return numpy bool_ or float64 arrays
+- Fill NaN / False for bars where insufficient history exists
+- Do NOT forward-fill
+"""
+
+from __future__ import annotations
+
+import numpy as np
+from numpy.typing import NDArray
+
+from packages.indicators.src.utils import validate_series
+
+
+def crossover(
+    s1: NDArray[np.float64],
+    s2: NDArray[np.float64],
+) -> NDArray[np.bool_]:
+    """Crossover detector — True where s1 crosses above s2.
+
+    A crossover at bar ``i`` means:
+        s1[i] > s2[i]  AND  s1[i-1] <= s2[i-1]
+
+    The first bar is always False (no prior bar to compare).
+
+    Args:
+        s1: First series, shape (n,).
+        s2: Second series, shape (n,). Must have the same length as s1.
+
+    Returns:
+        Boolean array, shape (n,). True where s1 crosses above s2.
+
+    Raises:
+        TypeError: If either input is not a numpy ndarray.
+        ValueError: If arrays have different lengths or length < 1.
+    """
+    validate_series(s1, min_length=1)
+    validate_series(s2, min_length=1)
+    if len(s1) != len(s2):
+        raise ValueError(
+            f"Array length mismatch: s1={len(s1)}, s2={len(s2)}"
+        )
+
+    n = len(s1)
+    result = np.zeros(n, dtype=np.bool_)
+    for i in range(1, n):
+        if np.isnan(s1[i]) or np.isnan(s2[i]) or np.isnan(s1[i - 1]) or np.isnan(s2[i - 1]):
+            continue
+        if s1[i] > s2[i] and s1[i - 1] <= s2[i - 1]:
+            result[i] = True
+    return result
+
+
+def crossunder(
+    s1: NDArray[np.float64],
+    s2: NDArray[np.float64],
+) -> NDArray[np.bool_]:
+    """Crossunder detector — True where s1 crosses below s2.
+
+    A crossunder at bar ``i`` means:
+        s1[i] < s2[i]  AND  s1[i-1] >= s2[i-1]
+
+    The first bar is always False (no prior bar to compare).
+
+    Args:
+        s1: First series, shape (n,).
+        s2: Second series, shape (n,). Must have the same length as s1.
+
+    Returns:
+        Boolean array, shape (n,). True where s1 crosses below s2.
+
+    Raises:
+        TypeError: If either input is not a numpy ndarray.
+        ValueError: If arrays have different lengths or length < 1.
+    """
+    validate_series(s1, min_length=1)
+    validate_series(s2, min_length=1)
+    if len(s1) != len(s2):
+        raise ValueError(
+            f"Array length mismatch: s1={len(s1)}, s2={len(s2)}"
+        )
+
+    n = len(s1)
+    result = np.zeros(n, dtype=np.bool_)
+    for i in range(1, n):
+        if np.isnan(s1[i]) or np.isnan(s2[i]) or np.isnan(s1[i - 1]) or np.isnan(s2[i - 1]):
+            continue
+        if s1[i] < s2[i] and s1[i - 1] >= s2[i - 1]:
+            result[i] = True
+    return result
+
+
+def pivothigh(
+    source: NDArray[np.float64],
+    left: int,
+    right: int,
+) -> NDArray[np.float64]:
+    """Detect local pivot highs.
+
+    Bar ``i`` is a pivot high if ``source[i]`` is the strict maximum in the
+    window ``[i - left, i + right]``.  Because the right-side bars must exist,
+    results for the last ``right`` bars are always NaN.  Results for the first
+    ``left`` bars are also NaN.
+
+    The returned value at a pivot bar is ``source[i]``; non-pivot bars are NaN.
+
+    Args:
+        source: Price series (typically high prices), shape (n,).
+        left:   Number of bars to the left of the candidate bar (>= 1).
+        right:  Number of bars to the right of the candidate bar (>= 1).
+
+    Returns:
+        Array of pivot high values, shape (n,). NaN where no pivot.
+
+    Raises:
+        ValueError: If left < 1 or right < 1.
+    """
+    validate_series(source, min_length=1)
+    if left < 1:
+        raise ValueError(f"pivothigh left must be >= 1, got {left}")
+    if right < 1:
+        raise ValueError(f"pivothigh right must be >= 1, got {right}")
+
+    n = len(source)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(left, n - right):
+        candidate = source[i]
+        if np.isnan(candidate):
+            continue
+        window = source[i - left : i + right + 1]
+        if np.any(np.isnan(window)):
+            continue
+        # Strict maximum: candidate must be greater than ALL other bars in window
+        if candidate == float(np.max(window)) and np.sum(window == candidate) == 1:
+            result[i] = candidate
+
+    return result
+
+
+def pivotlow(
+    source: NDArray[np.float64],
+    left: int,
+    right: int,
+) -> NDArray[np.float64]:
+    """Detect local pivot lows.
+
+    Bar ``i`` is a pivot low if ``source[i]`` is the strict minimum in the
+    window ``[i - left, i + right]``.  Because the right-side bars must exist,
+    results for the last ``right`` bars are always NaN.  Results for the first
+    ``left`` bars are also NaN.
+
+    The returned value at a pivot bar is ``source[i]``; non-pivot bars are NaN.
+
+    Args:
+        source: Price series (typically low prices), shape (n,).
+        left:   Number of bars to the left of the candidate bar (>= 1).
+        right:  Number of bars to the right of the candidate bar (>= 1).
+
+    Returns:
+        Array of pivot low values, shape (n,). NaN where no pivot.
+
+    Raises:
+        ValueError: If left < 1 or right < 1.
+    """
+    validate_series(source, min_length=1)
+    if left < 1:
+        raise ValueError(f"pivotlow left must be >= 1, got {left}")
+    if right < 1:
+        raise ValueError(f"pivotlow right must be >= 1, got {right}")
+
+    n = len(source)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(left, n - right):
+        candidate = source[i]
+        if np.isnan(candidate):
+            continue
+        window = source[i - left : i + right + 1]
+        if np.any(np.isnan(window)):
+            continue
+        # Strict minimum: candidate must be less than ALL other bars in window
+        if candidate == float(np.min(window)) and np.sum(window == candidate) == 1:
+            result[i] = candidate
+
+    return result

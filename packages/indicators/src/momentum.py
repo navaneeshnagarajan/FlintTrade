@@ -1,5 +1,5 @@
 """Momentum indicators — RSI, MACD, Stochastic, Williams %R, CCI, ROC, CMO,
-TRIX, StochRSI, BOP.
+TRIX, StochRSI, BOP, MOM, Awesome Oscillator.
 
 All functions:
 - Accept numpy float64 arrays
@@ -420,3 +420,73 @@ def bop(
         hl = high[i] - low[i]
         result[i] = (close[i] - open_[i]) / hl if hl != 0.0 else 0.0
     return result
+
+
+def mom(close: NDArray[np.float64], period: int = 10) -> NDArray[np.float64]:
+    """Simple Momentum — close minus close ``period`` bars ago.
+
+    MOM[i] = close[i] - close[i - period]
+
+    Unlike ROC, this is an absolute (not percentage) change.
+
+    Args:
+        close:  Close prices, shape (n,).
+        period: Lookback period (default 10).
+
+    Returns:
+        Momentum values, shape (n,). First ``period`` values are NaN.
+
+    Raises:
+        ValueError: If period < 1.
+    """
+    validate_series(close, min_length=period + 1)
+    if period < 1:
+        raise ValueError(f"mom period must be >= 1, got {period}")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+    result[period:] = close[period:] - close[: n - period]
+    return result
+
+
+def awesome_oscillator(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    fast: int = 5,
+    slow: int = 34,
+) -> NDArray[np.float64]:
+    """Awesome Oscillator (AO) — Bill Williams.
+
+    AO = SMA(midpoint, fast) - SMA(midpoint, slow)
+    where midpoint = (high + low) / 2.
+
+    Positive AO indicates bullish momentum; negative indicates bearish
+    momentum. A zero-line crossover is a primary signal.
+
+    Args:
+        high: High prices, shape (n,).
+        low:  Low prices,  shape (n,).
+        fast: Fast SMA period (default 5).
+        slow: Slow SMA period (default 34).
+
+    Returns:
+        AO values, shape (n,). First ``slow - 1`` values are NaN.
+
+    Raises:
+        ValueError: If fast >= slow or either period < 1.
+    """
+    from packages.indicators.src.utils import validate_ohlcv as _val
+    from packages.indicators.src.trend import sma as _sma
+
+    _val(high, low, high, min_length=slow)  # high as close proxy for length check
+    if fast < 1:
+        raise ValueError(f"awesome_oscillator fast period must be >= 1, got {fast}")
+    if slow < 1:
+        raise ValueError(f"awesome_oscillator slow period must be >= 1, got {slow}")
+    if fast >= slow:
+        raise ValueError(
+            f"awesome_oscillator fast ({fast}) must be < slow ({slow})"
+        )
+
+    midpoint = (high + low) / 2.0
+    return _sma(midpoint, fast) - _sma(midpoint, slow)

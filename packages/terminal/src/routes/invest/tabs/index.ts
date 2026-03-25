@@ -8,4 +8,5 @@ export { HoldingsTab } from "./HoldingsTab";
 export { NetWorthTab } from "./NetWorthTab";
 export { SipTab } from "./SipTab";
 export { SectorTab } from "./SectorTab";
-export { EtfTab, StocksTab, IpoTab } from "./LockedTabs";
+export { EtfTab } from "./EtfTab";
+export { StocksTab, IpoTab } from "./LockedTabs";

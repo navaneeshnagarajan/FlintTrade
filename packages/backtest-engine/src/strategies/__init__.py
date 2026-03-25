@@ -137,6 +137,7 @@ from .volume_vwap_cross import VWAPCross  # noqa: E402
 
 # Options
 from .options_iron_condor import IronCondorStrategy  # noqa: E402
+from .options_short_straddle_indian import IndianShortStraddle  # noqa: E402
 from .options_straddle_strangle import ATMStraddleSell, OTMStrangleSell  # noqa: E402
 from .options_wheel import WheelStrategy  # noqa: E402
 
@@ -189,11 +190,12 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "OBVDivergence": OBVDivergence,
     "VWAPCross": VWAPCross,
     "VolumeBreakout": VolumeBreakout,
-    # Options (3 new)
+    # Options (4 new)
     "ATMStraddleSell": ATMStraddleSell,
     "OTMStrangleSell": OTMStrangleSell,
     "IronCondorStrategy": IronCondorStrategy,
     "WheelStrategy": WheelStrategy,
+    "IndianShortStraddle": IndianShortStraddle,
     # User's personal strategy (in ema_supertrend_dema.py)
 }
 
