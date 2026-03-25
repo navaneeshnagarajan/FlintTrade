@@ -5,6 +5,7 @@
 import { useState, useCallback } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { FieldRow, SelectInput, TextInput, SectionTitle } from "./shared";
+import { LLM_PROVIDERS, LOCAL_PROVIDERS } from "@/lib/llmProviders";
 
 type LlmProvider =
   | "lmstudio"
@@ -27,22 +28,7 @@ interface LlmSettings {
   apiKey: string;
 }
 
-const LOCAL_PROVIDERS = new Set<LlmProvider>(["lmstudio", "ollama", "custom"]);
-
-const LLM_PROVIDER_OPTIONS = [
-  { value: "lmstudio",   label: "LM Studio (local)"  },
-  { value: "ollama",     label: "Ollama (local)"      },
-  { value: "openai",     label: "OpenAI"              },
-  { value: "anthropic",  label: "Anthropic"           },
-  { value: "gemini",     label: "Google Gemini"       },
-  { value: "deepseek",   label: "DeepSeek"            },
-  { value: "groq",       label: "Groq"                },
-  { value: "grok",       label: "Grok (xAI)"         },
-  { value: "mistral",    label: "Mistral"             },
-  { value: "together",   label: "Together AI"         },
-  { value: "openrouter", label: "OpenRouter"          },
-  { value: "custom",     label: "Custom endpoint"     },
-];
+const LLM_PROVIDER_OPTIONS = LLM_PROVIDERS.map((p) => ({ value: p.id, label: p.name }));
 
 interface LLMSectionProps {
   settings: LlmSettings;

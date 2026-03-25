@@ -3,6 +3,7 @@
  */
 
 import { FieldRow, TextInput, SectionTitle } from "./shared";
+import { RISK_HINTS } from "@/lib/schemas/riskSchema";
 
 interface RiskSettings {
   maxPositionLots: string;
@@ -29,7 +30,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       <FieldRow
         label="Max Position Size (lots)"
         hint="Maximum number of lots per position. Leave blank to disable."
-        tooltip="Maximum number of lots per single position. Prevents oversizing on any one trade. For example, entering 10 means you cannot hold more than 10 lots of any one instrument at a time. Applies to new orders — existing positions are not auto-closed."
+        tooltip={RISK_HINTS.maxPositionLots}
       >
         <TextInput
           value={settings.maxPositionLots}
@@ -43,7 +44,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       <FieldRow
         label="MTM Stoploss (₹)"
         hint="Mark-to-market loss limit. Enter as negative number (e.g. -5000). Leave blank to disable."
-        tooltip="Maximum net loss allowed per day in ₹. Trading is blocked when this limit is hit. Reset at market open. Enter a negative rupee amount (e.g. -5000 = stop at ₹5,000 loss). This is a soft limit enforced in the browser only."
+        tooltip={RISK_HINTS.mtmStoploss}
       >
         <TextInput
           value={settings.mtmStoploss}
@@ -57,7 +58,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       <FieldRow
         label="MTM Target (₹)"
         hint="Mark-to-market profit target. Leave blank to disable."
-        tooltip="Mark-to-market (MTM) target: when cumulative unrealised + realised profit for the day reaches this value, a reminder is shown and new orders are blocked. This is a soft limit — use it to lock in daily gains by stopping further trading."
+        tooltip={RISK_HINTS.mtmTarget}
       >
         <TextInput
           value={settings.mtmTarget}
@@ -71,7 +72,7 @@ export function RiskSection({ settings, onChange }: RiskSectionProps) {
       <FieldRow
         label="Max Orders per Minute"
         hint="Rate limit for order placement. Leave blank to use OpenAlgo default (10/sec)."
-        tooltip="Maximum orders per second. SEBI mandates ≤10 OPS for retail algo trading. This cap applies on top of OpenAlgo's own rate limiter. Useful to prevent runaway automation from firing too many orders."
+        tooltip={RISK_HINTS.maxOrdersPerMinute}
       >
         <TextInput
           value={settings.maxOrdersPerMinute}

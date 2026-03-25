@@ -2,10 +2,9 @@
  * ConnectionSection — OpenAlgo host, API key, and WebSocket port settings.
  */
 
-import { useState } from "react";
 import { Loader2, Wifi, CheckCircle2, XCircle } from "lucide-react";
-import { ping } from "@/services/api";
 import { FieldRow, TextInput, SectionTitle } from "./shared";
+import { useTestConnection } from "@/hooks/useTestConnection";
 
 interface ApiSettings {
   host: string;
@@ -19,24 +18,12 @@ interface ConnectionSectionProps {
 }
 
 export function ConnectionSection({ settings, onChange }: ConnectionSectionProps) {
-  const [testing, setTesting]         = useState(false);
-  const [connStatus, setConnStatus]   = useState<"connected" | "failed" | null>(null);
-  const [connMessage, setConnMessage] = useState("");
+  const { status: connStatus, message: connMessage, testConnection } = useTestConnection();
+
+  const testing = connStatus === "testing";
 
   async function handleTestConnection() {
-    setTesting(true);
-    setConnStatus(null);
-    setConnMessage("");
-    try {
-      await ping();
-      setConnStatus("connected");
-      setConnMessage("OpenAlgo is reachable and responding.");
-    } catch (e) {
-      setConnStatus("failed");
-      setConnMessage(e instanceof Error ? e.message : "Connection failed. Check host and API key.");
-    } finally {
-      setTesting(false);
-    }
+    await testConnection(settings.host, settings.apiKey);
   }
 
   return (
@@ -92,16 +79,16 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
           ) : (
             <Wifi size={12} />
           )}
-          {testing ? "Testing…" : "Test Connection"}
+          {testing ? "Testing..." : "Test Connection"}
         </button>
 
-        {connStatus && (
+        {connStatus !== "idle" && connStatus !== "testing" && connMessage && (
           <div className={`flex items-center gap-2 px-3 py-2 rounded text-xs border ${
-            connStatus === "connected"
+            connStatus === "ok"
               ? "bg-profit/10 border-profit/20 text-profit"
               : "bg-loss/10 border-loss/20 text-loss"
           }`}>
-            {connStatus === "connected" ? (
+            {connStatus === "ok" ? (
               <CheckCircle2 size={13} />
             ) : (
               <XCircle size={13} />

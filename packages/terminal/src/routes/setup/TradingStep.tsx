@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { EXCHANGES, PRODUCTS } from "@/lib/tradingConstants";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -23,8 +24,8 @@ import {
 
 export const tradingDefaultsSchema = z.object({
   defaultExchange: z.string().min(1, "Exchange is required"),
-  defaultProduct: z.string().min(1, "Product is required"),
-  defaultQty: z.number().int().min(1, "Minimum 1").max(9999, "Maximum 9999"),
+  defaultProduct:  z.string().min(1, "Product is required"),
+  defaultQty:      z.number().int().min(1, "Minimum 1").max(9999, "Maximum 9999"),
 });
 
 export type TradingDefaultsFormValues = z.infer<typeof tradingDefaultsSchema>;
@@ -34,7 +35,7 @@ export type TradingDefaultsFormValues = z.infer<typeof tradingDefaultsSchema>;
 // ---------------------------------------------------------------------------
 
 interface TradingStepProps {
-  onComplete: (values: TradingDefaultsFormValues) => void;
+  onComplete:     (values: TradingDefaultsFormValues) => void;
   defaultValues?: Partial<TradingDefaultsFormValues>;
 }
 
@@ -49,13 +50,13 @@ export function TradingStep({ onComplete, defaultValues }: TradingStepProps) {
     resolver: zodResolver(tradingDefaultsSchema),
     defaultValues: {
       defaultExchange: defaultValues?.defaultExchange ?? "NFO",
-      defaultProduct: defaultValues?.defaultProduct ?? "MIS",
-      defaultQty: defaultValues?.defaultQty ?? 1,
+      defaultProduct:  defaultValues?.defaultProduct  ?? "MIS",
+      defaultQty:      defaultValues?.defaultQty      ?? 1,
     },
   });
 
   const watchedExchange = watch("defaultExchange");
-  const watchedProduct = watch("defaultProduct");
+  const watchedProduct  = watch("defaultProduct");
 
   return (
     <form onSubmit={handleSubmit(onComplete)} className="space-y-5">
@@ -74,9 +75,9 @@ export function TradingStep({ onComplete, defaultValues }: TradingStepProps) {
             <SelectValue placeholder="Select exchange" />
           </SelectTrigger>
           <SelectContent>
-            {["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX"].map((ex) => (
-              <SelectItem key={ex} value={ex}>
-                {ex}
+            {EXCHANGES.map((ex) => (
+              <SelectItem key={ex.value} value={ex.value}>
+                {ex.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -101,9 +102,11 @@ export function TradingStep({ onComplete, defaultValues }: TradingStepProps) {
             <SelectValue placeholder="Select product" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="MIS">MIS — Intraday</SelectItem>
-            <SelectItem value="CNC">CNC — Delivery</SelectItem>
-            <SelectItem value="NRML">NRML — Normal (F&O)</SelectItem>
+            {PRODUCTS.map((p) => (
+              <SelectItem key={p.value} value={p.value}>
+                {p.label}
+              </SelectItem>
+            ))}
             <SelectItem value="BO">BO — Bracket Order</SelectItem>
             <SelectItem value="CO">CO — Cover Order</SelectItem>
           </SelectContent>

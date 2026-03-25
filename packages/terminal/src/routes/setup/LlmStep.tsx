@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LLM_PROVIDERS, LOCAL_PROVIDERS } from "@/lib/llmProviders";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -23,8 +24,8 @@ import {
 
 export const llmSchema = z.object({
   provider: z.string().min(1, "Provider is required"),
-  model: z.string().min(1, "Model is required"),
-  host: z.string().optional(),
+  model:    z.string().min(1, "Model is required"),
+  host:     z.string().optional(),
 });
 
 export type LlmFormValues = z.infer<typeof llmSchema>;
@@ -50,6 +51,10 @@ export function LlmStep({ onComplete }: LlmStepProps) {
   });
 
   const provider = watch("provider");
+  const isLocal = LOCAL_PROVIDERS.has(provider);
+
+  const providerConfig = LLM_PROVIDERS.find((p) => p.id === provider);
+  const defaultHost = providerConfig?.defaultHost ?? "";
 
   return (
     <form onSubmit={handleSubmit(onComplete)} className="space-y-5">
@@ -63,11 +68,11 @@ export function LlmStep({ onComplete }: LlmStepProps) {
             <SelectValue placeholder="Select provider" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="openai">OpenAI</SelectItem>
-            <SelectItem value="anthropic">Anthropic</SelectItem>
-            <SelectItem value="google">Google Gemini</SelectItem>
-            <SelectItem value="lmstudio">LM Studio (local)</SelectItem>
-            <SelectItem value="ollama">Ollama (local)</SelectItem>
+            {LLM_PROVIDERS.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         {errors.provider && <p className="text-red-400 text-xs">{errors.provider.message}</p>}
@@ -81,7 +86,7 @@ export function LlmStep({ onComplete }: LlmStepProps) {
           <Input
             id="llmModel"
             placeholder={
-              provider === "lmstudio" || provider === "ollama"
+              isLocal
                 ? "qwen3-9b"
                 : provider === "anthropic"
                   ? "claude-3-5-haiku-20241022"
@@ -95,7 +100,7 @@ export function LlmStep({ onComplete }: LlmStepProps) {
         {errors.model && <p className="text-red-400 text-xs">{errors.model.message}</p>}
       </div>
 
-      {(provider === "lmstudio" || provider === "ollama") && (
+      {isLocal && (
         <div className="space-y-1.5">
           <Label htmlFor="llmHost" className="text-text-secondary text-xs uppercase tracking-wider">
             Local Host URL
@@ -103,7 +108,7 @@ export function LlmStep({ onComplete }: LlmStepProps) {
           <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
             <Input
               id="llmHost"
-              placeholder={provider === "lmstudio" ? "http://localhost:1234" : "http://localhost:11434"}
+              placeholder={defaultHost || "http://127.0.0.1:1234"}
               aria-label="LLM local host URL"
               className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
               {...register("host")}
