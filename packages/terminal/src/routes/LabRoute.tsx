@@ -47,7 +47,6 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import TabTransition from "@/components/motion/TabTransition";
 import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { motionConfig } from "@/lib/motion";
-import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import {
   runBacktest,
   getStrategies,
@@ -1686,7 +1685,6 @@ export default function LabRoute() {
   }
 
   return (
-    <CinematicLayout mode="focused">
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 pt-4 pb-0">
@@ -1709,7 +1707,7 @@ export default function LabRoute() {
 
       {/* Tab content */}
       <ScrollArea className="flex-1">
-        <div className="p-6 max-w-5xl" data-tour-target="backtest-results">
+        <div className="p-6 max-w-5xl mx-auto" data-tour-target="backtest-results">
           <TabTransition tabKey={activeTab}>
             {renderTab(activeTab)}
           </TabTransition>
@@ -1724,6 +1722,5 @@ export default function LabRoute() {
         />
       )}
     </div>
-    </CinematicLayout>
   );
 }

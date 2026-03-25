@@ -13,8 +13,6 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { motionConfig } from "@/lib/motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CinematicLayout } from "@/components/layout/CinematicLayout";
-import { BlurFade } from "@/components/magicui/blur-fade";
 
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -203,11 +201,9 @@ export default function SetupRoute() {
   // ---------- Mode selection ----------
   if (!mode) {
     return (
-      <CinematicLayout mode="cinematic">
-        <ModeSelection
-          onSelect={(m) => { setMode(m); setStep(0); }}
-        />
-      </CinematicLayout>
+      <ModeSelection
+        onSelect={(m) => { setMode(m); setStep(0); }}
+      />
     );
   }
 
@@ -352,12 +348,10 @@ export default function SetupRoute() {
   };
 
   return (
-    <CinematicLayout mode="cinematic">
       <main aria-label="Setup wizard" className="min-h-screen flex items-center justify-center p-4">
         <div className="max-w-lg w-full space-y-6">
           {/* Header */}
-          <BlurFade delay={0} duration={0.4}>
-            <div className="text-center space-y-1">
+          <div className="text-center space-y-1">
               <p className="text-text-muted text-xxs uppercase tracking-widest">FlintTrade Setup</p>
               <AnimatePresence mode="wait">
                 <motion.h2
@@ -370,8 +364,7 @@ export default function SetupRoute() {
                   {stepLabel}
                 </motion.h2>
               </AnimatePresence>
-            </div>
-          </BlurFade>
+          </div>
 
           {/* Progress dots */}
           <StepIndicator total={totalSteps} current={step} onStepClick={(i) => setStep(i)} />
@@ -412,6 +405,5 @@ export default function SetupRoute() {
           )}
         </div>
       </main>
-    </CinematicLayout>
   );
 }

@@ -36,13 +36,11 @@ import { useThemeStore } from "@/stores/themeStore";
 
 // Magic UI
 import { Particles } from "@/components/magicui/particles";
-import { BlurFade } from "@/components/magicui/blur-fade";
 import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { ShimmerButton } from "@/components/magicui/shimmer-button";
 
 // Aceternity UI
 import { HoverCard } from "@/components/aceternity/card-hover-effect";
-import { TextGenerateEffect } from "@/components/aceternity/text-generate-effect";
 
 // ---------------------------------------------------------------------------
 // Toast — inline, no external library needed
@@ -616,10 +614,9 @@ export default function ExploreRoute() {
 
         <main id="explore-main" aria-label="Explore demo mode" className="max-w-6xl mx-auto px-6 py-12 space-y-12">
           {/* ---------------------------------------------------------------- */}
-          {/* Hero — Particles background + TextGenerateEffect heading          */}
+          {/* Hero — Particles background + heading                            */}
           {/* ---------------------------------------------------------------- */}
-          <BlurFade delay={0} duration={0.5}>
-            <div className="relative text-center space-y-4 py-8 overflow-hidden rounded-2xl">
+          <div className="relative text-center space-y-4 py-8 overflow-hidden rounded-2xl animate-fade-in">
               {/* Particles layer — behind everything */}
               <Particles
                 quantity={40}
@@ -634,44 +631,38 @@ export default function ExploreRoute() {
                   Sample data only — no broker connection needed
                 </div>
 
-                <div style={{ fontSize: "clamp(1.75rem, 4vw, 2.75rem)" }}>
-                  <TextGenerateEffect
-                    words="Explore FlintTrade"
-                    className="font-bold text-text-primary tracking-tight"
-                    duration={0.4}
-                  />
-                </div>
+                <h1
+                  className="font-heading font-bold text-text-primary tracking-tight"
+                  style={{ fontSize: "clamp(1.75rem, 4vw, 2.75rem)" }}
+                >
+                  Explore FlintTrade
+                </h1>
 
-                <BlurFade delay={0.6} duration={0.5}>
-                  <p
-                    className="text-text-secondary max-w-xl mx-auto leading-relaxed"
-                    style={{ fontSize: "clamp(0.875rem, 1.5vw, 1rem)" }}
-                  >
-                    See what&apos;s possible — no broker connection needed. Click any module to open it,
-                    then connect OpenAlgo in Settings for live data.
-                  </p>
-                </BlurFade>
+                <p
+                  className="text-text-secondary max-w-xl mx-auto leading-relaxed"
+                  style={{ fontSize: "clamp(0.875rem, 1.5vw, 1rem)" }}
+                >
+                  See what&apos;s possible — no broker connection needed. Click any module to open it,
+                  then connect OpenAlgo in Settings for live data.
+                </p>
 
                 {/* Stats row — AnimatedCounter for each number */}
-                <BlurFade delay={0.9} duration={0.5}>
-                  <div className="flex flex-wrap justify-center gap-6 pt-2">
-                    {STATS.map((stat) => (
-                      <div key={stat.label} className="text-center">
-                        <div className="font-heading font-bold text-text-primary text-lg">
-                          <AnimatedCounter
-                            value={stat.value}
-                            duration={1.5}
-                            formatter={(v) => `${v}${stat.suffix}`}
-                          />
-                        </div>
-                        <div className="text-xxs text-text-muted">{stat.label}</div>
+                <div className="flex flex-wrap justify-center gap-6 pt-2">
+                  {STATS.map((stat) => (
+                    <div key={stat.label} className="text-center">
+                      <div className="font-heading font-bold text-text-primary text-lg">
+                        <AnimatedCounter
+                          value={stat.value}
+                          duration={1.5}
+                          formatter={(v) => `${v}${stat.suffix}`}
+                        />
                       </div>
-                    ))}
-                  </div>
-                </BlurFade>
+                      <div className="text-xxs text-text-muted">{stat.label}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          </BlurFade>
+          </div>
 
           {/* ---------------------------------------------------------------- */}
           {/* Module grid — motion.div fade-in wrapper, cards stagger inside   */}
