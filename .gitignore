@@ -89,3 +89,4 @@ progress.md
 # === Build ===
 *.zip
 *.tar.gz
+.worktrees/
