@@ -72,7 +72,15 @@ export function useWsBridge(): void {
       const key = `${tick.exchange}:${tick.symbol}`;
       // Route MCX futures ticks to their display-name atoms
       const displayKey = futuresMap.get(key) ?? key;
-      pendingTicks.set(displayKey, tick);
+      // Preserve prevClose from the existing atom — WebSocket LTP mode does not
+      // send close/prevClose, so a raw tick write would erase the REST-fetched
+      // prevClose that usePrevClose merged in on mount.
+      const existing = store.get(tickAtomFamily(displayKey));
+      const merged: WsTick =
+        existing?.prevClose != null
+          ? { ...tick, prevClose: existing.prevClose }
+          : tick;
+      pendingTicks.set(displayKey, merged);
       if (rafId === null) {
         rafId = requestAnimationFrame(() => {
           for (const [k, t] of pendingTicks) {

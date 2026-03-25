@@ -44,6 +44,8 @@ import { cn } from "@/lib/utils";
 export interface QuickAccessPanelProps {
   onClose: () => void;
   triggerRef?: React.RefObject<HTMLButtonElement | null>;
+  /** Bounding rect of the trigger button — used for fixed positioning when rendered via portal. */
+  anchorRect?: DOMRect;
 }
 
 type ColorMode = "dark" | "light" | "system";
@@ -201,7 +203,7 @@ function SandboxSwitch({ enabled, onToggle }: SandboxSwitchProps) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function QuickAccessPanel({ onClose, triggerRef }: QuickAccessPanelProps) {
+export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: QuickAccessPanelProps) {
   const navigate = useNavigate();
   const panelRef = useRef<HTMLDivElement>(null);
   const firstModeButtonRef = useRef<HTMLButtonElement>(null);
@@ -300,14 +302,29 @@ export default function QuickAccessPanel({ onClose, triggerRef }: QuickAccessPan
     navigate("/settings");
   }, [navigate, onClose]);
 
+  // When anchorRect is provided (portal mode) use fixed positioning so the panel
+  // escapes any parent stacking context. Otherwise fall back to absolute (legacy).
+  const positionStyle: React.CSSProperties = anchorRect
+    ? {
+        position: "fixed",
+        top: anchorRect.bottom + 4,
+        right: window.innerWidth - anchorRect.right,
+      }
+    : {
+        position: "absolute",
+        right: 0,
+        top: "2.25rem", // 36px — same as the original top-9
+      };
+
   return (
     <motion.div
       ref={panelRef}
       role="dialog"
       aria-label="Quick settings"
       aria-modal="false"
-      className="absolute right-0 top-9 z-50 w-80 rounded-xl shadow-2xl overflow-hidden"
+      className="z-50 w-80 rounded-xl shadow-2xl overflow-hidden"
       style={{
+        ...positionStyle,
         backdropFilter: "blur(24px)",
         WebkitBackdropFilter: "blur(24px)",
         backgroundColor: "rgba(22,22,31,0.85)",

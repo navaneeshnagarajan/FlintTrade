@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X, Sun, Moon, Settings } from "lucide-react";
@@ -656,8 +657,8 @@ export default function TopBar() {
           )}
         </Button>
 
-        {/* Gear icon + QuickAccessPanel */}
-        <div className="relative">
+        {/* Gear icon + QuickAccessPanel (portal-rendered to escape stacking context) */}
+        <div>
           <Button
             ref={gearRef}
             variant="ghost"
@@ -670,15 +671,18 @@ export default function TopBar() {
           >
             <Settings className="h-3.5 w-3.5" aria-hidden="true" />
           </Button>
-          <AnimatePresence>
-            {quickSettingsOpen && (
-              <QuickAccessPanel
-                onClose={() => setQuickSettingsOpen(false)}
-                triggerRef={gearRef}
-              />
-            )}
-          </AnimatePresence>
         </div>
+        {/* Portal — renders outside the TopBar stacking context so z-50 works correctly */}
+        <AnimatePresence>
+          {quickSettingsOpen && createPortal(
+            <QuickAccessPanel
+              onClose={() => setQuickSettingsOpen(false)}
+              triggerRef={gearRef}
+              anchorRect={gearRef.current?.getBoundingClientRect()}
+            />,
+            document.body,
+          )}
+        </AnimatePresence>
 
         <div className="w-px h-4 bg-border-default" aria-hidden="true" />
 
