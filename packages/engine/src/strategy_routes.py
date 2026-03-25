@@ -61,8 +61,8 @@ def upload_strategy() -> Response:
 
     # Try JSON body first
     body: dict[str, Any] = request.get_json(silent=True) or {}
-    name: str = body.get("name", "")
-    code: str = body.get("code", "")
+    name: str = body.get("name", "") or request.form.get("name", "")
+    code: str = body.get("code", "") or request.form.get("code", "")
 
     # Fall back to multipart file upload
     if not code and "file" in request.files:

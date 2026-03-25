@@ -23,6 +23,7 @@ class TestConfig:
         monkeypatch.setenv("OPENALGO_HOST", "http://127.0.0.1:5000")
         monkeypatch.setenv("OPENALGO_API_KEY", "test_key_123")
         monkeypatch.setenv("OPENALGO_WS_PORT", "8765")
+        monkeypatch.setenv("OPENALGO_PORT", "5000")
 
         from packages.core.src.config import Settings
 
