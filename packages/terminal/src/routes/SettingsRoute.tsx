@@ -3,20 +3,14 @@
  *
  * Accessible from ALL routes via the TOOLS dropdown.
  * Uses the same section components as SettingsTool so settings
- * are shared (both read/write the same localStorage key).
+ * are shared (both read/write through the same Zustand stores).
  *
  * Layout: slim header + left sidebar nav + scrollable content area.
  */
 
-import { useState, useEffect, useCallback, useRef, type JSX } from "react";
+import { useState, useCallback, useEffect, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft, Monitor, Palette, Wifi, TrendingUp, ShieldAlert,
-  Keyboard, Brain, Send, HardDrive, Info, RefreshCw,
-  ShieldCheck, Activity, GraduationCap,
-  type LucideIcon,
-} from "lucide-react";
-import { resetWsService } from "@/services/websocket";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { InlineToast } from "@/tools/Settings/shared";
 import { GeneralSection }    from "@/tools/Settings/GeneralSection";
@@ -32,88 +26,8 @@ import { AboutSection }      from "@/tools/Settings/AboutSection";
 import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 import { SkillSection }      from "@/tools/Settings/SkillSection";
-
-// ---------------------------------------------------------------------------
-// Types (mirror SettingsTool so same localStorage key is compatible)
-// ---------------------------------------------------------------------------
-
-type LlmProvider =
-  | "lmstudio" | "ollama" | "openai" | "anthropic" | "gemini"
-  | "deepseek" | "groq" | "grok" | "mistral" | "together" | "openrouter" | "custom";
-
-interface AllSettings {
-  general:   { fontSize: "small" | "normal" | "large"; density: "compact" | "comfortable" };
-  api:       { host: string; apiKey: string; wsPort: string };
-  trading:   { exchange: string; product: "MIS" | "NRML" | "CNC"; orderType: "MARKET" | "LIMIT" | "SL" | "SL-M"; quantity: string };
-  risk:      { maxPositionLots: string; mtmStoploss: string; mtmTarget: string; maxOrdersPerMinute: string };
-  llm:       { provider: LlmProvider; host: string; model: string; apiKey: string };
-  telegram:  { enabled: boolean; botToken: string; chatId: string };
-  dataPaths: { fastStoragePath: string; archiveStoragePath: string };
-}
-
-type SectionId =
-  | "general" | "appearance" | "api" | "trading" | "risk"
-  | "keyboard" | "llm" | "telegram" | "dataPaths" | "about"
-  | "security" | "monitoring" | "skill";
-
-interface SectionDef { id: SectionId; label: string; icon: LucideIcon }
-
-// ---------------------------------------------------------------------------
-// Constants — same storage key as SettingsTool so changes are shared
-// ---------------------------------------------------------------------------
-
-const STORAGE_KEY = "flinttrade:settings";
-
-const DEFAULT_SETTINGS: AllSettings = {
-  general:   { fontSize: "normal", density: "comfortable" },
-  api:       { host: "", apiKey: "", wsPort: "8765" },
-  trading:   { exchange: "NSE", product: "MIS", orderType: "MARKET", quantity: "1" },
-  risk:      { maxPositionLots: "", mtmStoploss: "", mtmTarget: "", maxOrdersPerMinute: "" },
-  llm:       { provider: "lmstudio", host: "http://127.0.0.1:1234", model: "", apiKey: "" },
-  telegram:  { enabled: false, botToken: "", chatId: "" },
-  dataPaths: { fastStoragePath: "", archiveStoragePath: "" },
-};
-
-const SECTIONS: SectionDef[] = [
-  { id: "general",    label: "General",           icon: Monitor     },
-  { id: "appearance", label: "Appearance",         icon: Palette     },
-  { id: "api",        label: "API Connection",     icon: Wifi        },
-  { id: "trading",    label: "Trading Defaults",   icon: TrendingUp  },
-  { id: "risk",       label: "Risk Limits",        icon: ShieldAlert },
-  { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard    },
-  { id: "llm",        label: "LLM Config",         icon: Brain       },
-  { id: "telegram",   label: "Telegram",           icon: Send        },
-  { id: "dataPaths",  label: "Data Paths",         icon: HardDrive   },
-  { id: "security",   label: "Security",           icon: ShieldCheck    },
-  { id: "monitoring", label: "Monitoring",         icon: Activity       },
-  { id: "skill",      label: "Skill & Experience", icon: GraduationCap  },
-  { id: "about",      label: "About",              icon: Info           },
-];
-
-// ---------------------------------------------------------------------------
-// Persistence helpers
-// ---------------------------------------------------------------------------
-
-function loadSettings(): AllSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    const p = JSON.parse(raw) as Partial<AllSettings>;
-    return {
-      general:   { ...DEFAULT_SETTINGS.general,   ...(p.general   ?? {}) },
-      api:       { ...DEFAULT_SETTINGS.api,        ...(p.api       ?? {}) },
-      trading:   { ...DEFAULT_SETTINGS.trading,    ...(p.trading   ?? {}) },
-      risk:      { ...DEFAULT_SETTINGS.risk,       ...(p.risk      ?? {}) },
-      llm:       { ...DEFAULT_SETTINGS.llm,        ...(p.llm       ?? {}) },
-      telegram:  { ...DEFAULT_SETTINGS.telegram,   ...(p.telegram  ?? {}) },
-      dataPaths: { ...DEFAULT_SETTINGS.dataPaths,  ...(p.dataPaths ?? {}) },
-    };
-  } catch { return DEFAULT_SETTINGS; }
-}
-
-function saveSettings(s: AllSettings): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* private browsing */ }
-}
+import { SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
+import { useSettingsState } from "@/hooks/useSettingsState";
 
 // ---------------------------------------------------------------------------
 // Route component
@@ -129,53 +43,45 @@ export default function SettingsRoute() {
   };
 
   const [activeSection, setActiveSection] = useState<SectionId>(initialSection);
-  const [settings, setSettings]           = useState<AllSettings>(loadSettings);
-  const [restarting, setRestarting]       = useState(false);
   const [toastMsg, setToastMsg]           = useState<string | null>(null);
   const dismissToast                      = useCallback(() => setToastMsg(null), []);
-  const restartRef                        = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Persist on every change (same behaviour as SettingsTool)
-  useEffect(() => { saveSettings(settings); }, [settings]);
-  useEffect(() => () => { if (restartRef.current) clearTimeout(restartRef.current); }, []);
 
   // Update hash when section changes for deep-link support
   useEffect(() => {
     window.history.replaceState(null, "", `#${activeSection}`);
   }, [activeSection]);
 
-  const updateSection = useCallback(<K extends keyof AllSettings>(
-    sectionId: K, field: keyof AllSettings[K], value: string,
-  ) => {
-    setSettings((prev) => ({ ...prev, [sectionId]: { ...prev[sectionId], [field]: value } }));
-  }, []);
-
-  const updateTelegram = useCallback((field: keyof AllSettings["telegram"], value: string | boolean) => {
-    setSettings((prev) => ({ ...prev, telegram: { ...prev.telegram, [field]: value } }));
-  }, []);
-
-  function handleRestart() {
-    if (restarting) return;
-    saveSettings(settings);
-    setRestarting(true);
-    resetWsService();
-    restartRef.current = setTimeout(() => {
-      setRestarting(false);
-      setToastMsg("Services restarted");
-    }, 800);
-  }
+  // All state and actions from Zustand stores
+  const {
+    general,
+    trading,
+    risk,
+    llm,
+    telegram,
+    dataPaths,
+    connection,
+    restarting,
+    updateGeneral,
+    updateTradingDefaults,
+    updateRiskLimits,
+    updateLLM,
+    updateTelegram,
+    updateDataPaths,
+    updateConnection,
+    handleRestart,
+  } = useSettingsState();
 
   function renderContent(): JSX.Element {
     switch (activeSection) {
-      case "general":    return <GeneralSection    settings={settings.general}   onChange={(f, v) => updateSection("general", f, v)} />;
+      case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
       case "appearance": return <AppearanceSection />;
-      case "api":        return <ConnectionSection settings={settings.api}       onChange={(f, v) => updateSection("api", f, v)} />;
-      case "trading":    return <TradingSection    settings={settings.trading}   onChange={(f, v) => updateSection("trading", f, v)} />;
-      case "risk":       return <RiskSection       settings={settings.risk}      onChange={(f, v) => updateSection("risk", f, v)} />;
+      case "api":        return <ConnectionSection settings={connection} onChange={updateConnection} />;
+      case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
+      case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
       case "keyboard":   return <KeyboardSection />;
-      case "llm":        return <LLMSection        settings={settings.llm}       onChange={(f, v) => updateSection("llm", f, v)} />;
-      case "telegram":   return <TelegramSection   settings={settings.telegram}  onChangeField={updateTelegram} />;
-      case "dataPaths":  return <DataSection       settings={settings.dataPaths} onChange={(f, v) => updateSection("dataPaths", f, v)} />;
+      case "llm":        return <LLMSection        settings={llm}        onChange={updateLLM} />;
+      case "telegram":   return <TelegramSection   settings={telegram}   onChangeField={updateTelegram} />;
+      case "dataPaths":  return <DataSection       settings={dataPaths}  onChange={updateDataPaths} />;
       case "security":   return <SecuritySection />;
       case "monitoring": return <MonitoringSection />;
       case "skill":      return <SkillSection />;
@@ -208,7 +114,7 @@ export default function SettingsRoute() {
           {toastMsg && <InlineToast message={toastMsg} onDismiss={dismissToast} />}
           <button
             type="button"
-            onClick={handleRestart}
+            onClick={() => handleRestart((msg) => setToastMsg(msg))}
             disabled={restarting}
             className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-surface-base border border-border-default text-text-secondary hover:text-text-primary hover:border-accent/40 hover:bg-accent/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >

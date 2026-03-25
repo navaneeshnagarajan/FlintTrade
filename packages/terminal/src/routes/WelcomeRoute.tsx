@@ -20,7 +20,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Moon, Circle, Leaf, Waves, Sun } from "lucide-react";
 
 import { LogoIcon } from "@/components/brand/Logo";
-import { useSettingsStore } from "@/stores/settingsStore";
+import { useThemeStore } from "@/stores/themeStore";
 import { motionConfig } from "@/lib/motion";
 
 // Magic UI
@@ -62,7 +62,7 @@ const enterEase = [0.22, 1, 0.36, 1] as const;
 export default function WelcomeRoute() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
-  const theme = useSettingsStore((s) => s.theme);
+  const theme = useThemeStore((s) => s.activeThemeId);
   const reducedMotion = motionConfig.prefersReducedMotion();
 
   const skipToEnd = useCallback(() => setStep(5), []);
@@ -280,7 +280,7 @@ export default function WelcomeRoute() {
             return (
               <button
                 key={t.id}
-                onClick={() => useSettingsStore.getState().setTheme(t.id)}
+                onClick={() => useThemeStore.getState().setTheme(t.id)}
                 aria-label={t.label}
                 className={`p-1.5 rounded transition-colors duration-150 cursor-pointer ${
                   theme === t.id

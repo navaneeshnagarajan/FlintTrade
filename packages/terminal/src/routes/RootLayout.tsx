@@ -1,15 +1,8 @@
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import { useSettingsStore } from "@/stores/settingsStore";
+import { useThemeStore } from "@/stores/themeStore";
 import { AITutorPill } from "@/components/help/AITutorPill";
 import { UpgradeSuggestionHost } from "@/components/help/UpgradeSuggestion";
-
-const THEME_CLASSES = [
-  "theme-obsidian",
-  "theme-terminal-green",
-  "theme-ocean-blue",
-  "theme-light",
-] as const;
 
 const ROUTE_TITLES: Record<string, string> = {
   "/welcome": "Welcome",
@@ -34,19 +27,16 @@ function useDocumentTitle() {
 }
 
 export default function RootLayout() {
-  const theme = useSettingsStore((s) => s.theme);
+  // Apply theme CSS properties on initial mount and whenever the active theme changes.
+  // themeStore.setTheme() already calls applyTheme() on user changes; this ensures
+  // the correct theme is applied when the app first loads from persisted state.
+  const applyTheme = useThemeStore((s) => s.applyTheme);
 
   useDocumentTitle();
 
   useEffect(() => {
-    const html = document.documentElement;
-    // Remove all theme classes
-    html.classList.remove(...THEME_CLASSES);
-    // Add current theme (midnight has no class — it's the default :root values)
-    if (theme !== "midnight") {
-      html.classList.add(`theme-${theme}`);
-    }
-  }, [theme]);
+    applyTheme();
+  }, [applyTheme]);
 
   return (
     <>

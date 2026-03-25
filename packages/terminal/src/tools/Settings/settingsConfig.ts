@@ -1,0 +1,68 @@
+/**
+ * settingsConfig — shared section definitions for SettingsRoute and SettingsTool.
+ *
+ * Extracted so both the full-page route and the canvas panel use the same
+ * section IDs, labels, and icons without duplicating them.
+ */
+
+import {
+  Monitor,
+  Palette,
+  Wifi,
+  TrendingUp,
+  ShieldAlert,
+  Keyboard,
+  Brain,
+  Send,
+  HardDrive,
+  ShieldCheck,
+  Activity,
+  GraduationCap,
+  Info,
+  type LucideIcon,
+} from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type SectionId =
+  | "general"
+  | "appearance"
+  | "api"
+  | "trading"
+  | "risk"
+  | "keyboard"
+  | "llm"
+  | "telegram"
+  | "dataPaths"
+  | "security"
+  | "monitoring"
+  | "skill"
+  | "about";
+
+export interface SectionDef {
+  id: SectionId;
+  label: string;
+  icon: LucideIcon;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+export const SECTIONS: SectionDef[] = [
+  { id: "general",    label: "General",           icon: Monitor      },
+  { id: "appearance", label: "Appearance",         icon: Palette      },
+  { id: "api",        label: "API Connection",     icon: Wifi         },
+  { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
+  { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
+  { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard     },
+  { id: "llm",        label: "LLM Config",         icon: Brain        },
+  { id: "telegram",   label: "Telegram",           icon: Send         },
+  { id: "dataPaths",  label: "Data Paths",         icon: HardDrive    },
+  { id: "security",   label: "Security",           icon: ShieldCheck  },
+  { id: "monitoring", label: "Monitoring",         icon: Activity     },
+  { id: "skill",      label: "Skill & Experience", icon: GraduationCap },
+  { id: "about",      label: "About",              icon: Info         },
+];

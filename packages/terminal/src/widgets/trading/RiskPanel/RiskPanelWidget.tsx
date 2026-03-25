@@ -184,7 +184,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
   const positionUsagePct = pct(positionCount, riskLimits.maxPositionLots);
 
   // Order rate (live tracking not available without WS; shows open orders vs max/min as proxy)
-  const orderRatePct = pct(openOrderCount, riskLimits.maxOrdersPerMin);
+  const orderRatePct = pct(openOrderCount, riskLimits.maxOrdersPerMinute);
 
   // Overall risk status — highest danger level wins
   const overallLevel = useMemo<RiskLevel>(() => {
@@ -263,7 +263,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
             <ProgressRow
               label="Open Orders"
               usedLabel={String(openOrderCount)}
-              maxLabel={`${riskLimits.maxOrdersPerMin}/min`}
+              maxLabel={`${riskLimits.maxOrdersPerMinute}/min`}
               usagePct={orderRatePct}
               icon={<Zap size={9} />}
             />
@@ -297,7 +297,7 @@ export default function RiskPanelWidget(_props: WidgetProps) {
                 ["Max Lots", riskLimits.maxPositionLots],
                 ["MTM Target", formatINR(riskLimits.mtmTarget)],
                 ["MTM SL", formatINR(riskLimits.mtmStoploss)],
-                ["Orders/Min", riskLimits.maxOrdersPerMin],
+                ["Orders/Min", riskLimits.maxOrdersPerMinute],
               ].map(([label, value]) => (
                 <div key={String(label)} className="flex justify-between">
                   <span className="text-xs text-text-muted">{label}</span>

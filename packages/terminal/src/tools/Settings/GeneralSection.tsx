@@ -2,7 +2,7 @@
  * GeneralSection — persona, font size, density settings.
  */
 
-import { useSettingsStore } from "@/stores/settingsStore";
+import { useThemeStore } from "@/stores/themeStore";
 import { FieldRow, SegmentControl, SectionTitle } from "./shared";
 
 const THEMES = [
@@ -24,7 +24,8 @@ interface GeneralSectionProps {
 }
 
 export function GeneralSection({ settings, onChange }: GeneralSectionProps) {
-  const theme = useSettingsStore((s) => s.theme);
+  const activeThemeId = useThemeStore((s) => s.activeThemeId);
+  const setTheme      = useThemeStore((s) => s.setTheme);
 
   return (
     <div className="space-y-5">
@@ -37,9 +38,9 @@ export function GeneralSection({ settings, onChange }: GeneralSectionProps) {
               key={t.id}
               type="button"
               aria-label={`Select ${t.label} theme`}
-              onClick={() => useSettingsStore.getState().setTheme(t.id)}
+              onClick={() => setTheme(t.id)}
               className={`p-3 rounded-lg border text-center transition-all ${
-                theme === t.id
+                activeThemeId === t.id
                   ? "border-accent bg-accent/10 ring-1 ring-accent/20"
                   : "border-border-default bg-surface-card hover:bg-surface-hover"
               }`}
