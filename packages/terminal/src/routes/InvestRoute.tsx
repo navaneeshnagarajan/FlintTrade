@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
-import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useSkillStore } from "@/stores/skillStore";
+import { classifySector } from "@/lib/sectors";
 import { useTremorTheme } from "@/hooks/useTremorTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
@@ -237,22 +238,10 @@ function DashboardTab({
     }));
 
   // Sector counts for breakdown pill
-  const sectorCount = useMemo(() => {
-    const sectors = new Set(
-      holdings.map((h) => {
-        const s = h.symbol.toUpperCase();
-        if (/BANK|HDFC|ICICI|AXIS|SBI|KOTAK|INDUS|FEDERAL|RBL|BANDHAN/.test(s)) return "Banking";
-        if (/TCS|INFY|WIPRO|HCL|TECH|LTI|MPHASIS|COFORGE/.test(s)) return "IT";
-        if (/PHARMA|CIPLA|DRRD|SUN|LUPIN|BIOCON|ALKEM|IPCA/.test(s)) return "Pharma";
-        if (/AUTO|MARUTI|BAJAJ.*AUTO|HERO|EICHER/.test(s)) return "Auto";
-        if (/RELIANCE|ONGC|BPCL|IOC|GAIL|NTPC|POWERGRID/.test(s)) return "Energy";
-        if (/HIND.*UNILEVER|NESTLE|ITC|BRITANNIA|DABUR/.test(s)) return "FMCG";
-        if (/METAL|STEEL|TATA.*STEEL|HINDALCO|SAIL|JINDAL/.test(s)) return "Metals";
-        return "Other";
-      }),
-    );
-    return sectors.size;
-  }, [holdings]);
+  const sectorCount = useMemo(
+    () => new Set(holdings.map((h) => classifySector(h.symbol))).size,
+    [holdings],
+  );
 
   if (isLoading) {
     return (
@@ -1283,8 +1272,7 @@ function IpoTrackerTab() {
 // ─── Root ──────────────────────────────────────────────────────────────────────
 
 export default function InvestRoute() {
-  const track = useTrackBehavior();
-  useEffect(() => { track("invest", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { useSkillStore.getState().trackAction("invest", "daysActive"); }, []);
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const level = useSkillLevel("invest");

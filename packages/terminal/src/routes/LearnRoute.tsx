@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
-import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { motion, AnimatePresence } from "framer-motion";
@@ -616,8 +616,7 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
 // ---------------------------------------------------------------------------
 
 export default function LearnRoute() {
-  const track = useTrackBehavior();
-  useEffect(() => { track("learn", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { useSkillStore.getState().trackAction("learn", "daysActive"); }, []);
 
   const [activeTab, setActiveTab] = useState<TabId>("basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -634,13 +633,13 @@ export default function LearnRoute() {
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
 
-  const tabContent: Record<TabId, React.ReactNode> = {
+  const tabContent = useMemo<Record<TabId, React.ReactNode>>(() => ({
     basics:     <BasicsTab />,
     glossary:   <GlossaryTab />,
     strategies: <StrategiesTab />,
     paper:      <PaperTradingTab />,
     videos:     <VideoHubTab />,
-  };
+  }), []);
 
   return (
     <CinematicLayout mode="cinematic">

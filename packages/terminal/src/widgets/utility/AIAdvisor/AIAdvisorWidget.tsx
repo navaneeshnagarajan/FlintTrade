@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
+import { getAdvisorBase } from "@/services/advisorApi";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -72,10 +73,6 @@ function fmtTime(ts: number): string {
     minute: "2-digit",
     hour12: false,
   });
-}
-
-function getApiBase(): string {
-  return import.meta.env.DEV ? "/ft-api" : "";
 }
 
 /**
@@ -136,7 +133,7 @@ function useIsAIConfigured(): boolean {
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
-    const base = getApiBase();
+    const base = getAdvisorBase();
     const resp = await fetch(`${base}/api/v1/advisor/status`);
     if (!resp.ok) return;
     const json = (await resp.json()) as AdvisorStatusResponse;
@@ -161,7 +158,7 @@ async function streamAdvisorMessage(
   onToken: (token: string, fullText: string) => void,
   signal?: AbortSignal,
 ): Promise<string> {
-  const base = getApiBase();
+  const base = getAdvisorBase();
   const resp = await fetch(`${base}/api/v1/advisor/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -190,13 +187,14 @@ async function streamAdvisorMessage(
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
+      let streamDone = false;
       for (const line of chunk.split("\n")) {
         if (!line.startsWith("data: ")) continue;
         const raw = line.slice(6).trim();
         if (!raw || raw === "[DONE]") continue;
         try {
           const data = JSON.parse(raw) as { done?: boolean; token?: string };
-          if (data.done) break;
+          if (data.done) { streamDone = true; break; }
           if (data.token) {
             assistantText += data.token;
             onToken(data.token, assistantText);
@@ -205,8 +203,10 @@ async function streamAdvisorMessage(
           // Malformed SSE line — skip
         }
       }
+      if (streamDone) break;
     }
   } finally {
+    try { await reader.cancel(); } catch { /* already cancelled */ }
     reader.releaseLock();
   }
 
@@ -220,7 +220,7 @@ async function postAdvisorMessage(
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
 ): Promise<string> {
-  const base = getApiBase();
+  const base = getAdvisorBase();
   const resp = await fetch(`${base}/api/v1/advisor`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -431,7 +431,7 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         return next;
       });
 
-      const base = getApiBase();
+      const base = getAdvisorBase();
       const endpoint = msg.toolCall.endpoint.startsWith("/")
         ? msg.toolCall.endpoint
         : `/api/v1/${msg.toolCall.endpoint}`;

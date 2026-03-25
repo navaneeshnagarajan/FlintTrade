@@ -4,6 +4,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { formatCurrencyCompact } from "@/lib/formatters";
 import {
   BookOpen,
   X,
@@ -44,21 +45,6 @@ interface Props {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatINR(value: number): string {
-  const abs = Math.abs(value);
-  let formatted: string;
-  if (abs >= 10_000_000) {
-    formatted = `${(abs / 10_000_000).toFixed(2)}Cr`;
-  } else if (abs >= 100_000) {
-    formatted = `${(abs / 100_000).toFixed(2)}L`;
-  } else if (abs >= 1_000) {
-    formatted = `${(abs / 1_000).toFixed(2)}K`;
-  } else {
-    formatted = abs.toFixed(2);
-  }
-  return `${value < 0 ? "-" : ""}₹${formatted}`;
-}
 
 function formatPrice(value: number): string {
   return value.toLocaleString("en-IN", {
@@ -288,27 +274,20 @@ function SkeletonRows({ count }: { count: number }) {
 // Summary Cards
 // ---------------------------------------------------------------------------
 
-function SummaryCards({ trades }: { trades: JournalTrade[] }) {
-  const closed = trades.filter((t) => t.pnl !== 0);
-  const netPnl = closed.reduce((s, t) => s + t.pnl, 0);
-  const wins = closed.filter((t) => t.pnl > 0);
-  const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
-  const bestTrade = closed.length ? Math.max(...closed.map((t) => t.pnl)) : 0;
-  const worstTrade = closed.length
-    ? Math.min(...closed.map((t) => t.pnl))
-    : 0;
+function SummaryCards({ analytics }: { analytics: TradeAnalytics }) {
+  const { totalTrades, wins, losses, netPnl, winRate, bestTrade, worstTrade } = analytics;
 
   return (
     <div className="grid grid-cols-5 gap-2 px-3 pt-2 pb-1 shrink-0">
       <StatCard
         label="Total Trades"
-        value={String(trades.length)}
-        sub={`${closed.length} closed`}
+        value={String(totalTrades)}
+        sub={`${wins + losses} closed`}
         icon={<Activity size={13} />}
       />
       <StatCard
         label="Net P&L"
-        value={formatINR(netPnl)}
+        value={formatCurrencyCompact(netPnl)}
         positive={netPnl >= 0}
         icon={
           netPnl >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />
@@ -317,18 +296,18 @@ function SummaryCards({ trades }: { trades: JournalTrade[] }) {
       <StatCard
         label="Win Rate"
         value={`${winRate.toFixed(1)}%`}
-        sub={`${wins.length}W / ${closed.length - wins.length}L`}
+        sub={`${wins}W / ${losses}L`}
         positive={winRate >= 50}
       />
       <StatCard
         label="Best Trade"
-        value={formatINR(bestTrade)}
+        value={formatCurrencyCompact(bestTrade)}
         positive={bestTrade > 0}
         icon={<Trophy size={13} />}
       />
       <StatCard
         label="Worst Trade"
-        value={formatINR(worstTrade)}
+        value={formatCurrencyCompact(worstTrade)}
         positive={worstTrade >= 0}
       />
     </div>
@@ -341,11 +320,13 @@ function SummaryCards({ trades }: { trades: JournalTrade[] }) {
 
 function TradeLogTab({
   trades,
+  analytics,
   isLoading,
   isError,
   onRetry,
 }: {
   trades: JournalTrade[];
+  analytics: TradeAnalytics;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -379,7 +360,7 @@ function TradeLogTab({
     <div className="flex flex-col h-full gap-2">
       {/* Summary cards */}
       {!isLoading && !isError && trades.length > 0 && (
-        <SummaryCards trades={trades} />
+        <SummaryCards analytics={analytics} />
       )}
 
       {/* Filters */}
@@ -542,7 +523,7 @@ function TradeLogTab({
                   <TableCell
                     className={`py-1 text-xs font-mono text-right font-medium ${pnlColor(trade.pnl)}`}
                   >
-                    {trade.pnl !== 0 ? formatINR(trade.pnl) : "-"}
+                    {trade.pnl !== 0 ? formatCurrencyCompact(trade.pnl) : "-"}
                   </TableCell>
                   <TableCell className="py-1 text-xs font-mono text-text-muted text-right">
                     {trade.fees > 0 ? formatPrice(trade.fees) : "-"}
@@ -585,7 +566,7 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
         <div className="grid grid-cols-4 gap-2">
           <StatCard
             label="Net P&L"
-            value={formatINR(a.netPnl)}
+            value={formatCurrencyCompact(a.netPnl)}
             positive={a.netPnl >= 0}
           />
           <StatCard
@@ -605,20 +586,20 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
         </div>
 
         <div className="grid grid-cols-4 gap-2">
-          <StatCard label="Avg Win" value={formatINR(a.avgWin)} positive={true} />
+          <StatCard label="Avg Win" value={formatCurrencyCompact(a.avgWin)} positive={true} />
           <StatCard
             label="Avg Loss"
-            value={formatINR(a.avgLoss)}
+            value={formatCurrencyCompact(a.avgLoss)}
             positive={false}
           />
           <StatCard
             label="Best Trade"
-            value={formatINR(a.bestTrade)}
+            value={formatCurrencyCompact(a.bestTrade)}
             positive={true}
           />
           <StatCard
             label="Worst Trade"
-            value={formatINR(a.worstTrade)}
+            value={formatCurrencyCompact(a.worstTrade)}
             positive={false}
           />
         </div>
@@ -669,7 +650,7 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                           pnl >= 0 ? "bg-emerald-600/60" : "bg-red-600/60"
                         }`}
                         style={{ height: `${Math.max(2, h * 44)}px` }}
-                        title={`${day}: ${formatINR(pnl)} (${count} trades)`}
+                        title={`${day}: ${formatCurrencyCompact(pnl)} (${count} trades)`}
                       />
                     </div>
                     <span className="text-xxs text-text-muted">{day}</span>
@@ -708,7 +689,7 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                     <span
                       className={`text-xs font-mono w-20 text-right shrink-0 ${pnlColor(pnl)}`}
                     >
-                      {formatINR(pnl)}
+                      {formatCurrencyCompact(pnl)}
                     </span>
                     <span className="text-xs text-text-muted w-14 text-right shrink-0">
                       {trades}t
@@ -797,7 +778,8 @@ function CoachTab({ trades }: { trades: JournalTrade[] }) {
     setAiResponse(null);
 
     try {
-      const res = await fetch("/api/v1/advisor", {
+      const base = import.meta.env.DEV ? "/ft-api" : "";
+      const res = await fetch(`${base}/api/v1/advisor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1042,6 +1024,7 @@ export default function TradeJournalTool({ onClose }: Props) {
   });
 
   const trades = data?.trades ?? [];
+  const analytics = useMemo(() => computeAnalytics(trades), [trades]);
 
   function handleSearch() {
     setQueryStart(startDate);
@@ -1175,6 +1158,7 @@ export default function TradeJournalTool({ onClose }: Props) {
         >
           <TradeLogTab
             trades={trades}
+            analytics={analytics}
             isLoading={isLoading}
             isError={isError}
             onRetry={() => refetch()}

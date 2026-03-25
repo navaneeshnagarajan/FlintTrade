@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
 import { getSafetyConfig, getRunningStrategies, getUploadedStrategies } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
-import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useSkillStore } from "@/stores/skillStore";
 
 import AutomateSidebar, { SECTIONS, type SectionId } from "./automate/AutomateSidebar";
 import FlowsSection       from "./automate/FlowsSection";
@@ -17,8 +17,7 @@ import StrategiesSection  from "./automate/StrategiesSection";
 import SettingsSection    from "./automate/SettingsSection";
 
 export default function AutomateRoute() {
-  const track = useTrackBehavior();
-  useEffect(() => { track("automate", "daysActive"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { useSkillStore.getState().trackAction("automate", "daysActive"); }, []);
 
   const level = useSkillLevel("automate");
 

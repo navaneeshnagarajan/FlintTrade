@@ -168,8 +168,13 @@ export default function TerminalRoute() {
   const navigate = useNavigate();
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
   const [panelCount, setPanelCount] = useState<number | null>(null);
-  const disposablesRef = useRef<Array<{ dispose(): void }>>([]);
+  // d1/d2/d4 — subscriptions created inside onDockviewReady; cleaned up on unmount.
+  const readyDisposablesRef = useRef<Array<{ dispose(): void }>>([]);
+  // d3 — auto-save subscription managed by its own useEffect.
+  const saveDisposableRef = useRef<{ dispose(): void } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // rAF handle for coalesced ARIA injection.
+  const ariaRafRef = useRef<number | undefined>(undefined);
 
   const level = useSkillLevel("trade");
   const resolvedMode = useThemeStore((s) => s.getResolvedMode());
@@ -229,12 +234,16 @@ export default function TerminalRoute() {
       setPanelCount(event.api.panels.length);
       const d1 = event.api.onDidAddPanel(() => setPanelCount(event.api.panels.length));
       const d2 = event.api.onDidRemovePanel(() => setPanelCount(event.api.panels.length));
-      disposablesRef.current.push(d1, d2);
+      readyDisposablesRef.current.push(d1, d2);
 
       // Re-apply ARIA attributes after every Dockview layout mutation so that
       // newly added/removed tabs and panels stay annotated.
-      const d4 = event.api.onDidLayoutChange(() => applyDockviewAria());
-      disposablesRef.current.push(d4);
+      // rAF coalescing prevents redundant DOM queries on every drag frame.
+      const d4 = event.api.onDidLayoutChange(() => {
+        if (ariaRafRef.current !== undefined) cancelAnimationFrame(ariaRafRef.current);
+        ariaRafRef.current = requestAnimationFrame(applyDockviewAria);
+      });
+      readyDisposablesRef.current.push(d4);
       // Apply once immediately after Dockview finishes its initial render.
       // rAF ensures the DOM has been painted before we query it.
       requestAnimationFrame(applyDockviewAria);
@@ -284,7 +293,18 @@ export default function TerminalRoute() {
     [setDockviewApi, applyDockviewAria]
   );
 
-  // Auto-save layout on changes (debounced 500ms to avoid thrashing on rapid panel ops)
+  // Cleanup d1/d2/d4 (onReady subscriptions) on unmount.
+  useEffect(() => {
+    return () => {
+      readyDisposablesRef.current.forEach((d) => d.dispose());
+      readyDisposablesRef.current = [];
+      if (ariaRafRef.current !== undefined) cancelAnimationFrame(ariaRafRef.current);
+    };
+  }, []);
+
+  // Auto-save layout on changes (debounced 500ms to avoid thrashing on rapid panel ops).
+  // d3 is managed independently of the onReady disposables so its cleanup
+  // does not accidentally dispose d1/d2/d4.
   useEffect(() => {
     const api = useLayoutStore.getState().dockviewApi;
     if (!api) return;
@@ -296,10 +316,10 @@ export default function TerminalRoute() {
         useLayoutStore.getState().saveTabLayout(activeTabId, layout as unknown as Record<string, unknown>);
       }, 500);
     });
-    disposablesRef.current.push(d3);
+    saveDisposableRef.current = d3;
     return () => {
-      disposablesRef.current.forEach(d => d.dispose());
-      disposablesRef.current = [];
+      saveDisposableRef.current?.dispose();
+      saveDisposableRef.current = null;
       clearTimeout(saveTimerRef.current);
     };
   }, []);

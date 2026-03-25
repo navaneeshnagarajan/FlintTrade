@@ -46,6 +46,7 @@ import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { motionConfig, EASE_ENTER, EASE_EXIT, DURATION } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { getAdvisorBase } from "@/services/advisorApi";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,12 +56,8 @@ import { cn } from "@/lib/utils";
 const VISIBLE_MESSAGE_COUNT = 50;
 
 // ---------------------------------------------------------------------------
-// API helpers — mirror the pattern used in AIAdvisorWidget
+// API helpers
 // ---------------------------------------------------------------------------
-
-function getApiBase(): string {
-  return import.meta.env.DEV ? "/ft-api" : "";
-}
 
 interface AdvisorStatusResponse {
   status: "success" | "error";
@@ -79,7 +76,7 @@ interface AdvisorResponse {
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
-    const resp = await fetch(`${getApiBase()}/api/v1/advisor/status`);
+    const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`);
     if (!resp.ok) return;
     const json = (await resp.json()) as AdvisorStatusResponse;
     if (json.status === "success" && json.data) {
@@ -104,7 +101,7 @@ async function streamAdvisorMessage(
   onToken: (token: string, fullText: string) => void,
   signal?: AbortSignal,
 ): Promise<string> {
-  const resp = await fetch(`${getApiBase()}/api/v1/advisor/stream`, {
+  const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages, context: { route } }),
@@ -130,13 +127,14 @@ async function streamAdvisorMessage(
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
+      let streamDone = false;
       for (const line of chunk.split("\n")) {
         if (!line.startsWith("data: ")) continue;
         const raw = line.slice(6).trim();
         if (!raw || raw === "[DONE]") continue;
         try {
           const data = JSON.parse(raw) as { done?: boolean; token?: string };
-          if (data.done) break;
+          if (data.done) { streamDone = true; break; }
           if (data.token) {
             assistantText += data.token;
             onToken(data.token, assistantText);
@@ -145,8 +143,10 @@ async function streamAdvisorMessage(
           // Malformed SSE line — skip
         }
       }
+      if (streamDone) break;
     }
   } finally {
+    try { await reader.cancel(); } catch { /* already cancelled */ }
     reader.releaseLock();
   }
 
@@ -162,7 +162,7 @@ async function postAdvisorMessage(
   route: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const resp = await fetch(`${getApiBase()}/api/v1/advisor`, {
+  const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -295,6 +295,7 @@ function Pill({ onClick }: PillProps) {
       onClick={onClick}
       aria-label="Open AI Tutor"
       aria-expanded={false}
+      aria-controls="ai-tutor-panel"
       className={cn(
         "flex items-center gap-2 px-4 py-2.5 rounded-full",
         "bg-surface-card border border-border-default",
@@ -492,6 +493,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured }: Expan
 
   return (
     <motion.div
+      id="ai-tutor-panel"
       role="dialog"
       aria-label="AI Tutor"
       aria-modal="false"
