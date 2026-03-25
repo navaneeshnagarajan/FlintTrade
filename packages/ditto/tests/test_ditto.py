@@ -570,6 +570,26 @@ class TestRiskManager:
         assert q.grade == "A"
         assert q.slippage_pct < 0.1
 
+    def test_trade_grade_b(self):
+        from packages.ditto.src.risk_manager import grade_trade
+        q = grade_trade(
+            entry_price=100.2, exit_price=110,
+            expected_entry=100, expected_exit=110,
+            had_stop_loss=True,
+        )
+        assert q.grade == "B"
+        assert q.slippage_pct == pytest.approx(0.1, abs=0.001)
+
+    def test_trade_grade_c(self):
+        from packages.ditto.src.risk_manager import grade_trade
+        q = grade_trade(
+            entry_price=100.8, exit_price=110,
+            expected_entry=100, expected_exit=110,
+            had_stop_loss=True,
+        )
+        assert q.grade == "C"
+        assert q.slippage_pct == pytest.approx(0.4, abs=0.001)
+
     def test_trade_grade_d(self):
         from packages.ditto.src.risk_manager import grade_trade
         q = grade_trade(
@@ -578,6 +598,16 @@ class TestRiskManager:
             had_stop_loss=False,
         )
         assert q.grade == "D"
+
+    def test_trade_grade_zero_expected(self):
+        from packages.ditto.src.risk_manager import grade_trade
+        q = grade_trade(
+            entry_price=100, exit_price=110,
+            expected_entry=0, expected_exit=0,
+            had_stop_loss=True,
+        )
+        assert q.grade == "A"
+        assert q.slippage_pct == 0.0
 
     def test_trade_grade_pnl_long(self):
         from packages.ditto.src.risk_manager import grade_trade
