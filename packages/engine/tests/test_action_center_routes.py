@@ -39,6 +39,15 @@ def _submit(action_center, order_id: str = "ord-1") -> None:
     action_center.submit(order_id, "acct-1", {"symbol": "NIFTY", "action": "BUY", "quantity": "50"})
 
 
+def test_get_ac_no_app_context():
+    """Verify _get_ac falls back to the default singleton outside a request context."""
+    # Explicitly import the module to test directly. The `current_app` mock
+    # is implicit since we aren't within a Flask app or test client context.
+    from packages.engine.src.action_center_routes import _default_action_center, _get_ac  # noqa: PLC0415
+
+    assert _get_ac() is _default_action_center
+
+
 # ---------------------------------------------------------------------------
 # GET /pending
 # ---------------------------------------------------------------------------
@@ -162,6 +171,19 @@ class TestConfigEndpoints:
         assert resp.status_code == 200
         assert action_center.ttl_seconds == 120
 
+    def test_post_config_updates_both(self, client, action_center):
+        resp = client.post(
+            "/ft-api/v1/action-center/config",
+            json={"enabled": False, "ttl_seconds": 600},
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["enabled"] is False
+        assert data["ttl_seconds"] == 600
+        assert action_center.enabled is False
+        assert action_center.ttl_seconds == 600
+
     def test_post_config_invalid_ttl_returns_400(self, client):
         resp = client.post(
             "/ft-api/v1/action-center/config",
@@ -169,3 +191,12 @@ class TestConfigEndpoints:
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+    def test_post_config_invalid_ttl_value_returns_400(self, client):
+        resp = client.post(
+            "/ft-api/v1/action-center/config",
+            json={"ttl_seconds": 0},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == "ttl_seconds must be >= 1"
