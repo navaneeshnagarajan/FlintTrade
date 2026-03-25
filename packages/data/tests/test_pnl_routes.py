@@ -74,7 +74,11 @@ class TestPnLRoutes:
         data = json.loads(resp.data)
         assert data["status"] == "ok"
         assert "realized" in data["data"]
+        assert "unrealized" in data["data"]
         assert "total" in data["data"]
+        assert "max_total" in data["data"]
+        assert "min_total" in data["data"]
+        assert "trade_count" in data["data"]
         assert data["data"]["data_points"] >= 1
 
     def test_series_since_filter(self, app_client):
@@ -84,3 +88,10 @@ class TestPnLRoutes:
         data = json.loads(resp.data)
         assert data["status"] == "ok"
         assert data["data"] == []
+
+    def test_series_since_invalid_float(self, app_client):
+        resp = _get(app_client, "/ft-api/v1/pnl-tracker?since=invalid_float")
+        assert resp.status_code == 400
+        data = json.loads(resp.data)
+        assert data["status"] == "error"
+        assert data["message"] == "since must be a float"

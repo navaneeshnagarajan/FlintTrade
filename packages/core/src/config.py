@@ -63,8 +63,8 @@ class Settings(BaseModel):
         return cls(
             openalgo_host=host,
             openalgo_api_key=key,
-            openalgo_port=int(port),
-            openalgo_ws_port=int(ws_port),
+            openalgo_port=int(port) if port else 5000,
+            openalgo_ws_port=int(ws_port) if ws_port else 8765,
         )
 
 
