@@ -40,6 +40,27 @@ def _submit(action_center, order_id: str = "ord-1") -> None:
 
 
 # ---------------------------------------------------------------------------
+# _get_ac
+# ---------------------------------------------------------------------------
+
+
+class TestGetAc:
+    def test_get_ac_no_app_context(self):
+        from packages.engine.src.action_center_routes import _get_ac, _default_action_center  # noqa: PLC0415
+        # Outside an app context, RuntimeError is caught and the default is returned.
+        assert _get_ac() is _default_action_center
+
+    def test_get_ac_with_app_context_but_no_action_center(self):
+        from flask import Flask  # noqa: PLC0415
+        from packages.engine.src.action_center_routes import _get_ac, _default_action_center  # noqa: PLC0415
+
+        app = Flask(__name__)
+        # No "ACTION_CENTER" key in app.config
+        with app.app_context():
+            assert _get_ac() is _default_action_center
+
+
+# ---------------------------------------------------------------------------
 # GET /pending
 # ---------------------------------------------------------------------------
 
@@ -58,6 +79,22 @@ class TestGetPending:
         data = resp.get_json()
         assert len(data["data"]["orders"]) == 1
         assert data["data"]["orders"][0]["order_id"] == "ord-1"
+
+    def test_get_pending_function_direct(self, action_center):
+        from flask import Flask  # noqa: PLC0415
+        from packages.engine.src.action_center_routes import get_pending  # noqa: PLC0415
+
+        app = Flask(__name__)
+        app.config["ACTION_CENTER"] = action_center
+        _submit(action_center)
+
+        with app.app_context():
+            resp, status_code = get_pending()
+            assert status_code == 200
+            data = resp.get_json()
+            assert data["status"] == "success"
+            assert len(data["data"]["orders"]) == 1
+            assert data["data"]["orders"][0]["order_id"] == "ord-1"
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +206,14 @@ class TestConfigEndpoints:
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+    def test_post_config_value_error_ttl_returns_400(self, client, action_center):
+        resp = client.post(
+            "/ft-api/v1/action-center/config",
+            json={"ttl_seconds": -5},
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["status"] == "error"
+        assert "ttl_seconds must be >= 1" in data["message"]
