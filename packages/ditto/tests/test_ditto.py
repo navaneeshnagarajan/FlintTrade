@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from packages.ditto.src.account_manager import decrypt_value, encrypt_value
 
 # ======================================================================
 # Helpers
@@ -134,7 +135,6 @@ class TestAccountManager:
         mgr.close()
 
     def test_encryption_roundtrip(self):
-        from packages.ditto.src.account_manager import decrypt_value, encrypt_value
         from cryptography.fernet import Fernet
         key = Fernet.generate_key().decode()
         plaintext = "my_secret_api_key"
@@ -142,6 +142,26 @@ class TestAccountManager:
         assert encrypted != plaintext
         decrypted = decrypt_value(encrypted, key)
         assert decrypted == plaintext
+
+    def test_encrypt_decrypt_env_key(self, monkeypatch):
+        from cryptography.fernet import Fernet
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", key)
+        plaintext = "secret_env_key"
+        encrypted = encrypt_value(plaintext)
+        assert encrypted != plaintext
+        decrypted = decrypt_value(encrypted)
+        assert decrypted == plaintext
+
+    def test_encrypt_no_key_raises(self, monkeypatch):
+        monkeypatch.delenv("DITTO_ENCRYPTION_KEY", raising=False)
+        with pytest.raises(ValueError, match="DITTO_ENCRYPTION_KEY environment variable is required"):
+            encrypt_value("test")
+
+    def test_decrypt_no_key_raises(self, monkeypatch):
+        monkeypatch.delenv("DITTO_ENCRYPTION_KEY", raising=False)
+        with pytest.raises(ValueError, match="DITTO_ENCRYPTION_KEY environment variable is required"):
+            decrypt_value("test")
 
 
 # ======================================================================
