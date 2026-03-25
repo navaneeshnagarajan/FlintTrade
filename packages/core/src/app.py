@@ -40,6 +40,7 @@ from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler  # no
 from packages.automation.src.cron_manager import CronManager  # noqa: E402
 from packages.automation.src.telegram_bot import TelegramBot  # noqa: E402
 from packages.ai.src.llm_client import LLMClient, LLMConfig, LLMMessage  # noqa: E402
+from packages.ai.src.rag import RAGEngine  # noqa: E402
 
 # Ensure the gateway src directory is on sys.path so bare gateway imports resolve.
 _GATEWAY_SRC = str(Path(_REPO_ROOT) / "packages" / "gateway" / "src")
@@ -134,6 +135,7 @@ def create_flask_app(
     registry: BrokerRegistry | None = None,
     credential_store: CredentialStore | None = None,
     contract_manager: ContractManager | None = None,
+    rag: Any | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -146,6 +148,7 @@ def create_flask_app(
         registry: BrokerRegistry for multi-broker account management.
         credential_store: CredentialStore for encrypted credential persistence.
         contract_manager: ContractManager for broker symbol contract data.
+        rag: RAGEngine instance for knowledge base queries.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -188,6 +191,9 @@ def create_flask_app(
     app.config["CREDENTIAL_STORE"] = credential_store
     app.config["CONTRACT_MANAGER"] = contract_manager
     app.config["OAUTH_STATES"] = {}
+
+    # Store RAG instance
+    app.config["RAG"] = rag
 
     # Register gateway blueprint (mounts at /ft-api/v1/)
     app.register_blueprint(gateway_bp)
@@ -1090,20 +1096,14 @@ def create_flask_app(
             return jsonify({"status": "error", "message": "query is required"}), 400
 
         try:
-            from packages.ai.src.rag import RAGEngine  # noqa: PLC0415
-            from packages.ai.src.llm_client import LLMClient  # noqa: PLC0415
-
-            try:
-                llm_client = LLMClient() if _is_llm_configured() else None
-                rag = RAGEngine(llm_client=llm_client)
-                response = rag.query(query, n_results=top_k)
-                if llm_client:
-                    llm_client.close()
-            except ImportError:
+            rag = app.config.get("RAG")
+            if rag is None:
                 return jsonify({
                     "status": "error",
-                    "message": "RAG not configured — chromadb not installed. pip install chromadb",
+                    "message": "RAG engine not available",
                 }), 200
+
+            response = rag.query(query, n_results=top_k)
 
             if response.error:
                 return jsonify({"status": "error", "message": response.error}), 200
@@ -1602,15 +1602,6 @@ def create_flask_app(
     except Exception:
         logger.debug("MCP bridge not available — skipping handler registration")
 
-    # ------------------------------------------------------------------
-    # RAG initialization (optional — requires chromadb)
-    # ------------------------------------------------------------------
-    # TODO: Initialize RAGEngine on startup once chromadb is a hard dependency.
-    #   from packages.ai.src.rag import RAGEngine
-    #   rag = RAGEngine()
-    #   if rag.document_count() == 0:
-    #       rag.index_directory("docs/")
-
     return app
 
 
@@ -1715,6 +1706,19 @@ class FlintTradeApp:
         self.contract_manager = ContractManager(contracts_dir)
         self.registry = BrokerRegistry()
 
+        # RAG — knowledge base (persistent)
+        rag_dir = flinttrade_dir / "rag"
+        rag_dir.mkdir(exist_ok=True)
+        try:
+            llm_client = LLMClient() if _is_llm_configured() else None
+            self.rag = RAGEngine(llm_client=llm_client, persist_directory=str(rag_dir))
+            if self.rag.document_count() == 0:
+                logger.info("RAG database empty — indexing docs/ directory...")
+                self.rag.index_directory("docs/")
+        except Exception as exc:
+            logger.warning("RAG initialization failed: %s", exc)
+            self.rag = None
+
         self._stop_event = asyncio.Event()
 
         logger.info("FlintTradeApp initialized — v%s", self.version)
@@ -1731,6 +1735,7 @@ class FlintTradeApp:
             registry=self.registry,
             credential_store=self.credential_store,
             contract_manager=self.contract_manager,
+            rag=self.rag,
         )
         _run_flask_server(flask_app, port=5001)
 
