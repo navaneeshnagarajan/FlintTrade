@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -789,9 +790,9 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
   const runError = backtestMutation.error;
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 items-start">
-      {/* Left: collapsible config panel — fixed width on md+, full width on mobile */}
-      <div className="w-full md:w-64 md:shrink-0">
+    <PanelGroup orientation="horizontal" className="flex gap-0 items-start min-h-0">
+      {/* Left: collapsible config panel — resizable, default 30%, min 250px */}
+      <Panel defaultSize={30} minSize={20} className="min-w-[250px]">
         <BacktestConfigPanel
           symbol={symbol}
           onSymbol={setSymbol}
@@ -816,10 +817,15 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
           isSuccess={backtestMutation.isSuccess}
           onRetry={handleRun}
         />
-      </div>
+      </Panel>
 
-      {/* Right: results panel */}
-      <div className="flex-1 min-w-0">
+      <PanelResizeHandle
+        data-separator
+        className="w-1 mx-2 rounded-full cursor-col-resize"
+      />
+
+      {/* Right: results panel — takes remaining space */}
+      <Panel minSize={40}>
         {isRunning ? (
           <GlassCard className="p-6 flex items-center gap-3">
             <Loader2 className="w-5 h-5 text-accent animate-spin" />
@@ -841,8 +847,8 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
             </p>
           </GlassCard>
         )}
-      </div>
-    </div>
+      </Panel>
+    </PanelGroup>
   );
 }
 

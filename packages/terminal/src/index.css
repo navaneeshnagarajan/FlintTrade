@@ -1,7 +1,4 @@
 @import "tailwindcss";
-@import "./themes/obsidian.css";
-@import "./themes/terminal-green.css";
-@import "./themes/ocean-blue.css";
 @import "./themes/light.css";
 
 /* ---------- Geist font (variable, from geist npm package) ---------- */
@@ -440,6 +437,18 @@ html.theme-light .dockview-theme-dark {
   [data-separator] {
     transition: none;
   }
+}
+
+/* ---------- Focus ring animation (WCAG 2.4.7) ---------- */
+@keyframes ring-scale-in {
+  from { outline-width: 0; outline-offset: 4px; }
+  to { outline-width: 3px; outline-offset: 2px; }
+}
+
+*:focus-visible {
+  animation: ring-scale-in 200ms ease-out forwards;
+  outline-color: var(--color-accent);
+  outline-style: solid;
 }
 
 /* ---------- Reduced motion respect (WCAG 2.3.3) ---------- */
