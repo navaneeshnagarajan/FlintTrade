@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
+import { useNavigate } from "react-router-dom";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
@@ -76,14 +77,15 @@ function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
 // Full-page tools available from the TOOLS dropdown on /trade.
 // backtest-lab → /lab, strategy-builder → /lab, flow-builder → /automate
 // are full routes now and are no longer overlaid on the /trade canvas.
-const tools: Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>> = {
-  "settings": lazy(() => import("../tools/Settings/SettingsTool")),
+// "settings" has been removed: it now navigates to /settings (handled in handleSelectTool).
+const tools: Omit<Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>, "settings"> = {
   "trade-journal": lazy(() => import("../tools/TradeJournal/TradeJournalTool")),
   "pnl-dashboard": lazy(() => import("../tools/PnLDashboard/PnLDashboardTool")),
   "market-intelligence": lazy(() => import("../tools/MarketIntelligence/MarketIntelligenceTool")),
 };
 
 export default function TerminalRoute() {
+  const navigate = useNavigate();
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
   const [panelCount, setPanelCount] = useState<number | null>(null);
   const disposablesRef = useRef<Array<{ dispose(): void }>>([]);
@@ -188,22 +190,34 @@ export default function TerminalRoute() {
   }, []);
 
   const handleSelectTool = useCallback((toolId: ToolId) => {
+    // "settings" is now a dedicated route — navigate instead of overlaying the canvas.
+    if (toolId === "settings") {
+      navigate("/settings");
+      return;
+    }
     setActiveTool(toolId);
-  }, []);
+  }, [navigate]);
 
   // Listen for the custom event dispatched by DailyWelcome's "Open Trade Journal" link.
   useEffect(() => {
     function onOpenTool(e: Event) {
       const detail = (e as CustomEvent<{ toolId: ToolId }>).detail;
-      if (detail?.toolId) {
-        setActiveTool(detail.toolId);
+      if (!detail?.toolId) return;
+      // "settings" navigates to the dedicated route, not a canvas overlay.
+      if (detail.toolId === "settings") {
+        navigate("/settings");
+        return;
       }
+      setActiveTool(detail.toolId);
     }
     window.addEventListener("flinttrade:open-tool", onOpenTool);
     return () => window.removeEventListener("flinttrade:open-tool", onOpenTool);
-  }, []);
+  }, [navigate]);
 
-  const ToolComponent = activeTool ? tools[activeTool] : null;
+  // activeTool is never "settings" (navigate handles it), so the cast is safe.
+  const ToolComponent = activeTool
+    ? (tools as Record<string, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>)[activeTool]
+    : null;
 
   return (
     <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden select-none">

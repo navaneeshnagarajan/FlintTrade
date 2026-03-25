@@ -1,9 +1,9 @@
 /**
- * useSettingsState — shared hook for SettingsRoute and SettingsTool.
+ * useSettingsState — shared hook for SettingsRoute and QuickAccessPanel.
  *
  * Reads from settingsStore + connectionStore and returns typed selectors
- * plus update actions. Both the full-page settings route and the canvas
- * panel consume this hook so they share identical data shapes.
+ * plus update actions. Both the full-page settings route and the quick
+ * access panel consume this hook so they share identical data shapes.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

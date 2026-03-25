@@ -1,7 +1,7 @@
 /**
- * settingsConfig — shared section definitions for SettingsRoute and SettingsTool.
+ * settingsConfig — shared section definitions for SettingsRoute.
  *
- * Extracted so both the full-page route and the canvas panel use the same
+ * Extracted so the full-page settings route and any consumers use the same
  * section IDs, labels, and icons without duplicating them.
  */
 

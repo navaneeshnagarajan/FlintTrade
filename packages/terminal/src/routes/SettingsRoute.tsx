@@ -1,9 +1,8 @@
 /**
  * SettingsRoute — standalone /settings full-page.
  *
- * Accessible from ALL routes via the TOOLS dropdown.
- * Uses the same section components as SettingsTool so settings
- * are shared (both read/write through the same Zustand stores).
+ * Accessible from ALL routes via the TOOLS dropdown, gear icon, or Ctrl+,.
+ * Shares section components and Zustand stores with QuickAccessPanel.
  *
  * Layout: slim header + left sidebar nav + scrollable content area.
  */

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
-import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X, Sun, Moon, Settings } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { useTimings } from "@/hooks/useMarketStatus";
 import type { MarketTiming } from "@/types/api";
 import AccountSwitcher from "./AccountSwitcher";
 import SandboxToggle from "./SandboxToggle";
+import QuickAccessPanel from "./QuickAccessPanel";
 
 function ISTClock() {
   const [time, setTime] = useState("");
@@ -213,8 +214,22 @@ export default function TopBar() {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   /** Id of the workspace tab awaiting inline delete confirmation. */
   const [deletingTabId, setDeletingTabId] = useState<string | null>(null);
+  /** Quick settings panel open state */
+  const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
+  const gearRef = useRef<HTMLButtonElement>(null);
 
   const connected = status === "connected";
+
+  // Phase B: themeStore.mode / setMode not yet in ThemeState — use cast fallback.
+  // Phase C will add these fields to the store.
+  const themeMode = useThemeStore(
+    (s) => (s as unknown as { mode?: "dark" | "light" | "system" }).mode ?? "dark",
+  ) as "dark" | "light" | "system";
+  const setThemeMode = useThemeStore(
+    (s) =>
+      (s as unknown as { setMode?: (m: string) => void }).setMode ??
+      (() => { /* noop until Phase C */ }),
+  );
 
   // Pending action center orders — poll every 5s for badge count
   const { data: pendingOrders } = useQuery({
@@ -314,6 +329,24 @@ export default function TopBar() {
     return () => window.removeEventListener("click", handler);
   }, [contextMenu]);
 
+  // Close QuickAccessPanel when clicking outside the panel or its trigger button
+  useEffect(() => {
+    if (!quickSettingsOpen) return;
+    const handler = (e: MouseEvent) => {
+      const panel = document.querySelector("[role='dialog'][aria-label='Quick settings']");
+      if (
+        panel &&
+        !panel.contains(e.target as Node) &&
+        gearRef.current &&
+        !gearRef.current.contains(e.target as Node)
+      ) {
+        setQuickSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [quickSettingsOpen]);
+
   // Ping OpenAlgo every 10s to check connection
   useEffect(() => {
     const check = async () => {
@@ -330,6 +363,18 @@ export default function TopBar() {
     const id = setInterval(check, 10_000);
     return () => clearInterval(id);
   }, [setStatus]);
+
+  // Ctrl+, (or Cmd+,) → navigate to /settings
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        navigate("/settings");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [navigate]);
 
   const pnlColor = totalPnl >= 0 ? "text-profit" : "text-loss";
   const pnlSign = totalPnl >= 0 ? "+" : "";
@@ -595,6 +640,45 @@ export default function TopBar() {
 
         {/* Sandbox / Live trading toggle */}
         <SandboxToggle />
+
+        {/* Sun/Moon quick mode flip */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 p-0"
+          onClick={() => setThemeMode(themeMode === "dark" ? "light" : "dark")}
+          aria-label={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {themeMode === "dark" ? (
+            <Sun className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Moon className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+        </Button>
+
+        {/* Gear icon + QuickAccessPanel */}
+        <div className="relative">
+          <Button
+            ref={gearRef}
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setQuickSettingsOpen(!quickSettingsOpen)}
+            aria-label="Quick settings"
+            aria-expanded={quickSettingsOpen}
+            aria-haspopup="dialog"
+          >
+            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+          <AnimatePresence>
+            {quickSettingsOpen && (
+              <QuickAccessPanel
+                onClose={() => setQuickSettingsOpen(false)}
+                triggerRef={gearRef}
+              />
+            )}
+          </AnimatePresence>
+        </div>
 
         <div className="w-px h-4 bg-border-default" aria-hidden="true" />
 
