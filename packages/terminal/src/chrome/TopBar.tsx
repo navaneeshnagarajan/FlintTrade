@@ -110,6 +110,7 @@ function MarketStatusBadge() {
   const [statusInfo, setStatusInfo] = useState<MarketStatusInfo>(() =>
     getNseStatus(timings),
   );
+  const resolvedMode = useThemeStore((s) => s.getResolvedMode());
 
   // Recompute every 30 seconds so the badge flips automatically at open/close
   useEffect(() => {
@@ -126,8 +127,10 @@ function MarketStatusBadge() {
     weekend: "bg-text-muted",
   };
 
+  // On light backgrounds, text-profit (#22c55e) fails WCAG AA contrast.
+  // Use text-green-700 (#15803d) on light mode — passes 4.5:1 on white.
   const textClass: Record<MarketStatus, string> = {
-    open: "text-profit",
+    open: resolvedMode === "light" ? "text-green-700" : "text-profit",
     "pre-market": "text-amber-400",
     closed: "text-text-muted",
     weekend: "text-text-muted",

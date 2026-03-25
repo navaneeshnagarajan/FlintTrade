@@ -789,9 +789,9 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
   const runError = backtestMutation.error;
 
   return (
-    <div className="flex gap-4 items-start">
-      {/* Left: collapsible config panel — fixed width */}
-      <div className="w-64 shrink-0">
+    <div className="flex flex-col md:flex-row gap-4 items-start">
+      {/* Left: collapsible config panel — fixed width on md+, full width on mobile */}
+      <div className="w-full md:w-64 md:shrink-0">
         <BacktestConfigPanel
           symbol={symbol}
           onSymbol={setSymbol}

@@ -334,6 +334,12 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
       animate="animate"
       exit="exit"
       onKeyDown={handleKeyDown}
+      onBlur={(e) => {
+        // Close when focus moves entirely outside the panel
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+          onClose();
+        }
+      }}
     >
       {/* Screen reader announcement on open */}
       <span className="sr-only" aria-live="polite" role="status">

@@ -96,6 +96,9 @@
       --color-text-secondary: #52525b;
       --color-text-muted: #71717a;
       --color-text-disabled: #a1a1aa;
+      /* WCAG AA contrast on white backgrounds (4.5:1 minimum) */
+      --color-profit: #16a34a;
+      --color-loss: #dc2626;
     }
   }
 }
