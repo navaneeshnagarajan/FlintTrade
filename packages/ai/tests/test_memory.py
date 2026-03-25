@@ -12,8 +12,9 @@ import os
 import uuid
 from datetime import datetime
 
-import chromadb
 import pytest
+
+chromadb = pytest.importorskip("chromadb", reason="chromadb not installed")
 
 from packages.ai.src.memory import (
     MemoryItem,
