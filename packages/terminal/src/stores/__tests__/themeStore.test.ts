@@ -13,10 +13,10 @@ import { CINEMATIC_THEMES } from "@/lib/cinematicThemes";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Reset the store to its initial programmatic state before each test. */
+/** Reset the store to its v3 initial programmatic state before each test. */
 function resetStore() {
   useThemeStore.setState({
-    activeThemeId: "emerald-night",
+    activeThemeId: "graphite",
     mode: "system",
     customThemes: [],
     reduceMotion: false,
@@ -46,8 +46,8 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("default state", () => {
-  it("activeThemeId defaults to emerald-night", () => {
-    expect(useThemeStore.getState().activeThemeId).toBe("emerald-night");
+  it("activeThemeId defaults to graphite", () => {
+    expect(useThemeStore.getState().activeThemeId).toBe("graphite");
   });
 
   it("mode defaults to system", () => {
@@ -178,22 +178,22 @@ describe("migration v1 → v2", () => {
 describe("getActiveTheme", () => {
   it("returns a CinematicTheme object for the default id", () => {
     const theme = useThemeStore.getState().getActiveTheme();
-    expect(theme.id).toBe("emerald-night");
+    expect(theme.id).toBe("graphite");
     expect(theme.dark).toBeDefined();
     expect(theme.light).toBeDefined();
     expect(theme.shared).toBeDefined();
   });
 
   it("returns the correct theme after setTheme", () => {
-    useThemeStore.getState().setTheme("ocean-depth");
+    useThemeStore.getState().setTheme("midnight");
     const theme = useThemeStore.getState().getActiveTheme();
-    expect(theme.id).toBe("ocean-depth");
+    expect(theme.id).toBe("midnight");
   });
 
-  it("falls back to emerald-night if id is not found", () => {
+  it("falls back to graphite (CINEMATIC_THEMES[0]) if id is not found", () => {
     useThemeStore.setState({ activeThemeId: "nonexistent" });
     const theme = useThemeStore.getState().getActiveTheme();
-    expect(theme.id).toBe("emerald-night");
+    expect(theme.id).toBe("graphite");
   });
 
   it("finds custom theme when present", () => {
@@ -257,13 +257,13 @@ describe("getResolvedMode", () => {
 
 describe("setTheme", () => {
   it("updates activeThemeId", () => {
-    useThemeStore.getState().setTheme("neon-pulse");
-    expect(useThemeStore.getState().activeThemeId).toBe("neon-pulse");
+    useThemeStore.getState().setTheme("midnight");
+    expect(useThemeStore.getState().activeThemeId).toBe("midnight");
   });
 
   it("calls applyTheme (sets data-theme attribute)", () => {
-    useThemeStore.getState().setTheme("solar-flare");
-    expect(document.documentElement.getAttribute("data-theme")).toBe("solar-flare");
+    useThemeStore.getState().setTheme("arctic-frost");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("arctic-frost");
   });
 
   it("sets all 6 cinematic theme ids without error", () => {
@@ -313,7 +313,7 @@ describe("setMode", () => {
 
 describe("applyTheme CSS properties", () => {
   beforeEach(() => {
-    useThemeStore.setState({ activeThemeId: "emerald-night", mode: "dark" });
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "dark" });
     useThemeStore.getState().applyTheme();
   });
 
@@ -328,18 +328,18 @@ describe("applyTheme CSS properties", () => {
   it("sets --color-accent", () => {
     const accent = document.documentElement.style.getPropertyValue("--color-accent");
     expect(accent).toBeTruthy();
-    // Emerald Night dark accent is #22c55e
-    expect(accent).toBe("#22c55e");
+    // Graphite dark accent is #7c8be8
+    expect(accent).toBe("#7c8be8");
   });
 
   it("sets --color-profit to fixed #22c55e regardless of theme", () => {
-    useThemeStore.getState().setTheme("blood-moon");
+    useThemeStore.getState().setTheme("midnight");
     const profit = document.documentElement.style.getPropertyValue("--color-profit");
     expect(profit).toBe("#22c55e");
   });
 
   it("sets --color-loss to fixed #ef4444 regardless of theme", () => {
-    useThemeStore.getState().setTheme("blood-moon");
+    useThemeStore.getState().setTheme("midnight");
     const loss = document.documentElement.style.getPropertyValue("--color-loss");
     expect(loss).toBe("#ef4444");
   });
@@ -387,7 +387,7 @@ describe("applyTheme CSS properties", () => {
   });
 
   it("sets data-theme attribute to theme id", () => {
-    expect(document.documentElement.getAttribute("data-theme")).toBe("emerald-night");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("graphite");
   });
 
   it("adds theme-light class in light mode", () => {
@@ -455,11 +455,11 @@ describe("custom themes", () => {
     ).toBe(false);
   });
 
-  it("removeCustomTheme falls back to emerald-night when active theme removed", () => {
+  it("removeCustomTheme falls back to graphite when active theme removed", () => {
     const custom = { ...CINEMATIC_THEMES[0], id: "custom-003" };
     useThemeStore.getState().addCustomTheme(custom);
     useThemeStore.setState({ activeThemeId: "custom-003" });
     useThemeStore.getState().removeCustomTheme("custom-003");
-    expect(useThemeStore.getState().activeThemeId).toBe("emerald-night");
+    expect(useThemeStore.getState().activeThemeId).toBe("graphite");
   });
 });

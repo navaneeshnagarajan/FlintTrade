@@ -2,7 +2,7 @@
  * themeStore.ts
  *
  * Zustand v5 store for FlintTrade's CinematicTheme system.
- * Persists to localStorage under "flinttrade-theme" (version 2).
+ * Persists to localStorage under "flinttrade-theme" (version 3).
  *
  * Responsibilities:
  *   - Track active CinematicTheme id
@@ -15,6 +15,8 @@
  * Persist version history:
  *   v1 — FlintTradeTheme (12 presets, single mode per theme)
  *   v2 — CinematicTheme (6 presets, dark + light variants, mode field)
+ *   v3 — Pruned to 6 canonical themes; removed emerald-night, ocean-depth,
+ *         solar-flare, neon-pulse, blood-moon. Default is now "graphite".
  */
 
 import { create } from "zustand";
@@ -84,9 +86,21 @@ const V1_THEME_MAP: Record<string, string> = {
   arctic:           "arctic-frost",
   neon:             "neon-pulse",
   forest:           "emerald-night",
-  monochrome:       "arctic-frost",
-  "solarized-dark": "solar-flare",
-  "solarized-light":"solar-flare",
+  monochrome:       "monochrome",
+  "solarized-dark": "solarized-dark",
+  "solarized-light":"solarized-dark",
+};
+
+// ---------------------------------------------------------------------------
+// Migration map: deprecated v2 CinematicTheme IDs → canonical v3 theme IDs
+// ---------------------------------------------------------------------------
+
+const V2_TO_V3_THEME_MAP: Record<string, string> = {
+  "emerald-night": "graphite",
+  "ocean-depth":   "midnight",
+  "solar-flare":   "graphite",
+  "neon-pulse":    "graphite",
+  "blood-moon":    "graphite",
 };
 
 // ---------------------------------------------------------------------------
@@ -114,11 +128,11 @@ function hexToRgba(hex: string, alpha: number): string {
  */
 function hexToHslString(hex: string): string {
   const cleaned = hex.startsWith("#") ? hex.slice(1) : hex;
-  if (cleaned.length !== 6) return "142 71% 45%"; // fallback to emerald accent
+  if (cleaned.length !== 6) return "233 70% 70%"; // fallback to graphite accent
   const r = parseInt(cleaned.slice(0, 2), 16) / 255;
   const g = parseInt(cleaned.slice(2, 4), 16) / 255;
   const b = parseInt(cleaned.slice(4, 6), 16) / 255;
-  if (isNaN(r) || isNaN(g) || isNaN(b)) return "142 71% 45%";
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return "233 70% 70%";
 
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
@@ -150,7 +164,7 @@ const storeImpl: StateCreator<
   ThemeState,
   [["zustand/persist", unknown]]
 > = (set, get) => ({
-  activeThemeId: "emerald-night",
+  activeThemeId: "graphite",
   mode: "system",
   customThemes: [],
   reduceMotion: false,
@@ -206,7 +220,7 @@ const storeImpl: StateCreator<
         (t: CinematicTheme) => t.id !== id,
       ),
       activeThemeId:
-        state.activeThemeId === id ? "emerald-night" : state.activeThemeId,
+        state.activeThemeId === id ? "graphite" : state.activeThemeId,
     }));
   },
 
@@ -235,7 +249,7 @@ const storeImpl: StateCreator<
     const builtin = findCinematicTheme(activeThemeId);
     if (builtin) return builtin;
 
-    // Fallback — emerald-night is always guaranteed to exist
+    // Fallback — graphite (index 0) is always guaranteed to exist in v3
     return CINEMATIC_THEMES[0];
   },
 
@@ -360,6 +374,22 @@ const storeImpl: StateCreator<
     style.setProperty("--color-itm-text",         shared.profit);
     style.setProperty("--color-otm-text",         "#eab308");
 
+    // ---- Surface hierarchy tokens (v0.3.0) ----
+    // Floating layer sits one step above elevated — use cardHover as its base
+    // so it remains visually distinct even in themes without a dedicated floating color.
+    style.setProperty("--color-surface-floating", variant.colors.cardHover);
+
+    // ---- Shadow scale (mode-aware) ----
+    if (resolvedMode === "light") {
+      style.setProperty("--shadow-raised",   "0 1px 3px rgba(0,0,0,0.08)");
+      style.setProperty("--shadow-elevated", "0 4px 12px rgba(0,0,0,0.12)");
+      style.setProperty("--shadow-floating", "0 8px 24px rgba(0,0,0,0.16)");
+    } else {
+      style.setProperty("--shadow-raised",   "none");
+      style.setProperty("--shadow-elevated", "0 4px 16px rgba(0,0,0,0.4)");
+      style.setProperty("--shadow-floating", "0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)");
+    }
+
     // ---- shadcn/ui HSL tokens ----
     const accentHsl = hexToHslString(variant.colors.accent);
     style.setProperty("--primary", accentHsl);
@@ -432,16 +462,24 @@ const storeImpl: StateCreator<
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade-theme",
-  version: 2,
+  version: 3,
   migrate: (persisted: unknown, version: number): Partial<ThemeState> => {
     const p = (persisted ?? {}) as Record<string, unknown>;
 
     if (version < 2) {
       const oldId = typeof p["activeThemeId"] === "string" ? p["activeThemeId"] : "midnight";
-      p["activeThemeId"] = V1_THEME_MAP[oldId] ?? "emerald-night";
+      p["activeThemeId"] = V1_THEME_MAP[oldId] ?? "graphite";
       p["mode"] = "system";
       p["customThemes"] = [];
       p["reduceMotion"] = false;
+    }
+
+    if (version < 3) {
+      const currentId = typeof p["activeThemeId"] === "string" ? p["activeThemeId"] : "graphite";
+      const mapped = V2_TO_V3_THEME_MAP[currentId];
+      if (mapped) {
+        p["activeThemeId"] = mapped;
+      }
     }
 
     return p as Partial<ThemeState>;
