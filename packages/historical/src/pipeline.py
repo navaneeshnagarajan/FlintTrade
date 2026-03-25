@@ -307,14 +307,14 @@ class DataPipeline:
     ) -> list[dict[str, Any]]:
         """Query OHLCV bars from a table."""
         _validate_table(table)
-        query = f"SELECT * FROM {table} WHERE symbol = ? AND exchange = ?"
+        query = f"SELECT * FROM {table} WHERE symbol = ? AND exchange = ?"  # nosec B608
         params: list[Any] = [symbol, exchange]
 
         if start_date:
-            query += " AND timestamp >= ?"
+            query += " AND timestamp >= ?"  # nosec B608
             params.append(start_date)
         if end_date:
-            query += " AND timestamp <= ?::DATE + INTERVAL '1 day'"
+            query += " AND timestamp <= ?::DATE + INTERVAL '1 day'"  # nosec B608
             params.append(end_date)
 
         query += " ORDER BY timestamp"
