@@ -42,9 +42,9 @@ class BrokerAccount:
     """A single broker account connected via its own OpenAlgo instance."""
 
     account_id: str
+    openalgo_host: str
+    api_key: str
     name: str = ""
-    openalgo_host: str = "http://127.0.0.1:5000"
-    api_key: str = ""
     enabled: bool = True
     allocation_weight: float = 1.0  # Relative weight for weighted allocation
     group: str = "default"  # "family", "personal", "HNI", etc.
@@ -134,13 +134,17 @@ class AccountManager:
 
         mgr = AccountManager()
         mgr.add_account(BrokerAccount(
-            account_id="acc1", name="Personal",
-            openalgo_host="http://127.0.0.1:5001", api_key="key1",
+            account_id="acc1",
+            openalgo_host="http://your-openalgo-host:5001",
+            api_key="your-api-key-1",
+            name="Personal",
             group="personal", allocation_weight=1.0,
         ))
         mgr.add_account(BrokerAccount(
-            account_id="acc2", name="Family",
-            openalgo_host="http://127.0.0.1:5002", api_key="key2",
+            account_id="acc2",
+            openalgo_host="http://your-openalgo-host:5002",
+            api_key="your-api-key-2",
+            name="Family",
             group="family", allocation_weight=2.0,
         ))
         health = mgr.health_check_all()
