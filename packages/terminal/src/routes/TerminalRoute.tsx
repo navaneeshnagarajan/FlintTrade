@@ -20,6 +20,10 @@ import { useDockviewTheme } from "@/hooks/useDockviewTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
+import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
+import { SectionHeader } from "@/components/layout/SectionHeader";
+import { TradeSidebar } from "./trade/TradeSidebar";
+import { TradeBottomPanel } from "./trade/TradeBottomPanel";
 
 // ---------------------------------------------------------------------------
 // Kill Switch Pill — floating daily loss monitor
@@ -175,6 +179,24 @@ export default function TerminalRoute() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // rAF handle for coalesced ARIA injection.
   const ariaRafRef = useRef<number | undefined>(undefined);
+
+  // ---------------------------------------------------------------------------
+  // Resizable panels — layout persistence via localStorage
+  // ---------------------------------------------------------------------------
+  // Horizontal layout: [sidebar, dockview, right-panel]
+  const { defaultLayout: hLayout, onLayoutChanged: onHLayoutChanged } = useDefaultLayout({
+    id: "trade-h-layout",
+    storage: localStorage,
+  });
+  // Vertical layout: [main, bottom-panel]
+  const { defaultLayout: vLayout, onLayoutChanged: onVLayoutChanged } = useDefaultLayout({
+    id: "trade-v-layout",
+    storage: localStorage,
+  });
+
+  // Imperative refs for programmatic collapse/expand (future toolbar buttons).
+  const bottomPanelRef = usePanelRef();
+  const rightPanelRef = usePanelRef();
 
   const level = useSkillLevel("trade");
   const resolvedMode = useThemeStore((s) => s.getResolvedMode());
@@ -372,59 +394,144 @@ export default function TerminalRoute() {
           </Suspense>
         </div>
       ) : (
-        <div
-          className="flex-1 relative overflow-hidden"
-          data-tour-target="workspace"
-          style={dockviewStyle}
+        /* ------------------------------------------------------------------ *
+         * Resizable panel shell — vertical outer split + horizontal inner split
+         * Bottom panel is collapsed by default (collapsedSize={0}).
+         * Dockview MUST sit inside overflow-hidden to prevent sash drift.
+         * ------------------------------------------------------------------ */
+        <Group
+          orientation="vertical"
+          className="flex-1 min-h-0"
+          defaultLayout={vLayout}
+          onLayoutChanged={onVLayoutChanged}
         >
-          <DockviewReact
-            className={dockviewThemeClass}
-            onReady={onDockviewReady}
-            components={widgetComponents}
-            singleTabMode="fullwidth"
-          />
-          {/* Empty-state overlay: shown when the canvas has no open panels */}
-          {panelCount === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div
-                className="pointer-events-auto flex flex-col items-center gap-4 px-8 py-10 rounded-xl border border-border-default bg-surface-card/80 backdrop-blur-sm shadow-lg animate-fade-in text-center max-w-xs"
-                role="status"
+          {/* ---- Main row: sidebar + dockview + right panel ---- */}
+          <Panel id="trade-main" defaultSize={75} minSize={40}>
+            <Group
+              orientation="horizontal"
+              className="h-full"
+              defaultLayout={hLayout}
+              onLayoutChanged={onHLayoutChanged}
+            >
+              {/* Left sidebar */}
+              <Panel
+                id="trade-sidebar"
+                defaultSize={18}
+                minSize={14}
+                maxSize={28}
+                collapsible
+                collapsedSize={0}
               >
-                <LayoutGrid className="h-10 w-10 text-text-muted" />
-                <div className="space-y-1">
-                  <p className="font-heading font-semibold text-base text-text-primary">
-                    Your workspace is empty
-                  </p>
-                  <p className="text-sm text-text-secondary">
-                    {level === "beginner"
-                      ? "Add your first widget — start with the Watchlist or Chart"
-                      : "Add widgets or choose a template to get started"}
+                <TradeSidebar />
+              </Panel>
+
+              <Separator
+                id="trade-sep-left"
+                className="w-1 cursor-col-resize bg-border-default hover:bg-primary/50 active:bg-primary/70 transition-colors shrink-0"
+              />
+
+              {/* Center: Dockview canvas */}
+              <Panel id="trade-dockview">
+                {/* overflow-hidden is mandatory — Dockview measures its parent
+                    to compute sash positions. Without it, height calculations break. */}
+                <div
+                  className="h-full w-full overflow-hidden relative"
+                  data-tour-target="workspace"
+                  style={dockviewStyle}
+                >
+                  <DockviewReact
+                    className={dockviewThemeClass}
+                    onReady={onDockviewReady}
+                    components={widgetComponents}
+                    singleTabMode="fullwidth"
+                  />
+                  {/* Empty-state overlay: shown when the canvas has no open panels */}
+                  {panelCount === 0 && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                      <div
+                        className="pointer-events-auto flex flex-col items-center gap-4 px-8 py-10 rounded-xl border border-border-default bg-surface-card/80 backdrop-blur-sm shadow-lg animate-fade-in text-center max-w-xs"
+                        role="status"
+                      >
+                        <LayoutGrid className="h-10 w-10 text-text-muted" />
+                        <div className="space-y-1">
+                          <p className="font-heading font-semibold text-base text-text-primary">
+                            Your workspace is empty
+                          </p>
+                          <p className="text-sm text-text-secondary">
+                            {level === "beginner"
+                              ? "Add your first widget — start with the Watchlist or Chart"
+                              : "Add widgets or choose a template to get started"}
+                          </p>
+                        </div>
+                        <div className="flex gap-2 mt-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs border-border-default text-text-secondary hover:text-text-primary"
+                            onClick={() => setWidgetPickerOpen(true)}
+                            data-tour-target="widget-picker"
+                          >
+                            <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
+                            Add Widgets
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
+                            onClick={() => setPresetPickerOpen(true)}
+                          >
+                            <Layers className="h-3.5 w-3.5 mr-1.5" />
+                            Choose Template
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Panel>
+
+              <Separator
+                id="trade-sep-right"
+                className="w-1 cursor-col-resize bg-border-default hover:bg-primary/50 active:bg-primary/70 transition-colors shrink-0"
+              />
+
+              {/* Right panel: Quick Trade placeholder */}
+              <Panel
+                id="trade-right"
+                panelRef={rightPanelRef}
+                defaultSize={20}
+                minSize={14}
+                maxSize={30}
+                collapsible
+                collapsedSize={0}
+              >
+                <div className="h-full overflow-y-auto bg-surface-card border-l border-border-default p-3">
+                  <SectionHeader title="Quick Trade" as="h3" className="mb-2" />
+                  <p className="text-xs text-text-muted">
+                    Order pad coming in next iteration
                   </p>
                 </div>
-                <div className="flex gap-2 mt-1">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs border-border-default text-text-secondary hover:text-text-primary"
-                    onClick={() => setWidgetPickerOpen(true)}
-                    data-tour-target="widget-picker"
-                  >
-                    <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
-                    Add Widgets
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
-                    onClick={() => setPresetPickerOpen(true)}
-                  >
-                    <Layers className="h-3.5 w-3.5 mr-1.5" />
-                    Choose Template
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+              </Panel>
+            </Group>
+          </Panel>
+
+          {/* ---- Horizontal separator above bottom panel ---- */}
+          <Separator
+            id="trade-sep-bottom"
+            className="h-1 cursor-row-resize bg-border-default hover:bg-primary/50 active:bg-primary/70 transition-colors shrink-0"
+          />
+
+          {/* ---- Bottom panel: Alerts / Trade Log ---- */}
+          <Panel
+            id="trade-bottom"
+            panelRef={bottomPanelRef}
+            defaultSize={0}
+            minSize={8}
+            collapsible
+            collapsedSize={0}
+          >
+            <TradeBottomPanel />
+          </Panel>
+        </Group>
       )}
 
       {/* Widget picker dialog */}

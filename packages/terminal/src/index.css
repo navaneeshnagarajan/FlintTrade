@@ -414,6 +414,34 @@ html.theme-light .dockview-theme-dark {
   --dv-group-view-background-color: var(--color-surface-base);
 }
 
+/* ---------- react-resizable-panels separator (sash) styling ---------- */
+/* The Separator component renders a div with data-separator attribute.
+   These rules give visual feedback on hover/drag without relying on inline
+   Tailwind classes that might be purged in production builds. */
+[data-separator] {
+  background-color: var(--color-border-default);
+  transition: background-color 150ms ease;
+  position: relative;
+  z-index: 10;
+  /* Widen the interactive hit area beyond the visual 1px/4px rule */
+  flex-shrink: 0;
+}
+[data-separator]:hover,
+[data-separator]:focus-visible {
+  background-color: var(--color-primary);
+  opacity: 0.5;
+}
+[data-separator][data-resize-handle-state="drag"] {
+  background-color: var(--color-primary);
+  opacity: 0.8;
+}
+/* Reduce motion: skip transitions on the drag handle */
+@media (prefers-reduced-motion: reduce) {
+  [data-separator] {
+    transition: none;
+  }
+}
+
 /* ---------- Reduced motion respect (WCAG 2.3.3) ---------- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
