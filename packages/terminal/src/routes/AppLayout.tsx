@@ -8,6 +8,7 @@ import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -67,6 +68,7 @@ export default function AppLayout() {
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   const location = useLocation();
   const navigate = useNavigate();
+  const sandboxMode = useSettingsStore((s) => s.sandboxMode);
 
   const routeTitle = ROUTE_TITLES[location.pathname] ?? "FlintTrade";
 
@@ -109,6 +111,14 @@ export default function AppLayout() {
     <div className="h-screen flex flex-col bg-surface-base overflow-hidden">
       {showSmallScreenWarning && (
         <SmallScreenOverlay onDismiss={handleDismissSmallScreen} />
+      )}
+      {/* Paper trading indicator — persistent amber top border when sandbox mode is active */}
+      {sandboxMode && (
+        <div
+          className="h-0.5 bg-amber-500 shrink-0"
+          role="status"
+          aria-label="Paper trading mode active"
+        />
       )}
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}

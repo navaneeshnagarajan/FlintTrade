@@ -1,0 +1,613 @@
+/**
+ * SocialTab.tsx
+ *
+ * Social trading foundation — leaderboard + strategy marketplace.
+ * Fetches data from /ft-api/v1/social/* endpoints.
+ *
+ * Two sections:
+ *   1. Leaderboard: TanStack Table of top traders ranked by return %
+ *   2. Marketplace: GlassCard grid of shared strategies with Copy button
+ */
+
+import { useState, useMemo } from "react";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  type ColumnDef,
+  type SortingState,
+  flexRender,
+} from "@tanstack/react-table";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  Trophy,
+  Users,
+  Copy,
+  TrendingUp,
+  Shield,
+  BarChart3,
+  RefreshCw,
+  AlertCircle,
+  Star,
+  Filter,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { GlassCard } from "@/components/ui/GlassCard";
+import { StaggeredList } from "@/components/motion/StaggeredList";
+import { cn } from "@/lib/utils";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface TraderRow {
+  rank: number;
+  user_id: string;
+  display_name: string;
+  strategy_count: number;
+  win_rate: number;
+  total_return_pct: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  follower_count: number;
+  trades_count: number;
+  active_since: string;
+  risk_score: number;
+}
+
+interface StrategyCard {
+  strategy_id: string;
+  creator_id: string;
+  name: string;
+  description: string;
+  category: string;
+  instruments: string[];
+  backtest_sharpe: number;
+  backtest_return_pct: number;
+  backtest_max_dd_pct: number;
+  live_return_pct: number;
+  follower_count: number;
+  created_at: string;
+}
+
+interface LeaderboardResponse {
+  status: string;
+  data: { traders: TraderRow[] };
+}
+
+interface StrategiesResponse {
+  status: string;
+  data: { strategies: StrategyCard[] };
+}
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+
+const FT_API_BASE = "/ft-api/v1";
+
+async function fetchLeaderboard(metric: string): Promise<TraderRow[]> {
+  const res = await fetch(
+    `${FT_API_BASE}/social/leaderboard?metric=${metric}&limit=20`,
+  );
+  if (!res.ok) throw new Error("Failed to fetch leaderboard");
+  const json: LeaderboardResponse = await res.json();
+  return json.data.traders;
+}
+
+async function fetchStrategies(category: string | null): Promise<StrategyCard[]> {
+  const params = new URLSearchParams({ limit: "50" });
+  if (category) params.set("category", category);
+  const res = await fetch(`${FT_API_BASE}/social/strategies?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch strategies");
+  const json: StrategiesResponse = await res.json();
+  return json.data.strategies;
+}
+
+async function copyStrategy(
+  strategyId: string,
+  userId: string,
+): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${FT_API_BASE}/social/strategies/copy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ strategy_id: strategyId, user_id: userId }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message ?? "Copy failed");
+  return json.data;
+}
+
+// ── Risk badge helper ────────────────────────────────────────────────────────
+
+function RiskBadge({ score }: { score: number }) {
+  const config: Record<number, { label: string; className: string }> = {
+    1: { label: "Low", className: "bg-profit/15 text-profit border-profit/30" },
+    2: { label: "Low-Med", className: "bg-profit/10 text-profit border-profit/20" },
+    3: { label: "Medium", className: "bg-accent/15 text-accent border-accent/30" },
+    4: { label: "Med-High", className: "bg-warning/15 text-warning border-warning/30" },
+    5: { label: "High", className: "bg-loss/15 text-loss border-loss/30" },
+  };
+  const c = config[score] ?? config[3];
+  return (
+    <Badge variant="outline" className={cn("text-xxs h-5", c.className)}>
+      {c.label}
+    </Badge>
+  );
+}
+
+// ── Category badge helper ────────────────────────────────────────────────────
+
+function CategoryBadge({ category }: { category: string }) {
+  const colors: Record<string, string> = {
+    intraday: "bg-accent/15 text-accent border-accent/30",
+    swing: "bg-profit/15 text-profit border-profit/30",
+    options: "bg-warning/15 text-warning border-warning/30",
+    investment: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  };
+  return (
+    <Badge variant="outline" className={cn("text-xxs h-5 capitalize", colors[category] ?? "")}>
+      {category}
+    </Badge>
+  );
+}
+
+// ── Leaderboard columns ──────────────────────────────────────────────────────
+
+function buildLeaderboardColumns(): ColumnDef<TraderRow>[] {
+  return [
+    {
+      accessorKey: "rank",
+      header: "#",
+      cell: ({ getValue }) => (
+        <span className="font-mono tabular-nums text-xs text-text-muted">
+          {getValue() as number}
+        </span>
+      ),
+      size: 40,
+    },
+    {
+      accessorKey: "display_name",
+      header: "Trader",
+      cell: ({ row }) => (
+        <div>
+          <div className="text-xs font-semibold text-text-primary">
+            {row.original.display_name}
+          </div>
+          <div className="text-xxs text-text-muted">
+            {row.original.trades_count.toLocaleString("en-IN")} trades
+          </div>
+        </div>
+      ),
+    },
+    {
+      accessorKey: "total_return_pct",
+      header: () => <span className="block text-right">Return %</span>,
+      cell: ({ getValue }) => {
+        const val = getValue() as number;
+        return (
+          <div
+            className={cn(
+              "text-right font-mono tabular-nums text-xs font-semibold",
+              val >= 0 ? "text-profit" : "text-loss",
+            )}
+          >
+            {val >= 0 ? "+" : ""}
+            {val.toFixed(1)}%
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: "win_rate",
+      header: () => <span className="block text-right">Win Rate</span>,
+      cell: ({ getValue }) => (
+        <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
+          {(getValue() as number).toFixed(1)}%
+        </div>
+      ),
+    },
+    {
+      accessorKey: "sharpe_ratio",
+      header: () => <span className="block text-right">Sharpe</span>,
+      cell: ({ getValue }) => (
+        <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
+          {(getValue() as number).toFixed(2)}
+        </div>
+      ),
+    },
+    {
+      accessorKey: "max_drawdown_pct",
+      header: () => <span className="block text-right">Max DD</span>,
+      cell: ({ getValue }) => (
+        <div className="text-right font-mono tabular-nums text-xs text-loss">
+          -{(getValue() as number).toFixed(1)}%
+        </div>
+      ),
+    },
+    {
+      accessorKey: "follower_count",
+      header: () => <span className="block text-right">Followers</span>,
+      cell: ({ getValue }) => (
+        <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
+          {(getValue() as number).toLocaleString("en-IN")}
+        </div>
+      ),
+    },
+    {
+      accessorKey: "risk_score",
+      header: () => <span className="block text-right">Risk</span>,
+      cell: ({ getValue }) => (
+        <div className="flex justify-end">
+          <RiskBadge score={getValue() as number} />
+        </div>
+      ),
+    },
+  ];
+}
+
+// ── Leaderboard section ──────────────────────────────────────────────────────
+
+function LeaderboardSection() {
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const columns = useMemo(() => buildLeaderboardColumns(), []);
+
+  const { data: traders = [], isLoading, isError, refetch } = useQuery({
+    queryKey: ["social", "leaderboard"],
+    queryFn: () => fetchLeaderboard("total_return_pct"),
+    staleTime: 60_000,
+  });
+
+  const table = useReactTable({
+    data: traders,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
+  return (
+    <GlassCard className="overflow-hidden p-0">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+        <div className="flex items-center gap-2">
+          <Trophy className="size-4 text-warning" />
+          <h2 className="text-sm font-heading font-bold text-text-primary">
+            Top Traders
+          </h2>
+          <Badge variant="outline" className="text-xxs h-5 border-border-default text-text-muted">
+            {traders.length} ranked
+          </Badge>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => refetch()}
+          className="text-xs text-text-muted h-6 px-2 gap-1"
+        >
+          <RefreshCw className={cn("size-3", isLoading && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Content */}
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
+          <RefreshCw className="size-5 animate-spin" />
+          <span className="text-sm">Loading leaderboard...</span>
+        </div>
+      )}
+
+      {isError && (
+        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
+          <AlertCircle className="size-5 text-loss" />
+          <span className="text-sm">Failed to load leaderboard</span>
+          <Button variant="outline" size="sm" onClick={() => refetch()} className="text-xs">
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {!isLoading && !isError && traders.length === 0 && (
+        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
+          <Users className="size-8 text-text-disabled" />
+          <span className="text-sm">No traders on the leaderboard yet</span>
+        </div>
+      )}
+
+      {!isLoading && !isError && traders.length > 0 && (
+        <div className="overflow-auto max-h-[420px]">
+          <Table aria-label="Trader leaderboard">
+            <TableHeader>
+              {table.getHeaderGroups().map((hg) => (
+                <TableRow key={hg.id} className="border-border-default hover:bg-transparent">
+                  {hg.headers.map((header) => {
+                    const sorted = header.column.getIsSorted();
+                    return (
+                      <TableHead
+                        key={header.id}
+                        className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider cursor-pointer select-none"
+                        onClick={header.column.getToggleSortingHandler()}
+                        aria-sort={
+                          sorted === "asc"
+                            ? "ascending"
+                            : sorted === "desc"
+                              ? "descending"
+                              : "none"
+                        }
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {sorted === "asc" && " \u2191"}
+                        {sorted === "desc" && " \u2193"}
+                      </TableHead>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  className="border-border-default hover:bg-surface-card transition-colors"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id} className="py-2 text-xs">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// ── Strategy card ────────────────────────────────────────────────────────────
+
+const CATEGORY_FILTERS = [
+  { value: null, label: "All" },
+  { value: "intraday", label: "Intraday" },
+  { value: "swing", label: "Swing" },
+  { value: "options", label: "Options" },
+  { value: "investment", label: "Investment" },
+] as const;
+
+function StrategyCardItem({
+  strategy,
+  onCopy,
+  isCopying,
+}: {
+  strategy: StrategyCard;
+  onCopy: (id: string) => void;
+  isCopying: boolean;
+}) {
+  return (
+    <GlassCard className="flex flex-col gap-3">
+      {/* Title row */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-heading font-bold text-text-primary truncate">
+            {strategy.name}
+          </h3>
+          <p className="text-xxs text-text-muted mt-0.5 line-clamp-2">
+            {strategy.description}
+          </p>
+        </div>
+        <CategoryBadge category={strategy.category} />
+      </div>
+
+      {/* Metrics */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <TrendingUp className="size-3 text-profit shrink-0" />
+          <span className="text-xxs text-text-muted">Backtest</span>
+          <span className="text-xs font-mono tabular-nums text-profit ml-auto">
+            +{strategy.backtest_return_pct.toFixed(1)}%
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <BarChart3 className="size-3 text-accent shrink-0" />
+          <span className="text-xxs text-text-muted">Live</span>
+          <span
+            className={cn(
+              "text-xs font-mono tabular-nums ml-auto",
+              strategy.live_return_pct >= 0 ? "text-profit" : "text-loss",
+            )}
+          >
+            {strategy.live_return_pct >= 0 ? "+" : ""}
+            {strategy.live_return_pct.toFixed(1)}%
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Star className="size-3 text-warning shrink-0" />
+          <span className="text-xxs text-text-muted">Sharpe</span>
+          <span className="text-xs font-mono tabular-nums text-text-secondary ml-auto">
+            {strategy.backtest_sharpe.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Shield className="size-3 text-loss shrink-0" />
+          <span className="text-xxs text-text-muted">Max DD</span>
+          <span className="text-xs font-mono tabular-nums text-loss ml-auto">
+            -{strategy.backtest_max_dd_pct.toFixed(1)}%
+          </span>
+        </div>
+      </div>
+
+      {/* Instruments */}
+      {strategy.instruments.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {strategy.instruments.slice(0, 4).map((inst) => (
+            <Badge
+              key={inst}
+              variant="outline"
+              className="text-xxs h-4 px-1.5 border-border-default text-text-muted"
+            >
+              {inst}
+            </Badge>
+          ))}
+          {strategy.instruments.length > 4 && (
+            <Badge
+              variant="outline"
+              className="text-xxs h-4 px-1.5 border-border-default text-text-muted"
+            >
+              +{strategy.instruments.length - 4}
+            </Badge>
+          )}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-1 border-t border-border-default">
+        <div className="flex items-center gap-1.5 text-xxs text-text-muted">
+          <Users className="size-3" />
+          <span>{strategy.follower_count.toLocaleString("en-IN")} followers</span>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs h-7 gap-1.5"
+          onClick={() => onCopy(strategy.strategy_id)}
+          disabled={isCopying}
+        >
+          <Copy className="size-3" />
+          Copy
+        </Button>
+      </div>
+    </GlassCard>
+  );
+}
+
+// ── Marketplace section ──────────────────────────────────────────────────────
+
+function MarketplaceSection() {
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const { data: strategies = [], isLoading, isError, refetch } = useQuery({
+    queryKey: ["social", "strategies", categoryFilter],
+    queryFn: () => fetchStrategies(categoryFilter),
+    staleTime: 60_000,
+  });
+
+  const copyMutation = useMutation({
+    mutationFn: ({ strategyId }: { strategyId: string }) =>
+      copyStrategy(strategyId, "current_user"),
+    onMutate: ({ strategyId }) => setCopyingId(strategyId),
+    onSettled: () => setCopyingId(null),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["social", "strategies"] });
+    },
+  });
+
+  const handleCopy = (strategyId: string) => {
+    copyMutation.mutate({ strategyId });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="size-4 text-accent" />
+          <h2 className="text-sm font-heading font-bold text-text-primary">
+            Strategy Marketplace
+          </h2>
+          <Badge variant="outline" className="text-xxs h-5 border-border-default text-text-muted">
+            {strategies.length} strategies
+          </Badge>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => refetch()}
+          className="text-xs text-text-muted h-6 px-2 gap-1"
+        >
+          <RefreshCw className={cn("size-3", isLoading && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Category filter pills */}
+      <div className="flex items-center gap-1.5">
+        <Filter className="size-3 text-text-muted shrink-0" />
+        {CATEGORY_FILTERS.map((f) => (
+          <button
+            key={f.label}
+            onClick={() => setCategoryFilter(f.value)}
+            className={cn(
+              "px-2.5 py-1 text-xxs font-medium rounded-full transition-colors border",
+              categoryFilter === f.value
+                ? "bg-accent/15 text-accent border-accent/30"
+                : "text-text-muted border-border-default hover:text-text-secondary hover:border-border-hover",
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
+          <RefreshCw className="size-5 animate-spin" />
+          <span className="text-sm">Loading strategies...</span>
+        </div>
+      )}
+
+      {isError && (
+        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
+          <AlertCircle className="size-5 text-loss" />
+          <span className="text-sm">Failed to load strategies</span>
+          <Button variant="outline" size="sm" onClick={() => refetch()} className="text-xs">
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {!isLoading && !isError && strategies.length === 0 && (
+        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
+          <BarChart3 className="size-8 text-text-disabled" />
+          <span className="text-sm">No strategies found</span>
+        </div>
+      )}
+
+      {!isLoading && !isError && strategies.length > 0 && (
+        <StaggeredList>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {strategies.map((s) => (
+              <StrategyCardItem
+                key={s.strategy_id}
+                strategy={s}
+                onCopy={handleCopy}
+                isCopying={copyingId === s.strategy_id}
+              />
+            ))}
+          </div>
+        </StaggeredList>
+      )}
+    </div>
+  );
+}
+
+// ── Main export ──────────────────────────────────────────────────────────────
+
+export function SocialTab() {
+  return (
+    <div className="space-y-8">
+      <LeaderboardSection />
+      <MarketplaceSection />
+    </div>
+  );
+}

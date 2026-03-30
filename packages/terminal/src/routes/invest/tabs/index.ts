@@ -11,3 +11,4 @@ export { SectorTab } from "./SectorTab";
 export { EtfTab } from "./EtfTab";
 export { StocksTab } from "./StocksTab";
 export { IpoTab } from "./IpoTab";
+export { SocialTab } from "./SocialTab";

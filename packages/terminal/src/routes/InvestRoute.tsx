@@ -28,6 +28,7 @@ import {
   Ticket,
   RefreshCw,
   LayoutDashboard,
+  Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -43,6 +44,7 @@ import {
   EtfTab,
   StocksTab,
   IpoTab,
+  SocialTab,
 } from "./invest/tabs";
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ type TabId =
   | "holdings"
   | "sip"
   | "networth"
+  | "social"
   | "sector"
   | "etf"
   | "stocks"
@@ -68,6 +71,7 @@ const TABS: TabDef[] = [
   { id: "holdings", label: "Holdings", icon: BarChart3 },
   { id: "sip", label: "SIPs", icon: Calculator },
   { id: "networth", label: "Net Worth", icon: Wallet },
+  { id: "social", label: "Social", icon: Users },
   { id: "sector", label: "Sector", icon: RotateCcw },
   { id: "etf", label: "ETFs", icon: Filter },
   { id: "stocks", label: "Stocks", icon: Search },
@@ -84,6 +88,7 @@ const TAB_CONTENT: Record<TabId, ReactNode> = {
   holdings: <HoldingsTab />,
   sip: <SipTab />,
   networth: <NetWorthTab />,
+  social: <SocialTab />,
   sector: <SectorTab />,
   etf: <EtfTab />,
   stocks: <StocksTab />,
@@ -104,8 +109,8 @@ function InvestShell() {
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["dashboard", "holdings", "sip", "networth"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "sector"];
-    return ["dashboard", "holdings", "sip", "networth", "sector", "etf", "stocks", "ipo"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "etf", "stocks", "ipo"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
