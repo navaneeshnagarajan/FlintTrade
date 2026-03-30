@@ -323,7 +323,8 @@ class TestWebhookServer:
     def test_register_endpoint(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer()
-        handler = lambda body, headers: {"status": "ok"}
+        def handler(body, headers):
+            return {"status": "ok"}
         server.register("/webhook/test", "test", handler)
         # Endpoint should exist in Flask app rules
         rules = [r.rule for r in server.app.url_map.iter_rules()]
@@ -332,7 +333,8 @@ class TestWebhookServer:
     def test_register_tradingview(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer()
-        handler = lambda body, headers: {"status": "ok"}
+        def handler(body, headers):
+            return {"status": "ok"}
         server.register_tradingview(handler, strategy_id="my_strat")
         rules = [r.rule for r in server.app.url_map.iter_rules()]
         assert "/webhook/tradingview/my_strat" in rules
@@ -340,7 +342,8 @@ class TestWebhookServer:
     def test_register_chartink(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer()
-        handler = lambda body, headers: {"status": "ok"}
+        def handler(body, headers):
+            return {"status": "ok"}
         server.register_chartink(handler, strategy_id="scanner1")
         rules = [r.rule for r in server.app.url_map.iter_rules()]
         assert "/webhook/chartink/scanner1" in rules
@@ -357,7 +360,8 @@ class TestWebhookServer:
     def test_webhook_auth_rejects_bad_secret(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer()
-        handler = lambda body, headers: {"result": "processed"}
+        def handler(body, headers):
+            return {"result": "processed"}
         server.register("/webhook/secure", "secure", handler, secret="my_secret")
         with server.app.test_client() as client:
             resp = client.post(
@@ -370,7 +374,8 @@ class TestWebhookServer:
     def test_webhook_auth_accepts_good_secret(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer()
-        handler = lambda body, headers: {"result": "processed"}
+        def handler(body, headers):
+            return {"result": "processed"}
         server.register("/webhook/secure", "secure", handler, secret="my_secret")
         with server.app.test_client() as client:
             resp = client.post(
@@ -383,7 +388,8 @@ class TestWebhookServer:
     def test_webhook_no_secret_allows_all(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer()
-        handler = lambda body, headers: {"result": "ok"}
+        def handler(body, headers):
+            return {"result": "ok"}
         server.register("/webhook/open", "open", handler)
         with server.app.test_client() as client:
             resp = client.post("/webhook/open", data=b"test")
@@ -392,7 +398,8 @@ class TestWebhookServer:
     def test_disable_endpoint(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer()
-        handler = lambda body, headers: {"result": "ok"}
+        def handler(body, headers):
+            return {"result": "ok"}
         server.register("/webhook/toggle", "toggle", handler)
         server.disable_endpoint("/webhook/toggle")
         with server.app.test_client() as client:
@@ -402,7 +409,8 @@ class TestWebhookServer:
     def test_rate_limit_on_webhook(self):
         from packages.integration.src.webhook_server import WebhookServer
         server = WebhookServer(rate_limit=3, rate_window=60)
-        handler = lambda body, headers: {"result": "ok"}
+        def handler(body, headers):
+            return {"result": "ok"}
         server.register("/webhook/limited", "limited", handler)
         with server.app.test_client() as client:
             for _ in range(3):

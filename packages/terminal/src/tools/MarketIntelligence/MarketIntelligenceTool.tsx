@@ -2181,6 +2181,20 @@ type TabId =
   | "maxpain"
   | "oiprofile";
 
+// Tabs that show static/sample data vs live API data
+const SAMPLE_DATA_TABS: TabId[] = [
+  "breadth",
+  "fiidii",
+  "sectors",
+  "heatmap",
+  "vix",
+  "global",
+  "participantoi",
+  "delivery",
+  "correlation",
+  "announcements",
+];
+
 interface TabDef {
   id: TabId;
   label: string;
@@ -2259,6 +2273,15 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
               <span className="text-text-disabled">/</span>
               <span className="text-xs text-text-secondary">{currentTab.label}</span>
             </>
+          )}
+          {activeTab && SAMPLE_DATA_TABS.includes(activeTab) ? (
+            <Badge className="text-xs h-4 px-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30">
+              Sample Data
+            </Badge>
+          ) : (
+            <Badge className="text-xs h-4 px-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+              Live
+            </Badge>
           )}
         </div>
         <button

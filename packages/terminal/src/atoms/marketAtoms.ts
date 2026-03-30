@@ -1,14 +1,23 @@
 import { atom } from "jotai";
-import { atomFamily } from "jotai/utils";
 import type { WsTick, WsInstrument } from "@/types/api";
 
 /**
- * Atom family for per-instrument tick data.
+ * Atom cache for per-instrument tick data.
  * Key format: "{exchange}:{symbol}" e.g. "NSE_INDEX:NIFTY"
+ *
+ * Using a plain Map instead of atomFamily (deprecated in jotai/utils, removed in v3).
+ * Interface is identical — callers use tickAtomFamily("NSE_INDEX:NIFTY") unchanged.
  */
-export const tickAtomFamily = atomFamily(
-  (_key: string) => atom<WsTick | null>(null)
-);
+const _tickAtomCache = new Map<string, ReturnType<typeof atom<WsTick | null>>>();
+
+export function tickAtomFamily(key: string): ReturnType<typeof atom<WsTick | null>> {
+  let existing = _tickAtomCache.get(key);
+  if (!existing) {
+    existing = atom<WsTick | null>(null);
+    _tickAtomCache.set(key, existing);
+  }
+  return existing;
+}
 
 // Derived index atoms (convenience)
 export const niftyAtom = tickAtomFamily("NSE_INDEX:NIFTY");

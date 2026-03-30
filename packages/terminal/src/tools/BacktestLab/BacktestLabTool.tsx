@@ -5,7 +5,9 @@
  *   - VectorBT-Tearsheets: EMA crossover, equity curve structure, QuantStats metrics
  */
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createChart, LineSeries } from "lightweight-charts";
+import type { IChartApi } from "lightweight-charts";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -122,8 +124,28 @@ const EXCHANGES = ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS"] as const;
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "1d"] as const;
 
 // ---------------------------------------------------------------------------
+// Equity curve data type — shared between mock data and API response shape
+// ---------------------------------------------------------------------------
+
+interface EquityPoint {
+  time: number; // Unix timestamp (seconds)
+  value: number; // Portfolio value (₹)
+}
+
+// ---------------------------------------------------------------------------
 // Mock results structure — ready for API integration
 // ---------------------------------------------------------------------------
+
+// Mock equity curve derived from MOCK_TRADES cumulative P&L on ₹10,00,000 capital.
+// Each point represents a trade exit date. Replace with real API data when backend connects.
+const MOCK_EQUITY_CURVE: EquityPoint[] = [
+  { time: 1705276800, value: 1000000 }, // 2024-01-15 — start
+  { time: 1705881600, value: 1005050 }, // 2024-01-22 — trade 1 exit
+  { time: 1707350400, value: 1008400 }, // 2024-02-12 — trade 2 exit
+  { time: 1709596800, value: 1005080 }, // 2024-03-04 — trade 3 exit
+  { time: 1711324800, value: 1013955 }, // 2024-03-25 — trade 4 exit
+  { time: 1713398400, value: 1011745 }, // 2024-04-17 — trade 5 exit
+];
 
 interface BacktestMetric {
   label: string;
@@ -209,8 +231,12 @@ function MetricCard({ metric }: { metric: BacktestMetric }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// EquityCurveChart — real Lightweight Charts line chart for equity curve data.
+// Falls back to SVG placeholder when no data points are provided.
+// ---------------------------------------------------------------------------
+
 function EquityCurvePlaceholder() {
-  // Placeholder SVG path simulating an equity curve
   const points = [0, 2, 5, 3, 8, 6, 12, 10, 15, 13, 18, 22, 20, 25, 24];
   const w = 600;
   const h = 120;
@@ -232,22 +258,79 @@ function EquityCurvePlaceholder() {
             <stop offset="100%" stopColor="#34d399" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <polyline
-          points={coords}
-          fill="none"
-          stroke="#34d399"
-          strokeWidth="2"
-        />
-        <polygon
-          points={`0,${h} ${coords} ${w},${h}`}
-          fill="url(#eqGrad)"
-        />
+        <polyline points={coords} fill="none" stroke="#34d399" strokeWidth="2" />
+        <polygon points={`0,${h} ${coords} ${w},${h}`} fill="url(#eqGrad)" />
       </svg>
       <div className="relative text-xs text-text-muted text-center">
         <BarChart2 size={20} className="mx-auto mb-1 opacity-40" />
         Equity curve renders here when backtest-engine API is connected
       </div>
     </div>
+  );
+}
+
+function EquityCurveChart({ data }: { data: EquityPoint[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || data.length === 0) return;
+
+    const bg = getComputedStyle(document.documentElement).getPropertyValue("--color-base").trim() || "#0a0a0f";
+    const gridColor = getComputedStyle(document.documentElement).getPropertyValue("--color-border").trim() || "#2a2a3a";
+    const textColor = getComputedStyle(document.documentElement).getPropertyValue("--color-text-muted").trim() || "#6b7280";
+
+    const chart = createChart(containerRef.current, {
+      width: containerRef.current.clientWidth,
+      height: 140,
+      layout: { background: { color: bg }, textColor },
+      grid: { vertLines: { color: gridColor }, horzLines: { color: gridColor } },
+      crosshair: { vertLine: { visible: true }, horzLine: { visible: true } },
+      rightPriceScale: { borderColor: gridColor },
+      timeScale: { borderColor: gridColor, timeVisible: true },
+      handleScroll: false,
+      handleScale: false,
+    });
+
+    const series = chart.addSeries(LineSeries, {
+      color: "#34d399",
+      lineWidth: 2,
+      priceFormat: { type: "price", precision: 0, minMove: 1 },
+    });
+
+    // Lightweight Charts v5 expects UTCTimestamp (seconds) for time
+    series.setData(
+      data.map((p) => ({
+        time: p.time as unknown as import("lightweight-charts").Time,
+        value: p.value,
+      }))
+    );
+
+    chart.timeScale().fitContent();
+    chartRef.current = chart;
+
+    const handleResize = () => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
+      chartRef.current = null;
+    };
+  }, [data]);
+
+  if (data.length === 0) return <EquityCurvePlaceholder />;
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full rounded-md border border-border-default overflow-hidden"
+      style={{ height: 140 }}
+    />
   );
 }
 
@@ -468,7 +551,7 @@ function ConfigureTab({
 // Results Tab
 // ---------------------------------------------------------------------------
 
-function ResultsTab({ hasRun }: { hasRun: boolean }) {
+function ResultsTab({ hasRun, equityCurve }: { hasRun: boolean; equityCurve: EquityPoint[] }) {
   if (!hasRun) {
     return (
       <div className="flex flex-col items-center justify-center h-40 text-center px-4 gap-2 mt-6">
@@ -493,13 +576,13 @@ function ResultsTab({ hasRun }: { hasRun: boolean }) {
           </p>
         </div>
 
-        {/* Equity curve placeholder */}
+        {/* Equity curve — real Lightweight Charts line chart, falls back to SVG if empty */}
         <div>
           <div className="text-xs text-text-muted mb-2 flex items-center gap-1">
             <TrendingUp size={12} />
             Equity Curve
           </div>
-          <EquityCurvePlaceholder />
+          <EquityCurveChart data={equityCurve} />
         </div>
 
         {/* Return metrics */}
@@ -710,8 +793,13 @@ interface Props {
 export default function BacktestLabTool({ onClose }: Props) {
   const [hasRun, setHasRun] = useState(false);
   const [activeTab, setActiveTab] = useState("configure");
+  // equityCurve is populated from API response when backend connects.
+  // For now, after "Run Backtest" we show the mock curve so the chart renders.
+  const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
 
   const handleRunRequest = () => {
+    // TODO: replace with real API call to backtest-engine when backend connects
+    setEquityCurve(MOCK_EQUITY_CURVE);
     setHasRun(true);
     setActiveTab("results");
   };
@@ -770,7 +858,7 @@ export default function BacktestLabTool({ onClose }: Props) {
           <ConfigureTab onRunRequest={handleRunRequest} />
         </TabsContent>
         <TabsContent value="results" className="flex-1 overflow-y-auto mt-0">
-          <ResultsTab hasRun={hasRun} />
+          <ResultsTab hasRun={hasRun} equityCurve={equityCurve} />
         </TabsContent>
         <TabsContent value="trades" className="flex-1 overflow-y-auto mt-0">
           <TradesTab hasRun={hasRun} />
