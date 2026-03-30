@@ -37,7 +37,7 @@ import {
   useMemo,
   useCallback,
 } from "react";
-import { AlertCircle, BarChart2, Loader2 } from "lucide-react";
+import { AlertCircle, BarChart2, Loader2, Grid3x3, BarChart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -291,11 +291,173 @@ function drawFootprint(
   }
 }
 
+// ─── Heatmap color helpers ───────────────────────────────────────────────────
+
+interface RGB { r: number; g: number; b: number }
+
+const HEATMAP_BUY_RAMP: RGB[] = [
+  { r: 10, g: 15, b: 30 },
+  { r: 15, g: 60, b: 100 },
+  { r: 30, g: 120, b: 180 },
+  { r: 60, g: 200, b: 230 },
+  { r: 200, g: 250, b: 255 },
+];
+
+const HEATMAP_SELL_RAMP: RGB[] = [
+  { r: 30, g: 10, b: 10 },
+  { r: 100, g: 30, b: 15 },
+  { r: 180, g: 60, b: 30 },
+  { r: 230, g: 150, b: 60 },
+  { r: 255, g: 230, b: 180 },
+];
+
+function lerpRGB(a: RGB, b: RGB, t: number): RGB {
+  return {
+    r: Math.round(a.r + (b.r - a.r) * t),
+    g: Math.round(a.g + (b.g - a.g) * t),
+    b: Math.round(a.b + (b.b - a.b) * t),
+  };
+}
+
+function colorFromRamp(ramp: RGB[], intensity: number): string {
+  const clamped = Math.max(0, Math.min(1, intensity));
+  const segments = ramp.length - 1;
+  const pos = clamped * segments;
+  const idx = Math.min(Math.floor(pos), segments - 1);
+  const frac = pos - idx;
+  const c = lerpRGB(ramp[idx], ramp[idx + 1], frac);
+  return `rgb(${c.r},${c.g},${c.b})`;
+}
+
+/**
+ * Draws the footprint data as a heatmap: each cell is colored by volume
+ * intensity. Buy-dominant cells in blue/cyan, sell-dominant in red/orange.
+ */
+function drawFootprintHeatmap(
+  ctx: CanvasRenderingContext2D,
+  columns: FootprintColumn[],
+  physicalWidth: number,
+  physicalHeight: number,
+  dpr: number,
+): void {
+  ctx.fillStyle = COLOR_CANVAS_BG;
+  ctx.fillRect(0, 0, physicalWidth, physicalHeight);
+
+  if (columns.length === 0) return;
+
+  const css = (px: number) => px * dpr;
+
+  const chartLeft = css(MARGIN_LEFT);
+  const chartRight = physicalWidth - css(MARGIN_RIGHT);
+  const chartTop = css(MARGIN_TOP);
+  const chartBottom = physicalHeight - css(MARGIN_BOTTOM);
+  const chartWidth = chartRight - chartLeft;
+  const chartHeight = chartBottom - chartTop;
+
+  if (chartWidth <= 0 || chartHeight <= 0) return;
+
+  const priceSet = new Set<number>();
+  columns.forEach((col) => col.cells.forEach((cell) => priceSet.add(cell.priceLevel)));
+  const priceLevels = [...priceSet].sort((a, b) => a - b);
+  const numLevels = priceLevels.length;
+  if (numLevels === 0) return;
+
+  const priceIndex = new Map<number, number>(priceLevels.map((p, i) => [p, i]));
+  const rowH = chartHeight / numLevels;
+  const colW = chartWidth / columns.length;
+
+  let maxVol = 1;
+  columns.forEach((col) =>
+    col.cells.forEach((cell) => {
+      maxVol = Math.max(maxVol, cell.buyVolume, cell.sellVolume);
+    }),
+  );
+
+  const gamma = 0.5;
+
+  // Draw heatmap cells
+  columns.forEach((col, colIdx) => {
+    const colLeft = chartLeft + colIdx * colW;
+
+    col.cells.forEach((cell) => {
+      const rowIdx = priceIndex.get(cell.priceLevel) ?? 0;
+      const cellBottom = chartBottom - rowIdx * rowH;
+      const cellTop = cellBottom - rowH;
+      const totalVol = cell.buyVolume + cell.sellVolume;
+      if (totalVol === 0) return;
+
+      const dominantBuy = cell.buyVolume >= cell.sellVolume;
+      const dominantVol = dominantBuy ? cell.buyVolume : cell.sellVolume;
+      const intensity = Math.pow(dominantVol / maxVol, gamma);
+
+      ctx.fillStyle = colorFromRamp(
+        dominantBuy ? HEATMAP_BUY_RAMP : HEATMAP_SELL_RAMP,
+        intensity,
+      );
+      ctx.fillRect(colLeft, cellTop, Math.ceil(colW) + 1, Math.ceil(rowH) + 1);
+
+      // POC highlight
+      if (cell.priceLevel === col.poc) {
+        ctx.save();
+        ctx.strokeStyle = COLOR_POC_BORDER;
+        ctx.lineWidth = dpr;
+        ctx.strokeRect(colLeft + 0.5, cellTop + 0.5, colW - 1, rowH - 1);
+        ctx.restore();
+      }
+    });
+
+    // Time label
+    ctx.save();
+    ctx.fillStyle = COLOR_TEXT;
+    ctx.font = `${css(9)}px "JetBrains Mono", monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(col.time, colLeft + colW / 2, chartBottom + css(4));
+    ctx.restore();
+  });
+
+  // Price scale
+  ctx.save();
+  ctx.fillStyle = COLOR_TEXT_PRICE;
+  ctx.font = `${css(9)}px "JetBrains Mono", monospace`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const maxLabels = Math.floor(chartHeight / css(16));
+  const step = Math.max(1, Math.ceil(numLevels / maxLabels));
+  priceLevels.forEach((price, i) => {
+    if (i % step !== 0) return;
+    const y = chartBottom - i * rowH - rowH / 2;
+    ctx.fillText(price.toLocaleString("en-IN"), chartRight + css(4), y);
+  });
+  ctx.restore();
+
+  // LTP line
+  const ltp = getLtp(columns);
+  const ltpIdx = priceIndex.get(ltp);
+  if (ltpIdx !== undefined) {
+    const ltpY = chartBottom - ltpIdx * rowH - rowH / 2;
+    ctx.save();
+    ctx.strokeStyle = COLOR_LTP_LINE;
+    ctx.lineWidth = dpr;
+    ctx.setLineDash([css(4), css(3)]);
+    ctx.beginPath();
+    ctx.moveTo(chartLeft, ltpY);
+    ctx.lineTo(chartRight, ltpY);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ─── View mode type ──────────────────────────────────────────────────────────
+
+type ViewMode = "footprint" | "heatmap";
+
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
 export default function OrderFlowWidget(_props: IDockviewPanelProps) {
   const [symbol, setSymbol] = useState("NIFTY");
   const [intervalLabel, setIntervalLabel] = useState("5m");
+  const [viewMode, setViewMode] = useState<ViewMode>("footprint");
 
   const intervalMinutes = useMemo(
     () => INTERVALS.find((i) => i.label === intervalLabel)?.minutes ?? 5,
@@ -322,9 +484,11 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
   const sizeRef = useRef({ width: 0, height: 0 });
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
 
   // Paint function — schedules via rAF to prevent redundant repaints
-  // Uses columnsRef to always read the latest columns without re-creating the callback.
+  // Uses refs to always read the latest state without re-creating the callback.
   const paint = useCallback(() => {
     if (rafRef.current !== null) return;
     rafRef.current = requestAnimationFrame(() => {
@@ -333,7 +497,9 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      drawFootprint(ctx, columnsRef.current, canvas.width, canvas.height, window.devicePixelRatio || 1);
+      const dpr = window.devicePixelRatio || 1;
+      const drawFn = viewModeRef.current === "heatmap" ? drawFootprintHeatmap : drawFootprint;
+      drawFn(ctx, columnsRef.current, canvas.width, canvas.height, dpr);
     });
   }, []);
 
@@ -367,10 +533,10 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
     return () => observer.disconnect();
   }, [paint]);
 
-  // Repaint when columns change (symbol/interval change)
+  // Repaint when columns or view mode change
   useEffect(() => {
     paint();
-  }, [columns, paint]);
+  }, [columns, viewMode, paint]);
 
   // Cleanup rAF on unmount
   useEffect(() => {
@@ -431,6 +597,40 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
               {iv.label}
             </button>
           ))}
+        </div>
+
+        {/* View mode toggle */}
+        <div className="flex items-center gap-0.5 border-l border-[#2a2a3a] pl-2 ml-1" role="group" aria-label="View mode">
+          <button
+            type="button"
+            onClick={() => setViewMode("footprint")}
+            className={cn(
+              "h-6 px-1.5 rounded transition-colors flex items-center gap-1",
+              viewMode === "footprint"
+                ? "bg-[#2a2a3a] text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-[#1a1a2a]",
+            )}
+            aria-pressed={viewMode === "footprint"}
+            aria-label="Footprint view"
+          >
+            <BarChart className="size-3" aria-hidden="true" />
+            <span className="text-xs">Footprint</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("heatmap")}
+            className={cn(
+              "h-6 px-1.5 rounded transition-colors flex items-center gap-1",
+              viewMode === "heatmap"
+                ? "bg-[#2a2a3a] text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-[#1a1a2a]",
+            )}
+            aria-pressed={viewMode === "heatmap"}
+            aria-label="Heatmap view"
+          >
+            <Grid3x3 className="size-3" aria-hidden="true" />
+            <span className="text-xs">Heatmap</span>
+          </button>
         </div>
 
         {/* LTP display */}

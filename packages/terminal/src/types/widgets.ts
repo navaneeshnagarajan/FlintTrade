@@ -35,6 +35,7 @@ export type WidgetId =
   | "ticker"
   | "aiadvisor"
   | "orderflow"
+  | "depthheatmap"
   | "actioncenter"
   | "gex"
   | "volsurface"

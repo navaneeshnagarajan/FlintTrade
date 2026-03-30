@@ -35,6 +35,7 @@ import {
   ArrowUpDown,
   BarChart3,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useStockScan, type StockFundamentals } from "@/hooks/useStockScan";
+import { CompanySnapshot, type SnapshotData } from "@/components/data/CompanySnapshot";
 import { cn } from "@/lib/utils";
 
 // ─── Sort options ────────────────────────────────────────────────────────────
@@ -222,6 +224,7 @@ export function StocksTab() {
   const [sorting, setSorting] = useState<SortingState>([
     { id: "market_cap", desc: true },
   ]);
+  const [selectedStock, setSelectedStock] = useState<StockFundamentals | null>(null);
 
   const sectorParam = selectedSector === "all" ? undefined : selectedSector;
 
@@ -442,7 +445,15 @@ export function StocksTab() {
                 ? table.getRowModel().rows.map((row) => (
                     <TableRow
                       key={row.id}
-                      className="border-border-default hover:bg-surface-card transition-colors"
+                      className={cn(
+                        "border-border-default hover:bg-surface-card transition-colors cursor-pointer",
+                        selectedStock?.symbol === row.original.symbol && "bg-surface-card",
+                      )}
+                      onClick={() =>
+                        setSelectedStock(
+                          selectedStock?.symbol === row.original.symbol ? null : row.original,
+                        )
+                      }
                     >
                       {row.getVisibleCells().map((cell) => (
                         <TableCell key={cell.id} className="py-2 text-xs">
@@ -474,9 +485,28 @@ export function StocksTab() {
         </GlassCard>
       )}
 
+      {/* Company Snapshot panel */}
+      {selectedStock && (
+        <div className="relative">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelectedStock(null)}
+            className="absolute -top-1 right-0 text-xs text-text-muted h-6 w-6 p-0"
+            aria-label="Close company snapshot"
+          >
+            <X className="size-3.5" />
+          </Button>
+          <CompanySnapshot
+            data={selectedStock as SnapshotData}
+          />
+        </div>
+      )}
+
       <p className="text-xs text-text-muted">
         Fundamental data is cached for 24 hours. Market cap in INR crore.
         PE/PB ratios are TTM. ROE and ROCE as percentage.
+        Click any row to view a detailed snapshot.
       </p>
     </div>
   );

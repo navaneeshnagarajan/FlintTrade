@@ -31,6 +31,7 @@ import {
   Users,
   Receipt,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -49,6 +50,7 @@ import {
   SocialTab,
   TaxTab,
   OverlapTab,
+  MfOptimizerTab,
 } from "./invest/tabs";
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
@@ -64,7 +66,8 @@ type TabId =
   | "etf"
   | "stocks"
   | "ipo"
-  | "tax";
+  | "tax"
+  | "mf-optimizer";
 
 interface TabDef {
   id: TabId;
@@ -84,6 +87,7 @@ const TABS: TabDef[] = [
   { id: "stocks", label: "Stocks", icon: Search },
   { id: "ipo", label: "IPO", icon: Ticket },
   { id: "tax", label: "Tax", icon: Receipt },
+  { id: "mf-optimizer", label: "MF Optimizer", icon: Sparkles },
 ];
 
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
@@ -103,6 +107,7 @@ const TAB_CONTENT: Record<TabId, ReactNode> = {
   stocks: <StocksTab />,
   ipo: <IpoTab />,
   tax: <TaxTab />,
+  "mf-optimizer": <MfOptimizerTab />,
 };
 
 // ─── Inner shell (needs InvestProvider in scope) ──────────────────────────────
@@ -118,9 +123,9 @@ function InvestShell() {
 
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
-    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "tax"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax"];
+    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "mf-optimizer"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "tax", "mf-optimizer"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
