@@ -32,8 +32,8 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.3.0
 
 ## Current State (v0.3.0, 2026-03-30)
 
-- 3,319 tests passing (2,554 Python + 765 terminal)
-- Terminal: 28 widgets (TSX), 6 tools, 12 routes, 6 workspace presets, 6 themes (Graphite default)
+- 3,629 tests passing (2,651 Python + 978 terminal)
+- Terminal: 30 widgets (TSX), 6 tools, 12 routes, 6 workspace presets, 6 themes (Graphite default)
 - 101 backtest strategies across 10 categories
 - v0.3.0 "Structured Calm" UI: ContentShell centering, 4-level surfaces, react-resizable-panels
 - 30+ FlintTrade backend endpoints, 100% OpenAlgo API coverage

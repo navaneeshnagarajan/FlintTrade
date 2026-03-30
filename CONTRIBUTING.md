@@ -111,7 +111,7 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → UPDATE → COMMIT
 3. **APPROVE** — Get approval for architecture changes or new files
 4. **BUILD** — Use TypeScript strict, shadcn/ui, Dockview panels. Check reference repos before writing from scratch
 5. **VERIFY** — `tsc --noEmit` (zero errors), `npm run build` (clean), visual check
-6. **TEST** — `npx vitest run` (765+ pass), `make test` (2,554+ pass), `ruff check`
+6. **TEST** — `npx vitest run` (978+ pass), `make test` (2,651+ pass), `ruff check`
 7. **UPDATE** — Update `CHANGELOG.md` [Unreleased] section, mark task done in `PLAN.md`
 8. **COMMIT** — Conventional commit, specific file staging, push, wait for CI green
 
@@ -130,8 +130,8 @@ Every push triggers 3 GitHub Actions jobs:
 
 | Job | What it checks |
 |---|---|
-| `python-tests` | pytest (2,554+ tests) + ruff lint |
-| `node-tests` | tsc strict + vitest (765+) + production build |
+| `python-tests` | pytest (2,651+ tests) + ruff lint |
+| `node-tests` | tsc strict + vitest (978+) + production build |
 | `secrets-check` | Scans for leaked API keys and credentials |
 
 **CI must be green before any new work.** If CI fails, fix immediately.
