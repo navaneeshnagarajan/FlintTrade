@@ -6,12 +6,10 @@ Run with:
 
 from __future__ import annotations
 
-import threading
 import time
 
-import pytest
 
-from packages.core.src.security import IPRecord, SecurityMonitor
+from packages.core.src.security import SecurityMonitor
 
 
 # ---------------------------------------------------------------------------

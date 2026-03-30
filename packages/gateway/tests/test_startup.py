@@ -38,10 +38,9 @@ if _GATEWAY_SRC not in sys.path:
 # ---------------------------------------------------------------------------
 
 from registry import BrokerRegistry  # noqa: E402
-from credentials import CredentialStore, CredentialError  # noqa: E402
+from credentials import CredentialStore  # noqa: E402
 from auth import gateway_bp  # noqa: E402
 from contracts import ContractManager  # noqa: E402
-from models import BrokerAccountInfo, AccountStatus  # noqa: E402
 from exceptions import AuthFlowError  # noqa: E402
 
 

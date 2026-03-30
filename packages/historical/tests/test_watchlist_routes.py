@@ -25,8 +25,6 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def app_client(monkeypatch_module, tmp_path_factory):
     """Return a Flask test client with an in-memory watchlist."""
-    import os
-    from pathlib import Path
     from packages.core.src.app import create_flask_app
     from packages.historical.src.watchlist import DownloadWatchlist
     from packages.historical.src.watchlist_routes import init_watchlist_routes

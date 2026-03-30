@@ -6,7 +6,6 @@ Run with:
 
 from __future__ import annotations
 
-import math
 import json
 from typing import Any
 
@@ -25,7 +24,6 @@ _TEST_API_KEY = "test-api-key-for-unit-tests"
 @pytest.fixture(scope="module")
 def client(monkeypatch_module):
     """Return a Flask test client for the FlintTrade app."""
-    import os
     from packages.core.src.app import create_flask_app
 
     monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)

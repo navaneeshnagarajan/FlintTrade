@@ -10,14 +10,12 @@ from __future__ import annotations
 import math
 import os
 import uuid
-from datetime import datetime
 
 import pytest
 
 chromadb = pytest.importorskip("chromadb", reason="chromadb not installed")
 
 from packages.ai.src.memory import (
-    MemoryItem,
     MemoryLayer,
     MemoryQueryResult,
     TradedMemory,

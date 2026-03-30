@@ -687,7 +687,6 @@ class TestAllStrategiesRegistered:
         assert len(ALL_STRATEGIES) >= 28 + 12
 
     def test_all_entries_are_base_strategy_subclasses(self):
-        from packages.engine.src.strategy import BaseStrategy
         from strategies import ALL_STRATEGIES
         for name, cls in ALL_STRATEGIES.items():
             # New strategies (non-legacy) must subclass the canonical BaseStrategy.

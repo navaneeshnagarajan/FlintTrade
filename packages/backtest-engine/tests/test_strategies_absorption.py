@@ -15,7 +15,6 @@ import random
 import sys
 from typing import Any
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path setup — mirrors test_strategies_new.py

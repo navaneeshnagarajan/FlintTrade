@@ -14,7 +14,6 @@ import os
 import sys
 from typing import Any
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path bootstrap (mirrors test_strategies_new.py)

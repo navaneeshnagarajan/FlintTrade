@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import time
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 from auth import gateway_bp
 from models import BrokerAccountInfo, AccountStatus
-from exceptions import AuthFlowError, BrokerNotFoundError, CredentialError
+from exceptions import BrokerNotFoundError, CredentialError
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ All tests are pure in-memory and require no external connections.
 
 from __future__ import annotations
 
-import time
 
 import pytest
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -307,10 +307,7 @@ class TestMarketSimulatorExports:
     def test_exported_from_package(self):
         from packages.ai.src import (
             DEFAULT_PARTICIPANTS,
-            MarketParticipant,
             MarketSimulator,
-            ParticipantAction,
-            SimulationResult,
         )
 
         assert MarketSimulator is not None

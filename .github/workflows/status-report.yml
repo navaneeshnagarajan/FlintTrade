@@ -22,7 +22,11 @@ jobs:
 
       - name: Generate status report
         run: |
-          mkdir -p .local
+          mkdir -p .local/reference
+          # absorption-status.json is local-only; create empty if absent
+          if [ ! -f .local/reference/absorption-status.json ]; then
+            echo '[]' > .local/reference/absorption-status.json
+          fi
           python scripts/audit_repos.py --format markdown > .local/STATUS.md
 
       - uses: actions/upload-artifact@v4

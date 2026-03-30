@@ -35,7 +35,6 @@ from adapter import (
     BrokerAdapter,
     _WrappedBrokerAdapter,
     _bootstrap_openalgo_imports,
-    _bootstrapped,
     load_broker_adapter,
 )
 from exceptions import BrokerNotFoundError

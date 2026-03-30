@@ -9,11 +9,9 @@ All tests are unit-level — no live OpenAlgo or network calls.
 
 from __future__ import annotations
 
-import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from packages.ditto.src.account_manager import BrokerAccount
 from packages.ditto.src.mirror import (

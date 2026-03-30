@@ -14,7 +14,7 @@ import math
 import pytest
 
 try:
-    from tick_engine import Bar, SimulationResult, TickSimulator, Trade  # type: ignore[import]
+    from tick_engine import Bar, SimulationResult, TickSimulator, Trade  # type: ignore[import]  # noqa: F401
     TICK_ENGINE_AVAILABLE = True
 except ImportError:
     TICK_ENGINE_AVAILABLE = False

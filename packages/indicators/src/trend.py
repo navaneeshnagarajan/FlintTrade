@@ -251,7 +251,9 @@ def vwap(
     typical_price = (high + low + close) / 3.0
     cum_tp_vol = np.cumsum(typical_price * volume)
     cum_vol = np.cumsum(volume)
-    return np.where(cum_vol > 0, cum_tp_vol / cum_vol, np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = np.where(cum_vol > 0, cum_tp_vol / cum_vol, np.nan)
+    return result
 
 
 def tema(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:

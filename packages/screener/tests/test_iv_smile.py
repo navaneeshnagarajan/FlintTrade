@@ -5,7 +5,6 @@ All tests use synthetic option chain data — no API calls required.
 
 from __future__ import annotations
 
-import pytest
 
 from packages.screener.src.option_chain import OptionChainSnapshot, StrikeData
 

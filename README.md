@@ -4,14 +4,14 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-1400%2B%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-2500%2B%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
-![Status](https://img.shields.io/badge/status-v0.2.0--alpha-blue)
+![Status](https://img.shields.io/badge/status-v0.3.0-blue)
 
-> **Alpha v0.2.0** — Direct broker connections, analysis tools, sandbox paper trading.
-> OpenAlgo absorption: gateway package, 5 Plotly analysis widgets, platform features.
+> **v0.3.0 "Structured Calm"** — Bloomberg precision + Stripe polish + Linear minimalism.
+> 100 strategies, 27 widgets, 12 routes, center-aligned UI, 6 themes, react-resizable-panels.
 
 Open-source modular trading platform for Indian markets with direct broker connections. Built on [OpenAlgo](https://openalgo.in) adapters. Supports 31 brokers, equities, F&O, commodities, currency derivatives, and crypto.
 

@@ -25,7 +25,6 @@ def monkeypatch_module():
 @pytest.fixture(scope="module")
 def app_client(monkeypatch_module):
     """Return a Flask test client with a pre-populated PnLTracker."""
-    import os
     from packages.core.src.app import create_flask_app
     from packages.data.src.pnl_tracker import PnLTracker
     from packages.data.src.pnl_routes import init_pnl_routes
@@ -50,7 +49,7 @@ def _get(client, url):
 
 def test_init_pnl_routes():
     from packages.data.src.pnl_tracker import PnLTracker
-    from packages.data.src.pnl_routes import init_pnl_routes, _tracker
+    from packages.data.src.pnl_routes import init_pnl_routes
     import packages.data.src.pnl_routes as pnl_routes
 
     old_tracker = pnl_routes._tracker
