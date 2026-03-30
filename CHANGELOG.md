@@ -6,28 +6,55 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
+## [0.3.0] — 2026-03-30
+
+v0.3.0 "Structured Calm" — Bloomberg precision + Stripe polish + Linear minimalism.
+
+### Added — UI Redesign
+- ContentShell universal centering wrapper (max-w-6xl, responsive padding)
+- SectionHeader component with optional action button
+- DataNumber three-tier numeric display (hero/primary/cell)
+- DataDirection profit/loss indicator with color + icon + sign + sr-only text
+- 4-level surface hierarchy (Base → Raised → Elevated → Floating)
+- CSS custom properties for data-elevation, shadow-elevated, shadow-floating
+- Graphite theme (new default) — desaturated blue-indigo accent #7c8be8
+- Monochrome theme — zero-color gray accent
+- Solarized Dark theme
+- Theme v3 migration (6 removed themes → mapped to kept themes)
+- react-resizable-panels on /trade (sidebar + Dockview + bottom panel)
+- Focus ring 200ms scale-in animation
+- Data update pulse (100ms background flash)
+
+### Changed
+- GlassCard defaults to solid (glass=false). Glass only on Level 3 floating elements.
+- Default theme changed from emerald-night to graphite
+- Price tick flash shortened to 300ms
+- AnimatedCounter capped at 800ms
+- Applied ContentShell to /invest, /learn, /ai, /settings, /admin, /explore, /setup, 404
+- Typography scale: 24px route titles, hero numbers per route
+
+### Removed
+- 6 themes: Emerald Night, Ocean Depth, Solar Flare, Neon Pulse, Blood Moon, Cyber Dusk
+- TextGenerateEffect on page headers (repeat-visit routes)
+- BlurFade on section headers
+- StaggeredList on card grids (replaced with 150ms container fade)
+- hover:-translate-y-0.5 on cards (border-color transition only)
+- @utility hover-lift from index.css
+- Particles on all routes except /welcome
+
+### Fixed (from v0.2.0-beta audit)
 - 43 audit findings resolved (4 critical, 12 high, 15 medium, 12 low)
 - Ticker -100% on WS disconnect (LTP=0 guard)
 - Stale API key in WS singleton (updateCredentials + reactive hooks)
 - Silent widget failures (error banners with retry in Orders/Positions/Holdings)
-- ForwardTestSection useState-as-effect → useEffect
 - Hardcoded dark colors in 8 chart/tool widgets → CSS var reads
 - Route nav buttons → Links (WCAG 2.4.4)
-- text-muted contrast brightened on all 6 dark themes (WCAG AA)
-- Theme toggle 3-way cycle (dark/light/system)
+- text-muted contrast brightened on all dark themes (WCAG AA)
 - Dockview ARIA roles (tablist/tab/tabpanel)
 - Dashboard loading skeletons
 - Scalper CE/PE color inversion, shadcn/ui migration, error states
-- 8 unused API functions removed
-- Dead InteractiveTour removed
-- DailyWelcome session persistence
-- Setup mode cards keyboard accessible
-- Option chain 30s refetchInterval during market hours
-- NoConnectionOverlay focus trap + route suppression
-- Light-mode flash prevention (prefers-color-scheme CSS)
-- ToolsDropdown portal rendering
-- Chart canvas aria-label, TickerBar screen reader summary
+- ToolsDropdown portal rendering, Chart theme reactivity
+- react-plotly.js excluded from Vite dep optimizer (prevents crash)
 
 ## [0.2.0-alpha] — 2026-03-25
 

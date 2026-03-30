@@ -5,7 +5,74 @@ This package shadows the parent ``strategies.py`` module when Python resolves
 we re-export everything from that module here so that existing test imports like
 ``from strategies import EMACrossover`` continue to work.
 
-Sub-modules (38 additional strategies across 6 categories):
+Sub-modules (~100 total strategies — 12 legacy + 88 sub-module classes):
+
+Sub-modules (43 NEW strategies added in this batch):
+
+    Multi-Timeframe (5):
+        mtf_rsi_trend              — MTFRSITrend
+        mtf_ema_breakout           — MTFEMABreakout
+        mtf_vwap_scalp             — MTFVWAPScalp
+        mtf_supertrend_confluence  — MTFSupertrendConfluence
+        mtf_macd_momentum          — MTFMACDMomentum
+
+    Pairs/Statistical (4):
+        pairs_ratio_reversion  — PairsRatioReversion
+        pairs_cointegration    — PairsCointegration
+        stat_regime_hmm        — StatRegimeHMM
+        stat_kalman_filter     — StatKalmanFilter
+
+    Intraday India-specific (6):
+        intraday_orb_atr        — IntradayORBATR
+        intraday_gap_fill       — IntradayGapFill
+        intraday_first_candle   — IntradayFirstCandle
+        intraday_vwap_bounce    — IntradayVWAPBounce
+        intraday_expiry_day     — IntradayExpiryDay
+        intraday_pre_market     — IntradayPreMarket
+
+    Options Advanced (5):
+        options_jade_lizard     — OptionsJadeLizard
+        options_ratio_spread    — OptionsRatioSpread
+        options_calendar_spread — OptionsCalendarSpread
+        options_butterfly       — OptionsButterfly, OptionsIronButterfly
+        options_collar          — OptionsCollar
+
+    Event-Driven (4):
+        event_earnings    — EventEarnings
+        event_rbi_policy  — EventRBIPolicy
+        event_expiry_oi   — EventExpiryOI
+        event_fii_flow    — EventFIIFlow
+
+    Crypto (4):
+        crypto_funding_arb     — CryptoFundingArb
+        crypto_grid            — CryptoGrid
+        crypto_dca_momentum    — CryptoDCAMomentum
+        crypto_breakout_volume — CryptoBreakoutVolume
+
+    Commodity (3):
+        commodity_seasonal  — CommoditySeasonal
+        commodity_spread    — CommoditySpread
+        commodity_inventory — CommodityInventory
+
+    Machine Learning (4):
+        ml_feature_signal      — MLFeatureSignal
+        ml_regime_classifier   — MLRegimeClassifier
+        ml_ensemble_voter      — MLEnsembleVoter
+        ml_adaptive_params     — MLAdaptiveParams
+
+    Portfolio/Risk (4):
+        portfolio_equal_weight        — PortfolioEqualWeight
+        portfolio_risk_parity         — PortfolioRiskParity
+        portfolio_momentum_rotation   — PortfolioMomentumRotation
+        portfolio_min_variance        — PortfolioMinVariance
+
+    Scalping (4):
+        scalp_tape_reading      — ScalpTapeReading
+        scalp_level2_squeeze    — ScalpLevel2Squeeze
+        scalp_tick_momentum     — ScalpTickMomentum
+        scalp_spread_capture    — ScalpSpreadCapture
+
+Sub-modules (38 original strategies across 6 categories):
 
     Trend (7):
         trend_ema_crossover    — TrendEMACrossover (EMA crossover + confirmation)
@@ -192,7 +259,74 @@ from .momentum_macd_divergence import MACDDivergence  # noqa: E402
 from .trend_triple_ma import TripleMA  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Unified strategy registry — all 28 new classes + 12 legacy
+# NEW BATCH — 43 additional strategies
+# ---------------------------------------------------------------------------
+
+# Multi-Timeframe (5)
+from .mtf_rsi_trend import MTFRSITrend  # noqa: E402
+from .mtf_ema_breakout import MTFEMABreakout  # noqa: E402
+from .mtf_vwap_scalp import MTFVWAPScalp  # noqa: E402
+from .mtf_supertrend_confluence import MTFSupertrendConfluence  # noqa: E402
+from .mtf_macd_momentum import MTFMACDMomentum  # noqa: E402
+
+# Pairs / Statistical (4)
+from .pairs_ratio_reversion import PairsRatioReversion  # noqa: E402
+from .pairs_cointegration import PairsCointegration  # noqa: E402
+from .stat_regime_hmm import StatRegimeHMM  # noqa: E402
+from .stat_kalman_filter import StatKalmanFilter  # noqa: E402
+
+# Intraday India-specific (6)
+from .intraday_orb_atr import IntradayORBATR  # noqa: E402
+from .intraday_gap_fill import IntradayGapFill  # noqa: E402
+from .intraday_first_candle import IntradayFirstCandle  # noqa: E402
+from .intraday_vwap_bounce import IntradayVWAPBounce  # noqa: E402
+from .intraday_expiry_day import IntradayExpiryDay  # noqa: E402
+from .intraday_pre_market import IntradayPreMarket  # noqa: E402
+
+# Options Advanced (5 files → 6 classes)
+from .options_jade_lizard import OptionsJadeLizard  # noqa: E402
+from .options_ratio_spread import OptionsRatioSpread  # noqa: E402
+from .options_calendar_spread import OptionsCalendarSpread  # noqa: E402
+from .options_butterfly import OptionsButterfly, OptionsIronButterfly  # noqa: E402
+from .options_collar import OptionsCollar  # noqa: E402
+
+# Event-Driven (4)
+from .event_earnings import EventEarnings  # noqa: E402
+from .event_rbi_policy import EventRBIPolicy  # noqa: E402
+from .event_expiry_oi import EventExpiryOI  # noqa: E402
+from .event_fii_flow import EventFIIFlow  # noqa: E402
+
+# Crypto (4)
+from .crypto_funding_arb import CryptoFundingArb  # noqa: E402
+from .crypto_grid import CryptoGrid  # noqa: E402
+from .crypto_dca_momentum import CryptoDCAMomentum  # noqa: E402
+from .crypto_breakout_volume import CryptoBreakoutVolume  # noqa: E402
+
+# Commodity (3)
+from .commodity_seasonal import CommoditySeasonal  # noqa: E402
+from .commodity_spread import CommoditySpread  # noqa: E402
+from .commodity_inventory import CommodityInventory  # noqa: E402
+
+# Machine Learning (4)
+from .ml_feature_signal import MLFeatureSignal  # noqa: E402
+from .ml_regime_classifier import MLRegimeClassifier  # noqa: E402
+from .ml_ensemble_voter import MLEnsembleVoter  # noqa: E402
+from .ml_adaptive_params import MLAdaptiveParams  # noqa: E402
+
+# Portfolio / Risk (4)
+from .portfolio_equal_weight import PortfolioEqualWeight  # noqa: E402
+from .portfolio_risk_parity import PortfolioRiskParity  # noqa: E402
+from .portfolio_momentum_rotation import PortfolioMomentumRotation  # noqa: E402
+from .portfolio_min_variance import PortfolioMinVariance  # noqa: E402
+
+# Scalping (4)
+from .scalp_tape_reading import ScalpTapeReading  # noqa: E402
+from .scalp_level2_squeeze import ScalpLevel2Squeeze  # noqa: E402
+from .scalp_tick_momentum import ScalpTickMomentum  # noqa: E402
+from .scalp_spread_capture import ScalpSpreadCapture  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Unified strategy registry — all new classes + 12 legacy (~100 total)
 # ---------------------------------------------------------------------------
 from packages.engine.src.strategy import BaseStrategy as _BaseStrategy  # noqa: E402
 
@@ -269,5 +403,62 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "MACDDivergence": MACDDivergence,
     # Trend — absorbed batch (1 new)
     "TripleMA": TripleMA,
+    # -----------------------------------------------------------------------
+    # NEW BATCH — 43 additional strategies (~100 total)
+    # -----------------------------------------------------------------------
+    # Multi-Timeframe (5)
+    "MTFRSITrend": MTFRSITrend,
+    "MTFEMABreakout": MTFEMABreakout,
+    "MTFVWAPScalp": MTFVWAPScalp,
+    "MTFSupertrendConfluence": MTFSupertrendConfluence,
+    "MTFMACDMomentum": MTFMACDMomentum,
+    # Pairs / Statistical (4)
+    "PairsRatioReversion": PairsRatioReversion,
+    "PairsCointegration": PairsCointegration,
+    "StatRegimeHMM": StatRegimeHMM,
+    "StatKalmanFilter": StatKalmanFilter,
+    # Intraday India-specific (6)
+    "IntradayORBATR": IntradayORBATR,
+    "IntradayGapFill": IntradayGapFill,
+    "IntradayFirstCandle": IntradayFirstCandle,
+    "IntradayVWAPBounce": IntradayVWAPBounce,
+    "IntradayExpiryDay": IntradayExpiryDay,
+    "IntradayPreMarket": IntradayPreMarket,
+    # Options Advanced (6 classes from 5 files)
+    "OptionsJadeLizard": OptionsJadeLizard,
+    "OptionsRatioSpread": OptionsRatioSpread,
+    "OptionsCalendarSpread": OptionsCalendarSpread,
+    "OptionsButterfly": OptionsButterfly,
+    "OptionsIronButterfly": OptionsIronButterfly,
+    "OptionsCollar": OptionsCollar,
+    # Event-Driven (4)
+    "EventEarnings": EventEarnings,
+    "EventRBIPolicy": EventRBIPolicy,
+    "EventExpiryOI": EventExpiryOI,
+    "EventFIIFlow": EventFIIFlow,
+    # Crypto (4)
+    "CryptoFundingArb": CryptoFundingArb,
+    "CryptoGrid": CryptoGrid,
+    "CryptoDCAMomentum": CryptoDCAMomentum,
+    "CryptoBreakoutVolume": CryptoBreakoutVolume,
+    # Commodity (3)
+    "CommoditySeasonal": CommoditySeasonal,
+    "CommoditySpread": CommoditySpread,
+    "CommodityInventory": CommodityInventory,
+    # Machine Learning (4)
+    "MLFeatureSignal": MLFeatureSignal,
+    "MLRegimeClassifier": MLRegimeClassifier,
+    "MLEnsembleVoter": MLEnsembleVoter,
+    "MLAdaptiveParams": MLAdaptiveParams,
+    # Portfolio / Risk (4)
+    "PortfolioEqualWeight": PortfolioEqualWeight,
+    "PortfolioRiskParity": PortfolioRiskParity,
+    "PortfolioMomentumRotation": PortfolioMomentumRotation,
+    "PortfolioMinVariance": PortfolioMinVariance,
+    # Scalping (4)
+    "ScalpTapeReading": ScalpTapeReading,
+    "ScalpLevel2Squeeze": ScalpLevel2Squeeze,
+    "ScalpTickMomentum": ScalpTickMomentum,
+    "ScalpSpreadCapture": ScalpSpreadCapture,
 }
 

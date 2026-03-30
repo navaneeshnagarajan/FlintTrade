@@ -1,30 +1,27 @@
 /**
  * StocksTab.tsx
  *
- * Real stock screener tab for the Invest route.
- * Replaces the FeatureLockCard placeholder from LockedTabs.tsx.
+ * Stock screener tab for the Invest route — displays fundamental data
+ * from the FlintTrade backend stock cache (30 Indian large-cap stocks).
  *
  * Data flow:
- *   searchSymbol() → symbol search results (on demand)
- *   localStorage("flinttrade:stock-watchlist") → persisted symbol list
- *   getMultiQuotes() → TanStack Query (30s refetch) → live prices
+ *   useStockScan() → GET /ft-api/v1/stocks/scan → TanStack Query (5 min stale)
  *
- * Design follows EtfTab.tsx:
- *   - TanStack Table for sortable rows
- *   - GlassCard for table container
+ * Features:
+ *   - Sector filter dropdown (shadcn/ui Select)
+ *   - Sort controls by market cap, PE, ROE, ROCE, dividend yield
+ *   - TanStack Table with sortable columns
  *   - Loading skeletons, error state with retry
- *   - formatINR / formatPercent from invest formatters
+ *   - Responsive layout with GlassCard container
  *
  * Accessibility:
- *   - Search input: labelled with htmlFor
  *   - Table: aria-label, aria-sort on sortable columns
  *   - Loading skeleton: role="status" + aria-live
  *   - Error state: retry button with aria-label
- *   - Add/remove buttons: descriptive aria-label per row
+ *   - Filter controls: proper labels
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -35,17 +32,21 @@ import {
 } from "@tanstack/react-table";
 import {
   AlertCircle,
+  ArrowUpDown,
   BarChart3,
-  Plus,
   RefreshCw,
-  Search,
-  Star,
-  StarOff,
-  X,
 } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -54,435 +55,187 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { searchSymbol, getMultiQuotes } from "@/services/api";
-import type { Quote } from "@/types/api";
-import { classifySector } from "@/lib/sectors";
+import { useStockScan, type StockFundamentals } from "@/hooks/useStockScan";
 import { cn } from "@/lib/utils";
-import { formatINR, formatPercent } from "../formatters";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Sort options ────────────────────────────────────────────────────────────
 
-const WATCHLIST_KEY = "flinttrade:stock-watchlist";
+const SORT_OPTIONS = [
+  { value: "market_cap", label: "Market Cap" },
+  { value: "pe_ratio", label: "PE Ratio" },
+  { value: "roe", label: "ROE" },
+  { value: "roce", label: "ROCE" },
+  { value: "dividend_yield", label: "Dividend Yield" },
+] as const;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-interface WatchlistEntry {
-  symbol: string;
-  exchange: string;
-}
-
-interface StockScreenerRow {
-  symbol: string;
-  exchange: string;
-  ltp: number;
-  changePct: number;
-  change: number;
-  volume: number;
-  sector: string;
-}
-
-// ─── Watchlist persistence ────────────────────────────────────────────────────
-
-function loadWatchlist(): WatchlistEntry[] {
-  try {
-    const raw = localStorage.getItem(WATCHLIST_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item): item is WatchlistEntry =>
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as Record<string, unknown>).symbol === "string" &&
-        typeof (item as Record<string, unknown>).exchange === "string",
-    );
-  } catch {
-    return [];
+function formatMarketCap(crore: number): string {
+  if (crore >= 100000) {
+    return `${(crore / 100000).toFixed(1)}L Cr`;
   }
+  return `${crore.toLocaleString("en-IN")} Cr`;
 }
 
-function saveWatchlist(entries: WatchlistEntry[]): void {
-  try {
-    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(entries));
-  } catch {
-    // localStorage may be unavailable in some contexts — fail silently
-  }
+function formatRatio(value: number): string {
+  return value.toFixed(1);
 }
 
-// ─── Hooks ────────────────────────────────────────────────────────────────────
+// ─── Loading skeleton ────────────────────────────────────────────────────────
 
-function useWatchlist() {
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(loadWatchlist);
-
-  const add = useCallback((entry: WatchlistEntry) => {
-    setWatchlist((prev) => {
-      if (prev.some((e) => e.symbol.toUpperCase() === entry.symbol.toUpperCase())) {
-        return prev;
-      }
-      const next = [...prev, entry];
-      saveWatchlist(next);
-      return next;
-    });
-  }, []);
-
-  const remove = useCallback((symbol: string) => {
-    setWatchlist((prev) => {
-      const next = prev.filter((e) => e.symbol.toUpperCase() !== symbol.toUpperCase());
-      saveWatchlist(next);
-      return next;
-    });
-  }, []);
-
-  const has = useCallback(
-    (symbol: string) =>
-      watchlist.some((e) => e.symbol.toUpperCase() === symbol.toUpperCase()),
-    [watchlist],
-  );
-
-  return { watchlist, add, remove, has };
-}
-
-function useStockQuotes(symbols: WatchlistEntry[]) {
-  return useQuery<Quote[]>({
-    queryKey: ["stock-watchlist-quotes", symbols.map((s) => s.symbol).join(",")],
-    queryFn: () => getMultiQuotes(symbols),
-    enabled: symbols.length > 0,
-    refetchInterval: 30_000,
-    retry: 1,
-  });
-}
-
-function useSymbolSearch(query: string) {
-  return useQuery<Array<{ symbol: string; exchange: string }>>({
-    queryKey: ["symbol-search", query],
-    queryFn: () => searchSymbol(query),
-    enabled: query.trim().length >= 2,
-    staleTime: 30_000,
-    retry: 0,
-  });
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function mergeWatchlistWithQuotes(
-  watchlist: WatchlistEntry[],
-  quotes: Quote[],
-): StockScreenerRow[] {
-  const quoteMap = new Map<string, Quote>(
-    quotes.map((q) => [q.symbol.toUpperCase(), q]),
-  );
-
-  return watchlist.map((entry): StockScreenerRow => {
-    const q = quoteMap.get(entry.symbol.toUpperCase());
-    const ltp = q?.ltp ?? 0;
-    const prevClose = q?.prev_close ?? q?.close ?? 0;
-    const change = prevClose > 0 ? ltp - prevClose : (q?.change ?? 0);
-    const changePct =
-      prevClose > 0 ? (change / prevClose) * 100 : (q?.pct ?? 0);
-    return {
-      symbol: entry.symbol,
-      exchange: entry.exchange,
-      ltp,
-      change,
-      changePct,
-      volume: q?.volume ?? 0,
-      sector: classifySector(entry.symbol),
-    };
-  });
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function ChangeCell({ change, pct }: { change: number; pct: number }) {
-  const pos = change >= 0;
+function TableSkeleton() {
   return (
-    <div className={cn("text-right tabular-nums", pos ? "text-profit" : "text-loss")}>
-      <div className="font-mono text-xs font-semibold">{formatPercent(pct)}</div>
-      <div className="font-mono text-xs opacity-75">{formatINR(change)}</div>
-    </div>
-  );
-}
-
-function RowSkeleton() {
-  return (
-    <TableRow className="border-border-default">
-      {[120, 80, 90, 70, 70, 60].map((w, i) => (
-        <TableCell key={i} className="py-2">
-          <div
-            className="animate-pulse h-3 rounded bg-surface-card"
-            style={{ width: w }}
-          />
-        </TableCell>
-      ))}
-    </TableRow>
-  );
-}
-
-// ─── Column definitions ───────────────────────────────────────────────────────
-
-function buildColumns(
-  onRemove: (s: string) => void,
-): ColumnDef<StockScreenerRow>[] {
-  return [
-    {
-      accessorKey: "symbol",
-      header: "Symbol",
-      cell: ({ row }) => (
-        <div>
-          <div className="font-mono text-xs font-bold text-text-primary">
-            {row.original.symbol}
+    <div role="status" aria-live="polite" aria-label="Loading stock data">
+      <div className="space-y-2 p-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-4">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-16" />
           </div>
-          <div className="text-xs text-text-muted">{row.original.exchange}</div>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "sector",
-      header: "Sector",
-      cell: ({ getValue }) => (
-        <Badge
-          variant="outline"
-          className="text-xs border-border-default text-text-muted font-normal"
-        >
-          {getValue() as string}
-        </Badge>
-      ),
-    },
-    {
-      accessorKey: "ltp",
-      header: () => <span className="block text-right">LTP</span>,
-      cell: ({ getValue }) => {
-        const v = getValue() as number;
-        return (
-          <div className="text-right font-mono tabular-nums text-xs text-text-primary font-semibold">
-            {v > 0 ? formatINR(v) : "—"}
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "changePct",
-      header: () => <span className="block text-right">Change</span>,
-      cell: ({ row }) => (
-        <ChangeCell change={row.original.change} pct={row.original.changePct} />
-      ),
-    },
-    {
-      accessorKey: "volume",
-      header: () => <span className="block text-right">Volume</span>,
-      cell: ({ getValue }) => {
-        const v = getValue() as number;
-        return (
-          <div className="text-right font-mono tabular-nums text-xs text-text-muted">
-            {v > 0 ? v.toLocaleString("en-IN") : "—"}
-          </div>
-        );
-      },
-    },
-    {
-      id: "actions",
-      header: "",
-      enableSorting: false,
-      cell: ({ row }) => {
-        const sym = row.original.symbol;
-        return (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-text-muted hover:text-loss"
-            onClick={() => onRemove(sym)}
-            aria-label={`Remove ${sym} from watchlist`}
-          >
-            <X className="size-3" aria-hidden="true" />
-          </Button>
-        );
-      },
-    },
-  ];
-}
-
-// ─── Search Panel ─────────────────────────────────────────────────────────────
-
-interface SearchPanelProps {
-  hasSymbol: (s: string) => boolean;
-  onAdd: (entry: WatchlistEntry) => void;
-}
-
-function SearchPanel({ hasSymbol, onAdd }: SearchPanelProps) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  const trimmedQuery = query.trim();
-  const { data: results, isFetching } = useSymbolSearch(trimmedQuery);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (
-        panelRef.current &&
-        !panelRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const showDropdown =
-    open && trimmedQuery.length >= 2 && (isFetching || (results && results.length > 0));
-
-  return (
-    <div className="relative" ref={panelRef}>
-      <label htmlFor="stock-search" className="sr-only">
-        Search for a stock symbol
-      </label>
-      <div className="relative">
-        <Search
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-text-muted pointer-events-none"
-          aria-hidden="true"
-        />
-        <input
-          id="stock-search"
-          ref={inputRef}
-          type="search"
-          placeholder="Search symbol (e.g. RELIANCE, TCS…)"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          className={cn(
-            "h-8 w-full rounded-md border border-border-default bg-surface-card pl-8 pr-3",
-            "text-xs text-text-primary placeholder:text-text-muted",
-            "focus:outline-none focus:ring-1 focus:ring-ring",
-            "transition-colors",
-          )}
-          autoComplete="off"
-        />
-        {isFetching && (
-          <RefreshCw
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 size-3 text-text-muted animate-spin"
-            aria-hidden="true"
-          />
-        )}
+        ))}
       </div>
+      <span className="sr-only">Loading stock screener data</span>
+    </div>
+  );
+}
 
-      {showDropdown && (
-        <div
-          className="absolute z-50 mt-1 w-full rounded-md border border-border-default bg-surface-card shadow-lg"
-        >
-          {results && results.length > 0 ? (
-            <ul className="max-h-48 overflow-y-auto py-1">
-              {results.slice(0, 15).map((r) => {
-                const alreadyAdded = hasSymbol(r.symbol);
-                return (
-                  <li
-                    key={`${r.symbol}-${r.exchange}`}
-                  >
-                    <button
-                      type="button"
-                      disabled={alreadyAdded}
-                      onClick={() => {
-                        if (!alreadyAdded) {
-                          onAdd({ symbol: r.symbol, exchange: r.exchange });
-                          setQuery("");
-                          setOpen(false);
-                          inputRef.current?.focus();
-                        }
-                      }}
-                      className={cn(
-                        "flex w-full items-center justify-between px-3 py-1.5 text-xs",
-                        "hover:bg-surface-hover transition-colors",
-                        alreadyAdded
-                          ? "opacity-50 cursor-not-allowed"
-                          : "cursor-pointer",
-                      )}
-                      aria-label={
-                        alreadyAdded
-                          ? `${r.symbol} already in watchlist`
-                          : `Add ${r.symbol} (${r.exchange}) to watchlist`
-                      }
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-text-primary">
-                          {r.symbol}
-                        </span>
-                        <span className="text-text-muted">{r.exchange}</span>
-                      </span>
-                      {alreadyAdded ? (
-                        <Star className="size-3 text-profit" aria-hidden="true" />
-                      ) : (
-                        <Plus className="size-3 text-text-muted" aria-hidden="true" />
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            !isFetching && (
-              <div className="px-3 py-2 text-xs text-text-muted">
-                No results for &quot;{trimmedQuery}&quot;
-              </div>
-            )
-          )}
+// ─── Column definitions ──────────────────────────────────────────────────────
+
+const columns: ColumnDef<StockFundamentals>[] = [
+  {
+    accessorKey: "symbol",
+    header: "Symbol",
+    cell: ({ row }) => (
+      <div>
+        <div className="font-mono text-xs font-bold text-text-primary">
+          {row.original.symbol}
         </div>
-      )}
-    </div>
-  );
-}
+        <div className="text-xs text-text-muted truncate max-w-45">
+          {row.original.name}
+        </div>
+      </div>
+    ),
+  },
+  {
+    accessorKey: "sector",
+    header: "Sector",
+    cell: ({ getValue }) => (
+      <Badge
+        variant="outline"
+        className="text-xs border-border-default text-text-muted font-normal"
+      >
+        {getValue() as string}
+      </Badge>
+    ),
+  },
+  {
+    accessorKey: "market_cap",
+    header: () => <span className="block text-right">Mkt Cap</span>,
+    cell: ({ getValue }) => (
+      <div className="text-right font-mono tabular-nums text-xs text-text-primary font-semibold">
+        {formatMarketCap(getValue() as number)}
+      </div>
+    ),
+  },
+  {
+    accessorKey: "pe_ratio",
+    header: () => <span className="block text-right">PE</span>,
+    cell: ({ getValue }) => (
+      <div className="text-right font-mono tabular-nums text-xs text-text-primary">
+        {formatRatio(getValue() as number)}
+      </div>
+    ),
+  },
+  {
+    accessorKey: "pb_ratio",
+    header: () => <span className="block text-right">PB</span>,
+    cell: ({ getValue }) => (
+      <div className="text-right font-mono tabular-nums text-xs text-text-muted">
+        {formatRatio(getValue() as number)}
+      </div>
+    ),
+  },
+  {
+    accessorKey: "roe",
+    header: () => <span className="block text-right">ROE %</span>,
+    cell: ({ getValue }) => {
+      const v = getValue() as number;
+      return (
+        <div
+          className={cn(
+            "text-right font-mono tabular-nums text-xs",
+            v >= 20 ? "text-profit" : v >= 10 ? "text-text-primary" : "text-text-muted",
+          )}
+        >
+          {formatRatio(v)}%
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "roce",
+    header: () => <span className="block text-right">ROCE %</span>,
+    cell: ({ getValue }) => {
+      const v = getValue() as number;
+      return (
+        <div
+          className={cn(
+            "text-right font-mono tabular-nums text-xs",
+            v >= 20 ? "text-profit" : v >= 10 ? "text-text-primary" : "text-text-muted",
+          )}
+        >
+          {v > 0 ? `${formatRatio(v)}%` : "—"}
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "dividend_yield",
+    header: () => <span className="block text-right">Div %</span>,
+    cell: ({ getValue }) => {
+      const v = getValue() as number;
+      return (
+        <div
+          className={cn(
+            "text-right font-mono tabular-nums text-xs",
+            v >= 3 ? "text-profit" : "text-text-muted",
+          )}
+        >
+          {formatRatio(v)}%
+        </div>
+      );
+    },
+  },
+];
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
-
-function EmptyWatchlist() {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 gap-3 text-text-muted">
-      <Star className="size-8 text-text-disabled" aria-hidden="true" />
-      <span className="text-sm font-medium text-text-secondary">
-        Your watchlist is empty
-      </span>
-      <span className="text-xs text-text-muted max-w-xs text-center">
-        Search for a symbol above and add it to see live prices here.
-      </span>
-    </div>
-  );
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main component ──────────────────────────────────────────────────────────
 
 export function StocksTab() {
-  const { watchlist, add, remove, has } = useWatchlist();
-
-  const { data: quotes, isLoading, isError, refetch } = useStockQuotes(watchlist);
-
+  const [selectedSector, setSelectedSector] = useState<string>("all");
+  const [sortField, setSortField] = useState<string>("market_cap");
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "changePct", desc: true },
+    { id: "market_cap", desc: true },
   ]);
 
-  const columns = useMemo(() => buildColumns(remove), [remove]);
+  const sectorParam = selectedSector === "all" ? undefined : selectedSector;
 
-  const rows = useMemo<StockScreenerRow[]>(
-    () =>
-      quotes
-        ? mergeWatchlistWithQuotes(watchlist, quotes)
-        : watchlist.map((entry) => ({
-            symbol: entry.symbol,
-            exchange: entry.exchange,
-            ltp: 0,
-            change: 0,
-            changePct: 0,
-            volume: 0,
-            sector: classifySector(entry.symbol),
-          })),
-    [quotes, watchlist],
-  );
+  const { data, isLoading, isError, refetch } = useStockScan({
+    sector: sectorParam,
+    sort_by: sortField,
+    limit: 50,
+  });
+
+  const stocks = data?.stocks ?? [];
+  const sectors = data?.sectors ?? [];
 
   const table = useReactTable({
-    data: rows,
+    data: stocks,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -490,7 +243,7 @@ export function StocksTab() {
     getSortedRowModel: getSortedRowModel(),
   });
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  // ─── Render ────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-5">
@@ -501,42 +254,106 @@ export function StocksTab() {
             Stock Screener
           </h3>
           <p className="text-xs text-text-muted mt-0.5">
-            Track individual stocks with live prices. Search and add to your
-            watchlist.
+            Fundamental analysis of 30 Indian large-cap stocks. Filter by
+            sector and sort by key metrics.
           </p>
         </div>
-        {watchlist.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void refetch()}
-            className="text-xs text-text-muted h-6 px-2 gap-1"
-            aria-label="Refresh stock quotes"
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void refetch()}
+          className="text-xs text-text-muted h-6 px-2 gap-1"
+          aria-label="Refresh stock data"
+        >
+          <RefreshCw className="size-3" aria-hidden="true" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Sector filter */}
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="sector-filter"
+            className="text-xs text-text-muted whitespace-nowrap"
           >
-            <RefreshCw className="size-3" aria-hidden="true" />
-            Refresh
-          </Button>
+            Sector
+          </label>
+          <Select value={selectedSector} onValueChange={setSelectedSector}>
+            <SelectTrigger
+              id="sector-filter"
+              className="h-7 w-35 text-xs border-border-default bg-surface-card"
+            >
+              <SelectValue placeholder="All Sectors" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Sectors</SelectItem>
+              {sectors.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Sort control */}
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="sort-field"
+            className="text-xs text-text-muted whitespace-nowrap"
+          >
+            <ArrowUpDown className="size-3 inline mr-1" aria-hidden="true" />
+            Sort
+          </label>
+          <Select value={sortField} onValueChange={setSortField}>
+            <SelectTrigger
+              id="sort-field"
+              className="h-7 w-35 text-xs border-border-default bg-surface-card"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Result count */}
+        {!isLoading && !isError && (
+          <Badge
+            variant="outline"
+            className="text-xs border-border-default text-text-muted h-5 px-2"
+          >
+            {stocks.length} stocks
+          </Badge>
         )}
       </div>
 
-      {/* Symbol search */}
-      <SearchPanel hasSymbol={has} onAdd={add} />
+      {/* sr-only live region for loading state */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {isLoading ? "Loading stock data" : "Stock data loaded"}
+      </div>
 
       {/* Error state */}
-      {isError && watchlist.length > 0 && (
+      {isError && (
         <div className="flex flex-col items-center justify-center h-32 gap-3 text-text-muted">
           <AlertCircle className="size-5 text-loss" aria-hidden="true" />
-          <span className="text-sm">Failed to load quotes.</span>
+          <span className="text-sm">Failed to load stock data.</span>
           <span className="text-xs text-text-muted max-w-xs text-center">
-            Check that OpenAlgo is running and the connection is configured in
-            Settings.
+            Check that the FlintTrade backend is running on port 5001.
           </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => void refetch()}
             className="text-xs"
-            aria-label="Retry loading stock quotes"
+            aria-label="Retry loading stock data"
           >
             <RefreshCw className="size-3 mr-1" aria-hidden="true" />
             Retry
@@ -544,36 +361,37 @@ export function StocksTab() {
         </div>
       )}
 
-      {/* Empty watchlist */}
-      {watchlist.length === 0 && !isError && <EmptyWatchlist />}
+      {/* Loading state */}
+      {isLoading && (
+        <GlassCard className="p-0 overflow-hidden">
+          <TableSkeleton />
+        </GlassCard>
+      )}
 
-      {/* sr-only live region for table loading state */}
-      <div className="sr-only" role="status" aria-live="polite">
-        {isLoading ? "Loading stock quotes" : "Stock quotes loaded"}
-      </div>
-
-      {/* Watchlist table */}
-      {watchlist.length > 0 && !isError && (
+      {/* Data table */}
+      {!isLoading && !isError && (
         <GlassCard className="p-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 border-b border-border-default">
             <div className="flex items-center gap-2">
-              <StarOff className="size-3 text-text-muted" aria-hidden="true" />
+              <BarChart3 className="size-3 text-text-muted" aria-hidden="true" />
               <span className="text-xs font-medium text-text-secondary">
-                My Watchlist
+                Fundamentals
               </span>
-              <Badge
-                variant="outline"
-                className="text-xs border-border-default text-text-muted h-4 px-1.5"
-              >
-                {watchlist.length}
-              </Badge>
+              {selectedSector !== "all" && (
+                <Badge
+                  variant="outline"
+                  className="text-xs border-border-default text-text-muted h-4 px-1.5"
+                >
+                  {selectedSector}
+                </Badge>
+              )}
             </div>
             <span className="text-xs text-text-muted">
-              Refreshes every 30s
+              Sorted by {SORT_OPTIONS.find((o) => o.value === sortField)?.label ?? sortField}
             </span>
           </div>
 
-          <Table aria-label="Stock watchlist — sortable by any column">
+          <Table aria-label="Stock fundamentals screener — sortable by any column">
             <TableHeader>
               {table.getHeaderGroups().map((hg) => (
                 <TableRow
@@ -620,9 +438,8 @@ export function StocksTab() {
               ))}
             </TableHeader>
             <TableBody>
-              {isLoading
-                ? watchlist.map((e) => <RowSkeleton key={e.symbol} />)
-                : table.getRowModel().rows.map((row) => (
+              {table.getRowModel().rows.length > 0
+                ? table.getRowModel().rows.map((row) => (
                     <TableRow
                       key={row.id}
                       className="border-border-default hover:bg-surface-card transition-colors"
@@ -636,30 +453,30 @@ export function StocksTab() {
                         </TableCell>
                       ))}
                     </TableRow>
-                  ))}
-              {!isLoading && rows.length === 0 && (
-                <TableRow>
-                  <TableCell
-                    colSpan={columns.length}
-                    className="py-8 text-center"
-                  >
-                    <div className="flex flex-col items-center gap-2 text-text-muted">
-                      <BarChart3 className="size-5 text-text-disabled" aria-hidden="true" />
-                      <span className="text-xs">
-                        Connect to OpenAlgo to see live prices.
-                      </span>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+                  ))
+                : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={columns.length}
+                        className="py-8 text-center"
+                      >
+                        <div className="flex flex-col items-center gap-2 text-text-muted">
+                          <BarChart3 className="size-5 text-text-disabled" aria-hidden="true" />
+                          <span className="text-xs">
+                            No stocks match the current filters.
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
             </TableBody>
           </Table>
         </GlassCard>
       )}
 
       <p className="text-xs text-text-muted">
-        Price data sourced from OpenAlgo. LTP and change% reflect the current
-        session. Watchlist is saved locally in your browser.
+        Fundamental data is cached for 24 hours. Market cap in INR crore.
+        PE/PB ratios are TTM. ROE and ROCE as percentage.
       </p>
     </div>
   );

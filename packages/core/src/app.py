@@ -202,6 +202,10 @@ def create_flask_app(
     from packages.screener.src.analysis_routes import analysis_bp  # noqa: PLC0415
     app.register_blueprint(analysis_bp)
 
+    # Register stock screener blueprint (/ft-api/v1/stocks/*)
+    from packages.screener.src.stock_routes import stock_bp  # noqa: PLC0415
+    app.register_blueprint(stock_bp)
+
     # Register Action Center blueprint (/ft-api/v1/action-center/*)
     from packages.engine.src.action_center import ActionCenter  # noqa: PLC0415
     from packages.engine.src.action_center_routes import action_center_bp  # noqa: PLC0415
@@ -220,6 +224,10 @@ def create_flask_app(
     # Register P&L tracker blueprint
     from packages.data.src.pnl_routes import pnl_bp  # noqa: PLC0415
     app.register_blueprint(pnl_bp)
+
+    # Register Order Flow blueprint (synthetic footprint data)
+    from packages.data.src.orderflow_routes import orderflow_bp  # noqa: PLC0415
+    app.register_blueprint(orderflow_bp)
 
     # Register Historify watchlist blueprint
     from packages.historical.src.watchlist_routes import historify_bp  # noqa: PLC0415

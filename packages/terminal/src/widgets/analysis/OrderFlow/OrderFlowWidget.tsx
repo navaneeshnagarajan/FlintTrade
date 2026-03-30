@@ -7,11 +7,10 @@
  * left as a red bar. The POC (Point of Control — highest total volume) is
  * highlighted per column with a yellow border.
  *
- * Since no backend order flow aggregator exists yet (planned for v0.3):
- *   - Deterministic sample data is generated to demonstrate the full UI.
- *   - A "Sample Data" badge is shown in the header.
- *   - When live data becomes available, replace generateSampleData() with
- *     a TanStack Query hook that calls the FlintTrade backend endpoint.
+ * Data is fetched from the FlintTrade backend via the useOrderFlow hook
+ * (GET /ft-api/v1/orderflow). The backend currently returns synthetic
+ * footprint data; when the live WebSocket tick pipeline is wired, the
+ * same endpoint will serve real aggregated order flow buckets.
  *
  * Canvas layout:
  *   left margin  = 12px  (minimal — bars face outward, no label needed)
@@ -38,8 +37,9 @@ import {
   useMemo,
   useCallback,
 } from "react";
-import { AlertCircle, BarChart2 } from "lucide-react";
+import { AlertCircle, BarChart2, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -49,6 +49,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { IDockviewPanelProps } from "dockview-react";
+import { useOrderFlow } from "@/hooks/useOrderFlow";
+import type { FootprintBucket } from "@/hooks/useOrderFlow";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,92 +95,30 @@ const COLOR_TEXT_PRICE = "#e4e4e7"; // text-primary equivalent
 const COLOR_LTP_LINE = "#6366f1";   // indigo-500 — LTP dashed line
 const COLOR_CANVAS_BG = "#0a0a0f"; // app background
 
-// ─── Sample data generation ────────────────────────────────────────────────────
+// ─── Backend → Widget data conversion ────────────────────────────────────────
 
 /**
- * Generates deterministic sample footprint data for demonstration.
- * Returns columns ordered oldest → newest (left → right on chart).
- *
- * @param symbol   - used to seed price range so different symbols look different
- * @param interval - column interval in minutes
- * @param cols     - number of time columns to generate
+ * Converts backend FootprintBucket[] (keyed cells) into the widget's
+ * internal FootprintColumn[] format (array-based cells with priceLevel).
  */
-function generateSampleData(
-  symbol: string,
-  interval: number,
-  cols = 20,
-): FootprintColumn[] {
-  // Seed from symbol to get different base prices per symbol
-  const basePrice =
-    symbol === "NIFTY"
-      ? 22_500
-      : symbol === "BANKNIFTY"
-        ? 48_000
-        : symbol === "FINNIFTY"
-          ? 21_000
-          : symbol === "MIDCPNIFTY"
-            ? 11_500
-            : symbol === "RELIANCE"
-              ? 2_900
-              : 3_800; // TCS
+function bucketsToColumns(buckets: FootprintBucket[]): FootprintColumn[] {
+  return buckets.map((bucket) => {
+    const cells: FootprintCell[] = Object.entries(bucket.cells).map(
+      ([priceStr, cell]) => ({
+        priceLevel: Number(priceStr),
+        buyVolume: cell.buy_volume,
+        sellVolume: cell.sell_volume,
+      }),
+    );
+    // Sort cells by price ascending for consistent rendering
+    cells.sort((a, b) => a.priceLevel - b.priceLevel);
 
-  const tickSize = basePrice >= 10_000 ? 50 : basePrice >= 1_000 ? 5 : 1;
-  const priceRows = 10; // number of price levels per column
-
-  // Simple PRNG seeded by symbol+interval so data is stable across renders
-  let seed = symbol.split("").reduce((a, c) => a + c.charCodeAt(0), interval);
-  function rand(): number {
-    seed = (seed * 1664525 + 1013904223) & 0xffff_ffff;
-    return Math.abs(seed) / 0x7fff_ffff;
-  }
-
-  // Generate a random walk for mid-price across columns
-  let mid = basePrice;
-  const columns: FootprintColumn[] = [];
-
-  // Work backwards from "now" to produce time labels
-  const now = new Date();
-  now.setSeconds(0, 0);
-
-  for (let c = 0; c < cols; c++) {
-    const colTime = new Date(now.getTime() - (cols - 1 - c) * interval * 60_000);
-    const timeLabel = colTime.toLocaleTimeString("en-IN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-
-    // Drift mid-price randomly
-    mid += (rand() - 0.5) * tickSize * 4;
-    mid = Math.round(mid / tickSize) * tickSize;
-
-    // Build cells around mid
-    const startPrice = mid - Math.floor(priceRows / 2) * tickSize;
-    const cells: FootprintCell[] = [];
-
-    for (let r = 0; r < priceRows; r++) {
-      const priceLevel = startPrice + r * tickSize;
-      // More volume near mid — Gaussian-ish distribution
-      const dist = Math.abs(r - priceRows / 2) / (priceRows / 2);
-      const volumeScale = Math.max(0.1, 1 - dist * 0.8) * 10_000;
-      const buyVolume = Math.round(rand() * volumeScale * (1 + rand() * 0.5));
-      const sellVolume = Math.round(rand() * volumeScale * (1 + rand() * 0.5));
-      cells.push({ priceLevel, buyVolume, sellVolume });
-    }
-
-    // POC = price level with max (buy + sell) volume
-    const poc = cells.reduce(
-      (best, cell) =>
-        cell.buyVolume + cell.sellVolume > best.buyVolume + best.sellVolume
-          ? cell
-          : best,
-      cells[0],
-    ).priceLevel;
-
-    columns.push({ time: timeLabel, cells, poc });
-  }
-
-  return columns;
+    return {
+      time: bucket.time_label,
+      cells,
+      poc: bucket.poc_price,
+    };
+  });
 }
 
 // ─── Drawing helpers ──────────────────────────────────────────────────────────
@@ -362,9 +302,16 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
     [intervalLabel],
   );
 
+  // Fetch footprint data from backend (interval in seconds for the API)
+  const { data, isLoading, isError, error } = useOrderFlow(
+    symbol,
+    "NSE",
+    intervalMinutes * 60,
+  );
+
   const columns = useMemo(
-    () => generateSampleData(symbol, intervalMinutes, 20),
-    [symbol, intervalMinutes],
+    () => (data?.buckets ? bucketsToColumns(data.buckets) : []),
+    [data],
   );
 
   const ltp = useMemo(() => getLtp(columns), [columns]);
@@ -494,15 +441,37 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
           </span>
         </div>
 
-        {/* Sample data badge */}
-        <Badge
-          variant="outline"
-          className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
-          aria-label="Displaying sample data — live data requires backend order flow aggregator"
-        >
-          <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
-          Sample Data
-        </Badge>
+        {/* Status badge */}
+        {isLoading && (
+          <Badge
+            variant="outline"
+            className="text-xs border-blue-500/40 text-blue-400 bg-blue-500/10 h-5 px-1.5"
+            aria-label="Loading order flow data"
+          >
+            <Loader2 className="size-2.5 mr-1 animate-spin" aria-hidden="true" />
+            Loading
+          </Badge>
+        )}
+        {isError && (
+          <Badge
+            variant="outline"
+            className="text-xs border-red-500/40 text-red-400 bg-red-500/10 h-5 px-1.5"
+            aria-label={`Error loading data: ${error instanceof Error ? error.message : "Unknown error"}`}
+          >
+            <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
+            Error
+          </Badge>
+        )}
+        {!isLoading && !isError && columns.length > 0 && (
+          <Badge
+            variant="outline"
+            className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
+            aria-label="Displaying synthetic data from backend — live tick data requires WebSocket"
+          >
+            <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
+            Synthetic
+          </Badge>
+        )}
       </div>
 
       {/* ─── Legend ─────────────────────────────────────────────────────── */}
@@ -543,7 +512,24 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
           className="absolute inset-0 block"
           aria-hidden="true"
         />
-        {columns.length === 0 && (
+        {isLoading && columns.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <Skeleton className="h-3 w-48" />
+            <Skeleton className="h-3 w-36" />
+            <Skeleton className="h-3 w-40" />
+            <span className="text-xs text-zinc-500 mt-1">Loading order flow data...</span>
+          </div>
+        )}
+        {isError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-red-400/70">
+            <AlertCircle className="size-8" aria-hidden="true" />
+            <span className="text-sm">
+              {error instanceof Error ? error.message : "Failed to load data"}
+            </span>
+            <span className="text-xs text-zinc-500">Retrying automatically...</span>
+          </div>
+        )}
+        {!isLoading && !isError && columns.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-600">
             <BarChart2 className="size-8" aria-hidden="true" />
             <span className="text-sm">No data</span>
