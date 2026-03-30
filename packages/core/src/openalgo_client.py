@@ -605,3 +605,28 @@ class OpenAlgoClient:
         """POST /api/v1/data/oiprofile — OI Profile data."""
         payload = self._body({"symbol": symbol, "expiry": expiry})
         return await self._post("data/oiprofile", payload)
+
+    # ── New OpenAlgo endpoints (absorbed 2026-03-30) ──────────────────────
+
+    async def broker_capabilities(self) -> dict[str, Any]:
+        """GET /api/broker/capabilities — broker exchange/feature metadata.
+
+        Returns supported exchanges, broker type, and features for the
+        currently connected broker. Added in OpenAlgo 2.0.0.2.
+        """
+        return await self._get("broker/capabilities")
+
+    async def pnl_symbols(self) -> dict[str, Any]:
+        """GET /api/v1/data/pnlsymbols — P&L symbol tracking.
+
+        Returns symbols with realized and unrealized P&L data.
+        """
+        return await self._get("data/pnlsymbols")
+
+    async def leverage_settings(self) -> dict[str, Any]:
+        """GET /api/broker/leverage — leverage settings (crypto brokers only).
+
+        Returns current leverage configuration. Only applicable for crypto
+        brokers like Delta Exchange.
+        """
+        return await self._get("broker/leverage")

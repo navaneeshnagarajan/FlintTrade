@@ -263,6 +263,9 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 ### Utilities
 `holidays` (**GET**), `timings` (**GET**), `telegram` (POST)
 
+### Broker Management (added OpenAlgo 2.0.0.2)
+`broker/capabilities` (**GET**), `broker/credentials` (**GET/POST**), `broker/leverage` (**GET**)
+
 ### WebSocket (port 8765)
 Modes: 1=LTP, 2=Quote, 3=Depth (50 levels in v2)
 Auth: `{ "action": "authenticate", "api_key": "<key>" }`
