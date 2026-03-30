@@ -317,7 +317,7 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 - **React:** Functional components, hooks, Tailwind CSS v4, shadcn/ui components, lucide-react icons
 - **Python:** PEP 8, ruff, type hints, Google docstrings, absolute imports
 - **Tests:** pytest (Python, `--import-mode=importlib` required for flat package layout) + Vitest (terminal). Every new function needs a test.
-- **Vite proxy (dev):** `/api` → OpenAlgo:5000, `/ws` → ws://127.0.0.1:8765. In dev mode `api.ts` uses relative paths (empty base); production uses full host from connectionStore. Don't bypass the proxy in dev.
+- **Vite proxy (dev):** `/api` → OpenAlgo:5000, `/ft-api` → FlintTrade backend:5001, `/ws` → ws://127.0.0.1:8765. In dev mode `api.ts` uses relative paths (empty base); production uses full host from connectionStore. Don't bypass the proxy in dev.
 - **Git:** Conventional commits (`feat(pkg):`, `fix(pkg):`, `docs:`, `test:`, `chore:`)
 - **Branch:** main only (pre-alpha)
 - **Widgets:** Every widget is a Dockview panel registered in `widgetFactory.tsx`
