@@ -20,6 +20,7 @@ import {
   BarChart3,
   ShieldAlert,
   RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -466,6 +467,12 @@ export default function AISuggestionsPanel() {
           </span>
         </div>
       </Card>
+
+      {/* Disclaimer */}
+      <div className="flex items-center gap-2 px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 text-xs">
+        <AlertCircle size={14} />
+        <span>Performance figures are illustrative estimates, not actual backtest results.</span>
+      </div>
 
       {/* Suggestion cards */}
       {suggestions.length === 0 ? (

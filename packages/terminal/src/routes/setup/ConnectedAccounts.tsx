@@ -6,6 +6,7 @@
  * brokerStore (Zustand) as the single source of truth.
  */
 
+import { useState } from "react";
 import { Trash2, RefreshCw, Star } from "lucide-react";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -49,6 +50,7 @@ export function ConnectedAccounts() {
   // Trigger polling — UI reads from store (single source of truth)
   useBrokerAccounts();
   const accounts = useBrokerStore((s) => s.accounts);
+  const [error, setError] = useState<string | null>(null);
 
   if (accounts.length === 0) {
     return (
@@ -62,19 +64,39 @@ export function ConnectedAccounts() {
   }
 
   const handleRemove = async (accountId: string) => {
-    await gatewayApi.removeAccount(accountId);
+    try {
+      setError(null);
+      await gatewayApi.removeAccount(accountId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove account");
+    }
   };
 
   const handleReconnect = async (accountId: string) => {
-    await gatewayApi.reconnectAccount(accountId);
+    try {
+      setError(null);
+      await gatewayApi.reconnectAccount(accountId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to reconnect account");
+    }
   };
 
   const handleSetPrimary = async (accountId: string) => {
-    await gatewayApi.setPrimary(accountId);
+    try {
+      setError(null);
+      await gatewayApi.setPrimary(accountId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set primary account");
+    }
   };
 
   return (
     <div className="space-y-2">
+      {error && (
+        <p className="text-xs text-red-400 px-1 py-1.5 rounded-md bg-red-500/10 border border-red-500/20">
+          {error}
+        </p>
+      )}
       {accounts.map((acct: BrokerAccount) => (
         <div
           key={acct.account_id}

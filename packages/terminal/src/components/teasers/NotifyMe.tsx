@@ -141,6 +141,13 @@ export function NotifyMe({ config, className }: NotifyMeProps) {
         )}
       </AnimatePresence>
 
+      {/* Post-subscribe disclaimer */}
+      {subscribed && (
+        <p className="text-xs text-text-muted mt-1">
+          Preference saved locally. Configure Telegram in Settings for push notifications.
+        </p>
+      )}
+
       {/* Channel hint */}
       {!subscribed && (
         <span className="text-[10px] text-text-muted pl-0.5">

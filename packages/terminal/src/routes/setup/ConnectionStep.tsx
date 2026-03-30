@@ -8,7 +8,7 @@
  * Exports: ConnectionStep, ConnectionFormValues, deriveWsUrl
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -265,11 +265,13 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
     flowState.step === "authenticating" ||
     flowState.step === "error";
 
-  // When auth succeeds go back to accounts list
-  if (flowState.step === "success" && directStep === "auth") {
-    setDirectStep("accounts");
-    setSelectedBroker(null);
-  }
+  // When auth succeeds go back to accounts list (must be in useEffect, not render body)
+  useEffect(() => {
+    if (flowState.step === "success" && directStep === "auth") {
+      setDirectStep("accounts");
+      setSelectedBroker(null);
+    }
+  }, [flowState.step, directStep]);
 
   function handleBrokerSelect(broker: BrokerInfo) {
     setSelectedBroker(broker);

@@ -52,6 +52,8 @@ beforeEach(() => {
     writable: true,
     configurable: true,
   });
+  // Mock window.confirm to auto-accept (tests verify the API call, not the dialog)
+  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
 afterEach(() => {

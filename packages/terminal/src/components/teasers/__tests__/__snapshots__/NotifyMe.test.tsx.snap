@@ -37,6 +37,11 @@ exports[`NotifyMe > matches snapshot for subscribed state 1`] = `
         Subscribed
       </span>
     </div>
+    <p
+      class="text-xs text-text-muted mt-1"
+    >
+      Preference saved locally. Configure Telegram in Settings for push notifications.
+    </p>
   </div>
 </div>
 `;

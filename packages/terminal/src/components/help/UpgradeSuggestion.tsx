@@ -176,15 +176,18 @@ export function UpgradeSuggestionHost() {
   const [activeSuggestion, setActiveSuggestion] = useState<UpgradeSuggestionType | null>(null);
   // Session-level dismissals (not persisted — will show next reload)
   const sessionDismissed   = useRef<Set<string>>(new Set());
+  // Ref to avoid re-creating refresh when activeSuggestion changes (prevents interval reset)
+  const activeSuggestionRef = useRef(activeSuggestion);
+  useEffect(() => { activeSuggestionRef.current = activeSuggestion; }, [activeSuggestion]);
 
   const refresh = useCallback(() => {
-    if (activeSuggestion) return; // don't interrupt an active toast
+    if (activeSuggestionRef.current) return; // don't interrupt an active toast
     const all = getSuggestions();
     const next = all.find(
       (s) => !sessionDismissed.current.has(`${s.domain}:${s.toLevel}`),
     );
     setActiveSuggestion(next ?? null);
-  }, [activeSuggestion, getSuggestions]);
+  }, [getSuggestions]);
 
   // Initial check after mount, then every 60s
   useEffect(() => {

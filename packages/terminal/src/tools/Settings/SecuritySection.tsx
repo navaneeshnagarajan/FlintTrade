@@ -107,6 +107,12 @@ export function SecuritySection() {
       setBanError("IP address is required");
       return;
     }
+    const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+    if (!ipv4Regex.test(ip) && !ipv6Regex.test(ip)) {
+      setBanError("Invalid IP address format");
+      return;
+    }
     banMutation.mutate({ ip, reason: newReason.trim() || "Manual ban" });
   }, [newIp, newReason, banMutation]);
 

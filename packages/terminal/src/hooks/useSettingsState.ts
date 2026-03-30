@@ -183,11 +183,12 @@ export function useSettingsState(): SettingsState {
     } else if (field === "apiKey") {
       useConnectionStore.getState().setConfig({ apiKey: value });
     } else if (field === "wsPort") {
-      // Derive wsUrl from current host + new port
+      // Derive wsUrl from current host + new port, respecting https → wss
       const host = useConnectionStore.getState().host;
       try {
-        const hostname = new URL(host).hostname;
-        useConnectionStore.getState().setConfig({ wsUrl: `ws://${hostname}:${value}` });
+        const parsed = new URL(host);
+        const protocol = parsed.protocol === "https:" ? "wss" : "ws";
+        useConnectionStore.getState().setConfig({ wsUrl: `${protocol}://${parsed.hostname}:${value}` });
       } catch {
         // If host isn't a valid URL yet, just store the partial wsUrl
         useConnectionStore.getState().setConfig({ wsUrl: `ws://127.0.0.1:${value}` });

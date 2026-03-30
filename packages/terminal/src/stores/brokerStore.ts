@@ -50,7 +50,25 @@ export const useBrokerStore = create<BrokerState>()(
           return accounts.find((a) => a.account_id === activeAccountId);
         },
       }),
-      { name: "flinttrade:brokers" },
+      {
+        name: "flinttrade:brokers",
+        // Only persist non-sensitive display fields. Credentials and session
+        // tokens must never be written to localStorage.
+        partialize: (state) => ({
+          accounts: state.accounts.map((a) => ({
+            account_id: a.account_id,
+            broker: a.broker,
+            label: a.label,
+            is_primary: a.is_primary,
+            // Persist status so the UI can show last-known state on reload;
+            // it will be refreshed from the backend immediately.
+            status: a.status,
+            connected_at: a.connected_at,
+            error_message: a.error_message,
+          })),
+          activeAccountId: state.activeAccountId,
+        }),
+      },
     ),
     { name: "BrokerStore" },
   ),

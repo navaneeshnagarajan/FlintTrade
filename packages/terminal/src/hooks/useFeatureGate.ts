@@ -8,6 +8,6 @@ export type GateStatus = "visible" | "preview" | "locked";
 export function useFeatureGate(featureId: string, domain?: Domain): GateStatus {
   const level = useSkillLevel(domain);
   const gate = FEATURE_GATES[featureId];
-  if (!gate) return "visible"; // unknown features default to visible
+  if (!gate) return "locked"; // unknown features default to locked (fail closed)
   return gate[level];
 }

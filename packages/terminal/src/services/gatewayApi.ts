@@ -8,11 +8,19 @@ import type { BrokerInfo, BrokerAccount, OAuthStartResponse } from "@/types/brok
 
 const BASE = "/ft-api/v1";
 
+async function extractErrorMessage(res: Response): Promise<string> {
+  const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+  const msg = (body?.message ?? body?.error) as string | undefined;
+  return msg ?? `HTTP ${res.status}`;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`Gateway API error: ${res.status}`);
-  const json = await res.json();
-  return json as T;
+  if (!res.ok) {
+    const msg = await extractErrorMessage(res);
+    throw new Error(`Gateway: ${msg}`);
+  }
+  return (await res.json()) as T;
 }
 
 async function post<T>(path: string, body?: object): Promise<T> {
@@ -21,13 +29,19 @@ async function post<T>(path: string, body?: object): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`Gateway API error: ${res.status}`);
+  if (!res.ok) {
+    const msg = await extractErrorMessage(res);
+    throw new Error(`Gateway: ${msg}`);
+  }
   return (await res.json()) as T;
 }
 
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(`Gateway API error: ${res.status}`);
+  if (!res.ok) {
+    const msg = await extractErrorMessage(res);
+    throw new Error(`Gateway: ${msg}`);
+  }
   return (await res.json()) as T;
 }
 

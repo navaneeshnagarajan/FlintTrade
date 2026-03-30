@@ -23,9 +23,15 @@ export default function useGlobalKeys({
 }: GlobalKeyHandlers): void {
   useEffect(() => {
     function handler(e: KeyboardEvent): void {
-      // Skip if user is typing in an input
+      // Skip if user is typing in an input or has a button/link focused
       const tag = document.activeElement?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        tag === "BUTTON" ||
+        tag === "A"
+      ) return;
       if ((document.activeElement as HTMLElement)?.isContentEditable) return;
 
       // Ctrl+K -- Command palette
@@ -42,21 +48,28 @@ export default function useGlobalKeys({
         return;
       }
 
-      // X -- Exit all positions (with confirmation)
+      // X -- Exit all positions (Shift+X requires confirmation)
       if (e.key === "x" || e.key === "X") {
         if (e.shiftKey) {
-          // Shift+X = immediate exit (no confirm)
-          closePosition("Flint").catch((e) => console.error("[GlobalKeys] Failed to close position:", e));
+          if (window.confirm("Close ALL open positions? This cannot be undone.")) {
+            closePosition("Flint").catch((err) =>
+              console.error("[GlobalKeys] Failed to close position:", err),
+            );
+          }
           return;
         }
         // Regular X = let the UI handle confirmation
         return;
       }
 
-      // C -- Cancel all orders
+      // C -- Cancel all orders (requires confirmation)
       if (e.key === "c" || e.key === "C") {
         if (!e.ctrlKey && !e.metaKey) {
-          cancelAllOrders().catch((e) => console.error("[GlobalKeys] Failed to cancel orders:", e));
+          if (window.confirm("Cancel ALL open orders? This cannot be undone.")) {
+            cancelAllOrders().catch((err) =>
+              console.error("[GlobalKeys] Failed to cancel orders:", err),
+            );
+          }
           return;
         }
       }
