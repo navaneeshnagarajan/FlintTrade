@@ -40,7 +40,8 @@ export type WidgetId =
   | "volsurface"
   | "ivsmile"
   | "straddlepnl"
-  | "oiprofile";
+  | "oiprofile"
+  | "scanner";
 
 export type ToolId =
   | "settings"

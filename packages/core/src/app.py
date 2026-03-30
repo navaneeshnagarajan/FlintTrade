@@ -229,6 +229,10 @@ def create_flask_app(
     from packages.data.src.orderflow_routes import orderflow_bp  # noqa: PLC0415
     app.register_blueprint(orderflow_bp)
 
+    # Register Tax Report blueprint (/v1/tax/*)
+    from packages.data.src.tax_routes import tax_bp  # noqa: PLC0415
+    app.register_blueprint(tax_bp)
+
     # Register Historify watchlist blueprint
     from packages.historical.src.watchlist_routes import historify_bp  # noqa: PLC0415
     app.register_blueprint(historify_bp)

@@ -12,3 +12,5 @@ export { EtfTab } from "./EtfTab";
 export { StocksTab } from "./StocksTab";
 export { IpoTab } from "./IpoTab";
 export { SocialTab } from "./SocialTab";
+export { TaxTab } from "./TaxTab";
+export { OverlapTab } from "./OverlapTab";

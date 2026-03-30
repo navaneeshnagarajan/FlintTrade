@@ -14,6 +14,9 @@ from packages.engine.src.social_trading import (
     TraderProfile,
     seed_leaderboard,
     seed_marketplace,
+    sync_from_registry,
+    _classify_strategy,
+    _humanise_name,
 )
 
 
@@ -187,7 +190,7 @@ class TestStrategyMarketplace:
     def test_publish_invalid_category_raises(self) -> None:
         mp = StrategyMarketplace()
         with pytest.raises(ValueError, match="Invalid category"):
-            mp.publish(self._make_strategy(category="crypto"))
+            mp.publish(self._make_strategy(category="forex"))
 
     def test_browse_returns_public_only(self) -> None:
         mp = StrategyMarketplace()
@@ -346,3 +349,76 @@ class TestSeedData:
         strategies = mp.browse(limit=100)
         categories = {s.category for s in strategies}
         assert categories == {"intraday", "swing", "options", "investment"}
+
+
+# ======================================================================
+# sync_from_registry
+# ======================================================================
+
+
+class TestSyncFromRegistry:
+    """Tests for sync_from_registry and helper functions."""
+
+    def test_classify_legacy_strategy(self) -> None:
+        assert _classify_strategy("EMACrossover") == "trend"
+        assert _classify_strategy("ORB") == "intraday"
+        assert _classify_strategy("IronCondor") == "options"
+        assert _classify_strategy("BollingerMR") == "mean_reversion"
+
+    def test_classify_prefix_strategy(self) -> None:
+        assert _classify_strategy("IntradayGapFill") == "intraday"
+        assert _classify_strategy("MTFRSITrend") == "swing"
+        assert _classify_strategy("ScalpTapeReading") == "scalping"
+        assert _classify_strategy("CryptoGrid") == "crypto"
+        assert _classify_strategy("CommoditySeasonal") == "commodity"
+        assert _classify_strategy("EventEarnings") == "event"
+        assert _classify_strategy("MLFeatureSignal") == "ml"
+        assert _classify_strategy("PortfolioEqualWeight") == "portfolio"
+        assert _classify_strategy("PairsCointegration") == "pairs"
+        assert _classify_strategy("StatRegimeHMM") == "statistical"
+
+    def test_classify_unknown_defaults_to_swing(self) -> None:
+        assert _classify_strategy("SomeUnknownStrategy") == "swing"
+
+    def test_humanise_name(self) -> None:
+        assert _humanise_name("MTFRSITrend") == "MTFRSI Trend"
+        assert _humanise_name("IntradayGapFill") == "Intraday Gap Fill"
+        assert _humanise_name("EMACrossover") == "EMA Crossover"
+        assert _humanise_name("RSIMomentum") == "RSI Momentum"
+        assert _humanise_name("VWAPReversion") == "VWAP Reversion"
+
+    def test_sync_from_registry_creates_marketplace(self) -> None:
+        mp = sync_from_registry()
+        # Must have at least the 10 seeded + some registry strategies
+        assert mp.count > 10
+
+    def test_sync_from_registry_with_existing_marketplace(self) -> None:
+        mp = seed_marketplace()
+        original_count = mp.count
+        mp = sync_from_registry(mp)
+        assert mp.count > original_count
+
+    def test_sync_from_registry_idempotent(self) -> None:
+        mp = sync_from_registry()
+        count_after_first = mp.count
+        mp = sync_from_registry(mp)
+        assert mp.count == count_after_first
+
+    def test_sync_from_registry_strategy_ids_prefixed(self) -> None:
+        mp = sync_from_registry()
+        all_strats = mp.browse(limit=10_000)
+        registry_strats = [s for s in all_strats if s.strategy_id.startswith("registry_")]
+        assert len(registry_strats) > 0
+        for s in registry_strats:
+            assert s.creator_id == "flinttrade_registry"
+            assert s.is_public is True
+            assert s.name  # non-empty
+            assert s.category  # non-empty
+
+    def test_sync_from_registry_all_categories_valid(self) -> None:
+        from packages.engine.src.social_trading import VALID_CATEGORIES
+
+        mp = sync_from_registry()
+        all_strats = mp.browse(limit=10_000)
+        for s in all_strats:
+            assert s.category in VALID_CATEGORIES, f"{s.strategy_id} has invalid category {s.category}"

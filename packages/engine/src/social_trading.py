@@ -19,9 +19,19 @@ from typing import Literal
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
-StrategyCategory = Literal["intraday", "swing", "options", "investment"]
+StrategyCategory = Literal[
+    "intraday", "swing", "options", "investment",
+    "trend", "momentum", "mean_reversion", "volatility", "volume",
+    "pattern", "scalping", "crypto", "commodity", "event",
+    "ml", "portfolio", "pairs", "statistical",
+]
 
-VALID_CATEGORIES: set[str] = {"intraday", "swing", "options", "investment"}
+VALID_CATEGORIES: set[str] = {
+    "intraday", "swing", "options", "investment",
+    "trend", "momentum", "mean_reversion", "volatility", "volume",
+    "pattern", "scalping", "crypto", "commodity", "event",
+    "ml", "portfolio", "pairs", "statistical",
+}
 
 VALID_SORT_METRICS: set[str] = {
     "total_return_pct",
@@ -526,6 +536,195 @@ def seed_marketplace() -> StrategyMarketplace:
     ]
 
     for strategy in strategies:
+        marketplace.publish(strategy)
+
+    return marketplace
+
+
+# ── Registry sync ───────────────────────────────────────────────────────────
+
+
+# Map strategy key prefix → category used in the marketplace.
+_PREFIX_TO_CATEGORY: dict[str, str] = {
+    "mtf": "swing",
+    "intraday": "intraday",
+    "options": "options",
+    "trend": "trend",
+    "momentum": "momentum",
+    "mean_reversion": "mean_reversion",
+    "volatility": "volatility",
+    "volume": "volume",
+    "pattern": "pattern",
+    "scalp": "scalping",
+    "crypto": "crypto",
+    "commodity": "commodity",
+    "event": "event",
+    "ml": "ml",
+    "portfolio": "portfolio",
+    "pairs": "pairs",
+    "stat": "statistical",
+}
+
+# Legacy strategies (from strategies.py) that don't follow prefix naming.
+_LEGACY_CATEGORY_MAP: dict[str, str] = {
+    "EMACrossover": "trend",
+    "Supertrend": "trend",
+    "MACD_RSI": "momentum",
+    "BollingerMR": "mean_reversion",
+    "VWAPDev": "mean_reversion",
+    "StraddleSell": "options",
+    "StrangleSell": "options",
+    "IronCondor": "options",
+    "BullPutSpread": "options",
+    "BearCallSpread": "options",
+    "MomentumBreakout": "momentum",
+    "ORB": "intraday",
+}
+
+
+def _classify_strategy(key: str) -> str:
+    """Determine the marketplace category for a strategy registry key.
+
+    Checks the legacy map first, then tries prefix matching.
+    Falls back to 'swing' for unrecognised keys.
+
+    Args:
+        key: The strategy key from ALL_STRATEGIES (e.g. 'MTFRSITrend').
+
+    Returns:
+        A string from VALID_CATEGORIES.
+    """
+    if key in _LEGACY_CATEGORY_MAP:
+        return _LEGACY_CATEGORY_MAP[key]
+
+    # Convert CamelCase key to a lowercase, underscore-separated form
+    # for prefix matching (e.g. "IntradayGapFill" → "intraday_gap_fill").
+    import re
+
+    snake = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", key).lower()
+
+    for prefix, category in _PREFIX_TO_CATEGORY.items():
+        if snake.startswith(prefix):
+            return category
+
+    return "swing"  # safe default
+
+
+def _humanise_name(key: str) -> str:
+    """Convert a PascalCase strategy key to a human-readable name.
+
+    Examples:
+        'IntradayGapFill' → 'Intraday Gap Fill'
+        'EMACrossover'    → 'EMA Crossover'
+        'MTFRSITrend'     → 'MTFRSI Trend'
+
+    Args:
+        key: PascalCase strategy name.
+
+    Returns:
+        Space-separated human name.
+    """
+    import re
+
+    # Insert space between a run of uppercase and an uppercase+lowercase
+    spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", key)
+    # Insert space before an uppercase letter preceded by lowercase/digit
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", spaced)
+    return spaced
+
+
+def _instruments_for_category(category: str) -> list[str]:
+    """Return a sensible default instrument list for a given category.
+
+    Args:
+        category: A value from VALID_CATEGORIES.
+
+    Returns:
+        List of instrument identifiers.
+    """
+    instruments_map: dict[str, list[str]] = {
+        "intraday": ["NIFTY", "BANKNIFTY"],
+        "swing": ["NIFTY", "RELIANCE", "TCS", "HDFC"],
+        "options": ["NIFTY", "BANKNIFTY"],
+        "investment": ["NIFTYBEES", "JUNIORBEES"],
+        "trend": ["NIFTY", "BANKNIFTY", "RELIANCE"],
+        "momentum": ["NIFTY", "BANKNIFTY"],
+        "mean_reversion": ["NIFTY", "RELIANCE"],
+        "volatility": ["NIFTY", "BANKNIFTY", "INDIAVIX"],
+        "volume": ["NIFTY", "RELIANCE", "TCS"],
+        "pattern": ["NIFTY", "RELIANCE", "INFY"],
+        "scalping": ["NIFTY", "BANKNIFTY"],
+        "crypto": ["BTCUSDT", "ETHUSDT"],
+        "commodity": ["GOLD", "SILVER", "CRUDEOIL"],
+        "event": ["NIFTY", "BANKNIFTY"],
+        "ml": ["NIFTY", "BANKNIFTY"],
+        "portfolio": ["NIFTY50"],
+        "pairs": ["RELIANCE", "TCS"],
+        "statistical": ["NIFTY", "BANKNIFTY"],
+    }
+    return instruments_map.get(category, ["NIFTY"])
+
+
+def sync_from_registry(
+    marketplace: StrategyMarketplace | None = None,
+) -> StrategyMarketplace:
+    """Populate a marketplace with entries derived from backtest-engine strategies.
+
+    Reads ALL_STRATEGIES from the backtest-engine's strategy registry and
+    creates a SharedStrategy for each, categorised by module prefix.
+
+    If ``marketplace`` is None a fresh one is created (with seed data already
+    loaded).  Existing strategies in the marketplace are preserved; only new
+    strategy IDs are added.
+
+    Args:
+        marketplace: Optional existing marketplace to populate.
+
+    Returns:
+        The marketplace with registry strategies added.
+    """
+    if marketplace is None:
+        marketplace = seed_marketplace()
+
+    try:
+        import os
+        import sys
+
+        _bt_src = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "backtest-engine", "src")
+        )
+        _added = False
+        if _bt_src not in sys.path:
+            sys.path.insert(0, _bt_src)
+            _added = True
+        try:
+            from strategies import ALL_STRATEGIES  # type: ignore[import-untyped]
+        finally:
+            if _added and _bt_src in sys.path:
+                sys.path.remove(_bt_src)
+    except Exception:  # pragma: no cover — import may fail in isolated tests
+        return marketplace
+
+    existing_ids = {s.strategy_id for s in marketplace.browse(limit=10_000)}
+
+    for key in sorted(ALL_STRATEGIES.keys()):
+        strategy_id = f"registry_{key.lower()}"
+        if strategy_id in existing_ids:
+            continue
+
+        category = _classify_strategy(key)
+        name = _humanise_name(key)
+        instruments = _instruments_for_category(category)
+
+        strategy = SharedStrategy(
+            strategy_id=strategy_id,
+            creator_id="flinttrade_registry",
+            name=name,
+            description=f"Built-in {category} strategy from the FlintTrade backtest engine.",
+            category=category,
+            instruments=instruments,
+            is_public=True,
+        )
         marketplace.publish(strategy)
 
     return marketplace

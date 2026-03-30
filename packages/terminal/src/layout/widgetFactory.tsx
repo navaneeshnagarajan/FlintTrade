@@ -44,6 +44,9 @@ const lazyWidgets = {
   straddlepnl: lazy(() => import("@/widgets/analysis/StraddlePnL/StraddlePnLWidget")),
   oiprofile: lazy(() => import("@/widgets/analysis/OIProfile/OIProfileWidget")),
   orderflow: lazy(() => import("@/widgets/analysis/OrderFlow/OrderFlowWidget")),
+
+  // Utility widgets (new)
+  scanner: lazy(() => import("@/widgets/utility/Scanner/ScannerWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -78,6 +81,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis" },
   { id: "oiprofile", name: "OI Profile", icon: "BarChart", category: "Analysis" },
   { id: "orderflow", name: "Order Flow", icon: "BarChart2", category: "Analysis" },
+  { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility" },
 ];
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,8 @@ import {
   RefreshCw,
   LayoutDashboard,
   Users,
+  Receipt,
+  Layers,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,6 +47,8 @@ import {
   StocksTab,
   IpoTab,
   SocialTab,
+  TaxTab,
+  OverlapTab,
 } from "./invest/tabs";
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
@@ -56,9 +60,11 @@ type TabId =
   | "networth"
   | "social"
   | "sector"
+  | "overlap"
   | "etf"
   | "stocks"
-  | "ipo";
+  | "ipo"
+  | "tax";
 
 interface TabDef {
   id: TabId;
@@ -73,9 +79,11 @@ const TABS: TabDef[] = [
   { id: "networth", label: "Net Worth", icon: Wallet },
   { id: "social", label: "Social", icon: Users },
   { id: "sector", label: "Sector", icon: RotateCcw },
+  { id: "overlap", label: "Overlap", icon: Layers },
   { id: "etf", label: "ETFs", icon: Filter },
   { id: "stocks", label: "Stocks", icon: Search },
   { id: "ipo", label: "IPO", icon: Ticket },
+  { id: "tax", label: "Tax", icon: Receipt },
 ];
 
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
@@ -90,9 +98,11 @@ const TAB_CONTENT: Record<TabId, ReactNode> = {
   networth: <NetWorthTab />,
   social: <SocialTab />,
   sector: <SectorTab />,
+  overlap: <OverlapTab />,
   etf: <EtfTab />,
   stocks: <StocksTab />,
   ipo: <IpoTab />,
+  tax: <TaxTab />,
 };
 
 // ─── Inner shell (needs InvestProvider in scope) ──────────────────────────────
@@ -109,8 +119,8 @@ function InvestShell() {
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["dashboard", "holdings", "sip", "networth"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "etf", "stocks", "ipo"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "tax"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));

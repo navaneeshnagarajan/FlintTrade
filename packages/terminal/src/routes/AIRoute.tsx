@@ -5,6 +5,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Bot,
+  Lightbulb,
   MessageSquare,
   Zap,
   TrendingUp,
@@ -18,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import AIAdvisorWidget from "@/widgets/utility/AIAdvisor/AIAdvisorWidget";
+import AISuggestionsPanel from "@/routes/ai/AISuggestionsPanel";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,7 +40,7 @@ import { motionConfig, EASE_ENTER, DURATION } from "@/lib/motion";
 // Section registry
 // ---------------------------------------------------------------------------
 
-type SectionId = "chat" | "signals" | "sentiment" | "knowledge" | "settings";
+type SectionId = "chat" | "suggestions" | "signals" | "sentiment" | "knowledge" | "settings";
 
 interface SectionDef {
   id: SectionId;
@@ -48,6 +50,7 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "suggestions", label: "Suggest", icon: Lightbulb },
   { id: "signals", label: "Signals", icon: Zap },
   { id: "sentiment", label: "Sentiment", icon: TrendingUp },
   { id: "knowledge", label: "KB", icon: BookOpen },
@@ -55,7 +58,7 @@ const SECTIONS: SectionDef[] = [
 ];
 
 // Sections that appear as right-side overlay panels (not full-height)
-const OVERLAY_SECTIONS = new Set<SectionId>(["signals", "sentiment", "knowledge", "settings"]);
+const OVERLAY_SECTIONS = new Set<SectionId>(["suggestions", "signals", "sentiment", "knowledge", "settings"]);
 
 // ---------------------------------------------------------------------------
 // Section: Chat — full height, no chrome
@@ -850,6 +853,7 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
 
 const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   chat: <ChatSection />,
+  suggestions: <AISuggestionsPanel />,
   signals: <SignalsSection />,
   sentiment: <SentimentSection />,
   knowledge: <KnowledgeSection />,
@@ -858,6 +862,7 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
 
 const SECTION_LABELS: Record<SectionId, string> = {
   chat: "AI Chat",
+  suggestions: "AI Strategy Suggestions",
   signals: "Signals",
   sentiment: "Sentiment Analysis",
   knowledge: "Knowledge Base",
@@ -879,9 +884,9 @@ export default function AIRoute() {
   // Intermediate: Chat + Signals
   // Advanced: All sections (chat, signals, sentiment, knowledge, settings)
   const visibleSectionIds: SectionId[] = useMemo(() => {
-    if (level === "beginner") return ["chat"];
-    if (level === "intermediate") return ["chat", "signals"];
-    return ["chat", "signals", "sentiment", "knowledge", "settings"];
+    if (level === "beginner") return ["chat", "suggestions"];
+    if (level === "intermediate") return ["chat", "suggestions", "signals"];
+    return ["chat", "suggestions", "signals", "sentiment", "knowledge", "settings"];
   }, [level]);
 
   const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
