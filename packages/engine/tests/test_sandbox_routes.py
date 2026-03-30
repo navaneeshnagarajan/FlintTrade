@@ -63,7 +63,7 @@ def client_no_engine(app_no_engine):
 
 class TestSandboxRoutes:
     def test_get_config(self, client):
-        resp = client.get("/ft-api/v1/sandbox/config")
+        resp = client.get("/v1/sandbox/config")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -71,7 +71,7 @@ class TestSandboxRoutes:
 
     def test_update_config(self, client):
         resp = client.post(
-            "/ft-api/v1/sandbox/config",
+            "/v1/sandbox/config",
             json={"equity_leverage": 5},
         )
         assert resp.status_code == 200
@@ -79,39 +79,39 @@ class TestSandboxRoutes:
         assert data["config"]["equity_leverage"] == 5
 
     def test_get_funds(self, client):
-        resp = client.get("/ft-api/v1/sandbox/funds")
+        resp = client.get("/v1/sandbox/funds")
         assert resp.status_code == 200
         data = resp.get_json()
         assert "funds" in data
         assert data["funds"]["starting_capital"] == 500_000.0
 
     def test_get_positions_empty(self, client):
-        resp = client.get("/ft-api/v1/sandbox/positions")
+        resp = client.get("/v1/sandbox/positions")
         assert resp.status_code == 200
         assert resp.get_json()["positions"] == []
 
     def test_get_orders_empty(self, client):
-        resp = client.get("/ft-api/v1/sandbox/orders")
+        resp = client.get("/v1/sandbox/orders")
         assert resp.status_code == 200
         assert resp.get_json()["orders"] == []
 
     def test_get_trades_empty(self, client):
-        resp = client.get("/ft-api/v1/sandbox/trades")
+        resp = client.get("/v1/sandbox/trades")
         assert resp.status_code == 200
         assert resp.get_json()["trades"] == []
 
     def test_get_pnl_empty(self, client):
-        resp = client.get("/ft-api/v1/sandbox/pnl")
+        resp = client.get("/v1/sandbox/pnl")
         assert resp.status_code == 200
         assert resp.get_json()["pnl_history"] == []
 
     def test_reset(self, client):
-        resp = client.post("/ft-api/v1/sandbox/reset")
+        resp = client.post("/v1/sandbox/reset")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
         assert data["starting_capital"] == 500_000.0
 
     def test_no_engine_returns_503(self, client_no_engine):
-        resp = client_no_engine.get("/ft-api/v1/sandbox/funds")
+        resp = client_no_engine.get("/v1/sandbox/funds")
         assert resp.status_code == 503

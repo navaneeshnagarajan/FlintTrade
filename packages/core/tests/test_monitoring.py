@@ -110,18 +110,18 @@ class TestTrafficCounter:
 
     def test_record_and_get_recent(self):
         tc = self._make()
-        tc.record("GET", "/ft-api/v1/health", 200, 12.5)
+        tc.record("GET", "/v1/health", 200, 12.5)
         recent = tc.get_recent(n=10)
         assert len(recent) == 1
         assert recent[0]["method"] == "GET"
-        assert recent[0]["path"] == "/ft-api/v1/health"
+        assert recent[0]["path"] == "/v1/health"
         assert recent[0]["status"] == 200
         assert recent[0]["duration_ms"] == pytest.approx(12.5)
 
     def test_stats_error_rate(self):
         tc = self._make()
-        tc.record("GET", "/ft-api/v1/health", 200, 10.0)
-        tc.record("GET", "/ft-api/v1/bad", 500, 5.0)
+        tc.record("GET", "/v1/health", 200, 10.0)
+        tc.record("GET", "/v1/bad", 500, 5.0)
         stats = tc.get_stats(minutes=60)
         assert stats["error_rate"] == pytest.approx(0.5)
 

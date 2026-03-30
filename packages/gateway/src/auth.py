@@ -1,6 +1,6 @@
 """Flask blueprint for broker authentication and account management.
 
-All endpoints are mounted under /ft-api/v1/. The blueprint reads
+All endpoints are mounted under /v1/. The blueprint reads
 ``current_app.config["REGISTRY"]`` (a BrokerRegistry instance) and
 ``current_app.config["CREDENTIAL_STORE"]`` (a CredentialStore instance)
 which are wired in during app startup (Task 8).
@@ -26,7 +26,7 @@ from models import AuthFlowType
 
 logger = logging.getLogger("flinttrade.gateway.auth")
 
-gateway_bp = Blueprint("gateway", __name__, url_prefix="/ft-api/v1")
+gateway_bp = Blueprint("gateway", __name__, url_prefix="/v1")
 
 # ---------------------------------------------------------------------------
 # Helpers

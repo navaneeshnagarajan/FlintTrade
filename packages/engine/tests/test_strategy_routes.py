@@ -81,7 +81,7 @@ def _make_mock_process(pid: int = 9999, returncode=None):
 class TestStrategyRoutes:
     def test_upload_safe_strategy(self, client):
         resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "safe_strat", "code": SAFE_CODE},
         )
         assert resp.status_code == 201
@@ -91,7 +91,7 @@ class TestStrategyRoutes:
 
     def test_upload_dangerous_strategy_returns_422(self, client):
         resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "bad_strat", "code": DANGEROUS_CODE},
         )
         assert resp.status_code == 422
@@ -101,7 +101,7 @@ class TestStrategyRoutes:
 
     def test_upload_missing_name_returns_400(self, client):
         resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"code": SAFE_CODE},
         )
         assert resp.status_code == 400
@@ -112,7 +112,7 @@ class TestStrategyRoutes:
             "file": (io.BytesIO(SAFE_CODE.encode("utf-8")), "my_auto_named_strat.py")
         }
         resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             data=data,
             content_type="multipart/form-data"
         )
@@ -128,7 +128,7 @@ class TestStrategyRoutes:
             "file": (io.BytesIO(SAFE_CODE.encode("utf-8")), "some_filename.py")
         }
         resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             data=data,
             content_type="multipart/form-data"
         )
@@ -143,7 +143,7 @@ class TestStrategyRoutes:
             "file": (io.BytesIO(SAFE_CODE.encode("utf-8")), "")
         }
         resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             data=data,
             content_type="multipart/form-data"
         )
@@ -153,148 +153,148 @@ class TestStrategyRoutes:
         assert "strategy" in resp_data["message"]
 
     def test_list_strategies_empty(self, client):
-        resp = client.get("/ft-api/v1/strategies")
+        resp = client.get("/v1/strategies")
         assert resp.status_code == 200
         assert resp.get_json()["strategies"] == []
 
     def test_list_strategies_after_upload(self, client):
         client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "listed", "code": SAFE_CODE},
         )
-        resp = client.get("/ft-api/v1/strategies")
+        resp = client.get("/v1/strategies")
         assert len(resp.get_json()["strategies"]) == 1
 
     def test_start_strategy(self, client):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "startable", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
         mock_proc = _make_mock_process()
         with patch("subprocess.Popen", return_value=mock_proc):
-            resp = client.post(f"/ft-api/v1/strategies/{strategy_id}/start")
+            resp = client.post(f"/v1/strategies/{strategy_id}/start")
 
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "success"
 
     def test_start_nonexistent_strategy_returns_404(self, client, app):
         with patch.object(app.config["STRATEGY_RUNNER"], "start", side_effect=FileNotFoundError("Not found")):
-            resp = client.post("/ft-api/v1/strategies/nonexistent-id/start")
+            resp = client.post("/v1/strategies/nonexistent-id/start")
         assert resp.status_code == 404
 
     def test_start_already_running_strategy_returns_409(self, client, app):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "startable_twice", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
         mock_proc = _make_mock_process()
         with patch("subprocess.Popen", return_value=mock_proc):
-            client.post(f"/ft-api/v1/strategies/{strategy_id}/start")
-            resp = client.post(f"/ft-api/v1/strategies/{strategy_id}/start")
+            client.post(f"/v1/strategies/{strategy_id}/start")
+            resp = client.post(f"/v1/strategies/{strategy_id}/start")
 
         assert resp.status_code == 409
 
     def test_start_strategy_generic_error(self, client, app):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "start_error", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
         with patch.object(app.config["STRATEGY_RUNNER"], "start", side_effect=Exception("Generic error")):
-            resp = client.post(f"/ft-api/v1/strategies/{strategy_id}/start")
+            resp = client.post(f"/v1/strategies/{strategy_id}/start")
 
         assert resp.status_code == 500
 
     def test_stop_running_strategy_success(self, client, app):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "stoppable_run", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
         mock_proc = _make_mock_process()
         with patch("subprocess.Popen", return_value=mock_proc):
-            client.post(f"/ft-api/v1/strategies/{strategy_id}/start")
+            client.post(f"/v1/strategies/{strategy_id}/start")
 
         with patch.object(mock_proc, "terminate"):
-            resp = client.post(f"/ft-api/v1/strategies/{strategy_id}/stop")
+            resp = client.post(f"/v1/strategies/{strategy_id}/stop")
 
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "success"
 
     def test_stop_nonexistent_strategy_returns_404(self, client, app):
         with patch.object(app.config["STRATEGY_RUNNER"], "stop", side_effect=FileNotFoundError("Not found")):
-            resp = client.post("/ft-api/v1/strategies/nonexistent-id/stop")
+            resp = client.post("/v1/strategies/nonexistent-id/stop")
         assert resp.status_code == 404
 
     def test_stop_not_running_returns_success(self, client):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "stoppable", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
-        resp = client.post(f"/ft-api/v1/strategies/{strategy_id}/stop")
+        resp = client.post(f"/v1/strategies/{strategy_id}/stop")
         # Not running — treated as no-op success
         assert resp.status_code == 200
 
     def test_stop_strategy_generic_error(self, client, app):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "stop_error", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
         with patch.object(app.config["STRATEGY_RUNNER"], "stop", side_effect=Exception("Generic error")):
-            resp = client.post(f"/ft-api/v1/strategies/{strategy_id}/stop")
+            resp = client.post(f"/v1/strategies/{strategy_id}/stop")
 
         assert resp.status_code == 500
 
     def test_delete_strategy(self, client):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "deletable", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
-        resp = client.delete(f"/ft-api/v1/strategies/{strategy_id}")
+        resp = client.delete(f"/v1/strategies/{strategy_id}")
         assert resp.status_code == 200
 
         # Verify it's gone from list
-        list_resp = client.get("/ft-api/v1/strategies")
+        list_resp = client.get("/v1/strategies")
         ids = [s["strategy_id"] for s in list_resp.get_json()["strategies"]]
         assert strategy_id not in ids
 
     def test_get_status_stopped(self, client):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "status_check", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
-        resp = client.get(f"/ft-api/v1/strategies/{strategy_id}/status")
+        resp = client.get(f"/v1/strategies/{strategy_id}/status")
         assert resp.status_code == 200
         assert resp.get_json()["strategy"]["state"] == "stopped"
 
     def test_get_logs_empty(self, client):
         upload_resp = client.post(
-            "/ft-api/v1/strategies/upload",
+            "/v1/strategies/upload",
             json={"name": "log_check", "code": SAFE_CODE},
         )
         strategy_id = upload_resp.get_json()["strategy_id"]
 
-        resp = client.get(f"/ft-api/v1/strategies/{strategy_id}/logs")
+        resp = client.get(f"/v1/strategies/{strategy_id}/logs")
         assert resp.status_code == 200
         assert resp.get_json()["lines"] == []
 
     def test_no_runner_returns_503(self, client_no_runner):
-        resp = client_no_runner.get("/ft-api/v1/strategies")
+        resp = client_no_runner.get("/v1/strategies")
         assert resp.status_code == 503
 
     def test_status_nonexistent_returns_404(self, client):
-        resp = client.get("/ft-api/v1/strategies/nonexistent-id/status")
+        resp = client.get("/v1/strategies/nonexistent-id/status")
         assert resp.status_code == 404

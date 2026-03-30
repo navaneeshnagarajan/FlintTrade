@@ -1,6 +1,6 @@
 """Flask blueprint for Security Dashboard endpoints.
 
-Mounts at /ft-api/v1/security/ and exposes IP tracking, ban management,
+Mounts at /v1/security/ and exposes IP tracking, ban management,
 and aggregate statistics to the React terminal.
 
 The companion before_request middleware is registered in ``app.py`` via
@@ -19,7 +19,7 @@ from .security import SecurityMonitor
 
 logger = logging.getLogger("flinttrade.security_routes")
 
-security_bp = Blueprint("security", __name__, url_prefix="/ft-api/v1/security")
+security_bp = Blueprint("security", __name__, url_prefix="/v1/security")
 
 # Module-level singleton — shared by the blueprint and the middleware.
 _default_monitor: SecurityMonitor = SecurityMonitor()

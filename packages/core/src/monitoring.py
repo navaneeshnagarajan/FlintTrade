@@ -253,7 +253,7 @@ class TrafficCounter:
     Example::
 
         counter = TrafficCounter()
-        counter.record("GET", "/ft-api/v1/health", 200, 12.3)
+        counter.record("GET", "/v1/health", 200, 12.3)
         stats = counter.get_stats(minutes=5)
     """
 
@@ -272,7 +272,7 @@ class TrafficCounter:
 
         Args:
             method: HTTP method (e.g. ``"GET"``, ``"POST"``).
-            path: Request path (e.g. ``"/ft-api/v1/health"``).
+            path: Request path (e.g. ``"/v1/health"``).
             status: HTTP status code.
             duration_ms: Request duration in milliseconds.
         """

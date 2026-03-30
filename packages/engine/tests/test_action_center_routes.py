@@ -46,7 +46,7 @@ def _submit(action_center, order_id: str = "ord-1") -> None:
 
 class TestGetPending:
     def test_empty_queue_returns_empty_list(self, client):
-        resp = client.get("/ft-api/v1/action-center/pending")
+        resp = client.get("/v1/action-center/pending")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -54,7 +54,7 @@ class TestGetPending:
 
     def test_pending_orders_appear(self, client, action_center):
         _submit(action_center)
-        resp = client.get("/ft-api/v1/action-center/pending")
+        resp = client.get("/v1/action-center/pending")
         data = resp.get_json()
         assert len(data["data"]["orders"]) == 1
         assert data["data"]["orders"][0]["order_id"] == "ord-1"
@@ -68,7 +68,7 @@ class TestGetPending:
         action_center.approve("approved-ord")
         action_center.reject("rejected-ord")
 
-        resp = client.get("/ft-api/v1/action-center/pending")
+        resp = client.get("/v1/action-center/pending")
         assert resp.status_code == 200
         data = resp.get_json()
 
@@ -86,7 +86,7 @@ class TestGetPending:
 
 class TestGetAll:
     def test_all_returns_empty_list(self, client):
-        resp = client.get("/ft-api/v1/action-center/all")
+        resp = client.get("/v1/action-center/all")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -95,7 +95,7 @@ class TestGetAll:
     def test_all_includes_approved(self, client, action_center):
         _submit(action_center)
         action_center.approve("ord-1")
-        resp = client.get("/ft-api/v1/action-center/all")
+        resp = client.get("/v1/action-center/all")
         data = resp.get_json()
         assert len(data["data"]["orders"]) == 1
         assert data["data"]["orders"][0]["status"] == "approved"
@@ -122,7 +122,7 @@ class TestGetAll:
             po = action_center._get_or_raise("ord-4")
             po.created_at = time.time() - action_center.ttl_seconds - 10
 
-        resp = client.get("/ft-api/v1/action-center/all")
+        resp = client.get("/v1/action-center/all")
         assert resp.status_code == 200
         data = resp.get_json()
         orders = data["data"]["orders"]
@@ -143,14 +143,14 @@ class TestGetAll:
 class TestApproveEndpoint:
     def test_approve_pending_order_returns_200(self, client, action_center):
         _submit(action_center)
-        resp = client.post("/ft-api/v1/action-center/approve/ord-1")
+        resp = client.post("/v1/action-center/approve/ord-1")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
         assert data["data"]["order"]["status"] == "approved"
 
     def test_approve_nonexistent_returns_409(self, client):
-        resp = client.post("/ft-api/v1/action-center/approve/no-such-order")
+        resp = client.post("/v1/action-center/approve/no-such-order")
         assert resp.status_code == 409
         assert resp.get_json()["status"] == "error"
 
@@ -163,7 +163,7 @@ class TestApproveEndpoint:
 class TestRejectEndpoint:
     def test_reject_pending_order_returns_200(self, client, action_center):
         _submit(action_center)
-        resp = client.post("/ft-api/v1/action-center/reject/ord-1")
+        resp = client.post("/v1/action-center/reject/ord-1")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["data"]["order"]["status"] == "rejected"
@@ -171,7 +171,7 @@ class TestRejectEndpoint:
     def test_reject_already_approved_returns_409(self, client, action_center):
         _submit(action_center)
         action_center.approve("ord-1")
-        resp = client.post("/ft-api/v1/action-center/reject/ord-1")
+        resp = client.post("/v1/action-center/reject/ord-1")
         assert resp.status_code == 409
 
 
@@ -184,7 +184,7 @@ class TestApproveAllEndpoint:
     def test_approve_all_returns_count(self, client, action_center):
         _submit(action_center, "m1")
         _submit(action_center, "m2")
-        resp = client.post("/ft-api/v1/action-center/approve-all")
+        resp = client.post("/v1/action-center/approve-all")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["data"]["approved_count"] == 2
@@ -197,7 +197,7 @@ class TestApproveAllEndpoint:
 
 class TestConfigEndpoints:
     def test_get_config_returns_defaults(self, client):
-        resp = client.get("/ft-api/v1/action-center/config")
+        resp = client.get("/v1/action-center/config")
         assert resp.status_code == 200
         data = resp.get_json()
         assert "enabled" in data["data"]
@@ -205,7 +205,7 @@ class TestConfigEndpoints:
 
     def test_post_config_updates_enabled(self, client, action_center):
         resp = client.post(
-            "/ft-api/v1/action-center/config",
+            "/v1/action-center/config",
             json={"enabled": True},
             content_type="application/json",
         )
@@ -215,7 +215,7 @@ class TestConfigEndpoints:
 
     def test_post_config_updates_ttl(self, client, action_center):
         resp = client.post(
-            "/ft-api/v1/action-center/config",
+            "/v1/action-center/config",
             json={"ttl_seconds": 120},
             content_type="application/json",
         )
@@ -224,7 +224,7 @@ class TestConfigEndpoints:
 
     def test_post_config_invalid_ttl_returns_400(self, client):
         resp = client.post(
-            "/ft-api/v1/action-center/config",
+            "/v1/action-center/config",
             json={"ttl_seconds": "bad"},
             content_type="application/json",
         )
@@ -232,7 +232,7 @@ class TestConfigEndpoints:
 
     def test_post_config_invalid_ttl_value_returns_400(self, client):
         resp = client.post(
-            "/ft-api/v1/action-center/config",
+            "/v1/action-center/config",
             json={"ttl_seconds": 0},
             content_type="application/json",
         )

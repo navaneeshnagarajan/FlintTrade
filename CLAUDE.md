@@ -13,12 +13,12 @@ npm install                                    # install deps
 npm run dev                                    # dev server at localhost:5173
 npm run build                                  # tsc --noEmit + vite build
 npm run typecheck                              # tsc --noEmit only
-npx vitest run                                 # all tests (~309)
+npx vitest run                                 # all tests (~765)
 npx vitest run src/path/to/file.test.ts        # single test file
 npx vitest run -t "test name"                  # single test by name
 
 # Python — run from repo root
-make test                                      # all pytest tests (~1,100)
+make test                                      # all pytest tests (~2,554)
 make test-fast                                 # stop on first failure
 python -m pytest packages/core/tests/test_foo.py -v              # single file
 python -m pytest packages/core/tests/test_foo.py::test_name -v   # single test
@@ -70,7 +70,7 @@ localhost:5173/
 ├── /explore        → Demo mode with sample data (no broker needed)
 ├── /setup          → First-time wizard (Quick / Guided / Advanced)
 ├── /settings       → Standalone settings page
-├── /trade          → Trader workspace (Dockview canvas, 27 widgets)
+├── /trade          → Trader workspace (Dockview canvas, 28 widgets)
 ├── /invest         → Investor dashboard (holdings, net worth, SIPs)
 ├── /learn          → Beginner center (courses, glossary, strategies)
 ├── /lab            → Strategy Lab (backtest, forward test, optimize)
@@ -202,7 +202,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Terminal — Widgets & Tools
 
-27 widgets (all TSX) + 6 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
+28 widgets (all TSX) + 6 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
 
 - **Widgets:** `src/widgets/` — Trading (10: dashboard, scalper, positions, orders, holdings, tradebook, orderpad, mtmmonitor, riskpanel, actioncenter), Analysis (12: chart, optionchain, oichart, straddle, depth, greeks, sectormap, gex, volsurface, ivsmile, straddlepnl, oiprofile), Utility (5: watchlist, calculator, news, ticker, aiadvisor)
 - **Tools:** `src/tools/` — Canvas overlays (3: P&L Dashboard, Market Intelligence, Trade Journal) + Full-page tools (3: Backtest Lab, Flow Builder, Strategy Builder)
@@ -212,8 +212,8 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 ## Current State
 
 - **Version:** 0.3.0 "Structured Calm" (2026-03-30)
-- **Tests:** 680 terminal (Vitest) + 1,822 Python (pytest) = 2,500+ total
-- **Terminal:** 27 widgets (TSX) + 6 tools + 12 routes + 6 workspace presets in Dockview v5.1 shell
+- **Tests:** 765 terminal (Vitest) + 2,554 Python (pytest) = 3,319 total
+- **Terminal:** 28 widgets (TSX) + 6 tools + 12 routes + 6 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
 - **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 6 cinematic themes with dark/light variants, density modes, zero arbitrary values
 - **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
@@ -334,7 +334,7 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 3. Check `docs/REPO_FEATURE_MAP.md` — absorb before building
 4. Use `/brainstorm` and `/write-plan` for non-trivial tasks
 5. Implement — full permissions: create, edit, delete, refactor as needed
-6. Run: `make test` (must pass 1,100+ Python) and `npx vitest run` in terminal (must pass 309+)
+6. Run: `make test` (must pass 2,554+ Python) and `npx vitest run` in terminal (must pass 765+)
 7. For React: `npm run build` in `packages/terminal` (must build clean)
 8. Mark task done in PLAN.md
 9. Update CHANGELOG.md [Unreleased] section for notable changes
@@ -357,8 +357,8 @@ To set up a new machine:
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
 4. Configure `infra/openalgo/.env` with broker credentials
 5. `make start` (starts OpenAlgo)
-6. `make test` (verify 1,100+ pass)
-7. `cd packages/terminal && npm install && npm run build` (verify clean build, 309+ vitest pass)
+6. `make test` (verify 2,554+ pass)
+7. `cd packages/terminal && npm install && npm run build` (verify clean build, 765+ vitest pass)
 8. Read PLAN.md, pick a task, start building
 
 See `docs/machine-setup/QUICKSTART.md` for detailed instructions.

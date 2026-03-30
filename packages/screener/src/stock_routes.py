@@ -1,6 +1,6 @@
 """Flask blueprint for stock screener endpoints.
 
-Provides GET /ft-api/v1/stocks/scan for querying stock fundamentals.
+Provides GET /v1/stocks/scan for querying stock fundamentals.
 Seeds the StockCache with 30 Indian large-cap stocks on first request.
 
 The StockCache is DuckDB-backed with 24-hour TTL; seeded data refreshes
@@ -19,7 +19,7 @@ from .stock_cache import StockCache, StockFundamentals
 
 logger = logging.getLogger("flinttrade.screener.stock_routes")
 
-stock_bp = Blueprint("stocks", __name__, url_prefix="/ft-api/v1/stocks")
+stock_bp = Blueprint("stocks", __name__, url_prefix="/v1/stocks")
 
 
 # ---------------------------------------------------------------------------

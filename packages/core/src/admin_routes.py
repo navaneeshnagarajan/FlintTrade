@@ -3,7 +3,7 @@
 Provides internal visibility into package health, widget registry,
 repo absorption status, feature flags, and project introspection.
 
-Blueprint: /ft-api/v1/admin/
+Blueprint: /v1/admin/
 Only registered when app.debug is True or FLINTTRADE_DEV env var is set.
 """
 
@@ -20,7 +20,7 @@ from flask import Blueprint, Response, current_app, jsonify
 
 logger = logging.getLogger("flinttrade.admin")
 
-admin_bp = Blueprint("admin", __name__, url_prefix="/ft-api/v1/admin")
+admin_bp = Blueprint("admin", __name__, url_prefix="/v1/admin")
 
 # Repo root — 3 levels up from packages/core/src/
 _REPO_ROOT = Path(__file__).resolve().parents[3]

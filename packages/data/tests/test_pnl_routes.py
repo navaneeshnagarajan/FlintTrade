@@ -64,7 +64,7 @@ def test_init_pnl_routes():
 class TestPnLRoutes:
 
     def test_series_returns_ok(self, app_client):
-        resp = _get(app_client, "/ft-api/v1/pnl-tracker")
+        resp = _get(app_client, "/v1/pnl-tracker")
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["status"] == "ok"
@@ -72,7 +72,7 @@ class TestPnLRoutes:
         assert len(data["data"]) >= 1
 
     def test_series_point_fields(self, app_client):
-        resp = _get(app_client, "/ft-api/v1/pnl-tracker")
+        resp = _get(app_client, "/v1/pnl-tracker")
         data = json.loads(resp.data)
         point = data["data"][0]
         assert "timestamp" in point
@@ -82,7 +82,7 @@ class TestPnLRoutes:
         assert "trade_count" in point
 
     def test_summary_returns_ok(self, app_client):
-        resp = _get(app_client, "/ft-api/v1/pnl-tracker/summary")
+        resp = _get(app_client, "/v1/pnl-tracker/summary")
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["status"] == "ok"
@@ -98,7 +98,7 @@ class TestPnLRoutes:
         import packages.data.src.pnl_routes as pnl_routes
         pnl_routes._tracker.reset()
 
-        resp = _get(app_client, "/ft-api/v1/pnl-tracker/summary")
+        resp = _get(app_client, "/v1/pnl-tracker/summary")
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["status"] == "ok"
@@ -113,13 +113,13 @@ class TestPnLRoutes:
     def test_series_since_filter(self, app_client):
         import time
         future_ts = time.time() + 9999
-        resp = _get(app_client, f"/ft-api/v1/pnl-tracker?since={future_ts}")
+        resp = _get(app_client, f"/v1/pnl-tracker?since={future_ts}")
         data = json.loads(resp.data)
         assert data["status"] == "ok"
         assert data["data"] == []
 
     def test_series_since_filter_invalid(self, app_client):
-        resp = _get(app_client, "/ft-api/v1/pnl-tracker?since=invalid")
+        resp = _get(app_client, "/v1/pnl-tracker?since=invalid")
         assert resp.status_code == 400
         data = json.loads(resp.data)
         assert data["status"] == "error"

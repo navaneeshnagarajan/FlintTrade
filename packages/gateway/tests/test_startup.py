@@ -123,10 +123,10 @@ def test_credential_store_in_config() -> None:
 
 
 def test_gateway_blueprint_registered() -> None:
-    """The /ft-api/v1/brokers endpoint must be reachable (blueprint registered)."""
+    """The /v1/brokers endpoint must be reachable (blueprint registered)."""
     app = _make_test_app()
     with app.test_client() as client:
-        response = client.get("/ft-api/v1/brokers")
+        response = client.get("/v1/brokers")
     assert response.status_code == 200
     data = response.get_json()
     assert data["status"] == "success"

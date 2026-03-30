@@ -21,8 +21,8 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | 0.1.0-alpha | Released (2026-03-21) | 13 packages, 1,018 tests, 10 routes, full-stack wiring, 5 themes |
 | 0.1.0-beta | Released (2026-03-24) | Security audit, WCAG a11y, perf optimization, god component splits |
 | 0.2.0-alpha | Released (2026-03-25) | OpenAlgo absorption: gateway, analysis tools, platform features |
-| 0.2.0-beta | Released (2026-03-25) | Audit fixes, 57 strategies, absorption tracks |
-| 0.3.0 | **RELEASED** (2026-03-30) | "Structured Calm" UI redesign, 100 strategies, backend wiring |
+| 0.2.0-beta | Released (2026-03-25) | Audit fixes, 101 strategies, absorption tracks |
+| 0.3.0 | **RELEASED** (2026-03-30) | "Structured Calm" UI redesign, 101 strategies, backend wiring |
 | 0.4.0 | Planned | Desktop app (Tauri), live signals pipeline, multi-user auth |
 | 1.0.0 | Planned | Full production release, all platforms tested |
 
@@ -111,7 +111,7 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → UPDATE → COMMIT
 3. **APPROVE** — Get approval for architecture changes or new files
 4. **BUILD** — Use TypeScript strict, shadcn/ui, Dockview panels. Check reference repos before writing from scratch
 5. **VERIFY** — `tsc --noEmit` (zero errors), `npm run build` (clean), visual check
-6. **TEST** — `npx vitest run` (309+ pass), `make test` (1,100+ pass), `ruff check`
+6. **TEST** — `npx vitest run` (765+ pass), `make test` (2,554+ pass), `ruff check`
 7. **UPDATE** — Update `CHANGELOG.md` [Unreleased] section, mark task done in `PLAN.md`
 8. **COMMIT** — Conventional commit, specific file staging, push, wait for CI green
 
@@ -130,8 +130,8 @@ Every push triggers 3 GitHub Actions jobs:
 
 | Job | What it checks |
 |---|---|
-| `python-tests` | pytest (1,100+ tests) + ruff lint |
-| `node-tests` | tsc strict + vitest (309+) + production build |
+| `python-tests` | pytest (2,554+ tests) + ruff lint |
+| `node-tests` | tsc strict + vitest (765+) + production build |
 | `secrets-check` | Scans for leaked API keys and credentials |
 
 **CI must be green before any new work.** If CI fails, fix immediately.

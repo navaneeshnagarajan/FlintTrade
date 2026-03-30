@@ -1,13 +1,13 @@
 """Flask blueprint for FlintTrade analysis endpoints.
 
-Provides 7 endpoints under /ft-api/v1/ for the analysis tools:
-    - POST /ft-api/v1/gex
-    - POST /ft-api/v1/volsurface
-    - POST /ft-api/v1/ivsmile
-    - POST /ft-api/v1/straddlepnl
-    - POST /ft-api/v1/oiprofile
-    - POST /ft-api/v1/maxpain
-    - GET  /ft-api/v1/rrg/sectors
+Provides 7 endpoints under /v1/ for the analysis tools:
+    - POST /v1/gex
+    - POST /v1/volsurface
+    - POST /v1/ivsmile
+    - POST /v1/straddlepnl
+    - POST /v1/oiprofile
+    - POST /v1/maxpain
+    - GET  /v1/rrg/sectors
 
 All endpoints:
 1. Extract params from the JSON request body (or query string for GET).
@@ -46,7 +46,7 @@ from .vol_surface import calculate_vol_surface
 
 logger = logging.getLogger("flinttrade.screener.analysis_routes")
 
-analysis_bp = Blueprint("analysis", __name__, url_prefix="/ft-api/v1")
+analysis_bp = Blueprint("analysis", __name__, url_prefix="/v1")
 
 
 # ---------------------------------------------------------------------------

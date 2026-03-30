@@ -4,7 +4,7 @@ Registered as a Blueprint in ``create_flask_app()`` (packages/core/src/app.py).
 
 Endpoint
 --------
-GET  /ft-api/v1/orderflow  — Footprint buckets for a given symbol/interval.
+GET  /v1/orderflow  — Footprint buckets for a given symbol/interval.
 
 Query parameters:
     symbol    (str, required):  Instrument symbol, e.g. "NIFTY".
@@ -133,7 +133,7 @@ def _generate_synthetic_buckets(
 # ---------------------------------------------------------------------------
 
 
-@orderflow_bp.route("/ft-api/v1/orderflow", methods=["GET"])
+@orderflow_bp.route("/v1/orderflow", methods=["GET"])
 def orderflow_endpoint() -> tuple[Any, int]:
     """Return synthetic footprint buckets for the OrderFlow widget.
 

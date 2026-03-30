@@ -1,6 +1,6 @@
 """Sandbox Flask Blueprint — virtual paper trading endpoints.
 
-All endpoints are under the ``/ft-api/v1/sandbox/`` prefix.  The
+All endpoints are under the ``/v1/sandbox/`` prefix.  The
 :class:`~packages.engine.src.sandbox.SandboxEngine` is stored on
 ``app.config["SANDBOX_ENGINE"]`` and injected when the Flask app is created.
 """
@@ -14,7 +14,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.engine.sandbox_routes")
 
-sandbox_bp = Blueprint("sandbox", __name__, url_prefix="/ft-api/v1/sandbox")
+sandbox_bp = Blueprint("sandbox", __name__, url_prefix="/v1/sandbox")
 
 
 # ---------------------------------------------------------------------------

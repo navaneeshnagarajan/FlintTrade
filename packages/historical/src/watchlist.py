@@ -39,7 +39,7 @@ class DownloadWatchlist:
     """Persistent watchlist for scheduled OHLCV downloads.
 
     Stores items in an SQLite database so they survive restarts.
-    The download trigger (``/ft-api/v1/historify/download``) iterates
+    The download trigger (``/v1/historify/download``) iterates
     only over enabled items.
 
     Args:

@@ -66,14 +66,14 @@ def _delete(client, url, body=None):
 class TestWatchlistRoutes:
 
     def test_list_empty(self, app_client):
-        resp = _get(app_client, "/ft-api/v1/historify/watchlist")
+        resp = _get(app_client, "/v1/historify/watchlist")
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["status"] == "ok"
         assert isinstance(data["data"], list)
 
     def test_add_item(self, app_client):
-        resp = _post(app_client, "/ft-api/v1/historify/watchlist",
+        resp = _post(app_client, "/v1/historify/watchlist",
                      {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
         assert resp.status_code == 201
         data = json.loads(resp.data)
@@ -81,22 +81,22 @@ class TestWatchlistRoutes:
         assert data["data"]["symbol"] == "RELIANCE"
 
     def test_list_after_add(self, app_client):
-        resp = _get(app_client, "/ft-api/v1/historify/watchlist")
+        resp = _get(app_client, "/v1/historify/watchlist")
         data = json.loads(resp.data)
         symbols = [item["symbol"] for item in data["data"]]
         assert "RELIANCE" in symbols
 
     def test_remove_item(self, app_client):
-        _post(app_client, "/ft-api/v1/historify/watchlist",
+        _post(app_client, "/v1/historify/watchlist",
               {"symbol": "TEMPSTOCK", "exchange": "NSE"})
-        resp = _delete(app_client, "/ft-api/v1/historify/watchlist",
+        resp = _delete(app_client, "/v1/historify/watchlist",
                        {"symbol": "TEMPSTOCK", "exchange": "NSE"})
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["status"] == "ok"
 
     def test_download_trigger_returns_ok(self, app_client):
-        resp = _post(app_client, "/ft-api/v1/historify/download",
+        resp = _post(app_client, "/v1/historify/download",
                      {"start_date": "2026-01-01", "end_date": "2026-01-31"})
         assert resp.status_code == 200
         data = json.loads(resp.data)

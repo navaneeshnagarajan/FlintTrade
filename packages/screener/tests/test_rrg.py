@@ -332,36 +332,36 @@ def client(app):
 
 class TestRRGEndpoint:
     def test_returns_200(self, client):
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         assert resp.status_code == 200
 
     def test_status_ok(self, client):
-        data = resp = client.get("/ft-api/v1/rrg/sectors")
+        data = resp = client.get("/v1/rrg/sectors")
         import json
         parsed = json.loads(resp.data)
         assert parsed["status"] == "ok"
 
     def test_has_sectors_key(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         assert "sectors" in parsed
 
     def test_sectors_is_list(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         assert isinstance(parsed["sectors"], list)
 
     def test_has_12_sectors(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         assert len(parsed["sectors"]) == len(NIFTY_SECTORS)
 
     def test_each_sector_has_required_fields(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         for sector in parsed["sectors"]:
             assert "symbol" in sector
@@ -371,14 +371,14 @@ class TestRRGEndpoint:
 
     def test_tail_not_empty(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         for sector in parsed["sectors"]:
             assert len(sector["tail"]) > 0
 
     def test_tail_points_have_required_keys(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         for sector in parsed["sectors"]:
             for pt in sector["tail"]:
@@ -388,19 +388,19 @@ class TestRRGEndpoint:
 
     def test_is_sample_data_flag_present(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         assert "is_sample_data" in parsed
 
     def test_benchmark_field_present(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         assert parsed["benchmark"] == "NIFTY 50"
 
     def test_tail_length_query_param(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors?tail_length=6")
+        resp = client.get("/v1/rrg/sectors?tail_length=6")
         parsed = json.loads(resp.data)
         assert parsed["tail_length"] == 6
         for sector in parsed["sectors"]:
@@ -408,21 +408,21 @@ class TestRRGEndpoint:
 
     def test_tail_length_clamped_min(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors?tail_length=1")
+        resp = client.get("/v1/rrg/sectors?tail_length=1")
         parsed = json.loads(resp.data)
         # Clamped to minimum of 4
         assert parsed["tail_length"] == 4
 
     def test_tail_length_clamped_max(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors?tail_length=999")
+        resp = client.get("/v1/rrg/sectors?tail_length=999")
         parsed = json.loads(resp.data)
         # Clamped to maximum of 52
         assert parsed["tail_length"] == 52
 
     def test_quadrant_values_valid(self, client):
         import json
-        resp = client.get("/ft-api/v1/rrg/sectors")
+        resp = client.get("/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         valid = {"leading", "weakening", "lagging", "improving", "neutral"}
         for sector in parsed["sectors"]:

@@ -195,25 +195,25 @@ def create_flask_app(
     # Store RAG instance
     app.config["RAG"] = rag
 
-    # Register gateway blueprint (mounts at /ft-api/v1/)
+    # Register gateway blueprint (mounts at /v1/)
     app.register_blueprint(gateway_bp)
 
     # Register analysis blueprint (GEX, vol surface, IV smile, straddle P&L, OI profile, max pain)
     from packages.screener.src.analysis_routes import analysis_bp  # noqa: PLC0415
     app.register_blueprint(analysis_bp)
 
-    # Register stock screener blueprint (/ft-api/v1/stocks/*)
+    # Register stock screener blueprint (/v1/stocks/*)
     from packages.screener.src.stock_routes import stock_bp  # noqa: PLC0415
     app.register_blueprint(stock_bp)
 
-    # Register Action Center blueprint (/ft-api/v1/action-center/*)
+    # Register Action Center blueprint (/v1/action-center/*)
     from packages.engine.src.action_center import ActionCenter  # noqa: PLC0415
     from packages.engine.src.action_center_routes import action_center_bp  # noqa: PLC0415
     action_center = ActionCenter()
     app.config["ACTION_CENTER"] = action_center
     app.register_blueprint(action_center_bp)
 
-    # Register Security blueprint and middleware (/ft-api/v1/security/*)
+    # Register Security blueprint and middleware (/v1/security/*)
     from packages.core.src.security import SecurityMonitor  # noqa: PLC0415
     from packages.core.src.security_routes import register_security_middleware, security_bp  # noqa: PLC0415
     security_monitor = SecurityMonitor()
@@ -237,6 +237,14 @@ def create_flask_app(
     from packages.core.src.monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
+    # Register Strategy Runner blueprint (/v1/strategies/*)
+    from packages.engine.src.strategy_routes import strategy_bp  # noqa: PLC0415
+    app.register_blueprint(strategy_bp)
+
+    # Register Sandbox blueprint (/v1/sandbox/*)
+    from packages.engine.src.sandbox_routes import sandbox_bp  # noqa: PLC0415
+    app.register_blueprint(sandbox_bp)
+
     # Register admin blueprint (dev/debug only)
     if app.debug or os.environ.get("FLINTTRADE_DEV"):
         from packages.core.src.admin_routes import admin_bp  # noqa: PLC0415
@@ -253,10 +261,10 @@ def create_flask_app(
     def require_auth() -> Any:
         """Require API key authentication on all endpoints.
 
-        Gateway endpoints under /ft-api/v1/brokers and /ft-api/v1/auth/
-        are public (broker catalog listing, OAuth callback) or manage their
-        own account-level credentials — they do not use the FlintTrade API key.
-        All other /ft-api/v1/ endpoints (accounts, reconnect, set-primary) are
+        Gateway endpoints under /v1/brokers and /v1/auth/ are public
+        (broker catalog listing, OAuth callback) or manage their own
+        account-level credentials — they do not use the FlintTrade API key.
+        All other /v1/ endpoints (accounts, reconnect, set-primary) are
         also exempted here because account management uses the gateway's own
         credential/session model rather than the server-level API key.
         """
@@ -266,8 +274,8 @@ def create_flask_app(
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
             return None
-        # Gateway endpoints handle their own auth — exempt the entire /ft-api/ namespace
-        if request.path.startswith("/ft-api/"):
+        # Gateway endpoints handle their own auth — exempt the entire /v1/ namespace
+        if request.path.startswith("/v1/"):
             return None
 
         api_key = (
@@ -1576,8 +1584,8 @@ def create_flask_app(
 
     # ------------------------------------------------------------------
     # Monitoring proxy routes (/api/v1/...) — delegate to blueprint singletons
-    # The monitoring_bp Blueprint serves at /ft-api/v1/* but the React
-    # frontend (via Vite proxy) calls /api/v1/* on port 5001.
+    # The monitoring_bp Blueprint serves at /v1/* and the Vite proxy
+    # strips /ft-api before forwarding to Flask on port 5001.
     # ------------------------------------------------------------------
 
     @app.route("/api/v1/health", methods=["GET"])

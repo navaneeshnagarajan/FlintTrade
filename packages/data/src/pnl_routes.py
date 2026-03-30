@@ -4,8 +4,8 @@ Registered as a Blueprint in ``create_flask_app()``.
 
 Endpoints
 ---------
-GET  /ft-api/v1/pnl-tracker          — P&L time series (optionally filtered by ?since=<unix>)
-GET  /ft-api/v1/pnl-tracker/summary  — Latest P&L summary stats
+GET  /v1/pnl-tracker          — P&L time series (optionally filtered by ?since=<unix>)
+GET  /v1/pnl-tracker/summary  — Latest P&L summary stats
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def init_pnl_routes(tracker: PnLTracker) -> None:
     logger.info("PnLTracker singleton injected into pnl_routes")
 
 
-@pnl_bp.route("/ft-api/v1/pnl-tracker", methods=["GET"])
+@pnl_bp.route("/v1/pnl-tracker", methods=["GET"])
 def pnl_series() -> tuple[Any, int]:
     """Return the P&L time series as a JSON array.
 
@@ -74,7 +74,7 @@ def pnl_series() -> tuple[Any, int]:
     }), 200
 
 
-@pnl_bp.route("/ft-api/v1/pnl-tracker/summary", methods=["GET"])
+@pnl_bp.route("/v1/pnl-tracker/summary", methods=["GET"])
 def pnl_summary() -> tuple[Any, int]:
     """Return a summary of the current P&L state.
 

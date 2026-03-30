@@ -134,8 +134,8 @@ def client(app):
 
 
 def test_list_brokers(client) -> None:
-    """GET /ft-api/v1/brokers returns all 30 non-sandbox brokers."""
-    response = client.get("/ft-api/v1/brokers")
+    """GET /v1/brokers returns all 30 non-sandbox brokers."""
+    response = client.get("/v1/brokers")
     assert response.status_code == 200
     data = response.get_json()
     assert data["status"] == "success"
@@ -152,8 +152,8 @@ def test_list_brokers(client) -> None:
 
 
 def test_list_accounts_empty(client) -> None:
-    """GET /ft-api/v1/accounts returns an empty list on a fresh registry."""
-    response = client.get("/ft-api/v1/accounts")
+    """GET /v1/accounts returns an empty list on a fresh registry."""
+    response = client.get("/v1/accounts")
     assert response.status_code == 200
     data = response.get_json()
     assert data["status"] == "success"
@@ -166,14 +166,14 @@ def test_list_accounts_empty(client) -> None:
 
 
 def test_add_account_success(client) -> None:
-    """POST /ft-api/v1/accounts creates an account and returns 201."""
+    """POST /v1/accounts creates an account and returns 201."""
     payload = {
         "broker": "zerodha",
         "label": "Primary Zerodha",
         "account_id": "ZD001",
         "credentials": {"api_key": "k", "totp": "123456"},
     }
-    response = client.post("/ft-api/v1/accounts", json=payload)
+    response = client.post("/v1/accounts", json=payload)
     assert response.status_code == 201
     data = response.get_json()
     assert data["status"] == "success"
@@ -189,13 +189,13 @@ def test_add_account_success(client) -> None:
 
 
 def test_add_account_unknown_broker(client) -> None:
-    """POST /ft-api/v1/accounts with unknown broker returns 404."""
+    """POST /v1/accounts with unknown broker returns 404."""
     payload = {
         "broker": "nonexistent_broker_xyz",
         "label": "Test",
         "credentials": {},
     }
-    response = client.post("/ft-api/v1/accounts", json=payload)
+    response = client.post("/v1/accounts", json=payload)
     assert response.status_code == 404
     data = response.get_json()
     assert data["status"] == "error"
@@ -208,10 +208,10 @@ def test_add_account_unknown_broker(client) -> None:
 
 
 def test_remove_account(client) -> None:
-    """DELETE /ft-api/v1/accounts/<id> removes an account successfully."""
+    """DELETE /v1/accounts/<id> removes an account successfully."""
     # First add an account
     client.post(
-        "/ft-api/v1/accounts",
+        "/v1/accounts",
         json={
             "broker": "fyers",
             "label": "Fyers Test",
@@ -220,22 +220,22 @@ def test_remove_account(client) -> None:
         },
     )
     # Verify it exists
-    get_resp = client.get("/ft-api/v1/accounts")
+    get_resp = client.get("/v1/accounts")
     assert len(get_resp.get_json()["accounts"]) == 1
 
     # Remove it
-    del_resp = client.delete("/ft-api/v1/accounts/FY001")
+    del_resp = client.delete("/v1/accounts/FY001")
     assert del_resp.status_code == 200
     assert del_resp.get_json()["status"] == "success"
 
     # Verify gone
-    get_resp2 = client.get("/ft-api/v1/accounts")
+    get_resp2 = client.get("/v1/accounts")
     assert get_resp2.get_json()["accounts"] == []
 
 
 def test_remove_account_not_found(client) -> None:
-    """DELETE /ft-api/v1/accounts/<id> with unknown id returns 404."""
-    response = client.delete("/ft-api/v1/accounts/GHOST99")
+    """DELETE /v1/accounts/<id> with unknown id returns 404."""
+    response = client.delete("/v1/accounts/GHOST99")
     assert response.status_code == 404
     assert response.get_json()["status"] == "error"
 
@@ -246,10 +246,10 @@ def test_remove_account_not_found(client) -> None:
 
 
 def test_set_primary(client) -> None:
-    """POST /ft-api/v1/accounts/<id>/set-primary promotes the account."""
+    """POST /v1/accounts/<id>/set-primary promotes the account."""
     # Add account first
     client.post(
-        "/ft-api/v1/accounts",
+        "/v1/accounts",
         json={
             "broker": "angel",
             "label": "Angel One",
@@ -257,14 +257,14 @@ def test_set_primary(client) -> None:
             "credentials": {"client_id": "c", "password": "p", "totp": "123456"},
         },
     )
-    response = client.post("/ft-api/v1/accounts/AN001/set-primary")
+    response = client.post("/v1/accounts/AN001/set-primary")
     assert response.status_code == 200
     assert response.get_json()["status"] == "success"
 
 
 def test_set_primary_not_found(client) -> None:
-    """POST /ft-api/v1/accounts/<id>/set-primary for unknown account → 404."""
-    response = client.post("/ft-api/v1/accounts/GHOST99/set-primary")
+    """POST /v1/accounts/<id>/set-primary for unknown account → 404."""
+    response = client.post("/v1/accounts/GHOST99/set-primary")
     assert response.status_code == 404
     assert response.get_json()["status"] == "error"
 
@@ -275,9 +275,9 @@ def test_set_primary_not_found(client) -> None:
 
 
 def test_oauth_start_returns_url_and_state(client) -> None:
-    """POST /ft-api/v1/auth/oauth/start returns redirect_url and state."""
+    """POST /v1/auth/oauth/start returns redirect_url and state."""
     response = client.post(
-        "/ft-api/v1/auth/oauth/start",
+        "/v1/auth/oauth/start",
         json={"broker": "zerodha", "label": "My Zerodha"},
     )
     assert response.status_code == 200
@@ -300,7 +300,7 @@ def test_oauth_start_stores_csrf_state(app, client) -> None:
         initial_count = len(app.config["OAUTH_STATES"])
 
     response = client.post(
-        "/ft-api/v1/auth/oauth/start",
+        "/v1/auth/oauth/start",
         json={"broker": "upstox", "label": "Upstox"},
     )
     assert response.status_code == 200
@@ -324,7 +324,7 @@ def test_oauth_start_stores_csrf_state(app, client) -> None:
 def test_oauth_callback_validates_state(client) -> None:
     """OAuth callback with an invalid state redirects to /setup?auth=error."""
     response = client.get(
-        "/ft-api/v1/auth/oauth/callback",
+        "/v1/auth/oauth/callback",
         query_string={"state": "completely_invalid_state", "code": "fake_code"},
     )
     # Should redirect
@@ -336,7 +336,7 @@ def test_oauth_callback_validates_state(client) -> None:
 def test_oauth_callback_missing_state(client) -> None:
     """OAuth callback with no state parameter redirects to error."""
     response = client.get(
-        "/ft-api/v1/auth/oauth/callback",
+        "/v1/auth/oauth/callback",
         query_string={"code": "some_code"},
     )
     assert response.status_code in (301, 302)
@@ -347,7 +347,7 @@ def test_oauth_callback_success(app, client) -> None:
     """OAuth callback with a valid state authenticates and redirects to success."""
     # Start OAuth to get a valid state
     start_resp = client.post(
-        "/ft-api/v1/auth/oauth/start",
+        "/v1/auth/oauth/start",
         json={"broker": "zerodha", "label": "Zerodha OAuth", "account_id": "ZD_OAUTH"},
     )
     assert start_resp.status_code == 200
@@ -355,7 +355,7 @@ def test_oauth_callback_success(app, client) -> None:
 
     # Hit the callback with the valid state
     callback_resp = client.get(
-        "/ft-api/v1/auth/oauth/callback",
+        "/v1/auth/oauth/callback",
         query_string={"state": state_token, "code": "valid_auth_code"},
     )
     assert callback_resp.status_code in (301, 302)
@@ -373,7 +373,7 @@ def test_oauth_callback_success(app, client) -> None:
 
 
 def test_credentials_submit_success(client) -> None:
-    """POST /ft-api/v1/auth/credentials stores credentials and returns account."""
+    """POST /v1/auth/credentials stores credentials and returns account."""
     payload = {
         "broker": "angel",
         "label": "Angel TOTP",
@@ -384,7 +384,7 @@ def test_credentials_submit_success(client) -> None:
             "totp": "654321",
         },
     }
-    response = client.post("/ft-api/v1/auth/credentials", json=payload)
+    response = client.post("/v1/auth/credentials", json=payload)
     assert response.status_code == 201
     data = response.get_json()
     assert data["status"] == "success"
@@ -399,13 +399,13 @@ def test_credentials_submit_success(client) -> None:
 
 
 def test_credentials_unknown_broker(client) -> None:
-    """POST /ft-api/v1/auth/credentials with unknown broker returns 404."""
+    """POST /v1/auth/credentials with unknown broker returns 404."""
     payload = {
         "broker": "ghost_broker",
         "label": "Ghost",
         "credentials": {"api_key": "k"},
     }
-    response = client.post("/ft-api/v1/auth/credentials", json=payload)
+    response = client.post("/v1/auth/credentials", json=payload)
     assert response.status_code == 404
     data = response.get_json()
     assert data["status"] == "error"
@@ -420,7 +420,7 @@ def test_credentials_unknown_broker(client) -> None:
 def test_oauth_start_non_oauth_broker(client) -> None:
     """OAuth start for a non-OAuth broker returns 400."""
     response = client.post(
-        "/ft-api/v1/auth/oauth/start",
+        "/v1/auth/oauth/start",
         json={"broker": "angel"},  # angel uses totp_form, not oauth_redirect
     )
     assert response.status_code == 400
@@ -432,15 +432,15 @@ def test_oauth_start_non_oauth_broker(client) -> None:
 def test_oauth_start_unknown_broker(client) -> None:
     """OAuth start with unknown broker returns 404."""
     response = client.post(
-        "/ft-api/v1/auth/oauth/start",
+        "/v1/auth/oauth/start",
         json={"broker": "totally_unknown"},
     )
     assert response.status_code == 404
 
 
 def test_add_account_missing_broker_field(client) -> None:
-    """POST /ft-api/v1/accounts without broker field returns 400."""
-    response = client.post("/ft-api/v1/accounts", json={"label": "Test"})
+    """POST /v1/accounts without broker field returns 400."""
+    response = client.post("/v1/accounts", json={"label": "Test"})
     assert response.status_code == 400
 
 
@@ -459,7 +459,7 @@ def test_oauth_start_expires_old_states(app, client) -> None:
 
     # A new OAuth start should purge the expired entry
     client.post(
-        "/ft-api/v1/auth/oauth/start",
+        "/v1/auth/oauth/start",
         json={"broker": "dhan", "label": "Dhan"},
     )
 

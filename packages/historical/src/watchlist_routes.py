@@ -4,10 +4,10 @@ Registered as a Blueprint in ``create_flask_app()``.
 
 Endpoints
 ---------
-GET    /ft-api/v1/historify/watchlist  — list all watchlist items
-POST   /ft-api/v1/historify/watchlist  — add an item
-DELETE /ft-api/v1/historify/watchlist  — remove an item
-POST   /ft-api/v1/historify/download   — trigger download for all enabled items
+GET    /v1/historify/watchlist  — list all watchlist items
+POST   /v1/historify/watchlist  — add an item
+DELETE /v1/historify/watchlist  — remove an item
+POST   /v1/historify/download   — trigger download for all enabled items
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def init_watchlist_routes(watchlist: DownloadWatchlist) -> None:
     logger.info("DownloadWatchlist singleton injected into watchlist_routes")
 
 
-@historify_bp.route("/ft-api/v1/historify/watchlist", methods=["GET"])
+@historify_bp.route("/v1/historify/watchlist", methods=["GET"])
 def list_watchlist() -> tuple[Any, int]:
     """Return all watchlist items.
 
@@ -71,7 +71,7 @@ def list_watchlist() -> tuple[Any, int]:
     }), 200
 
 
-@historify_bp.route("/ft-api/v1/historify/watchlist", methods=["POST"])
+@historify_bp.route("/v1/historify/watchlist", methods=["POST"])
 def add_watchlist() -> tuple[Any, int]:
     """Add a symbol to the watchlist.
 
@@ -105,7 +105,7 @@ def add_watchlist() -> tuple[Any, int]:
     }), 201
 
 
-@historify_bp.route("/ft-api/v1/historify/watchlist", methods=["DELETE"])
+@historify_bp.route("/v1/historify/watchlist", methods=["DELETE"])
 def remove_watchlist() -> tuple[Any, int]:
     """Remove a symbol from the watchlist.
 
@@ -129,7 +129,7 @@ def remove_watchlist() -> tuple[Any, int]:
     return jsonify({"status": "ok"}), 200
 
 
-@historify_bp.route("/ft-api/v1/historify/download", methods=["POST"])
+@historify_bp.route("/v1/historify/download", methods=["POST"])
 def trigger_download() -> tuple[Any, int]:
     """Trigger OHLCV download for all enabled watchlist items.
 

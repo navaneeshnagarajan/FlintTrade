@@ -4,11 +4,11 @@ Registered as a Blueprint in ``create_flask_app()``.
 
 Endpoints
 ---------
-GET /ft-api/v1/health             — aggregated health status
-GET /ft-api/v1/traffic/stats      — traffic statistics
-GET /ft-api/v1/traffic/recent     — recent requests
-GET /ft-api/v1/latency/stats      — order latency stats
-GET /ft-api/v1/latency/recent     — recent latency records
+GET /v1/health             — aggregated health status
+GET /v1/traffic/stats      — traffic statistics
+GET /v1/traffic/recent     — recent requests
+GET /v1/latency/stats      — order latency stats
+GET /v1/latency/recent     — recent latency records
 """
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ def init_monitoring_routes(
 # ---------------------------------------------------------------------------
 
 
-@monitoring_bp.route("/ft-api/v1/health", methods=["GET"])
+@monitoring_bp.route("/v1/health", methods=["GET"])
 def health() -> tuple[Any, int]:
     """Return aggregated health status.
 
@@ -97,7 +97,7 @@ def health() -> tuple[Any, int]:
 # ---------------------------------------------------------------------------
 
 
-@monitoring_bp.route("/ft-api/v1/traffic/stats", methods=["GET"])
+@monitoring_bp.route("/v1/traffic/stats", methods=["GET"])
 def traffic_stats() -> tuple[Any, int]:
     """Return traffic statistics.
 
@@ -118,7 +118,7 @@ def traffic_stats() -> tuple[Any, int]:
     return jsonify({"status": "ok", "data": _traffic.get_stats(minutes=minutes)}), 200
 
 
-@monitoring_bp.route("/ft-api/v1/traffic/recent", methods=["GET"])
+@monitoring_bp.route("/v1/traffic/recent", methods=["GET"])
 def traffic_recent() -> tuple[Any, int]:
     """Return recent HTTP requests.
 
@@ -144,7 +144,7 @@ def traffic_recent() -> tuple[Any, int]:
 # ---------------------------------------------------------------------------
 
 
-@monitoring_bp.route("/ft-api/v1/latency/stats", methods=["GET"])
+@monitoring_bp.route("/v1/latency/stats", methods=["GET"])
 def latency_stats() -> tuple[Any, int]:
     """Return order latency statistics per broker.
 
@@ -155,7 +155,7 @@ def latency_stats() -> tuple[Any, int]:
     return jsonify({"status": "ok", "data": _latency.get_stats()}), 200
 
 
-@monitoring_bp.route("/ft-api/v1/latency/recent", methods=["GET"])
+@monitoring_bp.route("/v1/latency/recent", methods=["GET"])
 def latency_recent() -> tuple[Any, int]:
     """Return recent order latency records.
 
