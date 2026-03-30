@@ -1,8 +1,16 @@
 /**
- * TelegramSection — Telegram bot token, chat ID, and enable/disable toggle.
+ * TelegramSection — Telegram bot token, chat ID, enable/disable toggle, and test send.
+ *
+ * The "Test Send" button calls the OpenAlgo POST /api/v1/telegram endpoint
+ * to verify the bot token and chat ID are working.
  */
 
+import { useState, useCallback } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { Send, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { FieldRow, TextInput, Toggle, SectionTitle } from "./shared";
+import { Button } from "@/components/ui/button";
+import { sendTelegram } from "@/services/api";
 
 interface TelegramSettings {
   enabled: boolean;
@@ -16,6 +24,28 @@ interface TelegramSectionProps {
 }
 
 export function TelegramSection({ settings, onChangeField }: TelegramSectionProps) {
+  const [testStatus, setTestStatus] = useState<"idle" | "success" | "error">("idle");
+  const [testError, setTestError]   = useState("");
+
+  const testMutation = useMutation({
+    mutationFn: () =>
+      sendTelegram("FlintTrade test message — your Telegram integration is working!"),
+    onSuccess: () => {
+      setTestStatus("success");
+      setTestError("");
+      setTimeout(() => setTestStatus("idle"), 5000);
+    },
+    onError: (err) => {
+      setTestStatus("error");
+      setTestError(err instanceof Error ? err.message : "Send failed");
+      setTimeout(() => setTestStatus("idle"), 5000);
+    },
+  });
+
+  const handleTestSend = useCallback(() => {
+    testMutation.mutate();
+  }, [testMutation]);
+
   return (
     <div className="space-y-5">
       <SectionTitle>Telegram</SectionTitle>
@@ -54,6 +84,39 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
           aria-label="Telegram chat ID"
         />
       </FieldRow>
+
+      {/* Test Send button */}
+      {settings.enabled && (
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleTestSend}
+            disabled={testMutation.isPending || !settings.enabled}
+            className="flex items-center gap-1.5 text-xs h-7"
+          >
+            {testMutation.isPending ? (
+              <RefreshCw size={11} className="animate-spin" />
+            ) : (
+              <Send size={11} />
+            )}
+            {testMutation.isPending ? "Sending..." : "Test Send"}
+          </Button>
+
+          {testStatus === "success" && (
+            <span className="flex items-center gap-1 text-xs text-profit">
+              <CheckCircle2 size={11} />
+              Message sent
+            </span>
+          )}
+          {testStatus === "error" && (
+            <span className="flex items-center gap-1 text-xs text-warning">
+              <AlertTriangle size={11} />
+              {testError || "Failed to send"}
+            </span>
+          )}
+        </div>
+      )}
 
       {settings.enabled && (
         <div className="p-3 rounded bg-accent/5 border border-accent/20 text-xs text-text-secondary space-y-1">

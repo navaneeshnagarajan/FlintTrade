@@ -227,9 +227,9 @@ function dedupeAndSort(items: NewsItem[]): NewsItem[] {
  * Try the FlintTrade backend endpoint first (GET /ft-api/api/v1/news).
  * If that fails or returns no articles, fall back to the CORS proxy path.
  *
- * TODO: Implement GET /api/v1/news in the FlintTrade Flask backend to fetch
- *       RSS server-side (avoids CORS entirely). Until that endpoint is live
- *       the widget automatically falls back to the allorigins CORS proxy.
+ * The backend endpoint GET /api/v1/news is implemented in app.py and fetches
+ * RSS feeds server-side (avoids CORS entirely). The CORS proxy fallback
+ * remains for when the backend is not running.
  */
 async function fetchAllFeeds(): Promise<NewsItem[]> {
   // Attempt 1: backend server-side RSS proxy

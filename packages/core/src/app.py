@@ -1575,6 +1575,156 @@ def create_flask_app(
             return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # ------------------------------------------------------------------
+    # Monitoring proxy routes (/api/v1/...) — delegate to blueprint singletons
+    # The monitoring_bp Blueprint serves at /ft-api/v1/* but the React
+    # frontend (via Vite proxy) calls /api/v1/* on port 5001.
+    # ------------------------------------------------------------------
+
+    @app.route("/api/v1/health", methods=["GET"])
+    def api_health() -> tuple[Any, int]:
+        """Proxy health endpoint for frontend compatibility."""
+        from packages.core.src.monitoring_routes import _health_agg  # noqa: PLC0415
+
+        registry_inst = app.config.get("REGISTRY")
+        result = _health_agg.get_health(registry=registry_inst)
+        http_status = 200 if result["status"] == "ok" else 503
+        return jsonify(result), http_status
+
+    @app.route("/api/v1/traffic/stats", methods=["GET"])
+    def api_traffic_stats() -> tuple[Any, int]:
+        """Proxy traffic stats endpoint for frontend compatibility."""
+        from packages.core.src.monitoring_routes import get_traffic_counter  # noqa: PLC0415
+
+        minutes_raw = request.args.get("minutes", "5")
+        try:
+            minutes = int(minutes_raw)
+            if minutes < 1:
+                raise ValueError
+        except ValueError:
+            return jsonify({"status": "error", "message": "minutes must be a positive integer"}), 400
+
+        return jsonify({"status": "ok", "data": get_traffic_counter().get_stats(minutes=minutes)}), 200
+
+    @app.route("/api/v1/latency/stats", methods=["GET"])
+    def api_latency_stats() -> tuple[Any, int]:
+        """Proxy latency stats endpoint for frontend compatibility."""
+        from packages.core.src.monitoring_routes import get_latency_tracker  # noqa: PLC0415
+
+        return jsonify({"status": "ok", "data": get_latency_tracker().get_stats()}), 200
+
+    # ------------------------------------------------------------------
+    # Security proxy routes (/api/v1/security/...) — delegate to SecurityMonitor
+    # ------------------------------------------------------------------
+
+    @app.route("/api/v1/security/stats", methods=["GET"])
+    def api_security_stats() -> tuple[Any, int]:
+        """Proxy security stats endpoint for frontend compatibility."""
+        from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+        monitor = app.config.get("SECURITY_MONITOR")
+        if not isinstance(monitor, _SM):
+            return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+        return jsonify({"status": "success", "data": monitor.get_stats()}), 200
+
+    @app.route("/api/v1/security/bans", methods=["GET"])
+    def api_security_bans() -> tuple[Any, int]:
+        """Proxy security bans list for frontend compatibility."""
+        from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+        monitor = app.config.get("SECURITY_MONITOR")
+        if not isinstance(monitor, _SM):
+            return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+        bans = monitor.get_banned_ips()
+        return jsonify({"status": "success", "data": {"bans": [r.to_dict() for r in bans]}}), 200
+
+    @app.route("/api/v1/security/ban", methods=["POST"])
+    def api_security_ban() -> tuple[Any, int]:
+        """Proxy ban-IP endpoint for frontend compatibility."""
+        from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+        monitor = app.config.get("SECURITY_MONITOR")
+        if not isinstance(monitor, _SM):
+            return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+        body = request.get_json(silent=True) or {}
+        ip: str = (body.get("ip") or "").strip()
+        reason: str = (body.get("reason") or "").strip()
+        if not ip:
+            return jsonify({"status": "error", "message": "ip is required"}), 400
+        if not reason:
+            return jsonify({"status": "error", "message": "reason is required"}), 400
+        duration_val: int | None = None
+        raw_duration = body.get("duration")
+        if raw_duration is not None:
+            try:
+                duration_val = int(raw_duration)
+            except (TypeError, ValueError):
+                return jsonify({"status": "error", "message": "duration must be an integer"}), 400
+        monitor.ban_ip(ip, reason, duration_val)
+        return jsonify({"status": "success", "data": {"ip": ip, "reason": reason, "duration": duration_val}}), 200
+
+    @app.route("/api/v1/security/unban", methods=["POST"])
+    def api_security_unban() -> tuple[Any, int]:
+        """Proxy unban-IP endpoint for frontend compatibility."""
+        from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+        monitor = app.config.get("SECURITY_MONITOR")
+        if not isinstance(monitor, _SM):
+            return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+        body = request.get_json(silent=True) or {}
+        ip: str = (body.get("ip") or "").strip()
+        if not ip:
+            return jsonify({"status": "error", "message": "ip is required"}), 400
+        monitor.unban_ip(ip)
+        return jsonify({"status": "success", "data": {"ip": ip}}), 200
+
+    # ------------------------------------------------------------------
+    # News (server-side RSS proxy — avoids CORS in browser)
+    # ------------------------------------------------------------------
+
+    @app.route("/api/v1/news", methods=["GET"])
+    def api_news() -> tuple[Any, int]:
+        """Fetch news from Indian financial RSS feeds server-side."""
+        import xml.etree.ElementTree as ET  # noqa: PLC0415, N817
+
+        feeds = [
+            ("MoneyControl", "https://www.moneycontrol.com/rss/latestnews.xml"),
+            ("ET Markets", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
+            ("LiveMint", "https://www.livemint.com/rss/markets"),
+        ]
+
+        articles: list[dict[str, str]] = []
+        for source_name, url in feeds:
+            try:
+                import httpx  # noqa: PLC0415
+
+                resp = httpx.get(url, timeout=5.0, follow_redirects=True)
+                if resp.status_code != 200:
+                    continue
+                root = ET.fromstring(resp.text)
+                for item in root.iter("item"):
+                    title_el = item.find("title")
+                    link_el = item.find("link")
+                    pub_el = item.find("pubDate")
+                    if title_el is not None and title_el.text:
+                        articles.append({
+                            "title": title_el.text.strip(),
+                            "link": link_el.text.strip() if link_el is not None and link_el.text else "",
+                            "pub_date": pub_el.text.strip() if pub_el is not None and pub_el.text else "",
+                            "source": source_name,
+                        })
+            except Exception:
+                continue
+
+        # Sort by pub_date descending, limit to 50
+        articles.sort(key=lambda a: a.get("pub_date", ""), reverse=True)
+        articles = articles[:50]
+
+        return jsonify({
+            "status": "success",
+            "data": {"articles": articles},
+        }), 200
+
+    # ------------------------------------------------------------------
     # MCP bridge — register handlers that route through OpenAlgo
     # ------------------------------------------------------------------
     try:
