@@ -1511,7 +1511,7 @@ function OptimizeSection() {
       </GlassCard>
       <GlassCard className="p-4 gap-2">
         <Badge className="bg-atm-bg text-warning text-xs">
-          Coming in v0.2.0
+          Coming soon
         </Badge>
         <p className="text-sm text-text-muted">
           Parameter optimization UI will be available in the next release. The
@@ -1594,7 +1594,7 @@ function ResultsSection({ lastResult }: ResultsSectionProps) {
         <Badge className="bg-atm-bg text-warning text-xs">No data yet</Badge>
         <p className="text-sm text-text-muted">
           Run a backtest from the Backtest section to populate results here.
-          Multi-run comparison and CSV export will be available in v0.2.0.
+          Multi-run comparison and CSV export will be available in a future update.
         </p>
       </GlassCard>
     </div>

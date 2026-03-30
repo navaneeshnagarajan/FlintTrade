@@ -18,7 +18,6 @@ import {
   X,
 } from "lucide-react";
 import AIAdvisorWidget from "@/widgets/utility/AIAdvisor/AIAdvisorWidget";
-import { FeatureTeaser } from "@/components/teasers";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -707,7 +706,7 @@ function AISettingsSection() {
       </Card>
 
       <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-atm-bg text-warning text-xs">Coming in v0.2.0</Badge>
+        <Badge className="bg-atm-bg text-warning text-xs">Coming soon</Badge>
         <p className="text-xs text-text-muted mt-2">
           Settings form controls will be available in the next release. Use workspace.json
           directly to configure provider, model, and ChromaDB paths in the meantime.
@@ -852,16 +851,8 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
 const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   chat: <ChatSection />,
   signals: <SignalsSection />,
-  sentiment: (
-    <FeatureTeaser status="in_dev" featureName="Market Sentiment" version="v0.3.0">
-      <SentimentSection />
-    </FeatureTeaser>
-  ),
-  knowledge: (
-    <FeatureTeaser status="in_dev" featureName="Knowledge Base" version="v0.3.0">
-      <KnowledgeSection />
-    </FeatureTeaser>
-  ),
+  sentiment: <SentimentSection />,
+  knowledge: <KnowledgeSection />,
   settings: <AISettingsSection />,
 };
 

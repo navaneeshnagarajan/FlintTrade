@@ -2,7 +2,7 @@
  * IpoTab.tsx
  *
  * Static IPO reference data tab — shows recent and upcoming Indian IPOs.
- * Live IPO tracking will replace this in v0.3.0 when the NSE IPO scraper
+ * Live IPO tracking will replace this when the NSE IPO scraper
  * backend is available.
  *
  * Design absorbed from:

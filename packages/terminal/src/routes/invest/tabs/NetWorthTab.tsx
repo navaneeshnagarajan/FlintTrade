@@ -107,24 +107,24 @@ export function NetWorthTab() {
     {
       label: "Gold",
       value: null,
-      note: "Manual entry available in v0.2.0",
+      note: "Manual entry available in a future update",
       hexColor: "#f59e0b",
       tailwindBg: "bg-amber-500",
       tailwindText: "text-amber-400",
       icon: Globe,
       addLabel: "Add Gold",
-      addTooltip: "Manual gold tracking (sovereign bonds, physical, ETF) coming in v0.2.0.",
+      addTooltip: "Manual gold tracking (sovereign bonds, physical, ETF) coming in a future update.",
     },
     {
       label: "Fixed Deposits",
       value: null,
-      note: "Manual entry available in v0.2.0",
+      note: "Manual entry available in a future update",
       hexColor: "#06b6d4",
       tailwindBg: "bg-cyan-500",
       tailwindText: "text-cyan-400",
       icon: DollarSign,
       addLabel: "Add FD",
-      addTooltip: "Track fixed deposits with maturity dates and interest tracking — v0.2.0.",
+      addTooltip: "Track fixed deposits with maturity dates and interest tracking — coming soon.",
     },
   ];
 
