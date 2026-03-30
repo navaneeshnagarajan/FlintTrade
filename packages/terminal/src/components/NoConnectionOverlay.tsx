@@ -25,7 +25,18 @@ const DELAY_MS = 5000;
  * The overlay is suppressed on these paths so users can configure
  * settings or explore demo data without being interrupted.
  */
-const SUPPRESSED_ROUTE_PREFIXES = ["/settings", "/explore"];
+const SUPPRESSED_ROUTE_PREFIXES = [
+  "/settings",
+  "/explore",
+  "/learn",
+  "/invest",
+  "/ai",
+  "/lab",
+  "/automate",
+  "/admin",
+  "/welcome",
+  "/setup",
+];
 
 /** CSS selector for all keyboard-focusable elements inside the dialog. */
 const FOCUSABLE_SELECTOR =
@@ -59,8 +70,12 @@ export function NoConnectionOverlay() {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
-    const firstFocusable = dialog.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-    firstFocusable?.focus();
+    // Delay focus to prevent residual Enter keypress from triggering the focused button
+    const timer = setTimeout(() => {
+      const firstFocusable = dialog.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      firstFocusable?.focus();
+    }, 100);
+    return () => clearTimeout(timer);
   }, [showOverlay, isSuppressedRoute]);
 
   // Issue #56 — Tab/Shift+Tab cycles within the dialog only.
