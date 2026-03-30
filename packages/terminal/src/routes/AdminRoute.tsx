@@ -19,6 +19,7 @@ interface PackageInfo {
   type: "python" | "react" | "rust";
   status: "active" | "stub" | "planned";
   testCount: number;
+  testFiles: number;
 }
 
 interface WidgetInfo {
@@ -31,7 +32,6 @@ interface WidgetInfo {
 interface EndpointInfo {
   method: string;
   path: string;
-  package: string;
   status: "wired" | "stub" | "planned";
 }
 
@@ -73,25 +73,38 @@ const TABS: { id: TabId; label: string; icon: typeof Package }[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Static Data
+// Introspection data (fetched from backend)
 // ---------------------------------------------------------------------------
 
-const PACKAGES: PackageInfo[] = [
-  { name: "core", type: "python", status: "active", testCount: 180 },
-  { name: "engine", type: "python", status: "active", testCount: 145 },
-  { name: "data", type: "python", status: "active", testCount: 85 },
-  { name: "historical", type: "python", status: "active", testCount: 92 },
-  { name: "screener", type: "python", status: "active", testCount: 110 },
-  { name: "backtest-engine", type: "python", status: "active", testCount: 98 },
-  { name: "ai", type: "python", status: "active", testCount: 72 },
-  { name: "integration", type: "python", status: "active", testCount: 55 },
-  { name: "automation", type: "python", status: "active", testCount: 48 },
-  { name: "ditto", type: "python", status: "active", testCount: 42 },
-  { name: "indicators", type: "python", status: "active", testCount: 58 },
-  { name: "gateway", type: "python", status: "active", testCount: 0 },
-  { name: "terminal", type: "react", status: "active", testCount: 36 },
-  { name: "tick-engine", type: "rust", status: "planned", testCount: 0 },
-];
+interface IntrospectData {
+  packages: PackageInfo[];
+  endpoints: EndpointInfo[];
+  endpoint_count: number;
+  package_count: number;
+}
+
+function useIntrospect(): { data: IntrospectData | null; loading: boolean; error: string | null } {
+  const [data, setData] = useState<IntrospectData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/ft-api/v1/admin/introspect")
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<{ status: string; data: IntrospectData }>;
+      })
+      .then((json) => setData(json.data))
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { data, loading, error };
+}
+
+// ---------------------------------------------------------------------------
+// Static Data (widgets & features — change rarely)
+// ---------------------------------------------------------------------------
 
 const WIDGETS: WidgetInfo[] = [
   // Trading
@@ -118,45 +131,13 @@ const WIDGETS: WidgetInfo[] = [
   { id: "ivsmile", name: "IV Smile", category: "Analysis", status: "live" },
   { id: "straddlepnl", name: "Straddle P&L", category: "Analysis", status: "live" },
   { id: "oiprofile", name: "OI Profile", category: "Analysis", status: "live" },
+  { id: "orderflow", name: "Order Flow", category: "Analysis", status: "live" },
   // Utility
   { id: "watchlist", name: "Watchlist", category: "Utility", status: "live" },
   { id: "calculator", name: "Calculator", category: "Utility", status: "live" },
   { id: "news", name: "News Feed", category: "Utility", status: "live" },
   { id: "ticker", name: "Ticker", category: "Utility", status: "live" },
   { id: "aiadvisor", name: "AI Advisor", category: "Utility", status: "live" },
-];
-
-const ENDPOINTS: EndpointInfo[] = [
-  // Gateway
-  { method: "GET", path: "/ft-api/v1/brokers", package: "gateway", status: "wired" },
-  { method: "POST", path: "/ft-api/v1/auth/connect", package: "gateway", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/accounts", package: "gateway", status: "wired" },
-  { method: "POST", path: "/ft-api/v1/accounts/set-primary", package: "gateway", status: "wired" },
-  // Analysis
-  { method: "GET", path: "/ft-api/v1/analysis/gex", package: "screener", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/analysis/vol-surface", package: "screener", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/analysis/iv-smile", package: "screener", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/analysis/straddle-pnl", package: "screener", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/analysis/oi-profile", package: "screener", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/analysis/max-pain", package: "screener", status: "wired" },
-  // Engine
-  { method: "POST", path: "/ft-api/v1/action-center/execute", package: "engine", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/action-center/actions", package: "engine", status: "wired" },
-  // Security
-  { method: "GET", path: "/ft-api/v1/security/status", package: "core", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/security/threats", package: "core", status: "wired" },
-  // P&L
-  { method: "GET", path: "/ft-api/v1/pnl/snapshot", package: "data", status: "wired" },
-  // Historical
-  { method: "GET", path: "/ft-api/v1/historify/watchlists", package: "historical", status: "wired" },
-  // Monitoring
-  { method: "GET", path: "/ft-api/v1/monitoring/health", package: "core", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/monitoring/traffic", package: "core", status: "wired" },
-  // Admin (dev only)
-  { method: "GET", path: "/ft-api/v1/admin/health", package: "core", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/admin/widgets", package: "core", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/admin/repos", package: "core", status: "wired" },
-  { method: "GET", path: "/ft-api/v1/admin/features", package: "core", status: "wired" },
 ];
 
 const FEATURES: FeatureInfo[] = [
@@ -167,12 +148,12 @@ const FEATURES: FeatureInfo[] = [
   { name: "IV Smile / Vol Surface", status: "live", route: "/trade" },
   { name: "Security Monitoring", status: "live", route: "/settings" },
   { name: "P&L Tracker", status: "live", route: "/trade" },
-  { name: "AI Advisor Chat", status: "preview", route: "/ai" },
-  { name: "Backtest Lab", status: "preview", route: "/lab" },
-  { name: "Flow Builder", status: "preview", route: "/automate" },
-  { name: "Strategy Builder", status: "preview", route: "/automate" },
-  { name: "Investor Dashboard", status: "preview", route: "/invest" },
-  { name: "Learn Center", status: "preview", route: "/learn" },
+  { name: "AI Advisor Chat", status: "live", route: "/ai" },
+  { name: "Backtest Lab", status: "live", route: "/lab" },
+  { name: "Flow Builder", status: "live", route: "/automate" },
+  { name: "Strategy Builder", status: "live", route: "/automate" },
+  { name: "Investor Dashboard", status: "live", route: "/invest" },
+  { name: "Learn Center", status: "live", route: "/learn" },
   { name: "Voice Trading", status: "locked", route: "/trade" },
   { name: "Telegram Kill Switch", status: "locked", route: "/automate" },
   { name: "Multi-account Mirroring", status: "locked", route: "/settings" },
@@ -278,7 +259,22 @@ function StatusBadge({ status }: { status: string }): JSX.Element {
 // Tab panels
 // ---------------------------------------------------------------------------
 
-function PackagesPanel(): JSX.Element {
+function PackagesPanel({ packages, loading, error }: {
+  packages: PackageInfo[];
+  loading: boolean;
+  error: string | null;
+}): JSX.Element {
+  if (loading) {
+    return <p className="text-text-secondary text-sm p-4">Loading package data...</p>;
+  }
+  if (error) {
+    return (
+      <div className="p-4 text-sm">
+        <p className="text-red-400">Failed to load packages: {error}</p>
+        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5001).</p>
+      </div>
+    );
+  }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -287,15 +283,17 @@ function PackagesPanel(): JSX.Element {
             <th className="py-2 px-3 font-medium">Package</th>
             <th className="py-2 px-3 font-medium">Type</th>
             <th className="py-2 px-3 font-medium">Status</th>
+            <th className="py-2 px-3 font-medium text-right">Test Files</th>
             <th className="py-2 px-3 font-medium text-right">Tests</th>
           </tr>
         </thead>
         <tbody>
-          {PACKAGES.map((pkg) => (
+          {packages.map((pkg) => (
             <tr key={pkg.name} className="border-b border-border/50 hover:bg-surface-hover">
               <td className="py-2 px-3 font-mono text-text-primary">{pkg.name}</td>
               <td className="py-2 px-3 text-text-secondary">{pkg.type}</td>
               <td className="py-2 px-3"><StatusBadge status={pkg.status} /></td>
+              <td className="py-2 px-3 text-right font-mono text-text-secondary">{pkg.testFiles}</td>
               <td className="py-2 px-3 text-right font-mono text-text-secondary">{pkg.testCount}</td>
             </tr>
           ))}
@@ -338,28 +336,44 @@ function WidgetsPanel(): JSX.Element {
   );
 }
 
-function EndpointsPanel(): JSX.Element {
+function EndpointsPanel({ endpoints, loading, error }: {
+  endpoints: EndpointInfo[];
+  loading: boolean;
+  error: string | null;
+}): JSX.Element {
+  if (loading) {
+    return <p className="text-text-secondary text-sm p-4">Loading endpoint data...</p>;
+  }
+  if (error) {
+    return (
+      <div className="p-4 text-sm">
+        <p className="text-red-400">Failed to load endpoints: {error}</p>
+        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5001).</p>
+      </div>
+    );
+  }
   return (
     <div className="overflow-x-auto">
+      <div className="px-3 pb-3 text-xs text-text-muted">
+        {endpoints.length} endpoints registered
+      </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-text-secondary">
             <th className="py-2 px-3 font-medium">Method</th>
             <th className="py-2 px-3 font-medium">Path</th>
-            <th className="py-2 px-3 font-medium">Package</th>
             <th className="py-2 px-3 font-medium">Status</th>
           </tr>
         </thead>
         <tbody>
-          {ENDPOINTS.map((ep) => (
+          {endpoints.map((ep) => (
             <tr key={`${ep.method}-${ep.path}`} className="border-b border-border/50 hover:bg-surface-hover">
               <td className="py-2 px-3">
-                <span className={`font-mono text-xs font-bold ${ep.method === "GET" ? "text-emerald-400" : "text-amber-400"}`}>
+                <span className={`font-mono text-xs font-bold ${ep.method === "GET" ? "text-emerald-400" : ep.method === "POST" ? "text-amber-400" : "text-blue-400"}`}>
                   {ep.method}
                 </span>
               </td>
               <td className="py-2 px-3 font-mono text-text-primary text-xs">{ep.path}</td>
-              <td className="py-2 px-3 text-text-secondary">{ep.package}</td>
               <td className="py-2 px-3"><StatusBadge status={ep.status} /></td>
             </tr>
           ))}
@@ -492,17 +506,27 @@ function DepsPanel(): JSX.Element {
 export default function AdminRoute(): JSX.Element {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("packages");
+  const { data: introspect, loading: introLoading, error: introError } = useIntrospect();
 
-  const panels: Record<TabId, () => JSX.Element> = {
-    packages: PackagesPanel,
-    widgets: WidgetsPanel,
-    endpoints: EndpointsPanel,
-    features: FeaturesPanel,
-    absorption: AbsorptionPanel,
-    deps: DepsPanel,
+  const packages = introspect?.packages ?? [];
+  const endpoints = introspect?.endpoints ?? [];
+
+  const renderPanel = (): JSX.Element => {
+    switch (activeTab) {
+      case "packages":
+        return <PackagesPanel packages={packages} loading={introLoading} error={introError} />;
+      case "widgets":
+        return <WidgetsPanel />;
+      case "endpoints":
+        return <EndpointsPanel endpoints={endpoints} loading={introLoading} error={introError} />;
+      case "features":
+        return <FeaturesPanel />;
+      case "absorption":
+        return <AbsorptionPanel />;
+      case "deps":
+        return <DepsPanel />;
+    }
   };
-
-  const ActivePanel = panels[activeTab];
 
   return (
     <div className="min-h-screen bg-background text-text-primary">
@@ -554,7 +578,7 @@ export default function AdminRoute(): JSX.Element {
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
-        <ActivePanel />
+        {renderPanel()}
       </main>
     </div>
   );

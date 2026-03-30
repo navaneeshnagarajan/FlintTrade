@@ -1,7 +1,7 @@
 """Admin API endpoints — dev/debug only.
 
 Provides internal visibility into package health, widget registry,
-repo absorption status, and feature flags.
+repo absorption status, feature flags, and project introspection.
 
 Blueprint: /ft-api/v1/admin/
 Only registered when app.debug is True or FLINTTRADE_DEV env var is set.
@@ -9,12 +9,14 @@ Only registered when app.debug is True or FLINTTRADE_DEV env var is set.
 
 from __future__ import annotations
 
+import glob as _glob
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, Response, jsonify
+from flask import Blueprint, Response, current_app, jsonify
 
 logger = logging.getLogger("flinttrade.admin")
 
@@ -54,6 +56,7 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
     {"id": "ivsmile", "name": "IV Smile", "category": "Analysis", "status": "live"},
     {"id": "straddlepnl", "name": "Straddle P&L", "category": "Analysis", "status": "live"},
     {"id": "oiprofile", "name": "OI Profile", "category": "Analysis", "status": "live"},
+    {"id": "orderflow", "name": "Order Flow", "category": "Analysis", "status": "live"},
     # Utility
     {"id": "watchlist", "name": "Watchlist", "category": "Utility", "status": "live"},
     {"id": "calculator", "name": "Calculator", "category": "Utility", "status": "live"},
@@ -74,12 +77,12 @@ _FEATURE_FLAGS: list[dict[str, str]] = [
     {"name": "IV Smile / Vol Surface", "status": "live", "route": "/trade"},
     {"name": "Security Monitoring", "status": "live", "route": "/settings"},
     {"name": "P&L Tracker", "status": "live", "route": "/trade"},
-    {"name": "AI Advisor Chat", "status": "preview", "route": "/ai"},
-    {"name": "Backtest Lab", "status": "preview", "route": "/lab"},
-    {"name": "Flow Builder", "status": "preview", "route": "/automate"},
-    {"name": "Strategy Builder", "status": "preview", "route": "/automate"},
-    {"name": "Investor Dashboard", "status": "preview", "route": "/invest"},
-    {"name": "Learn Center", "status": "preview", "route": "/learn"},
+    {"name": "AI Advisor Chat", "status": "live", "route": "/ai"},
+    {"name": "Backtest Lab", "status": "live", "route": "/lab"},
+    {"name": "Flow Builder", "status": "live", "route": "/automate"},
+    {"name": "Strategy Builder", "status": "live", "route": "/automate"},
+    {"name": "Investor Dashboard", "status": "live", "route": "/invest"},
+    {"name": "Learn Center", "status": "live", "route": "/learn"},
     {"name": "Voice Trading", "status": "locked", "route": "/trade"},
     {"name": "Telegram Kill Switch", "status": "locked", "route": "/automate"},
     {"name": "Multi-account Mirroring", "status": "locked", "route": "/settings"},
@@ -90,32 +93,96 @@ _FEATURE_FLAGS: list[dict[str, str]] = [
 
 @admin_bp.route("/health", methods=["GET"])
 def admin_health() -> tuple[Response, int]:
-    """Aggregate package health status.
-
-    Returns a summary of all packages with their test status.
-    In future this will run tests in a background thread and cache results.
-    """
-    packages = [
-        {"name": "core", "type": "python", "status": "active", "tests": 180},
-        {"name": "engine", "type": "python", "status": "active", "tests": 145},
-        {"name": "data", "type": "python", "status": "active", "tests": 85},
-        {"name": "historical", "type": "python", "status": "active", "tests": 92},
-        {"name": "screener", "type": "python", "status": "active", "tests": 110},
-        {"name": "backtest-engine", "type": "python", "status": "active", "tests": 98},
-        {"name": "ai", "type": "python", "status": "active", "tests": 72},
-        {"name": "integration", "type": "python", "status": "active", "tests": 55},
-        {"name": "automation", "type": "python", "status": "active", "tests": 48},
-        {"name": "ditto", "type": "python", "status": "active", "tests": 42},
-        {"name": "indicators", "type": "python", "status": "active", "tests": 58},
-        {"name": "gateway", "type": "python", "status": "active", "tests": 0},
-        {"name": "terminal", "type": "react", "status": "active", "tests": 36},
-        {"name": "tick-engine", "type": "rust", "status": "planned", "tests": 0},
-    ]
-    total_tests = sum(p["tests"] for p in packages)
+    """Aggregate package health status (delegates to introspect)."""
+    data = _introspect_packages()
+    total_tests = sum(p["testCount"] for p in data)
     return jsonify({
-        "packages": packages,
-        "total_packages": len(packages),
+        "packages": data,
+        "total_packages": len(data),
         "total_tests": total_tests,
+    }), 200
+
+
+def _introspect_packages() -> list[dict[str, object]]:
+    """Scan the packages/ directory and count real test functions."""
+    root = str(_REPO_ROOT)
+    packages: list[dict[str, object]] = []
+
+    pkg_dirs = sorted(_glob.glob(os.path.join(root, "packages", "*")))
+    for pkg_dir in pkg_dirs:
+        if not os.path.isdir(pkg_dir):
+            continue
+        name = os.path.basename(pkg_dir)
+
+        if name == "terminal":
+            pkg_type = "react"
+            test_files = _glob.glob(os.path.join(pkg_dir, "src", "**", "*.test.ts"), recursive=True)
+            test_files += _glob.glob(os.path.join(pkg_dir, "src", "**", "*.test.tsx"), recursive=True)
+        elif name == "tick-engine":
+            pkg_type = "rust"
+            test_files = _glob.glob(os.path.join(pkg_dir, "tests", "*.py"))
+        else:
+            pkg_type = "python"
+            test_files = _glob.glob(os.path.join(pkg_dir, "tests", "*.py"))
+
+        test_count = 0
+        for tf in test_files:
+            try:
+                with open(tf, encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if (
+                            stripped.startswith("def test_")
+                            or stripped.startswith("it(")
+                            or stripped.startswith("test(")
+                        ):
+                            test_count += 1
+            except OSError:
+                pass
+
+        packages.append({
+            "name": name,
+            "type": pkg_type,
+            "status": "active",
+            "testCount": test_count,
+            "testFiles": len(test_files),
+        })
+
+    return packages
+
+
+@admin_bp.route("/introspect", methods=["GET"])
+def admin_introspect() -> tuple[Response, int]:
+    """Return real-time project introspection data for /admin dashboard.
+
+    Scans the filesystem for actual test counts per package and
+    enumerates all Flask routes registered on the running application.
+    """
+    packages = _introspect_packages()
+
+    # Enumerate Flask routes from the running app
+    endpoints: list[dict[str, str]] = []
+    for rule in current_app.url_map.iter_rules():
+        if rule.endpoint == "static":
+            continue
+        methods = [m for m in rule.methods if m not in ("HEAD", "OPTIONS")]
+        for method in methods:
+            endpoints.append({
+                "method": method,
+                "path": rule.rule,
+                "status": "wired",
+            })
+
+    endpoints.sort(key=lambda e: e["path"])
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "packages": packages,
+            "endpoints": endpoints,
+            "endpoint_count": len(endpoints),
+            "package_count": len(packages),
+        },
     }), 200
 
 
