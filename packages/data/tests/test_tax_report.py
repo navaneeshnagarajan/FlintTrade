@@ -12,7 +12,6 @@ from packages.data.src.tax_report import (
     AUDIT_TURNOVER_CONDITIONAL,
     LTCG_EXEMPTION,
     TaxReportGenerator,
-    TaxSummary,
     TaxableTransaction,
 )
 
