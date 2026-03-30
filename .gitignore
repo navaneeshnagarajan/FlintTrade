@@ -90,3 +90,4 @@ progress.md
 *.zip
 *.tar.gz
 .worktrees/
+qa-*.png
