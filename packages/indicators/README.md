@@ -2,7 +2,7 @@
 Technical analysis indicator library — pure NumPy implementation for batch use.
 Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade). See CLAUDE.md for dev context.
 
-## Indicators (31 total)
+## Indicators (43 functions across 7 modules)
 
 | Category | Indicators |
 |----------|-----------|
@@ -45,6 +45,14 @@ dc_upper, dc_mid, dc_lower = donchian_channels(high, low, period=20)
 obv_vals = obv(close, volume)
 mfi14 = mfi(high, low, close, volume, period=14)
 ```
+
+## Additional Modules
+
+- `signals.py` — Signal generation from indicator crossovers and thresholds
+- `streaming.py` — Streaming (incremental) indicator updates for real-time data
+- `numba_kernels.py` — Numba JIT-compiled kernels for hot-path indicators
+- `pipeline.py` — Indicator pipeline chaining and composition
+- `utils.py` — Shared utility functions
 
 ## Design rules
 

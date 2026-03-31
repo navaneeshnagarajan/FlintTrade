@@ -1,3 +1,3 @@
 # flint-integration
-TradingView, ChartInk, webhooks, Chrome extension, Excel, Amibroker, visual flow builder
+TradingView webhooks, ChartInk alerts, custom webhooks, visual flow builder (54 flow nodes), alerter
 Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade). See CLAUDE.md for dev context.
