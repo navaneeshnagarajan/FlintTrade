@@ -202,7 +202,7 @@ function InvestShell() {
                       : "text-text-secondary hover:text-text-primary border-transparent hover:border-border-default",
                   )}
                 >
-                  <Icon className="w-3.5 h-3.5 shrink-0" />
+                  <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   {tab.label}
                 </button>
               );

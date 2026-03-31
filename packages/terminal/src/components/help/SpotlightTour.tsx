@@ -370,7 +370,7 @@ export function SpotlightTour({
                 "border border-border-default/50",
                 "bg-surface-card/85",
                 "text-text-primary shadow-xl",
-                "focus:outline-none",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
               )}
               style={{
                 ...cardPosition,

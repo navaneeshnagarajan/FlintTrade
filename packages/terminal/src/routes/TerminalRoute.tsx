@@ -380,6 +380,7 @@ export default function TerminalRoute() {
   return (
     <CinematicLayout mode="focused">
     <div className="h-full flex flex-col text-text-primary overflow-hidden select-none">
+      <h1 className="sr-only">Trade Workspace</h1>
       {/* Main content: Dockview canvas OR full-page tool */}
       {activeTool && ToolComponent ? (
         <div className="flex-1 overflow-auto">

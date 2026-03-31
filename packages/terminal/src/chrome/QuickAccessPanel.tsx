@@ -185,7 +185,7 @@ function SandboxSwitch({ enabled, onToggle }: SandboxSwitchProps) {
       onClick={onToggle}
       className={cn(
         "relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full",
-        "transition-colors duration-200 focus:outline-none",
+        "transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
         "focus-visible:ring-2 focus-visible:ring-accent/50",
         enabled ? "bg-accent" : "bg-surface-hover border border-border-default",
       )}

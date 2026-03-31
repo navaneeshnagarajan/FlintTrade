@@ -62,9 +62,9 @@ def make_agent(
     mock_resp.content = llm_response
     mock_llm.chat.return_value = mock_resp
 
-    # Mock broker
+    # Mock broker — all methods are async, so use AsyncMock
     mock_broker = MagicMock()
-    mock_broker.quotes.return_value = {
+    mock_broker.quotes = AsyncMock(return_value={
         "status": "success",
         "data": {
             "ltp": quotes_ltp,
@@ -74,23 +74,23 @@ def make_agent(
             "volume": 100_000,
             "prev_close": quotes_ltp * 0.995,
         },
-    }
-    mock_broker.depth.return_value = {
+    })
+    mock_broker.depth = AsyncMock(return_value={
         "status": "success",
         "data": {
             "bids": [{"quantity": 500}],
             "asks": [{"quantity": 400}],
         },
-    }
-    mock_broker.history.return_value = {
+    })
+    mock_broker.history = AsyncMock(return_value={
         "status": "error",
         "message": "no data",
-    }
-    mock_broker.placeorder.return_value = {
+    })
+    mock_broker.place_order = AsyncMock(return_value={
         "status": order_status,
         "data": {"price": quotes_ltp, "orderid": "ORD001"},
-    }
-    mock_broker.closeposition.return_value = {"status": "success"}
+    })
+    mock_broker.close_position = AsyncMock(return_value={"status": "success"})
 
     return AutonomousTrader(llm_client=mock_llm, openalgo_client=mock_broker, config=config)
 

@@ -147,7 +147,7 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
           up ? "text-profit" : "text-loss"
         }`}
       >
-        {up ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+        {up ? <TrendingUp size={11} aria-hidden="true" /> : <TrendingDown size={11} aria-hidden="true" />}
         <span className="font-mono tabular-nums">
           {change >= 0 ? "+" : ""}
           {change.toFixed(2)}
@@ -192,6 +192,7 @@ export default function DashboardWidget(_props: WidgetProps) {
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden bg-surface-base" data-tour-target="dashboard">
+      <h2 className="sr-only">Dashboard Overview</h2>
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
       {/* Index strip — responsive: 5 cols on wide panels, fewer on narrow */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -208,7 +209,7 @@ export default function DashboardWidget(_props: WidgetProps) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-surface-card border border-border-default rounded-lg p-4 shadow-sm">
           <div className="flex items-center gap-1.5 text-xxs uppercase tracking-wider text-text-muted font-sans mb-2">
-            <Wallet size={12} className="text-text-muted" />
+            <Wallet size={12} className="text-text-muted" aria-hidden="true" />
             Funds
           </div>
           <div
@@ -228,7 +229,7 @@ export default function DashboardWidget(_props: WidgetProps) {
 
         <div className="bg-surface-card border border-border-default rounded-lg p-4 shadow-sm">
           <div className="flex items-center gap-1.5 text-xxs uppercase tracking-wider text-text-muted font-sans mb-2">
-            <Activity size={12} className="text-text-muted" />
+            <Activity size={12} className="text-text-muted" aria-hidden="true" />
             Margin Used
           </div>
           <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
@@ -244,7 +245,7 @@ export default function DashboardWidget(_props: WidgetProps) {
 
         <div className="bg-surface-card border border-border-default rounded-lg p-4 shadow-sm">
           <div className="flex items-center gap-1.5 text-xxs uppercase tracking-wider text-text-muted font-sans mb-2">
-            <BarChart3 size={12} className="text-text-muted" />
+            <BarChart3 size={12} className="text-text-muted" aria-hidden="true" />
             Day P&L
           </div>
           <div
@@ -295,7 +296,7 @@ export default function DashboardWidget(_props: WidgetProps) {
           </h3>
           {lastFetch && (
             <div className="flex items-center gap-1 text-xs text-text-muted font-sans">
-              <Clock size={10} />
+              <Clock size={10} aria-hidden="true" />
               {lastFetch.toLocaleTimeString("en-IN", {
                 timeZone: "Asia/Kolkata",
                 hour12: false,
@@ -311,7 +312,7 @@ export default function DashboardWidget(_props: WidgetProps) {
           </div>
         ) : positions.length === 0 ? (
           <div className="px-4 py-8 text-center">
-            <Minus size={16} className="mx-auto mb-1 text-text-disabled" />
+            <Minus size={16} className="mx-auto mb-1 text-text-disabled" aria-hidden="true" />
             <p className="text-xs text-text-muted font-sans">No open positions</p>
           </div>
         ) : (
@@ -410,7 +411,7 @@ export default function DashboardWidget(_props: WidgetProps) {
           </div>
         ) : orders.length === 0 ? (
           <div className="px-4 py-8 text-center">
-            <Minus size={16} className="mx-auto mb-1 text-text-disabled" />
+            <Minus size={16} className="mx-auto mb-1 text-text-disabled" aria-hidden="true" />
             <p className="text-xs text-text-muted font-sans">No orders today</p>
           </div>
         ) : (

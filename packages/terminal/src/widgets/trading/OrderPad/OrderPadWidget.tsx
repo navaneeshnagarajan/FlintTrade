@@ -223,7 +223,7 @@ function Toast({ msg, onRetry }: ToastProps) {
           : "bg-loss/10 border-loss/20 text-loss"
       }`}
     >
-      {ok ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+      {ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
       <span className="flex-1 leading-tight">{msg.text}</span>
       {showRetry && (
         <button
@@ -442,7 +442,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
     <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden" data-tour-target="order-pad">
       {/* Header */}
       <div className="flex-none bg-surface-card border-b border-border-default px-3 py-2 flex items-center gap-2">
-        <FileEdit size={13} className="text-accent shrink-0" />
+        <FileEdit size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="font-heading font-semibold text-sm text-text-primary uppercase tracking-wider">
           Order Pad
         </span>
@@ -463,7 +463,7 @@ export default function OrderPadWidget(_props: WidgetProps) {
           <label className="text-xxs text-text-muted uppercase tracking-wider">Symbol</label>
           <div className="relative">
             <div className="flex items-center gap-1.5 h-9 bg-surface-hover border border-border-default rounded px-2 focus-within:border-accent transition-colors">
-              <Search size={12} className="text-text-muted shrink-0" />
+              <Search size={12} className="text-text-muted shrink-0" aria-hidden="true" />
               <input
                 type="text"
                 value={query}
@@ -477,13 +477,14 @@ export default function OrderPadWidget(_props: WidgetProps) {
                 spellCheck={false}
               />
               {searching && (
-                <Loader2 size={11} className="text-text-muted animate-spin shrink-0" />
+                <Loader2 size={11} className="text-text-muted animate-spin shrink-0" aria-hidden="true" />
               )}
               {query && !searching && (
                 <button
                   type="button"
                   onClick={handleClearSearch}
                   className="text-text-muted hover:text-text-primary transition-colors"
+                  aria-label="Clear search"
                 >
                   <X size={11} />
                 </button>
