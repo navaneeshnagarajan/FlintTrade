@@ -6,9 +6,7 @@ LLM and broker are mocked to test the agent's logic in isolation.
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -26,7 +24,6 @@ from packages.ai.src.autonomous_agent import (
     _supertrend_signal,
     _vwap,
     _build_signal_prompt,
-    _atr,
     _to_float_list,
 )
 
