@@ -2,8 +2,8 @@
  * TradeSidebar.tsx
  *
  * Persistent left sidebar for /trade route.
- * Shows a compact Watchlist header (placeholder for next iteration) and a
- * live Positions summary fed from the TanStack Query usePositions hook.
+ * Shows a compact Watchlist hint and a live Positions summary fed from
+ * the TanStack Query usePositions hook.
  *
  * Accessibility:
  * - Landmark: <nav> with aria-label
@@ -45,7 +45,7 @@ export function TradeSidebar() {
           className="mb-2"
         />
         <p className="text-xs text-text-muted">
-          Full watchlist in next iteration
+          Add the Watchlist widget from the widget picker.
         </p>
       </section>
 

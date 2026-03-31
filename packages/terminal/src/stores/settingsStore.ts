@@ -106,7 +106,7 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   interests: [],
   experience: "intermediate",
   lastOpenTimestamp: 0,
-  sandboxMode: false,
+  sandboxMode: true,
 
   setPersona: (persona) => set({ persona }),
   setDensity: (density) => set({ density }),

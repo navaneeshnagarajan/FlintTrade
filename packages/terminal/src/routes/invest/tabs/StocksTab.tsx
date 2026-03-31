@@ -34,6 +34,8 @@ import {
   AlertCircle,
   ArrowUpDown,
   BarChart3,
+  Download,
+  Printer,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -59,6 +61,7 @@ import {
 import { useStockScan, type StockFundamentals } from "@/hooks/useStockScan";
 import { CompanySnapshot, type SnapshotData } from "@/components/data/CompanySnapshot";
 import { cn } from "@/lib/utils";
+import { exportToCSV, printCurrentView } from "@/lib/exportUtils";
 
 // ─── Sort options ────────────────────────────────────────────────────────────
 
@@ -261,16 +264,52 @@ export function StocksTab() {
             sector and sort by key metrics.
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void refetch()}
-          className="text-xs text-text-muted h-6 px-2 gap-1"
-          aria-label="Refresh stock data"
-        >
-          <RefreshCw className="size-3" aria-hidden="true" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (stocks.length === 0) return;
+              const csvData = stocks.map((s) => ({
+                Symbol: s.symbol,
+                Name: s.name,
+                Sector: s.sector,
+                "Market Cap (Cr)": s.market_cap,
+                PE: s.pe_ratio,
+                PB: s.pb_ratio,
+                "ROE %": s.roe,
+                "ROCE %": s.roce,
+                "Div Yield %": s.dividend_yield,
+              }));
+              exportToCSV(csvData, `stock-screener-${new Date().toISOString().slice(0, 10)}`);
+            }}
+            className="text-xs text-text-muted h-6 px-2 gap-1"
+            aria-label="Export stock data as CSV"
+          >
+            <Download className="size-3" aria-hidden="true" />
+            Export CSV
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={printCurrentView}
+            className="text-xs text-text-muted h-6 px-2 gap-1"
+            aria-label="Print current view"
+          >
+            <Printer className="size-3" aria-hidden="true" />
+            Print
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void refetch()}
+            className="text-xs text-text-muted h-6 px-2 gap-1"
+            aria-label="Refresh stock data"
+          >
+            <RefreshCw className="size-3" aria-hidden="true" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

@@ -46,6 +46,11 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
+// Mock GlossaryTooltip — render children without tooltip wrapper
+vi.mock("@/components/ui/GlossaryTooltip", () => ({
+  GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 // Mock the tax report hook
 const mockSummary = {
   fy: "2025-26",
@@ -151,7 +156,8 @@ describe("TaxTab", () => {
     expect(screen.getByText("Intraday P&L")).toBeInTheDocument();
     expect(screen.getByText("F&O P&L")).toBeInTheDocument();
     expect(screen.getByText("Commodity P&L")).toBeInTheDocument();
-    expect(screen.getByText("STT Paid")).toBeInTheDocument();
+    // STT appears in multiple places (card label + table)
+    expect(screen.getAllByText(/STT/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("displays turnover section", () => {

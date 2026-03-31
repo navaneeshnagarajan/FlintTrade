@@ -24,8 +24,32 @@ import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { classifySector } from "@/lib/sectors";
 import { useTremorTheme } from "@/hooks/useTremorTheme";
 import { cn } from "@/lib/utils";
+import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
+import type { Holding } from "@/types/api";
+
+// ─── Demo data ────────────────────────────────────────────────────────────────
+
+const DEMO_HOLDINGS: Holding[] = [
+  { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
+  { symbol: "TCS", exchange: "NSE", quantity: 25, averagePrice: 3800, ltp: 3920, pnl: 3000, pnlPercent: 3.16 },
+  { symbol: "HDFCBANK", exchange: "NSE", quantity: 40, averagePrice: 1650, ltp: 1710, pnl: 2400, pnlPercent: 3.64 },
+  { symbol: "INFY", exchange: "NSE", quantity: 30, averagePrice: 1500, ltp: 1475, pnl: -750, pnlPercent: -1.67 },
+  { symbol: "ICICIBANK", exchange: "NSE", quantity: 60, averagePrice: 1100, ltp: 1145, pnl: 2700, pnlPercent: 4.09 },
+  { symbol: "WIPRO", exchange: "NSE", quantity: 100, averagePrice: 450, ltp: 462, pnl: 1200, pnlPercent: 2.67 },
+  { symbol: "ITC", exchange: "NSE", quantity: 200, averagePrice: 480, ltp: 495, pnl: 3000, pnlPercent: 3.13 },
+  { symbol: "BHARTIARTL", exchange: "NSE", quantity: 30, averagePrice: 1700, ltp: 1745, pnl: 1350, pnlPercent: 2.65 },
+  { symbol: "SBIN", exchange: "NSE", quantity: 80, averagePrice: 780, ltp: 798, pnl: 1440, pnlPercent: 2.31 },
+  { symbol: "LT", exchange: "NSE", quantity: 20, averagePrice: 3200, ltp: 3150, pnl: -1000, pnlPercent: -1.56 },
+];
+
+const DEMO_NET_WORTH = 845000;
+const DEMO_CASH = 100000;
+const DEMO_INVESTED = 728160;
+const DEMO_PNL = 16840;
+const DEMO_PNL_PCT = 2.31;
 
 // ─── Internal types ────────────────────────────────────────────────────────────
 
@@ -45,10 +69,18 @@ interface TopMover {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function DashboardTab() {
-  const { holdings, summary, isLoading } = useInvest();
-  const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
+  const { holdings: liveHoldings, summary: liveSummary, isLoading, isError } = useInvest();
   const tremorColors = useTremorTheme();
-  const netWorth = currentValue + availableCash;
+
+  // Fall back to demo data when API fails or returns empty
+  const isDemo = isError || (!isLoading && liveHoldings.length === 0);
+  const holdings = isDemo ? DEMO_HOLDINGS : liveHoldings;
+  const currentValue = isDemo ? DEMO_NET_WORTH - DEMO_CASH : liveSummary.currentValue;
+  const totalInvested = isDemo ? DEMO_INVESTED : liveSummary.totalInvested;
+  const totalPnl = isDemo ? DEMO_PNL : liveSummary.totalPnl;
+  const totalPnlPercent = isDemo ? DEMO_PNL_PCT : liveSummary.totalPnlPercent;
+  const availableCash = isDemo ? DEMO_CASH : liveSummary.availableCash;
+  const netWorth = isDemo ? DEMO_NET_WORTH : currentValue + availableCash;
 
   const equityValue = useMemo(
     () =>
@@ -109,6 +141,13 @@ export function DashboardTab() {
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      {/* Demo banner */}
+      {isDemo && (
+        <div className="lg:col-span-3">
+          <DemoBanner />
+        </div>
+      )}
+
       {/* Hero: Net Worth (full width) */}
       <GlassCard className="lg:col-span-3 p-5 gap-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -180,13 +219,13 @@ export function DashboardTab() {
             <DollarSign className="size-3.5 text-text-secondary" />
           </div>
           <span className="text-xxs text-text-muted uppercase tracking-wider">
-            Margin Used
+            Invested Value
           </span>
         </div>
         <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
           <AnimatedCounter value={totalInvested} formatter={formatINRCompact} duration={1.0} />
         </div>
-        <p className="text-xs text-text-muted">Cost basis of holdings</p>
+        <p className="text-xs text-text-muted">Total cost basis of holdings</p>
       </GlassCard>
 
       <GlassCard className="p-4 gap-2">
@@ -204,7 +243,7 @@ export function DashboardTab() {
             )}
           </div>
           <span className="text-xxs text-text-muted uppercase tracking-wider">
-            Day P&amp;L
+            <GlossaryTooltip term="Day P&L">Day P&amp;L</GlossaryTooltip>
           </span>
         </div>
         <div

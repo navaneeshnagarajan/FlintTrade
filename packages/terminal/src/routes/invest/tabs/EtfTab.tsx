@@ -29,7 +29,7 @@ import {
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
-import { AlertCircle, BarChart3, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
+import { RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,9 +43,25 @@ import {
 } from "@/components/ui/table";
 import { getMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { cn } from "@/lib/utils";
 import { ETF_UNIVERSE, type EtfInfo } from "@/lib/etfs";
 import { formatINR, formatPercent } from "../formatters";
+
+// ─── Demo prices (approximate last known) ────────────────────────────────────
+
+const DEMO_ETF_PRICES: Record<string, { ltp: number; change: number; changePct: number; volume: number }> = {
+  NIFTYBEES: { ltp: 265, change: 2.10, changePct: 0.80, volume: 1250000 },
+  BANKBEES: { ltp: 530, change: -1.50, changePct: -0.28, volume: 890000 },
+  JUNIORBEES: { ltp: 760, change: 4.20, changePct: 0.56, volume: 320000 },
+  GOLDBEES: { ltp: 58, change: 0.35, changePct: 0.61, volume: 2100000 },
+  LIQUIDBEES: { ltp: 1000, change: 0.01, changePct: 0.00, volume: 150000 },
+  ITBEES: { ltp: 420, change: 3.80, changePct: 0.91, volume: 480000 },
+  PHARMABEES: { ltp: 185, change: -0.90, changePct: -0.48, volume: 210000 },
+  CPSEETF: { ltp: 82, change: 0.60, changePct: 0.74, volume: 560000 },
+  SETFNIF50: { ltp: 265, change: 1.90, changePct: 0.72, volume: 710000 },
+  MAFANG: { ltp: 72, change: -0.40, changePct: -0.55, volume: 95000 },
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -244,16 +260,23 @@ export function EtfTab() {
 
   const columns = useMemo(() => buildColumns(), []);
 
-  const rows = useMemo<EtfRow[]>(
-    () => (quotes ? mergeWithQuotes(quotes) : ETF_UNIVERSE.map((e) => ({
-      ...e,
-      ltp: 0,
-      change: 0,
-      changePct: 0,
-      volume: 0,
-    }))),
-    [quotes],
-  );
+  // Fall back to demo prices when API fails or returns empty
+  const isDemo = isError || (!isLoading && (!quotes || quotes.length === 0));
+
+  const rows = useMemo<EtfRow[]>(() => {
+    if (quotes && quotes.length > 0) return mergeWithQuotes(quotes);
+    // Use demo prices when no live data
+    return ETF_UNIVERSE.map((e): EtfRow => {
+      const demo = DEMO_ETF_PRICES[e.symbol];
+      return {
+        ...e,
+        ltp: demo?.ltp ?? 0,
+        change: demo?.change ?? 0,
+        changePct: demo?.changePct ?? 0,
+        volume: demo?.volume ?? 0,
+      };
+    });
+  }, [quotes]);
 
   const table = useReactTable({
     data: rows,
@@ -295,54 +318,19 @@ export function EtfTab() {
     );
   }
 
-  // ─── Error state ─────────────────────────────────────────────────────────
-
-  if (isError) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
-        <AlertCircle className="size-5 text-loss" aria-hidden="true" />
-        <span className="text-sm">Failed to load ETF quotes.</span>
-        <span className="text-xs text-text-muted max-w-xs text-center">
-          Check that OpenAlgo is running and the connection is configured in Settings.
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void refetch()}
-          className="text-xs"
-          aria-label="Retry loading ETF quotes"
-        >
-          <RefreshCw className="size-3 mr-1" aria-hidden="true" />
-          Retry
-        </Button>
-      </div>
-    );
-  }
-
-  // ─── No data state ───────────────────────────────────────────────────────
-
-  if (!quotes || quotes.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
-        <BarChart3 className="size-8 text-text-disabled" aria-hidden="true" />
-        <span className="text-sm font-medium text-text-secondary">No quote data available</span>
-        <span className="text-xs text-text-muted max-w-sm text-center">
-          Connect to OpenAlgo to see live ETF prices.
-        </span>
-      </div>
-    );
-  }
-
   // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
+      {/* Demo banner */}
+      {isDemo && <DemoBanner />}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-heading font-semibold text-sm text-text-primary">ETF Universe</h3>
           <p className="text-xs text-text-muted mt-0.5">
-            {ETF_UNIVERSE.length} ETFs — live quotes via OpenAlgo. Refreshes every 30s.
+            {ETF_UNIVERSE.length} ETFs — {isDemo ? "sample prices" : "live quotes via OpenAlgo. Refreshes every 30s"}.
           </p>
         </div>
         <Button

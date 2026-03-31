@@ -439,6 +439,35 @@ export default function WelcomeRoute() {
             </motion.div>
           </div>
 
+          {/* Tagline + feature bullets — fade in with CTA step */}
+          <motion.div
+            className="flex flex-col items-center gap-3 text-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: step >= 5 ? 1 : 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            aria-label="FlintTrade feature overview"
+          >
+            <p className="text-sm text-text-secondary font-sans">
+              Open-source trading platform for Indian markets
+            </p>
+            <ul className="space-y-1.5 text-left" role="list">
+              {[
+                "Trade stocks, F&O, commodities with 30+ brokers via OpenAlgo",
+                "AI-powered strategy suggestions and 101 backtest strategies",
+                "Real-time option chain, Greeks, IV surface, and order flow analysis",
+                "SIP tracking, tax reports, and portfolio overlap detection",
+              ].map((bullet) => (
+                <li
+                  key={bullet}
+                  className="flex items-start gap-2 text-xs text-text-muted font-sans"
+                >
+                  <span className="text-accent mt-0.5 shrink-0" aria-hidden="true">•</span>
+                  <span>{bullet}</span>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+
           {/* CTA buttons — always in DOM, fade in */}
           <div style={{ height: 56 }} className="mt-4">
             <motion.div

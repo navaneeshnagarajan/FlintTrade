@@ -17,7 +17,7 @@
 
 import { useMemo, useState } from "react";
 import { DonutChart } from "@tremor/react";
-import { PieChart, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import {
   Table,
@@ -30,9 +30,26 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { getSectorBreakdown, type SectorBreakdownEntry } from "@/lib/sectors";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
 import { formatINRCompact } from "../formatters";
+import type { Holding } from "@/types/api";
+
+// ─── Demo data ────────────────────────────────────────────────────────────────
+
+const DEMO_HOLDINGS: Holding[] = [
+  { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
+  { symbol: "TCS", exchange: "NSE", quantity: 25, averagePrice: 3800, ltp: 3920, pnl: 3000, pnlPercent: 3.16 },
+  { symbol: "HDFCBANK", exchange: "NSE", quantity: 40, averagePrice: 1650, ltp: 1710, pnl: 2400, pnlPercent: 3.64 },
+  { symbol: "INFY", exchange: "NSE", quantity: 30, averagePrice: 1500, ltp: 1475, pnl: -750, pnlPercent: -1.67 },
+  { symbol: "ICICIBANK", exchange: "NSE", quantity: 60, averagePrice: 1100, ltp: 1145, pnl: 2700, pnlPercent: 4.09 },
+  { symbol: "WIPRO", exchange: "NSE", quantity: 100, averagePrice: 450, ltp: 462, pnl: 1200, pnlPercent: 2.67 },
+  { symbol: "ITC", exchange: "NSE", quantity: 200, averagePrice: 480, ltp: 495, pnl: 3000, pnlPercent: 3.13 },
+  { symbol: "BHARTIARTL", exchange: "NSE", quantity: 30, averagePrice: 1700, ltp: 1745, pnl: 1350, pnlPercent: 2.65 },
+  { symbol: "SBIN", exchange: "NSE", quantity: 80, averagePrice: 780, ltp: 798, pnl: 1440, pnlPercent: 2.31 },
+  { symbol: "LT", exchange: "NSE", quantity: 20, averagePrice: 3200, ltp: 3150, pnl: -1000, pnlPercent: -1.56 },
+];
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 // 10 distinct Tailwind colours mapped by sector index (cyclically)
@@ -114,7 +131,11 @@ function SortHeader({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function SectorTab() {
-  const { holdings, isLoading } = useInvest();
+  const { holdings: liveHoldings, isLoading, isError } = useInvest();
+
+  // Fall back to demo data when API fails or returns empty
+  const isDemo = isError || (!isLoading && liveHoldings.length === 0);
+  const holdings = isDemo ? DEMO_HOLDINGS : liveHoldings;
 
   const [sortField, setSortField] = useState<SortField>("value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -157,23 +178,11 @@ export function SectorTab() {
     );
   }
 
-  if (holdings.length === 0) {
-    return (
-      <div
-        className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted"
-        role="status"
-      >
-        <PieChart className="size-8 text-text-disabled" aria-hidden="true" />
-        <span className="text-sm font-medium text-text-secondary">No holdings data</span>
-        <span className="text-xs text-text-muted max-w-sm text-center">
-          Connect to OpenAlgo to see your sector allocation.
-        </span>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
+      {/* Demo banner */}
+      {isDemo && <DemoBanner />}
+
       {/* Header */}
       <div>
         <h3 className="font-heading font-semibold text-sm text-text-primary">

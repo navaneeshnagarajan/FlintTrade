@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { DisabledActionButton } from "../DisabledActionButton";
 import { formatINR, formatINRCompact } from "../formatters";
@@ -80,7 +81,7 @@ export function SipTab() {
     <div className="max-w-xl space-y-6">
       {/* Header */}
       <div className="space-y-1">
-        <h3 className="font-heading font-semibold text-sm text-text-primary">SIP Calculator</h3>
+        <h3 className="font-heading font-semibold text-sm text-text-primary"><GlossaryTooltip term="SIP">SIP</GlossaryTooltip> Calculator</h3>
         <p className="text-xs text-text-muted">
           Estimate future corpus from regular monthly investments using compound interest (CAGR).
         </p>
@@ -261,7 +262,7 @@ export function SipTab() {
 
         <p className="text-xs text-text-muted leading-relaxed">
           After connecting a NAV feed, FlintTrade will sync your SIP dates, invested amounts, and
-          current NAV to show running XIRR alongside this calculator.
+          current NAV to show running <GlossaryTooltip term="XIRR">XIRR</GlossaryTooltip> alongside this calculator.
         </p>
       </div>
     </div>

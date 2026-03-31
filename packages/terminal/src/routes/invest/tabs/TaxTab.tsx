@@ -9,6 +9,7 @@
  * Data source: GET /ft-api/v1/tax/summary, /ft-api/v1/tax/report
  */
 
+import type { ReactNode } from "react";
 import { useState, useMemo } from "react";
 import {
   Receipt,
@@ -25,6 +26,8 @@ import {
   ArrowDownRight,
   ChevronDown,
   ChevronUp,
+  Download,
+  Printer,
 } from "lucide-react";
 import {
   Select,
@@ -43,9 +46,30 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { cn } from "@/lib/utils";
-import { useTaxSummary, useTaxReport, type TaxSegment } from "@/hooks/useTaxReport";
+import { Button } from "@/components/ui/button";
+import { useTaxSummary, useTaxReport, type TaxSummary, type TaxSegment } from "@/hooks/useTaxReport";
 import { formatINR, formatINRCompact } from "../formatters";
+
+// ─── Demo data ────────────────────────────────────────────────────────────────
+
+const DEMO_TAX_SUMMARY: TaxSummary = {
+  fy: "2025-26",
+  equity_ltcg: 45000,
+  equity_stcg: 28000,
+  intraday_pnl: -12000,
+  fno_pnl: 185000,
+  commodity_pnl: 8500,
+  stt_paid: 4200,
+  turnover: 8500000,
+  tax_liability_estimated: 62000,
+  ltcg_exemption_used: 45000,
+  needs_audit: false,
+  trade_count: 342,
+};
+import { exportToCSV, printCurrentView } from "@/lib/exportUtils";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -115,7 +139,7 @@ function SummaryCard({
   subtitle,
   variant = "default",
 }: {
-  label: string;
+  label: ReactNode;
   value: number;
   icon: typeof TrendingUp;
   subtitle?: string;
@@ -220,10 +244,14 @@ function SegmentBreakdownRow({
 
 export function TaxTab() {
   const [selectedFy, setSelectedFy] = useState("2025-26");
-  const { data: summary, isLoading: summaryLoading } = useTaxSummary(selectedFy);
+  const { data: liveSummary, isLoading: summaryLoading, isError: summaryError } = useTaxSummary(selectedFy);
   const { data: report, isLoading: reportLoading } = useTaxReport(selectedFy);
 
   const isLoading = summaryLoading || reportLoading;
+
+  // Fall back to demo data when API fails or returns empty
+  const isDemo = summaryError || (!isLoading && !liveSummary);
+  const summary = isDemo ? DEMO_TAX_SUMMARY : liveSummary;
 
   // Compute total P&L for display
   const totalPnl = useMemo(() => {
@@ -267,6 +295,9 @@ export function TaxTab() {
 
   return (
     <div className="space-y-6">
+      {/* Demo banner */}
+      {isDemo && <DemoBanner />}
+
       {/* Header with FY selector */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -280,19 +311,50 @@ export function TaxTab() {
             </p>
           </div>
         </div>
-        <Select value={selectedFy} onValueChange={setSelectedFy}>
-          <SelectTrigger className="w-36 h-8 text-xs">
-            <Calendar className="size-3 mr-1.5 text-text-muted" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {FY_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (!summary) return;
+              const csvData = [
+                { Segment: "Equity LTCG", "P&L": summary.equity_ltcg, "Tax Rate": "12.5% above 1.25L", "Estimated Tax": summary.equity_ltcg > 125000 ? (summary.equity_ltcg - 125000) * 0.125 : 0, STT: "" },
+                { Segment: "Equity STCG", "P&L": summary.equity_stcg, "Tax Rate": "20%", "Estimated Tax": summary.equity_stcg * 0.2, STT: "" },
+                { Segment: "Intraday", "P&L": summary.intraday_pnl, "Tax Rate": "Slab rate", "Estimated Tax": summary.intraday_pnl * 0.3, STT: "" },
+                { Segment: "F&O", "P&L": summary.fno_pnl, "Tax Rate": "Slab rate", "Estimated Tax": summary.fno_pnl * 0.3, STT: "" },
+                { Segment: "Commodity", "P&L": summary.commodity_pnl, "Tax Rate": "Slab rate", "Estimated Tax": summary.commodity_pnl * 0.3, STT: "" },
+                { Segment: "Total STT", "P&L": "", "Tax Rate": "", "Estimated Tax": "", STT: summary.stt_paid },
+              ];
+              exportToCSV(csvData, `tax-summary-${selectedFy}`);
+            }}
+            className="text-xs text-text-muted h-6 px-2 gap-1"
+          >
+            <Download className="size-3" />
+            Export CSV
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={printCurrentView}
+            className="text-xs text-text-muted h-6 px-2 gap-1"
+          >
+            <Printer className="size-3" />
+            Print
+          </Button>
+          <Select value={selectedFy} onValueChange={setSelectedFy}>
+            <SelectTrigger className="w-36 h-8 text-xs">
+              <Calendar className="size-3 mr-1.5 text-text-muted" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FY_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Hero: Total P&L + Estimated Tax */}
@@ -342,14 +404,14 @@ export function TaxTab() {
       {/* Summary cards grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <SummaryCard
-          label="Equity LTCG"
+          label={<>Equity <GlossaryTooltip term="LTCG">LTCG</GlossaryTooltip></>}
           value={summary.equity_ltcg}
           icon={TrendingUp}
           subtitle={`Exemption used: ${formatINR(summary.ltcg_exemption_used)} of 1.25L`}
           variant={summary.equity_ltcg >= 0 ? "profit" : "loss"}
         />
         <SummaryCard
-          label="Equity STCG"
+          label={<>Equity <GlossaryTooltip term="STCG">STCG</GlossaryTooltip></>}
           value={summary.equity_stcg}
           icon={summary.equity_stcg >= 0 ? ArrowUpRight : ArrowDownRight}
           subtitle="Tax: 20% flat"
@@ -377,7 +439,7 @@ export function TaxTab() {
           variant={summary.commodity_pnl >= 0 ? "profit" : "loss"}
         />
         <SummaryCard
-          label="STT Paid"
+          label={<><GlossaryTooltip term="STT">STT</GlossaryTooltip> Paid</>}
           value={-summary.stt_paid}
           icon={Receipt}
           subtitle="Securities Transaction Tax"

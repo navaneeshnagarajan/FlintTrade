@@ -1,8 +1,8 @@
 /**
  * SandboxToggle — TopBar paper / live trading mode switch.
  *
- * - "LIVE" (green) default state
- * - "PAPER" (orange) sandbox state — shows a persistent orange pill in TopBar
+ * - "PAPER" (amber) default state — all new users start in paper mode
+ * - "LIVE" (green) state — must be explicitly switched to by the user
  * - Switching to PAPER shows a confirmation dialog
  * - Persists mode in settingsStore (sandboxMode)
  * - Calls POST /ft-api/api/v1/sandbox/config to notify the backend

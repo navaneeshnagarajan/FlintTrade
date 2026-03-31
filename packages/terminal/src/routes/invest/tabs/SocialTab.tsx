@@ -27,7 +27,6 @@ import {
   Shield,
   BarChart3,
   RefreshCw,
-  AlertCircle,
   Star,
   Filter,
 } from "lucide-react";
@@ -43,6 +42,7 @@ import {
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { cn } from "@/lib/utils";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -86,6 +86,25 @@ interface StrategiesResponse {
   status: string;
   data: { strategies: StrategyCard[] };
 }
+
+// ── Demo data (seeded from social_trading.py sample data) ───────────────────
+
+const DEMO_TRADERS: TraderRow[] = [
+  { rank: 1, user_id: "demo_1", display_name: "NiftyScalper", strategy_count: 3, win_rate: 68.5, total_return_pct: 42.3, max_drawdown_pct: 8.2, sharpe_ratio: 2.15, follower_count: 1240, trades_count: 2850, active_since: "2023-04-15", risk_score: 3 },
+  { rank: 2, user_id: "demo_2", display_name: "OptionsMaster", strategy_count: 5, win_rate: 72.1, total_return_pct: 38.7, max_drawdown_pct: 12.5, sharpe_ratio: 1.89, follower_count: 980, trades_count: 1920, active_since: "2022-11-01", risk_score: 4 },
+  { rank: 3, user_id: "demo_3", display_name: "SwingTraderPro", strategy_count: 2, win_rate: 61.3, total_return_pct: 31.2, max_drawdown_pct: 6.8, sharpe_ratio: 1.72, follower_count: 756, trades_count: 890, active_since: "2023-08-20", risk_score: 2 },
+  { rank: 4, user_id: "demo_4", display_name: "BankNiftyKing", strategy_count: 4, win_rate: 65.8, total_return_pct: 28.9, max_drawdown_pct: 15.3, sharpe_ratio: 1.45, follower_count: 620, trades_count: 3100, active_since: "2024-01-10", risk_score: 5 },
+  { rank: 5, user_id: "demo_5", display_name: "ValueInvestor", strategy_count: 1, win_rate: 78.2, total_return_pct: 24.5, max_drawdown_pct: 4.1, sharpe_ratio: 2.35, follower_count: 1580, trades_count: 145, active_since: "2022-06-15", risk_score: 1 },
+];
+
+const DEMO_STRATEGIES: StrategyCard[] = [
+  { strategy_id: "demo_s1", creator_id: "demo_1", name: "Nifty ORB Scalper", description: "Opening range breakout strategy on Nifty futures with tight stop-losses. Best for first 90 mins of trading.", category: "intraday", instruments: ["NIFTY", "BANKNIFTY"], backtest_sharpe: 1.95, backtest_return_pct: 34.2, backtest_max_dd_pct: 7.5, live_return_pct: 28.1, follower_count: 890, created_at: "2024-06-15" },
+  { strategy_id: "demo_s2", creator_id: "demo_2", name: "Iron Condor Weekly", description: "Weekly iron condor on Nifty index with delta-neutral adjustments. Targets theta decay.", category: "options", instruments: ["NIFTY"], backtest_sharpe: 1.62, backtest_return_pct: 22.8, backtest_max_dd_pct: 11.2, live_return_pct: 18.5, follower_count: 650, created_at: "2024-03-20" },
+  { strategy_id: "demo_s3", creator_id: "demo_3", name: "Momentum Swing", description: "RSI + MACD crossover on top 50 stocks. Holds 3-10 days with trailing SL.", category: "swing", instruments: ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"], backtest_sharpe: 1.48, backtest_return_pct: 26.5, backtest_max_dd_pct: 9.8, live_return_pct: 21.3, follower_count: 420, created_at: "2024-08-10" },
+  { strategy_id: "demo_s4", creator_id: "demo_5", name: "Quality Value Pick", description: "Quarterly rebalanced portfolio of high-ROCE, low-debt stocks with margin of safety.", category: "investment", instruments: ["RELIANCE", "TCS", "BHARTIARTL", "ITC", "LT", "SBIN"], backtest_sharpe: 2.10, backtest_return_pct: 19.8, backtest_max_dd_pct: 5.2, live_return_pct: 16.7, follower_count: 1120, created_at: "2023-12-01" },
+  { strategy_id: "demo_s5", creator_id: "demo_4", name: "BankNifty Straddle", description: "Short straddle on BankNifty expiry day with adjustment rules. High win rate, requires active management.", category: "options", instruments: ["BANKNIFTY"], backtest_sharpe: 1.35, backtest_return_pct: 41.5, backtest_max_dd_pct: 18.2, live_return_pct: 32.8, follower_count: 340, created_at: "2024-09-05" },
+  { strategy_id: "demo_s6", creator_id: "demo_1", name: "Gap & Go", description: "Catches gap-up/gap-down moves in liquid stocks during market open. 15-min timeframe.", category: "intraday", instruments: ["NIFTY", "RELIANCE", "HDFCBANK"], backtest_sharpe: 1.78, backtest_return_pct: 29.3, backtest_max_dd_pct: 10.1, live_return_pct: 23.6, follower_count: 560, created_at: "2024-07-22" },
+];
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
@@ -257,11 +276,15 @@ function LeaderboardSection() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(() => buildLeaderboardColumns(), []);
 
-  const { data: traders = [], isLoading, isError, refetch } = useQuery({
+  const { data: liveTraders = [], isLoading, isError, refetch } = useQuery({
     queryKey: ["social", "leaderboard"],
     queryFn: () => fetchLeaderboard("total_return_pct"),
     staleTime: 60_000,
   });
+
+  // Fall back to demo data when API fails or returns empty
+  const isDemo = isError || (!isLoading && liveTraders.length === 0);
+  const traders = isDemo ? DEMO_TRADERS : liveTraders;
 
   const table = useReactTable({
     data: traders,
@@ -296,6 +319,13 @@ function LeaderboardSection() {
         </Button>
       </div>
 
+      {/* Demo banner */}
+      {isDemo && !isLoading && (
+        <div className="px-4 pt-3">
+          <DemoBanner />
+        </div>
+      )}
+
       {/* Content */}
       {isLoading && (
         <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
@@ -304,24 +334,7 @@ function LeaderboardSection() {
         </div>
       )}
 
-      {isError && (
-        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
-          <AlertCircle className="size-5 text-loss" />
-          <span className="text-sm">Failed to load leaderboard</span>
-          <Button variant="outline" size="sm" onClick={() => refetch()} className="text-xs">
-            Retry
-          </Button>
-        </div>
-      )}
-
-      {!isLoading && !isError && traders.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
-          <Users className="size-8 text-text-disabled" />
-          <span className="text-sm">No traders on the leaderboard yet</span>
-        </div>
-      )}
-
-      {!isLoading && !isError && traders.length > 0 && (
+      {!isLoading && traders.length > 0 && (
         <div className="overflow-auto max-h-[420px]">
           <Table aria-label="Trader leaderboard">
             <TableHeader>
@@ -495,11 +508,19 @@ function MarketplaceSection() {
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const { data: strategies = [], isLoading, isError, refetch } = useQuery({
+  const { data: liveStrategies = [], isLoading, isError, refetch } = useQuery({
     queryKey: ["social", "strategies", categoryFilter],
     queryFn: () => fetchStrategies(categoryFilter),
     staleTime: 60_000,
   });
+
+  // Fall back to demo data when API fails or returns empty
+  const isDemo = isError || (!isLoading && liveStrategies.length === 0);
+  const strategies = isDemo
+    ? (categoryFilter
+        ? DEMO_STRATEGIES.filter((s) => s.category === categoryFilter)
+        : DEMO_STRATEGIES)
+    : liveStrategies;
 
   const copyMutation = useMutation({
     mutationFn: ({ strategyId }: { strategyId: string }) =>
@@ -512,6 +533,7 @@ function MarketplaceSection() {
   });
 
   const handleCopy = (strategyId: string) => {
+    if (isDemo) return; // Don't attempt copy in demo mode
     copyMutation.mutate({ strategyId });
   };
 
@@ -538,6 +560,9 @@ function MarketplaceSection() {
           Refresh
         </Button>
       </div>
+
+      {/* Demo banner */}
+      {isDemo && !isLoading && <DemoBanner />}
 
       {/* Category filter pills */}
       <div className="flex items-center gap-1.5">
@@ -566,24 +591,7 @@ function MarketplaceSection() {
         </div>
       )}
 
-      {isError && (
-        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
-          <AlertCircle className="size-5 text-loss" />
-          <span className="text-sm">Failed to load strategies</span>
-          <Button variant="outline" size="sm" onClick={() => refetch()} className="text-xs">
-            Retry
-          </Button>
-        </div>
-      )}
-
-      {!isLoading && !isError && strategies.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-48 gap-3 text-text-muted">
-          <BarChart3 className="size-8 text-text-disabled" />
-          <span className="text-sm">No strategies found</span>
-        </div>
-      )}
-
-      {!isLoading && !isError && strategies.length > 0 && (
+      {!isLoading && strategies.length > 0 && (
         <StaggeredList>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {strategies.map((s) => (

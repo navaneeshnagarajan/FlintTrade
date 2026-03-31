@@ -2,6 +2,7 @@ import { useAtomValue } from "jotai";
 import { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
+import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import type { WsTick } from "@/types/api";
 
 interface IndexChipProps {
@@ -76,7 +77,9 @@ function IndexChip({ name, data }: IndexChipProps) {
 
   return (
     <div className="flex items-center gap-2 px-3 shrink-0 border-r border-border-default last:border-r-0 h-full">
-      <span className="text-xs text-text-muted">{name}</span>
+      <span className="text-xs text-text-muted">
+        {name === "VIX" ? <GlossaryTooltip term="VIX">{name}</GlossaryTooltip> : name}
+      </span>
       <span
         aria-live="off"
         className={`text-xs font-mono tabular-nums transition-colors duration-200 ${ltpColorClass}`}

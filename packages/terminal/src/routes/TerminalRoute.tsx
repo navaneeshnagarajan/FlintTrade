@@ -494,20 +494,20 @@ export default function TerminalRoute() {
                 className="w-1 cursor-col-resize bg-border-default hover:bg-primary/50 active:bg-primary/70 transition-colors shrink-0"
               />
 
-              {/* Right panel: Quick Trade placeholder */}
+              {/* Right panel: Order Pad (collapsed by default — open via widget picker) */}
               <Panel
                 id="trade-right"
                 panelRef={rightPanelRef}
-                defaultSize={20}
+                defaultSize={0}
                 minSize={14}
                 maxSize={30}
                 collapsible
                 collapsedSize={0}
               >
                 <div className="h-full overflow-y-auto bg-surface-card border-l border-border-default p-3">
-                  <SectionHeader title="Quick Trade" as="h3" className="mb-2" />
+                  <SectionHeader title="Order Pad" as="h3" className="mb-2" />
                   <p className="text-xs text-text-muted">
-                    Order pad coming in next iteration
+                    Add the Order Pad widget from the widget picker.
                   </p>
                 </div>
               </Panel>
