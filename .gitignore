@@ -91,3 +91,4 @@ progress.md
 *.tar.gz
 .worktrees/
 qa-*.png
+*.png
