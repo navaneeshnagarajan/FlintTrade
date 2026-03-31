@@ -96,9 +96,9 @@ def upload_strategy() -> Response:
         strategy_id = runner.upload(name, code)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 422
-    except Exception as exc:
-        logger.error("Failed to upload strategy '%s': %s", name, exc)
-        return jsonify({"status": "error", "message": f"Upload failed: {exc}"}), 500
+    except Exception:
+        logger.exception("Failed to upload strategy '%s'", name)
+        return jsonify({"status": "error", "message": "Upload failed. Check server logs."}), 500
 
     return (
         jsonify(
@@ -156,9 +156,9 @@ def start_strategy(strategy_id: str) -> Response:
         return jsonify({"status": "error", "message": str(exc)}), 404
     except RuntimeError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 409
-    except Exception as exc:
-        logger.error("Failed to start strategy %s: %s", strategy_id, exc)
-        return jsonify({"status": "error", "message": f"Start failed: {exc}"}), 500
+    except Exception:
+        logger.exception("Failed to start strategy %s", strategy_id)
+        return jsonify({"status": "error", "message": "Start failed. Check server logs."}), 500
 
     status = runner.get_status(strategy_id)
     return jsonify({"status": "success", "message": "Strategy started", "strategy": status})
@@ -190,9 +190,9 @@ def stop_strategy(strategy_id: str) -> Response:
     except RuntimeError as exc:
         # Not running — treat as a no-op success
         return jsonify({"status": "success", "message": str(exc)})
-    except Exception as exc:
-        logger.error("Failed to stop strategy %s: %s", strategy_id, exc)
-        return jsonify({"status": "error", "message": f"Stop failed: {exc}"}), 500
+    except Exception:
+        logger.exception("Failed to stop strategy %s", strategy_id)
+        return jsonify({"status": "error", "message": "Stop failed. Check server logs."}), 500
 
     return jsonify({"status": "success", "message": "Strategy stopped"})
 
@@ -220,9 +220,9 @@ def delete_strategy(strategy_id: str) -> Response:
         runner.delete(strategy_id)
     except FileNotFoundError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 404
-    except Exception as exc:
-        logger.error("Failed to delete strategy %s: %s", strategy_id, exc)
-        return jsonify({"status": "error", "message": f"Delete failed: {exc}"}), 500
+    except Exception:
+        logger.exception("Failed to delete strategy %s", strategy_id)
+        return jsonify({"status": "error", "message": "Delete failed. Check server logs."}), 500
 
     return jsonify({"status": "success", "message": "Strategy deleted"})
 

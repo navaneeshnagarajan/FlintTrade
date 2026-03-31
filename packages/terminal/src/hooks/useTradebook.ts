@@ -6,6 +6,7 @@ export function useTradebook() {
   return useQuery<Trade[]>({
     queryKey: ["tradebook"],
     queryFn: getTradebook,
+    staleTime: 15_000,
     refetchInterval: 30_000,
   });
 }

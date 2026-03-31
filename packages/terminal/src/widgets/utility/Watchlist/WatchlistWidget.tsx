@@ -11,7 +11,7 @@
  *   - Dense dark layout matching FlintTrade terminal theme
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Plus, X, Search, MoreVertical, Trash2,
   TrendingUp, TrendingDown,
@@ -413,13 +413,27 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   // Quote polling
   // ---------------------------------------------------------------------------
 
-  const fetchQuotes = useCallback(async () => {
-    if (watchlist.length === 0) return;
+  // Stable snapshot of the watchlist for use inside async callbacks. Avoids
+  // adding `watchlist` to deps of `fetchQuotes` only to rebuild on every render.
+  const watchlistRef = useRef(watchlist);
+  useEffect(() => {
+    watchlistRef.current = watchlist;
+  }, [watchlist]);
 
-    const symbols: WsInstrument[] = watchlist.map((w) => ({
-      symbol: w.symbol,
-      exchange: w.exchange,
-    }));
+  // Build instrument list for the API call without depending on state.
+  const instrumentsMemo = useMemo(
+    () => watchlist.map((w): WsInstrument => ({ symbol: w.symbol, exchange: w.exchange })),
+    [watchlist],
+  );
+  const instrumentsRef = useRef(instrumentsMemo);
+  useEffect(() => {
+    instrumentsRef.current = instrumentsMemo;
+  }, [instrumentsMemo]);
+
+  const fetchQuotes = useCallback(async () => {
+    const currentWatchlist = watchlistRef.current;
+    const symbols = instrumentsRef.current;
+    if (symbols.length === 0) return;
 
     try {
       const data = await getMultiQuotes(symbols);
@@ -428,59 +442,65 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
       // Normalise response — OpenAlgo multiquotes returns Quote[]
       if (Array.isArray(data)) {
         const next: QuoteMap = {};
-        const histNext: SparkMap = {};
-
-        data.forEach((q: PartialQuote, idx: number) => {
-          const item = watchlist[idx];
-          if (!item) return;
-          const key = `${item.symbol}:${item.exchange}`;
-          next[key] = q;
-          const ltp = q?.ltp ?? q?.close ?? null;
-          if (ltp != null) {
-            histNext[key] = [
-              ...(sparkHistory[key] ?? []).slice(-(SPARK_MAX - 1)),
-              Number(ltp),
-            ];
-          }
-        });
-
-        setQuotes((prev) => ({ ...prev, ...next }));
-        setSparkHistory((prev) => ({ ...prev, ...histNext }));
-      } else if (data && typeof data === "object") {
-        // Object form keyed by symbol or "EXCHANGE:SYMBOL"
-        const dataObj = data as Record<string, PartialQuote>;
-        const next: QuoteMap = {};
-        const histNext: SparkMap = {};
-
-        watchlist.forEach((item) => {
-          const key = `${item.symbol}:${item.exchange}`;
-          const q =
-            dataObj[key] ??
-            dataObj[`${item.exchange}:${item.symbol}`] ??
-            dataObj[item.symbol] ??
-            null;
-
-          if (q) {
+        // Use functional update so we never close over sparkHistory state.
+        setSparkHistory((prevSpark) => {
+          const histNext: SparkMap = { ...prevSpark };
+          data.forEach((q: PartialQuote, idx: number) => {
+            const item = currentWatchlist[idx];
+            if (!item) return;
+            const key = `${item.symbol}:${item.exchange}`;
             next[key] = q;
             const ltp = q?.ltp ?? q?.close ?? null;
             if (ltp != null) {
               histNext[key] = [
-                ...(sparkHistory[key] ?? []).slice(-(SPARK_MAX - 1)),
+                ...(prevSpark[key] ?? []).slice(-(SPARK_MAX - 1)),
                 Number(ltp),
               ];
             }
-          }
+          });
+          return histNext;
         });
-
         setQuotes((prev) => ({ ...prev, ...next }));
-        setSparkHistory((prev) => ({ ...prev, ...histNext }));
+      } else if (data && typeof data === "object") {
+        // Object form keyed by symbol or "EXCHANGE:SYMBOL"
+        const dataObj = data as Record<string, PartialQuote>;
+        const next: QuoteMap = {};
+        setSparkHistory((prevSpark) => {
+          const histNext: SparkMap = { ...prevSpark };
+          currentWatchlist.forEach((item) => {
+            const key = `${item.symbol}:${item.exchange}`;
+            const q =
+              dataObj[key] ??
+              dataObj[`${item.exchange}:${item.symbol}`] ??
+              dataObj[item.symbol] ??
+              null;
+
+            if (q) {
+              next[key] = q;
+              const ltp = q?.ltp ?? q?.close ?? null;
+              if (ltp != null) {
+                histNext[key] = [
+                  ...(prevSpark[key] ?? []).slice(-(SPARK_MAX - 1)),
+                  Number(ltp),
+                ];
+              }
+            }
+          });
+          return histNext;
+        });
+        setQuotes((prev) => ({ ...prev, ...next }));
       }
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Quote fetch failed");
     }
-  }, [watchlist, sparkHistory]);
+    // `fetchQuotes` is now stable: it reads watchlist and instruments via refs,
+    // and reads sparkHistory through the functional-update form of setSparkHistory.
+  }, []);
 
-  // Schedule polling — 5s market hours, 60s off-hours
+  // Schedule polling — 5s market hours, 60s off-hours.
+  // Re-runs when the watchlist changes (instrumentsMemo identity changes) so
+  // newly-added symbols are fetched immediately without restarting the timer
+  // on every sparkHistory update.
   useEffect(() => {
     void fetchQuotes();
 
@@ -496,7 +516,8 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current);
     };
-  }, [fetchQuotes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchQuotes, instrumentsMemo]);
 
   // ---------------------------------------------------------------------------
   // Add / remove symbols

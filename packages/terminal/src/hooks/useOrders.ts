@@ -7,6 +7,7 @@ export function useOrders() {
   return useQuery<Order[]>({
     queryKey: ["orders"],
     queryFn: getOrderbook,
+    staleTime: 5_000,
     refetchInterval: () => (isMarketHours() ? 10_000 : false),
   });
 }

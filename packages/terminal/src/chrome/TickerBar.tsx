@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
@@ -16,7 +16,7 @@ function hasAnyLiveData(indices: { data: WsTick | null }[]): boolean {
   return indices.some((idx) => idx.data !== null && (idx.data.ltp ?? 0) !== 0);
 }
 
-function IndexChip({ name, data }: IndexChipProps) {
+const IndexChip = memo(function IndexChip({ name, data }: IndexChipProps) {
   const ltp = data?.ltp ?? null;
   // Prefer prevClose (fetched from REST by usePrevClose hook) for accurate change%.
   // LTP-mode WebSocket does not send close/change/pct — those fields are always
@@ -104,7 +104,7 @@ function IndexChip({ name, data }: IndexChipProps) {
       ) : null}
     </div>
   );
-}
+});
 
 /**
  * TickerBar -- always-visible bar at h-7 showing live index prices.

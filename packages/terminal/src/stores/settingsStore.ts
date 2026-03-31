@@ -134,6 +134,14 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:settings",
   version: 4,
+  partialize: (state) => {
+    const { llm, telegram, ...rest } = state;
+    return {
+      ...rest,
+      llm: { ...llm, apiKey: "" },  // never persist LLM API key to localStorage
+      telegram: { ...telegram, botToken: "" },  // never persist bot token to localStorage
+    };
+  },
   migrate: (persistedState: unknown, version: number) => {
     // IMPORTANT: Zustand calls migrate ONCE with the stored version number.
     // All blocks must fall through so a v1 user reaches v4 in a single call.

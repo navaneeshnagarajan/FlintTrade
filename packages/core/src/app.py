@@ -167,17 +167,23 @@ def create_flask_app(
         registry = BrokerRegistry()
 
     if credential_store is None:
+        import secrets as _secrets  # noqa: PLC0415
+
         flinttrade_dir = Path.home() / ".flinttrade"
         flinttrade_dir.mkdir(exist_ok=True)
         master_password = os.environ.get("MASTER_PASSWORD", "")
         if not master_password:
             if os.environ.get("FLINTTRADE_DEV") or app.debug or "pytest" in sys.modules:
-                master_password = "flinttrade-dev-default"
+                master_password = _secrets.token_urlsafe(32)
                 logger.warning(
-                    "MASTER_PASSWORD not set — using development default. Set it for production."
+                    "MASTER_PASSWORD not set — generated random password for this session. "
+                    "Set MASTER_PASSWORD env var for persistent credential storage across restarts."
                 )
             else:
-                raise ValueError("MASTER_PASSWORD environment variable must be set for secure credential storage.")
+                raise ValueError(
+                    "MASTER_PASSWORD environment variable must be set. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
         credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
 
     if contract_manager is None:
@@ -261,16 +267,24 @@ def create_flask_app(
     except Exception as exc:
         logger.error("Account reconnection failed: %s", exc)
 
+    # Specific /v1/ paths that are legitimately public (no API key needed):
+    # - Health check endpoint
+    # - Admin introspect (already gated by FLINTTRADE_DEV in admin_routes)
+    # - OAuth callbacks (browser redirect — no API key in URL)
+    _PUBLIC_V1_PREFIXES = (
+        "/v1/admin/health",
+        "/v1/admin/introspect",
+        "/v1/auth/callback",
+    )
+
     @app.before_request
     def require_auth() -> Any:
         """Require API key authentication on all endpoints.
 
-        Gateway endpoints under /v1/brokers and /v1/auth/ are public
-        (broker catalog listing, OAuth callback) or manage their own
-        account-level credentials — they do not use the FlintTrade API key.
-        All other /v1/ endpoints (accounts, reconnect, set-primary) are
-        also exempted here because account management uses the gateway's own
-        credential/session model rather than the server-level API key.
+        Only specific public paths are exempted:
+        - Health check and admin introspect (dev-gated)
+        - OAuth callback (browser redirect, no API key in URL)
+        All other /v1/ endpoints require the same API key auth.
         """
         # Allow health check without auth
         if request.endpoint in ("health", "static"):
@@ -278,8 +292,8 @@ def create_flask_app(
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
             return None
-        # Gateway endpoints handle their own auth — exempt the entire /v1/ namespace
-        if request.path.startswith("/v1/"):
+        # Allow specific public /v1/ paths only
+        if any(request.path.startswith(prefix) for prefix in _PUBLIC_V1_PREFIXES):
             return None
 
         api_key = (
@@ -397,9 +411,10 @@ def create_flask_app(
             )
             _ = [int(b["time"]) for b in raw_bars]  # validate time field exists
         except (KeyError, TypeError, ValueError) as exc:
+            logger.debug("Invalid bar data in indicators/compute: %s", exc)
             return jsonify({
                 "status": "error",
-                "message": f"Invalid bar data: {exc}",
+                "message": "Invalid bar data. Ensure each bar has numeric open/high/low/close and int time fields.",
             }), 400
 
         def _to_list(arr: "np.ndarray") -> list:
@@ -1415,7 +1430,8 @@ def create_flask_app(
 
             return jsonify({"status": "success", "data": {"message": "Safety config updated"}}), 200
         except (ValueError, TypeError) as exc:
-            return jsonify({"status": "error", "message": f"Invalid value: {exc}"}), 400
+            logger.debug("Invalid safety config value: %s", exc)
+            return jsonify({"status": "error", "message": "Invalid value in safety config update."}), 400
         except Exception:
             logger.exception("safety_config_update error")
             return jsonify({"status": "error", "message": "Internal server error"}), 500

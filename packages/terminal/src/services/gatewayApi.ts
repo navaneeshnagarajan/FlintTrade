@@ -64,13 +64,13 @@ export const gatewayApi = {
     }).then((r) => r.account),
 
   removeAccount: (accountId: string) =>
-    del<{ status: string }>(`/accounts/${accountId}`),
+    del<{ status: string }>(`/accounts/${encodeURIComponent(accountId)}`),
 
   reconnectAccount: (accountId: string) =>
-    post<{ account: BrokerAccount }>(`/accounts/${accountId}/reconnect`),
+    post<{ account: BrokerAccount }>(`/accounts/${encodeURIComponent(accountId)}/reconnect`),
 
   setPrimary: (accountId: string) =>
-    post<{ account: BrokerAccount }>(`/accounts/${accountId}/set-primary`),
+    post<{ account: BrokerAccount }>(`/accounts/${encodeURIComponent(accountId)}/set-primary`),
 
   startOAuth: (broker: string, label: string) =>
     post<OAuthStartResponse>("/auth/oauth/start", { broker, label }),

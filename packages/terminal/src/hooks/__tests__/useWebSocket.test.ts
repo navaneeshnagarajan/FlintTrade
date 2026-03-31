@@ -78,9 +78,16 @@ beforeEach(() => {
   resetFakeWs();
   _wsUrl = "ws://127.0.0.1:8765";
   _apiKey = "test-key";
+  // Mock rAF to fire synchronously — jsdom's rAF doesn't interact with fake timers
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+    cb(performance.now());
+    return 0;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 

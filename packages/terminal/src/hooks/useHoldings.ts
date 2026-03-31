@@ -6,6 +6,7 @@ export function useHoldings() {
   return useQuery<Holding[]>({
     queryKey: ["holdings"],
     queryFn: getHoldings,
+    staleTime: 30_000,
     refetchInterval: 60_000,
     retry: false,
   });

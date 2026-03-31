@@ -6,6 +6,43 @@ import type { WsInstrument, WsTick, WsMode } from "@/types/api";
 type TickMap = Record<string, WsTick>;
 
 /**
+ * Batch incoming ticks with requestAnimationFrame so we do at most one
+ * setState per animation frame (~16ms) instead of one per tick at 160+ Hz.
+ */
+function useTickBatcher(): [
+  TickMap,
+  (key: string, tick: WsTick) => void,
+] {
+  const [ticks, setTicks] = useState<TickMap>({});
+  const pendingRef = useRef<TickMap>({});
+  const rafRef = useRef<number>(0);
+
+  const pushTick = (key: string, tick: WsTick) => {
+    pendingRef.current[key] = tick;
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        const batch = pendingRef.current;
+        pendingRef.current = {};
+        rafRef.current = 0;
+        setTicks((prev) => ({ ...prev, ...batch }));
+      });
+    }
+  };
+
+  // Cancel any pending rAF on unmount to prevent stale setState calls.
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+    };
+  }, []);
+
+  return [ticks, pushTick];
+}
+
+/**
  * React hook wrapping the WebSocket service.
  * Subscribe to instruments on mount, unsubscribe on unmount.
  * Returns the latest tick keyed by "exchange:symbol".
@@ -16,7 +53,7 @@ export default function useWebSocket(
 ): { ticks: TickMap; connected: boolean } {
   const wsUrl                         = useConnectionStore((s) => s.wsUrl);
   const apiKey                        = useConnectionStore((s) => s.apiKey);
-  const [ticks, setTicks]             = useState<TickMap>({});
+  const [ticks, pushTick]             = useTickBatcher();
   const [connected, setConnected]     = useState(false);
   const prevRef                       = useRef<WsInstrument[]>([]);
 
@@ -36,7 +73,7 @@ export default function useWebSocket(
 
     const unsubTick = ws.onTick((tick: WsTick) => {
       const key = `${tick.exchange}:${tick.symbol}`;
-      setTicks((prev) => ({ ...prev, [key]: tick }));
+      pushTick(key, tick);
     });
     const unsubStatus = ws.onStatus((c: boolean) => setConnected(c));
     setConnected(ws.isConnected);

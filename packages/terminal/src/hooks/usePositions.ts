@@ -9,6 +9,7 @@ export function usePositions() {
   const query = useQuery<Position[]>({
     queryKey: ["positions"],
     queryFn: getPositionbook,
+    staleTime: 3_000,
     refetchInterval: () => (isMarketHours() ? 5_000 : 60_000),
   });
 

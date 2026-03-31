@@ -8,6 +8,7 @@ export function useFunds() {
   const query = useQuery<Funds>({
     queryKey: ["funds"],
     queryFn: getFunds,
+    staleTime: 15_000,
     refetchInterval: 30_000,
   });
 

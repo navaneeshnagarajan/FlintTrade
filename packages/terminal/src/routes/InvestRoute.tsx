@@ -12,7 +12,7 @@
  * All data fetching lives in routes/invest/InvestContext.tsx
  */
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -100,24 +100,31 @@ const TABS: TabDef[] = [
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
 const FULL_HEIGHT_TABS: TabId[] = ["holdings"];
 
-// ─── Tab content map ──────────────────────────────────────────────────────────
+// ─── Active tab renderer ──────────────────────────────────────────────────────
 
-const TAB_CONTENT: Record<TabId, ReactNode> = {
-  dashboard: <DashboardTab />,
-  holdings: <HoldingsTab />,
-  sip: <SipTab />,
-  networth: <NetWorthTab />,
-  social: <SocialTab />,
-  sector: <SectorTab />,
-  overlap: <OverlapTab />,
-  etf: <EtfTab />,
-  stocks: <StocksTab />,
-  ipo: <IpoTab />,
-  tax: <TaxTab />,
-  "mf-optimizer": <MfOptimizerTab />,
-  benchmark: <BenchmarkTab />,
-  basket: <BasketTab />,
-};
+/**
+ * Renders only the currently active tab's component, avoiding the cost of
+ * instantiating all 14 tab components at module-load time.
+ */
+function ActiveTabContent({ tabId }: { tabId: TabId }) {
+  switch (tabId) {
+    case "dashboard":    return <DashboardTab />;
+    case "holdings":     return <HoldingsTab />;
+    case "sip":          return <SipTab />;
+    case "networth":     return <NetWorthTab />;
+    case "social":       return <SocialTab />;
+    case "sector":       return <SectorTab />;
+    case "overlap":      return <OverlapTab />;
+    case "etf":          return <EtfTab />;
+    case "stocks":       return <StocksTab />;
+    case "ipo":          return <IpoTab />;
+    case "tax":          return <TaxTab />;
+    case "mf-optimizer": return <MfOptimizerTab />;
+    case "benchmark":    return <BenchmarkTab />;
+    case "basket":       return <BasketTab />;
+    default:             return null;
+  }
+}
 
 // ─── Inner shell (needs InvestProvider in scope) ──────────────────────────────
 
@@ -202,12 +209,14 @@ function InvestShell() {
       {/* Content */}
       {FULL_HEIGHT_TABS.includes(activeTab) ? (
         <TabTransition tabKey={activeTab} className="flex-1 flex flex-col overflow-hidden">
-          {TAB_CONTENT[activeTab]}
+          <ActiveTabContent tabId={activeTab} />
         </TabTransition>
       ) : (
         <ScrollArea className="flex-1">
           <TabTransition tabKey={activeTab}>
-            <div className="p-6 max-w-5xl mx-auto">{TAB_CONTENT[activeTab]}</div>
+            <div className="p-6 max-w-5xl mx-auto">
+              <ActiveTabContent tabId={activeTab} />
+            </div>
           </TabTransition>
         </ScrollArea>
       )}
