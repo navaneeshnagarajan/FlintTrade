@@ -241,6 +241,7 @@ class AutonomousTrader:
             last_signals={sym: TradeSignal.HOLD for sym in self.config.symbols},
         )
         self._status: AgentStatus = AgentStatus.IDLE
+        self._state_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Status
@@ -294,8 +295,8 @@ class AutonomousTrader:
             data = MarketData(symbol=symbol)
 
             # Quotes
-            quotes_resp = await asyncio.to_thread(
-                self.broker.quotes, symbol=symbol, exchange=self.config.exchange
+            quotes_resp = await self.broker.quotes(
+                symbol=symbol, exchange=self.config.exchange
             )
             if isinstance(quotes_resp, dict) and quotes_resp.get("status") == "success":
                 q = quotes_resp.get("data", {})
@@ -310,8 +311,8 @@ class AutonomousTrader:
                 return data
 
             # Depth
-            depth_resp = await asyncio.to_thread(
-                self.broker.depth, symbol=symbol, exchange=self.config.exchange
+            depth_resp = await self.broker.depth(
+                symbol=symbol, exchange=self.config.exchange
             )
             if isinstance(depth_resp, dict) and depth_resp.get("status") == "success":
                 d = depth_resp.get("data", {})
@@ -351,8 +352,7 @@ class AutonomousTrader:
             end_date = self._ist_now().strftime("%Y-%m-%d")
             start_date = (self._ist_now() - dt.timedelta(days=3)).strftime("%Y-%m-%d")
 
-            history_resp = await asyncio.to_thread(
-                self.broker.history,
+            history_resp = await self.broker.history(
                 symbol=data.symbol,
                 exchange=self.config.exchange,
                 interval="5m",
@@ -571,8 +571,7 @@ class AutonomousTrader:
 
         action = "BUY" if signal == TradeSignal.BUY else "SELL"
         try:
-            order_resp = await asyncio.to_thread(
-                self.broker.placeorder,
+            order_resp = await self.broker.place_order(  # type: ignore[attr-defined]
                 symbol=symbol,
                 exchange=self.config.exchange,
                 action=action,
@@ -591,9 +590,10 @@ class AutonomousTrader:
                 data = order_resp.get("data", {})
                 if isinstance(data, dict):
                     ltp_guess = float(data.get("price", 0) or 0)
-                self.state.active_positions[symbol] = ltp_guess
-                self.state.trade_counts[symbol] = self.state.trade_counts.get(symbol, 0) + 1
-                self.state.last_signals[symbol] = signal
+                async with self._state_lock:
+                    self.state.active_positions[symbol] = ltp_guess
+                    self.state.trade_counts[symbol] = self.state.trade_counts.get(symbol, 0) + 1
+                    self.state.last_signals[symbol] = signal
                 logger.info("Order placed: %s %s x%d", action, symbol, risk.position_qty)
             else:
                 logger.warning("Order rejected for %s: %s", symbol, order_resp)
@@ -629,8 +629,8 @@ class AutonomousTrader:
             return
 
         try:
-            quotes_resp = await asyncio.to_thread(
-                self.broker.quotes, symbol=symbol, exchange=self.config.exchange
+            quotes_resp = await self.broker.quotes(
+                symbol=symbol, exchange=self.config.exchange
             )
             if not isinstance(quotes_resp, dict) or quotes_resp.get("status") != "success":
                 return
@@ -661,8 +661,7 @@ class AutonomousTrader:
 
             if should_close:
                 exit_action = "SELL" if action == "BUY" else "BUY"
-                await asyncio.to_thread(
-                    self.broker.placeorder,
+                await self.broker.place_order(  # type: ignore[attr-defined]
                     symbol=symbol,
                     exchange=self.config.exchange,
                     action=exit_action,
@@ -674,12 +673,13 @@ class AutonomousTrader:
                     disclosed_quantity=0,
                     strategy="AutonomousAgent",
                 )
-                self.state.active_positions.pop(symbol, None)
-                self.state.daily_pnl += pnl
+                async with self._state_lock:
+                    self.state.active_positions.pop(symbol, None)
+                    self.state.daily_pnl += pnl
 
-                if self.state.daily_pnl <= self.config.daily_stop_loss:
-                    self.state.stop_loss_hit = True
-                    logger.warning("Daily stop-loss hit. Total P&L: %.0f", self.state.daily_pnl)
+                    if self.state.daily_pnl <= self.config.daily_stop_loss:
+                        self.state.stop_loss_hit = True
+                        logger.warning("Daily stop-loss hit. Total P&L: %.0f", self.state.daily_pnl)
 
         except Exception as exc:
             logger.error("Monitor error for %s: %s", symbol, exc)
@@ -703,8 +703,10 @@ class AutonomousTrader:
             return {"skipped": True, "reason": "stop_loss_hit"}
 
         self._status = AgentStatus.RUNNING
-        self.state.cycle_count += 1
-        cycle_result: dict[str, Any] = {"cycle": self.state.cycle_count, "actions": {}}
+        async with self._state_lock:
+            self.state.cycle_count += 1
+            cycle_count = self.state.cycle_count
+        cycle_result: dict[str, Any] = {"cycle": cycle_count, "actions": {}}
 
         # Parallel fetch
         all_data = await self.analyze_all()
@@ -766,15 +768,13 @@ class AutonomousTrader:
 
     async def _square_off_all(self) -> None:
         """Square off all active positions at market price."""
-        for symbol, entry_price in list(self.state.active_positions.items()):
+        async with self._state_lock:
+            positions_snapshot = list(self.state.active_positions.items())
+        for symbol, _entry_price in positions_snapshot:
             try:
-                await asyncio.to_thread(
-                    self.broker.closeposition,
-                    symbol=symbol,
-                    exchange=self.config.exchange,
-                    product=self.config.product,
-                )
-                self.state.active_positions.pop(symbol, None)
+                await self.broker.close_position(strategy="AutonomousAgent")
+                async with self._state_lock:
+                    self.state.active_positions.pop(symbol, None)
                 logger.info("Squared off position in %s", symbol)
             except Exception as exc:
                 logger.error("Square-off failed for %s: %s", symbol, exc)

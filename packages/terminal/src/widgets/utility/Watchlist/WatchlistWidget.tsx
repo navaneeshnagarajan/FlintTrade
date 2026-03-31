@@ -143,7 +143,7 @@ function Sparkline({ prices, positive }: SparklineProps) {
   const color = positive === false ? "#ef4444" : "#22c55e";
 
   return (
-    <svg width={W} height={H} className="shrink-0">
+    <svg width={W} height={H} className="shrink-0" role="img" aria-label={`Price trend: ${positive === false ? 'falling' : 'rising'}`}>
       <polyline
         points={pts.join(" ")}
         fill="none"
@@ -219,6 +219,9 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Search symbols"
       className="absolute inset-0 z-50 flex flex-col bg-surface-base/90 backdrop-blur-sm"
       onKeyDown={handleKeyDown}
     >
@@ -310,6 +313,8 @@ function ContextMenu({ x, y, symbol, onRemove, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label={`Actions for ${symbol}`}
       className="fixed z-50 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-36"
       style={{ top: y, left: x }}
     >
@@ -317,6 +322,7 @@ function ContextMenu({ x, y, symbol, onRemove, onClose }: ContextMenuProps) {
         <span className="text-xs text-text-muted font-mono">{symbol}</span>
       </div>
       <button
+        role="menuitem"
         onClick={onRemove}
         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 transition-colors"
       >

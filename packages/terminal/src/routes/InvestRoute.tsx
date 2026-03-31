@@ -179,8 +179,9 @@ function InvestShell() {
           </div>
 
           {/* Horizontal tab bar — filtered by skill level */}
-          <nav
-            aria-label="Section navigation"
+          <div
+            role="tablist"
+            aria-label="Invest sections"
             className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
           >
             {visibleTabs.map((tab) => {
@@ -189,8 +190,11 @@ function InvestShell() {
               return (
                 <button
                   key={tab.id}
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-controls={`invest-tabpanel-${tab.id}`}
+                  id={`invest-tab-${tab.id}`}
                   onClick={() => setActiveTab(tab.id)}
-                  aria-current={isActive ? "true" : undefined}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-2 text-xs font-sans font-medium transition-colors border-b-2 whitespace-nowrap shrink-0",
                     isActive
@@ -203,22 +207,36 @@ function InvestShell() {
                 </button>
               );
             })}
-          </nav>
+          </div>
       </div>
 
       {/* Content */}
       {FULL_HEIGHT_TABS.includes(activeTab) ? (
-        <TabTransition tabKey={activeTab} className="flex-1 flex flex-col overflow-hidden">
-          <ActiveTabContent tabId={activeTab} />
-        </TabTransition>
-      ) : (
-        <ScrollArea className="flex-1">
-          <TabTransition tabKey={activeTab}>
-            <div className="p-6 max-w-5xl mx-auto">
-              <ActiveTabContent tabId={activeTab} />
-            </div>
+        <div
+          role="tabpanel"
+          id={`invest-tabpanel-${activeTab}`}
+          aria-labelledby={`invest-tab-${activeTab}`}
+          className="flex-1 flex flex-col overflow-hidden"
+        >
+          <TabTransition tabKey={activeTab} className="flex-1 flex flex-col overflow-hidden">
+            <ActiveTabContent tabId={activeTab} />
           </TabTransition>
-        </ScrollArea>
+        </div>
+      ) : (
+        <div
+          role="tabpanel"
+          id={`invest-tabpanel-${activeTab}`}
+          aria-labelledby={`invest-tab-${activeTab}`}
+          className="flex-1"
+        >
+          <ScrollArea className="h-full">
+            <TabTransition tabKey={activeTab}>
+              <div className="p-6 max-w-5xl mx-auto">
+                <ActiveTabContent tabId={activeTab} />
+              </div>
+            </TabTransition>
+          </ScrollArea>
+        </div>
       )}
 
       {/* Guided tour — beginner only, first visit */}

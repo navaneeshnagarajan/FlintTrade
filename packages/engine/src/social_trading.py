@@ -12,6 +12,7 @@ No external dependencies beyond the standard library.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
@@ -98,6 +99,7 @@ class Leaderboard:
 
     def __init__(self) -> None:
         self._profiles: dict[str, TraderProfile] = {}
+        self._lock = threading.Lock()
 
     @property
     def count(self) -> int:
@@ -119,7 +121,8 @@ class Leaderboard:
             raise ValueError("display_name must not be empty")
         if not 1 <= profile.risk_score <= 5:
             raise ValueError("risk_score must be between 1 and 5")
-        self._profiles[profile.user_id] = profile
+        with self._lock:
+            self._profiles[profile.user_id] = profile
 
     def get_top_traders(
         self,
@@ -143,7 +146,8 @@ class Leaderboard:
             raise ValueError(
                 f"Invalid metric '{metric}'. Must be one of: {sorted(VALID_SORT_METRICS)}"
             )
-        profiles = list(self._profiles.values())
+        with self._lock:
+            profiles = list(self._profiles.values())
         profiles.sort(key=lambda p: getattr(p, metric, 0), reverse=True)
         return profiles[:limit]
 
@@ -156,7 +160,8 @@ class Leaderboard:
         Returns:
             TraderProfile if found, else None.
         """
-        return self._profiles.get(user_id)
+        with self._lock:
+            return self._profiles.get(user_id)
 
     def remove_profile(self, user_id: str) -> bool:
         """Remove a trader profile from the leaderboard.
@@ -167,9 +172,10 @@ class Leaderboard:
         Returns:
             True if the profile was removed, False if it didn't exist.
         """
-        if user_id in self._profiles:
-            del self._profiles[user_id]
-            return True
+        with self._lock:
+            if user_id in self._profiles:
+                del self._profiles[user_id]
+                return True
         return False
 
 
@@ -186,6 +192,7 @@ class StrategyMarketplace:
     def __init__(self) -> None:
         self._strategies: dict[str, SharedStrategy] = {}
         self._copies: dict[str, list[str]] = {}  # strategy_id -> [user_ids]
+        self._lock = threading.Lock()
 
     @property
     def count(self) -> int:
@@ -214,7 +221,8 @@ class StrategyMarketplace:
             )
         if not strategy.created_at:
             strategy.created_at = datetime.now(timezone.utc).isoformat()
-        self._strategies[strategy.strategy_id] = strategy
+        with self._lock:
+            self._strategies[strategy.strategy_id] = strategy
 
     def browse(
         self,
@@ -244,7 +252,8 @@ class StrategyMarketplace:
                 f"Invalid category '{category}'. Must be one of: {sorted(VALID_CATEGORIES)}"
             )
 
-        strategies = [s for s in self._strategies.values() if s.is_public]
+        with self._lock:
+            strategies = [s for s in self._strategies.values() if s.is_public]
         if category:
             strategies = [s for s in strategies if s.category == category]
         strategies.sort(key=lambda s: getattr(s, sort_by, 0), reverse=True)
@@ -259,7 +268,8 @@ class StrategyMarketplace:
         Returns:
             SharedStrategy if found, else None.
         """
-        return self._strategies.get(strategy_id)
+        with self._lock:
+            return self._strategies.get(strategy_id)
 
     def copy(self, strategy_id: str, user_id: str) -> dict[str, str]:
         """Copy a strategy to a user's account.
@@ -279,26 +289,27 @@ class StrategyMarketplace:
         if not user_id:
             raise ValueError("user_id must not be empty")
 
-        strategy = self._strategies.get(strategy_id)
-        if strategy is None:
-            raise ValueError(f"Strategy '{strategy_id}' not found")
+        with self._lock:
+            strategy = self._strategies.get(strategy_id)
+            if strategy is None:
+                raise ValueError(f"Strategy '{strategy_id}' not found")
 
-        if strategy.creator_id == user_id:
-            raise ValueError("Cannot copy your own strategy")
+            if strategy.creator_id == user_id:
+                raise ValueError("Cannot copy your own strategy")
 
-        # Track copies
-        if strategy_id not in self._copies:
-            self._copies[strategy_id] = []
+            # Track copies
+            if strategy_id not in self._copies:
+                self._copies[strategy_id] = []
 
-        if user_id in self._copies[strategy_id]:
-            return {
-                "status": "already_copied",
-                "strategy_id": strategy_id,
-                "message": "You have already copied this strategy",
-            }
+            if user_id in self._copies[strategy_id]:
+                return {
+                    "status": "already_copied",
+                    "strategy_id": strategy_id,
+                    "message": "You have already copied this strategy",
+                }
 
-        self._copies[strategy_id].append(user_id)
-        strategy.follower_count += 1
+            self._copies[strategy_id].append(user_id)
+            strategy.follower_count += 1
 
         return {
             "status": "success",
@@ -316,7 +327,8 @@ class StrategyMarketplace:
         Returns:
             List of user_ids who copied this strategy.
         """
-        return list(self._copies.get(strategy_id, []))
+        with self._lock:
+            return list(self._copies.get(strategy_id, []))
 
     def remove_strategy(self, strategy_id: str) -> bool:
         """Remove a strategy from the marketplace.
@@ -327,10 +339,11 @@ class StrategyMarketplace:
         Returns:
             True if removed, False if it didn't exist.
         """
-        if strategy_id in self._strategies:
-            del self._strategies[strategy_id]
-            self._copies.pop(strategy_id, None)
-            return True
+        with self._lock:
+            if strategy_id in self._strategies:
+                del self._strategies[strategy_id]
+                self._copies.pop(strategy_id, None)
+                return True
         return False
 
 

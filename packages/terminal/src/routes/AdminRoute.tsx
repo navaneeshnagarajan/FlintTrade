@@ -577,7 +577,7 @@ export default function AdminRoute(): JSX.Element {
       </nav>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main aria-label="Admin Dashboard" className="max-w-7xl mx-auto px-4 py-6">
         {renderPanel()}
       </main>
     </div>

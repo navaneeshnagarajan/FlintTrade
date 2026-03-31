@@ -673,8 +673,9 @@ export default function DittoRoute() {
         </div>
 
         {/* Tab bar */}
-        <nav
-          aria-label="Ditto section navigation"
+        <div
+          role="tablist"
+          aria-label="Ditto sections"
           className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
         >
           {TABS.map((tab) => {
@@ -683,8 +684,11 @@ export default function DittoRoute() {
             return (
               <button
                 key={tab.id}
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`ditto-tabpanel-${tab.id}`}
+                id={`ditto-tab-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
-                aria-current={isActive ? "true" : undefined}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-2 text-xs font-sans font-medium transition-colors border-b-2 whitespace-nowrap shrink-0",
                   isActive
@@ -697,15 +701,22 @@ export default function DittoRoute() {
               </button>
             );
           })}
-        </nav>
+        </div>
       </div>
 
       {/* Content */}
-      <ScrollArea className="flex-1">
-        <TabTransition tabKey={activeTab}>
-          <div className="p-6 max-w-5xl mx-auto">{TAB_CONTENT[activeTab]}</div>
-        </TabTransition>
-      </ScrollArea>
+      <div
+        role="tabpanel"
+        id={`ditto-tabpanel-${activeTab}`}
+        aria-labelledby={`ditto-tab-${activeTab}`}
+        className="flex-1"
+      >
+        <ScrollArea className="h-full">
+          <TabTransition tabKey={activeTab}>
+            <div className="p-6 max-w-5xl mx-auto">{TAB_CONTENT[activeTab]}</div>
+          </TabTransition>
+        </ScrollArea>
+      </div>
     </div>
   );
 }

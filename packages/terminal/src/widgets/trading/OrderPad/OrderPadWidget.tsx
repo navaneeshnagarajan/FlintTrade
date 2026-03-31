@@ -81,11 +81,13 @@ interface PillGroupProps {
 
 function PillGroup({ value, options, onChange, className = "" }: PillGroupProps) {
   return (
-    <div className={`flex border border-border-default rounded overflow-hidden ${className}`}>
+    <div role="radiogroup" className={`flex border border-border-default rounded overflow-hidden ${className}`}>
       {options.map((opt) => (
         <button
           key={opt}
           type="button"
+          role="radio"
+          aria-checked={value === opt}
           onClick={() => onChange(opt)}
           className={`flex-1 h-8 text-xs font-medium transition-colors ${
             value === opt
@@ -136,6 +138,7 @@ function StepInput({
           type="button"
           onClick={dec}
           disabled={disabled}
+          aria-label={`Decrease ${label}`}
           className="w-8 flex items-center justify-center bg-surface-hover border border-r-0 border-border-default rounded-l text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Minus size={10} />
@@ -154,6 +157,7 @@ function StepInput({
           type="button"
           onClick={inc}
           disabled={disabled}
+          aria-label={`Increase ${label}`}
           className="w-8 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus size={10} />

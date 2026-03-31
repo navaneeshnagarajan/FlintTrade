@@ -1627,6 +1627,8 @@ function LabTabBar({ active, onChange, tabs = TABS }: LabTabBarProps) {
             key={tab.id}
             role="tab"
             aria-selected={isActive}
+            aria-controls={`lab-tabpanel-${tab.id}`}
+            id={`lab-tab-${tab.id}`}
             onClick={() => onChange(tab.id)}
             className={[
               "relative flex items-center gap-2 px-4 py-3 text-sm font-sans transition-colors select-none",
@@ -1712,13 +1714,20 @@ export default function LabRoute() {
       </div>
 
       {/* Tab content */}
-      <ScrollArea className="flex-1">
-        <div className="p-6 max-w-5xl mx-auto" data-tour-target="backtest-results">
-          <TabTransition tabKey={activeTab}>
-            {renderTab(activeTab)}
-          </TabTransition>
-        </div>
-      </ScrollArea>
+      <div
+        role="tabpanel"
+        id={`lab-tabpanel-${activeTab}`}
+        aria-labelledby={`lab-tab-${activeTab}`}
+        className="flex-1"
+      >
+        <ScrollArea className="h-full">
+          <div className="p-6 max-w-5xl mx-auto" data-tour-target="backtest-results">
+            <TabTransition tabKey={activeTab}>
+              {renderTab(activeTab)}
+            </TabTransition>
+          </div>
+        </ScrollArea>
+      </div>
 
       {/* Guided tour — beginner only, first visit */}
       {level === "beginner" && (

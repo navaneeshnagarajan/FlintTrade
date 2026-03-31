@@ -763,8 +763,14 @@ def create_flask_app(
         start_date: str = body.get("start_date", "").strip()
         end_date: str = body.get("end_date", "").strip()
         strategy_name: str = body.get("strategy", "").strip()
-        initial_capital: float = float(body.get("initial_capital", 1_000_000))
-        position_size_pct: float = float(body.get("position_size_pct", 10.0))
+        try:
+            initial_capital = float(body.get("initial_capital", 1_000_000))
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "initial_capital must be a number"}), 400
+        try:
+            position_size_pct = float(body.get("position_size_pct", 10.0))
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "position_size_pct must be a number"}), 400
 
         if not symbol:
             return jsonify({"status": "error", "message": "symbol is required"}), 400
@@ -1125,7 +1131,10 @@ def create_flask_app(
         """
         body = request.get_json(silent=True) or {}
         query: str = body.get("query", "").strip()
-        top_k: int = int(body.get("top_k", 5))
+        try:
+            top_k: int = min(max(int(body.get("top_k", 5)), 1), 50)
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "top_k must be an integer"}), 400
 
         if not query:
             return jsonify({"status": "error", "message": "query is required"}), 400
@@ -1263,8 +1272,14 @@ def create_flask_app(
         _IST = _tz(_td(hours=5, minutes=30))
 
         date_str: str = request.args.get("date", _dt.now(_IST).strftime("%Y-%m-%d"))
-        limit: int = min(int(request.args.get("limit", 100)), 1000)
-        offset: int = max(0, int(request.args.get("offset", 0)))
+        try:
+            limit: int = min(int(request.args.get("limit", 100)), 1000)
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "limit must be an integer"}), 400
+        try:
+            offset: int = max(0, int(request.args.get("offset", 0)))
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "offset must be an integer"}), 400
 
         try:
             all_logs = _audit.read_day(date_str)
@@ -1785,10 +1800,12 @@ def create_flask_app(
                         "is_master": acct.is_master,
                     })
                 return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Ditto account fetch failed: %s", exc)
+            if not (app.debug or os.environ.get("FLINTTRADE_DEV")):
+                return jsonify({"status": "error", "message": "Account service unavailable"}), 503
 
-        # Fallback: sample data for UI development
+        # Fallback: sample data for UI development (dev mode only)
         sample_accounts = [
             {"id": "acc_1", "name": "Client: Rajesh Mehta", "broker": "Zerodha", "capital": 5000000, "pnl_today": 12500, "status": "active", "positions": 8, "group": "HNI", "allocation_weight": 1.0, "is_master": True},
             {"id": "acc_2", "name": "Client: Priya Sharma", "broker": "Dhan", "capital": 3000000, "pnl_today": -8200, "status": "active", "positions": 5, "group": "HNI", "allocation_weight": 0.6, "is_master": False},

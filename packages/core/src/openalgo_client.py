@@ -49,18 +49,20 @@ class _RateLimiter:
         self.per = per
         self.tokens = rate
         self._last = time.monotonic()
+        self._lock = asyncio.Lock()
 
     async def acquire(self) -> None:
-        now = time.monotonic()
-        elapsed = now - self._last
-        self._last = now
-        self.tokens = min(self.rate, self.tokens + elapsed * (self.rate / self.per))
-        if self.tokens < 1:
-            sleep_time = (1 - self.tokens) * (self.per / self.rate)
-            await asyncio.sleep(sleep_time)
-            self.tokens = 0
-        else:
-            self.tokens -= 1
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last
+            self._last = now
+            self.tokens = min(self.rate, self.tokens + elapsed * self.rate / self.per)
+            if self.tokens < 1:
+                sleep_time = (1 - self.tokens) * self.per / self.rate
+                await asyncio.sleep(sleep_time)
+                self.tokens = 0
+            else:
+                self.tokens -= 1
 
 
 # ---------------------------------------------------------------------------

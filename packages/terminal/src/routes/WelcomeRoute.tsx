@@ -271,6 +271,7 @@ export default function WelcomeRoute() {
         }
       `}</style>
 
+      <h1 className="sr-only">Welcome to FlintTrade</h1>
       <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center relative overflow-hidden select-none">
 
         {/* ====== SPACE BACKGROUND — always visible ====== */}
