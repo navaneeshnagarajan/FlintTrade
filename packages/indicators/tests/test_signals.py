@@ -1,6 +1,6 @@
-"""Tests for signal generators: crossover, crossunder, pivothigh, pivotlow.
+"""Tests for signal generators: crossover, crossunder, exrem, flip, valuewhen, pivothigh, pivotlow.
 
-10+ tests covering correctness, edge cases, and type validation.
+20+ tests covering correctness, edge cases, and type validation.
 """
 
 from __future__ import annotations
@@ -219,3 +219,146 @@ class TestPivotLow:
         # No bar has both a pivot high and pivot low value
         both = ~np.isnan(ph) & ~np.isnan(pl)
         assert not np.any(both)
+
+
+# ---------------------------------------------------------------------------
+# exrem (absorbed from pandas_signals_library)
+# ---------------------------------------------------------------------------
+
+
+def _bool(*values: bool) -> np.ndarray:
+    return np.array(values, dtype=np.bool_)
+
+
+class TestExrem:
+    def test_basic_suppression(self):
+        """Only the first primary signal fires; subsequent are suppressed."""
+        from packages.indicators.src.signals import exrem
+
+        primary = _bool(False, True, True, False, True, True)
+        secondary = _bool(False, False, False, True, False, False)
+        result = exrem(primary, secondary)
+        expected = _bool(False, True, False, False, True, False)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_no_secondary_ever(self):
+        """Without a reset, only the very first primary fires."""
+        from packages.indicators.src.signals import exrem
+
+        primary = _bool(True, True, True, True)
+        secondary = _bool(False, False, False, False)
+        result = exrem(primary, secondary)
+        expected = _bool(True, False, False, False)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_immediate_reset(self):
+        """Secondary immediately after primary re-arms the latch."""
+        from packages.indicators.src.signals import exrem
+
+        primary = _bool(True, False, True, False)
+        secondary = _bool(False, True, False, True)
+        result = exrem(primary, secondary)
+        expected = _bool(True, False, True, False)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_empty_primary(self):
+        """No primary signals means no output signals."""
+        from packages.indicators.src.signals import exrem
+
+        primary = _bool(False, False, False)
+        secondary = _bool(True, True, True)
+        result = exrem(primary, secondary)
+        assert not np.any(result)
+
+    def test_length_mismatch_raises(self):
+        from packages.indicators.src.signals import exrem
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            exrem(_bool(True, False), _bool(True))
+
+
+class TestFlip:
+    def test_basic_latch(self):
+        """Set latches on, reset turns off."""
+        from packages.indicators.src.signals import flip
+
+        set_sig = _bool(False, True, False, False, False, True)
+        rst_sig = _bool(False, False, False, True, False, False)
+        result = flip(set_sig, rst_sig)
+        expected = _bool(False, True, True, False, False, True)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_starts_off(self):
+        """Output is False until the first set signal."""
+        from packages.indicators.src.signals import flip
+
+        set_sig = _bool(False, False, True, False)
+        rst_sig = _bool(False, False, False, False)
+        result = flip(set_sig, rst_sig)
+        expected = _bool(False, False, True, True)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_multiple_resets(self):
+        """Multiple resets with no set stay off."""
+        from packages.indicators.src.signals import flip
+
+        set_sig = _bool(True, False, False, False)
+        rst_sig = _bool(False, True, True, False)
+        result = flip(set_sig, rst_sig)
+        expected = _bool(True, False, False, False)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_length_mismatch_raises(self):
+        from packages.indicators.src.signals import flip
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            flip(_bool(True), _bool(True, False))
+
+
+class TestValuewhen:
+    def test_basic_lookback(self):
+        """Returns source value at most recent condition=True."""
+        from packages.indicators.src.signals import valuewhen
+
+        cond = _bool(False, True, False, True, False)
+        vals = _arr(10.0, 20.0, 30.0, 40.0, 50.0)
+        result = valuewhen(cond, vals, 1)
+        assert np.isnan(result[0])
+        assert result[1] == 20.0
+        assert result[2] == 20.0
+        assert result[3] == 40.0
+        assert result[4] == 40.0
+
+    def test_second_occurrence(self):
+        """occurrence=2 gets the second-most-recent trigger."""
+        from packages.indicators.src.signals import valuewhen
+
+        cond = _bool(True, False, True, False, True)
+        vals = _arr(1.0, 2.0, 3.0, 4.0, 5.0)
+        result = valuewhen(cond, vals, 2)
+        assert np.isnan(result[0])  # Only 1 trigger so far
+        assert np.isnan(result[1])  # Still only 1 trigger
+        assert result[2] == 1.0  # 2nd most recent trigger is index 0
+        assert result[3] == 1.0
+        assert result[4] == 3.0  # 2nd most recent is index 2
+
+    def test_no_triggers(self):
+        """All NaN when condition is never True."""
+        from packages.indicators.src.signals import valuewhen
+
+        cond = _bool(False, False, False)
+        vals = _arr(1.0, 2.0, 3.0)
+        result = valuewhen(cond, vals, 1)
+        assert np.all(np.isnan(result))
+
+    def test_occurrence_zero_raises(self):
+        from packages.indicators.src.signals import valuewhen
+
+        with pytest.raises(ValueError, match="occurrence must be >= 1"):
+            valuewhen(_bool(True), _arr(1.0), 0)
+
+    def test_length_mismatch_raises(self):
+        from packages.indicators.src.signals import valuewhen
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            valuewhen(_bool(True, False), _arr(1.0), 1)

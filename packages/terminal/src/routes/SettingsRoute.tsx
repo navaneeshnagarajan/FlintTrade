@@ -23,6 +23,7 @@ import { LLMSection }        from "@/tools/Settings/LLMSection";
 import { TelegramSection }   from "@/tools/Settings/TelegramSection";
 import { DataSection }       from "@/tools/Settings/DataSection";
 import { AboutSection }      from "@/tools/Settings/AboutSection";
+import { LeverageSection }   from "@/tools/Settings/LeverageSection";
 import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 import { SkillSection }      from "@/tools/Settings/SkillSection";
@@ -78,6 +79,7 @@ export default function SettingsRoute() {
       case "api":        return <ConnectionSection settings={connection} onChange={updateConnection} />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
+      case "leverage":   return <LeverageSection />;
       case "keyboard":   return <KeyboardSection />;
       case "llm":        return <LLMSection        settings={llm}        onChange={updateLLM} />;
       case "telegram":   return <TelegramSection   settings={telegram}   onChangeField={updateTelegram} />;

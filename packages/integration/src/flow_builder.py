@@ -1,13 +1,23 @@
 """Strategy flow builder — visual strategy definition as connected nodes.
 
-Absorbs openalgo-flow patterns: N8N-style node graph for defining trading
-strategies without code.
+Absorbs all 54 node types from openalgo-flow: N8N-style node graph for
+defining trading strategies without code.
 
-Node types:
-- SIGNAL: TradingView webhook, ChartInk scan, Python script, cron, manual
-- CONDITION: price above/below, OI threshold, time window, indicator value
-- ACTION: place order, modify order, cancel order, send alert
-- EXIT: stop loss, target, trailing SL, time-based, signal-based
+Categories (8):
+- Trigger: Start, PriceAlert, WebhookTrigger, HttpRequest
+- Action: PlaceOrder, SmartOrder, OptionsOrder, OptionsMultiOrder,
+          CancelAllOrders, ClosePositions, CancelOrder, ModifyOrder,
+          BasketOrder, SplitOrder
+- Condition: PositionCheck, FundCheck, TimeWindow, TimeCondition, PriceCondition
+- Logic: AndGate, OrGate, NotGate
+- Data: GetQuote, GetDepth, GetOrderStatus, History, OpenPosition,
+        Expiry, Intervals, MultiQuotes, Symbol, OptionSymbol,
+        OrderBook, TradeBook, PositionBook, SyntheticFuture, OptionChain,
+        Search, Holidays, Timings
+- Streaming: SubscribeLTP, SubscribeQuote, SubscribeDepth, Unsubscribe
+- Risk: Holdings, Funds, Margin
+- Utility: TelegramAlert, Delay, WaitUntil, Group, Variable,
+           MathExpression, Log
 
 A Flow is a JSON-serializable graph of connected nodes. The FlowBuilder
 validates the graph and FlowRunner executes it.
@@ -25,17 +35,101 @@ logger = logging.getLogger("flinttrade.integration.flow_builder")
 
 
 # ---------------------------------------------------------------------------
-# Node types
+# Node Category
+# ---------------------------------------------------------------------------
+
+
+class NodeCategory(StrEnum):
+    TRIGGER = "TRIGGER"
+    ACTION = "ACTION"
+    CONDITION = "CONDITION"
+    LOGIC = "LOGIC"
+    DATA = "DATA"
+    STREAMING = "STREAMING"
+    RISK = "RISK"
+    UTILITY = "UTILITY"
+
+
+# ---------------------------------------------------------------------------
+# Node types — all 54 from openalgo-flow
 # ---------------------------------------------------------------------------
 
 
 class NodeType(StrEnum):
-    SIGNAL = "SIGNAL"
-    CONDITION = "CONDITION"
-    ACTION = "ACTION"
-    EXIT = "EXIT"
+    """All 54 node types supported by the flow builder."""
+
+    # --- Trigger (4) ---
+    START = "start"
+    PRICE_ALERT = "priceAlert"
+    WEBHOOK_TRIGGER = "webhookTrigger"
+    HTTP_REQUEST = "httpRequest"
+
+    # --- Action (10) ---
+    PLACE_ORDER = "placeOrder"
+    SMART_ORDER = "smartOrder"
+    OPTIONS_ORDER = "optionsOrder"
+    OPTIONS_MULTI_ORDER = "optionsMultiOrder"
+    CANCEL_ALL_ORDERS = "cancelAllOrders"
+    CLOSE_POSITIONS = "closePositions"
+    CANCEL_ORDER = "cancelOrder"
+    MODIFY_ORDER = "modifyOrder"
+    BASKET_ORDER = "basketOrder"
+    SPLIT_ORDER = "splitOrder"
+
+    # --- Condition (5) ---
+    POSITION_CHECK = "positionCheck"
+    FUND_CHECK = "fundCheck"
+    TIME_WINDOW = "timeWindow"
+    TIME_CONDITION = "timeCondition"
+    PRICE_CONDITION = "priceCondition"
+
+    # --- Logic (3) ---
+    AND_GATE = "andGate"
+    OR_GATE = "orGate"
+    NOT_GATE = "notGate"
+
+    # --- Data (18) ---
+    GET_QUOTE = "getQuote"
+    GET_DEPTH = "getDepth"
+    GET_ORDER_STATUS = "getOrderStatus"
+    HISTORY = "history"
+    OPEN_POSITION = "openPosition"
+    EXPIRY = "expiry"
+    INTERVALS = "intervals"
+    MULTI_QUOTES = "multiQuotes"
+    SYMBOL = "symbol"
+    OPTION_SYMBOL = "optionSymbol"
+    ORDER_BOOK = "orderBook"
+    TRADE_BOOK = "tradeBook"
+    POSITION_BOOK = "positionBook"
+    SYNTHETIC_FUTURE = "syntheticFuture"
+    OPTION_CHAIN = "optionChain"
+    SEARCH = "search"
+    HOLIDAYS = "holidays"
+    TIMINGS = "timings"
+
+    # --- Streaming (4) ---
+    SUBSCRIBE_LTP = "subscribeLtp"
+    SUBSCRIBE_QUOTE = "subscribeQuote"
+    SUBSCRIBE_DEPTH = "subscribeDepth"
+    UNSUBSCRIBE = "unsubscribe"
+
+    # --- Risk (3) ---
+    HOLDINGS = "holdings"
+    FUNDS = "funds"
+    MARGIN = "margin"
+
+    # --- Utility (8) ---
+    TELEGRAM_ALERT = "telegramAlert"
+    DELAY = "delay"
+    WAIT_UNTIL = "waitUntil"
+    GROUP = "group"
+    VARIABLE = "variable"
+    MATH_EXPRESSION = "mathExpression"
+    LOG = "log"
 
 
+# Legacy aliases for backward compatibility
 class SignalSource(StrEnum):
     TRADINGVIEW = "TRADINGVIEW"
     CHARTINK = "CHARTINK"
@@ -71,6 +165,814 @@ class ExitType(StrEnum):
 
 
 # ---------------------------------------------------------------------------
+# Node registry — metadata for all 54 node types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NodePortSpec:
+    """Specification for a node's input or output port."""
+
+    name: str
+    label: str
+    data_type: str = "any"  # "any", "trigger", "bool", "number", "quote", "order"
+
+
+@dataclass(frozen=True)
+class ConfigFieldSpec:
+    """Specification for a single config field."""
+
+    name: str
+    label: str
+    field_type: str = "string"  # string, number, select, boolean
+    required: bool = False
+    default: str | int | float | bool | None = None
+    options: tuple[str, ...] = ()  # for select fields
+
+
+@dataclass(frozen=True)
+class NodeSpec:
+    """Complete specification for a node type."""
+
+    node_type: NodeType
+    label: str
+    category: NodeCategory
+    description: str
+    inputs: tuple[NodePortSpec, ...] = ()
+    outputs: tuple[NodePortSpec, ...] = ()
+    config_fields: tuple[ConfigFieldSpec, ...] = ()
+    icon: str = ""  # lucide icon name
+
+
+def _build_registry() -> dict[NodeType, NodeSpec]:
+    """Build the complete node type registry."""
+    r: dict[NodeType, NodeSpec] = {}
+
+    def _reg(spec: NodeSpec) -> None:
+        r[spec.node_type] = spec
+
+    _in = NodePortSpec
+    _out = NodePortSpec
+    _cfg = ConfigFieldSpec
+
+    # -----------------------------------------------------------------------
+    # Trigger nodes (4)
+    # -----------------------------------------------------------------------
+    _reg(NodeSpec(
+        node_type=NodeType.START, label="Start", category=NodeCategory.TRIGGER,
+        description="Schedule-based trigger: one-time, daily, weekly, or interval",
+        outputs=(_out("trigger", "Trigger"),),
+        config_fields=(
+            _cfg("scheduleType", "Schedule Type", "select", True, "daily",
+                 ("once", "daily", "weekly", "interval")),
+            _cfg("time", "Time (HH:MM)", "string", False, "09:15"),
+            _cfg("days", "Days (0=Sun..6=Sat)", "string", False, "1,2,3,4,5"),
+            _cfg("intervalValue", "Interval Value", "number", False, 1),
+            _cfg("intervalUnit", "Interval Unit", "select", False, "minutes",
+                 ("seconds", "minutes", "hours")),
+        ),
+        icon="Clock",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.PRICE_ALERT, label="Price Alert", category=NodeCategory.TRIGGER,
+        description="Trigger when price crosses a threshold via WebSocket monitoring",
+        outputs=(
+            _out("yes", "Condition Met", "bool"),
+            _out("no", "Condition Not Met", "bool"),
+        ),
+        config_fields=(
+            _cfg("symbol", "Symbol", "string", True),
+            _cfg("exchange", "Exchange", "select", True, "NSE",
+                 ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX")),
+            _cfg("condition", "Condition", "select", True, "crosses_above",
+                 ("crosses_above", "crosses_below", "equals")),
+            _cfg("price", "Price", "number", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Bell",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.WEBHOOK_TRIGGER, label="Webhook Trigger",
+        category=NodeCategory.TRIGGER,
+        description="Trigger flow from an inbound webhook (TradingView, ChartInk, custom)",
+        outputs=(_out("trigger", "Trigger"),),
+        config_fields=(
+            _cfg("webhookId", "Webhook ID", "string", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Webhook",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.HTTP_REQUEST, label="HTTP Request",
+        category=NodeCategory.TRIGGER,
+        description="Make an outbound HTTP request and use the response",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("response", "Response"),),
+        config_fields=(
+            _cfg("url", "URL", "string", True),
+            _cfg("method", "Method", "select", True, "GET",
+                 ("GET", "POST", "PUT", "DELETE")),
+            _cfg("headers", "Headers (JSON)", "string"),
+            _cfg("body", "Body (JSON)", "string"),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Globe",
+    ))
+
+    # -----------------------------------------------------------------------
+    # Action nodes (10)
+    # -----------------------------------------------------------------------
+    _sym_exchange = (
+        _cfg("symbol", "Symbol", "string", True),
+        _cfg("exchange", "Exchange", "select", True, "NSE",
+             ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX")),
+    )
+    _order_common = (
+        *_sym_exchange,
+        _cfg("action", "Action", "select", True, "BUY", ("BUY", "SELL")),
+        _cfg("quantity", "Quantity", "number", True, 1),
+        _cfg("priceType", "Price Type", "select", True, "MARKET",
+             ("MARKET", "LIMIT", "SL", "SL-M")),
+        _cfg("product", "Product", "select", True, "MIS",
+             ("MIS", "CNC", "NRML")),
+        _cfg("price", "Price", "number", False, 0),
+        _cfg("triggerPrice", "Trigger Price", "number", False, 0),
+    )
+
+    _reg(NodeSpec(
+        node_type=NodeType.PLACE_ORDER, label="Place Order",
+        category=NodeCategory.ACTION,
+        description="Place a regular order via OpenAlgo",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Order Result"),),
+        config_fields=(*_order_common, _cfg("outputVariable", "Output Variable", "string")),
+        icon="ShoppingCart",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.SMART_ORDER, label="Smart Order",
+        category=NodeCategory.ACTION,
+        description="Place a smart order with position sizing via OpenAlgo",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Order Result"),),
+        config_fields=(
+            *_order_common,
+            _cfg("positionSize", "Position Size", "number", False, 0),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Zap",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.OPTIONS_ORDER, label="Options Order",
+        category=NodeCategory.ACTION,
+        description="Place an options order by strike offset (ATM, ITM, OTM)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Order Result"),),
+        config_fields=(
+            _cfg("underlying", "Underlying", "string", True, "NIFTY"),
+            _cfg("exchange", "Exchange", "select", True, "NFO", ("NFO", "BFO")),
+            _cfg("expiryType", "Expiry Type", "select", True, "current_week",
+                 ("current_week", "next_week", "current_month", "next_month")),
+            _cfg("optionType", "Option Type", "select", True, "CE", ("CE", "PE")),
+            _cfg("offset", "Strike Offset", "string", True, "ATM"),
+            _cfg("action", "Action", "select", True, "BUY", ("BUY", "SELL")),
+            _cfg("quantity", "Quantity", "number", True, 1),
+            _cfg("priceType", "Price Type", "select", True, "MARKET",
+                 ("MARKET", "LIMIT", "SL", "SL-M")),
+            _cfg("product", "Product", "select", True, "MIS", ("MIS", "NRML")),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="TrendingUp",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.OPTIONS_MULTI_ORDER, label="Options Multi Order",
+        category=NodeCategory.ACTION,
+        description="Place multiple options legs simultaneously (straddle, strangle, etc.)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Order Result"),),
+        config_fields=(
+            _cfg("underlying", "Underlying", "string", True, "NIFTY"),
+            _cfg("exchange", "Exchange", "select", True, "NFO", ("NFO", "BFO")),
+            _cfg("expiryType", "Expiry Type", "select", True, "current_week",
+                 ("current_week", "next_week", "current_month", "next_month")),
+            _cfg("legs", "Legs (JSON array)", "string", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Layers",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.CANCEL_ALL_ORDERS, label="Cancel All Orders",
+        category=NodeCategory.ACTION,
+        description="Cancel all open orders",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="XCircle",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.CLOSE_POSITIONS, label="Close Positions",
+        category=NodeCategory.ACTION,
+        description="Close all open positions",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="LogOut",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.CANCEL_ORDER, label="Cancel Order",
+        category=NodeCategory.ACTION,
+        description="Cancel a specific order by order ID",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(
+            _cfg("orderId", "Order ID", "string", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="X",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.MODIFY_ORDER, label="Modify Order",
+        category=NodeCategory.ACTION,
+        description="Modify an existing order's price, quantity, or type",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(
+            _cfg("orderId", "Order ID", "string", True),
+            *_sym_exchange,
+            _cfg("action", "Action", "select", True, "BUY", ("BUY", "SELL")),
+            _cfg("quantity", "New Quantity", "number", True),
+            _cfg("priceType", "Price Type", "select", True, "LIMIT",
+                 ("MARKET", "LIMIT", "SL", "SL-M")),
+            _cfg("price", "New Price", "number"),
+            _cfg("triggerPrice", "Trigger Price", "number"),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Edit",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.BASKET_ORDER, label="Basket Order",
+        category=NodeCategory.ACTION,
+        description="Place multiple orders as a basket in one call",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(
+            _cfg("orders", "Orders (JSON array)", "string", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="ShoppingBag",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.SPLIT_ORDER, label="Split Order",
+        category=NodeCategory.ACTION,
+        description="Split a large order into smaller slices with optional delay",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(
+            *_sym_exchange,
+            _cfg("action", "Action", "select", True, "BUY", ("BUY", "SELL")),
+            _cfg("totalQuantity", "Total Quantity", "number", True),
+            _cfg("sliceSize", "Slice Size", "number", True),
+            _cfg("delayMs", "Delay Between Slices (ms)", "number", False, 1000),
+            _cfg("priceType", "Price Type", "select", True, "MARKET",
+                 ("MARKET", "LIMIT")),
+            _cfg("product", "Product", "select", True, "MIS", ("MIS", "CNC", "NRML")),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Scissors",
+    ))
+
+    # -----------------------------------------------------------------------
+    # Condition nodes (5)
+    # -----------------------------------------------------------------------
+    _bool_outputs = (
+        _out("yes", "Condition True", "bool"),
+        _out("no", "Condition False", "bool"),
+    )
+
+    _reg(NodeSpec(
+        node_type=NodeType.POSITION_CHECK, label="Position Check",
+        category=NodeCategory.CONDITION,
+        description="Check if a position exists for a given symbol",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=_bool_outputs,
+        config_fields=(
+            *_sym_exchange,
+            _cfg("product", "Product", "select", False, "MIS", ("MIS", "CNC", "NRML")),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Search",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.FUND_CHECK, label="Fund Check",
+        category=NodeCategory.CONDITION,
+        description="Check if available funds exceed a threshold",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=_bool_outputs,
+        config_fields=(
+            _cfg("minFunds", "Minimum Funds", "number", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Wallet",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.TIME_WINDOW, label="Time Window",
+        category=NodeCategory.CONDITION,
+        description="Check if current time is within a start/end window",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=_bool_outputs,
+        config_fields=(
+            _cfg("startTime", "Start Time (HH:MM)", "string", True, "09:15"),
+            _cfg("endTime", "End Time (HH:MM)", "string", True, "15:20"),
+        ),
+        icon="Clock",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.TIME_CONDITION, label="Time Condition",
+        category=NodeCategory.CONDITION,
+        description="Check time against a specific condition (before, after, at)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=_bool_outputs,
+        config_fields=(
+            _cfg("condition", "Condition", "select", True, "after",
+                 ("before", "after", "at", "between")),
+            _cfg("time", "Time (HH:MM)", "string", True, "09:15"),
+            _cfg("endTime", "End Time (HH:MM, for between)", "string"),
+        ),
+        icon="Timer",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.PRICE_CONDITION, label="Price Condition",
+        category=NodeCategory.CONDITION,
+        description="Compare current price against a value using an operator",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=_bool_outputs,
+        config_fields=(
+            *_sym_exchange,
+            _cfg("operator", "Operator", "select", True, "greater_than",
+                 ("greater_than", "less_than", "equals", "greater_equal",
+                  "less_equal", "not_equals")),
+            _cfg("value", "Value", "number", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="GitCompare",
+    ))
+
+    # -----------------------------------------------------------------------
+    # Logic gate nodes (3)
+    # -----------------------------------------------------------------------
+    _reg(NodeSpec(
+        node_type=NodeType.AND_GATE, label="AND Gate",
+        category=NodeCategory.LOGIC,
+        description="Outputs true only if ALL inputs are true",
+        inputs=(
+            _in("input-0", "Input A", "bool"),
+            _in("input-1", "Input B", "bool"),
+        ),
+        outputs=_bool_outputs,
+        config_fields=(_cfg("inputCount", "Number of Inputs", "number", False, 2),),
+        icon="GitMerge",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.OR_GATE, label="OR Gate",
+        category=NodeCategory.LOGIC,
+        description="Outputs true if ANY input is true",
+        inputs=(
+            _in("input-0", "Input A", "bool"),
+            _in("input-1", "Input B", "bool"),
+        ),
+        outputs=_bool_outputs,
+        config_fields=(_cfg("inputCount", "Number of Inputs", "number", False, 2),),
+        icon="GitBranch",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.NOT_GATE, label="NOT Gate",
+        category=NodeCategory.LOGIC,
+        description="Inverts the boolean input",
+        inputs=(_in("input-0", "Input", "bool"),),
+        outputs=_bool_outputs,
+        config_fields=(),
+        icon="ToggleLeft",
+    ))
+
+    # -----------------------------------------------------------------------
+    # Data nodes (17)
+    # -----------------------------------------------------------------------
+    _data_sym = (
+        *_sym_exchange,
+        _cfg("outputVariable", "Output Variable", "string"),
+    )
+
+    _reg(NodeSpec(
+        node_type=NodeType.GET_QUOTE, label="Get Quote",
+        category=NodeCategory.DATA,
+        description="Fetch real-time quote (LTP, open, high, low, close, volume)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("quote", "Quote Data", "quote"),),
+        config_fields=_data_sym,
+        icon="BarChart3",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.GET_DEPTH, label="Get Depth",
+        category=NodeCategory.DATA,
+        description="Fetch market depth (bid/ask levels)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("depth", "Depth Data"),),
+        config_fields=_data_sym,
+        icon="Layers",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.GET_ORDER_STATUS, label="Get Order Status",
+        category=NodeCategory.DATA,
+        description="Get the status of a specific order by ID",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("status", "Order Status"),),
+        config_fields=(
+            _cfg("orderId", "Order ID", "string", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="FileSearch",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.HISTORY, label="History",
+        category=NodeCategory.DATA,
+        description="Fetch OHLCV historical candle data",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("candles", "Candle Data"),),
+        config_fields=(
+            *_sym_exchange,
+            _cfg("interval", "Interval", "select", True, "1d",
+                 ("1m", "3m", "5m", "15m", "30m", "1h", "1d", "1w", "1M")),
+            _cfg("startDate", "Start Date (YYYY-MM-DD)", "string"),
+            _cfg("endDate", "End Date (YYYY-MM-DD)", "string"),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="CandlestickChart",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.OPEN_POSITION, label="Open Position",
+        category=NodeCategory.DATA,
+        description="Get open position details for a symbol",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("position", "Position Data"),),
+        config_fields=(
+            *_sym_exchange,
+            _cfg("product", "Product", "select", False, "MIS", ("MIS", "CNC", "NRML")),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Briefcase",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.EXPIRY, label="Expiry",
+        category=NodeCategory.DATA,
+        description="Get expiry dates for a symbol",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("expiries", "Expiry Dates"),),
+        config_fields=(
+            _cfg("symbol", "Symbol", "string", True),
+            _cfg("exchange", "Exchange", "select", True, "NFO", ("NFO", "BFO", "MCX", "CDS")),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Calendar",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.INTERVALS, label="Intervals",
+        category=NodeCategory.DATA,
+        description="Get supported candle intervals for a broker",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("intervals", "Intervals List"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="BarChart",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.MULTI_QUOTES, label="Multi Quotes",
+        category=NodeCategory.DATA,
+        description="Fetch quotes for multiple symbols in one call",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("quotes", "Multi Quote Data"),),
+        config_fields=(
+            _cfg("symbols", "Symbols (JSON array)", "string", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="BarChart2",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.SYMBOL, label="Symbol Lookup",
+        category=NodeCategory.DATA,
+        description="Look up symbol details (token, lot size, tick size)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("symbolInfo", "Symbol Info"),),
+        config_fields=_data_sym,
+        icon="Hash",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.OPTION_SYMBOL, label="Option Symbol",
+        category=NodeCategory.DATA,
+        description="Resolve an option symbol from underlying, expiry, strike, and type",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("optionSymbol", "Option Symbol"),),
+        config_fields=(
+            _cfg("underlying", "Underlying", "string", True),
+            _cfg("exchange", "Exchange", "select", True, "NFO", ("NFO", "BFO")),
+            _cfg("expiryType", "Expiry Type", "select", True, "current_week",
+                 ("current_week", "next_week", "current_month", "next_month")),
+            _cfg("optionType", "Option Type", "select", True, "CE", ("CE", "PE")),
+            _cfg("strikePrice", "Strike Price", "number"),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Tag",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.ORDER_BOOK, label="Order Book",
+        category=NodeCategory.DATA,
+        description="Fetch the full order book (all orders today)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("orders", "Order Book"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="BookOpen",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.TRADE_BOOK, label="Trade Book",
+        category=NodeCategory.DATA,
+        description="Fetch the trade book (all executed trades today)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("trades", "Trade Book"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="FileText",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.POSITION_BOOK, label="Position Book",
+        category=NodeCategory.DATA,
+        description="Fetch all current positions",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("positions", "Position Book"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="Table",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.SYNTHETIC_FUTURE, label="Synthetic Future",
+        category=NodeCategory.DATA,
+        description="Calculate synthetic future price from option chain",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("price", "Synthetic Future Price", "number"),),
+        config_fields=(
+            _cfg("symbol", "Symbol", "string", True),
+            _cfg("exchange", "Exchange", "select", True, "NFO", ("NFO", "BFO")),
+            _cfg("expiry", "Expiry Date", "string"),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Activity",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.OPTION_CHAIN, label="Option Chain",
+        category=NodeCategory.DATA,
+        description="Fetch the full option chain for a symbol and expiry",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("chain", "Option Chain Data"),),
+        config_fields=(
+            _cfg("symbol", "Symbol", "string", True),
+            _cfg("exchange", "Exchange", "select", True, "NFO", ("NFO", "BFO")),
+            _cfg("expiry", "Expiry Date", "string"),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Table2",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.SEARCH, label="Search Symbol",
+        category=NodeCategory.DATA,
+        description="Search for symbols by name or keyword",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("results", "Search Results"),),
+        config_fields=(
+            _cfg("query", "Search Query", "string", True),
+            _cfg("exchange", "Exchange", "select", False, "",
+                 ("", "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX")),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Search",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.HOLIDAYS, label="Holidays",
+        category=NodeCategory.DATA,
+        description="Get list of market holidays",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("holidays", "Holiday List"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="CalendarOff",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.TIMINGS, label="Market Timings",
+        category=NodeCategory.DATA,
+        description="Get market open/close timings for each segment",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("timings", "Timings Data"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="Clock3",
+    ))
+
+    # -----------------------------------------------------------------------
+    # Streaming nodes (4)
+    # -----------------------------------------------------------------------
+    _stream_cfg = (
+        *_sym_exchange,
+        _cfg("outputVariable", "Output Variable", "string"),
+    )
+
+    _reg(NodeSpec(
+        node_type=NodeType.SUBSCRIBE_LTP, label="Subscribe LTP",
+        category=NodeCategory.STREAMING,
+        description="Subscribe to real-time LTP updates via WebSocket",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("ltp", "LTP Data", "number"),),
+        config_fields=_stream_cfg,
+        icon="Radio",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.SUBSCRIBE_QUOTE, label="Subscribe Quote",
+        category=NodeCategory.STREAMING,
+        description="Subscribe to real-time quote updates via WebSocket",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("quote", "Quote Data", "quote"),),
+        config_fields=_stream_cfg,
+        icon="Radio",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.SUBSCRIBE_DEPTH, label="Subscribe Depth",
+        category=NodeCategory.STREAMING,
+        description="Subscribe to real-time depth updates via WebSocket",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("depth", "Depth Data"),),
+        config_fields=_stream_cfg,
+        icon="Radio",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.UNSUBSCRIBE, label="Unsubscribe",
+        category=NodeCategory.STREAMING,
+        description="Unsubscribe from a WebSocket stream",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(
+            *_sym_exchange,
+            _cfg("mode", "Mode", "select", True, "LTP", ("LTP", "Quote", "Depth")),
+        ),
+        icon="RadioOff",
+    ))
+
+    # -----------------------------------------------------------------------
+    # Risk management nodes (3)
+    # -----------------------------------------------------------------------
+    _reg(NodeSpec(
+        node_type=NodeType.HOLDINGS, label="Holdings",
+        category=NodeCategory.RISK,
+        description="Fetch current portfolio holdings",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("holdings", "Holdings Data"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="PieChart",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.FUNDS, label="Funds",
+        category=NodeCategory.RISK,
+        description="Fetch available margin/funds",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("funds", "Funds Data"),),
+        config_fields=(_cfg("outputVariable", "Output Variable", "string"),),
+        icon="IndianRupee",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.MARGIN, label="Margin",
+        category=NodeCategory.RISK,
+        description="Calculate margin required for a position",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("margin", "Margin Data"),),
+        config_fields=(
+            *_sym_exchange,
+            _cfg("action", "Action", "select", True, "BUY", ("BUY", "SELL")),
+            _cfg("quantity", "Quantity", "number", True),
+            _cfg("priceType", "Price Type", "select", True, "MARKET",
+                 ("MARKET", "LIMIT")),
+            _cfg("product", "Product", "select", True, "MIS", ("MIS", "CNC", "NRML")),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Calculator",
+    ))
+
+    # -----------------------------------------------------------------------
+    # Utility nodes (7)
+    # -----------------------------------------------------------------------
+    _reg(NodeSpec(
+        node_type=NodeType.TELEGRAM_ALERT, label="Telegram Alert",
+        category=NodeCategory.UTILITY,
+        description="Send a notification via Telegram",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result"),),
+        config_fields=(
+            _cfg("message", "Message", "string", True),
+        ),
+        icon="Send",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.DELAY, label="Delay",
+        category=NodeCategory.UTILITY,
+        description="Wait for a specified duration before continuing",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("trigger", "Continue"),),
+        config_fields=(
+            _cfg("delayValue", "Delay Value", "number", True, 5),
+            _cfg("delayUnit", "Delay Unit", "select", True, "seconds",
+                 ("seconds", "minutes", "hours")),
+        ),
+        icon="Timer",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.WAIT_UNTIL, label="Wait Until",
+        category=NodeCategory.UTILITY,
+        description="Wait until a specific time of day before continuing",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("trigger", "Continue"),),
+        config_fields=(
+            _cfg("time", "Time (HH:MM)", "string", True, "09:15"),
+        ),
+        icon="Clock",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.GROUP, label="Group",
+        category=NodeCategory.UTILITY,
+        description="Visual grouping of nodes (no logic, organizational only)",
+        inputs=(),
+        outputs=(),
+        config_fields=(
+            _cfg("label", "Group Label", "string"),
+            _cfg("color", "Color", "string", False, "#1e1e2e"),
+        ),
+        icon="Square",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.VARIABLE, label="Variable",
+        category=NodeCategory.UTILITY,
+        description="Set or compute a variable for use in later nodes",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("value", "Value"),),
+        config_fields=(
+            _cfg("variableName", "Variable Name", "string", True),
+            _cfg("value", "Value / Expression", "string", True),
+            _cfg("valueType", "Value Type", "select", True, "string",
+                 ("string", "number", "boolean", "json")),
+        ),
+        icon="Variable",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.MATH_EXPRESSION, label="Math Expression",
+        category=NodeCategory.UTILITY,
+        description="Evaluate a math expression using variables (e.g. {{ltp}} * 1.01)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("result", "Result", "number"),),
+        config_fields=(
+            _cfg("expression", "Expression", "string", True),
+            _cfg("outputVariable", "Output Variable", "string"),
+        ),
+        icon="Calculator",
+    ))
+    _reg(NodeSpec(
+        node_type=NodeType.LOG, label="Log",
+        category=NodeCategory.UTILITY,
+        description="Log a message to the execution log (supports {{variable}} interpolation)",
+        inputs=(_in("trigger", "Trigger"),),
+        outputs=(_out("trigger", "Continue"),),
+        config_fields=(
+            _cfg("message", "Message", "string", True),
+            _cfg("level", "Level", "select", False, "info", ("info", "warning", "error")),
+        ),
+        icon="FileText",
+    ))
+
+    return r
+
+
+NODE_REGISTRY: dict[NodeType, NodeSpec] = _build_registry()
+
+# Category-to-node-type mapping for easy lookup
+NODES_BY_CATEGORY: dict[NodeCategory, list[NodeType]] = {}
+for _nt, _spec in NODE_REGISTRY.items():
+    NODES_BY_CATEGORY.setdefault(_spec.category, []).append(_nt)
+
+
+def get_node_spec(node_type: NodeType | str) -> NodeSpec:
+    """Look up the spec for a node type. Raises KeyError if not found."""
+    if isinstance(node_type, str):
+        node_type = NodeType(node_type)
+    return NODE_REGISTRY[node_type]
+
+
+def get_all_node_types() -> list[NodeType]:
+    """Return a list of all registered node types."""
+    return list(NODE_REGISTRY.keys())
+
+
+def get_node_types_by_category(category: NodeCategory) -> list[NodeType]:
+    """Return node types for a given category."""
+    return NODES_BY_CATEGORY.get(category, [])
+
+
+# ---------------------------------------------------------------------------
 # Flow Node
 # ---------------------------------------------------------------------------
 
@@ -81,7 +983,7 @@ class FlowNode:
 
     id: str
     node_type: str  # NodeType value
-    subtype: str = ""  # SignalSource, ConditionType, ActionType, or ExitType value
+    subtype: str = ""  # Legacy — kept for backward compat
     label: str = ""
     config: dict[str, Any] = field(default_factory=dict)
     next_nodes: list[str] = field(default_factory=list)  # IDs of connected nodes
@@ -184,16 +1086,22 @@ class ValidationResult:
     warnings: list[ValidationError] = field(default_factory=list)
 
 
+# Node types considered "terminal" — flows must have at least one
+_TERMINAL_CATEGORIES = {NodeCategory.ACTION.value, NodeCategory.UTILITY.value}
+# Legacy top-level types that also count as terminal
+_TERMINAL_LEGACY_TYPES = {"ACTION", "EXIT"}
+
+
 def validate_flow(flow: FlowDefinition) -> ValidationResult:
     """Validate a flow definition for structural correctness.
 
     Checks:
     - At least one node exists
     - Entry node is set and exists
-    - Entry node is a SIGNAL type
+    - Entry node is a trigger type
     - All next_node references are valid
     - No orphan nodes (unreachable from entry)
-    - At least one ACTION or EXIT node
+    - At least one ACTION, EXIT, or terminal-category node
     - No self-loops
     """
     result = ValidationResult()
@@ -218,12 +1126,14 @@ def validate_flow(flow: FlowDefinition) -> ValidationResult:
         ))
         return result
 
-    # Entry must be SIGNAL
+    # Entry should be a trigger type
     entry = flow.nodes[flow.entry_node_id]
-    if entry.node_type != NodeType.SIGNAL.value:
+    _trigger_types = {nt.value for nt in get_node_types_by_category(NodeCategory.TRIGGER)}
+    _trigger_types.add("SIGNAL")  # legacy
+    if entry.node_type not in _trigger_types:
         result.warnings.append(ValidationError(
             entry.id,
-            f"Entry node should be SIGNAL type, got {entry.node_type}",
+            f"Entry node should be a trigger type, got {entry.node_type}",
             severity="warning",
         ))
 
@@ -243,7 +1153,7 @@ def validate_flow(flow: FlowDefinition) -> ValidationResult:
                     nid, f"Node '{nid}' has a self-loop",
                 ))
 
-    # Check for orphan nodes (not reachable from entry)
+    # Check for orphan nodes
     reachable: set[str] = set()
     _walk(flow, flow.entry_node_id, reachable)
 
@@ -255,18 +1165,33 @@ def validate_flow(flow: FlowDefinition) -> ValidationResult:
             severity="warning",
         ))
 
-    # Must have at least one ACTION or EXIT
-    has_action_or_exit = any(
-        n.node_type in (NodeType.ACTION.value, NodeType.EXIT.value)
-        for n in flow.nodes.values()
+    # Must have at least one ACTION/EXIT/terminal node
+    has_terminal = any(
+        _is_terminal_node(n) for n in flow.nodes.values()
     )
-    if not has_action_or_exit:
+    if not has_terminal:
         result.is_valid = False
         result.errors.append(ValidationError(
             "", "Flow must have at least one ACTION or EXIT node",
         ))
 
     return result
+
+
+def _is_terminal_node(node: FlowNode) -> bool:
+    """Check if a node is considered a terminal (action/exit) node."""
+    # Legacy top-level types
+    if node.node_type in _TERMINAL_LEGACY_TYPES:
+        return True
+    # New category-based check
+    try:
+        nt = NodeType(node.node_type)
+        spec = NODE_REGISTRY.get(nt)
+        if spec and spec.category.value in _TERMINAL_CATEGORIES:
+            return True
+    except ValueError:
+        pass
+    return False
 
 
 def _walk(flow: FlowDefinition, node_id: str, visited: set[str]) -> None:
@@ -302,6 +1227,20 @@ class FlowBuilder:
 
         flow = fb.build()
         result = fb.validate()
+
+    New API — add any of the 54 node types::
+
+        fb = FlowBuilder("Options Flow")
+        start = fb.add_node(NodeType.START, config={"scheduleType": "daily", "time": "09:16"})
+        quote = fb.add_node(NodeType.GET_QUOTE, config={"symbol": "NIFTY", "exchange": "NSE"})
+        check = fb.add_node(NodeType.PRICE_CONDITION, config={"operator": "greater_than", "value": 24000})
+        order = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY", "action": "BUY", "quantity": 75})
+
+        fb.connect(start, quote)
+        fb.connect(quote, check)
+        fb.connect(check, order)
+
+        flow = fb.build()
     """
 
     def __init__(self, name: str, description: str = "") -> None:
@@ -312,22 +1251,58 @@ class FlowBuilder:
         self._counter += 1
         return f"{prefix}_{self._counter}"
 
+    # --- New generic API ---
+
+    def add_node(
+        self,
+        node_type: NodeType | str,
+        label: str = "",
+        config: dict[str, Any] | None = None,
+    ) -> str:
+        """Add any node type. Returns node ID.
+
+        The node type determines the ID prefix and whether it auto-sets
+        as the entry node (triggers only).
+        """
+        if isinstance(node_type, str):
+            node_type = NodeType(node_type)
+
+        spec = NODE_REGISTRY.get(node_type)
+        prefix = node_type.value[:6]  # short prefix from type name
+        nid = self._next_id(prefix)
+
+        resolved_label = label or (spec.label if spec else node_type.value)
+        node = FlowNode(
+            id=nid,
+            node_type=node_type.value,
+            label=resolved_label,
+            config=config or {},
+        )
+        self._flow.add_node(node)
+
+        # First trigger node becomes entry
+        if spec and spec.category == NodeCategory.TRIGGER and not self._flow.entry_node_id:
+            self._flow.entry_node_id = nid
+
+        return nid
+
+    # --- Legacy API (backward compatible) ---
+
     def add_signal(
         self,
         source: SignalSource | str,
         label: str = "",
         config: dict[str, Any] | None = None,
     ) -> str:
-        """Add a SIGNAL node. Returns node ID."""
+        """Add a SIGNAL node (legacy). Returns node ID."""
         nid = self._next_id("sig")
         subtype = source.value if isinstance(source, SignalSource) else source
         node = FlowNode(
-            id=nid, node_type=NodeType.SIGNAL.value,
+            id=nid, node_type="SIGNAL",
             subtype=subtype, label=label or subtype,
             config=config or {},
         )
         self._flow.add_node(node)
-        # First signal becomes entry
         if not self._flow.entry_node_id:
             self._flow.entry_node_id = nid
         return nid
@@ -338,11 +1313,11 @@ class FlowBuilder:
         label: str = "",
         config: dict[str, Any] | None = None,
     ) -> str:
-        """Add a CONDITION node. Returns node ID."""
+        """Add a CONDITION node (legacy). Returns node ID."""
         nid = self._next_id("cond")
         subtype = condition.value if isinstance(condition, ConditionType) else condition
         node = FlowNode(
-            id=nid, node_type=NodeType.CONDITION.value,
+            id=nid, node_type="CONDITION",
             subtype=subtype, label=label or subtype,
             config=config or {},
         )
@@ -355,11 +1330,11 @@ class FlowBuilder:
         label: str = "",
         config: dict[str, Any] | None = None,
     ) -> str:
-        """Add an ACTION node. Returns node ID."""
+        """Add an ACTION node (legacy). Returns node ID."""
         nid = self._next_id("act")
         subtype = action.value if isinstance(action, ActionType) else action
         node = FlowNode(
-            id=nid, node_type=NodeType.ACTION.value,
+            id=nid, node_type="ACTION",
             subtype=subtype, label=label or subtype,
             config=config or {},
         )
@@ -372,16 +1347,18 @@ class FlowBuilder:
         label: str = "",
         config: dict[str, Any] | None = None,
     ) -> str:
-        """Add an EXIT node. Returns node ID."""
+        """Add an EXIT node (legacy). Returns node ID."""
         nid = self._next_id("exit")
         subtype = exit_type.value if isinstance(exit_type, ExitType) else exit_type
         node = FlowNode(
-            id=nid, node_type=NodeType.EXIT.value,
+            id=nid, node_type="EXIT",
             subtype=subtype, label=label or subtype,
             config=config or {},
         )
         self._flow.add_node(node)
         return nid
+
+    # --- Common ---
 
     def connect(self, from_id: str, to_id: str) -> None:
         """Connect two nodes."""

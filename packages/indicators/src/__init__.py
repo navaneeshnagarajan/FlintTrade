@@ -75,8 +75,11 @@ from packages.indicators.src.volume import (
 from packages.indicators.src.signals import (
     crossover,
     crossunder,
+    exrem,
+    flip,
     pivothigh,
     pivotlow,
+    valuewhen,
 )
 
 # Streaming
@@ -141,8 +144,11 @@ __all__ = [
     # signals
     "crossover",
     "crossunder",
+    "exrem",
+    "flip",
     "pivothigh",
     "pivotlow",
+    "valuewhen",
     # streaming
     "StreamingEMA",
     "StreamingSMA",

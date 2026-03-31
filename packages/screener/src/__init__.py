@@ -1,7 +1,8 @@
-"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis, RRG."""
+"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis, RRG, scanner."""
 
 __version__ = "0.1.0-alpha"
 
+from .scanner import ScannerDef, ScannerEngine, ScanResult
 from .stock_cache import StockCache, StockFundamentals
 
 from .futures_quadrant import FuturesQuadrant, FuturesSnapshot, Quadrant, QuadrantResult
@@ -68,4 +69,8 @@ __all__ = [
     "compute_rrg",
     "classify_quadrant",
     "build_sector_rrg",
+    # Scanner
+    "ScannerDef",
+    "ScannerEngine",
+    "ScanResult",
 ]

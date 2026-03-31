@@ -1,5 +1,6 @@
 """Extended tests for FlowBuilder — node creation, edge connection, validation, serialization.
 
+Covers all 54 node types, the node registry, and both legacy and new APIs.
 No external dependencies. Pure in-process logic.
 """
 
@@ -11,18 +12,11 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Enum coverage
+# Enum coverage (legacy)
 # ---------------------------------------------------------------------------
 
 
-class TestFlowEnums:
-    def test_node_type_values(self):
-        from packages.integration.src.flow_builder import NodeType
-        assert NodeType.SIGNAL == "SIGNAL"
-        assert NodeType.CONDITION == "CONDITION"
-        assert NodeType.ACTION == "ACTION"
-        assert NodeType.EXIT == "EXIT"
-
+class TestLegacyEnums:
     def test_signal_source_values(self):
         from packages.integration.src.flow_builder import SignalSource
         assert SignalSource.TRADINGVIEW == "TRADINGVIEW"
@@ -49,6 +43,245 @@ class TestFlowEnums:
         expected = {"STOP_LOSS", "TARGET", "TRAILING_SL", "TIME_BASED", "SIGNAL_BASED"}
         actual = {e.value for e in ExitType}
         assert expected == actual
+
+
+# ---------------------------------------------------------------------------
+# NodeType enum — all 54
+# ---------------------------------------------------------------------------
+
+
+class TestNodeTypeEnum:
+    def test_total_count_is_54(self):
+        from packages.integration.src.flow_builder import NodeType
+        assert len(NodeType) == 54
+
+    def test_trigger_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        triggers = {"start", "priceAlert", "webhookTrigger", "httpRequest"}
+        for t in triggers:
+            assert NodeType(t) is not None
+
+    def test_action_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        actions = {
+            "placeOrder", "smartOrder", "optionsOrder", "optionsMultiOrder",
+            "cancelAllOrders", "closePositions", "cancelOrder", "modifyOrder",
+            "basketOrder", "splitOrder",
+        }
+        for a in actions:
+            assert NodeType(a) is not None
+
+    def test_condition_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        conditions = {"positionCheck", "fundCheck", "timeWindow", "timeCondition", "priceCondition"}
+        for c in conditions:
+            assert NodeType(c) is not None
+
+    def test_logic_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        logic = {"andGate", "orGate", "notGate"}
+        for l in logic:
+            assert NodeType(l) is not None
+
+    def test_data_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        data = {
+            "getQuote", "getDepth", "getOrderStatus", "history", "openPosition",
+            "expiry", "intervals", "multiQuotes", "symbol", "optionSymbol",
+            "orderBook", "tradeBook", "positionBook", "syntheticFuture",
+            "optionChain", "search", "holidays", "timings",
+        }
+        for d in data:
+            assert NodeType(d) is not None
+
+    def test_streaming_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        streaming = {"subscribeLtp", "subscribeQuote", "subscribeDepth", "unsubscribe"}
+        for s in streaming:
+            assert NodeType(s) is not None
+
+    def test_risk_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        risk = {"holdings", "funds", "margin"}
+        for r in risk:
+            assert NodeType(r) is not None
+
+    def test_utility_types(self):
+        from packages.integration.src.flow_builder import NodeType
+        utility = {"telegramAlert", "delay", "waitUntil", "group", "variable", "mathExpression", "log"}
+        for u in utility:
+            assert NodeType(u) is not None
+
+
+# ---------------------------------------------------------------------------
+# Node registry
+# ---------------------------------------------------------------------------
+
+
+class TestNodeRegistry:
+    def test_registry_has_54_entries(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY
+        assert len(NODE_REGISTRY) == 54
+
+    def test_every_node_type_has_a_spec(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY, NodeType
+        for nt in NodeType:
+            assert nt in NODE_REGISTRY, f"Missing spec for {nt}"
+
+    def test_every_spec_has_label(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY
+        for nt, spec in NODE_REGISTRY.items():
+            assert spec.label, f"Missing label for {nt}"
+
+    def test_every_spec_has_category(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY, NodeCategory
+        for nt, spec in NODE_REGISTRY.items():
+            assert isinstance(spec.category, NodeCategory), f"Bad category for {nt}"
+
+    def test_every_spec_has_description(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY
+        for nt, spec in NODE_REGISTRY.items():
+            assert spec.description, f"Missing description for {nt}"
+
+    def test_get_node_spec_by_enum(self):
+        from packages.integration.src.flow_builder import NodeType, get_node_spec
+        spec = get_node_spec(NodeType.PLACE_ORDER)
+        assert spec.label == "Place Order"
+
+    def test_get_node_spec_by_string(self):
+        from packages.integration.src.flow_builder import get_node_spec
+        spec = get_node_spec("placeOrder")
+        assert spec.label == "Place Order"
+
+    def test_get_node_spec_invalid_raises(self):
+        from packages.integration.src.flow_builder import get_node_spec
+        with pytest.raises((KeyError, ValueError)):
+            get_node_spec("nonExistentNode")
+
+    def test_get_all_node_types(self):
+        from packages.integration.src.flow_builder import get_all_node_types
+        all_types = get_all_node_types()
+        assert len(all_types) == 54
+
+    def test_nodes_by_category(self):
+        from packages.integration.src.flow_builder import NODES_BY_CATEGORY, NodeCategory
+        assert len(NODES_BY_CATEGORY[NodeCategory.TRIGGER]) == 4
+        assert len(NODES_BY_CATEGORY[NodeCategory.ACTION]) == 10
+        assert len(NODES_BY_CATEGORY[NodeCategory.CONDITION]) == 5
+        assert len(NODES_BY_CATEGORY[NodeCategory.LOGIC]) == 3
+        assert len(NODES_BY_CATEGORY[NodeCategory.DATA]) == 18
+        assert len(NODES_BY_CATEGORY[NodeCategory.STREAMING]) == 4
+        assert len(NODES_BY_CATEGORY[NodeCategory.RISK]) == 3
+        assert len(NODES_BY_CATEGORY[NodeCategory.UTILITY]) == 7
+        # Confirm total: 4+10+5+3+17+4+3+7 = 53 — hmm, check
+        total = sum(len(v) for v in NODES_BY_CATEGORY.values())
+        assert total == 54  # must match NodeType enum count
+
+    def test_get_node_types_by_category(self):
+        from packages.integration.src.flow_builder import NodeCategory, NodeType, get_node_types_by_category
+        triggers = get_node_types_by_category(NodeCategory.TRIGGER)
+        assert NodeType.START in triggers
+        assert NodeType.PRICE_ALERT in triggers
+
+    def test_config_fields_exist_for_order_nodes(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY, NodeType
+        order_types = [
+            NodeType.PLACE_ORDER, NodeType.SMART_ORDER, NodeType.OPTIONS_ORDER,
+            NodeType.MODIFY_ORDER, NodeType.BASKET_ORDER, NodeType.SPLIT_ORDER,
+        ]
+        for nt in order_types:
+            spec = NODE_REGISTRY[nt]
+            field_names = {f.name for f in spec.config_fields}
+            assert len(field_names) > 0, f"No config fields for {nt}"
+
+    def test_place_order_has_symbol_and_quantity(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY, NodeType
+        spec = NODE_REGISTRY[NodeType.PLACE_ORDER]
+        field_names = {f.name for f in spec.config_fields}
+        assert "symbol" in field_names
+        assert "quantity" in field_names
+        assert "exchange" in field_names
+        assert "action" in field_names
+
+    def test_condition_nodes_have_bool_outputs(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY, NodeCategory
+        for nt, spec in NODE_REGISTRY.items():
+            if spec.category == NodeCategory.CONDITION:
+                output_names = {o.name for o in spec.outputs}
+                assert "yes" in output_names, f"{nt} missing 'yes' output"
+                assert "no" in output_names, f"{nt} missing 'no' output"
+
+    def test_logic_gates_have_bool_outputs(self):
+        from packages.integration.src.flow_builder import NODE_REGISTRY, NodeCategory
+        for nt, spec in NODE_REGISTRY.items():
+            if spec.category == NodeCategory.LOGIC:
+                output_names = {o.name for o in spec.outputs}
+                assert "yes" in output_names, f"{nt} missing 'yes' output"
+                assert "no" in output_names, f"{nt} missing 'no' output"
+
+
+# ---------------------------------------------------------------------------
+# Node creation — one test per node type (parametrized)
+# ---------------------------------------------------------------------------
+
+
+class TestNodeCreationAllTypes:
+    """Test that every node type can be created via FlowBuilder.add_node()."""
+
+    def test_create_all_54_node_types(self):
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("AllNodes")
+        ids: list[str] = []
+        for nt in NodeType:
+            nid = fb.add_node(nt, label=f"Test {nt.value}")
+            ids.append(nid)
+        flow = fb.build()
+        assert len(flow.nodes) == 54
+        # All IDs unique
+        assert len(set(ids)) == 54
+
+    def test_node_gets_label_from_registry(self):
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("LabelTest")
+        nid = fb.add_node(NodeType.TELEGRAM_ALERT)
+        flow = fb.build()
+        assert flow.nodes[nid].label == "Telegram Alert"
+
+    def test_node_custom_label_overrides_registry(self):
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("LabelTest")
+        nid = fb.add_node(NodeType.DELAY, label="Wait 5 Seconds")
+        flow = fb.build()
+        assert flow.nodes[nid].label == "Wait 5 Seconds"
+
+    def test_node_config_stored(self):
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("ConfigTest")
+        nid = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY", "quantity": 75})
+        flow = fb.build()
+        assert flow.nodes[nid].config["symbol"] == "NIFTY"
+        assert flow.nodes[nid].config["quantity"] == 75
+
+    def test_trigger_node_auto_sets_entry(self):
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("EntryTest")
+        nid = fb.add_node(NodeType.START, config={"scheduleType": "daily"})
+        flow = fb.build()
+        assert flow.entry_node_id == nid
+
+    def test_non_trigger_does_not_set_entry(self):
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("NoEntry")
+        fb.add_node(NodeType.PLACE_ORDER)
+        flow = fb.build()
+        assert flow.entry_node_id == ""
+
+    def test_add_node_with_string_type(self):
+        from packages.integration.src.flow_builder import FlowBuilder
+        fb = FlowBuilder("StringType")
+        nid = fb.add_node("start", config={"scheduleType": "once"})
+        flow = fb.build()
+        assert flow.nodes[nid].node_type == "start"
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +325,6 @@ class TestFlowNode:
         assert "next_nodes" in d
 
     def test_from_dict_missing_optional_keys(self):
-        """from_dict must handle minimal dict with just id and node_type."""
         from packages.integration.src.flow_builder import FlowNode
         n = FlowNode.from_dict({"id": "n1", "node_type": "EXIT"})
         assert n.label == ""
@@ -140,7 +372,7 @@ class TestFlowDefinition:
         flow.add_node(FlowNode(id="n1", node_type="SIGNAL"))
         flow.add_node(FlowNode(id="n2", node_type="ACTION"))
         flow.connect("n1", "n2")
-        flow.connect("n1", "n2")  # duplicate
+        flow.connect("n1", "n2")
         assert flow.nodes["n1"].next_nodes.count("n2") == 1
 
     def test_to_dict_structure(self):
@@ -191,14 +423,14 @@ class TestFlowDefinition:
 class TestValidationResult:
     def test_valid_flow_with_signal_condition_action(self):
         from packages.integration.src.flow_builder import (
-            ConditionType, FlowDefinition, FlowNode, NodeType, SignalSource, validate_flow,
+            ConditionType, FlowDefinition, FlowNode, SignalSource, validate_flow,
         )
         flow = FlowDefinition(name="Valid", entry_node_id="n1")
-        flow.add_node(FlowNode(id="n1", node_type=NodeType.SIGNAL.value,
+        flow.add_node(FlowNode(id="n1", node_type="SIGNAL",
                                subtype=SignalSource.TRADINGVIEW.value, next_nodes=["n2"]))
-        flow.add_node(FlowNode(id="n2", node_type=NodeType.CONDITION.value,
+        flow.add_node(FlowNode(id="n2", node_type="CONDITION",
                                subtype=ConditionType.PRICE_ABOVE.value, next_nodes=["n3"]))
-        flow.add_node(FlowNode(id="n3", node_type=NodeType.ACTION.value,
+        flow.add_node(FlowNode(id="n3", node_type="ACTION",
                                subtype="PLACE_ORDER"))
         result = validate_flow(flow)
         assert result.is_valid
@@ -255,9 +487,9 @@ class TestValidationResult:
         flow = FlowDefinition(name="Orphan", entry_node_id="n1")
         flow.add_node(FlowNode(id="n1", node_type="SIGNAL", next_nodes=["n2"]))
         flow.add_node(FlowNode(id="n2", node_type="ACTION"))
-        flow.add_node(FlowNode(id="orphan", node_type="EXIT"))  # unreachable
+        flow.add_node(FlowNode(id="orphan", node_type="EXIT"))
         result = validate_flow(flow)
-        assert result.is_valid  # warnings don't fail validation
+        assert result.is_valid
         assert any(w.node_id == "orphan" for w in result.warnings)
 
     def test_entry_not_signal_type_is_warning_not_error(self):
@@ -266,7 +498,6 @@ class TestValidationResult:
         flow.add_node(FlowNode(id="n1", node_type="CONDITION", next_nodes=["n2"]))
         flow.add_node(FlowNode(id="n2", node_type="ACTION"))
         result = validate_flow(flow)
-        # Should warn but not fail
         assert any(w.severity == "warning" for w in result.warnings)
 
     def test_flow_with_exit_node_valid(self):
@@ -277,13 +508,33 @@ class TestValidationResult:
         result = validate_flow(flow)
         assert result.is_valid
 
+    def test_new_api_flow_validates(self):
+        """Flow built with new add_node API should validate correctly."""
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("NewAPI")
+        start = fb.add_node(NodeType.START, config={"scheduleType": "daily"})
+        order = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY"})
+        fb.connect(start, order)
+        result = fb.validate()
+        assert result.is_valid
+
+    def test_new_api_telegram_is_terminal(self):
+        """Utility nodes like Telegram should count as terminal (ACTION-like)."""
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("TgFlow")
+        start = fb.add_node(NodeType.START)
+        tg = fb.add_node(NodeType.TELEGRAM_ALERT, config={"message": "Hello"})
+        fb.connect(start, tg)
+        result = fb.validate()
+        assert result.is_valid
+
 
 # ---------------------------------------------------------------------------
-# FlowBuilder — builder API
+# FlowBuilder — legacy builder API
 # ---------------------------------------------------------------------------
 
 
-class TestFlowBuilderAPI:
+class TestFlowBuilderLegacyAPI:
     def test_add_signal_returns_id(self):
         from packages.integration.src.flow_builder import FlowBuilder, SignalSource
         fb = FlowBuilder("Test")
@@ -386,7 +637,7 @@ class TestFlowBuilderAPI:
             fb.add_action(ActionType.PLACE_ORDER),
             fb.add_exit(ExitType.STOP_LOSS),
         ]
-        assert len(set(ids)) == 5  # all unique
+        assert len(set(ids)) == 5
 
     def test_config_stored_on_node(self):
         from packages.integration.src.flow_builder import ActionType, FlowBuilder
@@ -404,7 +655,6 @@ class TestFlowBuilderAPI:
         assert flow.nodes[nid].label == "Manual Trigger"
 
     def test_subtype_from_string(self):
-        """Passing subtype as a plain string (not enum) should still work."""
         from packages.integration.src.flow_builder import FlowBuilder
         fb = FlowBuilder("StrType")
         nid = fb.add_signal("PYTHON_SCRIPT")
@@ -413,11 +663,11 @@ class TestFlowBuilderAPI:
 
 
 # ---------------------------------------------------------------------------
-# Full end-to-end flow: Signal → Condition → Action → Exit
+# Full end-to-end flow: Signal -> Condition -> Action -> Exit (legacy)
 # ---------------------------------------------------------------------------
 
 
-class TestEndToEndFlow:
+class TestEndToEndFlowLegacy:
     def _build_full_flow(self):
         from packages.integration.src.flow_builder import (
             ActionType, ConditionType, ExitType, FlowBuilder, SignalSource,
@@ -456,7 +706,6 @@ class TestEndToEndFlow:
             assert restored.nodes[nid].next_nodes == node.next_nodes
 
     def test_multiple_actions_one_signal(self):
-        """One signal can fan out to multiple actions."""
         from packages.integration.src.flow_builder import ActionType, FlowBuilder, SignalSource
         fb = FlowBuilder("FanOut")
         sig = fb.add_signal(SignalSource.TRADINGVIEW)
@@ -469,3 +718,114 @@ class TestEndToEndFlow:
         assert act2 in flow.nodes[sig].next_nodes
         result = fb.validate()
         assert result.is_valid
+
+
+# ---------------------------------------------------------------------------
+# Full end-to-end flow: new API with 54 node types
+# ---------------------------------------------------------------------------
+
+
+class TestEndToEndFlowNewAPI:
+    def test_options_straddle_flow(self):
+        """Build a realistic options straddle flow with the new API."""
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("NIFTY Straddle", description="Daily straddle at 09:16")
+        start = fb.add_node(NodeType.START, config={"scheduleType": "daily", "time": "09:16"})
+        quote = fb.add_node(NodeType.GET_QUOTE, config={"symbol": "NIFTY", "exchange": "NSE_INDEX"})
+        ce = fb.add_node(NodeType.OPTIONS_ORDER, label="Sell CE", config={
+            "underlying": "NIFTY", "optionType": "CE", "action": "SELL", "quantity": 75,
+        })
+        pe = fb.add_node(NodeType.OPTIONS_ORDER, label="Sell PE", config={
+            "underlying": "NIFTY", "optionType": "PE", "action": "SELL", "quantity": 75,
+        })
+        tg = fb.add_node(NodeType.TELEGRAM_ALERT, config={"message": "Straddle placed"})
+
+        fb.connect(start, quote)
+        fb.connect(quote, ce)
+        fb.connect(quote, pe)
+        fb.connect(ce, tg)
+
+        result = fb.validate()
+        assert result.is_valid
+        assert len(fb.build().nodes) == 5
+
+    def test_price_alert_flow(self):
+        """Price alert -> condition -> order flow."""
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("Price Breakout")
+        alert = fb.add_node(NodeType.PRICE_ALERT, config={
+            "symbol": "RELIANCE", "exchange": "NSE", "condition": "crosses_above", "price": 2800,
+        })
+        check = fb.add_node(NodeType.FUND_CHECK, config={"minFunds": 50000})
+        order = fb.add_node(NodeType.PLACE_ORDER, config={
+            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10,
+        })
+        fb.connect(alert, check)
+        fb.connect(check, order)
+        result = fb.validate()
+        assert result.is_valid
+
+    def test_data_pipeline_flow(self):
+        """Data fetch -> math -> log flow."""
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("Data Pipeline")
+        start = fb.add_node(NodeType.START, config={"scheduleType": "interval", "intervalValue": 5})
+        ltp = fb.add_node(NodeType.SUBSCRIBE_LTP, config={"symbol": "NIFTY", "exchange": "NSE_INDEX"})
+        math = fb.add_node(NodeType.MATH_EXPRESSION, config={
+            "expression": "{{ltp}} * 1.01", "outputVariable": "target",
+        })
+        log = fb.add_node(NodeType.LOG, config={"message": "Target: {{target}}"})
+        fb.connect(start, ltp)
+        fb.connect(ltp, math)
+        fb.connect(math, log)
+        result = fb.validate()
+        assert result.is_valid
+
+    def test_logic_gate_flow(self):
+        """Multiple conditions -> AND gate -> order."""
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType
+        fb = FlowBuilder("Multi-Condition")
+        start = fb.add_node(NodeType.START)
+        time_ok = fb.add_node(NodeType.TIME_WINDOW, config={"startTime": "09:15", "endTime": "15:20"})
+        price_ok = fb.add_node(NodeType.PRICE_CONDITION, config={
+            "symbol": "NIFTY", "exchange": "NSE_INDEX", "operator": "greater_than", "value": 24000,
+        })
+        gate = fb.add_node(NodeType.AND_GATE)
+        order = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY", "action": "BUY"})
+
+        fb.connect(start, time_ok)
+        fb.connect(start, price_ok)
+        fb.connect(time_ok, gate)
+        fb.connect(price_ok, gate)
+        fb.connect(gate, order)
+
+        result = fb.validate()
+        assert result.is_valid
+
+    def test_mixed_legacy_and_new_api(self):
+        """Legacy add_signal + new add_node should coexist."""
+        from packages.integration.src.flow_builder import FlowBuilder, NodeType, SignalSource
+        fb = FlowBuilder("Mixed")
+        sig = fb.add_signal(SignalSource.TRADINGVIEW)
+        order = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY"})
+        fb.connect(sig, order)
+        result = fb.validate()
+        assert result.is_valid
+
+    def test_serialization_roundtrip_new_api(self):
+        """Flow built with new API serializes and restores correctly."""
+        from packages.integration.src.flow_builder import FlowBuilder, FlowDefinition, NodeType
+        fb = FlowBuilder("Roundtrip")
+        start = fb.add_node(NodeType.START)
+        delay = fb.add_node(NodeType.DELAY, config={"delayValue": 5, "delayUnit": "seconds"})
+        log = fb.add_node(NodeType.LOG, config={"message": "Hello"})
+        fb.connect(start, delay)
+        fb.connect(delay, log)
+
+        json_str = fb.to_json()
+        restored = FlowDefinition.from_json(json_str)
+        assert restored.name == "Roundtrip"
+        assert len(restored.nodes) == 3
+        # Verify connections survived roundtrip
+        start_node = restored.nodes[start]
+        assert delay in start_node.next_nodes

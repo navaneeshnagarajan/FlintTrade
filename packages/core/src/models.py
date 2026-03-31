@@ -77,6 +77,14 @@ class Order(BaseModel):
     trigger_price: str = "0"
     disclosed_quantity: str = "0"
     strategy: str = "Flint"
+    market_protection: bool | None = None
+    """Enable Market Price Protection (MPP) for market orders.
+
+    When True, OpenAlgo converts MARKET orders to LIMIT orders with a
+    price buffer based on exchange-regulated protection slabs.  Currently
+    supported by Zerodha and selected brokers.  None means use the
+    broker's default behaviour.
+    """
 
 
 class SmartOrder(Order):

@@ -1,16 +1,38 @@
 /**
  * FlowsSection — Flow Builder tab.
- * Shows node-type stats and the registered webhook list (create / delete).
+ * Shows the 54-node drag-and-drop palette grouped by category,
+ * node-type stats, and the registered webhook list (create / delete).
  */
 
 import { useState, useCallback } from "react";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import {
+  Plus, Trash2, Loader2, ChevronDown, ChevronRight,
+  // Trigger icons
+  Clock, Bell, Webhook, Globe,
+  // Action icons
+  ShoppingCart, Zap, TrendingUp, Layers, XCircle, LogOut,
+  X, Edit, ShoppingBag, Scissors,
+  // Condition icons
+  Search, Wallet, Timer, GitCompare,
+  // Logic icons
+  GitMerge, GitBranch, ToggleLeft,
+  // Data icons
+  BarChart3, FileSearch, CandlestickChart, Briefcase,
+  Calendar, BarChart, BarChart2, Hash, Tag, BookOpen,
+  FileText, Table, Activity, Table2, CalendarOff, Clock3,
+  // Streaming icons
+  Radio, Unplug,
+  // Risk icons
+  PieChart, IndianRupee, Calculator,
+  // Utility icons
+  Send, Square, Variable,
+} from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table as UITable, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
@@ -21,6 +43,7 @@ import {
   type WebhookConfig,
 } from "@/services/ftApi";
 import { InlineToast } from "./shared";
+import type { LucideIcon } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,6 +70,180 @@ const WEBHOOK_TYPE_LABELS: Record<WebhookConfig["type"], string> = {
   chartink:    "ChartInk",
   custom:      "Custom",
 };
+
+// ---------------------------------------------------------------------------
+// Node palette — all 54 node types
+// ---------------------------------------------------------------------------
+
+interface NodeDef {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  description: string;
+}
+
+interface NodeCategory {
+  name: string;
+  color: string;
+  nodes: NodeDef[];
+}
+
+const NODE_CATEGORIES: NodeCategory[] = [
+  {
+    name: "Triggers",
+    color: "text-green-400",
+    nodes: [
+      { id: "start",          label: "Start",             icon: Clock,           description: "Schedule: one-time, daily, weekly, interval" },
+      { id: "priceAlert",     label: "Price Alert",       icon: Bell,            description: "Trigger on price crossing a threshold" },
+      { id: "webhookTrigger", label: "Webhook Trigger",   icon: Webhook,         description: "Trigger from inbound webhook" },
+      { id: "httpRequest",    label: "HTTP Request",      icon: Globe,           description: "Outbound HTTP request" },
+    ],
+  },
+  {
+    name: "Actions",
+    color: "text-blue-400",
+    nodes: [
+      { id: "placeOrder",        label: "Place Order",         icon: ShoppingCart, description: "Regular order via OpenAlgo" },
+      { id: "smartOrder",        label: "Smart Order",         icon: Zap,          description: "Smart order with position sizing" },
+      { id: "optionsOrder",      label: "Options Order",       icon: TrendingUp,   description: "Options order by strike offset" },
+      { id: "optionsMultiOrder", label: "Options Multi Order", icon: Layers,       description: "Multi-leg options (straddle, etc.)" },
+      { id: "cancelAllOrders",   label: "Cancel All Orders",   icon: XCircle,      description: "Cancel all open orders" },
+      { id: "closePositions",    label: "Close Positions",     icon: LogOut,       description: "Close all open positions" },
+      { id: "cancelOrder",       label: "Cancel Order",        icon: X,            description: "Cancel a specific order" },
+      { id: "modifyOrder",       label: "Modify Order",        icon: Edit,         description: "Modify an existing order" },
+      { id: "basketOrder",       label: "Basket Order",        icon: ShoppingBag,  description: "Multiple orders in one call" },
+      { id: "splitOrder",        label: "Split Order",         icon: Scissors,     description: "Split large order into slices" },
+    ],
+  },
+  {
+    name: "Conditions",
+    color: "text-yellow-400",
+    nodes: [
+      { id: "positionCheck",  label: "Position Check",   icon: Search,     description: "Check if position exists" },
+      { id: "fundCheck",      label: "Fund Check",       icon: Wallet,     description: "Check available funds" },
+      { id: "timeWindow",     label: "Time Window",      icon: Clock,      description: "Check if within time range" },
+      { id: "timeCondition",  label: "Time Condition",   icon: Timer,      description: "Time before/after/at check" },
+      { id: "priceCondition", label: "Price Condition",  icon: GitCompare, description: "Compare price to value" },
+    ],
+  },
+  {
+    name: "Logic Gates",
+    color: "text-purple-400",
+    nodes: [
+      { id: "andGate", label: "AND Gate",  icon: GitMerge,   description: "All inputs must be true" },
+      { id: "orGate",  label: "OR Gate",   icon: GitBranch,  description: "Any input can be true" },
+      { id: "notGate", label: "NOT Gate",  icon: ToggleLeft,  description: "Invert boolean input" },
+    ],
+  },
+  {
+    name: "Data",
+    color: "text-cyan-400",
+    nodes: [
+      { id: "getQuote",        label: "Get Quote",        icon: BarChart3,        description: "Fetch real-time quote" },
+      { id: "getDepth",        label: "Get Depth",        icon: Layers,           description: "Fetch market depth" },
+      { id: "getOrderStatus",  label: "Get Order Status", icon: FileSearch,       description: "Get status of an order" },
+      { id: "history",         label: "History",          icon: CandlestickChart, description: "OHLCV candle data" },
+      { id: "openPosition",    label: "Open Position",    icon: Briefcase,        description: "Get position details" },
+      { id: "expiry",          label: "Expiry",           icon: Calendar,         description: "Get expiry dates" },
+      { id: "intervals",       label: "Intervals",        icon: BarChart,         description: "Supported candle intervals" },
+      { id: "multiQuotes",     label: "Multi Quotes",     icon: BarChart2,        description: "Quotes for multiple symbols" },
+      { id: "symbol",          label: "Symbol Lookup",    icon: Hash,             description: "Look up symbol details" },
+      { id: "optionSymbol",    label: "Option Symbol",    icon: Tag,              description: "Resolve option symbol" },
+      { id: "orderBook",       label: "Order Book",       icon: BookOpen,         description: "All orders today" },
+      { id: "tradeBook",       label: "Trade Book",       icon: FileText,         description: "All executed trades" },
+      { id: "positionBook",    label: "Position Book",    icon: Table,            description: "All current positions" },
+      { id: "syntheticFuture", label: "Synthetic Future", icon: Activity,         description: "Synthetic future price" },
+      { id: "optionChain",     label: "Option Chain",     icon: Table2,           description: "Full option chain" },
+      { id: "search",          label: "Search Symbol",    icon: Search,           description: "Search symbols by name" },
+      { id: "holidays",        label: "Holidays",         icon: CalendarOff,      description: "Market holidays list" },
+      { id: "timings",         label: "Market Timings",   icon: Clock3,           description: "Market open/close times" },
+    ],
+  },
+  {
+    name: "Streaming",
+    color: "text-emerald-400",
+    nodes: [
+      { id: "subscribeLtp",   label: "Subscribe LTP",   icon: Radio,    description: "Real-time LTP via WebSocket" },
+      { id: "subscribeQuote",  label: "Subscribe Quote", icon: Radio,    description: "Real-time quote via WebSocket" },
+      { id: "subscribeDepth",  label: "Subscribe Depth", icon: Radio,    description: "Real-time depth via WebSocket" },
+      { id: "unsubscribe",     label: "Unsubscribe",     icon: Unplug, description: "Unsubscribe from stream" },
+    ],
+  },
+  {
+    name: "Risk",
+    color: "text-orange-400",
+    nodes: [
+      { id: "holdings", label: "Holdings", icon: PieChart,    description: "Portfolio holdings" },
+      { id: "funds",    label: "Funds",    icon: IndianRupee, description: "Available margin/funds" },
+      { id: "margin",   label: "Margin",   icon: Calculator,  description: "Margin calculation" },
+    ],
+  },
+  {
+    name: "Utilities",
+    color: "text-gray-400",
+    nodes: [
+      { id: "telegramAlert",  label: "Telegram Alert",   icon: Send,       description: "Send Telegram notification" },
+      { id: "delay",          label: "Delay",             icon: Timer,      description: "Wait for a duration" },
+      { id: "waitUntil",      label: "Wait Until",        icon: Clock,      description: "Wait until a specific time" },
+      { id: "group",          label: "Group",             icon: Square,     description: "Visual grouping (no logic)" },
+      { id: "variable",       label: "Variable",          icon: Variable,   description: "Set/compute a variable" },
+      { id: "mathExpression", label: "Math Expression",   icon: Calculator, description: "Evaluate math expression" },
+      { id: "log",            label: "Log",               icon: FileText,   description: "Log a message" },
+    ],
+  },
+];
+
+const TOTAL_NODE_COUNT = NODE_CATEGORIES.reduce((sum, cat) => sum + cat.nodes.length, 0);
+
+// ---------------------------------------------------------------------------
+// CollapsibleCategory — expandable node group
+// ---------------------------------------------------------------------------
+
+function CollapsibleCategory({ category }: { category: NodeCategory }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div className="border border-border-default rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-surface-base hover:bg-surface-card transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-semibold ${category.color}`}>{category.name}</span>
+          <Badge className="text-[10px] bg-surface-card text-text-muted border-0 px-1.5 py-0">
+            {category.nodes.length}
+          </Badge>
+        </div>
+        {open ? <ChevronDown size={12} className="text-text-muted" /> : <ChevronRight size={12} className="text-text-muted" />}
+      </button>
+      {open && (
+        <div className="grid grid-cols-2 gap-1 p-2 bg-surface-base/50">
+          {category.nodes.map((node) => {
+            const Icon = node.icon;
+            return (
+              <div
+                key={node.id}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-surface-card border border-border-default hover:border-accent/50 transition-colors cursor-grab group"
+                title={node.description}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("application/flow-node", node.id);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+              >
+                <Icon size={12} className="text-text-muted group-hover:text-accent shrink-0" />
+                <span className="text-[10px] text-text-secondary group-hover:text-text-primary truncate">
+                  {node.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -103,18 +300,18 @@ export default function FlowsSection() {
         <GlassCard className="p-6">
           <h3 className="font-heading font-semibold text-lg text-text-primary mb-2">Flow Builder</h3>
           <p className="text-sm text-text-secondary leading-relaxed mb-4">
-            Build trading automations visually with a 54-node drag-and-drop flow builder.
+            Build trading automations visually with a {TOTAL_NODE_COUNT}-node drag-and-drop flow builder.
             Connect market data triggers, conditions, and order actions without writing code.
             Flows run server-side and persist across sessions.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="bg-surface-base border border-border-default rounded-lg p-4">
               <p className="text-xs text-text-muted mb-1">Node Types</p>
-              <p className="text-2xl font-mono font-bold text-text-primary">54</p>
+              <p className="text-2xl font-mono font-bold text-text-primary">{TOTAL_NODE_COUNT}</p>
             </div>
             <div className="bg-surface-base border border-border-default rounded-lg p-4">
               <p className="text-xs text-text-muted mb-1">Categories</p>
-              <p className="text-2xl font-mono font-bold text-text-primary">8</p>
+              <p className="text-2xl font-mono font-bold text-text-primary">{NODE_CATEGORIES.length}</p>
             </div>
             <div className="bg-surface-base border border-border-default rounded-lg p-4">
               <p className="text-xs text-text-muted mb-1">Execution</p>
@@ -123,14 +320,15 @@ export default function FlowsSection() {
           </div>
         </GlassCard>
 
-        {/* Node categories */}
+        {/* Node palette — collapsible by category */}
         <GlassCard className="p-6">
-          <h3 className="font-heading font-semibold text-sm text-text-primary mb-2">Node Categories</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {["Triggers", "Conditions", "Actions", "Orders", "Indicators", "Data", "Alerts", "Utilities"].map((cat) => (
-              <div key={cat} className="bg-surface-base border border-border-default rounded-lg p-3 text-center">
-                <p className="text-xs font-semibold text-text-primary">{cat}</p>
-              </div>
+          <h3 className="font-heading font-semibold text-sm text-text-primary mb-3">Node Palette</h3>
+          <p className="text-xs text-text-muted mb-3">
+            Drag nodes onto the canvas to build your flow. {TOTAL_NODE_COUNT} nodes across {NODE_CATEGORIES.length} categories.
+          </p>
+          <div className="space-y-2">
+            {NODE_CATEGORIES.map((cat) => (
+              <CollapsibleCategory key={cat.name} category={cat} />
             ))}
           </div>
         </GlassCard>
@@ -239,7 +437,7 @@ export default function FlowsSection() {
           )}
 
           {!loadingWebhooks && webhooks.length > 0 && (
-            <Table>
+            <UITable>
               <TableHeader>
                 <TableRow className="border-border-default hover:bg-transparent">
                   <TableHead className="text-xs text-text-muted font-medium">Name</TableHead>
@@ -280,7 +478,7 @@ export default function FlowsSection() {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+            </UITable>
           )}
         </GlassCard>
 

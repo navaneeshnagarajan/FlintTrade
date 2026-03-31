@@ -194,8 +194,13 @@ class OpenAlgoClient:
     # ==================================================================
 
     async def place_order(self, order: Order) -> OrderResponse:
-        """POST /api/v1/placeorder"""
-        payload = self._body({
+        """POST /api/v1/placeorder
+
+        Supports Market Price Protection (MPP): when ``order.market_protection``
+        is True and the broker supports it, MARKET orders are converted to
+        LIMIT orders with an exchange-regulated price buffer.
+        """
+        extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
             "action": order.action.value,
@@ -206,13 +211,19 @@ class OpenAlgoClient:
             "price": order.price,
             "trigger_price": order.trigger_price,
             "disclosed_quantity": order.disclosed_quantity,
-        })
+        }
+        if order.market_protection is not None:
+            extras["market_protection"] = order.market_protection
+        payload = self._body(extras)
         data = await self._post("placeorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
     async def place_smart_order(self, order: SmartOrder) -> OrderResponse:
-        """POST /api/v1/placesmartorder"""
-        payload = self._body({
+        """POST /api/v1/placesmartorder
+
+        Supports Market Price Protection (MPP) — see ``place_order``.
+        """
+        extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
             "action": order.action.value,
@@ -224,7 +235,10 @@ class OpenAlgoClient:
             "trigger_price": order.trigger_price,
             "disclosed_quantity": order.disclosed_quantity,
             "position_size": order.position_size,
-        })
+        }
+        if order.market_protection is not None:
+            extras["market_protection"] = order.market_protection
+        payload = self._body(extras)
         data = await self._post("placesmartorder", payload, limiter=self._smart_limiter)
         return OrderResponse(**data)
 

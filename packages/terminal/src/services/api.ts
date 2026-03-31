@@ -24,6 +24,8 @@ import type {
   MarginData,
   Holiday,
   MarketTiming,
+  BrokerCapabilities,
+  LeverageSettings,
 } from "@/types/api";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
@@ -232,3 +234,9 @@ export const getHolidays = () => get<Holiday[]>("holidays");
 export const getTimings = () => get<MarketTiming[]>("timings");
 export const sendTelegram = (message: string) =>
   post<{ message: string }>("telegram", { message });
+
+// --- Broker Management (OpenAlgo 2.0.0.2) ---
+export const getBrokerCapabilities = () =>
+  get<BrokerCapabilities>("broker/capabilities");
+export const getLeverageSettings = () =>
+  get<LeverageSettings>("broker/leverage");

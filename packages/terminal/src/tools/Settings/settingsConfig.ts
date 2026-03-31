@@ -19,6 +19,7 @@ import {
   Activity,
   GraduationCap,
   Info,
+  Scale,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,6 +33,7 @@ export type SectionId =
   | "api"
   | "trading"
   | "risk"
+  | "leverage"
   | "keyboard"
   | "llm"
   | "telegram"
@@ -57,6 +59,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "api",        label: "API Connection",     icon: Wifi         },
   { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
   { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
+  { id: "leverage",   label: "Leverage",           icon: Scale        },
   { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard     },
   { id: "llm",        label: "LLM Config",         icon: Brain        },
   { id: "telegram",   label: "Telegram",           icon: Send         },

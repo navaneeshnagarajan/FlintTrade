@@ -596,6 +596,20 @@ export const banIP            = (ip: string, reason: string) =>
 export const unbanIP          = (ip: string) =>
   post<{ status: string }>("security/unban", { ip });
 
+// Auto-ban settings (absorbed from OpenAlgo security dashboard)
+export interface SecuritySettings {
+  auto_ban_enabled: boolean;
+  threshold_404: number;
+  ban_duration_404: number;
+  threshold_api: number;
+  ban_duration_api: number;
+  repeat_offender_limit: number;
+}
+
+export const getSecuritySettings = () => get<SecuritySettings>("security/settings");
+export const updateSecuritySettings = (settings: Partial<SecuritySettings>) =>
+  post<{ status: string }>("security/settings", settings);
+
 // ---------------------------------------------------------------------------
 // P&L Tracker
 // ---------------------------------------------------------------------------

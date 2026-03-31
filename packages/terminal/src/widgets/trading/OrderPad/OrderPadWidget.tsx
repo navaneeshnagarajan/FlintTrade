@@ -36,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { searchSymbol, placeOrder } from "@/services/api";
 import { useMargin } from "@/hooks/useMargin";
+import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours } from "@/lib/market";
@@ -289,6 +290,10 @@ export default function OrderPadWidget(_props: WidgetProps) {
   const priceEnabled = PRICE_ENABLED.has(orderType);
   const triggerEnabled = TRIGGER_ENABLED.has(orderType);
   const isBuy = action === "BUY";
+
+  // Broker capabilities — used to hide product for crypto, show dynamic exchanges
+  const { data: brokerCaps } = useBrokerCapabilities();
+  const isCryptoBroker = brokerCaps?.broker_type === "crypto";
 
   // Live margin requirement — enabled only when symbol + qty are set
   const { data: marginData, isFetching: marginFetching } = useMargin(
@@ -557,21 +562,23 @@ export default function OrderPadWidget(_props: WidgetProps) {
           />
         </div>
 
-        {/* Product type */}
-        <div className="flex flex-col gap-0.5">
-          <label className="text-xxs text-text-muted uppercase tracking-wider">Product</label>
-          <Controller
-            control={control}
-            name="product"
-            render={({ field }) => (
-              <PillGroup
-                value={field.value}
-                options={PRODUCT_TYPES}
-                onChange={field.onChange}
-              />
-            )}
-          />
-        </div>
+        {/* Product type — hidden for crypto brokers (no product concept) */}
+        {!isCryptoBroker && (
+          <div className="flex flex-col gap-0.5">
+            <label className="text-xxs text-text-muted uppercase tracking-wider">Product</label>
+            <Controller
+              control={control}
+              name="product"
+              render={({ field }) => (
+                <PillGroup
+                  value={field.value}
+                  options={PRODUCT_TYPES}
+                  onChange={field.onChange}
+                />
+              )}
+            />
+          </div>
+        )}
 
         {/* Qty + Price row */}
         <div className="grid grid-cols-2 gap-3">

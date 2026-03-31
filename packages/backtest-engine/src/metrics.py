@@ -333,6 +333,251 @@ class PerformanceMetrics:
 
 
 # ---------------------------------------------------------------------------
+# Streaming metrics (adapted from raptorbt Welford algorithm)
+# ---------------------------------------------------------------------------
+
+
+class StreamingMetrics:
+    """Single-pass streaming metrics using Welford's online algorithm.
+
+    Enables real-time metric calculation during live trading and backtesting
+    without storing all historical data points. Incrementally computes:
+    - Mean, variance, standard deviation of returns
+    - Sharpe and Sortino ratios
+    - Drawdown tracking (max, current, duration)
+    - Trade statistics (win rate, profit factor, consecutive streaks)
+    - SQN (System Quality Number)
+
+    Adapted from raptorbt (marketcalls/raptorbt) Rust streaming metrics.
+
+    Usage::
+
+        sm = StreamingMetrics(initial_capital=100_000.0)
+        sm.update_equity(100_500.0)   # After bar 1
+        sm.update_equity(99_800.0)    # After bar 2
+        sm.record_trade(pnl=500.0, return_pct=0.5, bars_held=3)
+        sm.record_trade(pnl=-200.0, return_pct=-0.2, bars_held=2)
+        snapshot = sm.snapshot()
+        print(f"Sharpe: {snapshot['sharpe']:.2f}")
+    """
+
+    def __init__(
+        self,
+        initial_capital: float = 0.0,
+        target_return: float = 0.0,
+        risk_free_rate: float = _RISK_FREE_RATE,
+    ) -> None:
+        # Welford accumulators for returns
+        self._count: int = 0
+        self._mean: float = 0.0
+        self._m2: float = 0.0
+        self._m2_downside: float = 0.0
+        self._target_return: float = target_return
+        self._risk_free_rate: float = risk_free_rate
+        self._sum_returns: float = 0.0
+
+        # Equity and drawdown tracking
+        self._initial_capital: float = initial_capital
+        self._peak_equity: float = initial_capital
+        self._current_equity: float = initial_capital
+        self._max_drawdown_pct: float = 0.0
+        self._current_drawdown_pct: float = 0.0
+        self._bars_since_peak: int = 0
+        self._max_drawdown_duration: int = 0
+
+        # Trade tracking
+        self._trade_count: int = 0
+        self._winning_trades: int = 0
+        self._losing_trades: int = 0
+        self._sum_wins: float = 0.0
+        self._sum_losses: float = 0.0
+        self._sum_trade_returns: float = 0.0
+        self._sum_trade_returns_sq: float = 0.0
+        self._best_trade_pct: float = float("-inf")
+        self._worst_trade_pct: float = float("inf")
+        self._current_consecutive_wins: int = 0
+        self._current_consecutive_losses: int = 0
+        self._max_consecutive_wins: int = 0
+        self._max_consecutive_losses: int = 0
+        self._total_fees: float = 0.0
+
+    def update_equity(self, equity: float) -> None:
+        """Feed a new equity value (e.g., after each bar).
+
+        Computes the bar-to-bar return and updates Welford accumulators,
+        drawdown tracking, and equity high-water mark.
+
+        Args:
+            equity: Current portfolio equity value.
+        """
+        if self._current_equity > 0:
+            bar_return = (equity - self._current_equity) / self._current_equity
+        else:
+            bar_return = 0.0
+
+        self._current_equity = equity
+
+        # Welford online update for mean/variance
+        self._count += 1
+        self._sum_returns += bar_return
+        delta = bar_return - self._mean
+        self._mean += delta / self._count
+        delta2 = bar_return - self._mean
+        self._m2 += delta * delta2
+
+        # Downside deviation (for Sortino)
+        downside = min(0.0, bar_return - self._target_return)
+        self._m2_downside += downside * downside
+
+        # Drawdown tracking
+        if equity > self._peak_equity:
+            self._peak_equity = equity
+            self._bars_since_peak = 0
+        else:
+            self._bars_since_peak += 1
+            self._max_drawdown_duration = max(
+                self._max_drawdown_duration, self._bars_since_peak
+            )
+
+        if self._peak_equity > 0:
+            self._current_drawdown_pct = (
+                (self._peak_equity - equity) / self._peak_equity * 100
+            )
+            self._max_drawdown_pct = max(
+                self._max_drawdown_pct, self._current_drawdown_pct
+            )
+
+    def record_trade(
+        self,
+        pnl: float,
+        return_pct: float,
+        bars_held: int = 0,
+        fees: float = 0.0,
+    ) -> None:
+        """Record a completed trade for statistics tracking.
+
+        Args:
+            pnl:        Net P&L of the trade.
+            return_pct: Return percentage of the trade.
+            bars_held:  Number of bars the trade was held.
+            fees:       Trading fees/commissions paid.
+        """
+        self._trade_count += 1
+        self._total_fees += fees
+        self._sum_trade_returns += return_pct
+        self._sum_trade_returns_sq += return_pct * return_pct
+
+        if return_pct > self._best_trade_pct:
+            self._best_trade_pct = return_pct
+        if return_pct < self._worst_trade_pct:
+            self._worst_trade_pct = return_pct
+
+        if pnl > 0:
+            self._winning_trades += 1
+            self._sum_wins += pnl
+            self._current_consecutive_wins += 1
+            self._current_consecutive_losses = 0
+            self._max_consecutive_wins = max(
+                self._max_consecutive_wins, self._current_consecutive_wins
+            )
+        else:
+            self._losing_trades += 1
+            self._sum_losses += abs(pnl)
+            self._current_consecutive_losses += 1
+            self._current_consecutive_wins = 0
+            self._max_consecutive_losses = max(
+                self._max_consecutive_losses, self._current_consecutive_losses
+            )
+
+    @property
+    def sharpe(self) -> float:
+        """Annualized Sharpe ratio from streaming data."""
+        if self._count < 2:
+            return 0.0
+        variance = self._m2 / (self._count - 1)
+        std = math.sqrt(variance) if variance > 0 else 0.0
+        if std == 0:
+            return 0.0
+        daily_rf = self._risk_free_rate / _TRADING_DAYS_PER_YEAR
+        return (self._mean - daily_rf) / std * math.sqrt(_TRADING_DAYS_PER_YEAR)
+
+    @property
+    def sortino(self) -> float:
+        """Annualized Sortino ratio from streaming data."""
+        if self._count < 2:
+            return 0.0
+        downside_var = self._m2_downside / self._count
+        downside_dev = math.sqrt(downside_var) if downside_var > 0 else 0.0
+        if downside_dev == 0:
+            return 0.0
+        daily_rf = self._risk_free_rate / _TRADING_DAYS_PER_YEAR
+        return (self._mean - daily_rf) / downside_dev * math.sqrt(_TRADING_DAYS_PER_YEAR)
+
+    @property
+    def win_rate(self) -> float:
+        """Win rate percentage."""
+        if self._trade_count == 0:
+            return 0.0
+        return self._winning_trades / self._trade_count * 100
+
+    @property
+    def profit_factor(self) -> float:
+        """Profit factor (gross wins / gross losses)."""
+        if self._sum_losses == 0:
+            return float("inf") if self._sum_wins > 0 else 0.0
+        return self._sum_wins / self._sum_losses
+
+    @property
+    def sqn(self) -> float:
+        """System Quality Number (Van Tharp).
+
+        SQN = sqrt(N) * mean(trade_returns) / std(trade_returns)
+        """
+        if self._trade_count < 2:
+            return 0.0
+        mean_r = self._sum_trade_returns / self._trade_count
+        var_r = (
+            self._sum_trade_returns_sq / self._trade_count - mean_r * mean_r
+        )
+        std_r = math.sqrt(max(0.0, var_r))
+        if std_r == 0:
+            return 0.0
+        return math.sqrt(self._trade_count) * mean_r / std_r
+
+    @property
+    def total_return_pct(self) -> float:
+        """Total return percentage from initial capital."""
+        if self._initial_capital <= 0:
+            return 0.0
+        return (self._current_equity - self._initial_capital) / self._initial_capital * 100
+
+    def snapshot(self) -> dict[str, float | int]:
+        """Return a snapshot of all streaming metrics as a flat dict.
+
+        Useful for logging, dashboard updates, or comparing with batch metrics.
+        """
+        return {
+            "total_return_pct": self.total_return_pct,
+            "sharpe": self.sharpe,
+            "sortino": self.sortino,
+            "max_drawdown_pct": self._max_drawdown_pct,
+            "current_drawdown_pct": self._current_drawdown_pct,
+            "max_drawdown_duration": self._max_drawdown_duration,
+            "trade_count": self._trade_count,
+            "win_rate": self.win_rate,
+            "profit_factor": self.profit_factor,
+            "sqn": self.sqn,
+            "max_consecutive_wins": self._max_consecutive_wins,
+            "max_consecutive_losses": self._max_consecutive_losses,
+            "best_trade_pct": self._best_trade_pct if self._trade_count > 0 else 0.0,
+            "worst_trade_pct": self._worst_trade_pct if self._trade_count > 0 else 0.0,
+            "total_fees": self._total_fees,
+            "current_equity": self._current_equity,
+            "bars_processed": self._count,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

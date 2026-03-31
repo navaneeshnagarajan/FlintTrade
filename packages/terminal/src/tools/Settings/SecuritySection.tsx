@@ -17,7 +17,7 @@ import {
   AlertTriangle,
   Ban,
 } from "lucide-react";
-import { SectionTitle, TextInput } from "./shared";
+import { SectionTitle, TextInput, Toggle } from "./shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -25,8 +25,11 @@ import {
   getBannedIPs,
   banIP,
   unbanIP,
+  getSecuritySettings,
+  updateSecuritySettings,
   type SecurityStats,
   type BannedIP,
+  type SecuritySettings,
 } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,8 @@ export function SecuritySection() {
   const [newIp, setNewIp]       = useState("");
   const [newReason, setNewReason] = useState("");
   const [banError, setBanError]  = useState<string | null>(null);
+  const [sortField, setSortField] = useState<"ip" | "reason" | "banned_at">("banned_at");
+  const [sortAsc, setSortAsc]     = useState(false);
 
   const statsQuery = useQuery<SecurityStats>({
     queryKey: ["ft", "security", "stats"],
@@ -78,6 +83,21 @@ export function SecuritySection() {
     queryKey: ["ft", "security", "bans"],
     queryFn: getBannedIPs,
     refetchInterval: 30_000,
+  });
+
+  const settingsQuery = useQuery<SecuritySettings>({
+    queryKey: ["ft", "security", "settings"],
+    queryFn: getSecuritySettings,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const autoBanMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      updateSecuritySettings({ auto_ban_enabled: enabled }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["ft", "security", "settings"] });
+    },
   });
 
   const banMutation = useMutation({
@@ -117,7 +137,14 @@ export function SecuritySection() {
   }, [newIp, newReason, banMutation]);
 
   const stats = statsQuery.data;
-  const bans  = bansQuery.data?.bans ?? [];
+  const rawBans = bansQuery.data?.bans ?? [];
+  const bans = [...rawBans].sort((a, b) => {
+    const aVal = a[sortField];
+    const bVal = b[sortField];
+    const cmp = String(aVal).localeCompare(String(bVal));
+    return sortAsc ? cmp : -cmp;
+  });
+  const autoBanEnabled = settingsQuery.data?.auto_ban_enabled ?? false;
 
   // ---------------------------------------------------------------------------
   // Format ban time relative to now
@@ -176,6 +203,22 @@ export function SecuritySection() {
         )}
       </div>
 
+      {/* Auto-ban toggle */}
+      <div className="rounded border border-border-default bg-surface-card p-4 space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+          Automatic Banning
+        </p>
+        <Toggle
+          checked={autoBanEnabled}
+          onChange={(checked) => autoBanMutation.mutate(checked)}
+          label={autoBanEnabled ? "Auto-ban is enabled" : "Auto-ban is disabled"}
+        />
+        <p className="text-xxs text-text-muted">
+          When enabled, IPs that exceed configured thresholds (404 probes,
+          failed API calls) are automatically banned. Managed by the FT backend.
+        </p>
+      </div>
+
       {/* Banned IPs table */}
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -222,9 +265,18 @@ export function SecuritySection() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border-default bg-surface-card">
-                  <th className="px-3 py-1.5 text-left text-text-muted font-medium">IP Address</th>
-                  <th className="px-3 py-1.5 text-left text-text-muted font-medium">Reason</th>
-                  <th className="px-3 py-1.5 text-left text-text-muted font-medium">Banned</th>
+                  {([["ip", "IP Address"], ["reason", "Reason"], ["banned_at", "Banned"]] as const).map(([field, label]) => (
+                    <th
+                      key={field}
+                      className="px-3 py-1.5 text-left text-text-muted font-medium cursor-pointer select-none hover:text-text-secondary transition-colors"
+                      onClick={() => {
+                        if (sortField === field) setSortAsc(!sortAsc);
+                        else { setSortField(field); setSortAsc(true); }
+                      }}
+                    >
+                      {label}{sortField === field ? (sortAsc ? " \u25B2" : " \u25BC") : ""}
+                    </th>
+                  ))}
                   <th className="px-3 py-1.5 text-right text-text-muted font-medium">Action</th>
                 </tr>
               </thead>

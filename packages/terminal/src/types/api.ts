@@ -132,6 +132,28 @@ export interface Greeks {
   iv: number;
 }
 
+// --- Broker Capabilities (OpenAlgo 2.0.0.2) ---
+export interface BrokerCapabilities {
+  broker_name: string;
+  broker_type: "equity" | "crypto" | "commodity" | "multi";
+  supported_exchanges: string[];
+  features: {
+    market_protection: boolean;
+    leverage: boolean;
+    bracket_orders: boolean;
+    cover_orders: boolean;
+    [key: string]: boolean;
+  };
+}
+
+// --- Leverage Settings (crypto brokers) ---
+export interface LeverageSettings {
+  leverage: number;
+  max_leverage: number;
+  margin_mode: string;
+  [key: string]: unknown;
+}
+
 // --- Order Placement ---
 export interface PlaceOrderParams {
   symbol: string;
@@ -143,6 +165,8 @@ export interface PlaceOrderParams {
   price?: number;
   triggerPrice?: number;
   strategy?: string;
+  /** Enable Market Price Protection — converts MARKET to LIMIT with price buffer. */
+  marketProtection?: boolean;
 }
 
 export interface SmartOrderParams extends PlaceOrderParams {
