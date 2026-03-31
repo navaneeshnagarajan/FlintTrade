@@ -259,7 +259,7 @@ class AutonomousTrader:
         """Current time in IST (UTC+5:30) without pytz dependency."""
         import datetime as dt
 
-        utc_now = dt.datetime.utcnow()
+        utc_now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
         ist = utc_now + dt.timedelta(hours=5, minutes=30)
         return ist
 

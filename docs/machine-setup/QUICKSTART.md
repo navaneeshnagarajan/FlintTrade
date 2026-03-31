@@ -31,7 +31,7 @@ Edit `infra/openalgo/.env` (copy from `.sample.env` if needed):
 ```bash
 make start       # Starts OpenAlgo on port 5000
 make status      # Verify API responding
-make test        # 738+ tests pass
+make test        # 2,903+ tests pass
 ```
 
 ## 5. Run Terminal

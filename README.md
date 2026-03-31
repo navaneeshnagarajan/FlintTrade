@@ -4,14 +4,14 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-3629%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3965%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
 ![Status](https://img.shields.io/badge/status-v0.3.0-blue)
 
 > **v0.3.0 "Structured Calm"** — Bloomberg precision + Stripe polish + Linear minimalism.
-> 101 strategies, 30 widgets, 12 routes, center-aligned UI, 6 themes, react-resizable-panels.
+> 101 strategies, 30 widgets, 13 routes, center-aligned UI, 6 themes, react-resizable-panels.
 
 Open-source modular trading platform for Indian markets with direct broker connections. Built on [OpenAlgo](https://openalgo.in) adapters. Supports 31 brokers, equities, F&O, commodities, currency derivatives, and crypto.
 
@@ -75,7 +75,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 | **data** | Tick capture, trade logs, DuckDB storage, SEBI audit trail | ✅ Built |
 | **historical** | Multi-source downloader, free NSE data, DuckDB/Parquet pipeline | ✅ Built |
 | **screener** | Option chain, OI analysis, futures quadrant, Greeks, IV | ✅ Built |
-| **backtest-engine** | Event-driven simulator, 28 strategies, walk-forward optimizer | ✅ Built |
+| **backtest-engine** | Event-driven simulator, 101 strategies, walk-forward optimizer | ✅ Built |
 | **ai** | LLM client, RAG, ML signals, sentiment, MCP bridge | ✅ Built |
 | **integration** | TradingView webhooks, ChartInk, visual flow builder | ✅ Built |
 | **automation** | Cron jobs, Telegram bot, OpenClaw bridge | ✅ Built |
@@ -88,11 +88,11 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 ## Current State
 
 **What works:**
-- 15 packages (13 Python + 1 React + 1 Rust/PyO3) with **3,629 passing tests** (2,651 Python + 765 terminal)
+- 15 packages (13 Python + 1 React + 1 Rust/PyO3) with **3,965 passing tests** (2,903 Python + 1,062 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
-- 28 backtest strategy templates with walk-forward optimizer
+- 101 backtest strategy templates with walk-forward optimizer
 - React terminal with Dockview widget-composable workspace and 6 preset templates
 - 20 FlintTrade backend endpoints (backtest execution, signals, sentiment, RAG, cron, audit, safety)
 - Docker Compose for cross-platform development
@@ -100,7 +100,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 **What's complete:**
 - TypeScript strict mode migration (zero JSX/JS files remain)
 - Dockview v5.1 widget-composable workspace with 30 widgets + 6 tools
-- 12 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /admin, 404
+- 13 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /ditto, /admin, 404
 - State architecture: Zustand 5 + Jotai + TanStack Query 5
 - Cinematic welcome (/welcome), Explore mode (/explore), Setup wizard (/setup)
 - Investor dashboard (/invest), Strategy Lab (/lab), Automation Hub (/automate), AI Center (/ai)
@@ -127,7 +127,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 2,651 tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 2,903 tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -144,10 +144,10 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 15 packages, 3,629 tests, CI | ✅ Complete |
+| Foundation | Monorepo, 15 packages, 3,965 tests, CI | ✅ Complete |
 | Infrastructure | Makefile, systemd, Docker, deploy scripts, git submodules | ✅ Complete |
 | Live Connection | OpenAlgo sandbox trading, WebSocket data, REST fallback | ✅ Complete |
-| Terminal UI | 30 widgets, 6 tools, 12 routes, Dockview v5.1, 6 presets | ✅ Complete |
+| Terminal UI | 30 widgets, 6 tools, 13 routes, Dockview v5.1, 6 presets | ✅ Complete |
 | Full-Stack Wiring | 20 backend endpoints, all routes functional, 6 themes | ✅ Complete |
 | UI/UX Polish | Accessibility, animations, responsive, error handling | ✅ Complete |
 | AI Integration | OpenClaw agent skills, autonomous signals | 📋 Planned |

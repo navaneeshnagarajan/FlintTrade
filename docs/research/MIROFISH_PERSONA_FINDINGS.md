@@ -10,7 +10,7 @@
 |---------|---------|---------------|
 | Beginner | 22yo college student, Pune, ₹5K capital | /welcome, /learn, /invest, /ai, /settings, /trade, /explore |
 | Day Trader | 35yo full-time F&O trader, Mumbai | /trade, /lab, /automate, /ai |
-| HNI/Wealth Manager | 48yo advisor, Bangalore, ₹50Cr AUM | /invest (all 12 tabs), /settings, /admin |
+| HNI/Wealth Manager | 48yo advisor, Bangalore, ₹50Cr AUM | /invest (all 16 tabs), /settings, /admin |
 
 ## P0 Blockers (FIXED)
 
@@ -30,7 +30,7 @@
 ## P2 Medium Priority
 
 1. Jargon everywhere: NAV feed, XIRR, Margin, Scalper, VIX — no tooltips
-2. Invest tab count inconsistency (5 vs 12 tabs based on skill level — confusing)
+2. Invest tab count inconsistency (5 vs 16 tabs based on skill level — confusing)
 3. No demo/sample data mode for most tabs when disconnected
 4. No benchmark comparison for portfolio performance
 5. No PDF tax statement export

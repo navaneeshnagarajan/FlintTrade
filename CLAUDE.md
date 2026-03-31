@@ -13,12 +13,12 @@ npm install                                    # install deps
 npm run dev                                    # dev server at localhost:5173
 npm run build                                  # tsc --noEmit + vite build
 npm run typecheck                              # tsc --noEmit only
-npx vitest run                                 # all tests (~978)
+npx vitest run                                 # all tests (~1,062)
 npx vitest run src/path/to/file.test.ts        # single test file
 npx vitest run -t "test name"                  # single test by name
 
 # Python — run from repo root
-make test                                      # all pytest tests (~2,554)
+make test                                      # all pytest tests (~2,903)
 make test-fast                                 # stop on first failure
 python -m pytest packages/core/tests/test_foo.py -v              # single file
 python -m pytest packages/core/tests/test_foo.py::test_name -v   # single test
@@ -76,6 +76,7 @@ localhost:5173/
 ├── /lab            → Strategy Lab (backtest, forward test, optimize)
 ├── /automate       → Automation Hub (flows, cron, monitors, logs)
 ├── /ai             → AI Center (chat, signals, sentiment, RAG)
+├── /ditto          → Multi-account management (mirror, margin, risk)
 ├── /admin          → Admin panel (security, health, traffic, audit)
 └── *               → 404 catch-all
 ```
@@ -179,7 +180,7 @@ Two-tier config. No exceptions.
 | `data` | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
 | `historical` | OHLCV downloader, free data (OpenChart/yfinance), DuckDB pipeline, expiry manager |
 | `screener` | Option chain, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, IV |
-| `backtest-engine` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 12 strategies |
+| `backtest-engine` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 101 strategies |
 | `ai` | LLM client (multi-provider), RAG (ChromaDB), signals, sentiment, MCP bridge, advisor |
 | `integration` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
 | `automation` | Cron manager, Telegram bot with kill switch, OpenClaw bridge, post-market analysis |
@@ -212,13 +213,13 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 ## Current State
 
 - **Version:** 0.3.0 "Structured Calm" (2026-03-30)
-- **Tests:** 978 terminal (Vitest) + 2,651 Python (pytest) = 3,629 total
-- **Terminal:** 30 widgets (TSX) + 6 tools + 12 routes + 6 workspace presets in Dockview v5.1 shell
+- **Tests:** 1,062 terminal (Vitest) + 2,903 Python (pytest) = 3,965 total
+- **Terminal:** 30 widgets (TSX) + 6 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
 - **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 6 cinematic themes with dark/light variants, density modes, zero arbitrary values
 - **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
 - **Onboarding:** Cinematic /welcome, /explore demo mode, setup wizard with persona × interest matrix
-- **Routes:** 12 total — 7 app modules (Learn/Invest/Trade/Lab/Automate/AI/Settings) + /welcome + /explore + /setup + /admin + 404
+- **Routes:** 13 total — 8 app modules (Learn/Invest/Trade/Lab/Automate/AI/Ditto/Settings) + /welcome + /explore + /setup + /admin + 404
 - **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), 20 FlintTrade backend endpoints
 - **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion
 - **OpenAlgo:** Tested with broker sandbox, first trade placed
@@ -299,7 +300,7 @@ Claude Code on every machine has these installed globally:
 
 **MCP Servers:** context7 (live library docs), playwright (browser testing), sequential-thinking, github, firecrawl
 
-For the complete list of all 222 repositories, libraries, skills, and tools, see `docs/references/REPOS.md`
+For the complete list of all 222 repositories, libraries, skills, and tools, see `docs/REFERENCES.md`
 
 ### USE THESE ACTIVELY
 - `/brainstorm` before starting any major feature
@@ -331,10 +332,10 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 
 1. Read CLAUDE.md and PLAN.md
 2. Pick the next unchecked task from PLAN.md
-3. Check `docs/REPO_FEATURE_MAP.md` — absorb before building
+3. Check `docs/REFERENCES.md` — absorb before building
 4. Use `/brainstorm` and `/write-plan` for non-trivial tasks
 5. Implement — full permissions: create, edit, delete, refactor as needed
-6. Run: `make test` (must pass 2,651+ Python) and `npx vitest run` in terminal (must pass 978+)
+6. Run: `make test` (must pass 2,903+ Python) and `npx vitest run` in terminal (must pass 1,062+)
 7. For React: `npm run build` in `packages/terminal` (must build clean)
 8. Mark task done in PLAN.md
 9. Update CHANGELOG.md [Unreleased] section for notable changes
@@ -357,8 +358,8 @@ To set up a new machine:
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
 4. Configure `infra/openalgo/.env` with broker credentials
 5. `make start` (starts OpenAlgo)
-6. `make test` (verify 2,651+ pass)
-7. `cd packages/terminal && npm install && npm run build` (verify clean build, 765+ vitest pass)
+6. `make test` (verify 2,903+ pass)
+7. `cd packages/terminal && npm install && npm run build` (verify clean build, 1,062+ vitest pass)
 8. Read PLAN.md, pick a task, start building
 
 See `docs/machine-setup/QUICKSTART.md` for detailed instructions.

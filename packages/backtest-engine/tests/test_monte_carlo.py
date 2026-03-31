@@ -6,24 +6,25 @@ probability of loss, empty trades guard.
 
 from __future__ import annotations
 
+import os
+import sys
+
 import pytest
 
-try:
-    from packages.backtest_engine.src.monte_carlo import (
-        MonteCarloConfig,
-        MonteCarloResult,
-        MonteCarloSimulator,
-        _max_drawdown,
-        _percentile,
-    )
-except ImportError:
-    from src.monte_carlo import (  # type: ignore[no-reattr]
-        MonteCarloConfig,
-        MonteCarloResult,
-        MonteCarloSimulator,
-        _max_drawdown,
-        _percentile,
-    )
+# Fix import paths for hyphenated package name (backtest-engine can't be a Python identifier)
+_test_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_test_dir, '..', 'src'))
+sys.path.insert(0, os.path.join(_test_dir, '..', '..', '..'))
+sys.path.insert(0, os.path.join(_test_dir, '..', '..', 'core', 'src'))
+sys.path.insert(0, os.path.join(_test_dir, '..', '..', 'engine', 'src'))
+
+from monte_carlo import (
+    MonteCarloConfig,
+    MonteCarloResult,
+    MonteCarloSimulator,
+    _max_drawdown,
+    _percentile,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -137,14 +138,18 @@ def test_determinism_same_seed() -> None:
     assert r1.var_95 == pytest.approx(r2.var_95)
 
 
-def test_different_seeds_may_differ() -> None:
-    """Different seeds should produce different results (probabilistic check)."""
+def test_different_seeds_produce_different_drawdowns() -> None:
+    """Different seeds produce different path-dependent metrics (max drawdown).
+
+    Note: final equity is always the same for all permutations (sum of P&L is
+    invariant to ordering). However, max drawdown IS path-dependent and WILL
+    differ between seeds.
+    """
     trades = [300.0, -150.0, 100.0, -50.0, 200.0, -400.0, 600.0]
     r1 = MonteCarloSimulator(trades, MonteCarloConfig(n_simulations=500, seed=1)).run()
     r2 = MonteCarloSimulator(trades, MonteCarloConfig(n_simulations=500, seed=99)).run()
-    # Not guaranteed to differ, but with enough simulations and different seeds
-    # the median should differ at least slightly
-    assert r1.p50 != r2.p50 or r1.std_final != r2.std_final
+    # max_drawdown_p50 is path-dependent and differs between seeds
+    assert r1.max_drawdown_p50 != r2.max_drawdown_p50
 
 
 # ---------------------------------------------------------------------------

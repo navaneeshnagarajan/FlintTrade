@@ -12,42 +12,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-try:
-    from packages.ai.src.autonomous_agent import (
-        AgentConfig,
-        AgentState,
-        AgentStatus,
-        AutonomousTrader,
-        MarketData,
-        RiskAssessment,
-        TradeSignal,
-        _ema,
-        _macd,
-        _rsi,
-        _supertrend_signal,
-        _vwap,
-        _build_signal_prompt,
-        _atr,
-        _to_float_list,
-    )
-except ImportError:
-    from src.autonomous_agent import (  # type: ignore[no-reattr]
-        AgentConfig,
-        AgentState,
-        AgentStatus,
-        AutonomousTrader,
-        MarketData,
-        RiskAssessment,
-        TradeSignal,
-        _ema,
-        _macd,
-        _rsi,
-        _supertrend_signal,
-        _vwap,
-        _build_signal_prompt,
-        _atr,
-        _to_float_list,
-    )
+from packages.ai.src.autonomous_agent import (
+    AgentConfig,
+    AgentState,
+    AgentStatus,
+    AutonomousTrader,
+    MarketData,
+    RiskAssessment,
+    TradeSignal,
+    _ema,
+    _macd,
+    _rsi,
+    _supertrend_signal,
+    _vwap,
+    _build_signal_prompt,
+    _atr,
+    _to_float_list,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -221,33 +202,27 @@ def test_risk_allowed_sell() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_execute_blocked_when_not_allowed() -> None:
+async def test_execute_blocked_when_not_allowed() -> None:
     agent = make_agent()
     risk = RiskAssessment(allowed=False, reason="test block")
-    result = asyncio.get_event_loop().run_until_complete(
-        agent.execute(TradeSignal.BUY, "RELIANCE", risk)
-    )
+    result = await agent.execute(TradeSignal.BUY, "RELIANCE", risk)
     assert result["status"] == "blocked"
     assert result["reason"] == "test block"
 
 
-def test_execute_places_order_on_success() -> None:
+async def test_execute_places_order_on_success() -> None:
     agent = make_agent(order_status="success")
     risk = RiskAssessment(allowed=True, position_qty=1, stop_loss=2450.0, take_profit=2600.0)
-    result = asyncio.get_event_loop().run_until_complete(
-        agent.execute(TradeSignal.BUY, "RELIANCE", risk)
-    )
+    result = await agent.execute(TradeSignal.BUY, "RELIANCE", risk)
     assert result.get("status") == "success"
     assert "RELIANCE" in agent.state.active_positions
     assert agent.state.trade_counts["RELIANCE"] == 1
 
 
-def test_execute_updates_last_signal() -> None:
+async def test_execute_updates_last_signal() -> None:
     agent = make_agent(order_status="success")
     risk = RiskAssessment(allowed=True, position_qty=1)
-    asyncio.get_event_loop().run_until_complete(
-        agent.execute(TradeSignal.SELL, "RELIANCE", risk)
-    )
+    await agent.execute(TradeSignal.SELL, "RELIANCE", risk)
     assert agent.state.last_signals["RELIANCE"] == TradeSignal.SELL
 
 
@@ -256,39 +231,39 @@ def test_execute_updates_last_signal() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_decide_returns_buy() -> None:
+async def test_decide_returns_buy() -> None:
     agent = make_agent(llm_response="BUY")
     md = MarketData(symbol="RELIANCE", ltp=2500.0)
-    result = asyncio.get_event_loop().run_until_complete(agent.decide(md))
+    result = await agent.decide(md)
     assert result == TradeSignal.BUY
 
 
-def test_decide_returns_sell() -> None:
+async def test_decide_returns_sell() -> None:
     agent = make_agent(llm_response="SELL")
     md = MarketData(symbol="RELIANCE", ltp=2500.0)
-    result = asyncio.get_event_loop().run_until_complete(agent.decide(md))
+    result = await agent.decide(md)
     assert result == TradeSignal.SELL
 
 
-def test_decide_hold_on_invalid_data() -> None:
+async def test_decide_hold_on_invalid_data() -> None:
     agent = make_agent(llm_response="BUY")
     md = MarketData(symbol="RELIANCE", ltp=0.0)
-    result = asyncio.get_event_loop().run_until_complete(agent.decide(md))
+    result = await agent.decide(md)
     assert result == TradeSignal.HOLD
 
 
-def test_decide_hold_on_unexpected_llm_output() -> None:
+async def test_decide_hold_on_unexpected_llm_output() -> None:
     agent = make_agent(llm_response="MAYBE")
     md = MarketData(symbol="RELIANCE", ltp=2500.0)
-    result = asyncio.get_event_loop().run_until_complete(agent.decide(md))
+    result = await agent.decide(md)
     assert result == TradeSignal.HOLD
 
 
-def test_decide_hold_on_llm_error() -> None:
+async def test_decide_hold_on_llm_error() -> None:
     agent = make_agent()
     agent.llm.chat.side_effect = RuntimeError("LLM timeout")
     md = MarketData(symbol="RELIANCE", ltp=2500.0)
-    result = asyncio.get_event_loop().run_until_complete(agent.decide(md))
+    result = await agent.decide(md)
     assert result == TradeSignal.HOLD
 
 
@@ -297,23 +272,23 @@ def test_decide_hold_on_llm_error() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_analyze_returns_market_data() -> None:
+async def test_analyze_returns_market_data() -> None:
     agent = make_agent()
-    result = asyncio.get_event_loop().run_until_complete(agent.analyze("RELIANCE"))
+    result = await agent.analyze("RELIANCE")
     assert isinstance(result, MarketData)
     assert result.symbol == "RELIANCE"
     assert result.ltp == 100.0
 
 
-def test_analyze_bid_ask_ratio() -> None:
+async def test_analyze_bid_ask_ratio() -> None:
     agent = make_agent()
-    result = asyncio.get_event_loop().run_until_complete(agent.analyze("RELIANCE"))
+    result = await agent.analyze("RELIANCE")
     assert result.bid_ask_ratio == pytest.approx(500 / 400)
 
 
-def test_analyze_all_returns_all_symbols() -> None:
+async def test_analyze_all_returns_all_symbols() -> None:
     agent = make_agent(symbols=["RELIANCE", "ICICIBANK"])
-    results = asyncio.get_event_loop().run_until_complete(agent.analyze_all())
+    results = await agent.analyze_all()
     assert "RELIANCE" in results
     assert "ICICIBANK" in results
 
@@ -323,7 +298,7 @@ def test_analyze_all_returns_all_symbols() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_monitor_closes_on_stop_loss() -> None:
+async def test_monitor_closes_on_stop_loss() -> None:
     agent = make_agent(quotes_ltp=90.0)  # LTP dropped to 90
     agent.state.active_positions["RELIANCE"] = 100.0
     position = {
@@ -334,12 +309,12 @@ def test_monitor_closes_on_stop_loss() -> None:
         "action": "BUY",
         "quantity": 1,
     }
-    asyncio.get_event_loop().run_until_complete(agent.monitor(position))
+    await agent.monitor(position)
     assert "RELIANCE" not in agent.state.active_positions
     assert agent.state.daily_pnl == pytest.approx(-10.0)
 
 
-def test_monitor_closes_on_take_profit() -> None:
+async def test_monitor_closes_on_take_profit() -> None:
     agent = make_agent(quotes_ltp=112.0)
     agent.state.active_positions["RELIANCE"] = 100.0
     position = {
@@ -350,12 +325,12 @@ def test_monitor_closes_on_take_profit() -> None:
         "action": "BUY",
         "quantity": 1,
     }
-    asyncio.get_event_loop().run_until_complete(agent.monitor(position))
+    await agent.monitor(position)
     assert "RELIANCE" not in agent.state.active_positions
     assert agent.state.daily_pnl == pytest.approx(12.0)
 
 
-def test_monitor_no_close_within_range() -> None:
+async def test_monitor_no_close_within_range() -> None:
     agent = make_agent(quotes_ltp=102.0)
     agent.state.active_positions["RELIANCE"] = 100.0
     position = {
@@ -366,7 +341,7 @@ def test_monitor_no_close_within_range() -> None:
         "action": "BUY",
         "quantity": 1,
     }
-    asyncio.get_event_loop().run_until_complete(agent.monitor(position))
+    await agent.monitor(position)
     # Position should remain open
     assert "RELIANCE" in agent.state.active_positions
 
