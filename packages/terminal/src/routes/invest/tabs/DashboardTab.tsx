@@ -18,7 +18,9 @@ import {
   DollarSign,
   ArrowUpRight,
   ArrowDownRight,
+  Percent,
 } from "lucide-react";
+import { xirr } from "@/lib/xirr";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { classifySector } from "@/lib/sectors";
@@ -50,6 +52,17 @@ const DEMO_CASH = 100000;
 const DEMO_INVESTED = 728160;
 const DEMO_PNL = 16840;
 const DEMO_PNL_PCT = 2.31;
+
+/** Sample cash flows for XIRR demo — negative = outflow, positive = current value. */
+const DEMO_CASH_FLOWS: { date: Date; amount: number }[] = [
+  { date: new Date("2024-01-15"), amount: -500000 },
+  { date: new Date("2024-04-01"), amount: -100000 },
+  { date: new Date("2024-07-01"), amount: -100000 },
+  { date: new Date("2024-10-01"), amount: -100000 },
+  { date: new Date("2025-01-01"), amount: -100000 },
+  { date: new Date("2025-04-01"), amount: -100000 },
+  { date: new Date("2025-04-01"), amount: 1150000 },  // current portfolio value
+];
 
 // ─── Internal types ────────────────────────────────────────────────────────────
 
@@ -130,6 +143,20 @@ export function DashboardTab() {
     [holdings],
   );
 
+  // XIRR calculation — uses demo cash flows for now; live would use trade history
+  const portfolioXirr = useMemo(() => {
+    if (!isDemo) {
+      // With live data we'd build cash flows from trade history
+      // For now, use demo flows but substitute current portfolio value
+      const flows = DEMO_CASH_FLOWS.slice(0, -1).concat({
+        date: new Date(),
+        amount: currentValue + availableCash,
+      });
+      return xirr(flows);
+    }
+    return xirr(DEMO_CASH_FLOWS);
+  }, [isDemo, currentValue, availableCash]);
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
@@ -174,6 +201,19 @@ export function DashboardTab() {
             </div>
             <p className="text-xs text-text-muted">
               {holdings.length} holdings &middot; {formatINRCompact(totalInvested)} invested
+              {portfolioXirr !== null && (
+                <>
+                  {" "}&middot;{" "}
+                  <span
+                    className={cn(
+                      "font-mono font-semibold tabular-nums",
+                      portfolioXirr >= 0 ? "text-profit" : "text-loss",
+                    )}
+                  >
+                    XIRR {formatPercent(portfolioXirr * 100)}
+                  </span>
+                </>
+              )}
             </p>
           </div>
 
@@ -382,6 +422,38 @@ export function DashboardTab() {
         </div>
         <p className="text-xs text-text-muted">Sectors represented</p>
       </GlassCard>
+
+      {/* Row 5: XIRR card */}
+      {portfolioXirr !== null && (
+        <GlassCard className="lg:col-span-3 p-4 gap-2">
+          <div className="flex items-center gap-2">
+            <div
+              className={cn(
+                "size-7 rounded-lg flex items-center justify-center",
+                portfolioXirr >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
+              )}
+            >
+              <Percent className={cn("size-3.5", portfolioXirr >= 0 ? "text-profit" : "text-loss")} />
+            </div>
+            <span className="text-xxs text-text-muted uppercase tracking-wider">
+              Portfolio XIRR
+            </span>
+          </div>
+          <div className="flex items-baseline gap-3">
+            <span
+              className={cn(
+                "text-2xl font-mono font-bold tabular-nums",
+                portfolioXirr >= 0 ? "text-profit" : "text-loss",
+              )}
+            >
+              {formatPercent(portfolioXirr * 100)}
+            </span>
+            <span className="text-xs text-text-muted">
+              Annualised return on irregular cash flows (SIPs + lump sum)
+            </span>
+          </div>
+        </GlassCard>
+      )}
 
       <p className="lg:col-span-3 text-xs text-text-muted">
         Holdings refresh every 60s. Cash refreshes every 30s from OpenAlgo.

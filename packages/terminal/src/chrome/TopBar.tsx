@@ -24,6 +24,7 @@ import { ping } from "@/services/api";
 import { getPendingOrders } from "@/services/ftApi";
 import { useTimings } from "@/hooks/useMarketStatus";
 import type { MarketTiming } from "@/types/api";
+import { useSkillLevel } from "@/hooks/useSkillLevel";
 import AccountSwitcher from "./AccountSwitcher";
 import SandboxToggle from "./SandboxToggle";
 import QuickAccessPanel from "./QuickAccessPanel";
@@ -152,13 +153,18 @@ function MarketStatusBadge() {
   );
 }
 
-const ROUTE_TABS = [
+const BASE_ROUTE_TABS = [
   { path: "/learn", label: "Learn" },
   { path: "/invest", label: "Invest" },
   { path: "/trade", label: "Trade" },
   { path: "/lab", label: "Lab" },
   { path: "/automate", label: "Automate" },
   { path: "/ai", label: "AI" },
+] as const;
+
+/** Advanced-only tabs appended when skill level is "advanced". */
+const ADVANCED_ROUTE_TABS = [
+  { path: "/ditto", label: "Multi-Account" },
 ] as const;
 
 /**
@@ -174,6 +180,10 @@ export default function TopBar() {
   const isTerminal = currentPath === "/trade";
 
   const glass = useThemeStore(useShallow((s) => s.glass));
+  const globalSkill = useSkillLevel();
+  const routeTabs = globalSkill === "advanced"
+    ? [...BASE_ROUTE_TABS, ...ADVANCED_ROUTE_TABS]
+    : [...BASE_ROUTE_TABS];
 
   const status = useConnectionStore((s) => s.status);
   const setStatus = useConnectionStore((s) => s.setStatus);
@@ -417,7 +427,7 @@ export default function TopBar() {
 
         {/* Route tabs (always visible) */}
         <nav aria-label="Main navigation" className="flex items-center gap-0.5 ml-3">
-          {ROUTE_TABS.map((tab) => {
+          {routeTabs.map((tab) => {
             const isActive = currentPath === tab.path;
             return (
               <Link

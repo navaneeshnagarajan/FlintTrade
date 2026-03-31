@@ -19,6 +19,7 @@ const LabRoute = lazy(() => import("./routes/LabRoute"));
 const AutomateRoute = lazy(() => import("./routes/AutomateRoute"));
 const AIRoute = lazy(() => import("./routes/AIRoute"));
 const SettingsRoute = lazy(() => import("./routes/SettingsRoute"));
+const DittoRoute = lazy(() => import("./routes/DittoRoute"));
 const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
 
 function Loading() {
@@ -77,6 +78,7 @@ const router = createBrowserRouter([
           { path: "lab", element: <Suspense fallback={<Loading />}><LabRoute /></Suspense> },
           { path: "automate", element: <Suspense fallback={<Loading />}><AutomateRoute /></Suspense> },
           { path: "ai", element: <Suspense fallback={<Loading />}><AIRoute /></Suspense> },
+          { path: "ditto", element: <Suspense fallback={<Loading />}><DittoRoute /></Suspense> },
         ],
       },
 

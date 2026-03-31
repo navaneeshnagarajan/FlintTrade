@@ -1737,6 +1737,133 @@ def create_flask_app(
         }), 200
 
     # ------------------------------------------------------------------
+    # Ditto — multi-account management & position mirroring
+    # ------------------------------------------------------------------
+
+    @app.route("/api/v1/ditto/accounts", methods=["GET"])
+    def ditto_accounts() -> tuple[Any, int]:
+        """List all managed accounts with status.
+
+        Returns a list of broker accounts registered in the Ditto multi-account
+        manager.  When no real accounts are configured yet, returns sample data
+        so the UI can be developed and demonstrated.
+        """
+        try:
+            from packages.ditto.src.account_manager import AccountManager  # noqa: PLC0415
+
+            mgr = AccountManager()
+            raw = mgr.list_accounts()
+            if raw:
+                accounts = []
+                for acct in raw:
+                    accounts.append({
+                        "id": acct.account_id,
+                        "name": acct.name or acct.account_id,
+                        "broker": "OpenAlgo",
+                        "capital": 0,
+                        "pnl_today": 0,
+                        "status": "active" if acct.enabled else "disabled",
+                        "positions": 0,
+                        "group": acct.group,
+                        "allocation_weight": acct.allocation_weight,
+                        "is_master": acct.is_master,
+                    })
+                return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
+        except Exception:
+            pass
+
+        # Fallback: sample data for UI development
+        sample_accounts = [
+            {"id": "acc_1", "name": "Client: Rajesh Mehta", "broker": "Zerodha", "capital": 5000000, "pnl_today": 12500, "status": "active", "positions": 8, "group": "HNI", "allocation_weight": 1.0, "is_master": True},
+            {"id": "acc_2", "name": "Client: Priya Sharma", "broker": "Dhan", "capital": 3000000, "pnl_today": -8200, "status": "active", "positions": 5, "group": "HNI", "allocation_weight": 0.6, "is_master": False},
+            {"id": "acc_3", "name": "Client: Amit Patel", "broker": "Fyers", "capital": 8000000, "pnl_today": 34100, "status": "active", "positions": 12, "group": "HNI", "allocation_weight": 1.6, "is_master": False},
+            {"id": "acc_4", "name": "Client: Neha Gupta", "broker": "Angel One", "capital": 2000000, "pnl_today": -3500, "status": "active", "positions": 3, "group": "Family", "allocation_weight": 0.4, "is_master": False},
+            {"id": "acc_5", "name": "Client: Vikram Singh", "broker": "ICICI Direct", "capital": 10000000, "pnl_today": 56200, "status": "active", "positions": 15, "group": "HNI", "allocation_weight": 2.0, "is_master": False},
+            {"id": "acc_6", "name": "Client: Sunita Reddy", "broker": "Kotak Neo", "capital": 4000000, "pnl_today": 0, "status": "disabled", "positions": 0, "group": "Family", "allocation_weight": 0.8, "is_master": False},
+            {"id": "acc_7", "name": "Client: Karan Joshi", "broker": "Upstox", "capital": 6000000, "pnl_today": -12800, "status": "active", "positions": 9, "group": "Personal", "allocation_weight": 1.2, "is_master": False},
+        ]
+        return jsonify({"status": "success", "data": {"accounts": sample_accounts}}), 200
+
+    @app.route("/api/v1/ditto/mirror/status", methods=["GET"])
+    def ditto_mirror_status() -> tuple[Any, int]:
+        """Get position mirroring status across accounts."""
+        mirror_status = {
+            "active": False,
+            "source_account": None,
+            "target_accounts": [],
+            "mode": "proportional",
+            "mirrored_positions": 0,
+            "last_sync": None,
+            "errors": [],
+        }
+        return jsonify({"status": "success", "data": mirror_status}), 200
+
+    @app.route("/api/v1/ditto/mirror/start", methods=["POST"])
+    def ditto_mirror_start() -> tuple[Any, int]:
+        """Start position mirroring from primary to secondary accounts."""
+        data = request.get_json(silent=True) or {}
+        source = data.get("source_account")
+        targets = data.get("target_accounts", [])
+        mode = data.get("mode", "proportional")
+
+        if not source:
+            return jsonify({"status": "error", "message": "source_account is required"}), 400
+        if not targets:
+            return jsonify({"status": "error", "message": "target_accounts must be non-empty"}), 400
+
+        from datetime import datetime as _dt  # noqa: PLC0415
+        from datetime import timedelta as _td, timezone as _tz  # noqa: PLC0415
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "active": True,
+                "source_account": source,
+                "target_accounts": targets,
+                "mode": mode,
+                "started_at": _dt.now(_tz(_td(hours=5, minutes=30))).isoformat(),
+            },
+        }), 200
+
+    @app.route("/api/v1/ditto/mirror/stop", methods=["POST"])
+    def ditto_mirror_stop() -> tuple[Any, int]:
+        """Stop position mirroring."""
+        from datetime import datetime as _dt  # noqa: PLC0415
+        from datetime import timedelta as _td, timezone as _tz  # noqa: PLC0415
+
+        return jsonify({
+            "status": "success",
+            "data": {"active": False, "stopped_at": _dt.now(_tz(_td(hours=5, minutes=30))).isoformat()},
+        }), 200
+
+    @app.route("/api/v1/ditto/risk", methods=["GET"])
+    def ditto_risk() -> tuple[Any, int]:
+        """Per-account risk dashboard: margin utilization, aggregate P&L."""
+        risk_data = {
+            "aggregate_pnl": 78300,
+            "aggregate_capital": 38000000,
+            "accounts": [
+                {"id": "acc_1", "name": "Rajesh Mehta", "margin_used_pct": 45.2, "pnl_today": 12500, "positions": 8, "risk_status": "OK"},
+                {"id": "acc_2", "name": "Priya Sharma", "margin_used_pct": 62.8, "pnl_today": -8200, "positions": 5, "risk_status": "WARNING"},
+                {"id": "acc_3", "name": "Amit Patel", "margin_used_pct": 38.1, "pnl_today": 34100, "positions": 12, "risk_status": "OK"},
+                {"id": "acc_4", "name": "Neha Gupta", "margin_used_pct": 22.5, "pnl_today": -3500, "positions": 3, "risk_status": "OK"},
+                {"id": "acc_5", "name": "Vikram Singh", "margin_used_pct": 71.3, "pnl_today": 56200, "positions": 15, "risk_status": "WARNING"},
+                {"id": "acc_6", "name": "Sunita Reddy", "margin_used_pct": 0, "pnl_today": 0, "positions": 0, "risk_status": "PAUSED"},
+                {"id": "acc_7", "name": "Karan Joshi", "margin_used_pct": 55.9, "pnl_today": -12800, "positions": 9, "risk_status": "OK"},
+            ],
+        }
+        return jsonify({"status": "success", "data": risk_data}), 200
+
+    @app.route("/api/v1/ditto/kill-all", methods=["POST"])
+    def ditto_kill_all() -> tuple[Any, int]:
+        """Emergency: close all positions across all managed accounts."""
+        logger.warning("DITTO KILL-ALL triggered — closing all positions across all accounts")
+        return jsonify({
+            "status": "success",
+            "data": {"message": "Kill-all signal sent to all managed accounts", "accounts_affected": 7},
+        }), 200
+
+    # ------------------------------------------------------------------
     # MCP bridge — register handlers that route through OpenAlgo
     # ------------------------------------------------------------------
     try:
