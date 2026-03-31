@@ -16,3 +16,4 @@ export { TaxTab } from "./TaxTab";
 export { OverlapTab } from "./OverlapTab";
 export { MfOptimizerTab } from "./MfOptimizerTab";
 export { BenchmarkTab } from "./BenchmarkTab";
+export { BasketTab } from "./BasketTab";

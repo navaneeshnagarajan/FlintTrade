@@ -53,6 +53,7 @@ import {
   OverlapTab,
   MfOptimizerTab,
   BenchmarkTab,
+  BasketTab,
 } from "./invest/tabs";
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
@@ -70,7 +71,8 @@ type TabId =
   | "ipo"
   | "tax"
   | "mf-optimizer"
-  | "benchmark";
+  | "benchmark"
+  | "basket";
 
 interface TabDef {
   id: TabId;
@@ -92,6 +94,7 @@ const TABS: TabDef[] = [
   { id: "tax", label: "Tax", icon: Receipt },
   { id: "mf-optimizer", label: "MF Optimizer", icon: Sparkles },
   { id: "benchmark", label: "Benchmark", icon: Activity },
+  { id: "basket", label: "Baskets", icon: Layers },
 ];
 
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
@@ -113,6 +116,7 @@ const TAB_CONTENT: Record<TabId, ReactNode> = {
   tax: <TaxTab />,
   "mf-optimizer": <MfOptimizerTab />,
   benchmark: <BenchmarkTab />,
+  basket: <BasketTab />,
 };
 
 // ─── Inner shell (needs InvestProvider in scope) ──────────────────────────────
@@ -129,8 +133,8 @@ function InvestShell() {
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "mf-optimizer"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "tax", "mf-optimizer", "benchmark"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "benchmark"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "tax", "mf-optimizer", "benchmark", "basket"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "benchmark", "basket"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));

@@ -35,15 +35,8 @@ ABSORBED_REPOS: list[dict] = [
             "Option chain/Greeks -> packages/screener/",
             "React dashboard patterns -> packages/terminal/",
         ],
-        "last_absorbed_commit": "47a1f51e",  # v0.2.0-beta baseline
+        "last_absorbed_commit": "960b2ad2",  # Updated 2026-03-31
         "missing_since": [
-            "GET /api/broker/capabilities — broker exchange/feature metadata",
-            "GET/POST /api/broker/credentials — credential management",
-            "blueprints/leverage.py — leverage settings for crypto",
-            "restx_api/pnl_symbols.py — P&L symbol tracking",
-            "Market Price Protection (MPP) for Zerodha/Kotak",
-            "Crypto design separation (dynamic exchanges, hide product)",
-            "Security dashboard hardening (auto-ban toggle, sorting)",
             "Zebu OAuth migration (TOTP -> OAuth 2.0)",
             "Flattrade V2 API endpoint migration",
             "Telegram alert service refactor (sync HTTP, no asyncio)",
@@ -84,13 +77,12 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/tier1-core/openalgo-flow",
         "type": "reference",
         "absorbed": [
-            "6 of 54 node types -> packages/integration/src/flow_builder.py",
+            "54 of 54 node types -> packages/integration/src/flow_builder.py",
             "Visual canvas pattern -> /automate route FlowBuilder",
+            "Draggable node palette with 8 categories",
         ],
-        "last_absorbed_commit": "unknown",
-        "missing_since": [
-            "48 more node types not absorbed",
-        ],
+        "last_absorbed_commit": "2026-03-31",
+        "missing_since": [],
     },
     {
         "name": "openalgo-chart",
@@ -141,6 +133,42 @@ ABSORBED_REPOS: list[dict] = [
         ],
         "last_absorbed_commit": "unknown",
         "missing_since": [],
+    },
+    {
+        "name": "fluxscan",
+        "github": "marketcalls/fluxscan",
+        "local_path": ".local/reference/repos/marketcalls-all/fluxscan",
+        "type": "reference",
+        "absorbed": [
+            "Scanner engine pattern -> packages/screener/src/scanner.py",
+            "6 built-in scanner templates",
+        ],
+        "last_absorbed_commit": "2026-03-31",
+        "missing_since": [],
+    },
+    {
+        "name": "pandas_signals_library",
+        "github": "marketcalls/pandas_signals_library",
+        "local_path": ".local/reference/repos/marketcalls-all/pandas_signals_library",
+        "type": "reference",
+        "absorbed": [
+            "exrem/flip/valuewhen signal functions -> packages/indicators/src/signals.py",
+        ],
+        "last_absorbed_commit": "2026-03-31",
+        "missing_since": [],
+    },
+    {
+        "name": "raptorbt",
+        "github": "marketcalls/raptorbt",
+        "local_path": ".local/reference/repos/marketcalls-all/raptorbt",
+        "type": "reference",
+        "absorbed": [
+            "StreamingMetrics (Welford) -> packages/backtest-engine/src/metrics.py",
+        ],
+        "last_absorbed_commit": "2026-03-31",
+        "missing_since": [
+            "Rust basket/options/spread backtest patterns (requires Rust expertise)",
+        ],
     },
 ]
 

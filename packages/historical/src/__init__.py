@@ -3,6 +3,7 @@
 __version__ = "0.1.0-alpha"
 
 from .downloader import DownloadResult, HistoricalDownloader
+from .expiry_collector import ExpiryDataCollector, ExpiryDataRecord, ExpiryDataResult
 from .expiry_manager import ContinuousFuturesBar, ExpiryInfo, ExpiryManager
 from .free_data import FreeDataSource
 from .pipeline import DataPipeline
@@ -15,4 +16,7 @@ __all__ = [
     "ExpiryManager",
     "ExpiryInfo",
     "ContinuousFuturesBar",
+    "ExpiryDataCollector",
+    "ExpiryDataRecord",
+    "ExpiryDataResult",
 ]

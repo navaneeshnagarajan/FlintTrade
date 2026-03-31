@@ -4,6 +4,7 @@ __version__ = "0.1.0-alpha"
 
 from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRanking
 from .analyst_chain import AnalysisState, AnalystChain
+from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
 from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
 from .memory import MemoryItem, MemoryLayer, MemoryQueryResult, TradedMemory
@@ -60,6 +61,9 @@ __all__ = [
     # Analyst chain
     "AnalystChain",
     "AnalysisState",
+    # News summarizer
+    "MarketNewsSummarizer",
+    "NewsSummary",
     # Market simulator
     "MarketSimulator",
     "MarketParticipant",
