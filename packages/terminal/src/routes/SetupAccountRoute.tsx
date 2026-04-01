@@ -57,10 +57,18 @@ const accountSchema = z.object({
     .regex(/[A-Z]/, "Include at least one uppercase letter")
     .regex(/[0-9]/, "Include at least one number")
     .regex(/[^a-zA-Z0-9]/, "Include at least one special character"),
+  confirmPassword: z.string(),
   pin: z
     .string()
     .length(6, "PIN must be exactly 6 digits")
     .regex(/^\d{6}$/, "PIN must be digits only"),
+  confirmPin: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+}).refine((data) => data.pin === data.confirmPin, {
+  message: "PINs do not match",
+  path: ["confirmPin"],
 });
 
 type AccountFormValues = z.infer<typeof accountSchema>;
@@ -151,7 +159,7 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
       {/* Username */}
       <div className="space-y-1.5">
         <Label htmlFor="sa-username" className="text-xs text-text-secondary uppercase tracking-wider">
-          Username
+          Username <span className="text-loss">*</span>
         </Label>
         <Input
           id="sa-username"
@@ -166,7 +174,7 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
       {/* Email */}
       <div className="space-y-1.5">
         <Label htmlFor="sa-email" className="text-xs text-text-secondary uppercase tracking-wider">
-          Email
+          Email <span className="text-loss">*</span>
         </Label>
         <Input
           id="sa-email"
@@ -181,7 +189,7 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
       {/* Password + strength meter */}
       <div className="space-y-1.5">
         <Label htmlFor="sa-password" className="text-xs text-text-secondary uppercase tracking-wider">
-          Password
+          Password <span className="text-loss">*</span>
         </Label>
         <div className="relative">
           <Input
@@ -224,10 +232,25 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
         {errors.password && <p className="text-xs text-loss">{errors.password.message}</p>}
       </div>
 
+      {/* Confirm Password */}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-confirm-password" className="text-xs text-text-secondary uppercase tracking-wider">
+          Confirm Password <span className="text-loss">*</span>
+        </Label>
+        <Input
+          id="sa-confirm-password"
+          type="password"
+          placeholder="Re-enter password"
+          aria-label="Confirm your password"
+          {...register("confirmPassword")}
+        />
+        {errors.confirmPassword && <p className="text-xs text-loss">{errors.confirmPassword.message}</p>}
+      </div>
+
       {/* PIN */}
       <div className="space-y-1.5">
         <Label htmlFor="sa-pin" className="text-xs text-text-secondary uppercase tracking-wider">
-          6-digit PIN <span className="normal-case text-text-muted font-normal">(for quick unlock and LIVE mode)</span>
+          6-digit PIN <span className="text-loss">*</span> <span className="normal-case text-text-muted font-normal">(for quick unlock and LIVE mode)</span>
         </Label>
         <Input
           id="sa-pin"
@@ -240,6 +263,24 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
           {...register("pin")}
         />
         {errors.pin && <p className="text-xs text-loss">{errors.pin.message}</p>}
+      </div>
+
+      {/* Confirm PIN */}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-confirm-pin" className="text-xs text-text-secondary uppercase tracking-wider">
+          Confirm PIN <span className="text-loss">*</span>
+        </Label>
+        <Input
+          id="sa-confirm-pin"
+          type="password"
+          inputMode="numeric"
+          maxLength={6}
+          placeholder="••••••"
+          aria-label="Re-enter your 6-digit PIN"
+          className="text-center font-mono text-lg tracking-widest max-w-40"
+          {...register("confirmPin")}
+        />
+        {errors.confirmPin && <p className="text-xs text-loss">{errors.confirmPin.message}</p>}
       </div>
 
       <Button type="submit" className="w-full" disabled={isLoading}>
