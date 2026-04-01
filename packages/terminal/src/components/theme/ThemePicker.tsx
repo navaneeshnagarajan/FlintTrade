@@ -1,19 +1,19 @@
 /**
  * ThemePicker.tsx
  *
- * Theme selection grid and custom theme builder for AppearanceSection.
- * Phase C: migrated from FlintTradeTheme to CinematicTheme.
- * Phase H: enhanced with contrast validation, dark/light split preview,
- *           stricter import validation, and hover-preview on preset cards.
+ * v4 theme selection UI for AppearanceSection.
  *
  * Sections:
- *   1. Built-in theme grid — icon + name + description + dark/light accent dots
- *      Hover-preview: temporarily applies hovered theme's CSS vars.
- *   2. Custom builder (collapsible) — dark + light variant color editors
- *      WCAG AA contrast indicators per accent/base pair.
- *      Dark/Light split preview cards shown side by side.
- *   3. Import / Export — JSON clipboard round-trip for CinematicTheme
- *      Import validates that both "dark" and "light" variant fields exist.
+ *   1. Built-in theme cards (Graphite / Midnight / Ember) with colour swatches.
+ *      Hover-preview: temporarily applies the hovered theme's CSS vars.
+ *   2. Dark / Light / System mode toggle — 3 buttons.
+ *   3. Glass effects toggle — shadcn/ui Switch.
+ *   4. Custom theme builder (collapsible):
+ *      - Pick a base theme
+ *      - Override any colour with a colour picker
+ *      - Dark + Light split preview cards side-by-side
+ *      - WCAG AA contrast validation per pair
+ *      - Export active theme as JSON / Import from JSON
  */
 
 import {
@@ -30,22 +30,23 @@ import {
   Check,
   Upload,
   Palette,
-  Leaf,
-  Waves,
-  Sun,
-  Zap,
-  Snowflake,
   Moon,
+  Sun,
+  Monitor,
+  Layers,
+  Flame,
   ShieldCheck,
   ShieldX,
-  type LucideProps,
 } from "lucide-react";
-import type { ForwardRefExoticComponent, RefAttributes } from "react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { useThemeStore } from "@/stores/themeStore";
 import {
   CINEMATIC_THEMES,
   type CinematicTheme,
+  type ThemeDefinition,
   type ThemeVariant,
+  type ColorMode,
 } from "@/lib/cinematicThemes";
 import { evaluateContrast, type ContrastResult } from "@/lib/contrastUtils";
 
@@ -53,19 +54,16 @@ import { evaluateContrast, type ContrastResult } from "@/lib/contrastUtils";
 // Icon resolver — maps theme.icon string to a Lucide component
 // ---------------------------------------------------------------------------
 
-type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>;
-
-const ICON_MAP: Record<string, LucideIcon> = {
-  leaf:      Leaf,
-  waves:     Waves,
-  sun:       Sun,
-  zap:       Zap,
-  snowflake: Snowflake,
-  moon:      Moon,
-};
+type IconComponent = React.FC<{ size?: number; className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
 
 function ThemeIcon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {
-  const Icon = (ICON_MAP[name] ?? Palette) as LucideIcon;
+  const icons: Record<string, IconComponent> = {
+    layers: Layers,
+    moon:   Moon,
+    flame:  Flame,
+    sun:    Sun,
+  };
+  const Icon = (icons[name] ?? Palette) as IconComponent;
   return <Icon size={size} className={className} aria-hidden />;
 }
 
@@ -77,38 +75,27 @@ function makeCustomId(): string {
   return `custom-${Date.now()}`;
 }
 
-/** Build a minimal CinematicTheme from partial variant overrides. */
 function buildCustomTheme(
   id: string,
   name: string,
   dark: ThemeVariant,
   light: ThemeVariant,
-): CinematicTheme {
+): ThemeDefinition {
   return {
     id,
     name,
     description: "Custom theme",
-    icon: "palette",
+    icon:        "palette",
     dark,
     light,
     shared: {
-      profit: "#22c55e",
-      loss:   "#ef4444",
-      shimmer: { speed: "2.4s" },
-      particles: {
-        quantity:  40,
-        sizeRange: [1, 3],
-        behavior:  "drift",
-      },
+      shimmer:   { speed: "2.4s" },
+      particles: { quantity: 40, sizeRange: [1, 3], behavior: "drift" },
     },
   };
 }
 
-/**
- * Validate that a parsed JSON value has the minimum shape of a CinematicTheme:
- * an object with id (string), name (string), dark (object), and light (object).
- */
-function isCinematicThemeShape(value: unknown): value is CinematicTheme {
+function isCinematicThemeShape(value: unknown): value is ThemeDefinition {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
@@ -121,7 +108,6 @@ function isCinematicThemeShape(value: unknown): value is CinematicTheme {
 
 // ---------------------------------------------------------------------------
 // Sub-component: ContrastBadge
-// Displays a WCAG AA pass/fail indicator with the numeric ratio.
 // ---------------------------------------------------------------------------
 
 interface ContrastBadgeProps {
@@ -134,27 +120,14 @@ function ContrastBadge({ fg, bg, label }: ContrastBadgeProps) {
   const result: ContrastResult = evaluateContrast(fg, bg);
 
   return (
-    <div
-      className="flex items-center gap-1"
-      title={`${label}: ${result.ratio}:1 — ${result.label}`}
-    >
+    <div className="flex items-center gap-1" title={`${label}: ${result.ratio}:1 — ${result.label}`}>
       <span className="text-[9px] text-text-muted">{label}</span>
       {result.passes ? (
-        <ShieldCheck
-          size={10}
-          className="text-profit shrink-0"
-          aria-label={`${label} passes WCAG AA (${result.ratio}:1)`}
-        />
+        <ShieldCheck size={10} className="text-profit shrink-0" aria-label={`${label} passes WCAG AA`} />
       ) : (
-        <ShieldX
-          size={10}
-          className="text-loss shrink-0"
-          aria-label={`${label} fails WCAG AA (${result.ratio}:1)`}
-        />
+        <ShieldX size={10} className="text-loss shrink-0" aria-label={`${label} fails WCAG AA`} />
       )}
-      <span
-        className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}
-      >
+      <span className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}>
         {result.ratio}
       </span>
     </div>
@@ -163,7 +136,6 @@ function ContrastBadge({ fg, bg, label }: ContrastBadgeProps) {
 
 // ---------------------------------------------------------------------------
 // Sub-component: VariantPreviewCard
-// Shows a compact visual preview for one ThemeVariant (dark OR light).
 // ---------------------------------------------------------------------------
 
 interface VariantPreviewCardProps {
@@ -184,78 +156,42 @@ function VariantPreviewCard({ variant, mode }: VariantPreviewCardProps) {
       style={{ backgroundColor: colors.base, borderColor: colors.border }}
       aria-label={`${mode} variant preview`}
     >
-      {/* Mode label */}
       <div className="flex items-center justify-between">
-        <span
-          className="text-[9px] uppercase tracking-widest font-medium"
-          style={{ color: colors.textMuted }}
-        >
+        <span className="text-[9px] uppercase tracking-widest font-medium" style={{ color: colors.textMuted }}>
           {mode}
         </span>
-        <div
-          className="h-1.5 w-1.5 rounded-full"
-          style={{ backgroundColor: colors.accent }}
-        />
+        <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: colors.accent }} />
       </div>
 
-      {/* Sample card */}
       <div
         className="rounded p-2 space-y-1.5"
-        style={{ backgroundColor: colors.card, borderColor: colors.border, border: `1px solid ${colors.border}` }}
+        style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}
       >
-        {/* Primary + muted text */}
-        <div
-          className="text-[10px] font-semibold leading-none"
-          style={{ color: colors.text }}
-        >
+        <div className="text-[10px] font-semibold leading-none" style={{ color: colors.text }}>
           NIFTY 25,150.00
         </div>
-        <div
-          className="text-[9px] leading-none"
-          style={{ color: colors.textMuted }}
-        >
-          Last updated 09:30 IST
+        <div className="text-[9px] leading-none" style={{ color: colors.textMuted }}>
+          09:30 IST
         </div>
-
-        {/* Accent-colored element */}
         <div
           className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-mono"
-          style={{
-            backgroundColor: `${colors.accent}22`,
-            color:            colors.accent,
-            border:           `1px solid ${colors.accent}44`,
-          }}
+          style={{ backgroundColor: `${colors.accent}22`, color: colors.accent, border: `1px solid ${colors.accent}44` }}
         >
           +1.42%
         </div>
       </div>
 
-      {/* Glass morphism strip */}
-      <div
-        className="rounded px-2 py-1 text-[9px]"
-        style={{ ...glassStyle, color: colors.textSecondary }}
-      >
+      <div className="rounded px-2 py-1 text-[9px]" style={{ ...glassStyle, color: colors.textSecondary }}>
         Glass surface
       </div>
 
-      {/* Color swatch strip */}
+      {/* Colour swatch strip: base / card / accent / profit / loss */}
       <div className="flex items-center gap-1">
-        {[
-          colors.base,
-          colors.card,
-          colors.accent,
-          colors.text,
-          colors.border,
-        ].map((c, i) => (
-          <div
-            key={i}
-            className="h-2 flex-1 rounded-sm"
-            style={{ backgroundColor: c }}
-          />
+        {[colors.base, colors.card, colors.accent, "#22c55e", "#ef4444"].map((c, i) => (
+          <div key={i} className="h-2 flex-1 rounded-sm" style={{ backgroundColor: c }} />
         ))}
       </div>
 
-      {/* Contrast indicator for the key pair: accent on base */}
       <ContrastBadge fg={colors.accent} bg={colors.base} label="accent/base" />
     </div>
   );
@@ -263,7 +199,7 @@ function VariantPreviewCard({ variant, mode }: VariantPreviewCardProps) {
 
 // ---------------------------------------------------------------------------
 // Sub-component: ThemeCard
-// Supports hover-preview: temporarily apply the hovered theme's CSS vars.
+// Hover-preview: temporarily applies hovered theme's CSS vars.
 // ---------------------------------------------------------------------------
 
 interface ThemeCardProps {
@@ -274,35 +210,21 @@ interface ThemeCardProps {
 
 function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
   const previewActive = useRef(false);
+  const prevId = useRef<string | null>(null);
 
   function handleMouseEnter(_e: MouseEvent<HTMLButtonElement>) {
-    previewActive.current = true;
-    // Temporarily apply this theme's CSS vars without persisting to store state.
-    // We do this by grabbing the store's applyTheme mechanism but swapping the
-    // active theme id for the preview id only in the DOM, then restoring it.
     const store = useThemeStore.getState();
-    const previousId = store.activeThemeId;
-
-    // Only preview if this isn't already the active theme
-    if (theme.id === previousId) return;
-
-    // Temporarily write the preview theme's vars to document
+    if (theme.id === store.activeThemeId) return;
+    previewActive.current = true;
+    prevId.current = store.activeThemeId;
     store.setTheme(theme.id);
-
-    // Stash the previous id so we can restore on leave
-    (handleMouseEnter as { _prevId?: string })._prevId = previousId;
   }
 
   function handleMouseLeave(_e: MouseEvent<HTMLButtonElement>) {
-    if (!previewActive.current) return;
+    if (!previewActive.current || !prevId.current) return;
     previewActive.current = false;
-
-    const prevId = (handleMouseEnter as { _prevId?: string })._prevId;
-    if (prevId) {
-      // Restore the previously active theme
-      useThemeStore.getState().setTheme(prevId);
-      (handleMouseEnter as { _prevId?: string })._prevId = undefined;
-    }
+    useThemeStore.getState().setTheme(prevId.current);
+    prevId.current = null;
   }
 
   return (
@@ -319,22 +241,17 @@ function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
           : "border-border-default bg-surface-card hover:bg-surface-hover hover:border-border-strong"
       }`}
     >
-      {/* Icon + accent dots row */}
+      {/* Icon + accent dots */}
       <div className="flex items-center justify-between">
-        <ThemeIcon
-          name={theme.icon}
-          size={14}
-          className={isActive ? "text-accent" : "text-text-muted"}
-        />
-        {/* Dark + Light accent dots */}
+        <ThemeIcon name={theme.icon} size={14} className={isActive ? "text-accent" : "text-text-muted"} />
         <div className="flex items-center gap-1">
           <div
-            title={`Dark accent: ${theme.dark.colors.accent}`}
+            title={`Dark: ${theme.dark.colors.accent}`}
             className="h-2.5 w-2.5 rounded-full border border-black/10 shrink-0"
             style={{ backgroundColor: theme.dark.colors.accent }}
           />
           <div
-            title={`Light accent: ${theme.light.colors.accent}`}
+            title={`Light: ${theme.light.colors.accent}`}
             className="h-2.5 w-2.5 rounded-full border border-black/10 shrink-0"
             style={{ backgroundColor: theme.light.colors.accent }}
           />
@@ -343,12 +260,8 @@ function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
 
       {/* Name + description */}
       <div>
-        <div className="text-xs font-heading font-semibold text-text-primary leading-tight">
-          {theme.name}
-        </div>
-        <div className="text-[10px] text-text-muted mt-0.5 leading-snug line-clamp-2">
-          {theme.description}
-        </div>
+        <div className="text-xs font-heading font-semibold text-text-primary leading-tight">{theme.name}</div>
+        <div className="text-[10px] text-text-muted mt-0.5 leading-snug line-clamp-2">{theme.description}</div>
       </div>
 
       {isActive && (
@@ -357,6 +270,45 @@ function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
         </div>
       )}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: ModeToggle — Dark / Light / System
+// ---------------------------------------------------------------------------
+
+interface ModeToggleProps {
+  mode: ColorMode;
+  onChange: (mode: ColorMode) => void;
+}
+
+function ModeToggle({ mode, onChange }: ModeToggleProps) {
+  const options: Array<{ value: ColorMode; icon: React.ReactNode; label: string }> = [
+    { value: "dark",   icon: <Moon size={13} aria-hidden />,    label: "Dark" },
+    { value: "light",  icon: <Sun size={13} aria-hidden />,     label: "Light" },
+    { value: "system", icon: <Monitor size={13} aria-hidden />, label: "System" },
+  ];
+
+  return (
+    <div className="flex items-center gap-1 rounded-lg border border-border-default bg-surface-base p-0.5" role="group" aria-label="Colour mode">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          aria-pressed={mode === opt.value}
+          aria-label={opt.label}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+            mode === opt.value
+              ? "bg-accent/15 text-accent border border-accent/30"
+              : "text-text-muted hover:text-text-primary hover:bg-surface-hover border border-transparent"
+          }`}
+        >
+          {opt.icon}
+          {opt.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -399,43 +351,22 @@ function ColorField({ label, value, onChange }: ColorFieldProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Default custom-builder variant state (based on emerald-night)
+// Default custom-builder variant — based on Graphite dark/light
 // ---------------------------------------------------------------------------
 
-const DEFAULT_DARK_VARIANT: ThemeVariant = {
-  colors: {
-    base:          "#0a0a0f",
-    card:          "#13151a",
-    cardHover:     "#1c1f27",
-    border:        "#1e2430",
-    text:          "#e2ffe8",
-    textMuted:     "#5a7a66",
-    textSecondary: "#8ab89a",
-    accent:        "#22c55e",
-    accentText:    "#0a0a0f",
+const BASE_VARIANTS: Record<string, { dark: ThemeVariant; light: ThemeVariant }> = {
+  graphite: {
+    dark:  CINEMATIC_THEMES[0].dark,
+    light: CINEMATIC_THEMES[0].light,
   },
-  particles: { colors: ["#22c55e", "#16a34a", "#4ade80"], opacity: 0.55 },
-  glass: { tint: "rgba(10,10,15,0.75)", blur: 12, borderAlpha: 0.18, minOpacity: 0.60 },
-  glow:  { color: "rgba(34,197,94,0.15)", opacity: 0.15, radius: 24 },
-  shimmerColor: "rgba(34,197,94,0.08)",
-};
-
-const DEFAULT_LIGHT_VARIANT: ThemeVariant = {
-  colors: {
-    base:          "#f8faf9",
-    card:          "#ffffff",
-    cardHover:     "#edf7f1",
-    border:        "#cce8d6",
-    text:          "#0f2318",
-    textMuted:     "#6a907a",
-    textSecondary: "#3d6b52",
-    accent:        "#15803d",
-    accentText:    "#ffffff",
+  midnight: {
+    dark:  CINEMATIC_THEMES[1].dark,
+    light: CINEMATIC_THEMES[1].light,
   },
-  particles: { colors: ["#15803d", "#16a34a", "#4ade80"], opacity: 0.35 },
-  glass: { tint: "rgba(248,250,249,0.80)", blur: 10, borderAlpha: 0.20, minOpacity: 0.70 },
-  glow:  { color: "rgba(21,128,61,0.10)", opacity: 0.10, radius: 20 },
-  shimmerColor: "rgba(21,128,61,0.06)",
+  ember: {
+    dark:  CINEMATIC_THEMES[2].dark,
+    light: CINEMATIC_THEMES[2].light,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -443,19 +374,14 @@ const DEFAULT_LIGHT_VARIANT: ThemeVariant = {
 // ---------------------------------------------------------------------------
 
 export function ThemePicker() {
-  const { activeThemeId, customThemes, setTheme, addCustomTheme } = useThemeStore();
+  const { activeThemeId, mode, glass, customThemes, setTheme, setMode, setGlass, addCustomTheme } = useThemeStore();
 
   // --- Custom builder state ---
-  const [builderOpen, setBuilderOpen] = useState(false);
-  const [customName,  setCustomName]  = useState("My Theme");
-  const [darkVariant,  setDarkVariant]  = useState<ThemeVariant>(() => ({
-    ...DEFAULT_DARK_VARIANT,
-    colors: { ...DEFAULT_DARK_VARIANT.colors },
-  }));
-  const [lightVariant, setLightVariant] = useState<ThemeVariant>(() => ({
-    ...DEFAULT_LIGHT_VARIANT,
-    colors: { ...DEFAULT_LIGHT_VARIANT.colors },
-  }));
+  const [builderOpen,   setBuilderOpen]  = useState(false);
+  const [customName,    setCustomName]   = useState("My Theme");
+  const [baseThemeId,   setBaseThemeId]  = useState<string>("graphite");
+  const [darkVariant,   setDarkVariant]  = useState<ThemeVariant>(() => ({ ...BASE_VARIANTS["graphite"].dark,  colors: { ...BASE_VARIANTS["graphite"].dark.colors }  }));
+  const [lightVariant,  setLightVariant] = useState<ThemeVariant>(() => ({ ...BASE_VARIANTS["graphite"].light, colors: { ...BASE_VARIANTS["graphite"].light.colors } }));
 
   // --- Import/Export state ---
   const [importText,  setImportText]  = useState("");
@@ -463,15 +389,21 @@ export function ThemePicker() {
   const [copied,      setCopied]      = useState(false);
 
   // All themes (built-in + custom)
-  const allThemes: CinematicTheme[] = [...CINEMATIC_THEMES, ...customThemes];
+  const allBuiltIn = [...CINEMATIC_THEMES];
+  const allThemes: CinematicTheme[] = [...allBuiltIn, ...customThemes];
+
+  // When the base theme selector changes, reset variant editors to that base
+  function handleBaseThemeChange(id: string) {
+    setBaseThemeId(id);
+    const base = BASE_VARIANTS[id] ?? BASE_VARIANTS["graphite"];
+    setDarkVariant({ ...base.dark,  colors: { ...base.dark.colors  } });
+    setLightVariant({ ...base.light, colors: { ...base.light.colors } });
+  }
 
   // --- Color updater for dark variant ---
   const updateDarkColor = useCallback(
     (key: keyof ThemeVariant["colors"], val: string) => {
-      setDarkVariant((prev) => ({
-        ...prev,
-        colors: { ...prev.colors, [key]: val },
-      }));
+      setDarkVariant((prev) => ({ ...prev, colors: { ...prev.colors, [key]: val } }));
     },
     [],
   );
@@ -479,10 +411,7 @@ export function ThemePicker() {
   // --- Color updater for light variant ---
   const updateLightColor = useCallback(
     (key: keyof ThemeVariant["colors"], val: string) => {
-      setLightVariant((prev) => ({
-        ...prev,
-        colors: { ...prev.colors, [key]: val },
-      }));
+      setLightVariant((prev) => ({ ...prev, colors: { ...prev.colors, [key]: val } }));
     },
     [],
   );
@@ -495,10 +424,9 @@ export function ThemePicker() {
     setTheme(id);
   }
 
-  // --- Export ---
+  // --- Export active theme as JSON ---
   async function handleExport() {
-    const store = useThemeStore.getState();
-    const theme = store.getActiveTheme();
+    const theme = useThemeStore.getState().getActiveTheme();
     const json = JSON.stringify(theme, null, 2);
     try {
       await navigator.clipboard.writeText(json);
@@ -509,35 +437,31 @@ export function ThemePicker() {
     }
   }
 
-  // --- Import (validates CinematicTheme shape: must have dark + light) ---
+  // --- Import ---
   function handleImport() {
     setImportError("");
     try {
       const parsed = JSON.parse(importText) as unknown;
       if (!isCinematicThemeShape(parsed)) {
-        setImportError(
-          "Invalid CinematicTheme JSON — must have id (string), name (string), dark (object), and light (object) fields.",
-        );
+        setImportError("Invalid theme JSON — must have id, name, dark, and light fields.");
         return;
       }
-      const importedTheme: CinematicTheme = {
+      const imported: ThemeDefinition = {
         ...parsed,
         id: parsed.id.startsWith("custom-") ? parsed.id : `custom-${parsed.id}`,
       };
-      addCustomTheme(importedTheme);
-      setTheme(importedTheme.id);
+      addCustomTheme(imported);
+      setTheme(imported.id);
       setImportText("");
     } catch {
       setImportError("Could not parse JSON. Check formatting and try again.");
     }
   }
 
-  // --- Contrast summary for the builder ---
-  // Show a compact panel with accent-on-base and text-on-base checks for
-  // both dark and light variants simultaneously.
+  // Contrast pairs for the WCAG checker
   const contrastPairs: Array<{ fg: string; bg: string; label: string; variant: "dark" | "light" }> = [
-    { fg: darkVariant.colors.accent,  bg: darkVariant.colors.base, label: "accent/base", variant: "dark" },
-    { fg: darkVariant.colors.text,    bg: darkVariant.colors.base, label: "text/base",   variant: "dark" },
+    { fg: darkVariant.colors.accent,  bg: darkVariant.colors.base,  label: "accent/base", variant: "dark" },
+    { fg: darkVariant.colors.text,    bg: darkVariant.colors.base,  label: "text/base",   variant: "dark" },
     { fg: lightVariant.colors.accent, bg: lightVariant.colors.base, label: "accent/base", variant: "light" },
     { fg: lightVariant.colors.text,   bg: lightVariant.colors.base, label: "text/base",   variant: "light" },
   ];
@@ -545,19 +469,49 @@ export function ThemePicker() {
   return (
     <div className="space-y-5">
 
-      {/* ---- Theme grid ---- */}
-      <div className="grid grid-cols-3 gap-2">
-        {allThemes.map((theme) => (
-          <ThemeCard
-            key={theme.id}
-            theme={theme}
-            isActive={theme.id === activeThemeId}
-            onSelect={() => setTheme(theme.id)}
-          />
-        ))}
+      {/* ---- Theme cards (3 built-in + any custom) ---- */}
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Theme</p>
+        <div className="grid grid-cols-3 gap-2">
+          {allThemes.map((theme) => (
+            <ThemeCard
+              key={theme.id}
+              theme={theme}
+              isActive={theme.id === activeThemeId}
+              onSelect={() => setTheme(theme.id)}
+            />
+          ))}
+        </div>
       </div>
 
-      {/* ---- Custom builder ---- */}
+      {/* ---- Dark / Light / System toggle ---- */}
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Colour mode</p>
+        <ModeToggle mode={mode} onChange={setMode} />
+        {mode === "system" && (
+          <p className="text-[10px] text-text-muted mt-1.5">
+            Automatically follows your OS dark/light preference in real time.
+          </p>
+        )}
+      </div>
+
+      {/* ---- Glass effects toggle ---- */}
+      <div className="flex items-center gap-3">
+        <Switch
+          id="glass-toggle"
+          checked={glass}
+          onCheckedChange={setGlass}
+          aria-label="Toggle glass effects"
+        />
+        <Label htmlFor="glass-toggle" className="text-xs text-text-primary cursor-pointer select-none">
+          Glass effects
+          <span className="block text-[10px] text-text-muted font-normal">
+            Backdrop blur on cards, panels, and overlays. Disable for better performance.
+          </span>
+        </Label>
+      </div>
+
+      {/* ---- Custom theme builder ---- */}
       <div className="rounded-lg border border-border-default overflow-hidden">
         <button
           type="button"
@@ -590,11 +544,30 @@ export function ThemePicker() {
               />
             </div>
 
-            {/* --- Dark variant color editor --- */}
+            {/* Base theme selector */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">Start from</span>
+              <div className="flex items-center gap-2">
+                {(["graphite", "midnight", "ember"] as const).map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handleBaseThemeChange(id)}
+                    className={`px-3 py-1 text-xs rounded border transition-colors capitalize ${
+                      baseThemeId === id
+                        ? "border-accent bg-accent/10 text-accent"
+                        : "border-border-default text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                    }`}
+                  >
+                    {id}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Dark variant color editor */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
-                Dark variant colors
-              </p>
+              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Dark variant colours</p>
               <div className="grid grid-cols-2 gap-3">
                 <ColorField label="Base"           value={darkVariant.colors.base}          onChange={(v) => updateDarkColor("base",          v)} />
                 <ColorField label="Card"           value={darkVariant.colors.card}          onChange={(v) => updateDarkColor("card",          v)} />
@@ -607,11 +580,9 @@ export function ThemePicker() {
               </div>
             </div>
 
-            {/* --- Light variant color editor --- */}
+            {/* Light variant color editor */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
-                Light variant colors
-              </p>
+              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Light variant colours</p>
               <div className="grid grid-cols-2 gap-3">
                 <ColorField label="Base"           value={lightVariant.colors.base}          onChange={(v) => updateLightColor("base",          v)} />
                 <ColorField label="Card"           value={lightVariant.colors.card}          onChange={(v) => updateLightColor("card",          v)} />
@@ -624,36 +595,25 @@ export function ThemePicker() {
               </div>
             </div>
 
-            {/* --- WCAG AA contrast checker --- */}
+            {/* WCAG AA contrast checker */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
-                WCAG AA contrast check
-              </p>
+              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">WCAG AA contrast</p>
               <div className="rounded-lg border border-border-default bg-surface-base p-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
                 {contrastPairs.map((pair) => {
                   const result = evaluateContrast(pair.fg, pair.bg);
                   return (
-                    <div
-                      key={`${pair.variant}-${pair.label}`}
-                      className="flex items-center justify-between gap-2"
-                    >
-                      <span className="text-[9px] text-text-muted capitalize">
-                        {pair.variant} {pair.label}
-                      </span>
+                    <div key={`${pair.variant}-${pair.label}`} className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] text-text-muted capitalize">{pair.variant} {pair.label}</span>
                       <div className="flex items-center gap-1">
                         {result.passes ? (
                           <ShieldCheck size={10} className="text-profit shrink-0" aria-label="passes AA" />
                         ) : (
                           <ShieldX size={10} className="text-loss shrink-0" aria-label="fails AA" />
                         )}
-                        <span
-                          className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}
-                        >
+                        <span className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}>
                           {result.ratio}:1
                         </span>
-                        <span
-                          className={`text-[9px] ${result.passes ? "text-profit" : "text-loss"}`}
-                        >
+                        <span className={`text-[9px] ${result.passes ? "text-profit" : "text-loss"}`}>
                           {result.label}
                         </span>
                       </div>
@@ -663,11 +623,9 @@ export function ThemePicker() {
               </div>
             </div>
 
-            {/* --- Dark / Light split preview --- */}
+            {/* Dark / Light split preview */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">
-                Preview — dark / light
-              </p>
+              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Live preview</p>
               <div className="flex gap-2">
                 <VariantPreviewCard variant={darkVariant}  mode="dark"  />
                 <VariantPreviewCard variant={lightVariant} mode="light" />
@@ -693,30 +651,20 @@ export function ThemePicker() {
           <span className="text-xs font-medium text-text-primary">Import / Export</span>
         </div>
         <div className="p-4 space-y-3">
-
-          {/* Export */}
           <button
             type="button"
             onClick={() => void handleExport()}
             className="flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-border-default bg-surface-card text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
           >
-            {copied ? (
-              <Check size={12} className="text-profit" />
-            ) : (
-              <Copy size={12} />
-            )}
-            {copied ? "Copied to clipboard" : "Export Active Theme as JSON"}
+            {copied ? <Check size={12} className="text-profit" /> : <Copy size={12} />}
+            {copied ? "Copied to clipboard" : "Export active theme as JSON"}
           </button>
 
-          {/* Import */}
           <div className="space-y-1.5">
             <textarea
               value={importText}
-              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => {
-                setImportText(e.target.value);
-                setImportError("");
-              }}
-              placeholder="Paste CinematicTheme JSON here — must have id, name, dark, and light fields."
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => { setImportText(e.target.value); setImportError(""); }}
+              placeholder="Paste theme JSON here — must have id, name, dark, and light fields."
               rows={4}
               spellCheck={false}
               className="w-full px-3 py-2 text-xs font-mono bg-surface-base border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 resize-none"
@@ -736,6 +684,7 @@ export function ThemePicker() {
           </div>
         </div>
       </div>
+
     </div>
   );
 }

@@ -112,12 +112,12 @@ describe("QuickAccessPanel", () => {
     expect(screen.getByText("Connected")).toBeInTheDocument();
   });
 
-  it("has theme radiogroup with 6 radio buttons", () => {
+  it("has theme radiogroup with 3 radio buttons (v4 themes)", () => {
     renderPanel();
     const group = screen.getByRole("radiogroup", { name: /theme/i });
     expect(group).toBeInTheDocument();
     const themeRadios = group.querySelectorAll("[role='radio']");
-    expect(themeRadios).toHaveLength(6);
+    expect(themeRadios).toHaveLength(3);
   });
 
   it("has density radiogroup with compact and comfortable options", () => {
@@ -183,15 +183,12 @@ describe("QuickAccessPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("theme dots have correct aria-label attributes", () => {
+  it("theme dots have correct aria-label attributes (v4 themes)", () => {
     renderPanel();
     const expectedLabels = [
       "Graphite",
       "Midnight",
-      "Light",
-      "Arctic Frost",
-      "Monochrome",
-      "Solarized Dark",
+      "Ember",
     ];
     for (const label of expectedLabels) {
       expect(screen.getByRole("radio", { name: label })).toBeInTheDocument();

@@ -1,8 +1,9 @@
 /**
  * themeStore.test.ts
  *
- * Tests for themeStore v2 — CinematicTheme system, mode, migration,
- * reduceMotion, and applyTheme CSS property writes.
+ * Tests for themeStore v4 — 3 themes (graphite, midnight, ember),
+ * glass as boolean, trading semantics in ThemeVariant, system mode
+ * matchMedia listener, and applyTheme CSS property writes.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
@@ -13,15 +14,14 @@ import { CINEMATIC_THEMES } from "@/lib/cinematicThemes";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Reset the store to its v3 initial programmatic state before each test. */
+/** Reset the store to v4 initial state before each test. */
 function resetStore() {
   useThemeStore.setState({
     activeThemeId: "graphite",
-    mode: "system",
-    customThemes: [],
-    reduceMotion: false,
-    glass: { enabled: false, transparency: 0, blur: 0 },
-    background: { type: "solid", value: "", overlay: "" },
+    mode:          "system",
+    customThemes:  [],
+    reduceMotion:  false,
+    glass:         true,
   });
 }
 
@@ -31,7 +31,6 @@ function resetStore() {
 
 beforeEach(() => {
   resetStore();
-  // Reset any CSS properties on documentElement between tests
   document.documentElement.removeAttribute("style");
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.className = "";
@@ -62,112 +61,82 @@ describe("default state", () => {
     expect(useThemeStore.getState().customThemes).toEqual([]);
   });
 
-  it("glass starts disabled", () => {
-    expect(useThemeStore.getState().glass.enabled).toBe(false);
+  it("glass defaults to true (enabled)", () => {
+    expect(useThemeStore.getState().glass).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Migration v1 → v2
+// v4 migration mapping (inline simulation)
 // ---------------------------------------------------------------------------
 
-describe("migration v1 → v2", () => {
-  // The store's migrate function is tested indirectly by calling it with
-  // mock v1 persisted objects.
-
-  /**
-   * Manually invoke the store's migration logic by reading the persisted
-   * config's migrate function from the store options.
-   * We access it through a type cast since Zustand does not expose it publicly.
-   */
-  function simulateMigration(oldId: string): Record<string, unknown> {
-    // We rebuild the migrate logic inline to match themeStore's V1_THEME_MAP.
-    const V1_THEME_MAP: Record<string, string> = {
-      midnight:          "emerald-night",
-      obsidian:          "emerald-night",
-      "terminal-green":  "emerald-night",
-      "ocean-blue":      "ocean-depth",
-      light:             "arctic-frost",
-      sunset:            "solar-flare",
-      arctic:            "arctic-frost",
-      neon:              "neon-pulse",
-      forest:            "emerald-night",
-      monochrome:        "arctic-frost",
-      "solarized-dark":  "solar-flare",
-      "solarized-light": "solar-flare",
+describe("v4 migration mapping", () => {
+  function simulateMigration(oldId: string): string {
+    const ALL_LEGACY_TO_V4: Record<string, string> = {
+      midnight:           "midnight",
+      obsidian:           "graphite",
+      "terminal-green":   "graphite",
+      "ocean-blue":       "midnight",
+      light:              "graphite",
+      sunset:             "ember",
+      arctic:             "graphite",
+      neon:               "graphite",
+      forest:             "graphite",
+      monochrome:         "graphite",
+      "solarized-dark":   "graphite",
+      "solarized-light":  "graphite",
+      "emerald-night":    "graphite",
+      "ocean-depth":      "midnight",
+      "solar-flare":      "ember",
+      "neon-pulse":       "graphite",
+      "blood-moon":       "ember",
+      "arctic-frost":     "graphite",
     };
-
-    const p: Record<string, unknown> = { activeThemeId: oldId };
-    // version < 2 migration
-    p["activeThemeId"] = V1_THEME_MAP[oldId] ?? "emerald-night";
-    p["mode"] = "system";
-    p["customThemes"] = [];
-    p["reduceMotion"] = false;
-    return p;
+    return ALL_LEGACY_TO_V4[oldId] ?? "graphite";
   }
 
-  it("maps midnight → emerald-night", () => {
-    expect(simulateMigration("midnight").activeThemeId).toBe("emerald-night");
+  it("maps midnight → midnight", () => {
+    expect(simulateMigration("midnight")).toBe("midnight");
   });
 
-  it("maps obsidian → emerald-night", () => {
-    expect(simulateMigration("obsidian").activeThemeId).toBe("emerald-night");
+  it("maps obsidian → graphite", () => {
+    expect(simulateMigration("obsidian")).toBe("graphite");
   });
 
-  it("maps terminal-green → emerald-night", () => {
-    expect(simulateMigration("terminal-green").activeThemeId).toBe("emerald-night");
+  it("maps terminal-green → graphite", () => {
+    expect(simulateMigration("terminal-green")).toBe("graphite");
   });
 
-  it("maps ocean-blue → ocean-depth", () => {
-    expect(simulateMigration("ocean-blue").activeThemeId).toBe("ocean-depth");
+  it("maps ocean-blue → midnight", () => {
+    expect(simulateMigration("ocean-blue")).toBe("midnight");
   });
 
-  it("maps light → arctic-frost", () => {
-    expect(simulateMigration("light").activeThemeId).toBe("arctic-frost");
+  it("maps sunset → ember", () => {
+    expect(simulateMigration("sunset")).toBe("ember");
   });
 
-  it("maps sunset → solar-flare", () => {
-    expect(simulateMigration("sunset").activeThemeId).toBe("solar-flare");
+  it("maps solar-flare → ember", () => {
+    expect(simulateMigration("solar-flare")).toBe("ember");
   });
 
-  it("maps arctic → arctic-frost", () => {
-    expect(simulateMigration("arctic").activeThemeId).toBe("arctic-frost");
+  it("maps blood-moon → ember", () => {
+    expect(simulateMigration("blood-moon")).toBe("ember");
   });
 
-  it("maps neon → neon-pulse", () => {
-    expect(simulateMigration("neon").activeThemeId).toBe("neon-pulse");
+  it("maps arctic-frost → graphite", () => {
+    expect(simulateMigration("arctic-frost")).toBe("graphite");
   });
 
-  it("maps forest → emerald-night", () => {
-    expect(simulateMigration("forest").activeThemeId).toBe("emerald-night");
+  it("maps monochrome → graphite", () => {
+    expect(simulateMigration("monochrome")).toBe("graphite");
   });
 
-  it("maps monochrome → arctic-frost", () => {
-    expect(simulateMigration("monochrome").activeThemeId).toBe("arctic-frost");
+  it("maps emerald-night → graphite", () => {
+    expect(simulateMigration("emerald-night")).toBe("graphite");
   });
 
-  it("maps solarized-dark → solar-flare", () => {
-    expect(simulateMigration("solarized-dark").activeThemeId).toBe("solar-flare");
-  });
-
-  it("maps solarized-light → solar-flare", () => {
-    expect(simulateMigration("solarized-light").activeThemeId).toBe("solar-flare");
-  });
-
-  it("falls back unknown id to emerald-night", () => {
-    expect(simulateMigration("unknown-theme").activeThemeId).toBe("emerald-night");
-  });
-
-  it("migration sets mode to system", () => {
-    expect(simulateMigration("midnight").mode).toBe("system");
-  });
-
-  it("migration resets customThemes to []", () => {
-    expect(simulateMigration("midnight").customThemes).toEqual([]);
-  });
-
-  it("migration sets reduceMotion to false", () => {
-    expect(simulateMigration("midnight").reduceMotion).toBe(false);
+  it("maps unknown id → graphite", () => {
+    expect(simulateMigration("unknown-theme")).toBe("graphite");
   });
 });
 
@@ -184,10 +153,14 @@ describe("getActiveTheme", () => {
     expect(theme.shared).toBeDefined();
   });
 
-  it("returns the correct theme after setTheme", () => {
+  it("returns the correct theme after setTheme to midnight", () => {
     useThemeStore.getState().setTheme("midnight");
-    const theme = useThemeStore.getState().getActiveTheme();
-    expect(theme.id).toBe("midnight");
+    expect(useThemeStore.getState().getActiveTheme().id).toBe("midnight");
+  });
+
+  it("returns the correct theme after setTheme to ember", () => {
+    useThemeStore.getState().setTheme("ember");
+    expect(useThemeStore.getState().getActiveTheme().id).toBe("ember");
   });
 
   it("falls back to graphite (CINEMATIC_THEMES[0]) if id is not found", () => {
@@ -200,8 +173,7 @@ describe("getActiveTheme", () => {
     const customTheme = { ...CINEMATIC_THEMES[0], id: "custom-test-001" };
     useThemeStore.getState().addCustomTheme(customTheme);
     useThemeStore.setState({ activeThemeId: "custom-test-001" });
-    const theme = useThemeStore.getState().getActiveTheme();
-    expect(theme.id).toBe("custom-test-001");
+    expect(useThemeStore.getState().getActiveTheme().id).toBe("custom-test-001");
   });
 });
 
@@ -222,14 +194,14 @@ describe("getResolvedMode", () => {
 
   it("returns dark for system when matchMedia reports dark", () => {
     vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
-      matches: query === "(prefers-color-scheme: dark)",
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
+      matches:             query === "(prefers-color-scheme: dark)",
+      media:               query,
+      onchange:            null,
+      addListener:         vi.fn(),
+      removeListener:      vi.fn(),
+      addEventListener:    vi.fn(),
       removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
+      dispatchEvent:       vi.fn(),
     }));
     useThemeStore.setState({ mode: "system" });
     expect(useThemeStore.getState().getResolvedMode()).toBe("dark");
@@ -237,14 +209,14 @@ describe("getResolvedMode", () => {
 
   it("returns light for system when matchMedia reports light", () => {
     vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
-      matches: query !== "(prefers-color-scheme: dark)",
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
+      matches:             query !== "(prefers-color-scheme: dark)",
+      media:               query,
+      onchange:            null,
+      addListener:         vi.fn(),
+      removeListener:      vi.fn(),
+      addEventListener:    vi.fn(),
       removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
+      dispatchEvent:       vi.fn(),
     }));
     useThemeStore.setState({ mode: "system" });
     expect(useThemeStore.getState().getResolvedMode()).toBe("light");
@@ -256,20 +228,24 @@ describe("getResolvedMode", () => {
 // ---------------------------------------------------------------------------
 
 describe("setTheme", () => {
-  it("updates activeThemeId", () => {
+  it("updates activeThemeId to midnight", () => {
     useThemeStore.getState().setTheme("midnight");
     expect(useThemeStore.getState().activeThemeId).toBe("midnight");
   });
 
-  it("calls applyTheme (sets data-theme attribute)", () => {
-    useThemeStore.getState().setTheme("arctic-frost");
-    expect(document.documentElement.getAttribute("data-theme")).toBe("arctic-frost");
+  it("updates activeThemeId to ember", () => {
+    useThemeStore.getState().setTheme("ember");
+    expect(useThemeStore.getState().activeThemeId).toBe("ember");
   });
 
-  it("sets all 6 cinematic theme ids without error", () => {
-    const ids = CINEMATIC_THEMES.map((t) => t.id);
-    for (const id of ids) {
-      expect(() => useThemeStore.getState().setTheme(id)).not.toThrow();
+  it("calls applyTheme (sets data-theme attribute)", () => {
+    useThemeStore.getState().setTheme("midnight");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("midnight");
+  });
+
+  it("sets all 3 canonical theme ids without error", () => {
+    for (const t of CINEMATIC_THEMES) {
+      expect(() => useThemeStore.getState().setTheme(t.id)).not.toThrow();
     }
   });
 });
@@ -295,15 +271,46 @@ describe("setMode", () => {
     expect(useThemeStore.getState().mode).toBe("system");
   });
 
-  it("calls applyTheme when mode changes to light (adds theme-light class)", () => {
+  it("adds theme-light class when mode changes to light", () => {
     useThemeStore.getState().setMode("light");
     expect(document.documentElement.classList.contains("theme-light")).toBe(true);
   });
 
-  it("calls applyTheme when mode changes to dark (removes theme-light class)", () => {
+  it("removes theme-light class when mode changes to dark", () => {
     document.documentElement.classList.add("theme-light");
     useThemeStore.getState().setMode("dark");
     expect(document.documentElement.classList.contains("theme-light")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setGlass
+// ---------------------------------------------------------------------------
+
+describe("setGlass", () => {
+  it("can be set to false (disables glass)", () => {
+    useThemeStore.getState().setGlass(false);
+    expect(useThemeStore.getState().glass).toBe(false);
+  });
+
+  it("can be set to true (enables glass)", () => {
+    useThemeStore.setState({ glass: false });
+    useThemeStore.getState().setGlass(true);
+    expect(useThemeStore.getState().glass).toBe(true);
+  });
+
+  it("sets --glass-blur to 0 when glass disabled", () => {
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "dark" });
+    useThemeStore.getState().setGlass(false);
+    expect(document.documentElement.style.getPropertyValue("--glass-blur")).toBe("0px");
+  });
+
+  it("sets --glass-blur to theme value when glass enabled", () => {
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "dark" });
+    useThemeStore.getState().setGlass(true);
+    const blur = document.documentElement.style.getPropertyValue("--glass-blur");
+    expect(blur).not.toBe("0px");
+    expect(blur).toBeTruthy();
   });
 });
 
@@ -313,7 +320,7 @@ describe("setMode", () => {
 
 describe("applyTheme CSS properties", () => {
   beforeEach(() => {
-    useThemeStore.setState({ activeThemeId: "graphite", mode: "dark" });
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "dark", glass: true });
     useThemeStore.getState().applyTheme();
   });
 
@@ -325,23 +332,26 @@ describe("applyTheme CSS properties", () => {
     expect(document.documentElement.style.getPropertyValue("--color-card")).toBeTruthy();
   });
 
-  it("sets --color-accent", () => {
+  it("sets --color-accent for graphite dark (emerald green)", () => {
     const accent = document.documentElement.style.getPropertyValue("--color-accent");
     expect(accent).toBeTruthy();
-    // Graphite dark accent is #7c8be8
-    expect(accent).toBe("#7c8be8");
+    // Graphite dark accent is #22c55e (emerald-500)
+    expect(accent).toBe("#22c55e");
   });
 
   it("sets --color-profit to fixed #22c55e regardless of theme", () => {
     useThemeStore.getState().setTheme("midnight");
-    const profit = document.documentElement.style.getPropertyValue("--color-profit");
-    expect(profit).toBe("#22c55e");
+    expect(document.documentElement.style.getPropertyValue("--color-profit")).toBe("#22c55e");
   });
 
   it("sets --color-loss to fixed #ef4444 regardless of theme", () => {
+    useThemeStore.getState().setTheme("ember");
+    expect(document.documentElement.style.getPropertyValue("--color-loss")).toBe("#ef4444");
+  });
+
+  it("sets --color-warning to fixed #f59e0b regardless of theme", () => {
     useThemeStore.getState().setTheme("midnight");
-    const loss = document.documentElement.style.getPropertyValue("--color-loss");
-    expect(loss).toBe("#ef4444");
+    expect(document.documentElement.style.getPropertyValue("--color-warning")).toBe("#f59e0b");
   });
 
   it("sets --particle-primary", () => {
@@ -364,14 +374,10 @@ describe("applyTheme CSS properties", () => {
     expect(document.documentElement.style.getPropertyValue("--shimmer-speed")).toBeTruthy();
   });
 
-  it("sets --chart-up equal to profit", () => {
-    const chartUp = document.documentElement.style.getPropertyValue("--chart-up");
-    expect(chartUp).toBe("#22c55e");
-  });
-
-  it("sets --chart-down equal to loss", () => {
-    const chartDown = document.documentElement.style.getPropertyValue("--chart-down");
-    expect(chartDown).toBe("#ef4444");
+  it("sets --chart-color-1 through --chart-color-5", () => {
+    for (let i = 1; i <= 5; i++) {
+      expect(document.documentElement.style.getPropertyValue(`--chart-color-${i}`)).toBeTruthy();
+    }
   });
 
   it("sets --scrollbar-thumb", () => {
@@ -431,9 +437,7 @@ describe("custom themes", () => {
   it("addCustomTheme stores the theme", () => {
     const custom = { ...CINEMATIC_THEMES[0], id: "custom-001" };
     useThemeStore.getState().addCustomTheme(custom);
-    expect(
-      useThemeStore.getState().customThemes.some((t) => t.id === "custom-001"),
-    ).toBe(true);
+    expect(useThemeStore.getState().customThemes.some((t) => t.id === "custom-001")).toBe(true);
   });
 
   it("addCustomTheme replaces theme with same id", () => {
@@ -450,9 +454,7 @@ describe("custom themes", () => {
     const custom = { ...CINEMATIC_THEMES[0], id: "custom-002" };
     useThemeStore.getState().addCustomTheme(custom);
     useThemeStore.getState().removeCustomTheme("custom-002");
-    expect(
-      useThemeStore.getState().customThemes.some((t) => t.id === "custom-002"),
-    ).toBe(false);
+    expect(useThemeStore.getState().customThemes.some((t) => t.id === "custom-002")).toBe(false);
   });
 
   it("removeCustomTheme falls back to graphite when active theme removed", () => {

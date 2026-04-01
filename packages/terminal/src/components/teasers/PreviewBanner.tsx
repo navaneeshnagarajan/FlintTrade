@@ -78,9 +78,9 @@ export function PreviewBanner({ config, className }: PreviewBannerProps) {
     return getDismissedSet().has(featureName);
   });
 
-  // Glass toggle from theme store
+  // Glass toggle from theme store (boolean in v4)
   const glassEnabled = useThemeStore(
-    useShallow((state) => state.glass.enabled),
+    useShallow((state) => state.glass),
   );
 
   const StatusIcon = STATUS_ICONS[status];

@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "./themes/light.css";
 
 /* ---------- Self-hosted fonts (no external CDN, offline-ready) ---------- */
 @import "@fontsource-variable/inter";

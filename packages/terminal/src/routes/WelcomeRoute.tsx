@@ -17,7 +17,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Moon, Circle, Leaf, Waves, Sun } from "lucide-react";
 
 import { LogoIcon } from "@/components/brand/Logo";
 import { useThemeStore } from "@/stores/themeStore";
@@ -43,14 +42,6 @@ function cssVar(name: string, fallback: string): string {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const THEME_OPTIONS = [
-  { id: "midnight" as const, icon: Moon, label: "Midnight" },
-  { id: "obsidian" as const, icon: Circle, label: "Obsidian" },
-  { id: "terminal-green" as const, icon: Leaf, label: "Green" },
-  { id: "ocean-blue" as const, icon: Waves, label: "Blue" },
-  { id: "light" as const, icon: Sun, label: "Light" },
-];
 
 const WORDMARK = "FlintTrade";
 
@@ -301,32 +292,6 @@ export default function WelcomeRoute() {
         />
 
         {/* ====== UI CHROME ====== */}
-
-        {/* Theme switcher — top-left */}
-        <motion.div
-          className="fixed top-4 left-4 flex items-center gap-1 z-50"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: step >= 2 ? 1 : 0 }}
-          transition={{ duration: 0.6, ease: enterEase }}
-        >
-          {THEME_OPTIONS.map((t) => {
-            const ThemeIcon = t.icon;
-            return (
-              <button
-                key={t.id}
-                onClick={() => useThemeStore.getState().setTheme(t.id)}
-                aria-label={t.label}
-                className={`p-1.5 rounded transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none ${
-                  theme === t.id
-                    ? "bg-accent/20 text-accent"
-                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
-                }`}
-              >
-                <ThemeIcon size={14} aria-hidden="true" />
-              </button>
-            );
-          })}
-        </motion.div>
 
         {/* Skip → /explore */}
         <motion.button

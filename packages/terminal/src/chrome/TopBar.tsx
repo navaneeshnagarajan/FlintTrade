@@ -403,21 +403,19 @@ export default function TopBar() {
   const pnlColor = totalPnl >= 0 ? "text-profit" : "text-loss";
   const pnlSign = totalPnl >= 0 ? "+" : "";
 
-  // Glass: apply backdrop-blur + reduced opacity background when enabled.
-  // When disabled, fall back to the solid surface-card token via className.
-  const glassStyle: React.CSSProperties = glass.enabled
+  // Glass is now a boolean. When enabled, use the CSS vars set by applyTheme.
+  const glassStyle: React.CSSProperties = glass
     ? {
-        backdropFilter: `blur(${glass.blur}px)`,
-        WebkitBackdropFilter: `blur(${glass.blur}px)`,
-        // Use CSS variable opacity notation supported in modern browsers
-        backgroundColor: `color-mix(in srgb, var(--color-surface-card) ${100 - glass.transparency}%, transparent)`,
+        backdropFilter:        `var(--glass-blur, 12px)`,
+        WebkitBackdropFilter:  `var(--glass-blur, 12px)`,
+        backgroundColor:       "var(--glass-tint)",
       }
     : {};
 
   return (
     <div
-      className={`h-10 border-b border-border-default flex items-center justify-between px-3 select-none shrink-0 animate-fade-in${glass.enabled ? "" : " bg-surface-card"}`}
-      style={glass.enabled ? glassStyle : undefined}
+      className={`h-10 border-b border-border-default flex items-center justify-between px-3 select-none shrink-0 animate-fade-in${glass ? "" : " bg-surface-card"}`}
+      style={glass ? glassStyle : undefined}
     >
       {/* Left: Logo + Route Tabs + Separator + Workspace Tabs */}
       <div className="flex items-center gap-3">

@@ -75,8 +75,6 @@ export function GlassCard({
   style,
   ...rest
 }: GlassCardProps) {
-  // Only used when glass={true} is explicitly passed — provides blur/transparency values.
-  const glassStore = useThemeStore(useShallow((state) => state.glass));
   // Subscribe to stable source fields so the selector only re-renders when
   // the active theme ID or mode actually changes.
   const { activeThemeId, storeMode, customThemes } = useThemeStore(
@@ -127,17 +125,12 @@ export function GlassCard({
   const cssTint = readCssVar("--glass-tint");
   const cssBorderAlpha = readCssVar("--glass-border-alpha");
 
-  const blurPx =
-    glassStore.blur > 0
-      ? glassStore.blur
-      : cssBlur
-      ? parseFloat(cssBlur)
-      : variant.glass.blur;
+  // glass is now a boolean — read blur and transparency from CSS vars set by applyTheme.
+  const blurPx = cssBlur
+    ? parseFloat(cssBlur)
+    : variant.glass.blur;
 
-  const transparencyPct =
-    glassStore.transparency > 0
-      ? glassStore.transparency
-      : Math.round((1 - variant.glass.minOpacity) * 100);
+  const transparencyPct = Math.round((1 - variant.glass.minOpacity) * 100);
 
   // transparency is 0–100; convert to 0–1 alpha.
   // We invert: 100% transparency = fully transparent (alpha 0), 0% = opaque.

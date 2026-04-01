@@ -9,6 +9,7 @@ import { usePrevClose } from "@/hooks/usePrevClose";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useAuthStore } from "@/stores/authStore";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -84,6 +85,24 @@ export default function AppLayout() {
     window.addEventListener("flinttrade:navigate", handler);
     return () => window.removeEventListener("flinttrade:navigate", handler);
   }, [navigate]);
+
+  // Idle detection — check every 60 s; reset timer on any user activity
+  useEffect(() => {
+    const interval = setInterval(() => {
+      useAuthStore.getState().checkIdle();
+    }, 60_000);
+
+    function onActivity() { useAuthStore.getState().touchActivity(); }
+    window.addEventListener("mousemove", onActivity, { passive: true });
+    window.addEventListener("keydown", onActivity, { passive: true });
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("mousemove", onActivity);
+      window.removeEventListener("keydown", onActivity);
+    };
+  }, []);
+
   const [showWelcome, setShowWelcome] = useState(() => {
     return sessionStorage.getItem("flinttrade:dailyWelcomeDismissed") !== "true";
   });

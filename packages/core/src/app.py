@@ -260,6 +260,13 @@ def create_flask_app(
     from packages.core.src.operations_routes import operations_bp  # noqa: PLC0415
     app.register_blueprint(operations_bp)
 
+    # Register Auth blueprint (/v1/auth/*) — public endpoints, no API key required
+    from packages.core.src.auth_service import AuthService as _AuthService  # noqa: PLC0415
+    from packages.core.src.auth_routes import auth_bp  # noqa: PLC0415
+    _auth_db = Path.home() / ".flinttrade" / "auth.db"
+    app.config["AUTH_SERVICE"] = _AuthService(db_path=_auth_db)
+    app.register_blueprint(auth_bp)
+
     # Reconnect saved accounts (best-effort, don't block startup)
     try:
         _reconnect_saved_accounts(registry, credential_store, logger)
@@ -273,6 +280,7 @@ def create_flask_app(
     _PUBLIC_V1_PREFIXES = (
         "/v1/admin/health",
         "/v1/admin/introspect",
+        "/v1/auth/",          # Auth endpoints are public (login, setup, status)
         "/v1/auth/callback",
     )
 

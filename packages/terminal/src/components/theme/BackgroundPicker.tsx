@@ -6,8 +6,7 @@
  * All changes apply immediately via themeStore.setBackground().
  */
 
-import { type ChangeEvent } from "react";
-import { useThemeStore } from "@/stores/themeStore";
+import { useState, type ChangeEvent } from "react";
 
 /** Read a CSS custom property from the document root at call-time. */
 function cssVar(name: string, fallback: string): string {
@@ -305,10 +304,23 @@ const BG_TYPE_OPTIONS: Array<{ value: BgType; label: string }> = [
 ];
 
 export function BackgroundPicker() {
-  const { background, setBackground } = useThemeStore();
+  // Background settings are managed locally and applied via CSS vars.
+  // The store no longer holds background state (v4 simplification).
+  const [background, setBackgroundLocal] = useState<{ type: BgType; value: string; overlay: string }>(
+    { type: "solid", value: "", overlay: "" }
+  );
 
-  const activeType = (background.type as BgType) || "solid";
-  const activeValue = background.value || "";
+  // Apply background changes directly via the --theme-background CSS var
+  function setBackground(partial: Partial<{ type: BgType; value: string; overlay: string }>) {
+    const next = { ...background, ...partial };
+    setBackgroundLocal(next);
+    if (typeof document !== "undefined" && next.value) {
+      document.documentElement.style.setProperty("--theme-background", next.value);
+    }
+  }
+
+  const activeType = background.type;
+  const activeValue = background.value;
 
   function handleTypeChange(type: BgType) {
     // Reset value to a sensible default per type — read from active theme CSS vars

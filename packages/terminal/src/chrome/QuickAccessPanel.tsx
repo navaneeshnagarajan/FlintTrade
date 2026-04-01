@@ -57,13 +57,11 @@ type ColorMode = "dark" | "light" | "system";
 // Phase B: hardcoded accent colors. Phase C: driven by themeStore presets.
 // ---------------------------------------------------------------------------
 
+// v4 themes — Graphite (emerald), Midnight (sky-blue), Ember (amber)
 const THEME_DOTS = [
-  { id: "graphite",      label: "Graphite",      color: "#7c8be8" },
-  { id: "midnight",      label: "Midnight",      color: "#38bdf8" },
-  { id: "light",         label: "Light",         color: "#4f46e5" },
-  { id: "arctic-frost",  label: "Arctic Frost",  color: "#94a3b8" },
-  { id: "monochrome",    label: "Monochrome",    color: "#d0d0d0" },
-  { id: "solarized-dark",label: "Solarized Dark",color: "#268bd2" },
+  { id: "graphite", label: "Graphite", color: "#22c55e" },
+  { id: "midnight", label: "Midnight", color: "#38bdf8" },
+  { id: "ember",    label: "Ember",    color: "#f59e0b" },
 ] as const;
 
 // ---------------------------------------------------------------------------

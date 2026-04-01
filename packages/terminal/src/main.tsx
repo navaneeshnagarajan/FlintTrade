@@ -8,6 +8,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
+import { useAuthGuard } from "./hooks/useAuthGuard";
 import "./index.css";
 
 const TerminalRoute = lazy(() => import("./routes/TerminalRoute"));
@@ -32,6 +33,13 @@ function Loading() {
       </div>
     </div>
   );
+}
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuthGuard();
+  if (isLoading) return <Loading />;
+  if (!isAuthenticated) return null;
+  return <>{children}</>;
 }
 
 /**
@@ -66,20 +74,20 @@ const router = createBrowserRouter([
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
       { path: "explore", element: <RouteErrorBoundary routeName="Explore"><Suspense fallback={<Loading />}><ExploreRoute /></Suspense></RouteErrorBoundary> },
       { path: "setup", element: <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
-      { path: "settings", element: <RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary> },
+      { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {
         element: <AppLayout />,
         children: [
-          { path: "trade", element: <RouteErrorBoundary routeName="Trade"><Suspense fallback={<Loading />}><TerminalRoute /></Suspense></RouteErrorBoundary> },
+          { path: "trade", element: <ProtectedRoute><RouteErrorBoundary routeName="Trade"><Suspense fallback={<Loading />}><TerminalRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "terminal", element: <Navigate to="/trade" replace /> },
-          { path: "invest", element: <RouteErrorBoundary routeName="Invest"><Suspense fallback={<Loading />}><InvestRoute /></Suspense></RouteErrorBoundary> },
-          { path: "learn", element: <RouteErrorBoundary routeName="Learn"><Suspense fallback={<Loading />}><LearnRoute /></Suspense></RouteErrorBoundary> },
-          { path: "lab", element: <RouteErrorBoundary routeName="Lab"><Suspense fallback={<Loading />}><LabRoute /></Suspense></RouteErrorBoundary> },
-          { path: "automate", element: <RouteErrorBoundary routeName="Automate"><Suspense fallback={<Loading />}><AutomateRoute /></Suspense></RouteErrorBoundary> },
-          { path: "ai", element: <RouteErrorBoundary routeName="AI"><Suspense fallback={<Loading />}><AIRoute /></Suspense></RouteErrorBoundary> },
-          { path: "ditto", element: <RouteErrorBoundary routeName="Ditto"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary> },
+          { path: "invest", element: <ProtectedRoute><RouteErrorBoundary routeName="Invest"><Suspense fallback={<Loading />}><InvestRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "learn", element: <ProtectedRoute><RouteErrorBoundary routeName="Learn"><Suspense fallback={<Loading />}><LearnRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "lab", element: <ProtectedRoute><RouteErrorBoundary routeName="Lab"><Suspense fallback={<Loading />}><LabRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "automate", element: <ProtectedRoute><RouteErrorBoundary routeName="Automate"><Suspense fallback={<Loading />}><AutomateRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI"><Suspense fallback={<Loading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Ditto"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
         ],
       },
 
