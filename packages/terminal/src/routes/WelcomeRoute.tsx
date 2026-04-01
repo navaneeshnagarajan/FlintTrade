@@ -71,10 +71,87 @@ const SLOGAN = [
 const enterEase = [0.22, 1, 0.36, 1] as const;
 
 // ---------------------------------------------------------------------------
+// Welcome-back greeting data
+// ---------------------------------------------------------------------------
+
+const TRADING_QUOTES = [
+  { text: "The stock market is a device for transferring money from the impatient to the patient.", author: "Warren Buffett" },
+  { text: "In investing, what is comfortable is rarely profitable.", author: "Robert Arnott" },
+  { text: "The four most dangerous words in investing are: 'this time it's different.'", author: "Sir John Templeton" },
+  { text: "Risk comes from not knowing what you're doing.", author: "Warren Buffett" },
+  { text: "The market is never wrong — opinions often are.", author: "Jesse Livermore" },
+  { text: "It's not whether you're right or wrong, it's how much money you make when you're right.", author: "George Soros" },
+  { text: "Be fearful when others are greedy and greedy when others are fearful.", author: "Warren Buffett" },
+  { text: "The trend is your friend until the end when it bends.", author: "Ed Seykota" },
+  { text: "Markets can remain irrational longer than you can remain solvent.", author: "John Maynard Keynes" },
+  { text: "Compound interest is the eighth wonder of the world.", author: "Albert Einstein" },
+] as const;
+
+function getISTGreeting(): string {
+  // Compute IST hour (UTC+05:30)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const nowIST = new Date(Date.now() + istOffset);
+  const hour = nowIST.getUTCHours();
+  if (hour >= 4 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function getRandomQuote() {
+  return TRADING_QUOTES[Math.floor(Math.random() * TRADING_QUOTES.length)];
+}
+
+const GREETED_KEY = "flinttrade:greeted-today";
+
+function shouldShowGreeting(): boolean {
+  return sessionStorage.getItem(GREETED_KEY) !== new Date().toDateString();
+}
+
+function markGreeted(): void {
+  sessionStorage.setItem(GREETED_KEY, new Date().toDateString());
+}
+
+// ---------------------------------------------------------------------------
 // Inner flow steps (for returning users)
 // ---------------------------------------------------------------------------
 
-type FlowStep = "cinematic" | "login" | "mode" | "broker";
+type FlowStep = "cinematic" | "greeting" | "login" | "mode" | "broker";
+
+// ---------------------------------------------------------------------------
+// Greeting screen — shown to returning users on first login of the day
+// ---------------------------------------------------------------------------
+
+function GreetingScreen({ onDone }: { onDone: () => void }) {
+  const quote = useMemo(() => getRandomQuote(), []);
+  const greeting = useMemo(() => getISTGreeting(), []);
+
+  useEffect(() => {
+    const t = setTimeout(onDone, 3000);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  return (
+    <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center px-6 relative">
+      <motion.div
+        className="flex flex-col items-center gap-6 text-center max-w-md"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <LogoIcon size={52} />
+        <div className="space-y-1">
+          <p className="font-heading font-bold text-2xl text-text-primary">{greeting}</p>
+          <p className="text-sm text-text-muted">Welcome back to FlintTrade</p>
+        </div>
+        <blockquote className="rounded-xl border border-border-default bg-surface-card p-5 space-y-2">
+          <p className="text-sm text-text-secondary leading-relaxed italic">&ldquo;{quote.text}&rdquo;</p>
+          <footer className="text-xs text-text-muted">— {quote.author}</footer>
+        </blockquote>
+        <p className="text-xs text-text-muted">Redirecting to login…</p>
+      </motion.div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -160,6 +237,7 @@ export default function WelcomeRoute() {
 
   // Returning user (logged-out / pin-required): auto-redirect to login
   // after a brief cinematic (1.5 s). When reduced-motion: immediate.
+  // For logged-out users on their first login of the day, show a greeting screen first.
   useEffect(() => {
     if (authStatus !== "logged-out" && authStatus !== "pin-required") return;
     if (flowStep !== "cinematic") return;
@@ -167,7 +245,13 @@ export default function WelcomeRoute() {
     const delay = reducedMotion ? 0 : 1500;
     const t = setTimeout(() => {
       setStep(5); // jump cinematic to end
-      setFlowStep("login");
+      // logged-out + first login of the day → show greeting before login form
+      if (authStatus === "logged-out" && shouldShowGreeting()) {
+        markGreeted();
+        setFlowStep("greeting");
+      } else {
+        setFlowStep("login");
+      }
     }, delay);
     return () => clearTimeout(t);
   }, [authStatus, flowStep, reducedMotion]);
@@ -192,6 +276,12 @@ export default function WelcomeRoute() {
   // ------------------------------------------------------------------
   // Sub-screen renders for returning users
   // ------------------------------------------------------------------
+
+  if (authStatus === "logged-out" && flowStep === "greeting") {
+    return (
+      <GreetingScreen onDone={() => setFlowStep("login")} />
+    );
+  }
 
   if (authStatus === "logged-out" && flowStep === "login") {
     return <LoginRoute onSuccess={handleLoginSuccess} mode="full" />;

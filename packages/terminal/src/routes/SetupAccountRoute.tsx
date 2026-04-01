@@ -8,10 +8,14 @@
  * Step 5: Risk Limits       — max daily loss, position size
  * Step 6: Mode Selection    — Demo / Sandbox / Live
  *
+ * Session-storage key `flinttrade:setup-progress` persists partial progress so
+ * that interrupting after account creation (step 1) and returning does not trigger
+ * a duplicate-account error from the backend.
+ *
  * On completion navigates to /trade (last used route default).
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -44,6 +48,42 @@ import { useAuthStore } from "@/stores/authStore";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useThemeStore } from "@/stores/themeStore";
 import type { ColorMode } from "@/lib/cinematicThemes";
+
+// ---------------------------------------------------------------------------
+// Session-storage progress tracking
+// ---------------------------------------------------------------------------
+
+const PROGRESS_KEY = "flinttrade:setup-progress";
+
+interface SetupProgress {
+  accountCreated: boolean;
+  totpUri: string;
+  backupCodes: string[];
+  /** 0 = account security, 1 = persona, 2 = broker, 3 = trading, 4 = risk, 5 = mode */
+  completedStep: number;
+}
+
+function loadProgress(): SetupProgress | null {
+  try {
+    const raw = sessionStorage.getItem(PROGRESS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as SetupProgress;
+  } catch {
+    return null;
+  }
+}
+
+function saveProgress(progress: SetupProgress): void {
+  try {
+    sessionStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  } catch {
+    // Non-critical — ignore storage errors
+  }
+}
+
+function clearProgress(): void {
+  sessionStorage.removeItem(PROGRESS_KEY);
+}
 
 // ---------------------------------------------------------------------------
 // Step 1 — Account security schema
@@ -103,9 +143,10 @@ function passwordStrength(password: string): { score: number; label: string; col
 
 interface AccountSecurityStepProps {
   onComplete: (values: AccountFormValues, totpUri: string, backupCodes: string[]) => void;
+  onBack: () => void;
 }
 
-function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
+function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
@@ -295,10 +336,15 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
         </div>
       )}
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
-        {isLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
-        {isLoading ? "Setting up…" : "Continue"}
-      </Button>
+      <div className="flex justify-between items-center mt-6">
+        <Button variant="ghost" onClick={onBack} type="button">
+          ← Back
+        </Button>
+        <Button type="submit" disabled={isLoading}>
+          {isLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+          {isLoading ? "Setting up…" : "Continue"}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -311,11 +357,13 @@ interface TotpDisplayProps {
   totpUri: string;
   backupCodes: string[];
   onConfirmed: () => void;
+  onBack: () => void;
 }
 
-function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
+function TotpDisplay({ totpUri, backupCodes, onConfirmed, onBack }: TotpDisplayProps) {
   const [phase, setPhase] = useState<"warning" | "qr">("warning");
   const [downloaded, setDownloaded] = useState(false);
+  const [qrVisible, setQrVisible] = useState(false);
 
   function downloadCodes() {
     const content = backupCodes.join("\n");
@@ -358,9 +406,14 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
           </ul>
         </div>
 
-        <Button onClick={() => setPhase("qr")} className="w-full">
-          I&apos;m ready — show QR code
-        </Button>
+        <div className="flex justify-between items-center mt-6">
+          <Button variant="ghost" onClick={onBack} type="button">
+            ← Back
+          </Button>
+          <Button onClick={() => setPhase("qr")}>
+            I&apos;m ready — show QR code
+          </Button>
+        </div>
       </div>
     );
   }
@@ -375,15 +428,43 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
           Use Google Authenticator, Authy, or any TOTP app. Scan the QR code or enter the key manually.
         </p>
         {totpUri ? (
-          <div className="flex justify-center">
-            <div className="rounded-lg border border-border-default bg-white p-2">
-              <QRCodeSVG
-                value={totpUri}
-                size={180}
-                bgColor="transparent"
-                fgColor="#000000"
-              />
-            </div>
+          <div className="flex flex-col items-center gap-3">
+            {qrVisible ? (
+              <>
+                <div className="rounded-lg border border-border-default bg-white p-2">
+                  <QRCodeSVG
+                    value={totpUri}
+                    size={180}
+                    bgColor="transparent"
+                    fgColor="#000000"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQrVisible(false)}
+                  className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded px-2 py-1"
+                  aria-label="Hide QR code"
+                >
+                  <EyeOff className="size-3.5" />
+                  Hide QR Code
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQrVisible(true)}
+                  className="flex items-center gap-2 px-4 py-3 rounded-lg border border-border-default bg-surface-card hover:bg-surface-raised text-sm text-text-secondary hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  aria-label="Reveal QR code"
+                >
+                  <Eye className="size-4" />
+                  Reveal QR Code
+                </button>
+                <p className="text-xs text-text-muted text-center">
+                  QR code is hidden for security. Click to reveal.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-xs text-text-muted italic">2FA QR code not available — configure later in Settings.</p>
@@ -416,9 +497,14 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
         </div>
       )}
 
-      <Button onClick={onConfirmed} className="w-full">
-        I have saved my codes — Continue
-      </Button>
+      <div className="flex justify-between items-center mt-6">
+        <Button variant="ghost" onClick={onBack} type="button">
+          ← Back
+        </Button>
+        <Button onClick={onConfirmed}>
+          I have saved my codes — Continue
+        </Button>
+      </div>
     </div>
   );
 }
@@ -429,21 +515,26 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
 
 interface PersonaStepWrapperProps {
   onComplete: (persona: Persona) => void;
+  onBack: () => void;
 }
 
-function PersonaStepWrapper({ onComplete }: PersonaStepWrapperProps) {
+function PersonaStepWrapper({ onComplete, onBack }: PersonaStepWrapperProps) {
   const [selected, setSelected] = useState<Persona | null>(null);
 
   return (
     <div className="space-y-6">
       <PersonaPicker selected={selected} onSelect={setSelected} />
-      <Button
-        onClick={() => selected && onComplete(selected)}
-        disabled={!selected}
-        className="w-full"
-      >
-        Continue
-      </Button>
+      <div className="flex justify-between items-center mt-6">
+        <Button variant="ghost" onClick={onBack} type="button">
+          ← Back
+        </Button>
+        <Button
+          onClick={() => selected && onComplete(selected)}
+          disabled={!selected}
+        >
+          Continue
+        </Button>
+      </div>
     </div>
   );
 }
@@ -467,12 +558,47 @@ export default function SetupAccountRoute() {
   const colorMode = useThemeStore((s) => s.mode);
   const setColorMode = useThemeStore((s) => s.setMode);
 
-  const [currentStep, setCurrentStep] = useState(0);
-  // Saved from Step 1 API response
-  const [totpUri, setTotpUri] = useState("");
-  const [backupCodes, setBackupCodes] = useState<string[]>([]);
-  // Whether we are showing the TOTP/backup-codes screen (between step 1 and step 2)
-  const [showTotp, setShowTotp] = useState(false);
+  // ---------------------------------------------------------------------------
+  // Restore progress from sessionStorage on mount
+  // ---------------------------------------------------------------------------
+  const [currentStep, setCurrentStep] = useState(() => {
+    const saved = loadProgress();
+    if (!saved) return 0;
+    // If account was created, start at persona step (or the next incomplete step)
+    if (saved.accountCreated) {
+      return Math.min(saved.completedStep + 1, STEP_LABELS.length - 1);
+    }
+    return 0;
+  });
+
+  // Saved from Step 1 API response (restored from sessionStorage if available)
+  const [totpUri, setTotpUri] = useState(() => loadProgress()?.totpUri ?? "");
+  const [backupCodes, setBackupCodes] = useState<string[]>(() => loadProgress()?.backupCodes ?? []);
+
+  // Whether we are showing the TOTP/backup-codes screen (between step 1 and step 2).
+  // Restored automatically when accountCreated is true and completedStep is still 0
+  // (i.e. the user created the account but hadn't confirmed TOTP yet).
+  const [showTotp, setShowTotp] = useState(() => {
+    const saved = loadProgress();
+    return !!(saved?.accountCreated && saved.completedStep === 0);
+  });
+
+  // Keep progress in sync whenever key state changes
+  useEffect(() => {
+    const saved = loadProgress();
+    if (!saved?.accountCreated) return; // nothing to persist yet
+
+    saveProgress({
+      accountCreated: true,
+      totpUri,
+      backupCodes,
+      completedStep: currentStep > 0 ? currentStep - 1 : 0,
+    });
+  }, [currentStep, totpUri, backupCodes]);
+
+  // ---------------------------------------------------------------------------
+  // Step handlers
+  // ---------------------------------------------------------------------------
 
   function handleAccountComplete(
     _values: AccountFormValues,
@@ -481,38 +607,66 @@ export default function SetupAccountRoute() {
   ) {
     setTotpUri(uri);
     setBackupCodes(codes);
+    // Persist immediately so a page reload after account creation goes to TOTP
+    saveProgress({ accountCreated: true, totpUri: uri, backupCodes: codes, completedStep: 0 });
     setShowTotp(true);
   }
 
   function handleTotpConfirmed() {
     setShowTotp(false);
+    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 1 });
     setCurrentStep(1);
   }
 
   function handlePersonaComplete(_persona: Persona) {
+    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 2 });
     setCurrentStep(2);
   }
 
   function handleConnectionComplete(_values: ConnectionFormValues) {
+    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 3 });
     setCurrentStep(3);
   }
 
   function handleTradingComplete(_values: TradingDefaultsFormValues) {
+    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 4 });
     setCurrentStep(4);
   }
 
   function handleRiskComplete(_values: RiskFormValues) {
+    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 5 });
     setCurrentStep(5);
   }
 
   function handleModeSelect(mode: AppMode) {
     setMode(mode);
+    // Clear sessionStorage progress on successful completion
+    clearProgress();
     // Mark setup as complete: the backend already set up the account.
     // Log the user in by triggering the auth state. They will have a token
     // from the initial setup call, but for the wizard we just redirect to
     // login to complete the first-time flow cleanly.
     useAuthStore.getState().setLoggedOut();
     navigate("/welcome");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Back navigation
+  // ---------------------------------------------------------------------------
+
+  function handleBack() {
+    if (showTotp) {
+      // Back from TOTP warning/QR screen returns to the account form view.
+      // The account IS already created on the backend — we just return to
+      // the TOTP display so the user doesn't re-submit the form.
+      setShowTotp(false);
+      return;
+    }
+    if (currentStep === 0) {
+      navigate("/welcome");
+      return;
+    }
+    setCurrentStep((s) => s - 1);
   }
 
   const totalSteps = STEP_LABELS.length;
@@ -570,7 +724,10 @@ export default function SetupAccountRoute() {
         ) : (
           <div className="rounded-xl border border-border-default bg-surface-card p-6">
             {currentStep === 0 && !showTotp && (
-              <AccountSecurityStep onComplete={handleAccountComplete} />
+              <AccountSecurityStep
+                onComplete={handleAccountComplete}
+                onBack={handleBack}
+              />
             )}
 
             {currentStep === 0 && showTotp && (
@@ -578,24 +735,44 @@ export default function SetupAccountRoute() {
                 totpUri={totpUri}
                 backupCodes={backupCodes}
                 onConfirmed={handleTotpConfirmed}
+                onBack={handleBack}
               />
             )}
 
             {currentStep === 1 && (
-              <PersonaStepWrapper onComplete={handlePersonaComplete} />
+              <PersonaStepWrapper
+                onComplete={handlePersonaComplete}
+                onBack={handleBack}
+              />
             )}
 
             {currentStep === 2 && (
-              <ConnectionStep onComplete={handleConnectionComplete} />
+              <ConnectionStep
+                onComplete={handleConnectionComplete}
+              />
             )}
 
             {currentStep === 3 && (
-              <TradingStep onComplete={handleTradingComplete} />
+              <TradingStep
+                onComplete={handleTradingComplete}
+              />
             )}
 
             {currentStep === 4 && (
-              <RiskStep onComplete={handleRiskComplete} />
+              <RiskStep
+                onComplete={handleRiskComplete}
+              />
             )}
+          </div>
+        )}
+
+        {/* Back button for steps 2–4 that use their own sub-components
+            (ConnectionStep, TradingStep, RiskStep render their own submit buttons) */}
+        {currentStep >= 2 && currentStep <= 4 && (
+          <div className="flex justify-start">
+            <Button variant="ghost" onClick={handleBack} type="button">
+              ← Back
+            </Button>
           </div>
         )}
       </div>

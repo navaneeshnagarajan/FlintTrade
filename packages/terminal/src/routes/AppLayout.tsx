@@ -8,6 +8,7 @@ import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
+import { LockScreen } from "@/components/LockScreen";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -72,6 +73,7 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const sandboxMode = useSettingsStore((s) => s.sandboxMode);
+  const authStatus = useAuthStore((s) => s.status);
 
   const routeTitle = ROUTE_TITLES[location.pathname] ?? "FlintTrade";
 
@@ -168,6 +170,7 @@ export default function AppLayout() {
         }} />
       )}
       <NoConnectionOverlay />
+      {authStatus === "pin-required" && <LockScreen />}
     </div>
   );
 }
