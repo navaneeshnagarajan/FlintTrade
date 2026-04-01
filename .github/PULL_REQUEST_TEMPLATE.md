@@ -11,10 +11,5 @@
 - [ ] Branch: `{type}/{package}-{description}`
 - [ ] Commits: `{type}({package}): description`
 - [ ] Tests pass (`make test`)
-- [ ] DEVLOG.md entry added
+- [ ] CHANGELOG.md [Unreleased] entry added
 - [ ] No secrets committed
-
-## DEVLOG entry
-```
-## YYYY-MM-DD HH:MM IST | Machine | @username | IDE/Tool | AI Model/Agent | Branch | Summary
-```

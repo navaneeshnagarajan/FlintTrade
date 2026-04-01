@@ -48,7 +48,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 │  └──────────┘ └──────────┘ └──────────┘             │
 │                     │                                │
 │  ┌──────────┐ ┌─────┴────┐ ┌──────────┐             │
-│  │automaton │ │integratn │ │ gateway  │  Broker      │
+│  │automation│ │integratn │ │ gateway  │  Broker      │
 │  │  cron    │ │ webhooks │ │ 31 broker│  gateway     │
 │  │ telegram │ │ flow     │ │ adapters │  & auth      │
 │  └──────────┘ └──────────┘ └──────────┘             │

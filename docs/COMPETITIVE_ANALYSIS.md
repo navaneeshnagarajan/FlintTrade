@@ -390,7 +390,7 @@ The global social trading market is growing from $2.62B (2025) to $3.77B (2030).
 
 | Aspect | Details |
 |--------|---------|
-| **Target audience** | Options strategy backtestors, quantitative options traders |
+| **Target audience** | Options strategy backtesters, quantitative options traders |
 | **Killer features** | EOD options backtesting (data since 2016), options simulator (5-min intraday), 3D volatility surface, options scanner with algo alerts, strategy payoff analysis, supports NIFTY/BANKNIFTY + 51 stocks |
 | **Pricing** | Free (basic analytics), PRO ₹1,300/month + GST (backtesting + simulator + scanner + 3D vol surface) |
 | **API availability** | None |
@@ -403,10 +403,10 @@ The global social trading market is growing from $2.62B (2025) to $3.77B (2030).
 | Aspect | Details |
 |--------|---------|
 | **Target audience** | Advanced options traders, institutional-level analytics seekers |
-| **Killer features** | 100 options tools (25 free, 33 full depth order book), built-up analysis (position building/unwinding), options triggers (price/volume/OI/IV alerts), Gain & Pain (strike level analysis), MF Flow (mutual fund FnO exposure tracking), real-time order and trade flow analytics, full order book access (previously institutional-only) |
+| **Killer features** | 100 options tools (25 free, 33 full depth order book), built-up analysis (position building/unwinding), options triggers (price/volume/OI/IV alerts), Gain & Pain (strike level analysis), MF Flow (mutual fund F&O exposure tracking), real-time order and trade flow analytics, full order book access (previously institutional-only) |
 | **Pricing** | Free (25 tools), Premium (59 tools), Pro (100 tools + 2 algorithms) |
 | **API availability** | None |
-| **Unique differentiator** | Full depth order book analysis for retail traders (previously institutional-only). MF Flow showing mutual fund FnO positions. 100 specialized options tools. |
+| **Unique differentiator** | Full depth order book analysis for retail traders (previously institutional-only). MF Flow showing mutual fund F&O positions. 100 specialized options tools. |
 | **Gaps/complaints** | Overwhelming number of tools, steep learning curve, premium pricing for full access, mobile UI can be cluttered |
 | **Features to absorb** | Full depth order book analysis, built-up analysis (long/short building/unwinding), MF flow tracking, Gain & Pain strike analysis, options triggers with multi-factor alerts |
 

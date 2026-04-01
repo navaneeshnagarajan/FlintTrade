@@ -373,8 +373,11 @@ function GoalFormDialog({ open, onOpenChange, onSave, editingGoal }: GoalFormDia
     reset,
     formState: { errors },
   } = useForm<GoalFormValues>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zod v4 + react-hook-form type mismatch
-    // zodResolver v5 + zod v4 inferred type mismatch (coerce vs number): cast required
+    // zod v4 + @hookform/resolvers v5 type mismatch: z.coerce fields produce a
+    // ZodEffects output type that doesn't satisfy Resolver<GoalFormValues> directly.
+    // The double cast (unknown → Resolver) is intentional and safe — the runtime
+    // behaviour is correct; only the inferred type diverges from what RHF expects.
+    // Revisit if @hookform/resolvers adds native zod v4 coerce support.
     resolver: zodResolver(goalSchema) as unknown as Resolver<GoalFormValues>,
     defaultValues: editingGoal
       ? {
@@ -431,7 +434,7 @@ function GoalFormDialog({ open, onOpenChange, onSave, editingGoal }: GoalFormDia
             {editingGoal ? "Edit Goal" : "Add Investment Goal"}
           </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit as (data: Record<string, unknown>) => void)} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="goal-name">Goal Name</Label>
             <Input
@@ -660,7 +663,7 @@ export function GoalTab() {
           {/* Add goal card */}
           <button
             onClick={handleAddNew}
-            className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border-default p-8 text-text-muted hover:text-text-primary hover:border-accent/50 hover:bg-surface-hover/50 transition-colors min-h-[200px]"
+            className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border-default p-8 text-text-muted hover:text-text-primary hover:border-accent/50 hover:bg-surface-hover/50 transition-colors min-h-50"
             aria-label="Add new investment goal"
           >
             <Plus className="size-8" />

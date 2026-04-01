@@ -158,7 +158,15 @@ export function bollingerBands(
 // MACD
 // ---------------------------------------------------------------------------
 
-export interface MACDResult {
+/**
+ * API response shape for MACD from the FlintTrade indicators compute endpoint
+ * (POST /ft-api/v1/indicators/macd). Uses `histogram` (not `hist`) and
+ * returns non-nullable number arrays because nulls are stripped server-side.
+ *
+ * Distinct from `MACDResult` in widgets/analysis/Chart/indicators.ts which
+ * uses `hist` and nullable arrays for the chart rendering layer.
+ */
+export interface MACDApiResult {
   macd: number[];
   signal: number[];
   histogram: number[];
@@ -175,8 +183,8 @@ export function macd(
   fastPeriod: number = 12,
   slowPeriod: number = 26,
   signalPeriod: number = 9,
-): MACDResult {
-  const emptyResult: MACDResult = { macd: [], signal: [], histogram: [] };
+): MACDApiResult {
+  const emptyResult: MACDApiResult = { macd: [], signal: [], histogram: [] };
 
   if (prices.length < slowPeriod + signalPeriod - 1) return emptyResult;
 

@@ -798,7 +798,14 @@ export default function BacktestLabTool({ onClose }: Props) {
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
 
   const handleRunRequest = () => {
-    // TODO: replace with real API call to backtest-engine when backend connects
+    // TODO: POST /ft-api/v1/backtest/run with BacktestFormValues body.
+    // Expected response shape:
+    //   { equity_curve: EquityPoint[], trades: Trade[], metrics: BacktestMetrics }
+    // where EquityPoint = { time: number; value: number } (Unix seconds, INR portfolio value),
+    // Trade matches the MOCK_TRADES shape, and BacktestMetrics covers the stat cards in ResultsTab.
+    // On success: setEquityCurve(res.equity_curve), populate trades + metrics state, setHasRun(true).
+    // On error: show a toast and leave hasRun false so the results tab stays hidden.
+    // The backtest-engine Python package exposes this via packages/backtest-engine (FastAPI router).
     setEquityCurve(MOCK_EQUITY_CURVE);
     setHasRun(true);
     setActiveTab("results");

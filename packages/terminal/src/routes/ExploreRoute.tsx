@@ -283,7 +283,7 @@ function LabPreview() {
       </div>
       <MiniChart bars={LAB_BARS} color="purple" />
       <div className="text-xxs text-text-muted">
-        Equity curve — 180 day simulation
+        Equity curve — 180-day simulation
       </div>
     </div>
   );

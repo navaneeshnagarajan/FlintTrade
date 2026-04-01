@@ -191,7 +191,7 @@ function SignalsSection() {
           </Button>
         </div>
         <p className="text-xs text-text-secondary leading-relaxed">
-          LightGBM models analyze price, volume, OI and technicals. Auto-refreshes every 30s.
+          LightGBM models analyze price, volume, OI, and technicals. Auto-refreshes every 30s.
         </p>
       </Card>
 

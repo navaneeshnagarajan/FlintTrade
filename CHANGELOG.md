@@ -277,9 +277,7 @@ Feature-complete alpha release. 13 packages, 1,021 tests, 7 routes, 21 widgets, 
 - systemd service file, production deployment scripts
 - Feature flags — ENABLE_BACKTEST, ENABLE_AI
 
-## [0.0.1-dev] — 2026-03-14
-
-### Added
+### Added — Initial Setup
 - Monorepo — 12 packages with per-package CLAUDE.md + AGENTS.md
 - CI/CD — GitHub Actions (pytest, ruff, secrets check)
 - SEBI compliance framework — rate limits, kill switch architecture, audit

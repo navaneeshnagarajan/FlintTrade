@@ -34,9 +34,9 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.3.0
 
 - 3,965 tests passing (2,903 Python + 1,062 terminal)
 - Terminal: 30 widgets (TSX), 6 tools, 13 routes, 6 workspace presets, 6 themes (Graphite default)
-- 101 backtest strategies across 10 categories
+- 101 backtest strategies across 16 categories
 - v0.3.0 "Structured Calm" UI: ContentShell centering, 4-level surfaces, react-resizable-panels
-- 90+ FlintTrade backend endpoints, 100% OpenAlgo API coverage
+- 20 FlintTrade backend endpoints, 100% OpenAlgo API coverage (45+ endpoints)
 - Read PLAN.md for next tasks
 
 ## OpenAlgo API
