@@ -1,0 +1,785 @@
+"""Operations blueprint — cron, audit, journal, safety, webhooks, news, ditto,
+and monitoring/security proxy endpoints.
+
+All routes under /api/v1/ that were previously inline @app.route handlers
+in create_flask_app() but are unrelated to indicators, AI advisor, or
+backtest/strategy lifecycle.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import xml.etree.ElementTree as ET
+from datetime import datetime as _dt
+from datetime import timedelta as _td
+from datetime import timezone as _tz
+from typing import Any
+
+from flask import Blueprint, current_app, jsonify, request
+
+logger = logging.getLogger("flinttrade")
+
+operations_bp = Blueprint("operations", __name__, url_prefix="/api/v1")
+
+_IST = _tz(_td(hours=5, minutes=30))
+
+
+# ------------------------------------------------------------------
+# Cron jobs
+# ------------------------------------------------------------------
+
+@operations_bp.route("/cron/jobs", methods=["GET"])
+def cron_jobs_list() -> tuple[Any, int]:
+    """Return all registered cron jobs with their current status.
+
+    Returns:
+        JSON with ``status`` and ``data.jobs`` — a list of job objects
+        with ``name``, ``description``, ``trigger_type``, ``status``,
+        ``last_run``, ``run_count``, and ``error_count``.
+    """
+    from packages.automation.src.cron_manager import CronManager  # noqa: PLC0415
+
+    _cron: CronManager | None = current_app.config.get("CRON")
+    if _cron is None:
+        return jsonify({"status": "success", "data": {"jobs": []}}), 200
+
+    try:
+        jobs = [
+            {
+                "name": job.name,
+                "description": job.description,
+                "trigger_type": job.trigger_type,
+                "status": job.status,
+                "last_run": job.last_run,
+                "run_count": job.run_count,
+                "error_count": job.error_count,
+            }
+            for job in _cron._jobs.values()
+        ]
+        return jsonify({"status": "success", "data": {"jobs": jobs}}), 200
+    except Exception:
+        logger.exception("cron_jobs_list error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/cron/jobs/<name>/pause", methods=["POST"])
+def cron_job_pause(name: str) -> tuple[Any, int]:
+    """Pause a cron job by name.
+
+    Args:
+        name: Job name as registered in CronManager.
+
+    Returns:
+        JSON with ``status`` and confirmation message.
+    """
+    from packages.automation.src.cron_manager import CronManager  # noqa: PLC0415
+
+    _cron: CronManager | None = current_app.config.get("CRON")
+    if _cron is None:
+        return jsonify({"status": "error", "message": "CronManager not available"}), 503
+
+    try:
+        if name not in _cron._jobs:
+            return jsonify({"status": "error", "message": f"Job '{name}' not found"}), 404
+        _cron.pause(name)
+        return jsonify({"status": "success", "data": {"message": f"Job '{name}' paused"}}), 200
+    except Exception:
+        logger.exception("cron_job_pause error for %s", name)
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/cron/jobs/<name>/resume", methods=["POST"])
+def cron_job_resume(name: str) -> tuple[Any, int]:
+    """Resume a paused cron job by name.
+
+    Args:
+        name: Job name as registered in CronManager.
+
+    Returns:
+        JSON with ``status`` and confirmation message.
+    """
+    from packages.automation.src.cron_manager import CronManager  # noqa: PLC0415
+
+    _cron: CronManager | None = current_app.config.get("CRON")
+    if _cron is None:
+        return jsonify({"status": "error", "message": "CronManager not available"}), 503
+
+    try:
+        if name not in _cron._jobs:
+            return jsonify({"status": "error", "message": f"Job '{name}' not found"}), 404
+        _cron.resume(name)
+        return jsonify({"status": "success", "data": {"message": f"Job '{name}' resumed"}}), 200
+    except Exception:
+        logger.exception("cron_job_resume error for %s", name)
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------
+# Audit logs
+# ------------------------------------------------------------------
+
+@operations_bp.route("/audit/logs", methods=["GET"])
+def audit_logs() -> tuple[Any, int]:
+    """Read SEBI-compliant audit logs for a given date.
+
+    Query parameters:
+        date (str): Date in ``YYYY-MM-DD`` format (default: today).
+        limit (int): Maximum entries to return (default 100, max 1000).
+        offset (int): Skip this many entries before returning (default 0).
+
+    Returns:
+        JSON with ``status`` and ``data`` containing ``logs`` (list)
+        and ``total`` (total entries before pagination).
+    """
+    from packages.data.src.audit_logger import AuditLogger  # noqa: PLC0415
+
+    _audit: AuditLogger | None = current_app.config.get("AUDIT")
+    if _audit is None:
+        return jsonify({"status": "error", "message": "AuditLogger not available"}), 503
+
+    date_str: str = request.args.get("date", _dt.now(_IST).strftime("%Y-%m-%d"))
+    try:
+        limit: int = min(int(request.args.get("limit", 100)), 1000)
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "limit must be an integer"}), 400
+    try:
+        offset: int = max(0, int(request.args.get("offset", 0)))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "offset must be an integer"}), 400
+
+    try:
+        all_logs = _audit.read_day(date_str)
+        total = len(all_logs)
+        page = all_logs[offset: offset + limit]
+        return jsonify({
+            "status": "success",
+            "data": {"logs": page, "total": total, "date": date_str},
+        }), 200
+    except Exception:
+        logger.exception("audit_logs error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------
+# Trade journal
+# ------------------------------------------------------------------
+
+@operations_bp.route("/trades/journal", methods=["GET"])
+def trades_journal() -> tuple[Any, int]:
+    """Query the trade journal from DuckDB storage.
+
+    Query parameters:
+        start_date (str): Filter trades from this date (``YYYY-MM-DD``).
+        end_date (str): Filter trades up to this date (``YYYY-MM-DD``).
+        strategy (str): Filter by strategy name.
+        limit (int): Maximum rows to return (default 100, max 1000).
+
+    Returns:
+        JSON with ``status`` and ``data`` containing ``trades`` (list)
+        and ``total`` (total rows before pagination).
+    """
+    try:
+        from packages.data.src.storage import StorageManager  # noqa: PLC0415
+
+        start_date: str = request.args.get("start_date", "")
+        end_date: str = request.args.get("end_date", "")
+        strategy_filter: str = request.args.get("strategy", "")
+        limit: int = min(int(request.args.get("limit", 100)), 1000)
+
+        storage = StorageManager()
+        storage.initialize()
+
+        # Use available query methods on StorageManager
+        if strategy_filter and start_date and end_date:
+            trades = storage.get_trades_by_strategy(strategy_filter, start_date, end_date)
+        elif start_date:
+            trades = storage.get_trades_by_date(start_date)
+        else:
+            today = _dt.now(_IST).strftime("%Y-%m-%d")
+            trades = storage.get_trades_by_date(today)
+
+        # Apply limit
+        trades = trades[:limit]
+        # Convert datetime objects to strings for JSON serialisation
+        for t in trades:
+            for k, v in t.items():
+                if isinstance(v, _dt):
+                    t[k] = v.isoformat()
+        storage.close()
+
+        return jsonify({
+            "status": "success",
+            "data": {"trades": trades, "total": len(trades)},
+        }), 200
+    except ImportError:
+        return jsonify({
+            "status": "error",
+            "message": "Trade storage not available (DuckDB not configured)",
+        }), 200
+    except Exception:
+        logger.exception("trades_journal error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------
+# Safety config
+# ------------------------------------------------------------------
+
+@operations_bp.route("/safety/config", methods=["GET"])
+def safety_config_get() -> tuple[Any, int]:
+    """Return the current safety system configuration.
+
+    Returns:
+        JSON with ``status`` and ``data`` containing all 5-layer
+        safety parameters and current kill-switch / pause state.
+    """
+    from packages.engine.src.safety import SafetySystem  # noqa: PLC0415
+
+    _safety: SafetySystem | None = current_app.config.get("SAFETY")
+    if _safety is None:
+        return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
+
+    try:
+        data = {
+            "l1_order": {
+                "price_deviation_pct": _safety.l1_order.price_deviation_pct,
+                "check_market_hours": _safety.l1_order.check_market_hours,
+                "qty_limits": _safety.l1_order.qty_limits,
+            },
+            "l2_position": {
+                "max_positions": _safety.l2_position.max_positions,
+                "max_margin_pct": _safety.l2_position.max_margin_pct,
+            },
+            "l3_portfolio": {
+                "max_net_delta": _safety.l3_portfolio.max_net_delta,
+                "max_net_vega": _safety.l3_portfolio.max_net_vega,
+            },
+            "l4_pnl": {
+                "pause_pct": _safety.l4_pnl.pause_pct,
+                "kill_pct": _safety.l4_pnl.kill_pct,
+                "is_paused": _safety.l4_pnl.is_paused,
+                "is_killed": _safety.l4_pnl.is_killed,
+            },
+            "l5_kill": {
+                "is_active": _safety.l5_kill.is_active,
+                "reason": _safety.l5_kill.reason,
+            },
+        }
+        return jsonify({"status": "success", "data": data}), 200
+    except Exception:
+        logger.exception("safety_config_get error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/safety/config", methods=["POST"])
+def safety_config_update() -> tuple[Any, int]:
+    """Update safety system parameters.
+
+    Request JSON (all fields optional):
+        price_deviation_pct (float): L1 price deviation tolerance.
+        check_market_hours (bool): L1 market-hours enforcement flag.
+        max_positions (int): L2 maximum simultaneous positions.
+        max_margin_pct (float): L2 maximum margin utilisation %.
+        max_net_delta (float): L3 maximum net options delta.
+        max_net_vega (float): L3 maximum net options vega.
+        pnl_pause_pct (float): L4 daily-loss % that triggers a pause.
+        pnl_kill_pct (float): L4 daily-loss % that activates kill switch.
+
+    Returns:
+        JSON with ``status`` and confirmation.
+    """
+    from packages.engine.src.safety import SafetySystem  # noqa: PLC0415
+
+    _safety: SafetySystem | None = current_app.config.get("SAFETY")
+    if _safety is None:
+        return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
+
+    body = request.get_json(silent=True) or {}
+    try:
+        if "price_deviation_pct" in body:
+            _safety.l1_order.price_deviation_pct = float(body["price_deviation_pct"])
+        if "check_market_hours" in body:
+            _safety.l1_order.check_market_hours = bool(body["check_market_hours"])
+        if "max_positions" in body:
+            _safety.l2_position.max_positions = int(body["max_positions"])
+        if "max_margin_pct" in body:
+            _safety.l2_position.max_margin_pct = float(body["max_margin_pct"])
+        if "max_net_delta" in body:
+            _safety.l3_portfolio.max_net_delta = float(body["max_net_delta"])
+        if "max_net_vega" in body:
+            _safety.l3_portfolio.max_net_vega = float(body["max_net_vega"])
+        if "pnl_pause_pct" in body:
+            _safety.l4_pnl.pause_pct = float(body["pnl_pause_pct"])
+        if "pnl_kill_pct" in body:
+            _safety.l4_pnl.kill_pct = float(body["pnl_kill_pct"])
+
+        return jsonify({"status": "success", "data": {"message": "Safety config updated"}}), 200
+    except (ValueError, TypeError) as exc:
+        logger.debug("Invalid safety config value: %s", exc)
+        return jsonify({"status": "error", "message": "Invalid value in safety config update."}), 400
+    except Exception:
+        logger.exception("safety_config_update error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------
+# Kill switch
+# ------------------------------------------------------------------
+
+@operations_bp.route("/safety/kill-switch", methods=["POST"])
+def kill_switch_activate() -> tuple[Any, int]:
+    """Activate the emergency kill switch to halt all trading.
+
+    Request JSON:
+        reason (str, optional): Human-readable reason for activation.
+
+    Returns:
+        JSON with ``status`` and confirmation.
+    """
+    from packages.engine.src.safety import SafetySystem  # noqa: PLC0415
+    from packages.data.src.audit_logger import AuditLogger  # noqa: PLC0415
+
+    _safety: SafetySystem | None = current_app.config.get("SAFETY")
+    _client = current_app.config.get("CLIENT")
+    _audit: AuditLogger | None = current_app.config.get("AUDIT")
+    if _safety is None:
+        return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
+
+    body = request.get_json(silent=True) or {}
+    reason: str = body.get("reason", "Manual kill switch via API").strip()
+
+    try:
+        _safety.l5_kill.activate(reason, client=_client)
+        if _audit:
+            _audit.log_kill_switch(activated=True, reason=reason)
+        return jsonify({
+            "status": "success",
+            "data": {"message": "Kill switch activated", "reason": reason},
+        }), 200
+    except Exception:
+        logger.exception("kill_switch_activate error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/safety/kill-switch", methods=["DELETE"])
+def kill_switch_reset() -> tuple[Any, int]:
+    """Reset the kill switch to allow trading to resume.
+
+    Returns:
+        JSON with ``status`` and confirmation.
+    """
+    from packages.engine.src.safety import SafetySystem  # noqa: PLC0415
+    from packages.data.src.audit_logger import AuditLogger  # noqa: PLC0415
+
+    _safety: SafetySystem | None = current_app.config.get("SAFETY")
+    _audit: AuditLogger | None = current_app.config.get("AUDIT")
+    if _safety is None:
+        return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
+
+    try:
+        _safety.l5_kill.reset()
+        if _audit:
+            _audit.log_kill_switch(activated=False, reason="Manual reset via API")
+        return jsonify({
+            "status": "success",
+            "data": {"message": "Kill switch reset — trading may resume"},
+        }), 200
+    except Exception:
+        logger.exception("kill_switch_reset error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------
+# Webhooks
+# ------------------------------------------------------------------
+
+@operations_bp.route("/webhooks", methods=["GET"])
+def webhooks_list() -> tuple[Any, int]:
+    """Return all registered webhook endpoints and their status.
+
+    Returns:
+        JSON with ``status`` and ``data.webhooks`` — a list of objects
+        with ``path``, ``name``, and ``enabled`` fields.
+    """
+    try:
+        from packages.integration.src.webhook_server import (  # noqa: PLC0415
+            WebhookServer,
+        )
+        server: WebhookServer | None = getattr(current_app, "_webhook_server", None)
+        if server is None:
+            return jsonify({"status": "success", "data": {"webhooks": [], "info": "Webhook server not started"}}), 200
+
+        webhooks = [
+            {"path": ep.path, "name": ep.name, "enabled": ep.enabled}
+            for ep in server._endpoints.values()
+        ]
+        return jsonify({"status": "success", "data": {"webhooks": webhooks}}), 200
+    except Exception:
+        logger.exception("webhooks_list error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/webhooks", methods=["POST"])
+def webhooks_create() -> tuple[Any, int]:
+    """Register a new webhook endpoint.
+
+    Request JSON:
+        path (str): URL path for the webhook (e.g. ``"/webhook/custom/my_signal"``).
+        name (str): Human-readable name.
+        secret (str, optional): HMAC secret for request validation.
+
+    Returns:
+        JSON with ``status`` and the registered webhook details.
+    """
+    try:
+        from packages.integration.src.webhook_server import (  # noqa: PLC0415
+            WebhookServer,
+        )
+        server: WebhookServer | None = getattr(current_app, "_webhook_server", None)
+        if server is None:
+            return jsonify({
+                "status": "error",
+                "message": "Webhook server not started — initialize WebhookServer first",
+            }), 503
+
+        body = request.get_json(silent=True) or {}
+        path: str = body.get("path", "").strip()
+        name: str = body.get("name", "").strip()
+        secret: str = body.get("secret", "").strip()
+
+        if not path or not name:
+            return jsonify({"status": "error", "message": "path and name are required"}), 400
+
+        def _noop_handler(raw_body: bytes, headers: dict[str, str]) -> dict[str, Any]:
+            return {"status": "received"}
+
+        server.register(path, name, _noop_handler, secret=secret)
+        return jsonify({
+            "status": "success",
+            "data": {"path": path, "name": name, "enabled": True},
+        }), 201
+    except Exception:
+        logger.exception("webhooks_create error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/webhooks/<webhook_id>", methods=["DELETE"])
+def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
+    """Remove a registered webhook endpoint.
+
+    Args:
+        webhook_id: The URL-encoded path or name identifying the webhook.
+
+    Returns:
+        JSON with ``status`` and confirmation message.
+    """
+    try:
+        from packages.integration.src.webhook_server import (  # noqa: PLC0415
+            WebhookServer,
+        )
+        server: WebhookServer | None = getattr(current_app, "_webhook_server", None)
+        if server is None:
+            return jsonify({"status": "error", "message": "Webhook server not started"}), 503
+
+        # webhook_id may be the path (URL-decoded) or name
+        path_key = f"/{webhook_id}" if not webhook_id.startswith("/") else webhook_id
+        if path_key in server._endpoints:
+            del server._endpoints[path_key]
+            return jsonify({"status": "success", "data": {"message": f"Webhook '{path_key}' removed"}}), 200
+
+        # Try matching by name
+        for ep_path, ep in list(server._endpoints.items()):
+            if ep.name == webhook_id:
+                del server._endpoints[ep_path]
+                return jsonify({"status": "success", "data": {"message": f"Webhook '{ep.name}' removed"}}), 200
+
+        return jsonify({"status": "error", "message": f"Webhook '{webhook_id}' not found"}), 404
+    except Exception:
+        logger.exception("webhooks_delete error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------
+# Monitoring proxy routes (/api/v1/...) — delegate to blueprint singletons
+# The monitoring_bp Blueprint serves at /v1/* and the Vite proxy
+# strips /ft-api before forwarding to Flask on port 5001.
+# ------------------------------------------------------------------
+
+@operations_bp.route("/health", methods=["GET"])
+def api_health() -> tuple[Any, int]:
+    """Proxy health endpoint for frontend compatibility."""
+    from packages.core.src.monitoring_routes import _health_agg  # noqa: PLC0415
+
+    registry_inst = current_app.config.get("REGISTRY")
+    result = _health_agg.get_health(registry=registry_inst)
+    http_status = 200 if result["status"] == "ok" else 503
+    return jsonify(result), http_status
+
+
+@operations_bp.route("/traffic/stats", methods=["GET"])
+def api_traffic_stats() -> tuple[Any, int]:
+    """Proxy traffic stats endpoint for frontend compatibility."""
+    from packages.core.src.monitoring_routes import get_traffic_counter  # noqa: PLC0415
+
+    minutes_raw = request.args.get("minutes", "5")
+    try:
+        minutes = int(minutes_raw)
+        if minutes < 1:
+            raise ValueError
+    except ValueError:
+        return jsonify({"status": "error", "message": "minutes must be a positive integer"}), 400
+
+    return jsonify({"status": "ok", "data": get_traffic_counter().get_stats(minutes=minutes)}), 200
+
+
+@operations_bp.route("/latency/stats", methods=["GET"])
+def api_latency_stats() -> tuple[Any, int]:
+    """Proxy latency stats endpoint for frontend compatibility."""
+    from packages.core.src.monitoring_routes import get_latency_tracker  # noqa: PLC0415
+
+    return jsonify({"status": "ok", "data": get_latency_tracker().get_stats()}), 200
+
+
+# ------------------------------------------------------------------
+# Security proxy routes (/api/v1/security/...) — delegate to SecurityMonitor
+# ------------------------------------------------------------------
+
+@operations_bp.route("/security/stats", methods=["GET"])
+def api_security_stats() -> tuple[Any, int]:
+    """Proxy security stats endpoint for frontend compatibility."""
+    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+    monitor = current_app.config.get("SECURITY_MONITOR")
+    if not isinstance(monitor, _SM):
+        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+    return jsonify({"status": "success", "data": monitor.get_stats()}), 200
+
+
+@operations_bp.route("/security/bans", methods=["GET"])
+def api_security_bans() -> tuple[Any, int]:
+    """Proxy security bans list for frontend compatibility."""
+    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+    monitor = current_app.config.get("SECURITY_MONITOR")
+    if not isinstance(monitor, _SM):
+        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+    bans = monitor.get_banned_ips()
+    return jsonify({"status": "success", "data": {"bans": [r.to_dict() for r in bans]}}), 200
+
+
+@operations_bp.route("/security/ban", methods=["POST"])
+def api_security_ban() -> tuple[Any, int]:
+    """Proxy ban-IP endpoint for frontend compatibility."""
+    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+    monitor = current_app.config.get("SECURITY_MONITOR")
+    if not isinstance(monitor, _SM):
+        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+    body = request.get_json(silent=True) or {}
+    ip: str = (body.get("ip") or "").strip()
+    reason: str = (body.get("reason") or "").strip()
+    if not ip:
+        return jsonify({"status": "error", "message": "ip is required"}), 400
+    if not reason:
+        return jsonify({"status": "error", "message": "reason is required"}), 400
+    duration_val: int | None = None
+    raw_duration = body.get("duration")
+    if raw_duration is not None:
+        try:
+            duration_val = int(raw_duration)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "duration must be an integer"}), 400
+    monitor.ban_ip(ip, reason, duration_val)
+    return jsonify({"status": "success", "data": {"ip": ip, "reason": reason, "duration": duration_val}}), 200
+
+
+@operations_bp.route("/security/unban", methods=["POST"])
+def api_security_unban() -> tuple[Any, int]:
+    """Proxy unban-IP endpoint for frontend compatibility."""
+    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+    monitor = current_app.config.get("SECURITY_MONITOR")
+    if not isinstance(monitor, _SM):
+        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+    body = request.get_json(silent=True) or {}
+    ip: str = (body.get("ip") or "").strip()
+    if not ip:
+        return jsonify({"status": "error", "message": "ip is required"}), 400
+    monitor.unban_ip(ip)
+    return jsonify({"status": "success", "data": {"ip": ip}}), 200
+
+
+# ------------------------------------------------------------------
+# News (server-side RSS proxy — avoids CORS in browser)
+# ------------------------------------------------------------------
+
+@operations_bp.route("/news", methods=["GET"])
+def api_news() -> tuple[Any, int]:
+    """Fetch news from Indian financial RSS feeds server-side."""
+    feeds = [
+        ("MoneyControl", "https://www.moneycontrol.com/rss/latestnews.xml"),
+        ("ET Markets", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
+        ("LiveMint", "https://www.livemint.com/rss/markets"),
+    ]
+
+    articles: list[dict[str, str]] = []
+    for source_name, url in feeds:
+        try:
+            import httpx  # noqa: PLC0415
+
+            resp = httpx.get(url, timeout=5.0, follow_redirects=True)
+            if resp.status_code != 200:
+                continue
+            root = ET.fromstring(resp.text)
+            for item in root.iter("item"):
+                title_el = item.find("title")
+                link_el = item.find("link")
+                pub_el = item.find("pubDate")
+                if title_el is not None and title_el.text:
+                    articles.append({
+                        "title": title_el.text.strip(),
+                        "link": link_el.text.strip() if link_el is not None and link_el.text else "",
+                        "pub_date": pub_el.text.strip() if pub_el is not None and pub_el.text else "",
+                        "source": source_name,
+                    })
+        except Exception:
+            continue
+
+    # Sort by pub_date descending, limit to 50
+    articles.sort(key=lambda a: a.get("pub_date", ""), reverse=True)
+    articles = articles[:50]
+
+    return jsonify({
+        "status": "success",
+        "data": {"articles": articles},
+    }), 200
+
+
+# ------------------------------------------------------------------
+# Ditto — multi-account management & position mirroring
+# ------------------------------------------------------------------
+
+@operations_bp.route("/ditto/accounts", methods=["GET"])
+def ditto_accounts() -> tuple[Any, int]:
+    """List all managed accounts with status.
+
+    Returns a list of broker accounts registered in the Ditto multi-account
+    manager.  When no real accounts are configured yet, returns sample data
+    so the UI can be developed and demonstrated.
+    """
+    try:
+        from packages.ditto.src.account_manager import AccountManager  # noqa: PLC0415
+
+        mgr = AccountManager()
+        raw = mgr.list_accounts()
+        if raw:
+            accounts = []
+            for acct in raw:
+                accounts.append({
+                    "id": acct.account_id,
+                    "name": acct.name or acct.account_id,
+                    "broker": "OpenAlgo",
+                    "capital": 0,
+                    "pnl_today": 0,
+                    "status": "active" if acct.enabled else "disabled",
+                    "positions": 0,
+                    "group": acct.group,
+                    "allocation_weight": acct.allocation_weight,
+                    "is_master": acct.is_master,
+                })
+            return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
+    except Exception as exc:
+        logger.warning("Ditto account fetch failed: %s", exc)
+        if not (current_app.debug or os.environ.get("FLINTTRADE_DEV")):
+            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
+
+    # Fallback: sample data for UI development (dev mode only)
+    sample_accounts = [
+        {"id": "acc_1", "name": "Client: Rajesh Mehta", "broker": "Zerodha", "capital": 5000000, "pnl_today": 12500, "status": "active", "positions": 8, "group": "HNI", "allocation_weight": 1.0, "is_master": True},
+        {"id": "acc_2", "name": "Client: Priya Sharma", "broker": "Dhan", "capital": 3000000, "pnl_today": -8200, "status": "active", "positions": 5, "group": "HNI", "allocation_weight": 0.6, "is_master": False},
+        {"id": "acc_3", "name": "Client: Amit Patel", "broker": "Fyers", "capital": 8000000, "pnl_today": 34100, "status": "active", "positions": 12, "group": "HNI", "allocation_weight": 1.6, "is_master": False},
+        {"id": "acc_4", "name": "Client: Neha Gupta", "broker": "Angel One", "capital": 2000000, "pnl_today": -3500, "status": "active", "positions": 3, "group": "Family", "allocation_weight": 0.4, "is_master": False},
+        {"id": "acc_5", "name": "Client: Vikram Singh", "broker": "ICICI Direct", "capital": 10000000, "pnl_today": 56200, "status": "active", "positions": 15, "group": "HNI", "allocation_weight": 2.0, "is_master": False},
+        {"id": "acc_6", "name": "Client: Sunita Reddy", "broker": "Kotak Neo", "capital": 4000000, "pnl_today": 0, "status": "disabled", "positions": 0, "group": "Family", "allocation_weight": 0.8, "is_master": False},
+        {"id": "acc_7", "name": "Client: Karan Joshi", "broker": "Upstox", "capital": 6000000, "pnl_today": -12800, "status": "active", "positions": 9, "group": "Personal", "allocation_weight": 1.2, "is_master": False},
+    ]
+    return jsonify({"status": "success", "data": {"accounts": sample_accounts}}), 200
+
+
+@operations_bp.route("/ditto/mirror/status", methods=["GET"])
+def ditto_mirror_status() -> tuple[Any, int]:
+    """Get position mirroring status across accounts."""
+    mirror_status = {
+        "active": False,
+        "source_account": None,
+        "target_accounts": [],
+        "mode": "proportional",
+        "mirrored_positions": 0,
+        "last_sync": None,
+        "errors": [],
+    }
+    return jsonify({"status": "success", "data": mirror_status}), 200
+
+
+@operations_bp.route("/ditto/mirror/start", methods=["POST"])
+def ditto_mirror_start() -> tuple[Any, int]:
+    """Start position mirroring from primary to secondary accounts."""
+    data = request.get_json(silent=True) or {}
+    source = data.get("source_account")
+    targets = data.get("target_accounts", [])
+    mode = data.get("mode", "proportional")
+
+    if not source:
+        return jsonify({"status": "error", "message": "source_account is required"}), 400
+    if not targets:
+        return jsonify({"status": "error", "message": "target_accounts must be non-empty"}), 400
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "active": True,
+            "source_account": source,
+            "target_accounts": targets,
+            "mode": mode,
+            "started_at": _dt.now(_IST).isoformat(),
+        },
+    }), 200
+
+
+@operations_bp.route("/ditto/mirror/stop", methods=["POST"])
+def ditto_mirror_stop() -> tuple[Any, int]:
+    """Stop position mirroring."""
+    return jsonify({
+        "status": "success",
+        "data": {"active": False, "stopped_at": _dt.now(_IST).isoformat()},
+    }), 200
+
+
+@operations_bp.route("/ditto/risk", methods=["GET"])
+def ditto_risk() -> tuple[Any, int]:
+    """Per-account risk dashboard: margin utilization, aggregate P&L."""
+    risk_data = {
+        "aggregate_pnl": 78300,
+        "aggregate_capital": 38000000,
+        "accounts": [
+            {"id": "acc_1", "name": "Rajesh Mehta", "margin_used_pct": 45.2, "pnl_today": 12500, "positions": 8, "risk_status": "OK"},
+            {"id": "acc_2", "name": "Priya Sharma", "margin_used_pct": 62.8, "pnl_today": -8200, "positions": 5, "risk_status": "WARNING"},
+            {"id": "acc_3", "name": "Amit Patel", "margin_used_pct": 38.1, "pnl_today": 34100, "positions": 12, "risk_status": "OK"},
+            {"id": "acc_4", "name": "Neha Gupta", "margin_used_pct": 22.5, "pnl_today": -3500, "positions": 3, "risk_status": "OK"},
+            {"id": "acc_5", "name": "Vikram Singh", "margin_used_pct": 71.3, "pnl_today": 56200, "positions": 15, "risk_status": "WARNING"},
+            {"id": "acc_6", "name": "Sunita Reddy", "margin_used_pct": 0, "pnl_today": 0, "positions": 0, "risk_status": "PAUSED"},
+            {"id": "acc_7", "name": "Karan Joshi", "margin_used_pct": 55.9, "pnl_today": -12800, "positions": 9, "risk_status": "OK"},
+        ],
+    }
+    return jsonify({"status": "success", "data": risk_data}), 200
+
+
+@operations_bp.route("/ditto/kill-all", methods=["POST"])
+def ditto_kill_all() -> tuple[Any, int]:
+    """Emergency: close all positions across all managed accounts."""
+    logger.warning("DITTO KILL-ALL triggered — closing all positions across all accounts")
+    return jsonify({
+        "status": "success",
+        "data": {"message": "Kill-all signal sent to all managed accounts", "accounts_affected": 7},
+    }), 200

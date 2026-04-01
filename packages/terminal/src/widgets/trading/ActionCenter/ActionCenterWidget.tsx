@@ -17,7 +17,7 @@
  *   POST /ft-api/api/v1/action-center/approve-all
  */
 
-import { useCallback } from "react";
+import { useCallback, memo } from "react";
 import { CheckCircle2, XCircle, CheckCheck, Loader2, ShieldCheck } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -137,7 +137,7 @@ function OrderRow({ order, onApprove, onReject, disabled }: OrderRowProps) {
 // Widget
 // ---------------------------------------------------------------------------
 
-export default function ActionCenterWidget(_props: WidgetProps) {
+function ActionCenterWidget(_props: WidgetProps) {
   const queryClient = useQueryClient();
 
   const { data: orders, isLoading, isError } = useQuery({
@@ -292,3 +292,5 @@ export default function ActionCenterWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(ActionCenterWidget);

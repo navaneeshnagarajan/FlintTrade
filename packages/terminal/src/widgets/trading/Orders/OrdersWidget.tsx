@@ -1,7 +1,7 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getOrderbook() call with useOrders() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table + shadcn Badge for status.
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, memo } from "react";
 import { RefreshCw, FileText } from "lucide-react";
 import {
   type ColumnDef,
@@ -51,7 +51,7 @@ function statusVariant(
   return "secondary";
 }
 
-export default function OrdersWidget(_props: WidgetProps) {
+function OrdersWidget(_props: WidgetProps) {
   const { data: ordersData, refetch, isFetching, isError, error } = useOrders();
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
@@ -226,3 +226,5 @@ export default function OrdersWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(OrdersWidget);

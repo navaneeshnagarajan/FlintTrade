@@ -11,7 +11,7 @@
  *   - Dense dark layout matching FlintTrade terminal theme
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import {
   Plus, X, Search, MoreVertical, Trash2,
   TrendingUp, TrendingDown,
@@ -396,7 +396,7 @@ interface WatchlistWidgetProps {
   node?: unknown;
 }
 
-export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
+function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   const [watchlist, setWatchlist]       = useState<WatchlistItem[]>(() => loadWatchlist());
   const [quotes, setQuotes]             = useState<QuoteMap>({});
   const [sparkHistory, setSparkHistory] = useState<SparkMap>({});
@@ -723,3 +723,5 @@ export default function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
     </div>
   );
 }
+
+export default memo(WatchlistWidget);

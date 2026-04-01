@@ -15,7 +15,7 @@
  * - Removed draggable/overlay shell; inline widget
  */
 
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import { useForm, Controller } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -527,7 +527,7 @@ function BrokerageCalcTab() {
 // ---------------------------------------------------------------------------
 // Widget entry point
 // ---------------------------------------------------------------------------
-export default function CalculatorWidget(_props: WidgetProps) {
+function CalculatorWidget(_props: WidgetProps) {
   return (
     <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Header */}
@@ -564,3 +564,5 @@ export default function CalculatorWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(CalculatorWidget);

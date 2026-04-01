@@ -13,7 +13,7 @@
  * FeatureTeaser with sample data when no broker is connected
  */
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, memo } from "react";
 import { createChart, CandlestickSeries } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, CandlestickData, Time } from "lightweight-charts";
 import { RefreshCw, AlertCircle, Loader2 } from "lucide-react";
@@ -73,7 +73,7 @@ function fmtOI(v: number): string {
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function OIProfileWidget() {
+function OIProfileWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [expiry, setExpiry] = useState("");
   const [interval, setInterval] = useState("15m");
@@ -399,3 +399,5 @@ export default function OIProfileWidget() {
     </div>
   );
 }
+
+export default memo(OIProfileWidget);

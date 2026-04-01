@@ -25,6 +25,7 @@ import {
   useMemo,
   useRef,
   useState,
+  memo,
 } from "react";
 import {
   AreaSeries,
@@ -120,7 +121,7 @@ function StatCard({
 // ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
-export default function MTMMonitorWidget(_props: WidgetProps) {
+function MTMMonitorWidget(_props: WidgetProps) {
   const { data: positions } = usePositions();
   const { data: _funds } = useFunds(); // keeps store updated
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
@@ -448,3 +449,5 @@ export default function MTMMonitorWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(MTMMonitorWidget);

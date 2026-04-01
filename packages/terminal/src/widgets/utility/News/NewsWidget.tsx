@@ -7,7 +7,7 @@
  * Auto-refreshes every 5 minutes. Handles errors gracefully.
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import {
   Search,
   Newspaper,
@@ -399,7 +399,7 @@ interface NewsWidgetProps {
 
 type FetchStatus = "idle" | "loading" | "success" | "error";
 
-export default function NewsWidget({ node: _node }: NewsWidgetProps) {
+function NewsWidget({ node: _node }: NewsWidgetProps) {
   const [filter, setFilter] = useState<SentimentFilter>("all");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<NewsItem[]>([]);
@@ -604,3 +604,5 @@ export default function NewsWidget({ node: _node }: NewsWidgetProps) {
     </div>
   );
 }
+
+export default memo(NewsWidget);

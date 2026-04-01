@@ -1,7 +1,7 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Direct API calls (placeOrder, cancelAllOrders, closePosition, getExpiry, getQuotes)
 // are intentional here: Scalper requires interactive one-click orders, not cached REST data.
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import {
   Zap,
   ZapOff,
@@ -321,7 +321,7 @@ function ActionButton({ onClick, disabled = false, title, variant, icon, label, 
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-export default function ScalperWidget(_props: WidgetProps) {
+function ScalperWidget(_props: WidgetProps) {
   const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
   const [lots, setLots] = useState(1);
   const [product, setProduct] = useState<ProductType>("MIS");
@@ -939,3 +939,5 @@ export default function ScalperWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(ScalperWidget);

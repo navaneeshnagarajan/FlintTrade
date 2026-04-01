@@ -5,6 +5,7 @@ import { Provider as JotaiProvider } from "jotai";
 import { MotionConfig } from "framer-motion";
 import { QueryProvider } from "./providers/QueryProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import "./index.css";
@@ -62,23 +63,23 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to={getInitialRoute()} replace /> },
 
       /* Flow routes -- no chrome (TopBar/TickerBar) */
-      { path: "welcome", element: <Suspense fallback={<Loading />}><WelcomeRoute /></Suspense> },
-      { path: "explore", element: <Suspense fallback={<Loading />}><ExploreRoute /></Suspense> },
-      { path: "setup", element: <Suspense fallback={<Loading />}><SetupRoute /></Suspense> },
-      { path: "settings", element: <Suspense fallback={<Loading />}><SettingsRoute /></Suspense> },
+      { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
+      { path: "explore", element: <RouteErrorBoundary routeName="Explore"><Suspense fallback={<Loading />}><ExploreRoute /></Suspense></RouteErrorBoundary> },
+      { path: "setup", element: <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
+      { path: "settings", element: <RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {
         element: <AppLayout />,
         children: [
-          { path: "trade", element: <Suspense fallback={<Loading />}><TerminalRoute /></Suspense> },
+          { path: "trade", element: <RouteErrorBoundary routeName="Trade"><Suspense fallback={<Loading />}><TerminalRoute /></Suspense></RouteErrorBoundary> },
           { path: "terminal", element: <Navigate to="/trade" replace /> },
-          { path: "invest", element: <Suspense fallback={<Loading />}><InvestRoute /></Suspense> },
-          { path: "learn", element: <Suspense fallback={<Loading />}><LearnRoute /></Suspense> },
-          { path: "lab", element: <Suspense fallback={<Loading />}><LabRoute /></Suspense> },
-          { path: "automate", element: <Suspense fallback={<Loading />}><AutomateRoute /></Suspense> },
-          { path: "ai", element: <Suspense fallback={<Loading />}><AIRoute /></Suspense> },
-          { path: "ditto", element: <Suspense fallback={<Loading />}><DittoRoute /></Suspense> },
+          { path: "invest", element: <RouteErrorBoundary routeName="Invest"><Suspense fallback={<Loading />}><InvestRoute /></Suspense></RouteErrorBoundary> },
+          { path: "learn", element: <RouteErrorBoundary routeName="Learn"><Suspense fallback={<Loading />}><LearnRoute /></Suspense></RouteErrorBoundary> },
+          { path: "lab", element: <RouteErrorBoundary routeName="Lab"><Suspense fallback={<Loading />}><LabRoute /></Suspense></RouteErrorBoundary> },
+          { path: "automate", element: <RouteErrorBoundary routeName="Automate"><Suspense fallback={<Loading />}><AutomateRoute /></Suspense></RouteErrorBoundary> },
+          { path: "ai", element: <RouteErrorBoundary routeName="AI"><Suspense fallback={<Loading />}><AIRoute /></Suspense></RouteErrorBoundary> },
+          { path: "ditto", element: <RouteErrorBoundary routeName="Ditto"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary> },
         ],
       },
 

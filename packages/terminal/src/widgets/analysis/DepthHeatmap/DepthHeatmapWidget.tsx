@@ -26,7 +26,7 @@
  *   - Symbol selector has visible label via sr-only span
  */
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, memo } from "react";
 import { Flame } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -288,7 +288,7 @@ function drawLegend(
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-export default function DepthHeatmapWidget() {
+function DepthHeatmapWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -450,3 +450,5 @@ export default function DepthHeatmapWidget() {
     </div>
   );
 }
+
+export default memo(DepthHeatmapWidget);

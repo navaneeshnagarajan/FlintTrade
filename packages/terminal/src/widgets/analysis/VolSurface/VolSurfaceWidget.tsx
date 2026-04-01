@@ -10,7 +10,7 @@
  *   - FeatureTeaser with sample data when no broker is connected
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 import { RefreshCw, AlertCircle, Loader2 } from "lucide-react";
 import { useVolSurface } from "./useVolSurface";
 import { SAMPLE_VOL_SURFACE_DATA } from "./sampleData";
@@ -36,7 +36,7 @@ const SYMBOL_EXCHANGE: Record<string, string> = {
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function VolSurfaceWidget() {
+function VolSurfaceWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [expiriesInput, setExpiriesInput] = useState("");
   const [strikeCount, setStrikeCount] = useState(20);
@@ -230,3 +230,5 @@ export default function VolSurfaceWidget() {
     </div>
   );
 }
+
+export default memo(VolSurfaceWidget);

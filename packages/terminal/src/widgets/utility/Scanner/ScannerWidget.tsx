@@ -12,7 +12,7 @@
  * Ready to wire to OpenAlgo pre-market data when available.
  */
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -525,7 +525,7 @@ function sectorColumns(): ColumnDef<SectorMoverEntry, unknown>[] {
 
 // ─── Main Widget ────────────────────────────────────────────────────────────────
 
-export default function ScannerWidget() {
+function ScannerWidget() {
   const [activeTab, setActiveTab] = useState<ScannerTab>("gap");
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -646,3 +646,5 @@ export default function ScannerWidget() {
     </div>
   );
 }
+
+export default memo(ScannerWidget);

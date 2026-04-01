@@ -11,7 +11,7 @@
  *   - P&L display when a straddle position is detected in positions data
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import { createChart, LineSeries } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, LineData, Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
@@ -381,7 +381,7 @@ function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOve
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function StraddleWidget() {
+function StraddleWidget() {
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
   const [expiries, setExpiries]               = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry]   = useState<string | null>(null);
@@ -725,3 +725,5 @@ export default function StraddleWidget() {
     </div>
   );
 }
+
+export default memo(StraddleWidget);

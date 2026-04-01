@@ -9,6 +9,7 @@
  *   - Default instruments: indices + top equities
  */
 
+import { memo } from "react";
 import { useAtomValue } from "jotai";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
@@ -144,7 +145,7 @@ interface TickerWidgetProps {
   node?: unknown;
 }
 
-export default function TickerWidget({ node: _node }: TickerWidgetProps) {
+function TickerWidget({ node: _node }: TickerWidgetProps) {
   return (
     <>
       {/*
@@ -182,3 +183,5 @@ export default function TickerWidget({ node: _node }: TickerWidgetProps) {
     </>
   );
 }
+
+export default memo(TickerWidget);

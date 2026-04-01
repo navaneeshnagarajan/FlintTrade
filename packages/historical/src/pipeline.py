@@ -94,6 +94,11 @@ CREATE TABLE IF NOT EXISTS {table} (
 );
 """
 
+_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_{table}_sym_ex_ts
+    ON {table} (symbol, exchange, timestamp);
+"""
+
 
 def aggregate_bars(bars: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
     """Aggregate OHLCV bars by grouping every n bars.
@@ -183,10 +188,11 @@ class DataPipeline:
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
-        """Create all OHLCV interval tables."""
+        """Create all OHLCV interval tables and indexes."""
         for table in set(INTERVAL_TABLES.values()):
             self.connection.execute(_TABLE_DDL.format(table=table))
-        logger.info("Historical pipeline schema initialized")
+            self.connection.execute(_INDEX_DDL.format(table=table))
+        logger.info("Historical pipeline schema initialized (tables + indexes)")
 
     # ------------------------------------------------------------------
     # Store data
@@ -264,34 +270,74 @@ class DataPipeline:
     ) -> int:
         """Insert bars, skipping duplicates by (timestamp, symbol, exchange).
 
+        Uses a staging table + anti-join instead of per-row SELECT+INSERT,
+        reducing 2N queries to 3 queries regardless of bar count.
+
         Returns number of new rows inserted.
         """
         table = _validate_table(table)
         if not bars:
             return 0
 
-        inserted = 0
-        for bar in bars:
-            ts = bar["timestamp"]
-            # Check if row already exists
-            existing = self.connection.execute(
-                f"SELECT 1 FROM {table} WHERE timestamp = ? AND symbol = ? AND exchange = ? LIMIT 1",
-                [ts, symbol, exchange],
-            ).fetchone()
+        staging = f"_staging_{table}"
+        conn = self.connection
 
-            if existing is None:
-                self.connection.execute(
-                    f"""INSERT INTO {table}
-                        (timestamp, symbol, exchange, open, high, low, close, volume, oi)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    [
-                        ts, symbol, exchange,
-                        bar["open"], bar["high"], bar["low"], bar["close"],
-                        bar.get("volume", 0) or 0,
-                        bar.get("oi", 0) or 0,
-                    ],
+        # 1. Create temp staging table
+        conn.execute(f"DROP TABLE IF EXISTS {staging}")
+        conn.execute(
+            f"""CREATE TEMPORARY TABLE {staging} (
+                timestamp TIMESTAMP NOT NULL,
+                symbol    VARCHAR NOT NULL,
+                exchange  VARCHAR NOT NULL,
+                open      DOUBLE NOT NULL,
+                high      DOUBLE NOT NULL,
+                low       DOUBLE NOT NULL,
+                close     DOUBLE NOT NULL,
+                volume    BIGINT DEFAULT 0,
+                oi        BIGINT DEFAULT 0
+            )"""
+        )
+
+        # 2. Bulk insert into staging
+        conn.executemany(
+            f"""INSERT INTO {staging}
+                (timestamp, symbol, exchange, open, high, low, close, volume, oi)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    bar["timestamp"], symbol, exchange,
+                    bar["open"], bar["high"], bar["low"], bar["close"],
+                    bar.get("volume", 0) or 0,
+                    bar.get("oi", 0) or 0,
                 )
-                inserted += 1
+                for bar in bars
+            ],
+        )
+
+        # 3. Count before, insert, count after (reliable across DuckDB versions)
+        before = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE symbol = ? AND exchange = ?",
+            [symbol, exchange],
+        ).fetchone()[0]  # type: ignore[index]
+
+        conn.execute(
+            f"""INSERT INTO {table}
+                SELECT s.* FROM {staging} s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {table} t
+                    WHERE t.timestamp = s.timestamp
+                      AND t.symbol = s.symbol
+                      AND t.exchange = s.exchange
+                )"""
+        )
+
+        after = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE symbol = ? AND exchange = ?",
+            [symbol, exchange],
+        ).fetchone()[0]  # type: ignore[index]
+        inserted = after - before
+
+        conn.execute(f"DROP TABLE IF EXISTS {staging}")
 
         logger.info(
             "Merged %d/%d bars into %s for %s:%s",

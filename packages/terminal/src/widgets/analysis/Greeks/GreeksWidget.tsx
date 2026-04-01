@@ -13,7 +13,7 @@
  *   - "No F&O positions" empty state
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { RefreshCw, AlertCircle, TrendingDown, Activity } from "lucide-react";
 import { getPositionbook, getMultiOptionGreeks } from "@/services/api";
 import type { Position } from "@/types/api";
@@ -159,7 +159,7 @@ function GreekCard({ label, value, colorScheme, description }: GreekCardProps) {
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function GreeksWidget() {
+function GreeksWidget() {
   const [positions,  setPositions]  = useState<RawPosition[]>([]);
   const [greeksMap,  setGreeksMap]  = useState<Record<string, RawGreeks>>({});
   const [ltpMap,     setLtpMap]     = useState<Record<string, number>>({});
@@ -474,3 +474,5 @@ export default function GreeksWidget() {
     </div>
   );
 }
+
+export default memo(GreeksWidget);

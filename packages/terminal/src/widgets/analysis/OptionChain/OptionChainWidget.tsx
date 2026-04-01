@@ -18,7 +18,7 @@
  *   - Glide theme uses design token hex values (surface/border/text tokens)
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo, useReducer } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useReducer, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSyntheticFuture } from "@/hooks/useSyntheticFuture";
 import DataEditor, {
@@ -57,7 +57,7 @@ import { SYMBOLS, VIEWS, OPTION_CHAIN_EXCHANGES } from "./types";
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function OptionChainWidget() {
+function OptionChainWidget() {
   const glideTheme = useGlideTheme();
   const [symDef, setSymDef]                     = useState<SymbolDef>(SYMBOLS[0]);
   const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
@@ -597,3 +597,5 @@ export default function OptionChainWidget() {
     </div>
   );
 }
+
+export default memo(OptionChainWidget);

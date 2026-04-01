@@ -13,7 +13,7 @@
  *   - Checks advisor/status on mount to sync LLM config state
  */
 
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
 import { Send, Bot, User, Loader2, Settings, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -371,7 +371,7 @@ interface AIAdvisorWidgetProps {
   node?: unknown;
 }
 
-export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
+function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
   // ---------------------------------------------------------------------------
   // Shared conversation store (synced with AITutorPill)
   // ---------------------------------------------------------------------------
@@ -726,3 +726,5 @@ export default function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
     </div>
   );
 }
+
+export default memo(AIAdvisorWidget);

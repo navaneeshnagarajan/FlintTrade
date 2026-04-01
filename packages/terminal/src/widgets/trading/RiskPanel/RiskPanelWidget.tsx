@@ -16,7 +16,7 @@
  *   - Color: green < 80%, yellow 80-95%, red >= 95%
  */
 
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import {
   ShieldAlert,
   TrendingDown,
@@ -159,7 +159,7 @@ function formatINR(n: number): string {
 // ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
-export default function RiskPanelWidget(_props: WidgetProps) {
+function RiskPanelWidget(_props: WidgetProps) {
   const { data: fundsData } = useFunds();
   const { data: positions } = usePositions();
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
@@ -311,3 +311,5 @@ export default function RiskPanelWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(RiskPanelWidget);

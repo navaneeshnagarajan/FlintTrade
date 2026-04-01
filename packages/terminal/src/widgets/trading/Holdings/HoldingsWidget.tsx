@@ -2,7 +2,7 @@
 // Replaces direct getHoldings() / getMultiQuotes() calls with useHoldings() hook.
 // PRESERVED: retry:false in useHoldings to suppress errors for brokers without holdings API.
 // Uses TanStack Table v8 + shadcn Table; search + sort are client-side derived state.
-import { useMemo, useState } from "react";
+import { useMemo, useState, memo } from "react";
 import { Clock, Search, RefreshCw, Briefcase } from "lucide-react";
 import {
   type ColumnDef,
@@ -64,7 +64,7 @@ function resolveLtp(h: RawHolding): number {
   return parseFloat(String(h.average_price ?? h.avg_price ?? 0));
 }
 
-export default function HoldingsWidget(_props: WidgetProps) {
+function HoldingsWidget(_props: WidgetProps) {
   // retry:false preserved — some brokers don't have a holdings endpoint
   const { data: holdingsData, dataUpdatedAt, refetch, isFetching, isError, error } = useHoldings();
   const [sorting, setSorting] = useState<SortingState>([{ id: "symbol", desc: false }]);
@@ -299,3 +299,5 @@ export default function HoldingsWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(HoldingsWidget);

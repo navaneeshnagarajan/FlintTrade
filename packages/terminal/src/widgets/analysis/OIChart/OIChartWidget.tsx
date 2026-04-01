@@ -14,7 +14,7 @@
  *   - Auto-refresh: 5s market hours, 30s off-market
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from "react";
 import { RefreshCw, ChevronDown, AlertCircle } from "lucide-react";
 import { getExpiry, getOptionChain, getQuotes, getMaxPain } from "@/services/api";
 import type { Quote } from "@/types/api";
@@ -147,7 +147,7 @@ function Selector({ value, options, onChange, className = "" }: SelectorProps) {
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function OIChartWidget() {
+function OIChartWidget() {
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
@@ -620,3 +620,5 @@ export default function OIChartWidget() {
     </div>
   );
 }
+
+export default memo(OIChartWidget);

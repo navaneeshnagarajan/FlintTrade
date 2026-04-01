@@ -11,7 +11,7 @@
  *   - FeatureTeaser with sample data when no broker is connected
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 import { RefreshCw, AlertCircle, Loader2, TrendingDown, TrendingUp } from "lucide-react";
 import { useIVSmile } from "./useIVSmile";
 import { SAMPLE_IV_SMILE_DATA } from "./sampleData";
@@ -43,7 +43,7 @@ type XAxisMode = "Strike" | "Moneyness";
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function IVSmileWidget() {
+function IVSmileWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [expiriesInput, setExpiriesInput] = useState("");
   const [optionType, setOptionType] = useState<OptionTypeFilter>("Both");
@@ -316,3 +316,5 @@ export default function IVSmileWidget() {
     </div>
   );
 }
+
+export default memo(IVSmileWidget);

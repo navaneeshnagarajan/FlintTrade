@@ -36,6 +36,7 @@ import {
   useState,
   useMemo,
   useCallback,
+  memo,
 } from "react";
 import { AlertCircle, BarChart2, Loader2, Grid3x3, BarChart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -454,7 +455,7 @@ type ViewMode = "footprint" | "heatmap";
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-export default function OrderFlowWidget(_props: IDockviewPanelProps) {
+function OrderFlowWidget(_props: IDockviewPanelProps) {
   const [symbol, setSymbol] = useState("NIFTY");
   const [intervalLabel, setIntervalLabel] = useState("5m");
   const [viewMode, setViewMode] = useState<ViewMode>("footprint");
@@ -739,3 +740,5 @@ export default function OrderFlowWidget(_props: IDockviewPanelProps) {
     </div>
   );
 }
+
+export default memo(OrderFlowWidget);

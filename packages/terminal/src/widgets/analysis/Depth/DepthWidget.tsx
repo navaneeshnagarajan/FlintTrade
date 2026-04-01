@@ -12,7 +12,7 @@
  *   - Empty state when no depth data
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { RefreshCw, Layers, AlertCircle } from "lucide-react";
 import { getDepth } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
@@ -165,7 +165,7 @@ function DepthRow({ bidOrders, bidQty, bidPrice, askPrice, askQty, askOrders, ma
 
 const KNOWN_EXCHANGES = ["NSE", "BSE", "NFO", "BFO", "MCX", "NSE_INDEX", "BSE_INDEX"];
 
-export default function DepthWidget() {
+function DepthWidget() {
   const [symbol,   setSymbol]   = useState("NIFTY");
   const [exchange, setExchange] = useState("NSE");
   const [depth,    setDepth]    = useState<NormalisedDepth | null>(null);
@@ -419,3 +419,5 @@ export default function DepthWidget() {
     </div>
   );
 }
+
+export default memo(DepthWidget);

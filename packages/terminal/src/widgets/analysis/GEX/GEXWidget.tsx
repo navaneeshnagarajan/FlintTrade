@@ -12,7 +12,7 @@
  *   - FeatureTeaser with sample data when no broker is connected
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 import { RefreshCw, ChevronDown, AlertCircle, Loader2 } from "lucide-react";
 import { useGEX } from "./useGEX";
 import { SAMPLE_GEX_DATA } from "./sampleData";
@@ -101,7 +101,7 @@ function Selector({ value, options, onChange, placeholder }: SelectorProps) {
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function GEXWidget() {
+function GEXWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [expiry, setExpiry] = useState("");
 
@@ -395,3 +395,5 @@ export default function GEXWidget() {
     </div>
   );
 }
+
+export default memo(GEXWidget);

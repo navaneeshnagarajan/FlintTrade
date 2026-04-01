@@ -1,7 +1,7 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getPositionbook() call with usePositions() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table for sortable positions grid.
-import { useMemo, useState } from "react";
+import { useMemo, useState, memo } from "react";
 import { Clock, Layers } from "lucide-react";
 import {
   type ColumnDef,
@@ -44,7 +44,7 @@ function formatPnl(pnl: number): string {
   return `${pnl >= 0 ? "+" : ""}₹${INR.format(Math.abs(pnl))}`;
 }
 
-export default function PositionsWidget(_props: WidgetProps) {
+function PositionsWidget(_props: WidgetProps) {
   const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions();
   const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -215,3 +215,5 @@ export default function PositionsWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(PositionsWidget);

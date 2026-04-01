@@ -18,7 +18,7 @@
  *   - react-hook-form + zod validation
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { useForm, Controller, type SubmitHandler, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -251,7 +251,7 @@ interface SymbolSuggestion {
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-export default function OrderPadWidget(_props: WidgetProps) {
+function OrderPadWidget(_props: WidgetProps) {
   // Symbol search state (outside react-hook-form — ephemeral UI state)
   const [query, setQuery] = useState("NIFTY");
   const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
@@ -718,3 +718,5 @@ export default function OrderPadWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(OrderPadWidget);

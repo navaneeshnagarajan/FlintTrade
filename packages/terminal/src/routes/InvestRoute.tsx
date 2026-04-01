@@ -12,7 +12,7 @@
  * All data fetching lives in routes/invest/InvestContext.tsx
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -39,22 +39,23 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
 import { cn } from "@/lib/utils";
 import { InvestProvider, useInvest } from "./invest/InvestContext";
-import {
-  DashboardTab,
-  HoldingsTab,
-  NetWorthTab,
-  SipTab,
-  SectorTab,
-  EtfTab,
-  StocksTab,
-  IpoTab,
-  SocialTab,
-  TaxTab,
-  OverlapTab,
-  MfOptimizerTab,
-  BenchmarkTab,
-  BasketTab,
-} from "./invest/tabs";
+
+// Lazy-load each tab individually — only the active tab is loaded.
+// Previously all 14 tabs were eagerly imported via barrel export (~142KB).
+const DashboardTab = lazy(() => import("./invest/tabs/DashboardTab").then(m => ({ default: m.DashboardTab })));
+const HoldingsTab = lazy(() => import("./invest/tabs/HoldingsTab").then(m => ({ default: m.HoldingsTab })));
+const NetWorthTab = lazy(() => import("./invest/tabs/NetWorthTab").then(m => ({ default: m.NetWorthTab })));
+const SipTab = lazy(() => import("./invest/tabs/SipTab").then(m => ({ default: m.SipTab })));
+const SectorTab = lazy(() => import("./invest/tabs/SectorTab").then(m => ({ default: m.SectorTab })));
+const EtfTab = lazy(() => import("./invest/tabs/EtfTab").then(m => ({ default: m.EtfTab })));
+const StocksTab = lazy(() => import("./invest/tabs/StocksTab").then(m => ({ default: m.StocksTab })));
+const IpoTab = lazy(() => import("./invest/tabs/IpoTab").then(m => ({ default: m.IpoTab })));
+const SocialTab = lazy(() => import("./invest/tabs/SocialTab").then(m => ({ default: m.SocialTab })));
+const TaxTab = lazy(() => import("./invest/tabs/TaxTab").then(m => ({ default: m.TaxTab })));
+const OverlapTab = lazy(() => import("./invest/tabs/OverlapTab").then(m => ({ default: m.OverlapTab })));
+const MfOptimizerTab = lazy(() => import("./invest/tabs/MfOptimizerTab").then(m => ({ default: m.MfOptimizerTab })));
+const BenchmarkTab = lazy(() => import("./invest/tabs/BenchmarkTab").then(m => ({ default: m.BenchmarkTab })));
+const BasketTab = lazy(() => import("./invest/tabs/BasketTab").then(m => ({ default: m.BasketTab })));
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 
@@ -106,24 +107,36 @@ const FULL_HEIGHT_TABS: TabId[] = ["holdings"];
  * Renders only the currently active tab's component, avoiding the cost of
  * instantiating all 14 tab components at module-load time.
  */
+function TabFallback() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+    </div>
+  );
+}
+
 function ActiveTabContent({ tabId }: { tabId: TabId }) {
-  switch (tabId) {
-    case "dashboard":    return <DashboardTab />;
-    case "holdings":     return <HoldingsTab />;
-    case "sip":          return <SipTab />;
-    case "networth":     return <NetWorthTab />;
-    case "social":       return <SocialTab />;
-    case "sector":       return <SectorTab />;
-    case "overlap":      return <OverlapTab />;
-    case "etf":          return <EtfTab />;
-    case "stocks":       return <StocksTab />;
-    case "ipo":          return <IpoTab />;
-    case "tax":          return <TaxTab />;
-    case "mf-optimizer": return <MfOptimizerTab />;
-    case "benchmark":    return <BenchmarkTab />;
-    case "basket":       return <BasketTab />;
-    default:             return null;
-  }
+  const content = (() => {
+    switch (tabId) {
+      case "dashboard":    return <DashboardTab />;
+      case "holdings":     return <HoldingsTab />;
+      case "sip":          return <SipTab />;
+      case "networth":     return <NetWorthTab />;
+      case "social":       return <SocialTab />;
+      case "sector":       return <SectorTab />;
+      case "overlap":      return <OverlapTab />;
+      case "etf":          return <EtfTab />;
+      case "stocks":       return <StocksTab />;
+      case "ipo":          return <IpoTab />;
+      case "tax":          return <TaxTab />;
+      case "mf-optimizer": return <MfOptimizerTab />;
+      case "benchmark":    return <BenchmarkTab />;
+      case "basket":       return <BasketTab />;
+      default:             return null;
+    }
+  })();
+
+  return <Suspense fallback={<TabFallback />}>{content}</Suspense>;
 }
 
 // ─── Inner shell (needs InvestProvider in scope) ──────────────────────────────

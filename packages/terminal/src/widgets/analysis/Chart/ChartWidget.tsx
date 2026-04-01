@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { isMarketHours } from "@/lib/market";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import type { Time } from "lightweight-charts";
@@ -295,7 +295,7 @@ function PeriodInput({ value, onChange }: { value: number; onChange: (v: number)
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function ChartWidget() {
+function ChartWidget() {
   const track = useTrackBehavior();
   useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -779,3 +779,5 @@ export default function ChartWidget() {
     </div>
   );
 }
+
+export default memo(ChartWidget);

@@ -1,7 +1,7 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct API calls with TanStack Query hooks (useFunds, usePositions, useOrders).
 // Index cards are driven by Jotai tickAtomFamily (populated by useWsBridge in App.tsx).
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import { useAtomValue } from "jotai";
 import {
   TrendingUp,
@@ -171,7 +171,7 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
 }
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
-export default function DashboardWidget(_props: WidgetProps) {
+function DashboardWidget(_props: WidgetProps) {
   const { data: fundsData, dataUpdatedAt, isPending: fundsPending } = useFunds();
   const { data: positionsData, isPending: positionsPending } = usePositions();
   const { data: ordersData, isPending: ordersPending } = useOrders();
@@ -488,3 +488,5 @@ export default function DashboardWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(DashboardWidget);

@@ -10,7 +10,7 @@
  *   - FeatureTeaser with sample data when no broker is connected
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 import { RefreshCw, AlertCircle, Loader2, Plus, X } from "lucide-react";
 import { useStraddlePnL } from "./useStraddlePnL";
 import { SAMPLE_STRADDLE_PNL_DATA } from "./sampleData";
@@ -124,7 +124,7 @@ function LegRow({ leg, index, onRemove, onChange, removable }: LegRowProps) {
 // Main widget
 // ---------------------------------------------------------------------------
 
-export default function StraddlePnLWidget() {
+function StraddlePnLWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [expiry, setExpiry] = useState("");
   const [adjustments, setAdjustments] = useState<StraddleLeg[]>([]);
@@ -440,3 +440,5 @@ export default function StraddlePnLWidget() {
     </div>
   );
 }
+
+export default memo(StraddlePnLWidget);

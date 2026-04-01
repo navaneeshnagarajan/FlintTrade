@@ -1,7 +1,7 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getTradebook() call with useTradebook() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table + shadcn Badge for BUY/SELL side badges.
-import { useMemo, useState } from "react";
+import { useMemo, useState, memo } from "react";
 import { Clock, RefreshCw, ArrowRightLeft } from "lucide-react";
 import {
   type ColumnDef,
@@ -104,7 +104,7 @@ function FilterPill({ value, label, count, activeFilter, onClick }: FilterPillPr
   );
 }
 
-export default function TradeBookWidget(_props: WidgetProps) {
+function TradeBookWidget(_props: WidgetProps) {
   const { data: tradesData, dataUpdatedAt, refetch, isFetching } = useTradebook();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [filter, setFilter] = useState<FilterValue>(FILTER_ALL);
@@ -307,3 +307,5 @@ export default function TradeBookWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(TradeBookWidget);

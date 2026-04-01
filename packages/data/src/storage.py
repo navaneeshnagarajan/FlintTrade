@@ -106,6 +106,16 @@ CREATE TABLE IF NOT EXISTS daily_summary (
 
 _ALL_SCHEMAS = [_SCHEMA_TICKS, _SCHEMA_TRADES, _SCHEMA_AUDIT, _SCHEMA_DAILY_SUMMARY]
 
+# Indexes — without these, every query does a full table scan.
+_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_ticks_sym_ex_ts ON ticks (symbol, exchange, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_trades_strategy_ts ON trades (strategy, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades (ts)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit (ts)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_event ON audit (event_type, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_summary (trade_date, strategy)",
+]
+
 
 # ---------------------------------------------------------------------------
 # StorageManager
@@ -154,10 +164,12 @@ class StorageManager:
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
-        """Create all tables if they don't exist."""
+        """Create all tables and indexes if they don't exist."""
         for ddl in _ALL_SCHEMAS:
             self.connection.execute(ddl)
-        logger.info("DuckDB schema initialized")
+        for idx in _INDEXES:
+            self.connection.execute(idx)
+        logger.info("DuckDB schema initialized (tables + indexes)")
 
     # ------------------------------------------------------------------
     # Tick storage

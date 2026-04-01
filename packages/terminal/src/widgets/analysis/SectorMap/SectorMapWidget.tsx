@@ -15,7 +15,7 @@
  * - Positions feed from usePositions() for real holding symbols
  */
 
-import { useMemo, useState, useRef, useCallback, useEffect } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react";
 import type { MouseEvent } from "react";
 import { LayoutGrid, Grid3X3, BarChart3, TrendingUp, TrendingDown } from "lucide-react";
 import { atom, useAtom } from "jotai";
@@ -225,7 +225,7 @@ const HEATMAP_MODES: { id: ActiveMode; label: string; icon: typeof LayoutGrid }[
   { id: "sector", label: "Sectors", icon: BarChart3 },
 ];
 
-export default function SectorMapWidget(_props: WidgetProps) {
+function SectorMapWidget(_props: WidgetProps) {
   const [activeMode, setActiveMode] = useState<ActiveMode>("treemap");
   const [sizingMode, setSizingMode] = useState<SizingMode>("equal");
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
@@ -695,3 +695,5 @@ export default function SectorMapWidget(_props: WidgetProps) {
     </div>
   );
 }
+
+export default memo(SectorMapWidget);
