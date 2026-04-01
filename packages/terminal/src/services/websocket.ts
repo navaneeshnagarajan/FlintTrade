@@ -9,7 +9,10 @@ export class WebSocketService {
   private readonly maxDelay = 30000;
   private readonly heartbeatInterval = 30000;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly pongTimeout = 10000; // 10s to receive pong before treating as dead
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingMessages: Record<string, unknown>[] = [];
   private subscriptions: Record<WsMode, WsInstrument[]> = {
     ltp: [], quote: [], depth: [],
   };
@@ -135,6 +138,7 @@ export class WebSocketService {
           if (!this.connected) {
             this.setConnected(true);
             this.resubscribeAll();
+            this.drainPendingMessages();
           }
           return;
         }
@@ -146,6 +150,10 @@ export class WebSocketService {
 
         // Control/system messages (action field: pong, etc.)
         if (typeof msg["action"] === "string") {
+          if (msg["action"] === "pong" && this.pongTimer) {
+            clearTimeout(this.pongTimer);
+            this.pongTimer = null;
+          }
           return;
         }
 
@@ -195,6 +203,16 @@ export class WebSocketService {
   private send(payload: Record<string, unknown>): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
+    } else if (payload.action === "subscribe") {
+      // Buffer subscription requests to replay after reconnect
+      this.pendingMessages.push(payload);
+    }
+  }
+
+  private drainPendingMessages(): void {
+    const msgs = this.pendingMessages.splice(0);
+    for (const msg of msgs) {
+      this.send(msg);
     }
   }
 
@@ -202,6 +220,11 @@ export class WebSocketService {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
       this.send({ action: "ping" });
+      // Start pong timeout — if no pong within 10s, connection is dead
+      this.pongTimer = setTimeout(() => {
+        console.warn("[WS] Pong timeout — connection appears dead, reconnecting");
+        this.ws?.close();
+      }, this.pongTimeout);
     }, this.heartbeatInterval);
   }
 
@@ -209,6 +232,10 @@ export class WebSocketService {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+    if (this.pongTimer) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
     }
   }
 
