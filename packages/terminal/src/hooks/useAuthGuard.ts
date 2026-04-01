@@ -18,7 +18,10 @@ export function useAuthGuard(): { isAuthenticated: boolean; isLoading: boolean }
     if (status === "unknown") {
       // Check backend for setup status
       fetch("/ft-api/v1/auth/status")
-        .then((r) => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then((data) => {
           if (!data.data?.is_setup) {
             useAuthStore.getState().setSetupRequired();
@@ -28,7 +31,15 @@ export function useAuthGuard(): { isAuthenticated: boolean; isLoading: boolean }
           setIsLoading(false);
         })
         .catch(() => {
-          useAuthStore.getState().setLoggedOut();
+          // Backend unreachable — in dev mode, allow access without auth
+          // so developers can work on the UI without running the Flask server.
+          // In production builds, this still redirects to welcome.
+          if (import.meta.env.DEV) {
+            console.warn("[AuthGuard] Backend unreachable — dev mode bypass active");
+            useAuthStore.getState().setLoggedIn("dev-bypass", "developer", "");
+          } else {
+            useAuthStore.getState().setSetupRequired();
+          }
           setIsLoading(false);
         });
       return;
