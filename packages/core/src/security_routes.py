@@ -56,11 +56,18 @@ def register_security_middleware(app: Flask, monitor: SecurityMonitor | None = N
     mon = monitor or _default_monitor
     app.config.setdefault("SECURITY_MONITOR", mon)
 
+    # Auth and health endpoints must be reachable even from banned IPs
+    # (otherwise a banned user can never log in or reset their password).
+    _BAN_EXEMPT_PREFIXES = ("/v1/auth/", "/v1/admin/health")
+
     @app.before_request
     def _security_check() -> Any:
         ip = request.remote_addr or "unknown"
         mon.record_request(ip)
         if mon.is_banned(ip):
+            # Exempt auth and health endpoints from ban enforcement
+            if any(request.path.startswith(p) for p in _BAN_EXEMPT_PREFIXES):
+                return None
             logger.warning("Blocked request from banned IP %s → %s", ip, request.path)
             return jsonify({
                 "status": "error",
