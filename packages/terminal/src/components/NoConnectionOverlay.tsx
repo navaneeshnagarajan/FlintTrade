@@ -33,6 +33,7 @@ const SUPPRESSED_ROUTE_PREFIXES = [
   "/ai",
   "/lab",
   "/automate",
+  "/ditto",
   "/admin",
   "/welcome",
   "/setup",
