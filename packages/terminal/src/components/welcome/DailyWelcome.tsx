@@ -236,7 +236,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
 
     return (
       <div
-        className="fixed top-16 right-4 w-80 rounded-lg border border-border-default bg-surface-elevated p-4 shadow-lg z-50 animate-slide-in-right"
+        className="fixed top-18 right-4 w-80 rounded-lg border border-border-default bg-surface-elevated p-4 shadow-lg z-40 animate-slide-in-right"
         role="status"
         aria-live="polite"
       >
@@ -279,7 +279,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
   // Recovery card
   return (
     <div
-      className="fixed top-16 right-4 w-80 rounded-lg border border-loss bg-loss/10 p-4 shadow-lg z-50 animate-slide-in-right"
+      className="fixed top-18 right-4 w-80 rounded-lg border border-loss bg-loss/10 p-4 shadow-lg z-40 animate-slide-in-right"
       role="alert"
       aria-live="assertive"
     >

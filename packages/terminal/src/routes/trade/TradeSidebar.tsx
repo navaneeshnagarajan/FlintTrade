@@ -35,16 +35,16 @@ export function TradeSidebar() {
   return (
     <nav
       aria-label="Trade sidebar: Watchlist and Positions"
-      className="h-full overflow-y-auto bg-surface-card border-r border-border-default flex flex-col"
+      className="h-full overflow-y-auto bg-surface-card border-r border-border-default flex flex-col min-w-0"
     >
       {/* Watchlist section */}
-      <section aria-labelledby="sidebar-watchlist-heading" className="p-3 border-b border-border-default">
+      <section aria-labelledby="sidebar-watchlist-heading" className="p-3 border-b border-border-default min-w-0 overflow-hidden">
         <SectionHeader
           title="Watchlist"
           as="h3"
           className="mb-2"
         />
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-text-muted overflow-hidden truncate" title="Add the Watchlist widget from the widget picker.">
           Add the Watchlist widget from the widget picker.
         </p>
       </section>
@@ -67,7 +67,7 @@ export function TradeSidebar() {
         )}
 
         {!isLoading && (!positions || positions.length === 0) && (
-          <p className="text-xs text-text-disabled px-1">
+          <p className="text-xs text-text-disabled px-1 truncate">
             No open positions
           </p>
         )}

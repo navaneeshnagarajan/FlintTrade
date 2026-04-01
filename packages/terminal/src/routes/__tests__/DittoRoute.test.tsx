@@ -183,8 +183,8 @@ describe("DittoRoute", () => {
     mockGetAccounts.mockRejectedValue(new Error("Network error"));
     render(<DittoRoute />, { wrapper: createWrapper() });
     await waitFor(() => {
-      expect(screen.getByText(/Failed to load accounts/)).toBeInTheDocument();
-    });
+      expect(screen.getByText(/Could not load accounts/)).toBeInTheDocument();
+    }, { timeout: 6000 });
   });
 
   it("shows Add Account button (disabled)", async () => {

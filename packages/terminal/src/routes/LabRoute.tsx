@@ -792,7 +792,7 @@ function BacktestSection({ onResult, lastResult }: BacktestSectionProps) {
   return (
     <PanelGroup orientation="horizontal" className="flex gap-0 items-start min-h-0">
       {/* Left: collapsible config panel — resizable, default 30%, min 250px */}
-      <Panel defaultSize={30} minSize={20} className="min-w-[250px]">
+      <Panel defaultSize={30} minSize={22} className="min-w-70">
         <BacktestConfigPanel
           symbol={symbol}
           onSymbol={setSymbol}

@@ -10,7 +10,7 @@
  * Data fetched via TanStack Query from /ft-api/api/v1/ditto/* endpoints.
  */
 
-import { useState, useCallback, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
@@ -104,16 +104,35 @@ function pnlColor(value: number): string {
 
 // ─── Accounts tab ────────────────────────────────────────────────────────────
 
+const ACCOUNTS_LOAD_TIMEOUT_MS = 5_000;
+
 function AccountsTab() {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["ditto", "accounts"],
     queryFn: getDittoAccounts,
     refetchInterval: 30_000,
+    retry: 1,
   });
+
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (isLoading) {
+      setLoadTimedOut(false);
+      timeoutRef.current = setTimeout(() => setLoadTimedOut(true), ACCOUNTS_LOAD_TIMEOUT_MS);
+    } else {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      setLoadTimedOut(false);
+    }
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [isLoading]);
 
   const accounts = data?.accounts ?? [];
 
-  if (isLoading) {
+  if (isLoading && !loadTimedOut) {
     return (
       <div className="flex items-center justify-center py-20">
         <RefreshCw className="size-5 text-text-muted animate-spin" />
@@ -122,10 +141,31 @@ function AccountsTab() {
     );
   }
 
-  if (error) {
+  if (isError || loadTimedOut) {
+    const message = isError
+      ? (error?.message ?? "Unknown error")
+      : "Request timed out — backend may not be running.";
     return (
-      <div className="flex items-center justify-center py-20 text-sm text-loss">
-        Failed to load accounts: {error.message}
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <AlertTriangle className="size-8 text-text-muted" />
+        <p className="text-sm text-text-secondary text-center max-w-xs">
+          Could not load accounts.{" "}
+          <span className="text-text-muted">{message}</span>
+        </p>
+        <Button size="sm" variant="outline" onClick={() => { setLoadTimedOut(false); void refetch(); }}>
+          <RefreshCw className="size-3.5" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (!isLoading && accounts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <Users className="size-8 text-text-muted" />
+        <p className="text-sm text-text-muted">No accounts connected</p>
+        <p className="text-xs text-text-disabled">Add an account to get started.</p>
       </div>
     );
   }
