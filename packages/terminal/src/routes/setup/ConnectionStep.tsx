@@ -438,6 +438,20 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
       ) : (
         <DirectConnectPanel onComplete={onComplete} />
       )}
+
+      {/* Skip / connect later */}
+      <div className="pt-2 border-t border-border-default space-y-2">
+        <button
+          type="button"
+          onClick={() => onComplete({ host: "", apiKey: "", wsPort: "8765" })}
+          className="w-full text-xs text-text-muted hover:text-text-primary transition-colors py-1.5 rounded focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+        >
+          I&apos;ll connect later →
+        </button>
+        <p className="text-xs text-text-muted text-center">
+          You can connect your broker anytime from Settings &rarr; API Connection.
+        </p>
+      </div>
     </div>
   );
 }

@@ -24,6 +24,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  Moon,
+  Sun,
+  Monitor,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -39,6 +42,8 @@ import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
 import ModeSelectRoute from "@/routes/ModeSelectRoute";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
+import { useThemeStore } from "@/stores/themeStore";
+import type { ColorMode } from "@/lib/cinematicThemes";
 
 // ---------------------------------------------------------------------------
 // Step 1 — Account security schema
@@ -58,15 +63,15 @@ const accountSchema = z.object({
     .regex(/[0-9]/, "Include at least one number")
     .regex(/[^a-zA-Z0-9]/, "Include at least one special character"),
   confirmPassword: z.string(),
-  pin: z
-    .string()
-    .length(6, "PIN must be exactly 6 digits")
-    .regex(/^\d{6}$/, "PIN must be digits only"),
-  confirmPin: z.string(),
-}).refine((data) => data.password === data.confirmPassword, {
+  pin: z.string().optional(),
+  confirmPin: z.string().optional(),
+}).refine((d) => d.password === d.confirmPassword, {
   message: "Passwords do not match",
   path: ["confirmPassword"],
-}).refine((data) => data.pin === data.confirmPin, {
+}).refine((d) => !d.pin || (d.pin.length === 6 && /^\d{6}$/.test(d.pin)), {
+  message: "PIN must be exactly 6 digits",
+  path: ["pin"],
+}).refine((d) => !d.pin || d.pin === d.confirmPin, {
   message: "PINs do not match",
   path: ["confirmPin"],
 });
@@ -113,6 +118,7 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
   } = useForm<AccountFormValues>({ resolver: zodResolver(accountSchema) });
 
   const watchedPassword = watch("password", "");
+  const watchedPin = watch("pin", "");
   const strength = passwordStrength(watchedPassword);
 
   async function onSubmit(values: AccountFormValues) {
@@ -126,7 +132,7 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
           username: values.username,
           email: values.email,
           password: values.password,
-          pin: values.pin,
+          pin: values.pin || "",
         }),
       });
       const data = await resp.json();
@@ -184,6 +190,7 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
           {...register("email")}
         />
         {errors.email && <p className="text-xs text-loss">{errors.email.message}</p>}
+        <p className="text-xs text-text-muted">Used for password reset only. Never shared with third parties.</p>
       </div>
 
       {/* Password + strength meter */}
@@ -232,56 +239,61 @@ function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
         {errors.password && <p className="text-xs text-loss">{errors.password.message}</p>}
       </div>
 
-      {/* Confirm Password */}
-      <div className="space-y-1.5">
-        <Label htmlFor="sa-confirm-password" className="text-xs text-text-secondary uppercase tracking-wider">
-          Confirm Password <span className="text-loss">*</span>
-        </Label>
-        <Input
-          id="sa-confirm-password"
-          type="password"
-          placeholder="Re-enter password"
-          aria-label="Confirm your password"
-          {...register("confirmPassword")}
-        />
-        {errors.confirmPassword && <p className="text-xs text-loss">{errors.confirmPassword.message}</p>}
-      </div>
+      {/* Confirm Password — only shown once the user starts typing a password */}
+      {watchedPassword.length > 0 && (
+        <div className="space-y-1.5">
+          <Label htmlFor="sa-confirm-password" className="text-xs text-text-secondary uppercase tracking-wider">
+            Confirm Password <span className="text-loss">*</span>
+          </Label>
+          <Input
+            id="sa-confirm-password"
+            type="password"
+            placeholder="Re-enter password"
+            aria-label="Confirm your password"
+            {...register("confirmPassword")}
+          />
+          {errors.confirmPassword && <p className="text-xs text-loss">{errors.confirmPassword.message}</p>}
+        </div>
+      )}
 
-      {/* PIN */}
+      {/* PIN — optional */}
       <div className="space-y-1.5">
         <Label htmlFor="sa-pin" className="text-xs text-text-secondary uppercase tracking-wider">
-          6-digit PIN <span className="text-loss">*</span> <span className="normal-case text-text-muted font-normal">(for quick unlock and LIVE mode)</span>
+          6-digit PIN <span className="normal-case text-text-muted font-normal">(optional)</span>
         </Label>
+        <p className="text-xs text-text-muted">Optional — enables quick unlock and lock screen.</p>
         <Input
           id="sa-pin"
           type="password"
           inputMode="numeric"
           maxLength={6}
           placeholder="••••••"
-          aria-label="Create a 6-digit PIN"
+          aria-label="Create a 6-digit PIN (optional)"
           className="text-center font-mono text-lg tracking-widest max-w-40"
           {...register("pin")}
         />
         {errors.pin && <p className="text-xs text-loss">{errors.pin.message}</p>}
       </div>
 
-      {/* Confirm PIN */}
-      <div className="space-y-1.5">
-        <Label htmlFor="sa-confirm-pin" className="text-xs text-text-secondary uppercase tracking-wider">
-          Confirm PIN <span className="text-loss">*</span>
-        </Label>
-        <Input
-          id="sa-confirm-pin"
-          type="password"
-          inputMode="numeric"
-          maxLength={6}
-          placeholder="••••••"
-          aria-label="Re-enter your 6-digit PIN"
-          className="text-center font-mono text-lg tracking-widest max-w-40"
-          {...register("confirmPin")}
-        />
-        {errors.confirmPin && <p className="text-xs text-loss">{errors.confirmPin.message}</p>}
-      </div>
+      {/* Confirm PIN — only shown once the user starts typing a PIN */}
+      {watchedPin && watchedPin.length > 0 && (
+        <div className="space-y-1.5">
+          <Label htmlFor="sa-confirm-pin" className="text-xs text-text-secondary uppercase tracking-wider">
+            Confirm PIN
+          </Label>
+          <Input
+            id="sa-confirm-pin"
+            type="password"
+            inputMode="numeric"
+            maxLength={6}
+            placeholder="••••••"
+            aria-label="Re-enter your 6-digit PIN"
+            className="text-center font-mono text-lg tracking-widest max-w-40"
+            {...register("confirmPin")}
+          />
+          {errors.confirmPin && <p className="text-xs text-loss">{errors.confirmPin.message}</p>}
+        </div>
+      )}
 
       <Button type="submit" className="w-full" disabled={isLoading}>
         {isLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
@@ -302,6 +314,7 @@ interface TotpDisplayProps {
 }
 
 function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
+  const [phase, setPhase] = useState<"warning" | "qr">("warning");
   const [downloaded, setDownloaded] = useState(false);
 
   function downloadCodes() {
@@ -316,6 +329,43 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
     setDownloaded(true);
   }
 
+  // Phase 1: Warning — explain what 2FA is and prompt to get an authenticator app
+  if (phase === "warning") {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-2 text-accent">
+          <ShieldCheck className="size-5 shrink-0" />
+          <h3 className="text-sm font-semibold text-text-primary">Two-Factor Authentication (2FA)</h3>
+        </div>
+
+        <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
+          <p className="text-xs text-text-secondary leading-relaxed">
+            2FA adds an extra layer of security to your account. After setup, every login will require a one-time code from your authenticator app.
+          </p>
+          <ul className="space-y-2 text-xs text-text-secondary">
+            <li className="flex items-start gap-2">
+              <span className="text-accent mt-0.5 shrink-0">•</span>
+              <span>You will need an authenticator app — <strong className="text-text-primary">Google Authenticator</strong>, <strong className="text-text-primary">Authy</strong>, or <strong className="text-text-primary">Microsoft Authenticator</strong> all work.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-accent mt-0.5 shrink-0">•</span>
+              <span>Download one from your app store now if you don&apos;t have it.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-loss mt-0.5 shrink-0">!</span>
+              <span><strong className="text-text-primary">Important:</strong> You will also receive backup codes on the next screen. Save them somewhere safe — they are your only recovery option if you lose your phone.</span>
+            </li>
+          </ul>
+        </div>
+
+        <Button onClick={() => setPhase("qr")} className="w-full">
+          I&apos;m ready — show QR code
+        </Button>
+      </div>
+    );
+  }
+
+  // Phase 2: QR code + backup codes
   return (
     <div className="space-y-6">
       {/* 2FA QR */}
@@ -414,6 +464,8 @@ const STEP_LABELS = [
 export default function SetupAccountRoute() {
   const navigate = useNavigate();
   const setMode = useModeStore((s) => s.setMode);
+  const colorMode = useThemeStore((s) => s.mode);
+  const setColorMode = useThemeStore((s) => s.setMode);
 
   const [currentStep, setCurrentStep] = useState(0);
   // Saved from Step 1 API response
@@ -466,7 +518,27 @@ export default function SetupAccountRoute() {
   const totalSteps = STEP_LABELS.length;
 
   return (
-    <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center p-6">
+    <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center p-6 relative">
+
+      {/* Dark / light / system mode toggle — top-right */}
+      <div className="absolute top-4 right-4 flex gap-1 z-50">
+        {(["dark", "light", "system"] as const).map((m) => {
+          const Icon = m === "dark" ? Moon : m === "light" ? Sun : Monitor;
+          return (
+            <button
+              key={m}
+              onClick={() => setColorMode(m as ColorMode)}
+              aria-label={`${m} mode`}
+              className={`p-1.5 rounded transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none ${
+                colorMode === m ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Icon size={14} />
+            </button>
+          );
+        })}
+      </div>
+
       <div className="w-full max-w-lg space-y-8">
 
         {/* Header */}

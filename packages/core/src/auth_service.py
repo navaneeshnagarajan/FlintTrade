@@ -103,12 +103,15 @@ class AuthService:
         username: str,
         email: str,
         password: str,
-        pin: str,
+        pin: str = "",
     ) -> list[str]:
         """Create the single-user account. Returns 8 backup codes.
 
+        Args:
+            pin: Optional 6-digit PIN for quick unlock. Empty string to skip.
+
         Raises:
-            ValueError: If password too weak or PIN not 6 digits.
+            ValueError: If password too weak or PIN invalid (when provided).
             RuntimeError: If account already exists.
         """
         if self.is_setup():
@@ -118,17 +121,21 @@ class AuthService:
         if len(password) < 8:
             raise ValueError("Password too weak — minimum 8 characters")
 
-        # Validate PIN
-        if not (pin.isdigit() and len(pin) == 6):
+        # Validate PIN (optional — empty string means no PIN)
+        if pin and not (pin.isdigit() and len(pin) == 6):
             raise ValueError("PIN must be exactly 6 digits")
 
         # Hash password with argon2id
         password_hash = self._hasher.hash(password)
 
-        # Hash PIN with PBKDF2
-        pin_salt = os.urandom(16)
-        pin_hash_bytes = hashlib.pbkdf2_hmac("sha256", pin.encode(), pin_salt, 390_000)
-        pin_hash = pin_salt.hex() + ":" + pin_hash_bytes.hex()
+        # Hash PIN with PBKDF2 (or store empty marker if no PIN set)
+        if pin:
+            pin_salt = os.urandom(16)
+            pin_hash_bytes = hashlib.pbkdf2_hmac("sha256", pin.encode(), pin_salt, 390_000)
+            pin_hash = pin_salt.hex() + ":" + pin_hash_bytes.hex()
+        else:
+            pin_salt = os.urandom(16)
+            pin_hash = ""  # Empty = no PIN configured
 
         # Generate TOTP secret and encrypt it
         totp_secret = pyotp.random_base32()
@@ -193,14 +200,19 @@ class AuthService:
             self._record_attempt(success=False)
             return False
 
+    def has_pin(self) -> bool:
+        """Check if a PIN was configured during setup."""
+        row = self._db.execute("SELECT pin_hash FROM account WHERE id = 1").fetchone()
+        return bool(row and row["pin_hash"])
+
     def verify_pin(self, pin: str) -> bool:
-        """Verify 6-digit PIN for quick unlock."""
+        """Verify 6-digit PIN for quick unlock. Returns False if no PIN configured."""
         if self.is_locked():
             return False
 
         row = self._db.execute("SELECT pin_hash FROM account WHERE id = 1").fetchone()
-        if not row:
-            return False
+        if not row or not row["pin_hash"]:
+            return False  # No PIN configured
 
         stored = row["pin_hash"]
         salt_hex, hash_hex = stored.split(":")

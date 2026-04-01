@@ -97,8 +97,8 @@ def auth_setup() -> tuple[Any, int]:
     password = str(body.get("password", ""))
     pin = str(body.get("pin", ""))
 
-    if not username or not email or not password or not pin:
-        return jsonify({"status": "error", "message": "All fields required: username, email, password, pin."}), 400
+    if not username or not email or not password:
+        return jsonify({"status": "error", "message": "Required fields: username, email, password."}), 400
 
     try:
         backup_codes = svc.setup_account(username, email, password, pin)
