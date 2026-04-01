@@ -21,7 +21,10 @@ export function QueryProvider({ children }: Props) {
   return (
     <QueryClientProvider client={queryClient}>
       {children}
-      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+      {/* TanStack Query Devtools — enable via console: localStorage.setItem("flinttrade:devtools", "1") then reload */}
+      {import.meta.env.DEV && localStorage.getItem("flinttrade:devtools") === "1" && (
+        <ReactQueryDevtools initialIsOpen={false} />
+      )}
     </QueryClientProvider>
   );
 }
