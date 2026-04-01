@@ -238,6 +238,13 @@ def create_flask_app(
     from packages.engine.src.sandbox_routes import sandbox_bp  # noqa: PLC0415
     app.register_blueprint(sandbox_bp)
 
+    # Register Data Sandbox blueprint (/v1/sandbox/*) — paper trading engine
+    # (capital, orders, positions, P&L, reset, export/import)
+    from packages.data.src.sandbox_routes import data_sandbox_bp  # noqa: PLC0415
+    from packages.data.src.sandbox_engine import SandboxEngine as _DataSandboxEngine  # noqa: PLC0415
+    app.config["DATA_SANDBOX_ENGINE"] = _DataSandboxEngine()
+    app.register_blueprint(data_sandbox_bp)
+
     # Register admin blueprint (dev/debug only)
     if app.debug or os.environ.get("FLINTTRADE_DEV"):
         from packages.core.src.admin_routes import admin_bp  # noqa: PLC0415
