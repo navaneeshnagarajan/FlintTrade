@@ -408,6 +408,19 @@ const storeImpl: StateCreator<
     style.setProperty("--color-itm-text",   variant.trading.profitText);
     style.setProperty("--color-otm-text",   variant.trading.warningText);
 
+    // ---- Toggle <html class="dark"> for shadcn/ui dark-mode HSL tokens ----
+    if (resolvedMode === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    // Also set a data attribute for CSS selectors
+    root.dataset.mode = resolvedMode;
+
+    // ---- Body background (prevent white flash) ----
+    document.body.style.backgroundColor = variant.colors.base;
+    document.body.style.color = variant.colors.text;
+
     // ---- Shadow scale (mode-aware) ----
     if (resolvedMode === "light") {
       style.setProperty("--shadow-raised",   "0 1px 3px rgba(0,0,0,0.08)");

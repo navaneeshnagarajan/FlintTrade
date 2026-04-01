@@ -23,9 +23,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { Moon, Sun, Monitor } from "lucide-react";
 
 import { LogoIcon } from "@/components/brand/Logo";
 import { useThemeStore } from "@/stores/themeStore";
+import type { ColorMode } from "@/lib/cinematicThemes";
 import { motionConfig } from "@/lib/motion";
 import { useAuthStore } from "@/stores/authStore";
 import LoginRoute from "@/routes/LoginRoute";
@@ -82,6 +84,8 @@ export default function WelcomeRoute() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const theme = useThemeStore((s) => s.activeThemeId);
+  const colorMode = useThemeStore((s) => s.mode);
+  const setColorMode = useThemeStore((s) => s.setMode);
   const reducedMotion = motionConfig.prefersReducedMotion();
   const authStatus = useAuthStore((s) => s.status);
   const setMode = useModeStore((s) => s.setMode);
@@ -345,6 +349,29 @@ export default function WelcomeRoute() {
       `}</style>
 
       <h1 className="sr-only">Welcome to FlintTrade</h1>
+
+      {/* Dark / light / system mode toggle — top-right, always visible */}
+      <div className="absolute top-6 right-6 flex gap-1 z-50">
+        {(["dark", "light", "system"] as const).map((m) => {
+          const Icon = m === "dark" ? Moon : m === "light" ? Sun : Monitor;
+          const isActive = colorMode === m;
+          return (
+            <button
+              key={m}
+              onClick={() => setColorMode(m as ColorMode)}
+              aria-label={`Switch to ${m} mode`}
+              className={`p-1.5 rounded transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none ${
+                isActive
+                  ? "bg-accent/20 text-accent"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Icon size={14} />
+            </button>
+          );
+        })}
+      </div>
+
       <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center relative overflow-hidden select-none">
 
         {/* ====== SPACE BACKGROUND — always visible ====== */}
@@ -503,7 +530,7 @@ export default function WelcomeRoute() {
           </motion.div>
 
           {/* CTA buttons — only shown for first-time / setup-required users */}
-          <div style={{ height: 56 }} className="mt-4">
+          <div className="mt-4 flex flex-col items-center gap-3">
             <motion.div
               className="flex flex-col sm:flex-row items-center gap-4"
               initial={{ opacity: 0 }}
@@ -518,6 +545,22 @@ export default function WelcomeRoute() {
                 Get Started
               </ShimmerButton>
             </motion.div>
+
+            {/* Explore Demo — bypasses account setup entirely */}
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: step >= 5 && authStatus === "setup-required" ? 1 : 0 }}
+              transition={{ duration: 1, delay: 0.15, ease: "easeOut" }}
+              onClick={() => {
+                useModeStore.getState().setMode("demo");
+                useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+                navigate("/trade");
+              }}
+              className="text-sm text-text-muted hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded px-2 py-1"
+              aria-label="Explore demo mode without creating an account"
+            >
+              Explore Demo →
+            </motion.button>
 
             {/* For returning users the cinematic plays while auto-redirecting — no buttons */}
             {(authStatus === "logged-out" || authStatus === "pin-required") && (

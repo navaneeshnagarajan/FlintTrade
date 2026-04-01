@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   Loader2,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -274,11 +275,6 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
     setDownloaded(true);
   }
 
-  // Build QR code URL via Google Charts (no external library needed at runtime)
-  const qrUrl = totpUri
-    ? `https://chart.googleapis.com/chart?chs=180x180&chld=M|0&cht=qr&chl=${encodeURIComponent(totpUri)}`
-    : null;
-
   return (
     <div className="space-y-6">
       {/* 2FA QR */}
@@ -287,15 +283,16 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
         <p className="text-xs text-text-muted">
           Use Google Authenticator, Authy, or any TOTP app. Scan the QR code or enter the key manually.
         </p>
-        {qrUrl ? (
+        {totpUri ? (
           <div className="flex justify-center">
-            <img
-              src={qrUrl}
-              alt="TOTP QR code — scan with your authenticator app"
-              className="rounded-lg border border-border-default bg-white p-2"
-              width={180}
-              height={180}
-            />
+            <div className="rounded-lg border border-border-default bg-white p-2">
+              <QRCodeSVG
+                value={totpUri}
+                size={180}
+                bgColor="transparent"
+                fgColor="#000000"
+              />
+            </div>
           </div>
         ) : (
           <p className="text-xs text-text-muted italic">2FA QR code not available — configure later in Settings.</p>

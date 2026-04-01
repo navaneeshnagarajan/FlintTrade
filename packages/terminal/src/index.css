@@ -119,6 +119,29 @@
       --shadow-floating: 0 8px 24px rgba(0,0,0,0.16);
     }
   }
+
+  /* shadcn/ui HSL tokens for light mode (when .dark class is removed) */
+  :root:not(.dark) {
+    --background: 0 0% 98%;
+    --foreground: 240 10% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 10%;
+    --primary: 142 71% 35%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 92%;
+    --secondary-foreground: 240 10% 10%;
+    --muted: 240 5% 92%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 5% 92%;
+    --accent-foreground: 240 10% 10%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 82%;
+    --input: 240 6% 82%;
+    --ring: 142 71% 35%;
+  }
 }
 
 /* ---------- Theme tokens ---------- */
