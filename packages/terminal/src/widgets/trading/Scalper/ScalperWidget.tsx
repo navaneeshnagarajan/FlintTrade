@@ -171,6 +171,7 @@ function Stepper({ label, value, onDec, onInc, sublabel, large = false, classNam
         <button
           type="button"
           onClick={onDec}
+          aria-label={`Decrease ${label}`}
           className={`${btnSize} flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-hover border border-border-default rounded-l-md hover:bg-surface-card transition-colors`}
         >
           <Minus size={iconSize} />
@@ -181,6 +182,7 @@ function Stepper({ label, value, onDec, onInc, sublabel, large = false, classNam
         <button
           type="button"
           onClick={onInc}
+          aria-label={`Increase ${label}`}
           className={`${btnSize} flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-hover border border-border-default rounded-r-md hover:bg-surface-card transition-colors`}
         >
           <Plus size={iconSize} />
@@ -238,11 +240,13 @@ function ToggleGroup({ label, value, options, onChange, className = "" }: Toggle
       {label && (
         <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">{label}</span>
       )}
-      <div className="flex border border-border-default rounded-md overflow-hidden">
+      <div role="radiogroup" aria-label={label} className="flex border border-border-default rounded-md overflow-hidden">
         {options.map((opt) => (
           <button
             key={opt}
             type="button"
+            role="radio"
+            aria-checked={value === opt}
             onClick={() => onChange(opt)}
             className={`px-2.5 h-8 text-xs font-semibold transition-colors ${
               value === opt
@@ -342,7 +346,14 @@ function ScalperWidget(_props: WidgetProps) {
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (pendingOrder) {
+      confirmBtnRef.current?.focus();
+    }
+  }, [pendingOrder]);
 
   const cfg = INDEX_CONFIG[symbol] ?? INDEX_CONFIG[DEFAULT_SYMBOL];
   const step = cfg.step;
@@ -870,9 +881,9 @@ function ScalperWidget(_props: WidgetProps) {
 
       {/* ── ORDER CONFIRMATION MODAL (non-one-click) ── */}
       {pendingOrder && (
-        <div className="absolute inset-0 flex items-center justify-center bg-surface-base/80 backdrop-blur-sm z-50">
+        <div role="dialog" aria-modal="true" aria-labelledby="scalper-confirm-title" className="absolute inset-0 flex items-center justify-center bg-surface-base/80 backdrop-blur-sm z-50">
           <div className="bg-surface-card border border-border-default rounded-lg p-4 min-w-64 shadow-2xl">
-            <div className="text-sm font-heading font-bold text-text-primary mb-3">Confirm Order</div>
+            <div id="scalper-confirm-title" className="text-sm font-heading font-bold text-text-primary mb-3">Confirm Order</div>
             <div className="space-y-1.5 mb-4">
               <div className="flex justify-between text-xs">
                 <span className="text-text-muted font-sans">Symbol</span>
@@ -915,6 +926,7 @@ function ScalperWidget(_props: WidgetProps) {
             </div>
             <div className="flex gap-2">
               <button
+                ref={confirmBtnRef}
                 type="button"
                 onClick={confirmOrder}
                 className={`flex-1 h-8 rounded-md text-sm font-semibold transition-colors ${

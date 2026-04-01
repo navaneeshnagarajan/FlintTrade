@@ -368,6 +368,7 @@ function SentimentSection() {
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
             placeholder="e.g. NIFTY, RELIANCE"
+            aria-label="Symbol for sentiment analysis"
             className="bg-surface-base border-border-default text-text-primary font-mono text-sm"
             onKeyDown={(e) => e.key === "Enter" && handleSymbolSentiment()}
           />
@@ -393,6 +394,7 @@ function SentimentSection() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Paste news, social post, or any market commentary here..."
+          aria-label="Text to analyse for sentiment"
           rows={4}
           className="bg-surface-base border-border-default text-text-primary text-sm resize-none"
         />
@@ -506,6 +508,7 @@ function KnowledgeSection() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="e.g. Iron condor adjustment rules"
+            aria-label="Knowledge base query"
             className="bg-surface-base border-border-default text-text-primary text-sm"
             onKeyDown={(e) => e.key === "Enter" && handleQuery()}
           />

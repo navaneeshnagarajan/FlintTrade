@@ -354,8 +354,10 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
   const changeColor = isUp === true ? "text-profit" : isUp === false ? "text-loss" : "text-text-muted";
 
   return (
-    <div
-      className="flex items-center gap-1.5 px-2 py-1.5 hover:bg-surface-hover cursor-pointer border-b border-border-subtle transition-colors group"
+    <button
+      type="button"
+      aria-label={item.symbol}
+      className="w-full text-left flex items-center gap-1.5 px-2 py-1.5 hover:bg-surface-hover cursor-pointer border-b border-border-subtle transition-colors group"
       onClick={() => onSelect(item)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -383,7 +385,7 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
           {chgPct != null ? fmtPct(chgPct) : "—"}
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -640,8 +642,9 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
           </button>
 
           {showMenu && (
-            <div className="absolute right-0 top-6 z-40 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-40">
+            <div role="menu" className="absolute right-0 top-6 z-40 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-40">
               <button
+                role="menuitem"
                 onClick={() => { setShowSearch(true); setShowMenu(false); }}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
               >
@@ -649,6 +652,7 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
                 Add symbol
               </button>
               <button
+                role="menuitem"
                 onClick={handleResetDefaults}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
               >
@@ -657,6 +661,7 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
               </button>
               <div className="border-t border-border-subtle my-1" />
               <button
+                role="menuitem"
                 onClick={handleClearAll}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 transition-colors"
               >

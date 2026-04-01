@@ -428,7 +428,7 @@ interface StatDef {
 const STATS: StatDef[] = [
   { label: "Brokers supported", value: 30,  suffix: "+" },
   { label: "Modules",           value: 6,   suffix: ""  },
-  { label: "Strategies",        value: 12,  suffix: "+" },
+  { label: "Strategies",        value: 101, suffix: "+" },
   { label: "Indicators",        value: 150, suffix: "+" },
 ];
 

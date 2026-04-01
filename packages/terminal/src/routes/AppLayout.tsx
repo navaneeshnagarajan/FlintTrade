@@ -16,11 +16,13 @@ const SMALL_SCREEN_BREAKPOINT = 768;
 const ROUTE_TITLES: Record<string, string> = {
   "/trade": "Trading Workspace",
   "/invest": "Investment Dashboard",
-  "/learn": "Learning Center",
+  "/learn": "Learning Centre",
   "/lab": "Strategy Lab",
   "/automate": "Automation Hub",
-  "/ai": "AI Center",
+  "/ai": "AI Centre",
   "/settings": "Settings",
+  "/ditto": "Multi-Account Manager",
+  "/admin": "Admin Panel",
 };
 
 function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {

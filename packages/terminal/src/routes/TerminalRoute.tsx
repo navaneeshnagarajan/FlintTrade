@@ -54,9 +54,14 @@ function KillSwitchPill() {
     if (isTriggering || triggered) return;
     setIsTriggering(true);
     try {
+      const { useConnectionStore } = await import("@/stores/connectionStore");
+      const { apiKey } = useConnectionStore.getState();
       await fetch("/api/v1/safety/kill-switch", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { "X-API-Key": apiKey } : {}),
+        },
         body: JSON.stringify({ reason: "Manual kill switch — trader initiated from terminal" }),
       });
       setTriggered(true);

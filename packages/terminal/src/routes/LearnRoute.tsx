@@ -545,7 +545,9 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
       <button
         type="button"
         role="tab"
+        id={`learn-tab-${tab.id}`}
         aria-selected={isActive}
+        aria-controls={`learn-tabpanel-${tab.id}`}
         onClick={onClick}
         title={collapsed ? tab.label : undefined}
         className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-sans transition-colors border-l-2 ${
@@ -698,7 +700,7 @@ export default function LearnRoute() {
 
         {/* Content area */}
         <ScrollArea className="flex-1">
-          <div role="tabpanel" className="p-6 max-w-4xl mx-auto">
+          <div role="tabpanel" id={`learn-tabpanel-${activeTab}`} aria-labelledby={`learn-tab-${activeTab}`} className="p-6 max-w-4xl mx-auto">
             <TabTransition tabKey={activeTab}>
               {tabContent[activeTab]}
             </TabTransition>

@@ -609,7 +609,7 @@ export default function TopBar() {
         {positionCount > 0 ? (
           <>
             <span className={`font-mono text-xs tabular-nums ${pnlColor}`}>
-              {pnlSign}{totalPnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{pnlSign}{totalPnl.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
             <Badge variant="secondary" className="text-xxs px-1.5 py-0">
               {positionCount} pos

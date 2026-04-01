@@ -231,14 +231,14 @@ function AccountRow({ account }: { account: DittoAccount }) {
       </TableCell>
       <TableCell className="text-center">
         <div className="flex items-center justify-center gap-1">
-          <Button size="icon-xs" variant="ghost" title="Connect" disabled>
-            <Power className="size-3" />
+          <Button size="icon-xs" variant="ghost" aria-label="Connect account" disabled>
+            <Power className="size-3" aria-hidden="true" />
           </Button>
-          <Button size="icon-xs" variant="ghost" title="Disconnect" disabled>
-            <PowerOff className="size-3" />
+          <Button size="icon-xs" variant="ghost" aria-label="Disconnect account" disabled>
+            <PowerOff className="size-3" aria-hidden="true" />
           </Button>
-          <Button size="icon-xs" variant="ghost" title="Remove" disabled>
-            <Trash2 className="size-3" />
+          <Button size="icon-xs" variant="ghost" aria-label="Remove account" disabled>
+            <Trash2 className="size-3" aria-hidden="true" />
           </Button>
         </div>
       </TableCell>

@@ -316,7 +316,7 @@ export default function WelcomeRoute() {
                 key={t.id}
                 onClick={() => useThemeStore.getState().setTheme(t.id)}
                 aria-label={t.label}
-                className={`p-1.5 rounded transition-colors duration-150 cursor-pointer ${
+                className={`p-1.5 rounded transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none ${
                   theme === t.id
                     ? "bg-accent/20 text-accent"
                     : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -493,7 +493,7 @@ export default function WelcomeRoute() {
                 <button
                   type="button"
                   onClick={() => navigate("/setup")}
-                  className="border border-border-default text-text-primary px-10 py-3.5 rounded-lg text-lg hover:bg-surface-hover hover:border-accent/40 transition-colors duration-150 cursor-pointer"
+                  className="border border-border-default text-text-primary px-10 py-3.5 rounded-lg text-lg hover:bg-surface-hover hover:border-accent/40 transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
                 >
                   Set Up Workspace
                 </button>

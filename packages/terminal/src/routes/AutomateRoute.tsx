@@ -81,7 +81,7 @@ export default function AutomateRoute() {
           <div>
             <h1 className="font-heading font-bold text-lg text-text-primary">Automation Hub</h1>
             <p className="text-xxs text-text-muted">
-              54-node flow builder, cron scheduler, Telegram kill switch — no other broker has this
+              Flow builder, cron scheduler, Telegram alerts, and safety controls
             </p>
           </div>
           {killSwitchActive && (

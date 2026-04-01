@@ -7,6 +7,7 @@
 
 import { useNavigate } from "react-router-dom";
 import { LogoIcon } from "@/components/brand/Logo";
+import { Button } from "@/components/ui/button";
 
 export default function NotFoundRoute() {
   const navigate = useNavigate();
@@ -34,20 +35,12 @@ export default function NotFoundRoute() {
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => navigate("/")}
-                className="w-full sm:w-auto px-6 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors cursor-pointer"
-              >
+              <Button onClick={() => navigate("/")} className="w-full sm:w-auto">
                 Go Home
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate("/explore")}
-                className="w-full sm:w-auto px-6 py-2 rounded-lg border border-border-default bg-surface-elevated text-text-primary text-sm font-medium hover:bg-surface-hover transition-colors cursor-pointer"
-              >
+              </Button>
+              <Button variant="outline" onClick={() => navigate("/explore")} className="w-full sm:w-auto">
                 Explore
-              </button>
+              </Button>
           </div>
       </div>
     </main>

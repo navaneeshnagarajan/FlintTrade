@@ -356,10 +356,12 @@ function OptionChainWidget() {
           <div className="flex-1" />
 
           {/* View toggle */}
-          <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
+          <div role="radiogroup" aria-label="Option chain view" className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
             {VIEWS.map((v) => (
               <button
                 key={v}
+                role="radio"
+                aria-checked={v === view}
                 onClick={() => setView(v)}
                 className={`px-2 py-0.5 text-xs font-medium transition-colors ${
                   v === view
