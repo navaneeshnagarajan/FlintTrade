@@ -13,6 +13,7 @@ import "./index.css";
 
 const TerminalRoute = lazy(() => import("./routes/TerminalRoute"));
 const SetupRoute = lazy(() => import("./routes/SetupRoute"));
+const SetupAccountRoute = lazy(() => import("./routes/SetupAccountRoute"));
 const InvestRoute = lazy(() => import("./routes/InvestRoute"));
 const LearnRoute = lazy(() => import("./routes/LearnRoute"));
 const WelcomeRoute = lazy(() => import("./routes/WelcomeRoute"));
@@ -74,6 +75,7 @@ const router = createBrowserRouter([
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
       { path: "explore", element: <RouteErrorBoundary routeName="Explore"><Suspense fallback={<Loading />}><ExploreRoute /></Suspense></RouteErrorBoundary> },
       { path: "setup", element: <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
+      { path: "setup-account", element: <RouteErrorBoundary routeName="SetupAccount"><Suspense fallback={<Loading />}><SetupAccountRoute /></Suspense></RouteErrorBoundary> },
       { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */

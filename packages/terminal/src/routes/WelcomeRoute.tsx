@@ -1,5 +1,5 @@
 /**
- * WelcomeRoute — cinematic space-themed welcome screen.
+ * WelcomeRoute — cinematic space-themed welcome screen and auth orchestrator.
  *
  * Background: Deep space with green particle stars + continuous meteor shower.
  * Animation sequence:
@@ -11,7 +11,13 @@
  *   step 5 (5-6s):     CTA buttons rise up
  *
  * Meteors + particles stay visible throughout — continuous space atmosphere.
- * Skip → navigates to /explore.
+ *
+ * Auth flow:
+ *   setup-required  → cinematic → "Get Started" → SetupAccountRoute
+ *   logged-out      → brief cinematic (auto-redirect 1.5s) → LoginRoute → ModeSelectRoute → BrokerDashboardRoute
+ *   pin-required    → LoginRoute (PIN mode) → ModeSelectRoute → BrokerDashboardRoute
+ *   logged-in       → redirect to last route immediately
+ *   unknown         → show cinematic while checking auth status
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -21,6 +27,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { LogoIcon } from "@/components/brand/Logo";
 import { useThemeStore } from "@/stores/themeStore";
 import { motionConfig } from "@/lib/motion";
+import { useAuthStore } from "@/stores/authStore";
+import LoginRoute from "@/routes/LoginRoute";
+import ModeSelectRoute from "@/routes/ModeSelectRoute";
+import BrokerDashboardRoute from "@/routes/BrokerDashboardRoute";
+import type { AppMode } from "@/stores/modeStore";
+import { useModeStore } from "@/stores/modeStore";
 
 // Magic UI
 import { Particles } from "@/components/magicui/particles";
@@ -57,6 +69,12 @@ const SLOGAN = [
 const enterEase = [0.22, 1, 0.36, 1] as const;
 
 // ---------------------------------------------------------------------------
+// Inner flow steps (for returning users)
+// ---------------------------------------------------------------------------
+
+type FlowStep = "cinematic" | "login" | "mode" | "broker";
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -65,6 +83,11 @@ export default function WelcomeRoute() {
   const [step, setStep] = useState(0);
   const theme = useThemeStore((s) => s.activeThemeId);
   const reducedMotion = motionConfig.prefersReducedMotion();
+  const authStatus = useAuthStore((s) => s.status);
+  const setMode = useModeStore((s) => s.setMode);
+
+  // Which sub-screen of the returning-user flow we are showing
+  const [flowStep, setFlowStep] = useState<FlowStep>("cinematic");
 
   // Read particle colors from CSS vars so they react to theme changes.
   // Re-computed when activeThemeId changes (theme token updates happen synchronously).
@@ -119,6 +142,65 @@ export default function WelcomeRoute() {
     s(5, 5000);
     return () => timers.forEach(clearTimeout);
   }, []);
+
+  // ------------------------------------------------------------------
+  // Auth-aware routing
+  // ------------------------------------------------------------------
+
+  // If already logged in: skip straight to last route
+  useEffect(() => {
+    if (authStatus === "logged-in") {
+      navigate("/trade", { replace: true });
+    }
+  }, [authStatus, navigate]);
+
+  // Returning user (logged-out / pin-required): auto-redirect to login
+  // after a brief cinematic (1.5 s). When reduced-motion: immediate.
+  useEffect(() => {
+    if (authStatus !== "logged-out" && authStatus !== "pin-required") return;
+    if (flowStep !== "cinematic") return;
+
+    const delay = reducedMotion ? 0 : 1500;
+    const t = setTimeout(() => {
+      setStep(5); // jump cinematic to end
+      setFlowStep("login");
+    }, delay);
+    return () => clearTimeout(t);
+  }, [authStatus, flowStep, reducedMotion]);
+
+  // ------------------------------------------------------------------
+  // Returning-user sub-screen handlers
+  // ------------------------------------------------------------------
+
+  function handleLoginSuccess() {
+    setFlowStep("mode");
+  }
+
+  function handleModeSelect(mode: AppMode) {
+    setMode(mode);
+    setFlowStep("broker");
+  }
+
+  function handleEnterApp() {
+    navigate("/trade", { replace: true });
+  }
+
+  // ------------------------------------------------------------------
+  // Sub-screen renders for returning users
+  // ------------------------------------------------------------------
+
+  if (authStatus === "logged-out" && flowStep === "login") {
+    return <LoginRoute onSuccess={handleLoginSuccess} mode="full" />;
+  }
+  if (authStatus === "pin-required" && flowStep === "login") {
+    return <LoginRoute onSuccess={handleLoginSuccess} mode="pin" />;
+  }
+  if (flowStep === "mode") {
+    return <ModeSelectRoute onSelect={handleModeSelect} />;
+  }
+  if (flowStep === "broker") {
+    return <BrokerDashboardRoute onEnterApp={handleEnterApp} />;
+  }
 
   return (
     <main aria-label="Welcome">
@@ -291,20 +373,6 @@ export default function WelcomeRoute() {
           }}
         />
 
-        {/* ====== UI CHROME ====== */}
-
-        {/* Skip → /explore */}
-        <motion.button
-          onClick={() => navigate("/explore")}
-          className="absolute top-6 right-6 text-xs text-text-muted hover:text-text-primary cursor-pointer z-50"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: step >= 1 ? 0.5 : 0 }}
-          whileHover={{ opacity: 1 }}
-          transition={{ duration: 0.4 }}
-        >
-          Skip →
-        </motion.button>
-
         {/* ====== CINEMATIC CONTENT — fixed layout, elements fade into place ====== */}
         <div className="relative z-10 flex flex-col items-center px-4" style={{ gap: 24 }}>
 
@@ -434,36 +502,34 @@ export default function WelcomeRoute() {
             </ul>
           </motion.div>
 
-          {/* CTA buttons — always in DOM, fade in */}
+          {/* CTA buttons — only shown for first-time / setup-required users */}
           <div style={{ height: 56 }} className="mt-4">
             <motion.div
               className="flex flex-col sm:flex-row items-center gap-4"
               initial={{ opacity: 0 }}
-              animate={{ opacity: step >= 5 ? 1 : 0 }}
+              animate={{ opacity: step >= 5 && authStatus === "setup-required" ? 1 : 0 }}
               transition={{ duration: 1, ease: "easeOut" }}
             >
               <ShimmerButton
-                onClick={() => navigate("/explore")}
+                onClick={() => navigate("/setup-account")}
                 shimmerColor="#22c55e"
                 className="px-10 py-3.5 text-lg font-semibold bg-profit/10 border-profit/40 text-profit hover:shadow-[0_0_30px_rgba(34,197,94,0.4)]"
               >
-                Explore FlintTrade
+                Get Started
               </ShimmerButton>
-
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: step >= 5 ? 1 : 0 }}
-                transition={{ delay: 0.3, duration: 1, ease: "easeOut" }}
-              >
-                <button
-                  type="button"
-                  onClick={() => navigate("/setup")}
-                  className="border border-border-default text-text-primary px-10 py-3.5 rounded-lg text-lg hover:bg-surface-hover hover:border-accent/40 transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
-                >
-                  Set Up Workspace
-                </button>
-              </motion.div>
             </motion.div>
+
+            {/* For returning users the cinematic plays while auto-redirecting — no buttons */}
+            {(authStatus === "logged-out" || authStatus === "pin-required") && (
+              <motion.p
+                className="text-xs text-text-muted text-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: step >= 3 ? 0.6 : 0 }}
+                transition={{ duration: 0.6 }}
+              >
+                Redirecting to login…
+              </motion.p>
+            )}
           </div>
         </div>
       </div>

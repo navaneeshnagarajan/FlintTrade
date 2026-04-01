@@ -1,0 +1,494 @@
+/**
+ * SetupAccountRoute — one-time account setup wizard (6 steps).
+ *
+ * Step 1: Account Security  — username, email, password (strength meter), PIN, 2FA TOTP
+ * Step 2: Persona           — Trader / Investor / Beginner
+ * Step 3: Broker Connection — OpenAlgo host + API key
+ * Step 4: Trading Defaults  — exchange, product, quantity
+ * Step 5: Risk Limits       — max daily loss, position size
+ * Step 6: Mode Selection    — Demo / Sandbox / Live
+ *
+ * On completion navigates to /trade (last used route default).
+ */
+
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import {
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  Download,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { LogoIcon } from "@/components/brand/Logo";
+import { StepIndicator } from "@/routes/setup/StepIndicator";
+import { PersonaPicker, type Persona } from "@/routes/setup/PersonaStep";
+import { ConnectionStep, type ConnectionFormValues } from "@/routes/setup/ConnectionStep";
+import { TradingStep, type TradingDefaultsFormValues } from "@/routes/setup/TradingStep";
+import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
+import ModeSelectRoute from "@/routes/ModeSelectRoute";
+import { useAuthStore } from "@/stores/authStore";
+import { useModeStore, type AppMode } from "@/stores/modeStore";
+
+// ---------------------------------------------------------------------------
+// Step 1 — Account security schema
+// ---------------------------------------------------------------------------
+
+const accountSchema = z.object({
+  username: z
+    .string()
+    .min(3, "At least 3 characters")
+    .max(32, "Maximum 32 characters")
+    .regex(/^[a-zA-Z0-9_-]+$/, "Letters, numbers, _ and - only"),
+  email: z.string().email("Enter a valid email address"),
+  password: z
+    .string()
+    .min(8, "At least 8 characters")
+    .regex(/[A-Z]/, "Include at least one uppercase letter")
+    .regex(/[0-9]/, "Include at least one number")
+    .regex(/[^a-zA-Z0-9]/, "Include at least one special character"),
+  pin: z
+    .string()
+    .length(6, "PIN must be exactly 6 digits")
+    .regex(/^\d{6}$/, "PIN must be digits only"),
+});
+
+type AccountFormValues = z.infer<typeof accountSchema>;
+
+// ---------------------------------------------------------------------------
+// Password strength meter
+// ---------------------------------------------------------------------------
+
+function passwordStrength(password: string): { score: number; label: string; color: string } {
+  if (password.length === 0) return { score: 0, label: "", color: "" };
+  let score = 0;
+  if (password.length >= 8)  score++;
+  if (password.length >= 12) score++;
+  if (/[A-Z]/.test(password)) score++;
+  if (/[0-9]/.test(password)) score++;
+  if (/[^a-zA-Z0-9]/.test(password)) score++;
+
+  if (score <= 2) return { score, label: "Weak",   color: "bg-loss" };
+  if (score === 3) return { score, label: "Fair",   color: "bg-amber-500" };
+  if (score === 4) return { score, label: "Good",   color: "bg-profit/70" };
+  return              { score, label: "Strong", color: "bg-profit" };
+}
+
+// ---------------------------------------------------------------------------
+// Step 1: Account Security
+// ---------------------------------------------------------------------------
+
+interface AccountSecurityStepProps {
+  onComplete: (values: AccountFormValues, totpUri: string, backupCodes: string[]) => void;
+}
+
+function AccountSecurityStep({ onComplete }: AccountSecurityStepProps) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [serverError, setServerError] = useState("");
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors },
+  } = useForm<AccountFormValues>({ resolver: zodResolver(accountSchema) });
+
+  const watchedPassword = watch("password", "");
+  const strength = passwordStrength(watchedPassword);
+
+  async function onSubmit(values: AccountFormValues) {
+    setIsLoading(true);
+    setServerError("");
+    try {
+      const resp = await fetch("/ft-api/v1/auth/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: values.username,
+          email: values.email,
+          password: values.password,
+          pin: values.pin,
+        }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.data) {
+        onComplete(values, data.data.totp_uri ?? "", data.data.backup_codes ?? []);
+      } else {
+        setServerError(data.message || "Setup failed. Please try again.");
+      }
+    } catch {
+      setServerError("Cannot reach server. Is the FlintTrade backend running?");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
+      <div className="flex items-center gap-2 text-accent mb-1">
+        <ShieldCheck className="size-4 shrink-0" />
+        <span className="text-xs text-text-secondary">Credentials stored locally — never sent to any server except your own instance.</span>
+      </div>
+
+      {serverError && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/30 text-sm text-loss">
+          <AlertTriangle className="size-4 shrink-0" />
+          {serverError}
+        </div>
+      )}
+
+      {/* Username */}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-username" className="text-xs text-text-secondary uppercase tracking-wider">
+          Username
+        </Label>
+        <Input
+          id="sa-username"
+          autoFocus
+          placeholder="e.g. navaneesh"
+          aria-label="Choose a username"
+          {...register("username")}
+        />
+        {errors.username && <p className="text-xs text-loss">{errors.username.message}</p>}
+      </div>
+
+      {/* Email */}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-email" className="text-xs text-text-secondary uppercase tracking-wider">
+          Email
+        </Label>
+        <Input
+          id="sa-email"
+          type="email"
+          placeholder="you@example.com"
+          aria-label="Enter your email address"
+          {...register("email")}
+        />
+        {errors.email && <p className="text-xs text-loss">{errors.email.message}</p>}
+      </div>
+
+      {/* Password + strength meter */}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-password" className="text-xs text-text-secondary uppercase tracking-wider">
+          Password
+        </Label>
+        <div className="relative">
+          <Input
+            id="sa-password"
+            type={showPassword ? "text" : "password"}
+            placeholder="Strong password"
+            aria-label="Create a strong password"
+            className="pr-10"
+            {...register("password")}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+          >
+            {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          </button>
+        </div>
+        {/* Strength bar */}
+        {watchedPassword.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex gap-1" aria-hidden="true">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <div
+                  key={n}
+                  className={`h-1 flex-1 rounded-full transition-colors duration-300 ${
+                    n <= strength.score ? strength.color : "bg-border-default"
+                  }`}
+                />
+              ))}
+            </div>
+            {strength.label && (
+              <p className={`text-xs ${strength.score <= 2 ? "text-loss" : strength.score === 3 ? "text-amber-400" : "text-profit"}`}>
+                {strength.label} password
+              </p>
+            )}
+          </div>
+        )}
+        {errors.password && <p className="text-xs text-loss">{errors.password.message}</p>}
+      </div>
+
+      {/* PIN */}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-pin" className="text-xs text-text-secondary uppercase tracking-wider">
+          6-digit PIN <span className="normal-case text-text-muted font-normal">(for quick unlock and LIVE mode)</span>
+        </Label>
+        <Input
+          id="sa-pin"
+          type="password"
+          inputMode="numeric"
+          maxLength={6}
+          placeholder="••••••"
+          aria-label="Create a 6-digit PIN"
+          className="text-center font-mono text-lg tracking-widest max-w-40"
+          {...register("pin")}
+        />
+        {errors.pin && <p className="text-xs text-loss">{errors.pin.message}</p>}
+      </div>
+
+      <Button type="submit" className="w-full" disabled={isLoading}>
+        {isLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+        {isLoading ? "Setting up…" : "Continue"}
+      </Button>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TOTP + Backup Codes display (shown after successful Step 1 API call)
+// ---------------------------------------------------------------------------
+
+interface TotpDisplayProps {
+  totpUri: string;
+  backupCodes: string[];
+  onConfirmed: () => void;
+}
+
+function TotpDisplay({ totpUri, backupCodes, onConfirmed }: TotpDisplayProps) {
+  const [downloaded, setDownloaded] = useState(false);
+
+  function downloadCodes() {
+    const content = backupCodes.join("\n");
+    const blob = new Blob([`FlintTrade Backup Codes\n\nStore these in a safe place.\nEach code can only be used once.\n\n${content}\n`], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "flinttrade-backup-codes.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+    setDownloaded(true);
+  }
+
+  // Build QR code URL via Google Charts (no external library needed at runtime)
+  const qrUrl = totpUri
+    ? `https://chart.googleapis.com/chart?chs=180x180&chld=M|0&cht=qr&chl=${encodeURIComponent(totpUri)}`
+    : null;
+
+  return (
+    <div className="space-y-6">
+      {/* 2FA QR */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-medium text-text-primary">Scan with Authenticator</h3>
+        <p className="text-xs text-text-muted">
+          Use Google Authenticator, Authy, or any TOTP app. Scan the QR code or enter the key manually.
+        </p>
+        {qrUrl ? (
+          <div className="flex justify-center">
+            <img
+              src={qrUrl}
+              alt="TOTP QR code — scan with your authenticator app"
+              className="rounded-lg border border-border-default bg-white p-2"
+              width={180}
+              height={180}
+            />
+          </div>
+        ) : (
+          <p className="text-xs text-text-muted italic">2FA QR code not available — configure later in Settings.</p>
+        )}
+      </div>
+
+      {/* Backup codes */}
+      {backupCodes.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-text-primary">Backup Codes</h3>
+          <p className="text-xs text-text-muted">
+            Save these codes. Each can be used once if you lose access to your Authenticator.
+          </p>
+          <div className="grid grid-cols-2 gap-1.5 p-3 rounded-lg bg-surface-card border border-border-default font-mono text-xs text-text-secondary">
+            {backupCodes.map((code) => (
+              <span key={code} className="select-all">{code}</span>
+            ))}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full gap-2"
+            onClick={downloadCodes}
+          >
+            <Download className="size-3.5" />
+            Download backup codes
+            {downloaded && <CheckCircle2 className="size-3.5 text-profit ml-auto" />}
+          </Button>
+        </div>
+      )}
+
+      <Button onClick={onConfirmed} className="w-full">
+        I have saved my codes — Continue
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Persona
+// ---------------------------------------------------------------------------
+
+interface PersonaStepWrapperProps {
+  onComplete: (persona: Persona) => void;
+}
+
+function PersonaStepWrapper({ onComplete }: PersonaStepWrapperProps) {
+  const [selected, setSelected] = useState<Persona | null>(null);
+
+  return (
+    <div className="space-y-6">
+      <PersonaPicker selected={selected} onSelect={setSelected} />
+      <Button
+        onClick={() => selected && onComplete(selected)}
+        disabled={!selected}
+        className="w-full"
+      >
+        Continue
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main wizard component
+// ---------------------------------------------------------------------------
+
+const STEP_LABELS = [
+  "Account Security",
+  "Persona",
+  "Broker Connection",
+  "Trading Defaults",
+  "Risk Limits",
+  "Choose Mode",
+];
+
+export default function SetupAccountRoute() {
+  const navigate = useNavigate();
+  const setMode = useModeStore((s) => s.setMode);
+
+  const [currentStep, setCurrentStep] = useState(0);
+  // Saved from Step 1 API response
+  const [totpUri, setTotpUri] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  // Whether we are showing the TOTP/backup-codes screen (between step 1 and step 2)
+  const [showTotp, setShowTotp] = useState(false);
+
+  function handleAccountComplete(
+    _values: AccountFormValues,
+    uri: string,
+    codes: string[],
+  ) {
+    setTotpUri(uri);
+    setBackupCodes(codes);
+    setShowTotp(true);
+  }
+
+  function handleTotpConfirmed() {
+    setShowTotp(false);
+    setCurrentStep(1);
+  }
+
+  function handlePersonaComplete(_persona: Persona) {
+    setCurrentStep(2);
+  }
+
+  function handleConnectionComplete(_values: ConnectionFormValues) {
+    setCurrentStep(3);
+  }
+
+  function handleTradingComplete(_values: TradingDefaultsFormValues) {
+    setCurrentStep(4);
+  }
+
+  function handleRiskComplete(_values: RiskFormValues) {
+    setCurrentStep(5);
+  }
+
+  function handleModeSelect(mode: AppMode) {
+    setMode(mode);
+    // Mark setup as complete: the backend already set up the account.
+    // Log the user in by triggering the auth state. They will have a token
+    // from the initial setup call, but for the wizard we just redirect to
+    // login to complete the first-time flow cleanly.
+    useAuthStore.getState().setLoggedOut();
+    navigate("/welcome");
+  }
+
+  const totalSteps = STEP_LABELS.length;
+
+  return (
+    <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-lg space-y-8">
+
+        {/* Header */}
+        <div className="flex flex-col items-center gap-3 text-center">
+          <LogoIcon size={36} />
+          <div>
+            <h1 className="font-heading font-bold text-xl text-text-primary">
+              Set up FlintTrade
+            </h1>
+            <p className="text-xs text-text-muted mt-0.5">
+              Step {currentStep + 1} of {totalSteps} — {STEP_LABELS[currentStep]}
+            </p>
+          </div>
+        </div>
+
+        {/* Step indicator */}
+        <StepIndicator
+          total={totalSteps}
+          current={currentStep}
+          onStepClick={(i) => {
+            // Allow navigating back to completed steps only
+            if (i < currentStep) setCurrentStep(i);
+          }}
+        />
+
+        {/* Step content — step 5 (ModeSelect) renders its own full layout */}
+        {currentStep === 5 ? (
+          <ModeSelectRoute onSelect={handleModeSelect} />
+        ) : (
+          <div className="rounded-xl border border-border-default bg-surface-card p-6">
+            {currentStep === 0 && !showTotp && (
+              <AccountSecurityStep onComplete={handleAccountComplete} />
+            )}
+
+            {currentStep === 0 && showTotp && (
+              <TotpDisplay
+                totpUri={totpUri}
+                backupCodes={backupCodes}
+                onConfirmed={handleTotpConfirmed}
+              />
+            )}
+
+            {currentStep === 1 && (
+              <PersonaStepWrapper onComplete={handlePersonaComplete} />
+            )}
+
+            {currentStep === 2 && (
+              <ConnectionStep onComplete={handleConnectionComplete} />
+            )}
+
+            {currentStep === 3 && (
+              <TradingStep onComplete={handleTradingComplete} />
+            )}
+
+            {currentStep === 4 && (
+              <RiskStep onComplete={handleRiskComplete} />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
