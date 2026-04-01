@@ -119,7 +119,7 @@ export default function InteractiveTour({ onComplete }: InteractiveTourProps) {
             {/* Pulsing dot */}
             <button
               onClick={() => handleDotClick(step.id)}
-              className={`w-3 h-3 rounded-full cursor-pointer transition-all ${
+              className={`w-3 h-3 rounded-full cursor-pointer transition-colors ${
                 isVisited
                   ? "bg-profit/50"
                   : "bg-profit"

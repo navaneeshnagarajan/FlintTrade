@@ -574,7 +574,7 @@ function SectorMapWidget(_props: WidgetProps) {
                 <td className="px-2 py-1">
                   <div className="h-1.5 rounded-full bg-surface-hover overflow-hidden w-full">
                     <div
-                      className="h-full rounded-full transition-all"
+                      className="h-full rounded-full transition-[width]"
                       style={{
                         width: `${getBarWidth(item.avgChange, maxChange)}%`,
                         backgroundColor: getChangeColor(item.avgChange),

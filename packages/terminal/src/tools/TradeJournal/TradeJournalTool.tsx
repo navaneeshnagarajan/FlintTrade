@@ -559,7 +559,7 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                       style={{ height: "44px" }}
                     >
                       <div
-                        className={`w-full rounded-sm transition-all ${
+                        className={`w-full rounded-sm transition-[height] ${
                           pnl >= 0 ? "bg-emerald-600/60" : "bg-red-600/60"
                         }`}
                         style={{ height: `${Math.max(2, h * 44)}px` }}
@@ -593,7 +593,7 @@ function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                     </span>
                     <div className="flex-1 h-4 bg-surface-base rounded overflow-hidden">
                       <div
-                        className={`h-full rounded transition-all ${
+                        className={`h-full rounded transition-[width] ${
                           pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"
                         }`}
                         style={{ width: `${w}%` }}
@@ -736,7 +736,7 @@ function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                       </span>
                       <div className="flex-1 h-3 bg-surface-base rounded overflow-hidden">
                         <div
-                          className={`h-full rounded transition-all ${wr >= 50 ? "bg-emerald-600/60" : "bg-red-600/60"}`}
+                          className={`h-full rounded transition-[width] ${wr >= 50 ? "bg-emerald-600/60" : "bg-red-600/60"}`}
                           style={{ width: `${Math.min(100, wr)}%` }}
                         />
                       </div>
@@ -822,7 +822,7 @@ function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                   </span>
                   <div className="flex-1 h-4 bg-surface-base rounded overflow-hidden">
                     <div
-                      className={`h-full rounded transition-all ${pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"}`}
+                      className={`h-full rounded transition-[width] ${pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"}`}
                       style={{ width: `${w}%` }}
                     />
                   </div>
@@ -889,7 +889,7 @@ function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                         style={{ height: "56px" }}
                       >
                         <div
-                          className="w-full rounded-sm bg-accent/40 transition-all"
+                          className="w-full rounded-sm bg-accent/40 transition-[height]"
                           style={{ height: `${Math.max(2, h * 56)}px` }}
                           title={`${label}: ${count} trades`}
                         />

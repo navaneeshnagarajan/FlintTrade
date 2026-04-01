@@ -6,9 +6,7 @@ All tests mock the OpenAlgo client. No network calls.
 from __future__ import annotations
 
 import json
-import os
 from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -238,7 +236,6 @@ class TestExportCsv:
         assert "22000.0" in content
 
     def test_csv_creates_symbol_directory(self, tmp_path):
-        from packages.core.src.models import OHLCV
         from packages.historical.src.downloader import DownloadResult
         from packages.historical.src.expiry_collector import ExpiryDataCollector
 

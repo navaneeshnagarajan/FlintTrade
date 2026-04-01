@@ -184,11 +184,11 @@ export function SipTab() {
             </div>
             <div className="h-2.5 w-full bg-border-default rounded-full overflow-hidden flex">
               <div
-                className="h-full bg-blue-600 transition-all duration-500"
+                className="h-full bg-blue-600 transition-[width] duration-500"
                 style={{ width: `${100 - result.progress}%` }}
               />
               <div
-                className="h-full bg-profit transition-all duration-500"
+                className="h-full bg-profit transition-[width] duration-500"
                 style={{ width: `${result.progress}%` }}
               />
             </div>

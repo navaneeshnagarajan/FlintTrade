@@ -285,7 +285,46 @@ class ScannerEngine:
         }
 
         try:
-            exec(scanner.code, {"__builtins__": {}}, namespace)  # noqa: S102 — sandboxed
+            # AST validation — reject dangerous constructs before execution
+            import ast as _ast  # noqa: PLC0415
+            try:
+                tree = _ast.parse(scanner.code)
+            except SyntaxError as syn_err:
+                return ScanResult(
+                    scanner_name=scanner_name,
+                    matched_symbols=[],
+                    total_scanned=0,
+                    elapsed_ms=0.0,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    error=f"Syntax error: {syn_err}",
+                )
+            _FORBIDDEN_NODES = (
+                _ast.Import, _ast.ImportFrom, _ast.Global, _ast.Nonlocal,
+            )
+            _FORBIDDEN_ATTRS = {"__class__", "__bases__", "__subclasses__", "__globals__",
+                                "__code__", "__builtins__", "__import__", "eval", "exec",
+                                "compile", "open", "getattr", "setattr", "delattr",
+                                "breakpoint", "exit", "quit"}
+            for node in _ast.walk(tree):
+                if isinstance(node, _FORBIDDEN_NODES):
+                    return ScanResult(
+                        scanner_name=scanner_name, matched_symbols=[], total_scanned=0,
+                        elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),
+                        error=f"Forbidden construct: {type(node).__name__}",
+                    )
+                if isinstance(node, _ast.Attribute) and node.attr in _FORBIDDEN_ATTRS:
+                    return ScanResult(
+                        scanner_name=scanner_name, matched_symbols=[], total_scanned=0,
+                        elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),
+                        error=f"Forbidden attribute: {node.attr}",
+                    )
+                if isinstance(node, _ast.Name) and node.id in _FORBIDDEN_ATTRS:
+                    return ScanResult(
+                        scanner_name=scanner_name, matched_symbols=[], total_scanned=0,
+                        elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),
+                        error=f"Forbidden name: {node.id}",
+                    )
+            exec(scanner.code, {"__builtins__": {}}, namespace)  # noqa: S102 — AST-validated
             matched = namespace.get("results", [])
             if not isinstance(matched, list):
                 matched = list(matched)

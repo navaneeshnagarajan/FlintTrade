@@ -631,7 +631,15 @@ def api_news() -> tuple[Any, int]:
             resp = httpx.get(url, timeout=5.0, follow_redirects=True)
             if resp.status_code != 200:
                 continue
-            root = ET.fromstring(resp.text)
+            # Use defused XML parser to prevent XXE attacks from malicious feeds
+            try:
+                import defusedxml.ElementTree as _SafeET  # noqa: PLC0415
+                root = _SafeET.fromstring(resp.text)
+            except ImportError:
+                # Fallback: disable entity resolution manually
+                parser = ET.XMLParser()
+                parser.feed(resp.text)
+                root = parser.close()
             for item in root.iter("item"):
                 title_el = item.find("title")
                 link_el = item.find("link")
@@ -759,17 +767,15 @@ def ditto_mirror_stop() -> tuple[Any, int]:
 @operations_bp.route("/ditto/risk", methods=["GET"])
 def ditto_risk() -> tuple[Any, int]:
     """Per-account risk dashboard: margin utilization, aggregate P&L."""
+    if not (current_app.debug or os.environ.get("FLINTTRADE_DEV")):
+        return jsonify({"status": "success", "data": {"aggregate_pnl": 0, "aggregate_capital": 0, "accounts": []}}), 200
     risk_data = {
         "aggregate_pnl": 78300,
         "aggregate_capital": 38000000,
         "accounts": [
-            {"id": "acc_1", "name": "Rajesh Mehta", "margin_used_pct": 45.2, "pnl_today": 12500, "positions": 8, "risk_status": "OK"},
-            {"id": "acc_2", "name": "Priya Sharma", "margin_used_pct": 62.8, "pnl_today": -8200, "positions": 5, "risk_status": "WARNING"},
-            {"id": "acc_3", "name": "Amit Patel", "margin_used_pct": 38.1, "pnl_today": 34100, "positions": 12, "risk_status": "OK"},
-            {"id": "acc_4", "name": "Neha Gupta", "margin_used_pct": 22.5, "pnl_today": -3500, "positions": 3, "risk_status": "OK"},
-            {"id": "acc_5", "name": "Vikram Singh", "margin_used_pct": 71.3, "pnl_today": 56200, "positions": 15, "risk_status": "WARNING"},
-            {"id": "acc_6", "name": "Sunita Reddy", "margin_used_pct": 0, "pnl_today": 0, "positions": 0, "risk_status": "PAUSED"},
-            {"id": "acc_7", "name": "Karan Joshi", "margin_used_pct": 55.9, "pnl_today": -12800, "positions": 9, "risk_status": "OK"},
+            {"id": "acc_1", "name": "Account 1", "margin_used_pct": 45.2, "pnl_today": 12500, "positions": 8, "risk_status": "OK"},
+            {"id": "acc_2", "name": "Account 2", "margin_used_pct": 62.8, "pnl_today": -8200, "positions": 5, "risk_status": "WARNING"},
+            {"id": "acc_3", "name": "Account 3", "margin_used_pct": 38.1, "pnl_today": 34100, "positions": 12, "risk_status": "OK"},
         ],
     }
     return jsonify({"status": "success", "data": risk_data}), 200
@@ -777,9 +783,11 @@ def ditto_risk() -> tuple[Any, int]:
 
 @operations_bp.route("/ditto/kill-all", methods=["POST"])
 def ditto_kill_all() -> tuple[Any, int]:
-    """Emergency: close all positions across all managed accounts."""
-    logger.warning("DITTO KILL-ALL triggered — closing all positions across all accounts")
+    """Emergency: close all positions across all managed accounts.
+
+    Currently a stub — returns 501 Not Implemented.
+    """
     return jsonify({
-        "status": "success",
-        "data": {"message": "Kill-all signal sent to all managed accounts", "accounts_affected": 7},
-    }), 200
+        "status": "error",
+        "message": "Not implemented — ditto kill-all requires real account connections",
+    }), 501

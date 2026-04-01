@@ -53,7 +53,7 @@ export function AppearanceSection() {
             aria-label="Light mode"
             aria-pressed={mode === "light"}
             onClick={() => handleMode("light")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               mode === "light"
                 ? "bg-accent/20 text-text-primary border border-accent/40"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -67,7 +67,7 @@ export function AppearanceSection() {
             aria-label="Dark mode"
             aria-pressed={mode === "dark"}
             onClick={() => handleMode("dark")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               mode === "dark"
                 ? "bg-accent/20 text-text-primary border border-accent/40"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -81,7 +81,7 @@ export function AppearanceSection() {
             aria-label="System mode"
             aria-pressed={mode === "system"}
             onClick={() => handleMode("system")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               mode === "system"
                 ? "bg-accent/20 text-text-primary border border-accent/40"
                 : "text-text-muted hover:text-text-primary hover:bg-surface-hover"

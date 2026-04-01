@@ -117,17 +117,19 @@ export default defineConfig({
           // only pulls in the icons it explicitly imports).
           // Framer Motion — loaded async, not needed on initial page
           if (id.includes("node_modules/framer-motion")) return "vendor-framer";
-          // Tremor + Recharts + d3 — only /invest, /lab, dashboard, pnl-dashboard
+          // d3-* — heavy math/scale/shape modules, lazy-loaded via Tremor/Recharts
+          if (id.includes("node_modules/d3-")) return "vendor-d3";
+          // Recharts — chart rendering (lazy, only dashboards/lab/invest)
+          if (id.includes("node_modules/recharts")) return "vendor-recharts";
+          // Tremor + headlessui — dashboard UI components (lazy)
           // NOTE: @floating-ui is intentionally omitted here — it lives in
           // vendor-radix to avoid the circular chunk warning.
           if (
             id.includes("node_modules/@tremor/") ||
-            id.includes("node_modules/recharts") ||
-            id.includes("node_modules/d3-") ||
             id.includes("node_modules/@headlessui/") ||
             id.includes("node_modules/react-day-picker") ||
             id.includes("node_modules/react-transition-state")
-          ) return "vendor-charts";
+          ) return "vendor-tremor";
           // Everything else in node_modules — clsx, tailwind-merge, date-fns, cmdk, etc.
           if (id.includes("node_modules/")) {
             return "vendor-misc";

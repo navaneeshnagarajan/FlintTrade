@@ -462,8 +462,12 @@ class DataPipeline:
 
         query += " ORDER BY timestamp"
 
+        # Sanitize path for SQL string literal — reject single quotes to prevent injection
+        safe_output_str = str(safe_output)
+        if "'" in safe_output_str:
+            raise ValueError(f"Output path must not contain single quotes: {safe_output_str!r}")
         self.connection.execute(
-            f"COPY ({query}) TO '{safe_output!s}' (FORMAT PARQUET)",
+            f"COPY ({query}) TO '{safe_output_str}' (FORMAT PARQUET)",
             params if params else None,
         )
         logger.info("Exported %s to %s", table, safe_output)

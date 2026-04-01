@@ -285,7 +285,7 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
           {/* Projected fill (lighter) */}
           <div
             className={cn(
-              "absolute inset-y-0 left-0 rounded-full transition-all duration-500",
+              "absolute inset-y-0 left-0 rounded-full transition-[width] duration-500",
               onTrack ? "bg-profit/20" : "bg-loss/20",
             )}
             style={{ width: `${projectedPct}%` }}
@@ -293,7 +293,7 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
           {/* Current savings fill (solid) */}
           <div
             className={cn(
-              "absolute inset-y-0 left-0 rounded-full transition-all duration-500",
+              "absolute inset-y-0 left-0 rounded-full transition-[width] duration-500",
               onTrack ? "bg-profit" : "bg-amber-500",
             )}
             style={{ width: `${progressPct}%` }}

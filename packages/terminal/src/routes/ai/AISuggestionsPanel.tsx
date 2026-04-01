@@ -438,7 +438,7 @@ export default function AISuggestionsPanel() {
               <button
                 key={m.id}
                 onClick={() => setMood(m.id)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors border ${
                   isActive
                     ? `${m.bgColor} ${m.color} border-current`
                     : "bg-surface-base border-border-default text-text-muted hover:text-text-secondary"

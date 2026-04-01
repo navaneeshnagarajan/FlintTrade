@@ -63,7 +63,7 @@ export function PersonaPicker({ selected, onSelect }: PersonaPickerProps) {
           aria-label={`Select ${opt.label} persona`}
           onClick={() => onSelect(opt.value)}
           className={[
-            "w-full text-left rounded-lg border p-4 transition-all duration-150",
+            "w-full text-left rounded-lg border p-4 transition-colors duration-150",
             selected === opt.value
               ? "border-accent/40 bg-accent/15"
               : "border-border-default bg-surface-base hover:border-accent/40",
@@ -113,7 +113,7 @@ export function ExperiencePicker({ selected, onSelect }: ExperiencePickerProps) 
           aria-label={`Select ${opt.label} experience level`}
           onClick={() => onSelect(opt.value)}
           className={[
-            "w-full text-left rounded-lg border p-4 transition-all duration-150",
+            "w-full text-left rounded-lg border p-4 transition-colors duration-150",
             selected === opt.value
               ? "border-accent/40 bg-accent/15"
               : "border-border-default bg-surface-base hover:border-accent/40",
@@ -159,7 +159,7 @@ export function InterestPicker({ selected, onToggle }: InterestPickerProps) {
             aria-pressed={isSelected}
             onClick={() => onToggle(interest.id)}
             className={[
-              "text-left rounded-lg border p-4 transition-all duration-150",
+              "text-left rounded-lg border p-4 transition-colors duration-150",
               isSelected
                 ? "bg-accent/10 border-accent/40 ring-1 ring-accent/20"
                 : "bg-surface-card border-border-default hover:border-accent/30 hover:bg-surface-hover",

@@ -299,7 +299,7 @@ function SentimentResultCard({ result }: { result: SentimentResult }) {
           <div className="relative h-2 bg-surface-base rounded-full overflow-hidden">
             <div className="absolute left-1/2 top-0 w-px h-full bg-border-default" />
             <div
-              className={`absolute top-0 h-full rounded-full transition-all ${
+              className={`absolute top-0 h-full rounded-full transition-[width,colors] ${
                 result.score > 0.1
                   ? "bg-profit"
                   : result.score < -0.1

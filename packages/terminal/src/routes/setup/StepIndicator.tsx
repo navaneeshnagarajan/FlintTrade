@@ -36,7 +36,7 @@ export function StepIndicator({ total, current, onStepClick }: StepIndicatorProp
             disabled={isFuture}
             onClick={isClickable ? () => onStepClick(i) : undefined}
             className={[
-              "relative flex items-center justify-center rounded-full transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+              "relative flex items-center justify-center rounded-full transition-[colors,transform] duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
               isActive ? "size-5 bg-primary cursor-default" : isCompleted ? "size-4 bg-profit cursor-pointer hover:ring-2 hover:ring-profit/40" : "size-3 bg-border-default cursor-not-allowed opacity-50",
             ].join(" ")}
           >

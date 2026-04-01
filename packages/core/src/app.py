@@ -291,22 +291,40 @@ def create_flask_app(
         if any(request.path.startswith(prefix) for prefix in _PUBLIC_V1_PREFIXES):
             return None
 
+        import hmac as _hmac  # noqa: PLC0415
+
         api_key = (
             request.headers.get("X-API-Key")
             or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         )
-        if not api_key:
-            body = request.get_json(silent=True) or {}
-            api_key = body.get("apikey", "")
 
         expected_key = os.environ.get("OPENALGO_API_KEY", "")
         if not expected_key:
             logger.warning("OPENALGO_API_KEY not set — all requests will be rejected")
             return jsonify({"status": "error", "message": "Server not configured"}), 503
 
-        if api_key != expected_key:
+        if not api_key or not _hmac.compare_digest(api_key, expected_key):
+            # Record auth failure for brute-force detection
+            try:
+                sec = app.config.get("SECURITY_MONITOR")
+                if sec:
+                    sec.record_auth_failure(request.remote_addr or "unknown")
+            except Exception:
+                pass
             return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
+        return None
+
+    @app.before_request
+    def _require_json_content_type() -> Any:
+        """Reject POST/PUT/PATCH requests that don't send JSON."""
+        if request.method in ("POST", "PUT", "PATCH") and request.content_length:
+            content_type = request.content_type or ""
+            if "json" not in content_type and "text/event-stream" not in content_type:
+                return jsonify({
+                    "status": "error",
+                    "message": "Content-Type must be application/json",
+                }), 415
         return None
 
     @app.before_request
@@ -464,15 +482,20 @@ class FlintTradeApp:
         # Gateway — broker registry + credential store + contract manager
         flinttrade_dir = Path.home() / ".flinttrade"
         flinttrade_dir.mkdir(exist_ok=True)
+        import secrets as _secrets  # noqa: PLC0415
         master_password = os.environ.get("MASTER_PASSWORD", "")
         if not master_password:
             if os.environ.get("FLINTTRADE_DEV") or "pytest" in sys.modules:
-                master_password = "flinttrade-dev-default"
+                master_password = _secrets.token_urlsafe(32)
                 logger.warning(
-                    "MASTER_PASSWORD not set — using development default. Set it for production."
+                    "MASTER_PASSWORD not set — generated random password for this session. "
+                    "Set MASTER_PASSWORD env var for persistent credential storage across restarts."
                 )
             else:
-                raise ValueError("MASTER_PASSWORD environment variable must be set for secure credential storage.")
+                raise ValueError(
+                    "MASTER_PASSWORD environment variable must be set. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
         self.credential_store = CredentialStore(
             flinttrade_dir / "credentials.db", master_password
         )

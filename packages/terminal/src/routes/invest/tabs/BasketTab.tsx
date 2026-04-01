@@ -355,7 +355,7 @@ export function BasketTab() {
             <GlassCard
               key={basket.id}
               className={cn(
-                "p-4 gap-3 cursor-pointer transition-all",
+                "p-4 gap-3 cursor-pointer transition-colors",
                 isSelected && "ring-1 ring-accent",
               )}
               onClick={() => setSelectedBasketId(isSelected ? null : basket.id)}

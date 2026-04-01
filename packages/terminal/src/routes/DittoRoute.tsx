@@ -562,7 +562,7 @@ function RiskTab() {
                     <div className="w-20 h-1.5 rounded-full bg-surface-hover overflow-hidden">
                       <div
                         className={cn(
-                          "h-full rounded-full transition-all",
+                          "h-full rounded-full transition-[width]",
                           acct.margin_used_pct > 80
                             ? "bg-loss"
                             : acct.margin_used_pct > 60

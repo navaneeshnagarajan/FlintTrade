@@ -326,7 +326,7 @@ export function SectorTab() {
                       aria-label={`${entry.pct.toFixed(1)}% allocation bar`}
                     >
                       <div
-                        className={cn("h-full rounded-full transition-all duration-500", pal.bg)}
+                        className={cn("h-full rounded-full transition-[width] duration-500", pal.bg)}
                         style={{ width: `${entry.pct}%` }}
                       />
                     </div>

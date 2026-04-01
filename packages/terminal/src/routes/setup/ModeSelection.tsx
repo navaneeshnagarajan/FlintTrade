@@ -24,7 +24,7 @@ function ModeCard({ title, subtitle, description, badge, icon, onClick }: ModeCa
     <Card
       role="button"
       tabIndex={0}
-      className="bg-surface-card border border-border-default rounded-lg p-6 shadow-sm cursor-pointer hover:border-accent/40 hover:bg-surface-hover transition-all duration-200 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="bg-surface-card border border-border-default rounded-lg p-6 shadow-sm cursor-pointer hover:border-accent/40 hover:bg-surface-hover transition-colors duration-200 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {

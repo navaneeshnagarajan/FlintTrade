@@ -383,7 +383,7 @@ export function OverlapTab() {
                 <div className="mt-1.5 h-1.5 bg-surface-hover rounded-full overflow-hidden">
                   <div
                     className={cn(
-                      "h-full rounded-full transition-all",
+                      "h-full rounded-full transition-[width]",
                       s.isRisky ? "bg-loss" : s.percent > 20 ? "bg-warning" : "bg-accent",
                     )}
                     style={{ width: `${Math.min(s.percent, 100)}%` }}

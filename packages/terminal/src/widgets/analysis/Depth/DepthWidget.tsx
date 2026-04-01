@@ -392,7 +392,7 @@ function DepthWidget() {
         <div className="flex-none border-t border-border-default px-3 py-2 bg-surface-card space-y-1.5">
           <div className="h-1.5 rounded-full overflow-hidden flex bg-loss/20">
             <div
-              className="h-full bg-profit/60 rounded-l-full transition-all duration-500"
+              className="h-full bg-profit/60 rounded-l-full transition-[width] duration-500"
               style={{ width: `${bidDomPct}%` }}
             />
           </div>

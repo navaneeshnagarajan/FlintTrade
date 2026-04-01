@@ -420,9 +420,9 @@ function MarketBreadthTab() {
                       </div>
                     </div>
                     <div className="h-2 bg-surface-elevated rounded-full overflow-hidden flex gap-px">
-                      <div className="h-full bg-profit transition-all" style={{ width: `${advPct}%` }} />
-                      <div className="h-full bg-surface-active transition-all" style={{ width: `${unchPct}%` }} />
-                      <div className="h-full bg-loss transition-all" style={{ width: `${decPct}%` }} />
+                      <div className="h-full bg-profit transition-[width]" style={{ width: `${advPct}%` }} />
+                      <div className="h-full bg-surface-active transition-[width]" style={{ width: `${unchPct}%` }} />
+                      <div className="h-full bg-loss transition-[width]" style={{ width: `${decPct}%` }} />
                     </div>
                     <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
                       <span>52W High: <span className="text-profit">{bd.newHighs}</span></span>
@@ -1110,7 +1110,7 @@ function DeliveryDataTab() {
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-1.5 bg-surface-elevated rounded-full overflow-hidden">
                         <div
-                          className="h-full rounded-full transition-all"
+                          className="h-full rounded-full transition-[width]"
                           style={{
                             width: `${row.delivery_pct}%`,
                             backgroundColor: row.delivery_pct >= 60 ? "#10b981" : row.delivery_pct >= 45 ? "#f59e0b" : "#6b7280",
@@ -1181,7 +1181,7 @@ function CorrelationMatrixTab() {
                     return (
                       <td key={ci} className="px-1 py-1">
                         <div
-                          className="w-16 h-10 rounded flex items-center justify-center font-mono text-xs font-semibold transition-all hover:opacity-90 cursor-default"
+                          className="w-16 h-10 rounded flex items-center justify-center font-mono text-xs font-semibold transition-opacity hover:opacity-90 cursor-default"
                           style={{ backgroundColor: colors.bg, color: colors.text }}
                           title={`${CORR_ASSETS[ri]} vs ${CORR_ASSETS[ci]}: ${val.toFixed(2)}`}
                         >

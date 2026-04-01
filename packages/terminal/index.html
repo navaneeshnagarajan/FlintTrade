@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- CSP: connect-src allows any protocol because OpenAlgo host is user-configurable (localhost, VPN, remote) -->
     <!-- Note: frame-ancestors is only valid via HTTP header, not meta tag — omitted here -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' ws: wss: http: https:; img-src 'self' data:; base-uri 'self'; form-action 'self';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' ws: wss: http: https:; img-src 'self' data:; base-uri 'self'; form-action 'self';" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- Preload critical fonts to eliminate FOIT -->
     <link rel="preload" href="/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
@@ -13,11 +13,7 @@
     <meta property="og:image" content="/logo.svg" />
     <meta property="og:title" content="FlintTrade" />
     <meta property="og:description" content="Open-source trading platform for Indian markets" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Async-load Google Fonts (non-render-blocking) -->
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" /></noscript>
+    <!-- Fonts self-hosted via @fontsource (no external CDN, works offline) -->
   </head>
   <body style="background:#0a0a0f;color:#e4e4e7;font-family:'Inter',system-ui,sans-serif">
     <div id="root"></div>

@@ -108,7 +108,7 @@ function ProgressRow({
       </div>
       <div className="h-1 rounded-full bg-surface-hover overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all duration-500 ${colors.bar}`}
+          className={`h-full rounded-full transition-[width] duration-500 ${colors.bar}`}
           style={{ width: `${usagePct}%` }}
         />
       </div>

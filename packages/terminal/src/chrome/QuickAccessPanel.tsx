@@ -433,7 +433,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
                     : -1
                 }
                 className={cn(
-                  "relative h-6 w-6 rounded-full transition-all duration-150",
+                  "relative h-6 w-6 rounded-full transition-[transform,colors] duration-150",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
                   "focus-visible:ring-white/40",
                   activeThemeId === dot.id

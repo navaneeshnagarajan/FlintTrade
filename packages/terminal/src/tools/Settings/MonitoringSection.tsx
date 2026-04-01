@@ -64,7 +64,7 @@ function UsageBar({
       </div>
       <div className="h-1.5 w-full rounded-full bg-surface-hover overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all ${color}`}
+          className={`h-full rounded-full transition-[width] ${color}`}
           style={{ width: `${Math.min(usedPct, 100)}%` }}
         />
       </div>

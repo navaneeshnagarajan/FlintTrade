@@ -87,7 +87,7 @@ function StageDot({ stage, activeIndex, index, reduceMotion }: StageDotProps) {
         {/* Dot fill */}
         <div
           className={cn(
-            "relative z-10 rounded-full transition-all duration-200",
+            "relative z-10 rounded-full transition-[width,height] duration-200",
             isActive && "w-3 h-3 bg-blue-400",
             isCompleted && "w-2.5 h-2.5 bg-blue-400",
             isFuture && "w-2 h-2 border border-border-default bg-transparent",

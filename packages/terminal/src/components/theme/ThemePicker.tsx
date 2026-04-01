@@ -313,7 +313,7 @@ function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
       onMouseLeave={handleMouseLeave}
       aria-label={theme.name}
       aria-pressed={isActive}
-      className={`group relative flex flex-col gap-2 p-3 rounded-lg border transition-all text-left ${
+      className={`group relative flex flex-col gap-2 p-3 rounded-lg border transition-colors text-left ${
         isActive
           ? "border-accent bg-accent/10 ring-1 ring-accent/20"
           : "border-border-default bg-surface-card hover:bg-surface-hover hover:border-border-strong"

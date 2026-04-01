@@ -247,7 +247,7 @@ function LearnPreview() {
           </div>
           <div className="h-1.5 rounded-full bg-surface-base overflow-hidden">
             <div
-              className="h-full rounded-full bg-primary transition-all"
+              className="h-full rounded-full bg-primary transition-[width]"
               style={{ width: `${c.progress}%` }}
             />
           </div>
