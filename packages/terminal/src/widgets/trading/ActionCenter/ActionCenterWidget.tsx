@@ -196,7 +196,11 @@ function ActionCenterWidget(_props: WidgetProps) {
             size="sm"
             variant="outline"
             disabled={anyPending}
-            onClick={() => approveAllMutation.mutate()}
+            onClick={() => {
+              if (window.confirm("Approve and send all pending orders to the broker?")) {
+                approveAllMutation.mutate();
+              }
+            }}
             className="h-6 px-2 text-xxs gap-1 border-border-default text-profit hover:bg-profit/10 hover:border-profit/40 hover:text-profit transition-colors"
             aria-label={`Approve all ${pending.length} pending orders`}
           >

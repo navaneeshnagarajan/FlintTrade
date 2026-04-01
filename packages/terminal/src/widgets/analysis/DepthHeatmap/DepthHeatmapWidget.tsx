@@ -385,11 +385,11 @@ function DepthHeatmapWidget() {
     : 0;
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a0f] select-none">
+    <div className="flex flex-col h-full bg-surface-base select-none">
       {/* ─── Toolbar ────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#2a2a3a] shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default shrink-0">
         <Flame className="size-4 text-amber-400" aria-hidden="true" />
-        <span className="text-xs font-medium text-zinc-300">Depth Heatmap</span>
+        <span className="text-xs font-medium text-text-secondary">Depth Heatmap</span>
 
         {/* Symbol selector */}
         <span className="sr-only" id="dh-symbol-label">
@@ -397,17 +397,17 @@ function DepthHeatmapWidget() {
         </span>
         <Select value={symbol} onValueChange={setSymbol}>
           <SelectTrigger
-            className="h-6 w-28 text-xs border-[#2a2a3a] bg-[#16161f] text-zinc-200 focus:ring-0"
+            className="h-6 w-28 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="dh-symbol-label"
           >
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-[#16161f] border-[#2a2a3a]">
+          <SelectContent className="bg-surface-card border-border-default">
             {SYMBOLS.map((s) => (
               <SelectItem
                 key={s}
                 value={s}
-                className="text-xs text-zinc-200 focus:bg-[#2a2a3a]"
+                className="text-xs text-text-primary focus:bg-surface-active"
               >
                 {s}
               </SelectItem>
@@ -417,8 +417,8 @@ function DepthHeatmapWidget() {
 
         {/* LTP */}
         <div className="ml-auto flex items-center gap-1.5">
-          <span className="text-xs text-zinc-500">LTP</span>
-          <span className="font-mono text-xs font-semibold text-zinc-100 tabular-nums">
+          <span className="text-xs text-text-muted">LTP</span>
+          <span className="font-mono text-xs font-semibold text-text-primary tabular-nums">
             {currentPrice > 0 ? currentPrice.toFixed(1) : "\u2014"}
           </span>
         </div>

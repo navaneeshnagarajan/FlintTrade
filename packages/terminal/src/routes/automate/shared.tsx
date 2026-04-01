@@ -13,27 +13,27 @@ import { Badge } from "@/components/ui/badge";
 
 const PULSE_STYLES = `
 @keyframes ft-pulse-green {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
-  50%       { opacity: 0.7; box-shadow: 0 0 0 4px rgba(34,197,94,0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-profit) 40%, transparent); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0 4px transparent; }
 }
 @keyframes ft-pulse-red {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
-  50%       { opacity: 0.6; box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-loss) 50%, transparent); }
+  50%       { opacity: 0.6; box-shadow: 0 0 0 5px transparent; }
 }
 .ft-dot-running {
   width: 7px; height: 7px; border-radius: 50%;
-  background: #22c55e;
+  background: var(--color-profit);
   animation: ft-pulse-green 1.6s ease-in-out infinite;
   flex-shrink: 0;
 }
 .ft-dot-paused {
   width: 7px; height: 7px; border-radius: 50%;
-  background: #f59e0b;
+  background: var(--color-warning);
   flex-shrink: 0;
 }
 .ft-dot-kill {
   width: 7px; height: 7px; border-radius: 50%;
-  background: #ef4444;
+  background: var(--color-loss);
   animation: ft-pulse-red 1s ease-in-out infinite;
   flex-shrink: 0;
 }
@@ -94,7 +94,7 @@ export function StatusDot({ status }: { status: string }) {
   if (lower === "active") return <span className="ft-dot-running" />;
   if (lower === "paused") return <span className="ft-dot-paused" />;
   if (lower === "error")  return <span className="ft-dot-kill" />;
-  return <span className="ft-dot-paused" style={{ background: "#6b7280" }} />;
+  return <span className="ft-dot-paused" style={{ background: "var(--color-text-muted)" }} />;
 }
 
 export function StatusBadge({ status }: { status: string }) {

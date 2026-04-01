@@ -549,26 +549,26 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
   }, []);
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a0f] select-none">
+    <div className="flex flex-col h-full bg-surface-base select-none">
       {/* ─── Toolbar ────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#2a2a3a] shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default shrink-0">
         {/* Symbol selector */}
         <span className="sr-only" id="of-symbol-label">
           Symbol
         </span>
         <Select value={symbol} onValueChange={setSymbol}>
           <SelectTrigger
-            className="h-6 w-28 text-xs border-[#2a2a3a] bg-[#16161f] text-zinc-200 focus:ring-0"
+            className="h-6 w-28 text-xs border-border-default bg-surface-card text-text-primary focus:ring-0"
             aria-labelledby="of-symbol-label"
           >
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-[#16161f] border-[#2a2a3a]">
+          <SelectContent className="bg-surface-card border-border-default">
             {SYMBOLS.map((s) => (
               <SelectItem
                 key={s}
                 value={s}
-                className="text-xs text-zinc-200 focus:bg-[#2a2a3a]"
+                className="text-xs text-text-primary focus:bg-surface-active"
               >
                 {s}
               </SelectItem>
@@ -589,8 +589,8 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
               className={cn(
                 "h-6 px-2 text-xs rounded font-mono transition-colors",
                 intervalLabel === iv.label
-                  ? "bg-[#2a2a3a] text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-300 hover:bg-[#1a1a2a]",
+                  ? "bg-surface-active text-text-primary"
+                  : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
               )}
               aria-pressed={intervalLabel === iv.label}
               aria-label={`${iv.label} interval`}
@@ -601,15 +601,15 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
         </div>
 
         {/* View mode toggle */}
-        <div className="flex items-center gap-0.5 border-l border-[#2a2a3a] pl-2 ml-1" role="group" aria-label="View mode">
+        <div className="flex items-center gap-0.5 border-l border-border-default pl-2 ml-1" role="group" aria-label="View mode">
           <button
             type="button"
             onClick={() => setViewMode("footprint")}
             className={cn(
               "h-6 px-1.5 rounded transition-colors flex items-center gap-1",
               viewMode === "footprint"
-                ? "bg-[#2a2a3a] text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-[#1a1a2a]",
+                ? "bg-surface-active text-text-primary"
+                : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
             )}
             aria-pressed={viewMode === "footprint"}
             aria-label="Footprint view"
@@ -623,8 +623,8 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
             className={cn(
               "h-6 px-1.5 rounded transition-colors flex items-center gap-1",
               viewMode === "heatmap"
-                ? "bg-[#2a2a3a] text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-[#1a1a2a]",
+                ? "bg-surface-active text-text-primary"
+                : "text-text-muted hover:text-text-secondary hover:bg-surface-hover",
             )}
             aria-pressed={viewMode === "heatmap"}
             aria-label="Heatmap view"
@@ -636,8 +636,8 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
 
         {/* LTP display */}
         <div className="ml-auto flex items-center gap-1.5">
-          <span className="text-xs text-zinc-500">LTP</span>
-          <span className="font-mono text-xs font-semibold text-indigo-400 tabular-nums">
+          <span className="text-xs text-text-muted">LTP</span>
+          <span className="font-mono text-xs font-semibold text-accent tabular-nums">
             {ltp > 0 ? ltp.toLocaleString("en-IN") : "—"}
           </span>
         </div>
@@ -676,14 +676,14 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
       </div>
 
       {/* ─── Legend ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-3 py-1 border-b border-[#2a2a3a] shrink-0">
+      <div className="flex items-center gap-3 px-3 py-1 border-b border-border-default shrink-0">
         <div className="flex items-center gap-1">
-          <div className="w-3 h-2 rounded-sm bg-[#22c55e]" aria-hidden="true" />
-          <span className="text-xs text-zinc-500">Buy</span>
+          <div className="w-3 h-2 rounded-sm bg-profit" aria-hidden="true" />
+          <span className="text-xs text-text-muted">Buy</span>
         </div>
         <div className="flex items-center gap-1">
-          <div className="w-3 h-2 rounded-sm bg-[#ef4444]" aria-hidden="true" />
-          <span className="text-xs text-zinc-500">Sell</span>
+          <div className="w-3 h-2 rounded-sm bg-loss" aria-hidden="true" />
+          <span className="text-xs text-text-muted">Sell</span>
         </div>
         <div className="flex items-center gap-1">
           <div className="w-3 h-2 rounded-sm border border-amber-400" aria-hidden="true" />
@@ -696,7 +696,7 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
           />
           <span className="text-xs text-zinc-500">LTP</span>
         </div>
-        <div className="ml-auto text-xs text-zinc-600">
+        <div className="ml-auto text-xs text-text-muted">
           {columns.length} bars &bull; {symbol} {intervalLabel}
         </div>
       </div>
@@ -718,20 +718,20 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
             <Skeleton className="h-3 w-48" />
             <Skeleton className="h-3 w-36" />
             <Skeleton className="h-3 w-40" />
-            <span className="text-xs text-zinc-500 mt-1">Loading order flow data...</span>
+            <span className="text-xs text-text-muted mt-1">Loading order flow data...</span>
           </div>
         )}
         {isError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-red-400/70">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-loss/70">
             <AlertCircle className="size-8" aria-hidden="true" />
             <span className="text-sm">
               {error instanceof Error ? error.message : "Failed to load data"}
             </span>
-            <span className="text-xs text-zinc-500">Retrying automatically...</span>
+            <span className="text-xs text-text-muted">Retrying automatically...</span>
           </div>
         )}
         {!isLoading && !isError && columns.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-600">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
             <BarChart2 className="size-8" aria-hidden="true" />
             <span className="text-sm">No data</span>
           </div>

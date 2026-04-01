@@ -492,6 +492,7 @@ function ScalperWidget(_props: WidgetProps) {
   }, [pendingOrder, executeOrder]);
 
   const handleCloseAll = useCallback(async () => {
+    if (!window.confirm("Close all open positions? This cannot be undone.")) return;
     showStatus("Closing all…", "pending", 0);
     try {
       await closePosition("FlintScalper");
@@ -502,6 +503,7 @@ function ScalperWidget(_props: WidgetProps) {
   }, [showStatus]);
 
   const handleCancelAll = useCallback(async () => {
+    if (!window.confirm("Cancel all pending orders?")) return;
     showStatus("Cancelling…", "pending", 0);
     try {
       await cancelAllOrders("FlintScalper");
