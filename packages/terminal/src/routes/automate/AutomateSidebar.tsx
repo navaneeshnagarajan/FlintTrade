@@ -6,14 +6,14 @@
  */
 
 import { useState } from "react";
-import { Workflow, Clock, Activity, FileText, Settings2, FileCode2 } from "lucide-react";
+import { Workflow, Clock, Activity, FileText, Settings2, FileCode2, Webhook } from "lucide-react";
 import { motion } from "framer-motion";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type SectionId = "flows" | "schedules" | "monitors" | "logs" | "strategies" | "settings";
+export type SectionId = "flows" | "schedules" | "monitors" | "logs" | "strategies" | "settings" | "webhooks";
 
 interface SectionDef {
   id: SectionId;
@@ -27,6 +27,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "schedules",  label: "Schedules",           icon: Clock,      desc: "Cron jobs & timed executions" },
   { id: "monitors",   label: "Monitors",            icon: Activity,   desc: "Live strategy monitoring" },
   { id: "strategies", label: "Strategies",          icon: FileCode2,  desc: "Upload and run Python strategies" },
+  { id: "webhooks",   label: "Webhooks",             icon: Webhook,    desc: "TradingView webhook endpoints and alert templates" },
   { id: "logs",       label: "Execution Logs",      icon: FileText,   desc: "History of automated actions" },
   { id: "settings",   label: "Automation Settings", icon: Settings2,  desc: "Kill switches, limits, Telegram alerts" },
 ];

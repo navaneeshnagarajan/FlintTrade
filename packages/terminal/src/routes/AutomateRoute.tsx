@@ -14,6 +14,7 @@ import MonitorsSection    from "./automate/MonitorsSection";
 import LogsSection        from "./automate/LogsSection";
 import StrategiesSection  from "./automate/StrategiesSection";
 import SettingsSection    from "./automate/SettingsSection";
+import WebhooksSection    from "./automate/WebhooksSection";
 
 export default function AutomateRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("automate", "daysActive"); }, []);
@@ -26,8 +27,8 @@ export default function AutomateRoute() {
   // Advanced: All sections
   const visibleSectionIds: SectionId[] = (() => {
     if (level === "beginner") return ["monitors", "settings"];
-    if (level === "intermediate") return ["flows", "schedules", "monitors", "logs"];
-    return ["flows", "schedules", "monitors", "strategies", "logs", "settings"];
+    if (level === "intermediate") return ["flows", "schedules", "monitors", "webhooks", "logs"];
+    return ["flows", "schedules", "monitors", "strategies", "webhooks", "logs", "settings"];
   })();
 
   const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
@@ -68,6 +69,7 @@ export default function AutomateRoute() {
     schedules:  <CronSection />,
     monitors:   <MonitorsSection />,
     strategies: <StrategiesSection />,
+    webhooks:   <WebhooksSection />,
     logs:       <LogsSection />,
     settings:   <SettingsSection />,
   };

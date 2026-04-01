@@ -222,6 +222,10 @@ def create_flask_app(
     from packages.historical.src.watchlist_routes import historify_bp  # noqa: PLC0415
     app.register_blueprint(historify_bp)
 
+    # Register TradingView signals blueprint (/v1/tv/*)
+    from packages.screener.src.tv_routes import tv_bp  # noqa: PLC0415
+    app.register_blueprint(tv_bp)
+
     # Register monitoring blueprint (health, traffic, latency)
     from packages.core.src.monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
