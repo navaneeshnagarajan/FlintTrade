@@ -139,6 +139,11 @@ def audit_logs() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "AuditLogger not available"}), 503
 
     date_str: str = request.args.get("date", _dt.now(_IST).strftime("%Y-%m-%d"))
+    # Validate date format to prevent malformed input
+    try:
+        _dt.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"status": "error", "message": "date must be in YYYY-MM-DD format"}), 400
     try:
         limit: int = min(int(request.args.get("limit", 100)), 1000)
     except (ValueError, TypeError):

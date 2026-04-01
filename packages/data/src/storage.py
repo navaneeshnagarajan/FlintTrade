@@ -110,6 +110,7 @@ _ALL_SCHEMAS = [_SCHEMA_TICKS, _SCHEMA_TRADES, _SCHEMA_AUDIT, _SCHEMA_DAILY_SUMM
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_ticks_sym_ex_ts ON ticks (symbol, exchange, ts)",
     "CREATE INDEX IF NOT EXISTS idx_trades_strategy_ts ON trades (strategy, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_trades_symbol_ts ON trades (symbol, ts)",
     "CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades (ts)",
     "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit (ts)",
     "CREATE INDEX IF NOT EXISTS idx_audit_event ON audit (event_type, ts)",

@@ -96,8 +96,8 @@ class CredentialStore:
 
     Example::
 
-        store = CredentialStore(Path.home() / ".flinttrade/credentials.db", "s3cr3t")
-        store.store("acc1", "zerodha", "Primary", {"api_key": "...", "api_secret": "..."})
+        store = CredentialStore(Path.home() / ".flinttrade/credentials.db", "<MASTER_PASSWORD>")
+        store.store("acc1", "broker_name", "Primary", {"api_key": "<YOUR_KEY>", "api_secret": "<YOUR_SECRET>"})
         creds = store.retrieve("acc1")
     """
 
