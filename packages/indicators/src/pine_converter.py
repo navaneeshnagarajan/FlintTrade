@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -658,7 +657,7 @@ class PineConverter:
             Complete Python call string including parentheses.
         """
         h = self._arrays["highs"]
-        l = self._arrays["lows"]
+        lo = self._arrays["lows"]
         c = self._arrays["closes"]
         o = self._arrays["opens"]
         v = self._arrays["volumes"]
@@ -669,7 +668,7 @@ class PineConverter:
             period = args[0] if args else "14"
             factor = args[1] if len(args) > 1 else "3.0"
             call_args = template.format(
-                highs=h, lows=l, closes=c, opens=o, volumes=v,
+                highs=h, lows=lo, closes=c, opens=o, volumes=v,
                 period=period, factor=factor,
             )
         elif py_func in {"ema", "sma", "wma", "hull", "dema", "tema", "linreg",
@@ -728,11 +727,11 @@ class PineConverter:
         """
         imports: set[str] = set()
         h = self._arrays["highs"]
-        l = self._arrays["lows"]
+        lo = self._arrays["lows"]
         c = self._arrays["closes"]
         v = self._arrays["volumes"]
         if re.search(r"\bta\.vwap\b", line):
-            replacement = f"vwap({h}, {l}, {c}, {v})"
+            replacement = f"vwap({h}, {lo}, {c}, {v})"
             line = re.sub(r"\bta\.vwap\b", replacement, line)
             imports.add("vwap")
         return line, imports
