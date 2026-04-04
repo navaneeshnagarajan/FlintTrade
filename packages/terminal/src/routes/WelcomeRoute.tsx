@@ -14,8 +14,8 @@
  *
  * Auth flow:
  *   setup-required  → cinematic → "Get Started" → SetupAccountRoute
- *   logged-out      → brief cinematic (auto-redirect 1.5s) → LoginRoute → ModeSelectRoute → BrokerDashboardRoute
- *   pin-required    → LoginRoute (PIN mode) → ModeSelectRoute → BrokerDashboardRoute
+ *   logged-out      → brief cinematic (auto-redirect 1.5s) → LoginRoute → /trade
+ *   pin-required    → LoginRoute (PIN mode) → /trade
  *   logged-in       → redirect to last route immediately
  *   unknown         → show cinematic while checking auth status
  */
@@ -31,9 +31,6 @@ import type { ColorMode } from "@/lib/cinematicThemes";
 import { motionConfig } from "@/lib/motion";
 import { useAuthStore } from "@/stores/authStore";
 import LoginRoute from "@/routes/LoginRoute";
-import ModeSelectRoute from "@/routes/ModeSelectRoute";
-import BrokerDashboardRoute from "@/routes/BrokerDashboardRoute";
-import type { AppMode } from "@/stores/modeStore";
 import { useModeStore } from "@/stores/modeStore";
 
 // Magic UI
@@ -115,7 +112,7 @@ function markGreeted(): void {
 // Inner flow steps (for returning users)
 // ---------------------------------------------------------------------------
 
-type FlowStep = "cinematic" | "greeting" | "login" | "mode" | "broker";
+type FlowStep = "cinematic" | "greeting" | "login";
 
 // ---------------------------------------------------------------------------
 // Greeting screen — shown to returning users on first login of the day
@@ -165,7 +162,6 @@ export default function WelcomeRoute() {
   const setColorMode = useThemeStore((s) => s.setMode);
   const reducedMotion = motionConfig.prefersReducedMotion();
   const authStatus = useAuthStore((s) => s.status);
-  const setMode = useModeStore((s) => s.setMode);
 
   // Which sub-screen of the returning-user flow we are showing
   const [flowStep, setFlowStep] = useState<FlowStep>("cinematic");
@@ -261,15 +257,9 @@ export default function WelcomeRoute() {
   // ------------------------------------------------------------------
 
   function handleLoginSuccess() {
-    setFlowStep("mode");
-  }
-
-  function handleModeSelect(mode: AppMode) {
-    setMode(mode);
-    setFlowStep("broker");
-  }
-
-  function handleEnterApp() {
+    // On daily login, default to practice mode (safety-first).
+    // Mode persists in localStorage, so returning users keep their last mode
+    // unless session expired (8AM IST), in which case we reset to practice.
     navigate("/trade", { replace: true });
   }
 
@@ -288,12 +278,6 @@ export default function WelcomeRoute() {
   }
   if (authStatus === "pin-required" && flowStep === "login") {
     return <LoginRoute onSuccess={handleLoginSuccess} mode="pin" />;
-  }
-  if (flowStep === "mode") {
-    return <ModeSelectRoute onSelect={handleModeSelect} />;
-  }
-  if (flowStep === "broker") {
-    return <BrokerDashboardRoute onEnterApp={handleEnterApp} />;
   }
 
   return (
@@ -642,7 +626,7 @@ export default function WelcomeRoute() {
               animate={{ opacity: step >= 5 && authStatus === "setup-required" ? 1 : 0 }}
               transition={{ duration: 1, delay: 0.15, ease: "easeOut" }}
               onClick={() => {
-                useModeStore.getState().setMode("demo");
+                useModeStore.getState().setMode("explore");
                 useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
                 navigate("/trade");
               }}

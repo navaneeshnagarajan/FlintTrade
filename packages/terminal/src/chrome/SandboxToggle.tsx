@@ -1,11 +1,12 @@
 /**
  * SandboxToggle — TopBar paper / live trading mode switch.
  *
- * - "PAPER" (amber) default state — all new users start in paper mode
- * - "LIVE" (green) state — must be explicitly switched to by the user
- * - Switching to PAPER shows a confirmation dialog
- * - Persists mode in settingsStore (sandboxMode)
+ * - "PAPER" (amber) displayed when mode === "practice"
+ * - "LIVE" (green) displayed when mode === "live"
+ * - Both directions require confirmation before switching
  * - Calls POST /ft-api/api/v1/sandbox/config to notify the backend
+ * - Mode is now owned exclusively by modeStore — settingsStore no longer
+ *   holds a sandboxMode flag.
  */
 
 import { useState, useCallback } from "react";
@@ -21,7 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useSettingsStore } from "@/stores/settingsStore";
+import { useModeStore } from "@/stores/modeStore";
 import { toggleSandbox } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
@@ -29,14 +30,16 @@ import { toggleSandbox } from "@/services/ftApi";
 // ---------------------------------------------------------------------------
 
 export default function SandboxToggle() {
-  const sandboxMode = useSettingsStore((s) => s.sandboxMode);
-  const setSandboxMode = useSettingsStore((s) => s.setSandboxMode);
+  const mode = useModeStore((s) => s.mode);
+  const setMode = useModeStore((s) => s.setMode);
+  const isPractice = mode === "practice";
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const mutation = useMutation({
     mutationFn: (enabled: boolean) => toggleSandbox(enabled),
     onSuccess: (data) => {
-      setSandboxMode(data.enabled);
+      // Sync the backend's response back into the mode store
+      setMode(data.enabled ? "practice" : "live");
     },
     onError: () => {
       // Revert optimistic state on error — do nothing, state stays as-is
@@ -50,20 +53,24 @@ export default function SandboxToggle() {
 
   const handleConfirm = useCallback(() => {
     setConfirmOpen(false);
-    mutation.mutate(!sandboxMode);
-  }, [sandboxMode, mutation]);
+    mutation.mutate(!isPractice);
+  }, [isPractice, mutation]);
 
   const handleCancel = useCallback(() => {
     setConfirmOpen(false);
   }, []);
 
-  if (sandboxMode) {
+  // Only render this toggle when the user is in practice or live mode.
+  // In explore mode the ModePill already handles mode switching.
+  if (mode === "explore") return null;
+
+  if (isPractice) {
     return (
       <>
         <button
           onClick={handleToggle}
           disabled={mutation.isPending}
-          aria-label="Paper trading mode active. Click to switch to live trading."
+          aria-label="Practice trading mode active. Click to switch to live trading."
           className="flex items-center gap-1 h-7 px-2 rounded text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 transition-colors"
         >
           <FlaskConical size={11} aria-hidden="true" />
@@ -75,7 +82,7 @@ export default function SandboxToggle() {
             <AlertDialogHeader>
               <AlertDialogTitle>Switch to Live Trading?</AlertDialogTitle>
               <AlertDialogDescription>
-                You are about to switch from paper trading to live mode.
+                You are about to switch from practice trading to live mode.
                 All orders will be executed with real money.
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -94,7 +101,7 @@ export default function SandboxToggle() {
       <button
         onClick={handleToggle}
         disabled={mutation.isPending}
-        aria-label="Live trading mode active. Click to switch to paper trading."
+        aria-label="Live trading mode active. Click to switch to practice trading."
         className="flex items-center gap-1 h-7 px-2 rounded text-xs font-medium text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
       >
         <span
@@ -107,7 +114,7 @@ export default function SandboxToggle() {
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Switch to paper trading?</AlertDialogTitle>
+            <AlertDialogTitle>Switch to practice trading?</AlertDialogTitle>
             <AlertDialogDescription>
               Orders will be simulated and will not be sent to your broker.
               All order amounts and P&amp;L will be virtual. You can switch back
@@ -122,7 +129,7 @@ export default function SandboxToggle() {
               onClick={handleConfirm}
               className="bg-amber-500 hover:bg-amber-600 text-white"
             >
-              Switch to Paper
+              Switch to Practice
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

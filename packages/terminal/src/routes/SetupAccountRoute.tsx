@@ -44,7 +44,6 @@ import { ConnectionStep, type ConnectionFormValues } from "@/routes/setup/Connec
 import { TradingStep, type TradingDefaultsFormValues } from "@/routes/setup/TradingStep";
 import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
 import ModeSelectRoute from "@/routes/ModeSelectRoute";
-import { useAuthStore } from "@/stores/authStore";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useThemeStore } from "@/stores/themeStore";
 import type { ColorMode } from "@/lib/cinematicThemes";
@@ -642,12 +641,11 @@ export default function SetupAccountRoute() {
     setMode(mode);
     // Clear sessionStorage progress on successful completion
     clearProgress();
-    // Mark setup as complete: the backend already set up the account.
-    // Log the user in by triggering the auth state. They will have a token
-    // from the initial setup call, but for the wizard we just redirect to
-    // login to complete the first-time flow cleanly.
-    useAuthStore.getState().setLoggedOut();
-    navigate("/welcome");
+    // Account is set up. Navigate to /welcome which will detect
+    // the account exists (status = "logged-out") and immediately
+    // show the login form — skipping the cinematic + "Get Started" CTA.
+    // The user logs in with the credentials they just created.
+    navigate("/welcome", { replace: true });
   }
 
   // ---------------------------------------------------------------------------

@@ -33,6 +33,8 @@ import { LogoIcon } from "@/components/brand/Logo";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { motionConfig } from "@/lib/motion";
 import { useThemeStore } from "@/stores/themeStore";
+import DemoChoice, { hasMadeDemoChoice } from "@/components/demo/DemoChoice";
+import type { DemoChoiceValue } from "@/components/demo/DemoChoice";
 
 // Magic UI
 import { Particles } from "@/components/magicui/particles";
@@ -524,6 +526,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
 export default function ExploreRoute() {
   const navigate = useNavigate();
   const [toast, setToast] = useState<ToastState>({ visible: false, message: "" });
+  const [showDemoChoice, setShowDemoChoice] = useState(() => !hasMadeDemoChoice());
   const theme = useThemeStore((s) => s.activeThemeId);
 
   // Read primary particle color from CSS vars — reactive to theme changes
@@ -559,6 +562,19 @@ export default function ExploreRoute() {
     const id = setTimeout(dismissToast, 4000);
     return () => clearTimeout(id);
   }, [toast.visible, dismissToast]);
+
+  function handleDemoChoice(choice: DemoChoiceValue) {
+    setShowDemoChoice(false);
+    if (choice === "tour") {
+      // TODO: Trigger SpotlightTour for explore-beginner tour definition
+    }
+    // "explore" choice = just dismiss the overlay, user explores freely
+  }
+
+  // Show DemoChoice overlay on first visit
+  if (showDemoChoice) {
+    return <DemoChoice onChoice={handleDemoChoice} />;
+  }
 
   return (
     <>

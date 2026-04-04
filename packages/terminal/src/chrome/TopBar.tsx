@@ -26,7 +26,7 @@ import { useTimings } from "@/hooks/useMarketStatus";
 import type { MarketTiming } from "@/types/api";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import AccountSwitcher from "./AccountSwitcher";
-import SandboxToggle from "./SandboxToggle";
+import ModeIndicator from "./ModeIndicator";
 import QuickAccessPanel from "./QuickAccessPanel";
 import ToolsDropdown from "./ToolsDropdown";
 import type { ToolId } from "@/types/widgets";
@@ -620,7 +620,7 @@ export default function TopBar() {
         )}
       </div>
 
-      {/* Right: TOOLS (all routes) + WIDGETS (/trade only) + AccountSwitcher + SandboxToggle + Connection status + Clock */}
+      {/* Right: TOOLS (all routes) + WIDGETS (/trade only) + AccountSwitcher + ModeIndicator + Connection status + Clock */}
       <div className="flex items-center gap-2">
         {/* TOOLS: always visible — shows route-relevant tools via ToolsDropdown (portal) */}
         <Button
@@ -671,8 +671,8 @@ export default function TopBar() {
         {/* Account switcher — hidden when no accounts connected */}
         <AccountSwitcher />
 
-        {/* Sandbox / Live trading toggle */}
-        <SandboxToggle />
+        {/* Mode indicator — Explore / Practice / Live */}
+        <ModeIndicator />
 
         {/* Sun/Moon/Monitor quick mode flip — cycles: dark → light → system → dark */}
         <Button

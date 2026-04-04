@@ -9,7 +9,7 @@ import { usePrevClose } from "@/hooks/usePrevClose";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { LockScreen } from "@/components/LockScreen";
-import { useSettingsStore } from "@/stores/settingsStore";
+import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
@@ -72,7 +72,9 @@ export default function AppLayout() {
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   const location = useLocation();
   const navigate = useNavigate();
-  const sandboxMode = useSettingsStore((s) => s.sandboxMode);
+  // Practice mode (paper trading) drives the persistent amber indicator bar.
+  // Mode is now owned exclusively by modeStore — settingsStore no longer has sandboxMode.
+  const mode = useModeStore((s) => s.mode);
   const authStatus = useAuthStore((s) => s.status);
 
   const routeTitle = ROUTE_TITLES[location.pathname] ?? "FlintTrade";
@@ -135,13 +137,15 @@ export default function AppLayout() {
       {showSmallScreenWarning && (
         <SmallScreenOverlay onDismiss={handleDismissSmallScreen} />
       )}
-      {/* Paper trading indicator — persistent amber top border when sandbox mode is active */}
-      {sandboxMode && (
-        <div
-          className="h-0.5 bg-amber-500 shrink-0"
-          role="status"
-          aria-label="Paper trading mode active"
-        />
+      {/* Mode indicator — coloured top border per mode (Thinkorswim-inspired) */}
+      {mode === "explore" && (
+        <div className="h-0.75 bg-text-muted/40 shrink-0" role="status" aria-label="Explore mode — sample data only" />
+      )}
+      {mode === "practice" && (
+        <div className="h-0.75 bg-amber-500 shrink-0" role="status" aria-label="Practice mode — virtual capital" />
+      )}
+      {mode === "live" && (
+        <div className="h-px bg-profit/60 shrink-0" role="status" aria-label="Live trading mode" />
       )}
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}

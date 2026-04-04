@@ -32,7 +32,7 @@ export interface DataPaths {
 }
 
 // ---------------------------------------------------------------------------
-// Store interface (v4 — theme removed, new fields added)
+// Store interface (v5 — sandboxMode removed; mode is owned by modeStore)
 // ---------------------------------------------------------------------------
 
 interface SettingsStore {
@@ -51,7 +51,6 @@ interface SettingsStore {
   interests: string[];
   experience: "beginner" | "intermediate" | "pro" | "custom";
   lastOpenTimestamp: number;
-  sandboxMode: boolean;
 
   // Actions
   setPersona: (persona: "trader" | "investor" | "beginner") => void;
@@ -66,7 +65,6 @@ interface SettingsStore {
   setInterests: (interests: string[]) => void;
   setExperience: (exp: "beginner" | "intermediate" | "pro" | "custom") => void;
   setLastOpenTimestamp: (ts: number) => void;
-  setSandboxMode: (enabled: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +104,6 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   interests: [],
   experience: "intermediate",
   lastOpenTimestamp: 0,
-  sandboxMode: true,
 
   setPersona: (persona) => set({ persona }),
   setDensity: (density) => set({ density }),
@@ -124,28 +121,27 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   setInterests: (interests) => set({ interests }),
   setExperience: (experience) => set({ experience }),
   setLastOpenTimestamp: (lastOpenTimestamp) => set({ lastOpenTimestamp }),
-  setSandboxMode: (sandboxMode) => set({ sandboxMode }),
 });
 
 // ---------------------------------------------------------------------------
-// Persist with migration v3 → v4
+// Persist with migration chain v1 → v5
 // ---------------------------------------------------------------------------
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:settings",
-  version: 4,
+  version: 5,
   partialize: (state) => {
     const { llm, telegram, ...rest } = state;
     return {
       ...rest,
-      llm: { ...llm, apiKey: "" },  // never persist LLM API key to localStorage
-      telegram: { ...telegram, botToken: "" },  // never persist bot token to localStorage
+      llm: { ...llm, apiKey: "" },         // never persist LLM API key to localStorage
+      telegram: { ...telegram, botToken: "" }, // never persist bot token to localStorage
     };
   },
   migrate: (persistedState: unknown, version: number) => {
     // IMPORTANT: Zustand calls migrate ONCE with the stored version number.
-    // All blocks must fall through so a v1 user reaches v4 in a single call.
-    // Each block mutates `state` in place and the final return emits the result.
+    // All blocks must fall through so a v1 user reaches v5 in a single call.
+    // Each block spreads/mutates `state` and the final return emits the result.
     let state = persistedState as Record<string, unknown>;
 
     // v1 → v2: add profile fields
@@ -159,7 +155,7 @@ const persistedStore = persist(storeImpl, {
       };
     }
 
-    // v2 → v3: normalize old "dark" theme alias (theme field is deleted in v4 step)
+    // v2 → v3: normalise old "dark" theme alias (theme field is deleted in v4 step)
     if (version < 3) {
       const oldTheme = state.theme as string | undefined;
       state = {
@@ -219,6 +215,12 @@ const persistedStore = persist(storeImpl, {
           ...((state.dataPaths as Record<string, unknown>) ?? {}),
         } as DataPaths,
       };
+    }
+
+    // v4 → v5: drop sandboxMode — mode ownership transferred to modeStore
+    if (version < 5) {
+      const { sandboxMode: _sandboxMode, ...rest } = state as Record<string, unknown> & { sandboxMode?: unknown };
+      state = rest;
     }
 
     return state;

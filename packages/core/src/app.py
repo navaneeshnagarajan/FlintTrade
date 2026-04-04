@@ -267,6 +267,13 @@ def create_flask_app(
     from packages.core.src.operations_routes import operations_bp  # noqa: PLC0415
     app.register_blueprint(operations_bp)
 
+    # Register Order proxy blueprint (/v1/orders/*) — CRITICAL SAFETY LAYER.
+    # All order requests from the frontend must pass through here so that
+    # mode enforcement (explore/practice/live) is applied before any
+    # real-money order reaches OpenAlgo.
+    from packages.core.src.order_routes import orders_bp  # noqa: PLC0415
+    app.register_blueprint(orders_bp)
+
     # Register Auth blueprint (/v1/auth/*) — public endpoints, no API key required
     from packages.core.src.auth_service import AuthService as _AuthService  # noqa: PLC0415
     from packages.core.src.auth_routes import auth_bp  # noqa: PLC0415

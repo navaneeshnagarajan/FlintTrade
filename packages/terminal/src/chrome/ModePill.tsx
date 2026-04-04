@@ -2,9 +2,9 @@
  * ModePill — TopBar pill showing the current execution mode.
  *
  * Colours:
- *   Demo    → grey
- *   Sandbox → amber
- *   Live    → green
+ *   Explore  → grey   (sample data, no broker required)
+ *   Practice → amber  (paper trading against live broker sandbox)
+ *   Live     → green  (real money — requires PIN on switch)
  *
  * Clicking opens a DropdownMenu to switch modes.
  * Switching to Live requires PIN via window.prompt (temporary — full PIN
@@ -33,14 +33,14 @@ interface ModeConfig {
 }
 
 const MODE_CONFIG: Record<AppMode, ModeConfig> = {
-  demo: {
-    label: "DEMO",
+  explore: {
+    label: "EXPLORE",
     pillClass:
       "bg-text-muted/20 text-text-secondary border border-text-muted/20 hover:bg-text-muted/30",
     icon: <Monitor size={11} aria-hidden="true" />,
   },
-  sandbox: {
-    label: "SANDBOX",
+  practice: {
+    label: "PRACTICE",
     pillClass:
       "bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25",
     icon: <FlaskConical size={11} aria-hidden="true" />,
@@ -96,25 +96,25 @@ export default function ModePill() {
 
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuItem
-          onClick={() => handleSelect("demo")}
-          className={mode === "demo" ? "bg-accent/10 text-accent font-medium" : ""}
-          aria-current={mode === "demo" ? "true" : undefined}
+          onClick={() => handleSelect("explore")}
+          className={mode === "explore" ? "bg-accent/10 text-accent font-medium" : ""}
+          aria-current={mode === "explore" ? "true" : undefined}
         >
           <Monitor size={14} className="mr-2 text-text-muted" aria-hidden="true" />
-          Demo
-          {mode === "demo" && (
+          Explore
+          {mode === "explore" && (
             <span className="ml-auto text-xxs text-text-muted">Active</span>
           )}
         </DropdownMenuItem>
 
         <DropdownMenuItem
-          onClick={() => handleSelect("sandbox")}
-          className={mode === "sandbox" ? "bg-accent/10 text-accent font-medium" : ""}
-          aria-current={mode === "sandbox" ? "true" : undefined}
+          onClick={() => handleSelect("practice")}
+          className={mode === "practice" ? "bg-accent/10 text-accent font-medium" : ""}
+          aria-current={mode === "practice" ? "true" : undefined}
         >
           <FlaskConical size={14} className="mr-2 text-amber-400" aria-hidden="true" />
-          Sandbox
-          {mode === "sandbox" && (
+          Practice
+          {mode === "practice" && (
             <span className="ml-auto text-xxs text-text-muted">Active</span>
           )}
         </DropdownMenuItem>

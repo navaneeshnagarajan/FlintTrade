@@ -1,7 +1,7 @@
 /**
  * ModeSelectRoute — mode picker shown during the login flow.
  *
- * Presents three cards: Demo / Sandbox / Live.
+ * Presents three cards: Explore / Practice / Live.
  * Selecting "Live" requires a 6-digit PIN before calling onSelect.
  * Not a standalone route — used as a step inside WelcomeRoute.
  */
@@ -38,9 +38,9 @@ interface ModeCardConfig {
 
 const MODE_CARDS: ModeCardConfig[] = [
   {
-    id: "demo",
-    label: "Demo",
-    description: "Explore with simulated data",
+    id: "explore",
+    label: "Explore",
+    description: "Browse with sample data",
     brokerNote: "No broker needed",
     icon: <Monitor size={22} aria-hidden="true" />,
     pillClass: "bg-text-muted/20 text-text-secondary",
@@ -49,8 +49,8 @@ const MODE_CARDS: ModeCardConfig[] = [
     iconBgClass: "bg-text-muted/10 text-text-secondary",
   },
   {
-    id: "sandbox",
-    label: "Sandbox",
+    id: "practice",
+    label: "Practice",
     description: "Paper trade with live data",
     brokerNote: "Broker required",
     icon: <FlaskConical size={22} aria-hidden="true" />,
@@ -77,7 +77,7 @@ const MODE_CARDS: ModeCardConfig[] = [
 // ---------------------------------------------------------------------------
 
 export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
-  const [selected, setSelected] = useState<AppMode>("demo");
+  const [selected, setSelected] = useState<AppMode>("explore");
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
 

@@ -20,6 +20,7 @@ import {
   GraduationCap,
   Info,
   Scale,
+  FlaskConical,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,6 +35,7 @@ export type SectionId =
   | "trading"
   | "risk"
   | "leverage"
+  | "practice"
   | "keyboard"
   | "llm"
   | "telegram"
@@ -60,6 +62,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
   { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
   { id: "leverage",   label: "Leverage",           icon: Scale        },
+  { id: "practice",   label: "Practice Mode",      icon: FlaskConical },
   { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard     },
   { id: "llm",        label: "LLM Config",         icon: Brain        },
   { id: "telegram",   label: "Telegram",           icon: Send         },

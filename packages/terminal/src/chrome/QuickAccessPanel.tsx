@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useMutation } from "@tanstack/react-query";
 import { toggleSandbox } from "@/services/ftApi";
+import { useModeStore } from "@/stores/modeStore";
 import {
   Settings,
   X,
@@ -129,10 +130,10 @@ const ModeButton = forwardRef<HTMLButtonElement, ModeButtonProps>(
 
 interface ConnectionCardProps {
   connected: boolean;
-  sandboxMode: boolean;
+  practiceMode: boolean;
 }
 
-function ConnectionCard({ connected, sandboxMode }: ConnectionCardProps) {
+function ConnectionCard({ connected, practiceMode }: ConnectionCardProps) {
   return (
     <div
       className="flex items-center justify-between p-2.5 rounded-lg border border-border-default"
@@ -152,12 +153,12 @@ function ConnectionCard({ connected, sandboxMode }: ConnectionCardProps) {
           {connected ? "Connected" : "Disconnected"}
         </span>
       </div>
-      {sandboxMode && (
+      {practiceMode && (
         <Badge
           variant="outline"
           className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-400 bg-amber-500/10"
         >
-          SANDBOX
+          PRACTICE
         </Badge>
       )}
     </div>
@@ -212,15 +213,18 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
   const status = useConnectionStore((s) => s.status);
   const connected = status === "connected";
 
-  // Settings store
+  // Settings store — density only; mode is owned by modeStore
   const density = useSettingsStore((s) => s.density);
   const setDensity = useSettingsStore((s) => s.setDensity);
-  const sandboxMode = useSettingsStore((s) => s.sandboxMode);
-  const setSandboxMode = useSettingsStore((s) => s.setSandboxMode);
+
+  // Mode store — practice flag drives the sandbox toggle in this panel
+  const appMode = useModeStore((s) => s.mode);
+  const setAppMode = useModeStore((s) => s.setMode);
+  const isPractice = appMode === "practice";
 
   const sandboxMutation = useMutation({
     mutationFn: (enabled: boolean) => toggleSandbox(enabled),
-    onSuccess: (data) => setSandboxMode(data.enabled),
+    onSuccess: (data) => setAppMode(data.enabled ? "practice" : "live"),
   });
 
   // Theme store — active theme for dot selection
@@ -380,7 +384,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         {/* ------------------------------------------------------------------ */}
         {/* Connection status card                                               */}
         {/* ------------------------------------------------------------------ */}
-        <ConnectionCard connected={connected} sandboxMode={sandboxMode} />
+        <ConnectionCard connected={connected} practiceMode={isPractice} />
 
         {/* ------------------------------------------------------------------ */}
         {/* Dark / Light / System mode segment                                   */}
@@ -491,14 +495,14 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         {/* ------------------------------------------------------------------ */}
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
-            <span className="text-xs font-medium text-text-primary">Sandbox Mode</span>
+            <span className="text-xs font-medium text-text-primary">Practice Mode</span>
             <p className="text-[10px] text-text-muted leading-snug">
               Paper trading, no real orders
             </p>
           </div>
           <SandboxSwitch
-            enabled={sandboxMode}
-            onToggle={() => sandboxMutation.mutate(!sandboxMode)}
+            enabled={isPractice}
+            onToggle={() => sandboxMutation.mutate(!isPractice)}
           />
         </div>
 
