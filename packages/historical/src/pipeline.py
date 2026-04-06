@@ -54,7 +54,7 @@ def _validate_path(path: str, base_dir: str | None = None) -> Path:
     resolved = Path(path).resolve()
     if base_dir:
         base = Path(base_dir).resolve()
-        if not str(resolved).startswith(str(base)):
+        if not resolved.is_relative_to(base):
             raise ValueError(
                 f"Path {path!r} is outside allowed directory {base_dir!r}"
             )

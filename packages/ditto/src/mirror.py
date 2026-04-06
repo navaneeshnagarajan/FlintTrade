@@ -44,10 +44,11 @@ class AllocationMode(StrEnum):
     MULTIPLIER = "MULTIPLIER"
 
 
-# Lot sizes for F&O instruments
+# Lot sizes for F&O instruments (as of Nov 2024 SEBI revision).
+# TODO: Fetch lot sizes dynamically from OpenAlgo /api/v1/instruments in future.
 LOT_SIZES: dict[str, int] = {
-    "NIFTY": 75, "BANKNIFTY": 30, "FINNIFTY": 40, "MIDCPNIFTY": 50,
-    "SENSEX": 20, "BANKEX": 30, "SENSEX50": 25,
+    "NIFTY": 75, "BANKNIFTY": 15, "FINNIFTY": 25, "MIDCPNIFTY": 50,
+    "SENSEX": 10, "BANKEX": 15, "SENSEX50": 25,
     "USDINR": 1000, "EURINR": 1000,
     "CRUDEOIL": 100, "GOLD": 100, "GOLDM": 10,
     "SILVER": 30, "SILVERM": 5, "NATURALGAS": 1250,

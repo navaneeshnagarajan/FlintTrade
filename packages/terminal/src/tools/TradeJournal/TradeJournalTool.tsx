@@ -1017,7 +1017,7 @@ function CoachTab({ trades }: { trades: JournalTrade[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: `Analyze my recent trading behavior. Win rate: ${winRate}%, Average win: ₹${avgWin}, Average loss: ₹${avgLoss}, Current streak: ${streak}. What patterns do you see and what should I improve?`,
+          message: `Analyse my recent trading behaviour. Win rate: ${winRate}%, Average win: ₹${avgWin}, Average loss: ₹${avgLoss}, Current streak: ${streak}. What patterns do you see and what should I improve?`,
         }),
       });
 
@@ -1053,7 +1053,7 @@ function CoachTab({ trades }: { trades: JournalTrade[] }) {
         <Card className="bg-surface-card border-border-default">
           <CardHeader className="p-3 pb-1">
             <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
-              Behavioral State
+              Behavioural State
             </CardTitle>
           </CardHeader>
           <CardContent className="p-3 pt-2 space-y-2">
@@ -1072,7 +1072,7 @@ function CoachTab({ trades }: { trades: JournalTrade[] }) {
           </CardContent>
         </Card>
 
-        {/* Behavioral summary */}
+        {/* Behavioural summary */}
         <Card className="bg-surface-card border-border-default">
           <CardHeader className="p-3 pb-1">
             <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">

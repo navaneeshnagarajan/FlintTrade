@@ -427,8 +427,8 @@ class OpenAlgoClient:
         return []
 
     async def intervals(self) -> list[str]:
-        """POST /api/v1/intervals"""
-        data = self._unwrap(await self._post("intervals", self._body()))
+        """GET /api/v1/intervals"""
+        data = self._unwrap(await self._get("intervals"))
         return data if isinstance(data, list) else []
 
     async def option_chain(self, symbol: str, exchange: str = "NFO") -> OptionChain:
@@ -571,12 +571,14 @@ class OpenAlgoClient:
         return await self._post("ping", self._body())
 
     async def holidays(self, year: str = "2026") -> dict[str, Any]:
-        """POST /api/v1/holidays"""
-        return await self._post("holidays", self._body({"year": year}))
+        """GET /api/v1/holidays"""
+        params: dict[str, str] = {"year": year}
+        return await self._get("holidays", params=params)
 
     async def timings(self, date: str = "") -> dict[str, Any]:
-        """POST /api/v1/timings"""
-        return await self._post("timings", self._body({"date": date}))
+        """GET /api/v1/timings"""
+        params: dict[str, str] = {"date": date} if date else {}
+        return await self._get("timings", params=params)
 
     async def telegram(self, message: str) -> dict[str, Any]:
         """POST /api/v1/telegram"""

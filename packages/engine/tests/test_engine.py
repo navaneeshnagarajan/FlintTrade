@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import date, datetime, time, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -450,7 +450,10 @@ class TestKillSwitch:
 
     def test_activate_calls_cancel_and_close(self):
         from packages.engine.src.safety import KillSwitch
+        # Both methods are async — use AsyncMock so they can be awaited correctly.
         mock_client = MagicMock()
+        mock_client.cancel_all_orders = AsyncMock()
+        mock_client.close_position = AsyncMock()
         ks = KillSwitch()
         ks.activate("Test kill", client=mock_client)
         mock_client.cancel_all_orders.assert_called_once()
@@ -785,8 +788,9 @@ class TestTimeScheduler:
 
     def test_load_holidays_with_mock_client(self):
         from packages.engine.src.scheduler import TimeScheduler
+        # holidays() is async — use AsyncMock so that awaiting it works correctly.
         mock_client = MagicMock()
-        mock_client.holidays.return_value = {"holidays": ["2026-01-26", "2026-08-15"]}
+        mock_client.holidays = AsyncMock(return_value={"holidays": ["2026-01-26", "2026-08-15"]})
         sched = TimeScheduler(client=mock_client)
         holidays = sched.load_holidays("2026")
         assert "2026-01-26" in holidays
@@ -1070,13 +1074,19 @@ class TestStrategyRunner:
         assert len(strategy.ticks) > 0
 
     @pytest.mark.asyncio
-    async def test_runner_skips_tick_when_deploy_frozen(self):
+    async def test_runner_delivers_ticks_when_deploy_frozen(self):
+        """Deploy freeze must NOT block tick delivery.
+
+        is_deploy_frozen() guards code *deployment* only. Strategies must
+        continue to receive ticks during market hours even when a deploy freeze
+        is active — otherwise live strategies would be silently starved of data.
+        """
         from unittest.mock import AsyncMock
         from packages.engine.src.scheduler import StrategyRunner, TimeScheduler
 
         strategy = self._make_strategy()
         mock_client = MagicMock()
-        mock_client.quotes = AsyncMock()
+        mock_client.quotes = AsyncMock(return_value=None)
 
         scheduler = TimeScheduler()
         scheduler.is_market_open = MagicMock(return_value=True)
@@ -1092,9 +1102,8 @@ class TestStrategyRunner:
         await asyncio.sleep(0.05)
         await runner.stop()
 
-        # on_tick should NOT have been called — deploy was frozen
-        assert len(strategy.ticks) == 0
-        mock_client.quotes.assert_not_called()
+        # Ticks SHOULD be delivered — deploy freeze must not gate tick delivery.
+        mock_client.quotes.assert_called()
 
     @pytest.mark.asyncio
     async def test_runner_skips_tick_when_market_closed(self):

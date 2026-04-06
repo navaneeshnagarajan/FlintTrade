@@ -54,16 +54,12 @@ function KillSwitchPill() {
     if (isTriggering || triggered) return;
     setIsTriggering(true);
     try {
-      const { useConnectionStore } = await import("@/stores/connectionStore");
-      const { apiKey } = useConnectionStore.getState();
-      await fetch("/api/v1/safety/kill-switch", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiKey ? { "X-API-Key": apiKey } : {}),
-        },
-        body: JSON.stringify({ reason: "Manual kill switch — trader initiated from terminal" }),
-      });
+      // Route through ftApi.ts so the request goes to the FlintTrade backend
+      // (port 5001, /ft-api/api/v1/safety/kill-switch) rather than OpenAlgo
+      // (port 5000, /api/v1/safety/kill-switch). The safety system lives in
+      // the FlintTrade engine — OpenAlgo has no equivalent endpoint.
+      const { activateKillSwitch } = await import("@/services/ftApi");
+      await activateKillSwitch("Manual kill switch — trader initiated from terminal");
       setTriggered(true);
     } catch {
       // Silent — the pill remains visible so the user can retry

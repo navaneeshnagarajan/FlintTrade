@@ -9,6 +9,7 @@ Layer 5: Kill switch (cancel all + close all)
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time as dt_time, timedelta, timezone
@@ -416,17 +417,45 @@ class KillSwitch:
         logger.critical("KILL SWITCH ACTIVATED: %s", reason)
 
         if client is not None:
+            # Both methods are async — run them synchronously from this
+            # synchronous context using asyncio.run() when no event loop is
+            # active, or by scheduling onto the running loop otherwise.
             try:
-                client.cancel_all_orders()
-                logger.info("Kill switch: all orders cancelled")
-            except Exception as exc:
-                logger.error("Kill switch: cancel_all_orders failed: %s", exc)
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
 
-            try:
-                client.close_position()
-                logger.info("Kill switch: close_position sent")
-            except Exception as exc:
-                logger.error("Kill switch: close_position failed: %s", exc)
+            if loop is not None and loop.is_running():
+                # Already inside an async context — schedule as a fire-and-forget
+                # task so the kill commands are sent without blocking the caller.
+                async def _emergency_close() -> None:
+                    try:
+                        await client.cancel_all_orders()
+                        logger.info("Kill switch: all orders cancelled")
+                    except Exception as exc:
+                        logger.error("Kill switch: cancel_all_orders failed: %s", exc)
+                    try:
+                        await client.close_position()
+                        logger.info("Kill switch: close_position sent")
+                    except Exception as exc:
+                        logger.error("Kill switch: close_position failed: %s", exc)
+
+                asyncio.ensure_future(_emergency_close())
+            else:
+                # No running event loop — block until both calls complete.
+                async def _emergency_close_blocking() -> None:
+                    try:
+                        await client.cancel_all_orders()
+                        logger.info("Kill switch: all orders cancelled")
+                    except Exception as exc:
+                        logger.error("Kill switch: cancel_all_orders failed: %s", exc)
+                    try:
+                        await client.close_position()
+                        logger.info("Kill switch: close_position sent")
+                    except Exception as exc:
+                        logger.error("Kill switch: close_position failed: %s", exc)
+
+                asyncio.run(_emergency_close_blocking())
 
     def reset(self) -> None:
         """Manually deactivate kill switch."""

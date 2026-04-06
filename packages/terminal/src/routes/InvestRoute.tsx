@@ -33,6 +33,7 @@ import {
   Layers,
   Sparkles,
   Activity,
+  Target,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -56,6 +57,7 @@ const OverlapTab = lazy(() => import("./invest/tabs/OverlapTab").then(m => ({ de
 const MfOptimizerTab = lazy(() => import("./invest/tabs/MfOptimizerTab").then(m => ({ default: m.MfOptimizerTab })));
 const BenchmarkTab = lazy(() => import("./invest/tabs/BenchmarkTab").then(m => ({ default: m.BenchmarkTab })));
 const BasketTab = lazy(() => import("./invest/tabs/BasketTab").then(m => ({ default: m.BasketTab })));
+const GoalTab = lazy(() => import("./invest/tabs/GoalTab").then(m => ({ default: m.GoalTab })));
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 
@@ -73,7 +75,8 @@ type TabId =
   | "tax"
   | "mf-optimizer"
   | "benchmark"
-  | "basket";
+  | "basket"
+  | "goals";
 
 interface TabDef {
   id: TabId;
@@ -96,6 +99,7 @@ const TABS: TabDef[] = [
   { id: "mf-optimizer", label: "MF Optimizer", icon: Sparkles },
   { id: "benchmark", label: "Benchmark", icon: Activity },
   { id: "basket", label: "Baskets", icon: Layers },
+  { id: "goals", label: "Goals", icon: Target },
 ];
 
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
@@ -132,6 +136,7 @@ function ActiveTabContent({ tabId }: { tabId: TabId }) {
       case "mf-optimizer": return <MfOptimizerTab />;
       case "benchmark":    return <BenchmarkTab />;
       case "basket":       return <BasketTab />;
+      case "goals":        return <GoalTab />;
       default:             return null;
     }
   })();
@@ -152,9 +157,9 @@ function InvestShell() {
 
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
-    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "mf-optimizer"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "tax", "mf-optimizer", "benchmark", "basket"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "benchmark", "basket"];
+    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "goals", "mf-optimizer"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "benchmark", "basket"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "benchmark", "basket", "goals"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));

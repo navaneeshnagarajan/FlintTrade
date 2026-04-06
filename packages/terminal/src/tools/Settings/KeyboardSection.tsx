@@ -10,6 +10,16 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { RotateCcw, AlertTriangle, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { SectionTitle } from "./shared";
 import {
   loadCustomHotkeys,
@@ -312,10 +322,18 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_ORDER: string[] = ["global", "scalper", "trading", "chart"];
 
+interface ConflictPending {
+  id: string;
+  keys: string[];
+  conflictAction: string;
+}
+
 export function KeyboardSection() {
   const [bindings, setBindings] = useState<HotkeyBinding[]>(() =>
     loadCustomHotkeys(),
   );
+  const [conflictPending, setConflictPending] = useState<ConflictPending | null>(null);
+  const [resetAllOpen, setResetAllOpen] = useState(false);
 
   // Conflict detection
   const conflictMap = new Map<string, string>();
@@ -331,14 +349,16 @@ export function KeyboardSection() {
   }
 
   function handleRemap(id: string, keys: string[]) {
-    // Check conflict before saving
+    // Check conflict before saving — show AlertDialog instead of window.confirm
     const conflictId = findConflict(keys, id, bindings);
     if (conflictId) {
       const conflictBinding = bindings.find((b) => b.id === conflictId);
-      const proceed = window.confirm(
-        `"${formatKeyCombo(keys)}" is already assigned to "${conflictBinding?.action ?? conflictId}". Assign anyway?`,
-      );
-      if (!proceed) return;
+      setConflictPending({
+        id,
+        keys,
+        conflictAction: conflictBinding?.action ?? conflictId,
+      });
+      return;
     }
 
     saveHotkeyOverride(id, keys);
@@ -351,12 +371,7 @@ export function KeyboardSection() {
   }
 
   function handleResetAll() {
-    const proceed = window.confirm(
-      "Reset all keyboard shortcuts to defaults? This cannot be undone.",
-    );
-    if (!proceed) return;
-    resetAllHotkeys();
-    setBindings(loadCustomHotkeys());
+    setResetAllOpen(true);
   }
 
   // Group by category
@@ -419,6 +434,68 @@ export function KeyboardSection() {
           />
         );
       })}
+
+      {/* Conflict override confirmation */}
+      <AlertDialog
+        open={conflictPending !== null}
+        onOpenChange={(open) => { if (!open) setConflictPending(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Shortcut already in use</AlertDialogTitle>
+            <AlertDialogDescription>
+              {conflictPending && (
+                <>
+                  <strong>{formatKeyCombo(conflictPending.keys)}</strong> is already
+                  assigned to &quot;{conflictPending.conflictAction}&quot;. Assigning it
+                  here will create a conflict. Assign anyway?
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConflictPending(null)}>
+              Keep existing
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (conflictPending) {
+                  saveHotkeyOverride(conflictPending.id, conflictPending.keys);
+                  setBindings(loadCustomHotkeys());
+                }
+                setConflictPending(null);
+              }}
+            >
+              Assign anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reset all shortcuts confirmation */}
+      <AlertDialog open={resetAllOpen} onOpenChange={setResetAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset all keyboard shortcuts?</AlertDialogTitle>
+            <AlertDialogDescription>
+              All custom keyboard shortcuts will be reset to their defaults.
+              This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep customisations</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setResetAllOpen(false);
+                resetAllHotkeys();
+                setBindings(loadCustomHotkeys());
+              }}
+            >
+              Reset All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

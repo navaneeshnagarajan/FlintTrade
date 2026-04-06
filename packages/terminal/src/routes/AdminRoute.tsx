@@ -493,7 +493,7 @@ function AbsorptionPanel(): JSX.Element {
 
 function DepsPanel(): JSX.Element {
   return (
-    <pre className="text-xs font-mono text-text-secondary p-4 whitespace-pre overflow-auto bg-surface-secondary rounded">
+    <pre className="text-xs font-mono text-text-secondary p-4 whitespace-pre overflow-auto bg-surface-card rounded">
       {DEPENDENCY_GRAPH}
     </pre>
   );
@@ -531,7 +531,7 @@ export default function AdminRoute(): JSX.Element {
   return (
     <div className="min-h-screen bg-background text-text-primary">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-surface-primary border-b border-border">
+      <header className="sticky top-0 z-10 bg-surface-base border-b border-border">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
@@ -551,7 +551,7 @@ export default function AdminRoute(): JSX.Element {
       </header>
 
       {/* Tab bar */}
-      <nav className="bg-surface-primary border-b border-border" role="tablist" aria-label="Admin sections">
+      <nav className="bg-surface-base border-b border-border" role="tablist" aria-label="Admin sections">
         <div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
           {TABS.map((tab) => {
             const Icon = tab.icon;

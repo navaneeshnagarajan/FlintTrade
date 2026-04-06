@@ -342,7 +342,7 @@ class CronManager:
             try:
                 self._scheduler.remove_job(name)
             except Exception:
-                pass
+                logger.exception("Failed to remove cron job %s from scheduler", name)
 
     # ------------------------------------------------------------------
     # Job control
@@ -356,7 +356,7 @@ class CronManager:
                 try:
                     self._scheduler.resume_job(name)
                 except Exception:
-                    pass
+                    logger.exception("Failed to resume cron job %s", name)
 
     def disable(self, name: str) -> None:
         job = self._jobs.get(name)
@@ -366,7 +366,7 @@ class CronManager:
                 try:
                     self._scheduler.pause_job(name)
                 except Exception:
-                    pass
+                    logger.exception("Failed to pause cron job %s", name)
 
     def pause(self, name: str) -> None:
         job = self._jobs.get(name)
@@ -376,7 +376,7 @@ class CronManager:
                 try:
                     self._scheduler.pause_job(name)
                 except Exception:
-                    pass
+                    logger.exception("Failed to pause cron job %s", name)
 
     def resume(self, name: str) -> None:
         job = self._jobs.get(name)
@@ -386,7 +386,7 @@ class CronManager:
                 try:
                     self._scheduler.resume_job(name)
                 except Exception:
-                    pass
+                    logger.exception("Failed to resume cron job %s", name)
 
     # ------------------------------------------------------------------
     # Job info

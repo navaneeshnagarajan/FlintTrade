@@ -191,7 +191,7 @@ function SignalsSection() {
           </Button>
         </div>
         <p className="text-xs text-text-secondary leading-relaxed">
-          LightGBM models analyze price, volume, OI, and technicals. Auto-refreshes every 30s.
+          LightGBM models analyse price, volume, OI, and technicals. Auto-refreshes every 30s.
         </p>
       </Card>
 
@@ -389,7 +389,7 @@ function SentimentSection() {
 
       {/* Text input */}
       <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3">
-        <h4 className="text-sm font-semibold text-text-primary">Paste Text to Analyze</h4>
+        <h4 className="text-sm font-semibold text-text-primary">Paste Text to Analyse</h4>
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -408,12 +408,12 @@ function SentimentSection() {
             {mutation.isPending ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Analyzing...
+                Analysing...
               </>
             ) : (
               <>
                 <TrendingUp className="w-3.5 h-3.5" />
-                Analyze
+                Analyse
               </>
             )}
           </Button>

@@ -1006,7 +1006,7 @@ function PineTab() {
       <div className="flex-1 min-h-0 flex flex-col">
         <textarea
           ref={textareaRef}
-          className="flex-1 min-h-0 w-full resize-none bg-[#0d0d14] text-[#e2e8f0] font-mono text-xs p-3 leading-5 border-0 border-b border-border-subtle outline-none focus:ring-1 focus:ring-primary/30 placeholder:text-text-muted"
+          className="flex-1 min-h-0 w-full resize-none bg-surface-base text-text-primary font-mono text-xs p-3 leading-5 border-0 border-b border-border-subtle outline-none focus:ring-1 focus:ring-primary/30 placeholder:text-text-muted"
           value={code}
           onChange={(e) => setCode(e.target.value)}
           spellCheck={false}

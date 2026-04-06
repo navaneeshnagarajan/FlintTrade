@@ -197,7 +197,7 @@ const TemplateCard = memo(function TemplateCard({ template }: TemplateCardProps)
         aria-hidden={!expanded}
       >
         {/* Webhook JSON */}
-        <div className="rounded-md border border-border-default bg-[#0a0a0f] p-3">
+        <div className="rounded-md border border-border-default bg-surface-base p-3">
           <pre className="overflow-x-auto font-mono text-xs leading-relaxed text-foreground/80">
             {template.webhookMessage}
           </pre>
@@ -226,7 +226,7 @@ const TemplateCard = memo(function TemplateCard({ template }: TemplateCardProps)
               <Code2 className="size-3" aria-hidden="true" />
               Pine Script v5 snippet
             </p>
-            <div className="rounded-md border border-border-default bg-[#0a0a0f] p-3">
+            <div className="rounded-md border border-border-default bg-surface-base p-3">
               <pre className="overflow-x-auto font-mono text-xs leading-relaxed text-foreground/80">
                 {template.pineSnippet}
               </pre>

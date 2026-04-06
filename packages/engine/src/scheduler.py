@@ -201,6 +201,10 @@ class TimeScheduler:
     def load_holidays(self, year: str | None = None) -> list[str]:
         """Fetch holidays from OpenAlgo and cache them.
 
+        ``OpenAlgoClient.holidays()`` is an async method. This synchronous
+        helper runs it to completion using asyncio, so it can be called from
+        non-async startup code (e.g. app initialisation, tests).
+
         Returns list of date strings like ["2026-01-26", "2026-03-14", ...].
         """
         y = year or str(self.now_ist().year)
@@ -210,7 +214,31 @@ class TimeScheduler:
             return []
 
         try:
-            data = self._client.holidays(year=y)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is not None and loop.is_running():
+                # Already inside an async context — cannot call asyncio.run().
+                # Schedule the coroutine and await it via a new task. Callers
+                # in an async context should use the async variant instead.
+                import concurrent.futures
+                future: concurrent.futures.Future[dict] = concurrent.futures.Future()
+
+                async def _fetch() -> None:
+                    try:
+                        result = await self._client.holidays(year=y)  # type: ignore[union-attr]
+                        future.set_result(result)
+                    except Exception as exc:
+                        future.set_exception(exc)
+
+                asyncio.ensure_future(_fetch())
+                # Block the current thread briefly to collect the result.
+                data = future.result(timeout=10)
+            else:
+                data = asyncio.run(self._client.holidays(year=y))  # type: ignore[union-attr]
+
             holidays = data.get("holidays", []) if isinstance(data, dict) else []
             if isinstance(holidays, list):
                 self._holidays[y] = holidays
@@ -339,9 +367,9 @@ class StrategyRunner:
         if not self.scheduler.is_market_open(exchange):
             return
 
-        # Skip if deploy is frozen (strategies should not fire during deploys)
-        if self.scheduler.is_deploy_frozen([exchange]):
-            return
+        # NOTE: is_deploy_frozen() guards code *deployment*, not tick delivery.
+        # Strategies must receive ticks during market hours regardless of
+        # whether a deployment freeze is active. Do not gate ticks here.
 
         # Check auto square-off
         if self.scheduler.should_square_off(exchange):

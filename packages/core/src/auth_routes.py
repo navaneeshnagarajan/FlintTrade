@@ -13,7 +13,10 @@ Public endpoints (no API key required):
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Any
 
 import jwt
@@ -37,11 +40,44 @@ def _get_auth_service():
 
 
 def _get_jwt_secret() -> str:
-    """Get or generate the JWT secret."""
+    """Get or generate the JWT secret.
+
+    Priority:
+    1. JWT_SECRET environment variable (explicit override)
+    2. Persisted secret from ~/.flinttrade/jwt_secret
+    3. Generate a new secret and persist it for future restarts
+    """
     global _JWT_SECRET_KEY
-    if not _JWT_SECRET_KEY:
-        import secrets
-        _JWT_SECRET_KEY = current_app.config.get("JWT_SECRET", secrets.token_urlsafe(64))
+    if _JWT_SECRET_KEY:
+        return _JWT_SECRET_KEY
+
+    # 1. Environment variable override
+    env_secret = os.environ.get("JWT_SECRET", "")
+    if env_secret:
+        _JWT_SECRET_KEY = env_secret
+        return _JWT_SECRET_KEY
+
+    # 2. Read from persisted file, or generate and persist
+    secret_file = Path.home() / ".flinttrade" / "jwt_secret"
+    try:
+        if secret_file.exists():
+            stored = secret_file.read_text().strip()
+            if stored:
+                _JWT_SECRET_KEY = stored
+                return _JWT_SECRET_KEY
+    except OSError:
+        pass
+
+    # 3. Generate new secret and persist
+    new_secret = secrets.token_urlsafe(64)
+    try:
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        secret_file.write_text(new_secret)
+        secret_file.chmod(0o600)
+    except OSError as exc:
+        logger.warning("Could not persist JWT secret to %s: %s", secret_file, exc)
+
+    _JWT_SECRET_KEY = new_secret
     return _JWT_SECRET_KEY
 
 
@@ -57,13 +93,18 @@ def _next_8am_ist() -> datetime:
 
 
 def _create_token(username: str) -> str:
-    """Create a JWT that expires at next 8:00 AM IST."""
+    """Create a JWT that expires at next 8:00 AM IST.
+
+    Includes a unique ``jti`` (JWT ID) to enable future token revocation
+    via a server-side blocklist.
+    """
     exp = _next_8am_ist()
     payload = {
         "sub": username,
         "iat": datetime.now(timezone.utc),
         "exp": exp,
         "type": "session",
+        "jti": secrets.token_hex(16),
     }
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 

@@ -393,7 +393,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
           <span className="text-xs text-text-muted font-medium uppercase tracking-wider">
             Mode
           </span>
-          <div className="flex gap-1.5" role="group" aria-label="Color mode">
+          <div className="flex gap-1.5" role="group" aria-label="Colour mode">
             {(["dark", "light", "system"] as ColorMode[]).map((m, i) => (
               <ModeButton
                 key={m}

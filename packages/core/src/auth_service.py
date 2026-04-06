@@ -7,7 +7,7 @@ TOTP 2FA, backup codes, and login attempt rate limiting.
 Credentials stored in ~/.flinttrade/auth.db (SQLite):
 - Password: argon2id hash
 - PIN: PBKDF2-SHA256 hash
-- TOTP secret: AES-256 encrypted
+- TOTP secret: Fernet-encrypted (AES-128-CBC + HMAC-SHA256, key derived via PBKDF2)
 - Backup codes: argon2id hashed (one-time use)
 
 Usage::
@@ -21,6 +21,7 @@ Usage::
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import logging
@@ -33,6 +34,9 @@ from pathlib import Path
 
 import argon2
 import pyotp
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger("flinttrade.auth")
 
@@ -41,9 +45,26 @@ _MAX_LOGIN_ATTEMPTS = 5
 _LOCKOUT_DURATION_SECONDS = 900  # 15 minutes
 
 
-def _derive_encryption_key(master: str, salt: bytes) -> bytes:
-    """Derive a 32-byte AES key from master password + salt via PBKDF2."""
-    return hashlib.pbkdf2_hmac("sha256", master.encode(), salt, 390_000, dklen=32)
+_KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
+
+
+def _derive_fernet_key(master: str, salt: bytes) -> Fernet:
+    """Derive a Fernet key from the master password and salt via PBKDF2-HMAC-SHA256.
+
+    Fernet requires a 32-byte URL-safe base64-encoded key. PBKDF2 derives
+    the raw 32 bytes; we then base64-encode for Fernet.
+
+    Returns:
+        A ready-to-use :class:`~cryptography.fernet.Fernet` instance.
+    """
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=_KDF_ITERATIONS,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(master.encode("utf-8")))
+    return Fernet(key)
 
 
 class AuthService:
@@ -135,17 +156,11 @@ class AuthService:
             pin_salt = os.urandom(16)
             pin_hash = ""  # Empty = no PIN configured
 
-        # Generate TOTP secret and encrypt it
+        # Generate TOTP secret and encrypt it with Fernet
         totp_secret = pyotp.random_base32()
         totp_salt = os.urandom(16)
-        encryption_key = _derive_encryption_key(password, totp_salt)
-        # Simple XOR encryption with derived key (for TOTP secret only)
-        secret_bytes = totp_secret.encode()
-        key_stream = hashlib.sha256(encryption_key).digest()
-        # Pad key_stream to match secret length
-        while len(key_stream) < len(secret_bytes):
-            key_stream += hashlib.sha256(key_stream).digest()
-        encrypted = bytes(a ^ b for a, b in zip(secret_bytes, key_stream[:len(secret_bytes)]))
+        fernet = _derive_fernet_key(password, totp_salt)
+        encrypted = fernet.encrypt(totp_secret.encode("utf-8"))
 
         # Generate 8 backup codes
         backup_codes: list[str] = []
@@ -182,7 +197,7 @@ class AuthService:
         return {"username": row["username"], "email": row["email"]}
 
     def verify_password(self, password: str) -> bool:
-        """Verify password. Returns False if locked out."""
+        """Verify password and cache decrypted TOTP secret. Returns False if locked out."""
         if self.is_locked():
             return False
 
@@ -193,10 +208,76 @@ class AuthService:
         try:
             result = self._hasher.verify(row["password_hash"], password)
             self._record_attempt(success=result)
+            if result:
+                self._decrypt_and_cache_totp(password)
             return result
         except argon2.exceptions.VerifyMismatchError:
             self._record_attempt(success=False)
             return False
+
+    def _decrypt_and_cache_totp(self, password: str) -> None:
+        """Decrypt the TOTP secret from the database and cache it in memory.
+
+        Falls back gracefully if the ciphertext uses the legacy XOR format
+        (pre-Fernet) — attempts XOR decryption as a migration path, then
+        re-encrypts with Fernet and updates the database.
+        """
+        row = self._db.execute(
+            "SELECT totp_secret_encrypted, totp_salt FROM account WHERE id = 1"
+        ).fetchone()
+        if not row:
+            return
+
+        salt = bytes(row["totp_salt"])
+        encrypted = bytes(row["totp_secret_encrypted"])
+        fernet = _derive_fernet_key(password, salt)
+
+        try:
+            plaintext = fernet.decrypt(encrypted).decode("utf-8")
+            self._totp_secret_cache = plaintext
+        except InvalidToken:
+            # Attempt legacy XOR decryption for backwards compatibility
+            legacy_secret = self._try_legacy_xor_decrypt(password, salt, encrypted)
+            if legacy_secret:
+                self._totp_secret_cache = legacy_secret
+                # Re-encrypt with Fernet and update the database
+                self._migrate_totp_to_fernet(password, legacy_secret)
+                logger.info("Migrated TOTP secret from legacy XOR to Fernet encryption")
+            else:
+                logger.warning("Failed to decrypt TOTP secret — neither Fernet nor legacy XOR succeeded")
+
+    @staticmethod
+    def _try_legacy_xor_decrypt(password: str, salt: bytes, encrypted: bytes) -> str | None:
+        """Attempt to decrypt a TOTP secret using the old XOR stream cipher.
+
+        Returns the plaintext secret if it looks like a valid base32 TOTP
+        secret, or None if decryption produced garbage.
+        """
+        import re
+        legacy_key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 390_000, dklen=32)
+        key_stream = hashlib.sha256(legacy_key).digest()
+        while len(key_stream) < len(encrypted):
+            key_stream += hashlib.sha256(key_stream).digest()
+        decrypted = bytes(a ^ b for a, b in zip(encrypted, key_stream[:len(encrypted)]))
+        try:
+            plaintext = decrypted.decode("utf-8")
+            # TOTP secrets are base32-encoded (A-Z, 2-7, =)
+            if re.fullmatch(r"[A-Z2-7=]+", plaintext) and len(plaintext) >= 16:
+                return plaintext
+        except UnicodeDecodeError:
+            pass
+        return None
+
+    def _migrate_totp_to_fernet(self, password: str, totp_secret: str) -> None:
+        """Re-encrypt TOTP secret with Fernet and update the database row."""
+        new_salt = os.urandom(16)
+        fernet = _derive_fernet_key(password, new_salt)
+        new_encrypted = fernet.encrypt(totp_secret.encode("utf-8"))
+        self._db.execute(
+            "UPDATE account SET totp_secret_encrypted = ?, totp_salt = ? WHERE id = 1",
+            [new_encrypted, new_salt],
+        )
+        self._db.commit()
 
     def has_pin(self) -> bool:
         """Check if a PIN was configured during setup."""

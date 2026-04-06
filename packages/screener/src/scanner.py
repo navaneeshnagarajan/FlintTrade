@@ -302,9 +302,16 @@ class ScannerEngine:
                 _ast.Import, _ast.ImportFrom, _ast.Global, _ast.Nonlocal,
             )
             _FORBIDDEN_ATTRS = {"__class__", "__bases__", "__subclasses__", "__globals__",
-                                "__code__", "__builtins__", "__import__", "eval", "exec",
+                                "__code__", "__builtins__", "__import__", "__mro__",
+                                "__dict__", "__init__", "__new__", "__reduce__",
+                                "__reduce_ex__", "__module__",
+                                "eval", "exec",
                                 "compile", "open", "getattr", "setattr", "delattr",
                                 "breakpoint", "exit", "quit"}
+            _FORBIDDEN_NAMES = {"eval", "exec", "compile", "open", "getattr", "setattr",
+                                "delattr", "breakpoint", "exit", "quit", "__import__",
+                                "type", "chr", "ord", "bytearray", "bytes",
+                                "memoryview", "vars", "dir", "help"}
             for node in _ast.walk(tree):
                 if isinstance(node, _FORBIDDEN_NODES):
                     return ScanResult(
@@ -318,7 +325,7 @@ class ScannerEngine:
                         elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),
                         error=f"Forbidden attribute: {node.attr}",
                     )
-                if isinstance(node, _ast.Name) and node.id in _FORBIDDEN_ATTRS:
+                if isinstance(node, _ast.Name) and node.id in _FORBIDDEN_NAMES:
                     return ScanResult(
                         scanner_name=scanner_name, matched_symbols=[], total_scanned=0,
                         elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),

@@ -14,7 +14,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/learn": "Learn",
   "/lab": "Strategy Lab",
   "/automate": "Automate",
-  "/ai": "AI Center",
+  "/ai": "AI Centre",
 };
 
 function useDocumentTitle() {

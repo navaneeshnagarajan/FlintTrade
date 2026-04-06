@@ -308,7 +308,7 @@ def create_flask_app(
         All other /v1/ endpoints require the same API key auth.
         """
         # Allow health check without auth
-        if request.endpoint in ("health", "static"):
+        if request.endpoint in ("monitoring.health", "static"):
             return None
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":

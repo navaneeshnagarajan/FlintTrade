@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { devtools, persist } from "zustand/middleware";
+import { createJSONStorage, devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
 import type { ConnectionStatus } from "@/types/stores";
 
@@ -40,6 +40,9 @@ const storeImpl: StateCreator<ConnectionStore, [["zustand/persist", unknown]]> =
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:connection",
   version: 1,
+  // sessionStorage — API key clears when the tab closes, preventing XSS exfiltration
+  // from persistent storage. User re-enters on next session (or populated from env in dev).
+  storage: createJSONStorage(() => sessionStorage),
   // Only persist credentials — runtime connection state is always re-derived
   partialize: (state) => ({
     host: state.host,

@@ -28,6 +28,7 @@ import type {
   LeverageSettings,
 } from "@/types/api";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
@@ -54,8 +55,73 @@ function getBase(): string {
   return useConnectionStore.getState().host;
 }
 
+/** Base URL for the FlintTrade Python backend.
+ *  In dev mode the Vite proxy maps /ft-api → localhost:5001.
+ *  In production the backend shares the same origin. */
+function getFtBase(): string {
+  if (import.meta.env.DEV) return "/ft-api";
+  return "";
+}
+
 function getApiKey(): string {
   return useConnectionStore.getState().apiKey;
+}
+
+/** POST an order through the FlintTrade safety proxy.
+ *
+ *  The backend at order_routes.py:
+ *    - Reads X-FlintTrade-Mode to enforce explore/practice/live guards
+ *    - Injects the OpenAlgo API key before forwarding the request
+ *
+ *  The API key is therefore NOT sent from the browser here; the backend
+ *  holds it securely and adds it server-side.
+ */
+async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
+  // Apply the order rate limit (10/s) — identical to OpenAlgo direct calls
+  if (!orderLimiter.tryConsume()) {
+    throw new Error(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);
+  }
+
+  // Read the current operating mode and attach it as a header so the
+  // backend safety layer can enforce practice/explore blocking.
+  const mode = useModeStore.getState().mode;
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${getFtBase()}/api/v1/orders/${ftEndpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-FlintTrade-Mode": mode,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("Connection failed. Check FlintTrade backend is running.");
+  }
+
+  if (!resp.ok) {
+    const body2 = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const serverMsg = body2?.message ?? body2?.error ?? null;
+    if (resp.status === 401) {
+      throw new Error("API key invalid. Check Settings → Connection.");
+    }
+    if (resp.status === 400) {
+      throw new Error(serverMsg ?? "Invalid order parameters. Check symbol and exchange.");
+    }
+    if (resp.status === 403) {
+      // Backend returns 403 when mode blocks the action (e.g. real order in practice mode)
+      throw new Error(serverMsg ?? `Order blocked in ${mode} mode.`);
+    }
+    if (resp.status === 500) {
+      throw new Error(serverMsg ?? "FlintTrade backend error. Try again in a few seconds.");
+    }
+    throw new Error(serverMsg ?? `Server error (${resp.status})`);
+  }
+
+  const json = await resp.json();
+  if (json.status === "error") throw new Error(json.message || `Order API ${ftEndpoint} error`);
+  return (json.data ?? json) as T;
 }
 
 async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
@@ -127,13 +193,20 @@ async function get<T>(endpoint: string): Promise<T> {
   return (json.data ?? json) as T;
 }
 
-// --- Orders ---
+// --- Orders (routed through FlintTrade safety proxy) ---
+// These three functions no longer call OpenAlgo directly. Every request passes
+// through order_routes.py in the FlintTrade backend, which:
+//   1. Reads X-FlintTrade-Mode and blocks real orders in explore/practice mode
+//   2. Injects the OpenAlgo API key before forwarding to OpenAlgo
+// The API key is therefore never sent from the browser for order endpoints.
 export const placeOrder = (params: PlaceOrderParams) =>
-  post<{ orderId: string }>("placeorder", params);
+  postOrder<{ orderId: string }>("place", params);
+export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
+  postOrder<{ orderId: string }>("place-smart", params);
 export const cancelAllOrders = (strategy = "Flint") =>
-  post<void>("cancelallorder", { strategy });
+  postOrder<void>("cancel-all", { strategy });
 export const closePosition = (strategy = "Flint") =>
-  post<void>("closeposition", { strategy }); // BUG FIX 2: passes strategy string, was passing { product: "MIS" }
+  postOrder<void>("close-position", { strategy });
 
 // --- Data ---
 export const getQuotes = (symbol: string, exchange = "NSE") =>

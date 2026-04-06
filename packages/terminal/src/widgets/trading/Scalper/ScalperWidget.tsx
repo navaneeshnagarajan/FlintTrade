@@ -16,6 +16,16 @@ import {
 import Chart from "@/components/Chart";
 import { Input } from "@/components/ui/input";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -344,6 +354,8 @@ function ScalperWidget(_props: WidgetProps) {
 
   const [status, setStatus] = useState<StatusState>({ message: "", type: "idle" });
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
+  const [closeAllOpen, setCloseAllOpen] = useState(false);
+  const [cancelAllOpen, setCancelAllOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
@@ -491,8 +503,12 @@ function ScalperWidget(_props: WidgetProps) {
     }
   }, [pendingOrder, executeOrder]);
 
-  const handleCloseAll = useCallback(async () => {
-    if (!window.confirm("Close all open positions? This cannot be undone.")) return;
+  const handleCloseAll = useCallback(() => {
+    setCloseAllOpen(true);
+  }, []);
+
+  const confirmCloseAll = useCallback(async () => {
+    setCloseAllOpen(false);
     showStatus("Closing all…", "pending", 0);
     try {
       await closePosition("FlintScalper");
@@ -502,8 +518,12 @@ function ScalperWidget(_props: WidgetProps) {
     }
   }, [showStatus]);
 
-  const handleCancelAll = useCallback(async () => {
-    if (!window.confirm("Cancel all pending orders?")) return;
+  const handleCancelAll = useCallback(() => {
+    setCancelAllOpen(true);
+  }, []);
+
+  const confirmCancelAll = useCallback(async () => {
+    setCancelAllOpen(false);
     showStatus("Cancelling…", "pending", 0);
     try {
       await cancelAllOrders("FlintScalper");
@@ -950,6 +970,46 @@ function ScalperWidget(_props: WidgetProps) {
           </div>
         </div>
       )}
+
+      {/* Close all positions confirmation */}
+      <AlertDialog open={closeAllOpen} onOpenChange={setCloseAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Close all open positions?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will send a close request for all positions under the FlintScalper
+              strategy. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmCloseAll()}
+              className="bg-loss hover:bg-loss/90 text-white"
+            >
+              Close All Positions
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cancel all pending orders confirmation */}
+      <AlertDialog open={cancelAllOpen} onOpenChange={setCancelAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel all pending orders?</AlertDialogTitle>
+            <AlertDialogDescription>
+              All pending orders under the FlintScalper strategy will be cancelled.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Orders</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmCancelAll()}>
+              Cancel All Orders
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

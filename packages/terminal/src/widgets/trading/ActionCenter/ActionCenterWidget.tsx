@@ -17,11 +17,21 @@
  *   POST /ft-api/api/v1/action-center/approve-all
  */
 
-import { useCallback, memo } from "react";
+import { useState, useCallback, memo } from "react";
 import { CheckCircle2, XCircle, CheckCheck, Loader2, ShieldCheck } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -139,6 +149,7 @@ function OrderRow({ order, onApprove, onReject, disabled }: OrderRowProps) {
 
 function ActionCenterWidget(_props: WidgetProps) {
   const queryClient = useQueryClient();
+  const [approveAllOpen, setApproveAllOpen] = useState(false);
 
   const { data: orders, isLoading, isError } = useQuery({
     queryKey: ["actionCenterPending"],
@@ -196,11 +207,7 @@ function ActionCenterWidget(_props: WidgetProps) {
             size="sm"
             variant="outline"
             disabled={anyPending}
-            onClick={() => {
-              if (window.confirm("Approve and send all pending orders to the broker?")) {
-                approveAllMutation.mutate();
-              }
-            }}
+            onClick={() => setApproveAllOpen(true)}
             className="h-6 px-2 text-xxs gap-1 border-border-default text-profit hover:bg-profit/10 hover:border-profit/40 hover:text-profit transition-colors"
             aria-label={`Approve all ${pending.length} pending orders`}
           >
@@ -293,6 +300,31 @@ function ActionCenterWidget(_props: WidgetProps) {
           </p>
         </div>
       )}
+
+      {/* Approve all confirmation */}
+      <AlertDialog open={approveAllOpen} onOpenChange={setApproveAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Approve and send all pending orders?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pending.length} order{pending.length !== 1 ? "s" : ""} will be sent to
+              your broker immediately. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setApproveAllOpen(false);
+                approveAllMutation.mutate();
+              }}
+              className="bg-profit hover:bg-profit/90 text-white"
+            >
+              Approve All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -61,7 +61,7 @@ const SLOGAN = [
   { text: "Invest", color: "text-emerald-400" },
   { text: "Trade", color: "text-amber-400" },
   { text: "Automate", color: "text-rose-400" },
-  { text: "Analyze", color: "text-purple-400" },
+  { text: "Analyse", color: "text-purple-400" },
   { text: "Evolve", color: "text-cyan-400" },
 ];
 
@@ -455,7 +455,7 @@ export default function WelcomeRoute() {
         <Particles quantity={15} color={particleColors.secondary} size={1.5} className="opacity-20" />
         <Particles quantity={6}  color={particleColors.tertiary}  size={2.5} className="opacity-15" />
         <Particles quantity={4}  color={particleColors.warm}      size={3.0} className="opacity-10" />
-        <Particles quantity={3}  color={particleColors.white}     size={2.0} className="opacity-8" />
+        <Particles quantity={3}  color={particleColors.white}     size={2.0} className="opacity-5" />
 
         {/* Continuous meteor shower — always falling */}
         <Meteors number={15} />

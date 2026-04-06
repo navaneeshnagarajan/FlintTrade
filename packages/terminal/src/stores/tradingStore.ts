@@ -24,7 +24,12 @@ const storeImpl: StateCreator<TradingStore> = (set) => ({
   availableMargin: 0,
   updateFromPositions: (positions) => {
     const totalPnl = positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
-    set({ totalPnl, positionCount: positions.length });
+    const totalInvested = positions.reduce(
+      (sum, p) => sum + Math.abs(p.averagePrice * p.quantity),
+      0,
+    );
+    const totalPnlPercent = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
+    set({ totalPnl, totalPnlPercent, positionCount: positions.length });
   },
   updateFromFunds: (funds) => {
     set({
