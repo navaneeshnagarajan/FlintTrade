@@ -10,9 +10,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from .adapter import load_broker_adapter, BrokerAdapter
-from .models import BrokerAccountInfo, AccountStatus
-from .exceptions import SessionError, AuthFlowError
+from adapter import load_broker_adapter, BrokerAdapter  # noqa: E402 — sys.path includes gateway/src/
+from models import BrokerAccountInfo, AccountStatus  # noqa: E402
+from exceptions import SessionError, AuthFlowError  # noqa: E402
 
 logger = logging.getLogger("flinttrade.gateway.session")
 

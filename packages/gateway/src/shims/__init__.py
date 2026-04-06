@@ -1,5 +1,5 @@
 """Shim modules that intercept OpenAlgo internal imports."""
-from . import auth_db_shim, config_shim, logging_shim, token_db_shim
+from shims import auth_db_shim, config_shim, logging_shim, token_db_shim  # noqa: E402
 
 __all__ = [
     "auth_db_shim",

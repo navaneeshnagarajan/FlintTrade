@@ -10,10 +10,10 @@ import logging
 import threading
 from typing import Any
 
-from .session import BrokerSession
-from .models import BrokerInfo, BrokerAccountInfo
-from .adapter import BROKER_CATALOG
-from .exceptions import BrokerNotFoundError, SessionError
+from session import BrokerSession  # noqa: E402 — sys.path includes gateway/src/
+from models import BrokerInfo, BrokerAccountInfo  # noqa: E402
+from adapter import BROKER_CATALOG  # noqa: E402
+from exceptions import BrokerNotFoundError, SessionError  # noqa: E402
 
 logger = logging.getLogger("flinttrade.gateway.registry")
 

@@ -20,9 +20,9 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, redirect, request
 
-from .adapter import BROKER_CATALOG
-from .exceptions import AuthFlowError, BrokerNotFoundError, CredentialError
-from .models import AuthFlowType
+from adapter import BROKER_CATALOG  # noqa: E402 — sys.path includes gateway/src/
+from exceptions import AuthFlowError, BrokerNotFoundError, CredentialError  # noqa: E402
+from models import AuthFlowType  # noqa: E402
 
 logger = logging.getLogger("flinttrade.gateway.auth")
 

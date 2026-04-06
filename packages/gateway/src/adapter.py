@@ -16,8 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .exceptions import BrokerNotFoundError
-from .models import AuthFlowType, BrokerInfo
+from exceptions import BrokerNotFoundError  # noqa: E402 — sys.path includes gateway/src/
+from models import AuthFlowType, BrokerInfo  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Path setup — locate OpenAlgo submodule root
