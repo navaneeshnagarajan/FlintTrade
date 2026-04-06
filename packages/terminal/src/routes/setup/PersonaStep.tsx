@@ -49,7 +49,7 @@ export function PersonaPicker({ selected, onSelect }: PersonaPickerProps) {
     {
       value: "beginner",
       label: "Learner",
-      description: "Learning markets, paper trading",
+      description: "Learning markets, practice trading",
       hint: "Guided workspace with explanations",
     },
   ];
@@ -132,7 +132,7 @@ export function ExperiencePicker({ selected, onSelect }: ExperiencePickerProps) 
 // ---------------------------------------------------------------------------
 
 export const INTERESTS = [
-  { id: "learning",    label: "Learning & Education", icon: BookOpen,        desc: "Market basics, strategies, paper trading"   },
+  { id: "learning",    label: "Learning & Education", icon: BookOpen,        desc: "Market basics, strategies, practice trading"   },
   { id: "investing",   label: "Investing",            icon: PiggyBank,       desc: "Mutual funds, SIPs, portfolio, net worth"   },
   { id: "trading",     label: "Trading",              icon: CandlestickChart, desc: "F&O scalping, options, intraday"           },
   { id: "backtesting", label: "Backtesting",          icon: Zap,             desc: "Strategy testing, walk-forward, optimization" },

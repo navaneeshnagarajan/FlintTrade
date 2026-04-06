@@ -1,5 +1,5 @@
 /**
- * SandboxControls — paper trading management panel.
+ * SandboxControls — practice mode management panel.
  *
  * Features:
  *   - Current virtual capital display (₹ formatted in Indian locale)

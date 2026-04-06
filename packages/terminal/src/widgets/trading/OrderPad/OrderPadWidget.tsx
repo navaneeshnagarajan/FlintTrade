@@ -20,6 +20,7 @@
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { useForm, Controller, type SubmitHandler, type Resolver } from "react-hook-form";
+import { useModeStore } from "@/stores/modeStore";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -432,6 +433,9 @@ function OrderPadWidget(_props: WidgetProps) {
     }
   }, [submitOrder]);
 
+  const appMode = useModeStore((s) => s.mode);
+  const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
+
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
   const btnColor = isBuy
@@ -709,7 +713,7 @@ function OrderPadWidget(_props: WidgetProps) {
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-          {loading ? "Placing…" : `Place ${action} Order`}
+          {loading ? "Placing…" : isPracticeOrExplore ? `Practice ${action === "BUY" ? "Buy" : "Sell"}` : `Place ${action} Order`}
         </Button>
       </form>
 

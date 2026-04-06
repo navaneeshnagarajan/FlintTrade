@@ -6,7 +6,7 @@
  * Step 3: Broker Connection — OpenAlgo host + API key
  * Step 4: Trading Defaults  — exchange, product, quantity
  * Step 5: Risk Limits       — max daily loss, position size
- * Step 6: Mode Selection    — Demo / Sandbox / Live
+ * Step 6: Mode Selection    — Explore / Practice / Live
  *
  * Session-storage key `flinttrade:setup-progress` persists partial progress so
  * that interrupting after account creation (step 1) and returning does not trigger

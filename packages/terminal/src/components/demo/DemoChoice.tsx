@@ -111,12 +111,12 @@ export default function DemoChoice({ onChoice }: DemoChoiceProps) {
             How would you like to explore FlintTrade?
           </h1>
           <p className="text-sm text-text-muted">
-            You are in Demo mode — no real data or orders.
+            You are in Explore mode — no real data or orders.
           </p>
         </div>
 
         {/* Choice cards */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Demo mode entry choice">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Explore mode entry choice">
           {CHOICE_CARDS.map((card) => {
             const isSelected = selected === card.id;
             return (

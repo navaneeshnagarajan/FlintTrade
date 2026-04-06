@@ -13,12 +13,12 @@ npm install                                    # install deps
 npm run dev                                    # dev server at localhost:5173
 npm run build                                  # tsc --noEmit + vite build
 npm run typecheck                              # tsc --noEmit only
-npx vitest run                                 # all tests (~1,062)
+npx vitest run                                 # all tests (~1,206)
 npx vitest run src/path/to/file.test.ts        # single test file
 npx vitest run -t "test name"                  # single test by name
 
 # Python — run from repo root
-make test                                      # all pytest tests (~2,903)
+make test                                      # all pytest tests (~2,940)
 make test-fast                                 # stop on first failure
 python -m pytest packages/core/tests/test_foo.py -v              # single file
 python -m pytest packages/core/tests/test_foo.py::test_name -v   # single test
@@ -148,7 +148,7 @@ TanStack Query ← REST API responses ONLY (positions, orders, holdings, funds, 
 **Boundary rules — data enters through ONE path only, never duplicated across stores:**
 - **Jotai atoms:** WebSocket real-time data ONLY (per-instrument LTP, quote, depth, derived PCR/straddle/greeks)
 - **TanStack Query:** REST API responses ONLY (positions, orders, holdings, funds, option chain)
-- **Zustand stores:** Derived/UI state ONLY (connection status, active layout, settings mirror, aggregated P&L)
+- **Zustand stores:** Derived/UI state ONLY (connection status, active layout, settings mirror, aggregated P&L, mode — `modeStore` with `explore | practice | live`)
 
 Rate limiting built into the query layer: Orders 10/s, Smart orders 2/s, General API 50/s.
 
@@ -166,6 +166,7 @@ Two-tier config. No exceptions.
 - TOTP auto-login NOT implemented. OpenAlgo handles broker auth.
 - API keys as env vars or workspace.json `_ref` fields, never hardcoded
 - Cross-platform workspace: `~/.flinttrade/` (Linux), `~/Library/Application Support/flinttrade/` (macOS), `%APPDATA%/flinttrade/` (Windows)
+- `~/.flinttrade/jwt_secret` is auto-generated on first startup (used for JWT auth tokens)
 - All other config (LLM, Telegram, risk, data paths) is in workspace.json, configured in-app via Settings
 
 ## Monorepo Structure
@@ -212,9 +213,11 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.3.0 "Structured Calm" (2026-03-30)
-- **Tests:** 1,062 terminal (Vitest) + 2,903 Python (pytest) = 3,965 total
+- **Version:** 0.4.1 "Unified Mode System + Server-Side Order Safety" (2026-04-04)
+- **Tests:** 1,206 terminal (Vitest) + 2,940 Python (pytest) = 4,146 total
 - **Terminal:** 30 widgets (TSX) + 6 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
+- **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement
+- **Auth:** argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
 - **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 6 cinematic themes with dark/light variants, density modes, zero arbitrary values
 - **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
@@ -223,8 +226,8 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 - **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), 20 FlintTrade backend endpoints
 - **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion
 - **OpenAlgo:** Tested with broker sandbox, first trade placed
-- **Shell:** TopBar (route tabs, market status, IST clock), TickerBar (16 instruments), WidgetPicker, PresetPicker, ToolsDropdown
-- **State:** 6 Zustand stores (connection, layout, settings, trading, theme, skill — connection persisted), Jotai market atoms, 15 TanStack Query hooks, WebSocket + REST fallback
+- **Shell:** TopBar (route tabs, market status, IST clock, ModeIndicator), TickerBar (16 instruments), WidgetPicker, PresetPicker, ToolsDropdown
+- **State:** 7 Zustand stores (connection, layout, settings, trading, theme, skill, mode — connection persisted), Jotai market atoms, 15 TanStack Query hooks, WebSocket + REST fallback
 - **Infrastructure:** Makefile, Docker Compose, systemd templates, GitHub Actions CI (3 jobs)
 - **Workspace:** `~/.flinttrade/workspace.json`, cross-platform
 
@@ -335,7 +338,7 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 3. Check `docs/REFERENCES.md` — absorb before building
 4. Use `/brainstorm` and `/write-plan` for non-trivial tasks
 5. Implement — full permissions: create, edit, delete, refactor as needed
-6. Run: `make test` (must pass 2,903+ Python) and `npx vitest run` in terminal (must pass 1,062+)
+6. Run: `make test` (must pass 2,940+ Python) and `npx vitest run` in terminal (must pass 1,206+)
 7. For React: `npm run build` in `packages/terminal` (must build clean)
 8. Mark task done in PLAN.md
 9. Update CHANGELOG.md [Unreleased] section for notable changes
@@ -358,8 +361,8 @@ To set up a new machine:
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
 4. Configure `infra/openalgo/.env` with broker credentials
 5. `make start` (starts OpenAlgo)
-6. `make test` (verify 2,903+ pass)
-7. `cd packages/terminal && npm install && npm run build` (verify clean build, 1,062+ vitest pass)
+6. `make test` (verify 2,940+ pass)
+7. `cd packages/terminal && npm install && npm run build` (verify clean build, 1,206+ vitest pass)
 8. Read PLAN.md, pick a task, start building
 
 See `docs/machine-setup/QUICKSTART.md` for detailed instructions.

@@ -615,6 +615,81 @@ def api_security_unban() -> tuple[Any, int]:
     return jsonify({"status": "success", "data": {"ip": ip}}), 200
 
 
+@operations_bp.route("/security/settings", methods=["GET"])
+def api_security_settings_get() -> tuple[Any, int]:
+    """Return the SecurityMonitor's current configuration.
+
+    Returns:
+        JSON with ``status`` and ``data`` containing:
+            ``auto_ban_enabled`` (bool): Whether automatic banning is active.
+            ``ban_threshold`` (int): Auth-failure count before auto-ban triggers.
+            ``notfound_ban_threshold`` (int): 404-flood count before auto-ban triggers.
+            ``ban_duration`` (int): Duration in seconds for automatic bans.
+    """
+    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+    monitor = current_app.config.get("SECURITY_MONITOR")
+    if not isinstance(monitor, _SM):
+        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "auto_ban_enabled": monitor._auth_ban_threshold > 0,
+            "ban_threshold": monitor._auth_ban_threshold,
+            "notfound_ban_threshold": monitor._notfound_ban_threshold,
+            "ban_duration": monitor._ban_duration,
+        },
+    }), 200
+
+
+@operations_bp.route("/security/settings", methods=["POST"])
+def api_security_settings_update() -> tuple[Any, int]:
+    """Update the SecurityMonitor's configuration.
+
+    Accepts a JSON body with any subset of the configurable fields.
+    Changes take effect immediately (in-memory).
+
+    Request JSON (all fields optional):
+        ban_threshold (int): Auth-failure count before auto-ban triggers.
+        notfound_ban_threshold (int): 404-flood count before auto-ban triggers.
+        ban_duration (int): Duration in seconds for automatic bans.
+
+    Returns:
+        JSON with ``status`` and updated settings in ``data``.
+    """
+    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+
+    monitor = current_app.config.get("SECURITY_MONITOR")
+    if not isinstance(monitor, _SM):
+        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
+
+    body = request.get_json(silent=True) or {}
+    try:
+        if "ban_threshold" in body:
+            monitor._auth_ban_threshold = int(body["ban_threshold"])
+        if "notfound_ban_threshold" in body:
+            monitor._notfound_ban_threshold = int(body["notfound_ban_threshold"])
+        if "ban_duration" in body:
+            monitor._ban_duration = int(body["ban_duration"])
+    except (TypeError, ValueError) as exc:
+        logger.debug("Invalid security settings value: %s", exc)
+        return jsonify({"status": "error", "message": "All settings values must be integers"}), 400
+    except Exception:
+        logger.exception("api_security_settings_update error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "auto_ban_enabled": monitor._auth_ban_threshold > 0,
+            "ban_threshold": monitor._auth_ban_threshold,
+            "notfound_ban_threshold": monitor._notfound_ban_threshold,
+            "ban_duration": monitor._ban_duration,
+        },
+    }), 200
+
+
 # ------------------------------------------------------------------
 # News (server-side RSS proxy — avoids CORS in browser)
 # ------------------------------------------------------------------

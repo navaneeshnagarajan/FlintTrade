@@ -6,6 +6,35 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Server-side order safety proxy (order_routes.py) — all orders route through FlintTrade backend
+- Unified mode system: Explore (sample data) / Practice (paper trading) / Live (real orders)
+- ModeIndicator component in TopBar with Practice-to-Live toggle
+- Practice section in Settings with SandboxControls
+- DemoChoice overlay on first /explore visit
+- GoalTab wired into /invest route
+- JWT secret persistence across server restarts
+- SEBI disclaimer banner in practice mode
+
+### Fixed
+- Kill switch now properly awaits async coroutines (was silently failing)
+- Scheduler no longer blocks equity ticks during market hours
+- TOTP encryption upgraded from XOR to Fernet (AES-128-CBC + HMAC)
+- API key moved from localStorage to sessionStorage
+- OpenAlgo holidays/timings/intervals changed from POST to GET
+- 6 window.confirm replaced with AlertDialog (Scalper, ActionCenter, KeyboardSection)
+- British English: Analyse, Behaviour, Centre, Colour (8+ locations)
+- Hardcoded hex colours replaced with design tokens
+- Path traversal validation uses Path.is_relative_to
+- Scanner exec() sandbox expanded with additional forbidden attributes
+- Lot sizes updated for SEBI Nov 2024 revision
+- Cron manager silent exception swallowing replaced with logging
+- Gateway bare imports fixed with relative paths
+
+### Removed
+- settingsStore.sandboxMode (mode now in modeStore exclusively)
+- ModePill.tsx and SandboxToggle.tsx (replaced by ModeIndicator)
+
 ## [0.3.0] — 2026-03-30
 
 v0.3.0 "Structured Calm" — Bloomberg precision + Stripe polish + Linear minimalism.

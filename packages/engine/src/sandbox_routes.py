@@ -1,8 +1,13 @@
-"""Sandbox Flask Blueprint — virtual paper trading endpoints.
+"""Engine Sandbox Flask Blueprint — config, leverage, and squareoff endpoints.
 
-All endpoints are under the ``/v1/sandbox/`` prefix.  The
+All endpoints are under the ``/v1/sandbox-config/`` prefix.  The
 :class:`~packages.engine.src.sandbox.SandboxEngine` is stored on
 ``app.config["SANDBOX_ENGINE"]`` and injected when the Flask app is created.
+
+Note: The paper-trading endpoints (capital, orders, positions, reset,
+export/import) live in ``packages/data/src/sandbox_routes.py`` under
+``/v1/sandbox/``.  This blueprint uses ``/v1/sandbox-config/`` to avoid
+a URL-prefix collision between the two blueprints.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.engine.sandbox_routes")
 
-sandbox_bp = Blueprint("sandbox", __name__, url_prefix="/v1/sandbox")
+sandbox_bp = Blueprint("sandbox", __name__, url_prefix="/v1/sandbox-config")
 
 
 # ---------------------------------------------------------------------------

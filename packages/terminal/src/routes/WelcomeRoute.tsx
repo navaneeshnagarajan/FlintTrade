@@ -128,7 +128,14 @@ function GreetingScreen({ onDone }: { onDone: () => void }) {
   }, [onDone]);
 
   return (
-    <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center px-6 relative">
+    <div
+      className="min-h-screen bg-surface-base flex flex-col items-center justify-center px-6 relative cursor-pointer"
+      onClick={onDone}
+      role="button"
+      tabIndex={0}
+      aria-label="Click to continue"
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onDone(); } }}
+    >
       <motion.div
         className="flex flex-col items-center gap-6 text-center max-w-md"
         initial={{ opacity: 0, y: 12 }}

@@ -322,6 +322,16 @@ export const getTradeJournal = (
 // Safety (5-layer safety system + kill switch)
 // ---------------------------------------------------------------------------
 
+/** Raw nested safety config as returned by the backend (5-layer system). */
+export interface SafetyConfigRaw {
+  l1_order: { price_deviation_pct: number; check_market_hours: boolean; qty_limits: Record<string, number> };
+  l2_position: { max_positions: number };
+  l3_portfolio: { max_margin_pct: number; max_net_delta: number; max_net_vega: number };
+  l4_pnl: { pnl_pause_pct: number; pnl_kill_pct: number };
+  l5_kill: { active: boolean };
+}
+
+/** Flattened safety config for UI consumption. */
 export interface SafetyConfig {
   check_market_hours: boolean;
   max_qty_nse: number;
@@ -336,7 +346,27 @@ export interface SafetyConfig {
   kill_switch_active: boolean;
 }
 
-export const getSafetyConfig = () => get<SafetyConfig>("safety/config");
+/** Flatten the nested backend response into the UI-friendly shape. */
+function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
+  return {
+    check_market_hours: raw.l1_order?.check_market_hours ?? true,
+    max_qty_nse: raw.l1_order?.qty_limits?.NSE ?? 1800,
+    max_qty_nfo: raw.l1_order?.qty_limits?.NFO ?? 1800,
+    max_qty_mcx: raw.l1_order?.qty_limits?.MCX ?? 100,
+    max_positions: raw.l2_position?.max_positions ?? 10,
+    max_margin_pct: raw.l3_portfolio?.max_margin_pct ?? 80,
+    max_net_delta: raw.l3_portfolio?.max_net_delta ?? 1000,
+    max_net_vega: raw.l3_portfolio?.max_net_vega ?? 500,
+    daily_loss_pause_pct: raw.l4_pnl?.pnl_pause_pct ?? 2,
+    daily_loss_kill_pct: raw.l4_pnl?.pnl_kill_pct ?? 5,
+    kill_switch_active: raw.l5_kill?.active ?? false,
+  };
+}
+
+export const getSafetyConfig = async (): Promise<SafetyConfig> => {
+  const raw = await get<SafetyConfigRaw>("safety/config");
+  return flattenSafetyConfig(raw);
+};
 
 export const updateSafetyConfig = (config: Partial<SafetyConfig>) =>
   post<{ status: string }>(
@@ -630,7 +660,7 @@ export interface PnLSummary {
   entries: PnLTrackerEntry[];
 }
 
-export const getPnLTracker = () => get<{ entries: PnLTrackerEntry[] }>("pnl-tracker");
+export const getPnLTracker = () => get<PnLTrackerEntry[]>("pnl-tracker");
 export const getPnLSummary = () => get<PnLSummary>("pnl-tracker/summary");
 
 // ---------------------------------------------------------------------------

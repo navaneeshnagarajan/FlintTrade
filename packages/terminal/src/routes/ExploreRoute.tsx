@@ -620,15 +620,15 @@ export default function ExploreRoute() {
           </div>
         </header>
 
-        {/* Demo mode banner — persistent, below the sticky header */}
+        {/* Explore mode banner — persistent, below the sticky header */}
         <div className="bg-accent/10 border border-accent/30 rounded-lg px-4 py-2 mx-4 mt-2 flex items-center gap-2">
           <Info className="w-4 h-4 text-accent shrink-0" />
           <p className="text-xs text-accent">
-            <strong>Demo Mode</strong> — All data shown is sample only. Connect a broker in Settings to see live data.
+            <strong>Explore Mode</strong> — All data shown is sample only. Connect a broker in Settings to see live data.
           </p>
         </div>
 
-        <main id="explore-main" aria-label="Explore demo mode" className="max-w-6xl mx-auto px-6 py-12 space-y-12">
+        <main id="explore-main" aria-label="Explore mode" className="max-w-6xl mx-auto px-6 py-12 space-y-12">
           {/* ---------------------------------------------------------------- */}
           {/* Hero — Particles background + heading                            */}
           {/* ---------------------------------------------------------------- */}

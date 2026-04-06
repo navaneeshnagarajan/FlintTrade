@@ -652,7 +652,7 @@ export default function LearnRoute() {
               <p className="text-xxs text-text-muted">
                 {level === "beginner"
                   ? "Learn the basics of trading — one lesson at a time"
-                  : "Market basics, strategies, and paper trading guides"}
+                  : "Market basics, strategies, and practice trading guides"}
               </p>
             </div>
           </div>

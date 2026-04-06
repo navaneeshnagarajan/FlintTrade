@@ -72,7 +72,7 @@ export default function AppLayout() {
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   const location = useLocation();
   const navigate = useNavigate();
-  // Practice mode (paper trading) drives the persistent amber indicator bar.
+  // Practice mode drives the persistent amber indicator bar.
   // Mode is now owned exclusively by modeStore — settingsStore no longer has sandboxMode.
   const mode = useModeStore((s) => s.mode);
   const authStatus = useAuthStore((s) => s.status);
@@ -146,6 +146,21 @@ export default function AppLayout() {
       )}
       {mode === "live" && (
         <div className="h-px bg-profit/60 shrink-0" role="status" aria-label="Live trading mode" />
+      )}
+      {/* Mode disclaimer banners */}
+      {mode === "practice" && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center">
+          <p className="text-xs text-amber-400">
+            PRACTICE MODE — Virtual trading results are simulated and do not represent actual trading outcomes
+          </p>
+        </div>
+      )}
+      {mode === "explore" && (
+        <div className="bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center">
+          <p className="text-xs text-text-muted">
+            EXPLORE MODE — All data shown is sample only
+          </p>
+        </div>
       )}
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}

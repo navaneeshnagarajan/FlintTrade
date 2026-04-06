@@ -203,6 +203,31 @@ def backtest_run() -> tuple[Any, int]:
     }), 200
 
 
+@backtest_bp.route("/strategies/uploaded", methods=["GET"])
+def list_uploaded_strategies() -> tuple[Any, int]:
+    """Return user-uploaded strategy files managed by the strategy runner.
+
+    Delegates to ``strategy_bp``'s runner so the frontend can call
+    ``GET /api/v1/strategies/uploaded`` without needing to know that the
+    strategy runner lives under ``/v1/strategies/``.
+
+    Returns:
+        JSON with ``status`` and ``data.strategies`` — a list of uploaded
+        strategy objects from :class:`~packages.engine.src.strategy_runner.UserStrategyRunner`.
+    """
+    runner = current_app.config.get("STRATEGY_RUNNER")
+    if runner is None:
+        # Runner not configured — return empty list so the frontend degrades gracefully.
+        return jsonify({"status": "success", "data": {"strategies": []}}), 200
+
+    try:
+        strategies = runner.list_strategies()
+        return jsonify({"status": "success", "data": {"strategies": strategies}}), 200
+    except Exception:
+        logger.exception("list_uploaded_strategies error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
 @backtest_bp.route("/strategies", methods=["GET"])
 def list_strategies() -> tuple[Any, int]:
     """Return available backtest strategy names and descriptions.

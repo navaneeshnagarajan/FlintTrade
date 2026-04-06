@@ -234,8 +234,12 @@ def create_flask_app(
     from packages.engine.src.strategy_routes import strategy_bp  # noqa: PLC0415
     app.register_blueprint(strategy_bp)
 
-    # Register Sandbox blueprint (/v1/sandbox/*)
+    # Register Engine Sandbox blueprint (/v1/sandbox-config/*) — config/leverage/squareoff.
+    # Uses the /v1/sandbox-config prefix to avoid collision with the data sandbox
+    # blueprint below, which owns /v1/sandbox.
     from packages.engine.src.sandbox_routes import sandbox_bp  # noqa: PLC0415
+    from packages.engine.src.sandbox import SandboxEngine as _EngineSandboxEngine  # noqa: PLC0415
+    app.config["SANDBOX_ENGINE"] = _EngineSandboxEngine(account_id="default")
     app.register_blueprint(sandbox_bp)
 
     # Register Data Sandbox blueprint (/v1/sandbox/*) — paper trading engine

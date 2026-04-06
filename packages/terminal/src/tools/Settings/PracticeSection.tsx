@@ -1,5 +1,5 @@
 /**
- * PracticeSection — Settings section for practice (paper trading) mode.
+ * PracticeSection — Settings section for practice mode.
  *
  * Wraps the existing SandboxControls component which provides:
  *   - Virtual capital display and adjustment
@@ -28,7 +28,7 @@ export function PracticeSection() {
       {!isPractice && (
         <div className="p-4 rounded-lg border border-border-default bg-surface-card">
           <p className="text-sm text-text-secondary">
-            Switch to <strong>Practice</strong> mode from the TopBar to access paper trading controls.
+            Switch to <strong>Practice</strong> mode from the TopBar to access virtual trading controls.
             You are currently in <strong>{mode === "explore" ? "Explore" : "Live"}</strong> mode.
           </p>
         </div>

@@ -166,15 +166,15 @@ function ConnectionCard({ connected, practiceMode }: ConnectionCardProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Sandbox toggle switch
+// Practice mode toggle switch
 // ---------------------------------------------------------------------------
 
-interface SandboxSwitchProps {
+interface PracticeSwitchProps {
   enabled: boolean;
   onToggle: () => void;
 }
 
-function SandboxSwitch({ enabled, onToggle }: SandboxSwitchProps) {
+function PracticeSwitch({ enabled, onToggle }: PracticeSwitchProps) {
   return (
     <button
       type="button"
@@ -491,16 +491,16 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         </div>
 
         {/* ------------------------------------------------------------------ */}
-        {/* Sandbox toggle                                                        */}
+        {/* Practice mode toggle                                                  */}
         {/* ------------------------------------------------------------------ */}
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <span className="text-xs font-medium text-text-primary">Practice Mode</span>
             <p className="text-[10px] text-text-muted leading-snug">
-              Paper trading, no real orders
+              Practice mode — virtual orders only
             </p>
           </div>
-          <SandboxSwitch
+          <PracticeSwitch
             enabled={isPractice}
             onToggle={() => sandboxMutation.mutate(!isPractice)}
           />
