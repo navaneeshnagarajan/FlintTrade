@@ -55,7 +55,7 @@ function KillSwitchPill() {
     setIsTriggering(true);
     try {
       // Route through ftApi.ts so the request goes to the FlintTrade backend
-      // (port 5001, /ft-api/api/v1/safety/kill-switch) rather than OpenAlgo
+      // (port 5100, /ft-api/api/v1/safety/kill-switch) rather than OpenAlgo
       // (port 5000, /api/v1/safety/kill-switch). The safety system lives in
       // the FlintTrade engine — OpenAlgo has no equivalent endpoint.
       const { activateKillSwitch } = await import("@/services/ftApi");

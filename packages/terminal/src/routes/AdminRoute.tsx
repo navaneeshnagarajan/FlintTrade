@@ -180,7 +180,7 @@ FlintTrade Dependency Graph
 terminal (React)
   +-- api.ts ------> OpenAlgo REST (port 5000)
   +-- websocket.ts -> OpenAlgo WS (port 8765)
-  +-- ft-api -------> core/app.py (port 5001)
+  +-- ft-api -------> core/app.py (port 5100)
 
 core
   +-- openalgo_client -> OpenAlgo REST API
@@ -279,7 +279,7 @@ function PackagesPanel({ packages, loading, error }: {
     return (
       <div className="p-4 text-sm">
         <p className="text-red-400">Failed to load packages: {error}</p>
-        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5001).</p>
+        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5100).</p>
       </div>
     );
   }
@@ -356,7 +356,7 @@ function EndpointsPanel({ endpoints, loading, error }: {
     return (
       <div className="p-4 text-sm">
         <p className="text-red-400">Failed to load endpoints: {error}</p>
-        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5001).</p>
+        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5100).</p>
       </div>
     );
   }
@@ -439,7 +439,7 @@ function AbsorptionPanel(): JSX.Element {
     return (
       <div className="p-4 text-sm">
         <p className="text-red-400">Failed to load absorption data: {error}</p>
-        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5001).</p>
+        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5100).</p>
       </div>
     );
   }
@@ -664,12 +664,13 @@ function LogsPanel(): JSX.Element {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Level filter buttons */}
-        <div className="flex items-center gap-1">
+        <div role="group" aria-label="Log level filter" className="flex items-center gap-1">
           {FILTER_LEVELS.map((lvl) => (
             <button
               key={lvl}
               type="button"
               onClick={() => setFilter(lvl)}
+              aria-pressed={filter === lvl}
               className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
                 filter === lvl
                   ? "bg-accent/20 text-accent border-accent/40"
@@ -686,6 +687,7 @@ function LogsPanel(): JSX.Element {
           <input
             type="search"
             placeholder="Search logs…"
+            aria-label="Search logs"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full h-7 pl-2.5 pr-7 text-xs rounded border border-border bg-surface-elevated text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
@@ -717,7 +719,7 @@ function LogsPanel(): JSX.Element {
       {/* Log container */}
       {!backendAvailable && entries.length === 0 ? (
         <div className="rounded-lg border border-border bg-surface-card p-6 text-center text-sm text-text-muted">
-          Backend unavailable. Ensure the FlintTrade backend is running on port 5001.
+          Backend unavailable. Ensure the FlintTrade backend is running on port 5100.
         </div>
       ) : (
         <div

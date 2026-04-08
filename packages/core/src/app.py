@@ -1,6 +1,6 @@
 """FlintTrade application entry point — wires all packages together.
 
-Includes a lightweight Flask API server (port 5001) for FlintTrade-specific
+Includes a lightweight Flask API server (port 5100) for FlintTrade-specific
 endpoints that are separate from the OpenAlgo API (port 5000).
 
 Usage:
@@ -25,10 +25,11 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[3])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+import hmac  # noqa: E402
 import time  # noqa: E402
 
 import structlog  # noqa: E402
-from flask import Flask, jsonify, request  # noqa: E402
+from flask import Flask, g as _flask_g, jsonify, request  # noqa: E402
 from flask_cors import CORS  # noqa: E402
 from flask_limiter import Limiter  # noqa: E402
 from flask_limiter.util import get_remote_address  # noqa: E402
@@ -41,10 +42,9 @@ from packages.data.src.audit_logger import AuditLogger  # noqa: E402
 from packages.engine.src.router import OrderRouter  # noqa: E402
 from packages.engine.src.safety import SafetyConfig, SafetySystem  # noqa: E402
 from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler  # noqa: E402
-from packages.automation.src.cron_manager import CronManager  # noqa: E402
-from packages.automation.src.telegram_bot import TelegramBot  # noqa: E402
-from packages.ai.src.llm_client import LLMClient, LLMConfig  # noqa: E402
-from packages.ai.src.rag import RAGEngine  # noqa: E402
+# Heavy optional modules are imported lazily inside FlintTradeApp.__init__()
+# to avoid a 2-5 s startup penalty when ChromaDB / LLM / Telegram deps load.
+# CronManager, TelegramBot, LLMClient, LLMConfig, RAGEngine
 
 # Ensure the gateway src directory is on sys.path so bare gateway imports resolve.
 _GATEWAY_SRC = str(Path(_REPO_ROOT) / "packages" / "gateway" / "src")
@@ -108,14 +108,14 @@ def _read_version() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Flask API server — FlintTrade-specific endpoints (port 5001)
+# Flask API server — FlintTrade-specific endpoints (port 5100)
 # ---------------------------------------------------------------------------
 
 
 def create_flask_app(
     safety: SafetySystem | None = None,
     scheduler: StrategyScheduler | None = None,
-    cron: CronManager | None = None,
+    cron: Any | None = None,
     audit: AuditLogger | None = None,
     client: OpenAlgoClient | None = None,
     registry: BrokerRegistry | None = None,
@@ -254,7 +254,7 @@ def create_flask_app(
     # Register gateway blueprint (mounts at /v1/)
     app.register_blueprint(gateway_bp)
 
-    # Register analysis blueprint (GEX, vol surface, IV smile, straddle P&L, OI profile, max pain)
+    # Register analysis blueprint (/api/v1/gex, /api/v1/volsurface, etc.)
     from packages.screener.src.analysis_routes import analysis_bp  # noqa: PLC0415
     app.register_blueprint(analysis_bp)
 
@@ -262,14 +262,14 @@ def create_flask_app(
     from packages.screener.src.stock_routes import stock_bp  # noqa: PLC0415
     app.register_blueprint(stock_bp)
 
-    # Register Action Center blueprint (/v1/action-center/*)
+    # Register Action Center blueprint (/api/v1/action-center/*)
     from packages.engine.src.action_center import ActionCenter  # noqa: PLC0415
     from packages.engine.src.action_center_routes import action_center_bp  # noqa: PLC0415
     action_center = ActionCenter()
     app.config["ACTION_CENTER"] = action_center
     app.register_blueprint(action_center_bp)
 
-    # Register Security blueprint and middleware (/v1/security/*)
+    # Register Security blueprint and middleware (/api/v1/security/*)
     from packages.core.src.security import SecurityMonitor  # noqa: PLC0415
     from packages.core.src.security_routes import register_security_middleware, security_bp  # noqa: PLC0415
     security_monitor = SecurityMonitor()
@@ -277,7 +277,7 @@ def create_flask_app(
     app.register_blueprint(security_bp)
     register_security_middleware(app, security_monitor)
 
-    # Register P&L tracker blueprint
+    # Register P&L tracker blueprint (/api/v1/pnl-tracker/*)
     from packages.data.src.pnl_routes import pnl_bp  # noqa: PLC0415
     app.register_blueprint(pnl_bp)
 
@@ -297,11 +297,11 @@ def create_flask_app(
     from packages.screener.src.tv_routes import tv_bp  # noqa: PLC0415
     app.register_blueprint(tv_bp)
 
-    # Register monitoring blueprint (health, traffic, latency)
+    # Register monitoring blueprint (/api/v1/health, /api/v1/traffic/*, /api/v1/latency/*)
     from packages.core.src.monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
-    # Register Strategy Runner blueprint (/v1/strategies/*)
+    # Register Strategy Runner blueprint (/api/v1/strategies/*)
     from packages.engine.src.strategy_routes import strategy_bp  # noqa: PLC0415
     app.register_blueprint(strategy_bp)
 
@@ -362,15 +362,17 @@ def create_flask_app(
     except Exception as exc:
         logger.error("Account reconnection failed: %s", exc)
 
-    # Specific /v1/ paths that are legitimately public (no API key needed):
-    # - Health check endpoint
+    # Paths that are legitimately public (no API key needed):
+    # - Health check endpoint (also exempted by endpoint name in require_auth)
     # - Admin introspect (already gated by FLINTTRADE_DEV in admin_routes)
     # - OAuth callbacks (browser redirect — no API key in URL)
+    # - Frontend error reporting (/api/v1/errors — must be reachable before auth)
     _PUBLIC_V1_PREFIXES = (
         "/v1/admin/health",
         "/v1/admin/introspect",
         "/v1/auth/",          # Auth endpoints are public (login, setup, status)
         "/v1/auth/callback",
+        "/api/v1/errors",     # Frontend error reporting — public, rate-limited
     )
 
     @app.before_request
@@ -420,8 +422,6 @@ def create_flask_app(
         if any(request.path.startswith(prefix) for prefix in _PUBLIC_V1_PREFIXES):
             return None
 
-        import hmac as _hmac  # noqa: PLC0415
-
         api_key = (
             request.headers.get("X-API-Key")
             or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
@@ -432,7 +432,7 @@ def create_flask_app(
             logger.warning("OPENALGO_API_KEY not set — all requests will be rejected")
             return jsonify({"status": "error", "message": "Server not configured"}), 503
 
-        if not api_key or not _hmac.compare_digest(api_key, expected_key):
+        if not api_key or not hmac.compare_digest(api_key, expected_key):
             # Record auth failure for brute-force detection
             try:
                 sec = app.config.get("SECURITY_MONITOR")
@@ -459,17 +459,15 @@ def create_flask_app(
     @app.before_request
     def _record_request_start() -> None:
         """Store request start time for latency calculation."""
-        import flask  # noqa: PLC0415
-        flask.g._request_start = time.monotonic()
+        _flask_g._request_start = time.monotonic()
 
     @app.after_request
     def _record_traffic(response: Any) -> Any:
         """Record method, path, status, and duration in TrafficCounter."""
         try:
-            import flask  # noqa: PLC0415
             from packages.core.src.monitoring_routes import get_traffic_counter  # noqa: PLC0415
 
-            start = getattr(flask.g, "_request_start", None)
+            start = getattr(_flask_g, "_request_start", None)
             duration_ms = (time.monotonic() - start) * 1000 if start is not None else 0.0
             get_traffic_counter().record(
                 method=request.method,
@@ -527,12 +525,12 @@ def create_flask_app(
     return app
 
 
-def _run_flask_server(app: Flask, port: int = 5001) -> None:
+def _run_flask_server(app: Flask, port: int = 5100) -> None:
     """Run the Flask API server in a daemon thread.
 
     Args:
         app: Flask application instance.
-        port: Port to bind (default 5001).
+        port: Port to bind (default 5100).
     """
     thread = threading.Thread(
         target=lambda: app.run(
@@ -592,13 +590,20 @@ class FlintTradeApp:
             time_scheduler=self.time_scheduler,
         )
 
-        # Automation — cron manager
+        # Automation — cron manager (lazy import avoids loading APScheduler at
+        # module level, which accounts for ~0.3 s of the startup penalty).
+        from packages.automation.src.cron_manager import CronManager  # noqa: PLC0415
+
         self.cron = CronManager(
             openalgo_client=self.client,
             audit_logger=self.audit,
         )
 
-        # Automation — Telegram bot (optional — token may not be set)
+        # Automation — Telegram bot (optional — token may not be set).
+        # Lazy import avoids pulling in the python-telegram-bot dependency
+        # (and its event-loop initialisation) until it is actually needed.
+        from packages.automation.src.telegram_bot import TelegramBot  # noqa: PLC0415
+
         self.telegram = TelegramBot(
             router=self.router,
             safety_system=self.safety,
@@ -632,10 +637,17 @@ class FlintTradeApp:
         self.contract_manager = ContractManager(contracts_dir)
         self.registry = BrokerRegistry()
 
-        # RAG — knowledge base (persistent)
+        # RAG — knowledge base (persistent).
+        # LLMClient and RAGEngine are imported lazily here to avoid loading
+        # ChromaDB, sentence-transformers, and the LLM HTTP client at module
+        # level, which would add 2-5 s to startup time even when the AI
+        # features are not yet used.
         rag_dir = flinttrade_dir / "rag"
         rag_dir.mkdir(exist_ok=True)
         try:
+            from packages.ai.src.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
+            from packages.ai.src.rag import RAGEngine  # noqa: PLC0415
+
             try:
                 _cfg = LLMConfig.from_env()
                 _llm_ok = bool(_cfg.provider)
@@ -644,10 +656,15 @@ class FlintTradeApp:
             llm_client = LLMClient() if _llm_ok else None
             self.rag = RAGEngine(llm_client=llm_client, persist_directory=str(rag_dir))
             if self.rag.document_count() == 0:
-                logger.info("RAG database empty — indexing docs/ directory...")
-                self.rag.index_directory("docs/")
+                logger.info("RAG database empty — indexing docs/ directory in background...")
+                # Index documentation in background — do not block startup
+                threading.Thread(
+                    target=lambda: self.rag.index_directory("docs/"),
+                    daemon=True,
+                    name="rag-indexer",
+                ).start()
         except Exception as exc:
-            logger.warning("RAG initialization failed: %s", exc)
+            logger.warning("RAG initialisation failed: %s", exc)
             self.rag = None
 
         self._stop_event = asyncio.Event()
@@ -656,7 +673,7 @@ class FlintTradeApp:
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""
-        # Start FlintTrade API server (Flask, port 5001)
+        # Start FlintTrade API server (Flask, port 5100)
         flask_app = create_flask_app(
             safety=self.safety,
             scheduler=self.scheduler,
@@ -668,7 +685,7 @@ class FlintTradeApp:
             contract_manager=self.contract_manager,
             rag=self.rag,
         )
-        _run_flask_server(flask_app, port=5001)
+        _run_flask_server(flask_app, port=5100)
 
         # Load market holidays (graceful — warns if OpenAlgo unreachable)
         try:
@@ -749,3 +766,7 @@ class FlintTradeApp:
 
 if __name__ == "__main__":
     FlintTradeApp().run()
+
+# Module-level app instance for gunicorn/WSGI servers.
+# Usage: gunicorn 'packages.core.src.app:app'
+app = create_flask_app()

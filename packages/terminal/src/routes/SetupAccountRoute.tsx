@@ -214,7 +214,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
           aria-label="Choose a username"
           {...register("username")}
         />
-        {errors.username && <p className="text-xs text-loss">{errors.username.message}</p>}
+        {errors.username && <p role="alert" className="text-xs text-loss">{errors.username.message}</p>}
       </div>
 
       {/* Email */}
@@ -229,7 +229,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
           aria-label="Enter your email address"
           {...register("email")}
         />
-        {errors.email && <p className="text-xs text-loss">{errors.email.message}</p>}
+        {errors.email && <p role="alert" className="text-xs text-loss">{errors.email.message}</p>}
         <p className="text-xs text-text-muted">Used for password reset only. Never shared with third parties.</p>
       </div>
 
@@ -276,7 +276,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
             )}
           </div>
         )}
-        {errors.password && <p className="text-xs text-loss">{errors.password.message}</p>}
+        {errors.password && <p role="alert" className="text-xs text-loss">{errors.password.message}</p>}
       </div>
 
       {/* Confirm Password — only shown once the user starts typing a password */}
@@ -292,7 +292,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
             aria-label="Confirm your password"
             {...register("confirmPassword")}
           />
-          {errors.confirmPassword && <p className="text-xs text-loss">{errors.confirmPassword.message}</p>}
+          {errors.confirmPassword && <p role="alert" className="text-xs text-loss">{errors.confirmPassword.message}</p>}
         </div>
       )}
 
@@ -312,7 +312,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
           className="text-center font-mono text-lg tracking-widest max-w-40"
           {...register("pin")}
         />
-        {errors.pin && <p className="text-xs text-loss">{errors.pin.message}</p>}
+        {errors.pin && <p role="alert" className="text-xs text-loss">{errors.pin.message}</p>}
       </div>
 
       {/* Confirm PIN — only shown once the user starts typing a PIN */}
@@ -331,7 +331,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
             className="text-center font-mono text-lg tracking-widest max-w-40"
             {...register("confirmPin")}
           />
-          {errors.confirmPin && <p className="text-xs text-loss">{errors.confirmPin.message}</p>}
+          {errors.confirmPin && <p role="alert" className="text-xs text-loss">{errors.confirmPin.message}</p>}
         </div>
       )}
 
@@ -670,7 +670,7 @@ export default function SetupAccountRoute() {
   const totalSteps = STEP_LABELS.length;
 
   return (
-    <div className="min-h-screen bg-surface-base flex flex-col items-center justify-center p-6 relative">
+    <main aria-label="Account setup" className="min-h-screen bg-surface-base flex flex-col items-center justify-center p-6 relative">
 
       {/* Dark / light / system mode toggle — top-right */}
       <div className="absolute top-4 right-4 flex gap-1 z-50">
@@ -774,6 +774,6 @@ export default function SetupAccountRoute() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

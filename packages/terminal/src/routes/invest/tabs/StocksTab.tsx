@@ -388,7 +388,7 @@ export function StocksTab() {
           <AlertCircle className="size-5 text-loss" aria-hidden="true" />
           <span className="text-sm">Failed to load stock data.</span>
           <span className="text-xs text-text-muted max-w-xs text-center">
-            Check that the FlintTrade backend is running on port 5001.
+            Check that the FlintTrade backend is running on port 5100.
           </span>
           <Button
             variant="outline"

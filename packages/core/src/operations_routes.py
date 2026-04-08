@@ -871,3 +871,91 @@ def ditto_kill_all() -> tuple[Any, int]:
         "status": "error",
         "message": "Not implemented — ditto kill-all requires real account connections",
     }), 501
+
+
+# ------------------------------------------------------------------
+# Frontend error reporting (H6)
+# ------------------------------------------------------------------
+
+@operations_bp.route("/errors", methods=["POST"])
+def receive_frontend_error() -> tuple[Any, int]:
+    """Receive error reports from the React frontend.
+
+    Rate limited to prevent DoS. Logs via structlog and forwards to
+    Glitchtip if sentry_sdk is initialised.
+
+    Request JSON:
+        message (str): Error message.
+        url (str): Page URL where the error occurred.
+        stack (str, optional): Stack trace (capped at 2000 characters).
+        userAgent (str, optional): Browser user-agent string.
+
+    Returns:
+        JSON with ``status: "success"`` always (avoids leaking info).
+    """
+    import structlog  # noqa: PLC0415
+
+    data = request.get_json(silent=True) or {}
+    log = structlog.get_logger()
+    log.error(
+        "frontend_error",
+        message=data.get("message", "Unknown error"),
+        url=data.get("url"),
+        stack=data.get("stack", "")[:2000],  # Cap stack trace size
+    )
+    # Forward to Glitchtip via sentry_sdk if available
+    try:
+        import sentry_sdk  # noqa: PLC0415
+        if sentry_sdk.is_initialized():
+            sentry_sdk.capture_message(
+                data.get("message", "Frontend error"),
+                level="error",
+                extras={"url": data.get("url"), "userAgent": data.get("userAgent")},
+            )
+    except Exception:
+        pass
+    return jsonify({"status": "success"}), 200
+
+
+# ------------------------------------------------------------------
+# Recent structured log entries (H7)
+# ------------------------------------------------------------------
+
+@operations_bp.route("/logs/recent", methods=["GET"])
+def get_recent_logs() -> tuple[Any, int]:
+    """Return recent structured log entries for the admin dashboard.
+
+    Reads the last 100 lines from the structured log file at
+    ``~/.flinttrade/logs/flinttrade.log``. Each line is expected to be a
+    JSON-encoded structlog entry; plain-text lines are wrapped in a
+    minimal dict.
+
+    Query parameters:
+        n (int, optional): Number of lines to return (default 100, max 500).
+
+    Returns:
+        JSON with ``status`` and ``data`` containing a list of log entries.
+    """
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    try:
+        n = min(int(request.args.get("n", 100)), 500)
+        if n < 1:
+            raise ValueError
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "n must be a positive integer"}), 400
+
+    log_file = Path.home() / ".flinttrade" / "logs" / "flinttrade.log"
+    entries: list[dict[str, Any]] = []
+    if log_file.exists():
+        lines = log_file.read_text(encoding="utf-8", errors="replace").strip().split("\n")
+        for line in lines[-n:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                entries.append({"message": line, "level": "info"})
+    return jsonify({"status": "success", "data": entries}), 200

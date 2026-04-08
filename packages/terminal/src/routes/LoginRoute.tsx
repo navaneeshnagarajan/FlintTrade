@@ -98,7 +98,7 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
         </div>
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/30 text-sm text-loss">
+          <div role="alert" className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/30 text-sm text-loss">
             <AlertTriangle className="size-4 shrink-0" />
             {error}
           </div>

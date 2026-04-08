@@ -247,7 +247,14 @@ function LearnPreview() {
               {c.topic}
             </Badge>
           </div>
-          <div className="h-1.5 rounded-full bg-surface-base overflow-hidden">
+          <div
+            className="h-1.5 rounded-full bg-surface-base overflow-hidden"
+            role="progressbar"
+            aria-valuenow={c.progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${c.title} progress`}
+          >
             <div
               className="h-full rounded-full bg-primary transition-[width]"
               style={{ width: `${c.progress}%` }}

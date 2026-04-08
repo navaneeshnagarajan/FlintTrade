@@ -131,7 +131,19 @@ export default defineConfig({
             id.includes("node_modules/react-day-picker") ||
             id.includes("node_modules/react-transition-state")
           ) return "vendor-tremor";
-          // Everything else in node_modules — clsx, tailwind-merge, date-fns, cmdk, etc.
+          // date-fns — date formatting/parsing; pulled in by many widgets
+          if (id.includes("node_modules/date-fns/")) return "vendor-dates";
+          // Styling utilities — tiny but imported by every component
+          if (
+            id.includes("node_modules/clsx/") ||
+            id.includes("node_modules/tailwind-merge/") ||
+            id.includes("node_modules/class-variance-authority/")
+          ) {
+            return "vendor-utils";
+          }
+          // QR code renderer — only used by the auth/setup flows
+          if (id.includes("node_modules/qrcode.react/")) return "vendor-qrcode";
+          // Everything else in node_modules
           if (id.includes("node_modules/")) {
             return "vendor-misc";
           }

@@ -1,6 +1,6 @@
 """Strategy Runner Flask Blueprint — user strategy management endpoints.
 
-All endpoints are under the ``/v1/strategies/`` prefix.  The
+All endpoints are under the ``/api/v1/strategies/`` prefix.  The
 :class:`~packages.engine.src.strategy_runner.UserStrategyRunner` instance is
 stored on ``app.config["STRATEGY_RUNNER"]`` and injected at app creation.
 """
@@ -14,7 +14,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.engine.strategy_routes")
 
-strategy_bp = Blueprint("strategies", __name__, url_prefix="/v1/strategies")
+strategy_bp = Blueprint("strategies", __name__, url_prefix="/api/v1/strategies")
 
 
 # ---------------------------------------------------------------------------

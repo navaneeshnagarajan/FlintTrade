@@ -51,7 +51,7 @@ const MODE_CARDS: ModeCardConfig[] = [
   {
     id: "practice",
     label: "Practice",
-    description: "Paper trade with live data",
+    description: "Practice trading with live data",
     brokerNote: "Broker required",
     icon: <FlaskConical size={22} aria-hidden="true" />,
     pillClass: "bg-amber-500/20 text-amber-400",

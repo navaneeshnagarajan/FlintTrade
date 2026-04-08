@@ -34,7 +34,7 @@ export function PracticeSection() {
         </div>
       )}
 
-      <SandboxControls />
+      {isPractice && <SandboxControls />}
     </div>
   );
 }

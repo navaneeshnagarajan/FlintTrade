@@ -26,6 +26,49 @@ logger = logging.getLogger("flinttrade.auth")
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/v1/auth")
 
+
+def _get_limiter():
+    """Get the flask-limiter instance from the app config."""
+    return current_app.config.get("LIMITER")
+
+
+def _rate_limit(limit_string: str):
+    """Apply a flask-limiter rate limit lazily (limiter lives in app config).
+
+    Returns a decorator that applies the rate limit at request time,
+    allowing the blueprint to be registered before the limiter is created.
+    """
+    import functools
+
+    def decorator(f):
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            # The actual rate-limit enforcement is handled by flask-limiter
+            # via the deferred decoration below; this wrapper is a no-op.
+            return f(*args, **kwargs)
+
+        # Store the limit string so we can apply it once the app is ready.
+        if not hasattr(wrapper, "_rate_limits"):
+            wrapper._rate_limits = []
+        wrapper._rate_limits.append(limit_string)
+        return wrapper
+
+    return decorator
+
+
+@auth_bp.record
+def _apply_rate_limits(state):
+    """Apply deferred rate limits once the blueprint is registered on an app."""
+    limiter = state.app.config.get("LIMITER")
+    if limiter is None:
+        logger.warning("No LIMITER in app config — auth rate limits not applied")
+        return
+
+    for rule_func in [auth_status, auth_setup, auth_login, auth_pin_verify, auth_logout]:
+        limits = getattr(rule_func, "_rate_limits", [])
+        for limit_str in limits:
+            limiter.limit(limit_str)(rule_func)
+
 # JWT config
 _JWT_SECRET_KEY = ""  # Set from env or generated at startup
 _JWT_ALGORITHM = "HS256"
@@ -110,6 +153,7 @@ def _create_token(username: str) -> str:
 
 
 @auth_bp.route("/status", methods=["GET"])
+@_rate_limit("30 per minute")
 def auth_status() -> tuple[Any, int]:
     """Check if account is set up and if user is locked out."""
     svc = _get_auth_service()
@@ -125,6 +169,7 @@ def auth_status() -> tuple[Any, int]:
 
 
 @auth_bp.route("/setup", methods=["POST"])
+@_rate_limit("3 per minute")
 def auth_setup() -> tuple[Any, int]:
     """One-time account setup. Returns backup codes and TOTP URI."""
     svc = _get_auth_service()
@@ -157,6 +202,7 @@ def auth_setup() -> tuple[Any, int]:
 
 
 @auth_bp.route("/login", methods=["POST"])
+@_rate_limit("5 per minute")
 def auth_login() -> tuple[Any, int]:
     """Daily login with password + TOTP."""
     svc = _get_auth_service()
@@ -195,6 +241,7 @@ def auth_login() -> tuple[Any, int]:
 
 
 @auth_bp.route("/pin", methods=["POST"])
+@_rate_limit("10 per minute")
 def auth_pin_verify() -> tuple[Any, int]:
     """PIN quick-unlock — returns new session token."""
     svc = _get_auth_service()
@@ -217,6 +264,7 @@ def auth_pin_verify() -> tuple[Any, int]:
 
 
 @auth_bp.route("/logout", methods=["POST"])
+@_rate_limit("10 per minute")
 def auth_logout() -> tuple[Any, int]:
     """Invalidate current session."""
     # JWT is stateless — client discards token

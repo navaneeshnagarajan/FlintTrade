@@ -1,6 +1,6 @@
 """Flask blueprint for Action Center endpoints.
 
-Mounts at /v1/action-center/ and exposes the pending-order
+Mounts at /api/v1/action-center/ and exposes the pending-order
 approval queue to the React terminal via TanStack Query.
 
 All endpoints require no authentication beyond the standard FlintTrade
@@ -19,7 +19,7 @@ from .action_center import ActionCenter, ActionCenterError
 
 logger = logging.getLogger("flinttrade.engine.action_center_routes")
 
-action_center_bp = Blueprint("action_center", __name__, url_prefix="/v1/action-center")
+action_center_bp = Blueprint("action_center", __name__, url_prefix="/api/v1/action-center")
 
 # Module-level singleton so routes share state even when imported separately.
 # The Flask app may inject a custom instance via app.config["ACTION_CENTER"].

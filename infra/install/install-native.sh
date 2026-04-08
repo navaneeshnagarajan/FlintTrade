@@ -152,6 +152,18 @@ if [ ! -f "$FLINTTRADE_DATA/jwt_secret" ]; then
     ok "JWT secret generated"
 fi
 
+# Generate Glitchtip secrets if not already set in .env
+if ! grep -q "^GLITCHTIP_SECRET_KEY=" "$INSTALL_DIR/.env" 2>/dev/null; then
+    GLITCHTIP_SECRET_KEY=$(head -c 50 /dev/urandom | base64 | tr -d '/+=' | head -c 50)
+    echo "GLITCHTIP_SECRET_KEY=$GLITCHTIP_SECRET_KEY" >> "$INSTALL_DIR/.env"
+    ok "Glitchtip secret key generated"
+fi
+if ! grep -q "^GLITCHTIP_DB_PASSWORD=" "$INSTALL_DIR/.env" 2>/dev/null; then
+    GLITCHTIP_DB_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
+    echo "GLITCHTIP_DB_PASSWORD=$GLITCHTIP_DB_PASSWORD" >> "$INSTALL_DIR/.env"
+    ok "Glitchtip DB password generated"
+fi
+
 # Set ownership
 chown -R "$FLINTTRADE_USER:$FLINTTRADE_USER" "$INSTALL_DIR"
 chown -R "$FLINTTRADE_USER:$FLINTTRADE_USER" "$FLINTTRADE_DATA"
@@ -186,7 +198,7 @@ server {
 
     # FlintTrade backend API proxy
     location /ft-api/ {
-        proxy_pass http://127.0.0.1:5001/ft-api/;
+        proxy_pass http://127.0.0.1:5100/ft-api/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -241,6 +253,13 @@ Restart=on-failure
 RestartSec=5
 EnvironmentFile=$INSTALL_DIR/.env
 
+# Security hardening — match standalone systemd units
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$INSTALL_DIR/infra/openalgo/db
+PrivateTmp=true
+
 [Install]
 WantedBy=flinttrade.target
 UNIT_EOF
@@ -260,6 +279,13 @@ ExecStart=$VENV_DIR/bin/python -m packages.core.src.app
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=$INSTALL_DIR/.env
+
+# Security hardening — match standalone systemd units
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$INSTALL_DIR/data $FLINTTRADE_DATA
+PrivateTmp=true
 
 [Install]
 WantedBy=flinttrade.target

@@ -77,7 +77,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5100/ft-api/v1/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:5100/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -153,6 +153,13 @@ services:
   # Internal only (proxied via Nginx at /errors/)
   # Requires PostgreSQL for storage + Celery worker for async processing
   # ---------------------------------------------------------------------------
+  glitchtip-redis:
+    image: redis:7-alpine
+    container_name: flinttrade-glitchtip-redis
+    restart: unless-stopped
+    networks:
+      - flinttrade
+
   glitchtip:
     image: glitchtip/glitchtip:latest
     container_name: flinttrade-glitchtip
@@ -162,8 +169,9 @@ services:
       glitchtip-db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://glitchtip:glitchtip@glitchtip-db:5432/glitchtip
-      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:-change-me-in-production}"
+      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:-glitchtip-dev-only}@glitchtip-db:5432/glitchtip"
+      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:?Set GLITCHTIP_SECRET_KEY in .env}"
+      CELERY_BROKER_URL: "redis://glitchtip-redis:6379/0"
       PORT: "8000"
       GLITCHTIP_DOMAIN: "http://127.0.0.1:8000"
     restart: unless-stopped
@@ -177,9 +185,12 @@ services:
     depends_on:
       glitchtip-db:
         condition: service_healthy
+      glitchtip-redis:
+        condition: service_started
     environment:
-      DATABASE_URL: postgres://glitchtip:glitchtip@glitchtip-db:5432/glitchtip
-      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:-change-me-in-production}"
+      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:-glitchtip-dev-only}@glitchtip-db:5432/glitchtip"
+      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:?Set GLITCHTIP_SECRET_KEY in .env}"
+      CELERY_BROKER_URL: "redis://glitchtip-redis:6379/0"
     restart: unless-stopped
     networks:
       - flinttrade
@@ -191,7 +202,7 @@ services:
       - glitchtip_pg:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: glitchtip
-      POSTGRES_PASSWORD: glitchtip
+      POSTGRES_PASSWORD: "${GLITCHTIP_DB_PASSWORD:-glitchtip-dev-only}"
       POSTGRES_DB: glitchtip
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U glitchtip"]

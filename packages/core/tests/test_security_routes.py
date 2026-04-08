@@ -44,7 +44,7 @@ def client(monitor):
 
 class TestGetStats:
     def test_empty_stats(self, client):
-        resp = client.get("/v1/security/stats")
+        resp = client.get("/api/v1/security/stats")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -52,7 +52,7 @@ class TestGetStats:
 
     def test_stats_counts_banned(self, client, monitor):
         monitor.ban_ip("1.1.1.1", "test")
-        resp = client.get("/v1/security/stats")
+        resp = client.get("/api/v1/security/stats")
         data = resp.get_json()
         assert data["data"]["banned_count"] == 1
 
@@ -64,14 +64,14 @@ class TestGetStats:
 
 class TestGetBans:
     def test_empty_bans_list(self, client):
-        resp = client.get("/v1/security/bans")
+        resp = client.get("/api/v1/security/bans")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["data"]["bans"] == []
 
     def test_banned_ip_appears_in_list(self, client, monitor):
         monitor.ban_ip("2.2.2.2", "flood")
-        resp = client.get("/v1/security/bans")
+        resp = client.get("/api/v1/security/bans")
         bans = resp.get_json()["data"]["bans"]
         assert any(b["ip"] == "2.2.2.2" for b in bans)
 
@@ -84,7 +84,7 @@ class TestGetBans:
 class TestGetRecords:
     def test_records_after_requests(self, client, monitor):
         monitor.record_request("3.3.3.3")
-        resp = client.get("/v1/security/records")
+        resp = client.get("/api/v1/security/records")
         assert resp.status_code == 200
         records = resp.get_json()["data"]["records"]
         assert any(r["ip"] == "3.3.3.3" for r in records)
@@ -98,7 +98,7 @@ class TestGetRecords:
 class TestBanEndpoint:
     def test_ban_ip_returns_200(self, client):
         resp = client.post(
-            "/v1/security/ban",
+            "/api/v1/security/ban",
             json={"ip": "5.5.5.5", "reason": "manual ban test"},
             content_type="application/json",
         )
@@ -109,7 +109,7 @@ class TestBanEndpoint:
 
     def test_ban_missing_ip_returns_400(self, client):
         resp = client.post(
-            "/v1/security/ban",
+            "/api/v1/security/ban",
             json={"reason": "no ip given"},
             content_type="application/json",
         )
@@ -117,7 +117,7 @@ class TestBanEndpoint:
 
     def test_ban_missing_reason_returns_400(self, client):
         resp = client.post(
-            "/v1/security/ban",
+            "/api/v1/security/ban",
             json={"ip": "6.6.6.6"},
             content_type="application/json",
         )
@@ -133,7 +133,7 @@ class TestUnbanEndpoint:
     def test_unban_ip_returns_200(self, client, monitor):
         monitor.ban_ip("7.7.7.7", "to be unbanned")
         resp = client.post(
-            "/v1/security/unban",
+            "/api/v1/security/unban",
             json={"ip": "7.7.7.7"},
             content_type="application/json",
         )
@@ -142,7 +142,7 @@ class TestUnbanEndpoint:
 
     def test_unban_missing_ip_returns_400(self, client):
         resp = client.post(
-            "/v1/security/unban",
+            "/api/v1/security/unban",
             json={},
             content_type="application/json",
         )

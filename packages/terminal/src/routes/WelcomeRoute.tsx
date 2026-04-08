@@ -660,7 +660,7 @@ export default function WelcomeRoute() {
                 navigate("/trade");
               }}
               className="text-sm text-text-muted hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded px-2 py-1"
-              aria-label="Explore FlintTrade in demo mode without creating an account"
+              aria-label="Explore FlintTrade without creating an account"
             >
               Explore FlintTrade →
             </motion.button>

@@ -114,7 +114,7 @@ const BASICS_SECTIONS: BasicsSection[] = [
     readingTime: 3,
     difficulty: "Intermediate",
     content:
-      "Never invest money you cannot afford to lose. Use stop-losses to limit downside. Diversify across stocks and sectors. For F&O, understand margin requirements — you can lose more than your invested amount. Start with paper trading before using real money.",
+      "Never invest money you cannot afford to lose. Use stop-losses to limit downside. Diversify across stocks and sectors. For F&O, understand margin requirements — you can lose more than your invested amount. Start with practice trading before using real money.",
   },
   {
     title: "SEBI Regulations",
@@ -456,7 +456,7 @@ function PaperTradingTab() {
           What is Paper Trading?
         </h3>
         <p className="text-sm text-text-secondary leading-relaxed mb-4">
-          Paper trading lets you practice trading with virtual money. You execute the same strategies,
+          Practice trading lets you trade with virtual money. You execute the same strategies,
           see the same market data, but don&apos;t risk real capital. It&apos;s the best way to learn
           before going live.
         </p>
@@ -470,7 +470,7 @@ function PaperTradingTab() {
           </li>
           <li>Connect FlintTrade to the sandbox instance</li>
           <li>Trade normally — all orders execute against virtual funds</li>
-          <li>Review your P&L Dashboard to analyze performance</li>
+          <li>Review your P&L Dashboard to analyse performance</li>
           <li>When confident, switch to your real broker credentials</li>
         </ol>
       </GlassCard>

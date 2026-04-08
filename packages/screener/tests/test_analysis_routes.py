@@ -62,15 +62,15 @@ class TestGEXEndpoint:
     """Tests for POST /v1/gex."""
 
     def test_gex_returns_200(self, client):
-        resp, body = _post(client, "/v1/gex", {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"})
+        resp, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"})
         assert resp.status_code == 200
 
     def test_gex_status_ok(self, client):
-        _, body = _post(client, "/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
         assert body["status"] == "ok"
 
     def test_gex_has_data(self, client):
-        _, body = _post(client, "/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
         assert "data" in body
         data = body["data"]
         assert "strikes" in data
@@ -79,11 +79,11 @@ class TestGEXEndpoint:
         assert "oi_walls" in data
 
     def test_gex_strikes_not_empty(self, client):
-        _, body = _post(client, "/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
         assert len(body["data"]["strikes"]) > 0
 
     def test_gex_symbol_in_response(self, client):
-        _, body = _post(client, "/v1/gex", {"symbol": "BANKNIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/gex", {"symbol": "BANKNIFTY", "exchange": "NFO"})
         assert body["symbol"] == "BANKNIFTY"
 
 
@@ -96,20 +96,20 @@ class TestVolSurfaceEndpoint:
     """Tests for POST /v1/volsurface."""
 
     def test_volsurface_returns_200(self, client):
-        resp, _ = _post(client, "/v1/volsurface", {
+        resp, _ = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
             "expiries": ["26MAR26", "24APR26"], "strike_count": 20,
         })
         assert resp.status_code == 200
 
     def test_volsurface_status_ok(self, client):
-        _, body = _post(client, "/v1/volsurface", {
+        _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO", "expiries": ["26MAR26"],
         })
         assert body["status"] == "ok"
 
     def test_volsurface_has_matrix(self, client):
-        _, body = _post(client, "/v1/volsurface", {
+        _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
             "expiries": ["26MAR26", "24APR26"],
         })
@@ -121,7 +121,7 @@ class TestVolSurfaceEndpoint:
 
     def test_volsurface_matrix_dimensions(self, client):
         """iv_matrix rows should match expiry count."""
-        _, body = _post(client, "/v1/volsurface", {
+        _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
             "expiries": ["26MAR26", "24APR26", "29MAY26"],
         })
@@ -133,7 +133,7 @@ class TestVolSurfaceEndpoint:
             assert len(row) == n_strikes
 
     def test_volsurface_strike_count_limited(self, client):
-        _, body = _post(client, "/v1/volsurface", {
+        _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
             "expiries": ["26MAR26"], "strike_count": 5,
         })
@@ -149,17 +149,17 @@ class TestIVSmileEndpoint:
     """Tests for POST /v1/ivsmile."""
 
     def test_ivsmile_returns_200(self, client):
-        resp, _ = _post(client, "/v1/ivsmile", {
+        resp, _ = _post(client, "/api/v1/ivsmile", {
             "symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26",
         })
         assert resp.status_code == 200
 
     def test_ivsmile_status_ok(self, client):
-        _, body = _post(client, "/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
         assert body["status"] == "ok"
 
     def test_ivsmile_has_required_fields(self, client):
-        _, body = _post(client, "/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
         data = body["data"]
         assert "strikes" in data
         assert "call_iv" in data
@@ -169,11 +169,11 @@ class TestIVSmileEndpoint:
         assert "skew" in data
 
     def test_ivsmile_strikes_not_empty(self, client):
-        _, body = _post(client, "/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
         assert len(body["data"]["strikes"]) > 0
 
     def test_ivsmile_atm_iv_positive(self, client):
-        _, body = _post(client, "/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
+        _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
         assert body["data"]["atm_iv"] > 0
 
 
@@ -186,18 +186,18 @@ class TestStraddlePnLEndpoint:
     """Tests for POST /v1/straddlepnl."""
 
     def test_straddlepnl_returns_200(self, client):
-        resp, _ = _post(client, "/v1/straddlepnl", {
+        resp, _ = _post(client, "/api/v1/straddlepnl", {
             "symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26",
             "interval": "5m", "adjustment_points": 50,
         })
         assert resp.status_code == 200
 
     def test_straddlepnl_status_ok(self, client):
-        _, body = _post(client, "/v1/straddlepnl", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
         assert body["status"] == "ok"
 
     def test_straddlepnl_has_required_fields(self, client):
-        _, body = _post(client, "/v1/straddlepnl", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
         data = body["data"]
         assert "timestamps" in data
         assert "pnl_series" in data
@@ -208,11 +208,11 @@ class TestStraddlePnLEndpoint:
         assert "initial_premium" in data
 
     def test_straddlepnl_timestamps_not_empty(self, client):
-        _, body = _post(client, "/v1/straddlepnl", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
         assert len(body["data"]["timestamps"]) > 0
 
     def test_straddlepnl_pnl_series_same_length_as_timestamps(self, client):
-        _, body = _post(client, "/v1/straddlepnl", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
         data = body["data"]
         assert len(data["pnl_series"]) == len(data["timestamps"])
 
@@ -226,17 +226,17 @@ class TestOIProfileEndpoint:
     """Tests for POST /v1/oiprofile."""
 
     def test_oiprofile_returns_200(self, client):
-        resp, _ = _post(client, "/v1/oiprofile", {
+        resp, _ = _post(client, "/api/v1/oiprofile", {
             "symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26", "interval": "5m",
         })
         assert resp.status_code == 200
 
     def test_oiprofile_status_ok(self, client):
-        _, body = _post(client, "/v1/oiprofile", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
         assert body["status"] == "ok"
 
     def test_oiprofile_has_required_fields(self, client):
-        _, body = _post(client, "/v1/oiprofile", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
         data = body["data"]
         assert "strikes" in data
         assert "ce_oi" in data
@@ -246,12 +246,12 @@ class TestOIProfileEndpoint:
         assert "futures_ohlcv" in data
 
     def test_oiprofile_butterfly_length_matches_strikes(self, client):
-        _, body = _post(client, "/v1/oiprofile", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
         data = body["data"]
         assert len(data["oi_butterfly"]) == len(data["strikes"])
 
     def test_oiprofile_strikes_not_empty(self, client):
-        _, body = _post(client, "/v1/oiprofile", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
         assert len(body["data"]["strikes"]) > 0
 
 
@@ -264,34 +264,34 @@ class TestMaxPainEndpoint:
     """Tests for POST /v1/maxpain."""
 
     def test_maxpain_returns_200(self, client):
-        resp, _ = _post(client, "/v1/maxpain", {
+        resp, _ = _post(client, "/api/v1/maxpain", {
             "symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26",
         })
         assert resp.status_code == 200
 
     def test_maxpain_status_ok(self, client):
-        _, body = _post(client, "/v1/maxpain", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/maxpain", {"symbol": "NIFTY"})
         assert body["status"] == "ok"
 
     def test_maxpain_has_strike(self, client):
-        _, body = _post(client, "/v1/maxpain", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/maxpain", {"symbol": "NIFTY"})
         data = body["data"]
         assert "max_pain_strike" in data
         assert data["max_pain_strike"] > 0
 
     def test_maxpain_has_strike_losses(self, client):
-        _, body = _post(client, "/v1/maxpain", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/maxpain", {"symbol": "NIFTY"})
         data = body["data"]
         assert "strike_losses" in data
         assert len(data["strike_losses"]) > 0
 
     def test_maxpain_total_loss_positive(self, client):
-        _, body = _post(client, "/v1/maxpain", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/maxpain", {"symbol": "NIFTY"})
         assert body["data"]["total_loss_at_max_pain"] >= 0
 
     def test_maxpain_strike_near_spot(self, client):
         """Max pain should be within a reasonable range of the spot."""
-        _, body = _post(client, "/v1/maxpain", {"symbol": "NIFTY"})
+        _, body = _post(client, "/api/v1/maxpain", {"symbol": "NIFTY"})
         spot = body["spot"]
         max_pain = body["data"]["max_pain_strike"]
         # Max pain within 10% of spot is reasonable for synthetic data

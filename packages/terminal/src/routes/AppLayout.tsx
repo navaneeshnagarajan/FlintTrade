@@ -139,13 +139,13 @@ export default function AppLayout() {
       )}
       {/* Mode indicator — coloured top border per mode (Thinkorswim-inspired) */}
       {mode === "explore" && (
-        <div className="h-0.75 bg-text-muted/40 shrink-0" role="status" aria-label="Explore mode — sample data only" />
+        <div className="h-0.75 bg-text-muted/40 shrink-0" aria-hidden="true" />
       )}
       {mode === "practice" && (
-        <div className="h-0.75 bg-amber-500 shrink-0" role="status" aria-label="Practice mode — virtual capital" />
+        <div className="h-0.75 bg-amber-500 shrink-0" aria-hidden="true" />
       )}
       {mode === "live" && (
-        <div className="h-px bg-profit/60 shrink-0" role="status" aria-label="Live trading mode" />
+        <div className="h-px bg-profit/60 shrink-0" aria-hidden="true" />
       )}
       {/* Mode disclaimer banners */}
       {mode === "practice" && (

@@ -62,8 +62,8 @@
     --color-border-strong: #3a3a4a;
     --color-text-primary: #e4e4e7;
     --color-text-secondary: #8b8b95;
-    --color-text-muted: #8f8f9b;
-    --color-text-disabled: #52525b;
+    --color-text-muted: #9898a4;
+    --color-text-disabled: #636370;
     --color-profit: #22c55e;
     --color-loss: #ef4444;
     --color-warning: #eab308;
@@ -398,9 +398,9 @@ html.density-compact {
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-tab-divider-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
   --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
 
   /* Clean separators */
   --dv-separator-border: var(--color-border-subtle);
@@ -431,9 +431,9 @@ html.theme-light .dockview-theme-dark {
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-tab-divider-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
   --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-disabled);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
   --dv-separator-border: var(--color-border-default);
   --dv-paneview-header-border-color: var(--color-border-default);
   --dv-background-color: var(--color-surface-base);

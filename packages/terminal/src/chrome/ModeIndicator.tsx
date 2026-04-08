@@ -68,12 +68,25 @@ export default function ModeIndicator() {
     }
   }, [mode, setMode]);
 
-  const handleConfirmLive = useCallback(() => {
+  const handleConfirmLive = useCallback(async () => {
     if (pin.length !== 6 || /\D/.test(pin)) {
       setPinError("Enter your 6-digit PIN.");
       return;
     }
-    // TODO: Verify PIN server-side via /v1/auth/pin before switching
+    try {
+      const res = await fetch("/ft-api/v1/auth/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      if (!res.ok) {
+        setPinError("Incorrect PIN. Try again.");
+        return;
+      }
+    } catch {
+      setPinError("Could not verify PIN — check connection.");
+      return;
+    }
     setPinError("");
     setConfirmOpen(false);
     setMode("live");

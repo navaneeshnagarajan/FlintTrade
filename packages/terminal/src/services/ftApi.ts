@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 function getBase(): string {
-  // In dev mode, Vite proxy routes /ft-api/* → http://127.0.0.1:5001/*
+  // In dev mode, Vite proxy routes /ft-api/* → http://127.0.0.1:5100/*
   // In production, the FT backend runs on the same host at /ft-api
   if (import.meta.env.DEV) return "/ft-api";
   return "";

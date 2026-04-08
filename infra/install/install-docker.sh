@@ -98,6 +98,8 @@ log "Generating secrets..."
 
 MASTER_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
 JWT_SECRET=$(head -c 48 /dev/urandom | base64 | tr -d '/+=' | head -c 48)
+GLITCHTIP_SECRET_KEY=$(head -c 50 /dev/urandom | base64 | tr -d '/+=' | head -c 50)
+GLITCHTIP_DB_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
 
 # Write secrets to .env if not already set
 if ! grep -q "^MASTER_PASSWORD=" "$INSTALL_DIR/.env" 2>/dev/null; then
@@ -105,6 +107,12 @@ if ! grep -q "^MASTER_PASSWORD=" "$INSTALL_DIR/.env" 2>/dev/null; then
 fi
 if ! grep -q "^JWT_SECRET=" "$INSTALL_DIR/.env" 2>/dev/null; then
     echo "JWT_SECRET=$JWT_SECRET" >> "$INSTALL_DIR/.env"
+fi
+if ! grep -q "^GLITCHTIP_SECRET_KEY=" "$INSTALL_DIR/.env" 2>/dev/null; then
+    echo "GLITCHTIP_SECRET_KEY=$GLITCHTIP_SECRET_KEY" >> "$INSTALL_DIR/.env"
+fi
+if ! grep -q "^GLITCHTIP_DB_PASSWORD=" "$INSTALL_DIR/.env" 2>/dev/null; then
+    echo "GLITCHTIP_DB_PASSWORD=$GLITCHTIP_DB_PASSWORD" >> "$INSTALL_DIR/.env"
 fi
 
 # Create user data directory
@@ -165,7 +173,7 @@ server {
     }
 
     location /ft-api/ {
-        proxy_pass http://127.0.0.1:5001/ft-api/;
+        proxy_pass http://127.0.0.1:5100/ft-api/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;

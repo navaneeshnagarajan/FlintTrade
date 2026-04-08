@@ -218,6 +218,8 @@ function Toast({ msg, onRetry }: ToastProps) {
   const showRetry = !ok && msg.retryable && !!onRetry;
   return (
     <div
+      role="alert"
+      aria-live="assertive"
       className={`flex items-center gap-2 px-3 py-2 text-xs border-t ${
         ok
           ? "bg-profit/10 border-profit/20 text-profit"
@@ -528,9 +530,11 @@ function OrderPadWidget(_props: WidgetProps) {
           control={control}
           name="action"
           render={({ field }) => (
-            <div className="flex gap-2">
+            <div role="radiogroup" aria-label="Transaction type" className="flex gap-2">
               <button
                 type="button"
+                role="radio"
+                aria-checked={field.value === "BUY"}
                 onClick={() => field.onChange("BUY")}
                 className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
                   field.value === "BUY"
@@ -542,6 +546,8 @@ function OrderPadWidget(_props: WidgetProps) {
               </button>
               <button
                 type="button"
+                role="radio"
+                aria-checked={field.value === "SELL"}
                 onClick={() => field.onChange("SELL")}
                 className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
                   field.value === "SELL"

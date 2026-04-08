@@ -175,8 +175,7 @@ export function LockScreen() {
         <p
           className="font-mono font-light text-text-primary select-none"
           style={{ fontSize: "clamp(3rem, 8vw, 5rem)", letterSpacing: "0.05em" }}
-          aria-live="polite"
-          aria-atomic="true"
+          aria-hidden="true"
         >
           {time}
         </p>
