@@ -23,7 +23,6 @@ Usage::
 from __future__ import annotations
 
 import csv
-import io
 import logging
 import time
 from dataclasses import asdict, dataclass, field

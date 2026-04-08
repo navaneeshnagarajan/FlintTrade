@@ -13,7 +13,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from .whatsapp_alerts import WhatsAppAlerter, WhatsAppConfig
+from .whatsapp_alerts import WhatsAppAlerter
 
 logger = logging.getLogger("flinttrade.automation.whatsapp_routes")
 

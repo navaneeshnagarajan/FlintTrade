@@ -39,7 +39,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from packages.ai.src.signals import (
-    FeatureSet,
     Signal,
     engineer_features,
     generate_labels,

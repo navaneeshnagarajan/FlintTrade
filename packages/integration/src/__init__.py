@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0-alpha"
 
+from .alert_trigger_log import AlertTriggerLog, TriggerEvent
 from .alerter import Alert, AlertChannel, Alerter, AlertType
 from .chartink import ChartInkConfig, ChartInkScanResult, ChartInkWebhook
 from .flow_builder import (
@@ -43,4 +44,7 @@ __all__ = [
     "Alert",
     "AlertType",
     "AlertChannel",
+    # Alert trigger log
+    "AlertTriggerLog",
+    "TriggerEvent",
 ]

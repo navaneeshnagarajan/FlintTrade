@@ -330,6 +330,15 @@ def create_flask_app(
         app.register_blueprint(admin_bp)
         logger.info("Admin endpoints registered (dev mode)")
 
+    # Register Activity Log blueprint (/api/v1/admin/activity)
+    # Always registered — SEBI audit access is not restricted to dev mode.
+    from packages.data.src.activity_routes import activity_bp  # noqa: PLC0415
+    _activity_db = Path.home() / ".flinttrade" / "activity.db"
+    from packages.data.src.activity_log import ActivityLog as _ActivityLog  # noqa: PLC0415
+    app.config["ACTIVITY_LOG"] = _ActivityLog(str(_activity_db))
+    app.register_blueprint(activity_bp)
+    logger.info("Activity log endpoint registered at /api/v1/admin/activity")
+
     # Register extracted inline-route blueprints
     from packages.core.src.indicators_routes import indicators_bp  # noqa: PLC0415
     app.register_blueprint(indicators_bp)
@@ -419,6 +428,24 @@ def create_flask_app(
             "request",
             status=response.status_code,
             content_length=response.content_length,
+        )
+        return response
+
+    @app.after_request
+    def _add_security_headers(response: Any) -> Any:
+        """Add security headers to every response (only when not already set).
+
+        CSP is intentionally omitted here — Nginx handles it at the proxy
+        layer so the header is applied once rather than duplicated.
+        """
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
         return response
 

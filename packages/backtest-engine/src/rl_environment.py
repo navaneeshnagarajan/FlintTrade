@@ -20,8 +20,7 @@ FlintTrade additions:
 from __future__ import annotations
 
 import logging
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -31,7 +30,6 @@ try:
     from .rl_features import (
         DEFAULT_FEATURES,
         RewardState,
-        RewardType,
         compute_features,
         compute_reward,
     )
@@ -39,7 +37,6 @@ except ImportError:
     from rl_features import (
         DEFAULT_FEATURES,
         RewardState,
-        RewardType,
         compute_features,
         compute_reward,
     )
@@ -81,7 +78,7 @@ class _BoxSpace:
 
 # Try to use real gymnasium spaces if available
 try:
-    import gymnasium as gym
+    import gymnasium as gym  # noqa: F401
     from gymnasium import spaces as gym_spaces
     _GYM_AVAILABLE = True
 except ImportError:

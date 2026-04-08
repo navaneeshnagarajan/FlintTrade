@@ -26,7 +26,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from packages.ai.src.signals import (
-    FeatureSet,
     SignalGenerator,
     engineer_features,
     generate_labels,

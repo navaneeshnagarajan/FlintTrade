@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -21,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
 try:
     from .rl_environment import TradingEnvironment
@@ -419,7 +417,7 @@ def register_rl_endpoints(app: Any) -> None:
         app: Flask application instance.
     """
     try:
-        from flask import Flask, jsonify, request
+        from flask import Flask, jsonify, request  # noqa: F401
     except ImportError:
         logger.warning("Flask not available — RL endpoints not registered")
         return

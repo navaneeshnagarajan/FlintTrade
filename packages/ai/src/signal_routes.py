@@ -16,7 +16,6 @@ from typing import Any, Generator
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from packages.ai.src.signal_models import SignalConfig
 from packages.ai.src.signal_pipeline import LiveSignalPipeline
 
 logger = logging.getLogger("flinttrade.ai.signal_routes")

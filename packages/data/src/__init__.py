@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0-alpha"
 
+from .activity_log import ActivityEntry, ActivityLog
 from .audit_logger import AuditLogger
 from .orderflow import FootprintBucket, FootprintCell, OrderFlowAggregator
 from .storage import StorageManager
@@ -17,4 +18,6 @@ __all__ = [
     "OrderFlowAggregator",
     "FootprintBucket",
     "FootprintCell",
+    "ActivityLog",
+    "ActivityEntry",
 ]

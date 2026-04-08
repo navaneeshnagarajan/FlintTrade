@@ -149,7 +149,6 @@ def _inverse_volatility(
     Returns:
         Dict of symbol → weight (weights sum to 1.0).
     """
-    import pandas as pd  # noqa: PLC0415
 
     inv_vols: dict[str, float] = {}
     for sym in symbols:
@@ -192,7 +191,6 @@ def _momentum_weight(
     Returns:
         Dict of symbol → weight (sums to ≤ 1.0; remainder is implicit cash).
     """
-    import pandas as pd  # noqa: PLC0415
 
     momentum: dict[str, float] = {}
     for sym in symbols:
@@ -246,7 +244,6 @@ def _simulate_portfolio_pure(
         Tuple of (equity_curve, drawdown_curve, rebalance_log).
         equity_curve is normalised to 1.0 at start.
     """
-    import pandas as pd  # noqa: PLC0415
 
     symbols = list(price_matrix.columns)
     shares: dict[str, float] = {s: 0.0 for s in symbols}
