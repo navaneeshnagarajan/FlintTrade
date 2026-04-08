@@ -535,7 +535,7 @@ def api_traffic_stats() -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "minutes must be a positive integer"}), 400
 
-    return jsonify({"status": "ok", "data": get_traffic_counter().get_stats(minutes=minutes)}), 200
+    return jsonify({"status": "success", "data": get_traffic_counter().get_stats(minutes=minutes)}), 200
 
 
 @operations_bp.route("/latency/stats", methods=["GET"])
@@ -543,7 +543,7 @@ def api_latency_stats() -> tuple[Any, int]:
     """Proxy latency stats endpoint for frontend compatibility."""
     from packages.core.src.monitoring_routes import get_latency_tracker  # noqa: PLC0415
 
-    return jsonify({"status": "ok", "data": get_latency_tracker().get_stats()}), 200
+    return jsonify({"status": "success", "data": get_latency_tracker().get_stats()}), 200
 
 
 # ------------------------------------------------------------------
@@ -871,6 +871,93 @@ def ditto_kill_all() -> tuple[Any, int]:
         "status": "error",
         "message": "Not implemented — ditto kill-all requires real account connections",
     }), 501
+
+
+# ------------------------------------------------------------------
+# Ditto — AlgoMirror bridge
+# ------------------------------------------------------------------
+
+
+@operations_bp.route("/ditto/algomirror/status", methods=["GET"])
+def ditto_algomirror_status() -> tuple[Any, int]:
+    """Check AlgoMirror health and mirror status.
+
+    Returns AlgoMirror connection status and active mirror details.
+    If AlgoMirror is not running, returns ``connected: false``.
+    """
+    try:
+        from packages.ditto.src.algomirror_bridge import AlgoMirrorBridge  # noqa: PLC0415
+
+        bridge = AlgoMirrorBridge()
+        healthy = bridge.check_health()
+
+        if not healthy:
+            return jsonify({
+                "status": "success",
+                "data": {"connected": False, "active": False},
+            }), 200
+
+        mirror_status = bridge.get_status()
+        return jsonify({
+            "status": "success",
+            "data": {
+                "connected": True,
+                "active": mirror_status.get("active", False),
+                "source": mirror_status.get("source", ""),
+                "targets": mirror_status.get("targets", []),
+                "multiplier": mirror_status.get("multiplier", 1.0),
+                "mirrored_positions": mirror_status.get("mirrored_positions", 0),
+                "errors": mirror_status.get("errors", []),
+            },
+        }), 200
+    except Exception:
+        logger.exception("ditto_algomirror_status error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------
+# AI — OpenClaw bridge
+# ------------------------------------------------------------------
+
+
+@operations_bp.route("/ai/openclaw/status", methods=["GET"])
+def ai_openclaw_status() -> tuple[Any, int]:
+    """Check OpenClaw health.
+
+    Returns whether the OpenClaw AI agent gateway is running.
+    """
+    try:
+        from packages.ai.src.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
+
+        bridge = OpenClawBridge()
+        healthy = bridge.check_health()
+        return jsonify({
+            "status": "success",
+            "data": {"connected": healthy},
+        }), 200
+    except Exception:
+        logger.exception("ai_openclaw_status error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/ai/openclaw/agents", methods=["GET"])
+def ai_openclaw_agents() -> tuple[Any, int]:
+    """List running agents on OpenClaw.
+
+    Returns an empty list if OpenClaw is not reachable.
+    """
+    try:
+        from packages.ai.src.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
+
+        bridge = OpenClawBridge()
+        agents = bridge.list_agents()
+        return jsonify({
+            "status": "success",
+            "data": {"agents": agents},
+        }), 200
+    except Exception:
+        logger.exception("ai_openclaw_agents error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
 # ------------------------------------------------------------------

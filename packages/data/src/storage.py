@@ -226,7 +226,9 @@ class StorageManager:
     ) -> list[dict[str, Any]]:
         """Query ticks by symbol, exchange, and date range (YYYY-MM-DD strings)."""
         result = self.connection.execute(
-            """SELECT * FROM ticks
+            """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
+                      volume, bid, ask, oi, prev_close, depth_json
+               FROM ticks
                WHERE symbol = ? AND exchange = ?
                  AND ts >= ? AND ts < ?::DATE + INTERVAL '1 day'
                ORDER BY ts""",
@@ -238,7 +240,9 @@ class StorageManager:
     def get_ticks_by_date(self, trade_date: str) -> list[dict[str, Any]]:
         """Get all ticks for a given date."""
         result = self.connection.execute(
-            """SELECT * FROM ticks
+            """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
+                      volume, bid, ask, oi, prev_close, depth_json
+               FROM ticks
                WHERE ts >= ?::DATE AND ts < ?::DATE + INTERVAL '1 day'
                ORDER BY ts""",
             [trade_date, trade_date],
@@ -283,7 +287,9 @@ class StorageManager:
     ) -> list[dict[str, Any]]:
         """Get trades filtered by strategy and date range."""
         result = self.connection.execute(
-            """SELECT * FROM trades
+            """SELECT ts, orderid, symbol, exchange, action, quantity, price,
+                      product, strategy, entry_price, exit_price, pnl, slippage, fees
+               FROM trades
                WHERE strategy = ?
                  AND ts >= ? AND ts < ?::DATE + INTERVAL '1 day'
                ORDER BY ts""",
@@ -295,7 +301,9 @@ class StorageManager:
     def get_trades_by_date(self, trade_date: str) -> list[dict[str, Any]]:
         """Get all trades for a given date."""
         result = self.connection.execute(
-            """SELECT * FROM trades
+            """SELECT ts, orderid, symbol, exchange, action, quantity, price,
+                      product, strategy, entry_price, exit_price, pnl, slippage, fees
+               FROM trades
                WHERE ts >= ?::DATE AND ts < ?::DATE + INTERVAL '1 day'
                ORDER BY ts""",
             [trade_date, trade_date],
@@ -340,14 +348,18 @@ class StorageManager:
         """Get daily summaries for a date range, optionally filtered by strategy."""
         if strategy:
             result = self.connection.execute(
-                """SELECT * FROM daily_summary
+                """SELECT trade_date, strategy, total_trades, winning_trades,
+                          losing_trades, gross_pnl, fees, net_pnl, max_drawdown
+                   FROM daily_summary
                    WHERE trade_date >= ? AND trade_date <= ? AND strategy = ?
                    ORDER BY trade_date""",
                 [start_date, end_date, strategy],
             )
         else:
             result = self.connection.execute(
-                """SELECT * FROM daily_summary
+                """SELECT trade_date, strategy, total_trades, winning_trades,
+                          losing_trades, gross_pnl, fees, net_pnl, max_drawdown
+                   FROM daily_summary
                    WHERE trade_date >= ? AND trade_date <= ?
                    ORDER BY trade_date""",
                 [start_date, end_date],

@@ -97,9 +97,12 @@ def admin_health() -> tuple[Response, int]:
     data = _introspect_packages()
     total_tests = sum(p["testCount"] for p in data)
     return jsonify({
-        "packages": data,
-        "total_packages": len(data),
-        "total_tests": total_tests,
+        "status": "success",
+        "data": {
+            "packages": data,
+            "total_packages": len(data),
+            "total_tests": total_tests,
+        },
     }), 200
 
 
@@ -195,9 +198,12 @@ def admin_widgets() -> tuple[Response, int]:
         by_category[cat] = by_category.get(cat, 0) + 1
 
     return jsonify({
-        "widgets": _WIDGET_REGISTRY,
-        "total": len(_WIDGET_REGISTRY),
-        "by_category": by_category,
+        "status": "success",
+        "data": {
+            "widgets": _WIDGET_REGISTRY,
+            "total": len(_WIDGET_REGISTRY),
+            "by_category": by_category,
+        },
     }), 200
 
 
@@ -206,16 +212,17 @@ def admin_repos() -> tuple[Response, int]:
     """Read absorption-status.json and return as JSON."""
     if not _STATUS_FILE.exists():
         return jsonify({
-            "error": "absorption-status.json not found",
-            "path": str(_STATUS_FILE),
+            "status": "error",
+            "message": "absorption-status.json not found",
         }), 404
 
     try:
         data: dict[str, Any] = json.loads(_STATUS_FILE.read_text(encoding="utf-8"))
-        return jsonify(data), 200
+        return jsonify({"status": "success", "data": data}), 200
     except json.JSONDecodeError as exc:
         return jsonify({
-            "error": f"Invalid JSON: {exc}",
+            "status": "error",
+            "message": f"Invalid JSON: {exc}",
         }), 500
 
 
@@ -228,7 +235,10 @@ def admin_features() -> tuple[Response, int]:
         by_status[s] = by_status.get(s, 0) + 1
 
     return jsonify({
-        "features": _FEATURE_FLAGS,
-        "total": len(_FEATURE_FLAGS),
-        "by_status": by_status,
+        "status": "success",
+        "data": {
+            "features": _FEATURE_FLAGS,
+            "total": len(_FEATURE_FLAGS),
+            "by_status": by_status,
+        },
     }), 200

@@ -46,7 +46,7 @@ class TestTaxSummaryEndpoint:
         resp = _get(app_client, "/v1/tax/summary?fy=2025-26")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
 
     def test_summary_has_required_fields(self, app_client) -> None:
         resp = _get(app_client, "/v1/tax/summary?fy=2025-26")
@@ -94,7 +94,7 @@ class TestTaxReportEndpoint:
         resp = _get(app_client, "/v1/tax/report?fy=2025-26")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
 
     def test_report_has_summary_and_segments(self, app_client) -> None:
         resp = _get(app_client, "/v1/tax/report?fy=2025-26")

@@ -88,6 +88,11 @@ CREATE TABLE IF NOT EXISTS sandbox_positions (
 
 _ALL_DDL = [_DDL_CAPITAL, _DDL_ORDERS, _DDL_POSITIONS]
 
+_SANDBOX_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_sandbox_orders_created ON sandbox_orders (created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_sandbox_positions_sym_ex ON sandbox_positions (symbol, exchange, product)",
+]
+
 
 def _default_db_path() -> str:
     """Resolve sandbox DuckDB path: env override > workspace > fallback."""
@@ -147,10 +152,18 @@ class SandboxEngine:
     # Initialisation
     # ------------------------------------------------------------------
 
+    def __enter__(self) -> SandboxEngine:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
     def _init_db(self) -> None:
-        """Create tables and seed the capital row if missing."""
+        """Create tables, indexes, and seed the capital row if missing."""
         for ddl in _ALL_DDL:
             self._conn.execute(ddl)
+        for idx in _SANDBOX_INDEXES:
+            self._conn.execute(idx)
 
         existing = self._conn.execute(
             "SELECT id FROM sandbox_capital WHERE id = 'default'"

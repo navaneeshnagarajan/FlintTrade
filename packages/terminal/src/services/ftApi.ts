@@ -62,6 +62,19 @@ async function get<T>(endpoint: string): Promise<T> {
   return parseResponse<T>(resp, endpoint);
 }
 
+async function put<T>(
+  endpoint: string,
+  body: Record<string, unknown> = {},
+): Promise<T> {
+  const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
+  return parseResponse<T>(resp, endpoint);
+}
+
 async function del<T>(endpoint: string): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "DELETE",
@@ -194,6 +207,37 @@ export interface Signal {
 }
 
 export const getActiveSignals = () => get<{ signals: Signal[] }>("signals/active");
+
+// ---------------------------------------------------------------------------
+// Live Signals (v0.5.0 — rule-based pipeline)
+// ---------------------------------------------------------------------------
+
+export interface LiveSignal {
+  timestamp: string;
+  symbol: string;
+  signal_type: "BUY" | "SELL" | "ALERT";
+  indicator: string;
+  value: number;
+  threshold: number;
+  confidence: number;
+  message: string;
+}
+
+export interface SignalConfig {
+  instruments: string[];
+  indicators: Array<{ name: string; params: Record<string, number> }>;
+  thresholds: Record<string, number>;
+}
+
+export const getRecentSignals = (limit?: number) => {
+  const qs = limit !== undefined ? `?limit=${limit}` : "";
+  return get<{ signals: LiveSignal[] }>("signals/recent" + qs);
+};
+
+export const getSignalConfig = () => get<SignalConfig>("signals/config");
+
+export const updateSignalConfig = (config: Partial<SignalConfig>) =>
+  post<SignalConfig>("signals/configure", config as Record<string, unknown>);
 
 // ---------------------------------------------------------------------------
 // Sentiment
@@ -421,6 +465,21 @@ export const computeIndicators = (
     bars: bars as unknown as Record<string, unknown>[],
     indicators,
   });
+
+// ---------------------------------------------------------------------------
+// Pine Script Compilation
+// ---------------------------------------------------------------------------
+
+export interface PineCompileResult {
+  python_code: string;
+  imports: string[];
+  warnings: string[];
+  unsupported: string[];
+  supported_functions: string[];
+}
+
+export const compilePineScript = (code: string) =>
+  post<PineCompileResult>("indicators/pine/compile", { code });
 
 // ---------------------------------------------------------------------------
 // Analysis endpoints (SP2)
@@ -724,6 +783,48 @@ export interface NewsArticle {
 export const getNews = () => get<{ articles: NewsArticle[] }>("news");
 
 // ---------------------------------------------------------------------------
+// Mutual Fund Explorer
+// ---------------------------------------------------------------------------
+
+export interface MutualFundEntry {
+  scheme_code: number;
+  scheme_name: string;
+  amc: string;
+  category: string;
+  nav: number;
+  nav_date: string;
+  scheme_type: string;
+}
+
+export interface MFSearchResponse {
+  query: string;
+  count: number;
+  funds: MutualFundEntry[];
+}
+
+export interface MFNAVResponse {
+  fund: MutualFundEntry;
+}
+
+export interface MFCategoriesResponse {
+  count: number;
+  categories: string[];
+}
+
+export const searchMutualFunds = (query: string, category?: string, limit?: number) => {
+  const params = new URLSearchParams({ q: query });
+  if (category) params.set("category", category);
+  if (limit !== undefined) params.set("limit", String(limit));
+  return get<MFSearchResponse>("mf/search?" + params.toString());
+};
+
+export const getMutualFundNAV = (schemeCode: number) =>
+  get<MFNAVResponse>("mf/nav/" + String(schemeCode));
+
+export const getMFCategories = () =>
+  get<MFCategoriesResponse>("mf/categories");
+
+// ---------------------------------------------------------------------------
 // Ditto — Multi-account management & position mirroring
 // ---------------------------------------------------------------------------
 
@@ -797,3 +898,169 @@ export const getDittoRisk = () => get<DittoRiskData>("ditto/risk");
 
 export const dittoKillAll = () =>
   post<{ message: string; accounts_affected: number }>("ditto/kill-all");
+
+// ---------------------------------------------------------------------------
+// AlgoMirror (submodule bridge)
+// ---------------------------------------------------------------------------
+
+export interface AlgoMirrorStatusData {
+  connected: boolean;
+  active: boolean;
+  source: string;
+  targets: string[];
+  multiplier: number;
+  mirrored_positions: number;
+  errors: string[];
+}
+
+export const getAlgoMirrorStatus = () =>
+  get<AlgoMirrorStatusData>("ditto/algomirror/status");
+
+// ---------------------------------------------------------------------------
+// OpenClaw (submodule bridge)
+// ---------------------------------------------------------------------------
+
+export interface OpenClawStatusData {
+  connected: boolean;
+}
+
+export interface OpenClawAgentData {
+  id: string;
+  name: string;
+  status: string;
+  strategy: string;
+  symbols: string[];
+  created_at: string;
+}
+
+export const getOpenClawStatus = () =>
+  get<OpenClawStatusData>("ai/openclaw/status");
+
+export const getOpenClawAgents = () =>
+  get<{ agents: OpenClawAgentData[] }>("ai/openclaw/agents");
+
+// ---------------------------------------------------------------------------
+// WhatsApp Alerts
+// ---------------------------------------------------------------------------
+
+export const testWhatsAppAlert = (message?: string) =>
+  post<{ status: string; message: string }>("alerts/whatsapp/test", {
+    ...(message ? { message } : {}),
+  });
+
+// ---------------------------------------------------------------------------
+// Historical Expired Options (ExpiryTrack)
+// ---------------------------------------------------------------------------
+
+export interface HistoricalOptionRow {
+  captured_at: string;
+  symbol: string;
+  exchange: string;
+  expiry_date: string;
+  strike: number;
+  option_type: "CE" | "PE";
+  oi: number;
+  volume: number;
+  ltp: number;
+  iv: number;
+}
+
+export const getHistoricalExpiries = (symbol: string, exchange?: string) => {
+  const params = new URLSearchParams();
+  if (exchange) params.set("exchange", exchange);
+  const qs = params.toString();
+  return get<{ symbol: string; exchange: string; expiries: string[] }>(
+    "historical/expiries/" + encodeURIComponent(symbol) + (qs ? "?" + qs : ""),
+  );
+};
+
+export const getHistoricalChain = (
+  symbol: string,
+  expiry: string,
+  exchange?: string,
+) => {
+  const params = new URLSearchParams();
+  if (exchange) params.set("exchange", exchange);
+  const qs = params.toString();
+  return get<{
+    symbol: string;
+    expiry: string;
+    exchange: string;
+    chain: HistoricalOptionRow[];
+  }>(
+    "historical/chain/" +
+      encodeURIComponent(symbol) +
+      "/" +
+      encodeURIComponent(expiry) +
+      (qs ? "?" + qs : ""),
+  );
+};
+
+// ---------------------------------------------------------------------------
+// IPO Tracker
+// ---------------------------------------------------------------------------
+
+export interface IpoEntry {
+  name: string;
+  symbol: string;
+  issue_size: string;
+  price_band: string;
+  lot_size: number;
+  open_date: string;
+  close_date: string;
+  listing_date: string;
+  status: string;
+  listing_gain?: number;
+}
+
+export interface IpoResponse {
+  ipos: IpoEntry[];
+  last_updated: string;
+}
+
+export const getUpcomingIPOs = () => get<IpoResponse>("ipo/upcoming");
+export const getRecentIPOs = () => get<IpoResponse>("ipo/recent");
+
+// ---------------------------------------------------------------------------
+// User Management (multi-user mode — admin only)
+// ---------------------------------------------------------------------------
+
+export interface UserAccount {
+  id: number;
+  username: string;
+  email: string;
+  role: "admin" | "trader" | "viewer";
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const listUsers = () =>
+  get<{ users: UserAccount[] }>("users");
+
+export const createUser = (
+  username: string,
+  password: string,
+  email: string,
+  role?: "admin" | "trader" | "viewer",
+) =>
+  post<UserAccount>("users", {
+    username,
+    password,
+    email,
+    ...(role ? { role } : {}),
+  });
+
+export const updateUser = (
+  username: string,
+  fields: { email?: string; role?: string; is_active?: boolean },
+) =>
+  put<UserAccount>(
+    "users/" + encodeURIComponent(username),
+    fields as Record<string, unknown>,
+  );
+
+export const deleteUser = (username: string) =>
+  del<{ message: string }>(
+    "users/" + encodeURIComponent(username),
+  );

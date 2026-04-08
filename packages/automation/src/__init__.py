@@ -12,6 +12,7 @@ from .post_market import (
 )
 from .telegram_bot import BotConfig, CommandResult, TelegramBot
 from .totp_login import LoginResult, is_trading_day
+from .whatsapp_alerts import WhatsAppAlerter, WhatsAppConfig
 
 __all__ = [
     # Trading day utilities (retained from totp_login)
@@ -36,4 +37,7 @@ __all__ = [
     "DailyReport",
     "TradeEntry",
     "StrategyPerformance",
+    # WhatsApp
+    "WhatsAppAlerter",
+    "WhatsAppConfig",
 ]

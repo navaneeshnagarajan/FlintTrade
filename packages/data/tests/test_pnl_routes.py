@@ -67,7 +67,7 @@ class TestPnLRoutes:
         resp = _get(app_client, "/api/v1/pnl-tracker")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert isinstance(data["data"], list)
         assert len(data["data"]) >= 1
 
@@ -85,7 +85,7 @@ class TestPnLRoutes:
         resp = _get(app_client, "/api/v1/pnl-tracker/summary")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert "realized" in data["data"]
         assert "unrealized" in data["data"]
         assert "total" in data["data"]
@@ -101,7 +101,7 @@ class TestPnLRoutes:
         resp = _get(app_client, "/api/v1/pnl-tracker/summary")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert data["data"]["realized"] == 0.0
         assert data["data"]["unrealized"] == 0.0
         assert data["data"]["total"] == 0.0
@@ -115,7 +115,7 @@ class TestPnLRoutes:
         future_ts = time.time() + 9999
         resp = _get(app_client, f"/api/v1/pnl-tracker?since={future_ts}")
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert data["data"] == []
 
     def test_series_since_filter_invalid(self, app_client):

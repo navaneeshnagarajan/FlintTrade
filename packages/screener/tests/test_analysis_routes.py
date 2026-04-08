@@ -67,7 +67,7 @@ class TestGEXEndpoint:
 
     def test_gex_status_ok(self, client):
         _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
-        assert body["status"] == "ok"
+        assert body["status"] == "success"
 
     def test_gex_has_data(self, client):
         _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
@@ -106,7 +106,7 @@ class TestVolSurfaceEndpoint:
         _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO", "expiries": ["26MAR26"],
         })
-        assert body["status"] == "ok"
+        assert body["status"] == "success"
 
     def test_volsurface_has_matrix(self, client):
         _, body = _post(client, "/api/v1/volsurface", {
@@ -156,7 +156,7 @@ class TestIVSmileEndpoint:
 
     def test_ivsmile_status_ok(self, client):
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
-        assert body["status"] == "ok"
+        assert body["status"] == "success"
 
     def test_ivsmile_has_required_fields(self, client):
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
@@ -194,7 +194,7 @@ class TestStraddlePnLEndpoint:
 
     def test_straddlepnl_status_ok(self, client):
         _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
-        assert body["status"] == "ok"
+        assert body["status"] == "success"
 
     def test_straddlepnl_has_required_fields(self, client):
         _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
@@ -233,7 +233,7 @@ class TestOIProfileEndpoint:
 
     def test_oiprofile_status_ok(self, client):
         _, body = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
-        assert body["status"] == "ok"
+        assert body["status"] == "success"
 
     def test_oiprofile_has_required_fields(self, client):
         _, body = _post(client, "/api/v1/oiprofile", {"symbol": "NIFTY"})
@@ -271,7 +271,7 @@ class TestMaxPainEndpoint:
 
     def test_maxpain_status_ok(self, client):
         _, body = _post(client, "/api/v1/maxpain", {"symbol": "NIFTY"})
-        assert body["status"] == "ok"
+        assert body["status"] == "success"
 
     def test_maxpain_has_strike(self, client):
         _, body = _post(client, "/api/v1/maxpain", {"symbol": "NIFTY"})

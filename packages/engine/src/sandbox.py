@@ -138,6 +138,14 @@ CREATE TABLE IF NOT EXISTS sandbox_daily_pnl (
 """
 
 
+_SANDBOX_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_sb_orders_account ON sandbox_orders (account_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_sb_trades_account ON sandbox_trades (account_id, traded_at)",
+    "CREATE INDEX IF NOT EXISTS idx_sb_positions_account ON sandbox_positions (account_id, symbol, exchange, product)",
+    "CREATE INDEX IF NOT EXISTS idx_sb_daily_pnl_account ON sandbox_daily_pnl (account_id, date)",
+]
+
+
 # ---------------------------------------------------------------------------
 # SandboxEngine
 # ---------------------------------------------------------------------------
@@ -182,9 +190,17 @@ class SandboxEngine:
     # Initialization
     # ------------------------------------------------------------------
 
+    def __enter__(self) -> SandboxEngine:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
     def _init_db(self) -> None:
-        """Create DuckDB tables and seed the funds row if missing."""
+        """Create DuckDB tables, indexes, and seed the funds row if missing."""
         self._conn.execute(_DDL)
+        for idx in _SANDBOX_INDEXES:
+            self._conn.execute(idx)
         # Ensure the funds row exists
         existing = self._conn.execute(
             "SELECT account_id FROM sandbox_funds WHERE account_id = ?",

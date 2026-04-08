@@ -17,3 +17,4 @@ export { OverlapTab } from "./OverlapTab";
 export { MfOptimizerTab } from "./MfOptimizerTab";
 export { BenchmarkTab } from "./BenchmarkTab";
 export { BasketTab } from "./BasketTab";
+export { MutualFundTab } from "./MutualFundTab";

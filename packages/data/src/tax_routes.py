@@ -100,14 +100,14 @@ def tax_summary() -> tuple[Any, int]:
         fy (str): Financial year (e.g. "2025-26"). Defaults to "2025-26".
 
     Returns:
-        JSON ``{"status": "ok", "data": {...}}`` with TaxSummary fields.
+        JSON ``{"status": "success", "data": {...}}`` with TaxSummary fields.
     """
     fy = request.args.get("fy", "2025-26")
     trades = _get_trades_for_fy(fy)
     summary = _generator.compute_pnl_by_segment(trades, fy)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "data": {
             "fy": summary.fy,
             "equity_ltcg": summary.equity_ltcg,
@@ -133,10 +133,10 @@ def tax_report() -> tuple[Any, int]:
         fy (str): Financial year (e.g. "2025-26"). Defaults to "2025-26".
 
     Returns:
-        JSON ``{"status": "ok", "data": {...}}`` with summary and segments.
+        JSON ``{"status": "success", "data": {...}}`` with summary and segments.
     """
     fy = request.args.get("fy", "2025-26")
     trades = _get_trades_for_fy(fy)
     report = _generator.generate_report(trades, fy)
 
-    return jsonify({"status": "ok", "data": report}), 200
+    return jsonify({"status": "success", "data": report}), 200

@@ -46,7 +46,7 @@ def pnl_series() -> tuple[Any, int]:
             this timestamp are returned.
 
     Returns:
-        JSON ``{"status": "ok", "data": [...]}`` where each element has
+        JSON ``{"status": "success", "data": [...]}`` where each element has
         keys ``timestamp``, ``realized_pnl``, ``unrealized_pnl``,
         ``total_pnl``, ``trade_count``.
     """
@@ -60,7 +60,7 @@ def pnl_series() -> tuple[Any, int]:
 
     points = _tracker.get_series(since=since)
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "data": [
             {
                 "timestamp": p.timestamp,
@@ -79,8 +79,8 @@ def pnl_summary() -> tuple[Any, int]:
     """Return a summary of the current P&L state.
 
     Returns:
-        JSON ``{"status": "ok", "data": {...}}`` with keys
+        JSON ``{"status": "success", "data": {...}}`` with keys
         ``realized``, ``unrealized``, ``total``, ``max_total``,
         ``min_total``, ``trade_count``, ``data_points``.
     """
-    return jsonify({"status": "ok", "data": _tracker.get_summary()}), 200
+    return jsonify({"status": "success", "data": _tracker.get_summary()}), 200

@@ -359,7 +359,10 @@ class DataPipeline:
     ) -> list[dict[str, Any]]:
         """Query OHLCV bars from a table."""
         table = _validate_table(table)
-        query = f"SELECT * FROM {table} WHERE symbol = ? AND exchange = ?"
+        query = (
+            f"SELECT timestamp, symbol, exchange, open, high, low, close, volume, oi"
+            f" FROM {table} WHERE symbol = ? AND exchange = ?"
+        )
         params: list[Any] = [symbol, exchange]
 
         if start_date:
@@ -446,7 +449,7 @@ class DataPipeline:
         safe_output = _validate_path(output_path)
         safe_output.parent.mkdir(parents=True, exist_ok=True)
 
-        query = f"SELECT * FROM {table}"
+        query = f"SELECT timestamp, symbol, exchange, open, high, low, close, volume, oi FROM {table}"
         conditions: list[str] = []
         params: list[Any] = []
 

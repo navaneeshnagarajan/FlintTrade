@@ -34,6 +34,7 @@ import {
   Sparkles,
   Activity,
   Target,
+  IndianRupee,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -58,6 +59,7 @@ const MfOptimizerTab = lazy(() => import("./invest/tabs/MfOptimizerTab").then(m 
 const BenchmarkTab = lazy(() => import("./invest/tabs/BenchmarkTab").then(m => ({ default: m.BenchmarkTab })));
 const BasketTab = lazy(() => import("./invest/tabs/BasketTab").then(m => ({ default: m.BasketTab })));
 const GoalTab = lazy(() => import("./invest/tabs/GoalTab").then(m => ({ default: m.GoalTab })));
+const MutualFundTab = lazy(() => import("./invest/tabs/MutualFundTab").then(m => ({ default: m.MutualFundTab })));
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 
@@ -74,6 +76,7 @@ type TabId =
   | "ipo"
   | "tax"
   | "mf-optimizer"
+  | "mutual-funds"
   | "benchmark"
   | "basket"
   | "goals";
@@ -97,6 +100,7 @@ const TABS: TabDef[] = [
   { id: "ipo", label: "IPO", icon: Ticket },
   { id: "tax", label: "Tax", icon: Receipt },
   { id: "mf-optimizer", label: "MF Optimizer", icon: Sparkles },
+  { id: "mutual-funds", label: "Mutual Funds", icon: IndianRupee },
   { id: "benchmark", label: "Benchmark", icon: Activity },
   { id: "basket", label: "Baskets", icon: Layers },
   { id: "goals", label: "Goals", icon: Target },
@@ -133,8 +137,9 @@ function ActiveTabContent({ tabId }: { tabId: TabId }) {
       case "stocks":       return <StocksTab />;
       case "ipo":          return <IpoTab />;
       case "tax":          return <TaxTab />;
-      case "mf-optimizer": return <MfOptimizerTab />;
-      case "benchmark":    return <BenchmarkTab />;
+      case "mf-optimizer":  return <MfOptimizerTab />;
+      case "mutual-funds":  return <MutualFundTab />;
+      case "benchmark":     return <BenchmarkTab />;
       case "basket":       return <BasketTab />;
       case "goals":        return <GoalTab />;
       default:             return null;
@@ -157,9 +162,9 @@ function InvestShell() {
 
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
-    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "goals", "mf-optimizer"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "benchmark", "basket"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "benchmark", "basket", "goals"];
+    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "goals", "mf-optimizer", "mutual-funds"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "goals"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));

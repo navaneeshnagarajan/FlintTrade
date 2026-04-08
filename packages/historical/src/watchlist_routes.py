@@ -53,12 +53,12 @@ def list_watchlist() -> tuple[Any, int]:
     """Return all watchlist items.
 
     Returns:
-        JSON ``{"status": "ok", "data": [...]}`` where each element has
+        JSON ``{"status": "success", "data": [...]}`` where each element has
         keys ``symbol``, ``exchange``, ``interval``, ``enabled``.
     """
     items = _get_watchlist().list_items()
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "data": [
             {
                 "symbol": item.symbol,
@@ -81,7 +81,7 @@ def add_watchlist() -> tuple[Any, int]:
         interval (str, optional): OHLCV interval (default ``"1d"``).
 
     Returns:
-        JSON ``{"status": "ok", "data": {...}}`` with the created item.
+        JSON ``{"status": "success", "data": {...}}`` with the created item.
     """
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "").strip()
@@ -95,7 +95,7 @@ def add_watchlist() -> tuple[Any, int]:
 
     item = _get_watchlist().add(symbol, exchange, interval)
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "data": {
             "symbol": item.symbol,
             "exchange": item.exchange,
@@ -114,7 +114,7 @@ def remove_watchlist() -> tuple[Any, int]:
         exchange (str): Exchange code.
 
     Returns:
-        JSON ``{"status": "ok"}``.
+        JSON ``{"status": "success"}``.
     """
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "").strip()
@@ -126,7 +126,7 @@ def remove_watchlist() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "exchange is required"}), 400
 
     _get_watchlist().remove(symbol, exchange)
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "success"}), 200
 
 
 @historify_bp.route("/v1/historify/download", methods=["POST"])
@@ -142,7 +142,7 @@ def trigger_download() -> tuple[Any, int]:
         end_date (str): ISO date (default: today).
 
     Returns:
-        JSON ``{"status": "ok", "data": {"triggered": N, "items": [...]}}``
+        JSON ``{"status": "success", "data": {"triggered": N, "items": [...]}}``
         listing the symbols that were queued for download.
     """
     body = request.get_json(silent=True) or {}
@@ -193,7 +193,7 @@ def trigger_download() -> tuple[Any, int]:
         results.append(entry)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "data": {
             "triggered": len(enabled),
             "start_date": start_date,

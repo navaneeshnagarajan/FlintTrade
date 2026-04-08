@@ -39,6 +39,7 @@ class AlertType(StrEnum):
 
 class AlertChannel(StrEnum):
     TELEGRAM = "TELEGRAM"
+    WHATSAPP = "WHATSAPP"
     CONSOLE = "CONSOLE"
 
 
@@ -230,6 +231,8 @@ class Alerter:
             try:
                 if channel == AlertChannel.TELEGRAM:
                     self._send_telegram(formatted)
+                elif channel == AlertChannel.WHATSAPP:
+                    self._send_whatsapp(formatted)
                 elif channel == AlertChannel.CONSOLE:
                     self._send_console(formatted)
             except Exception as exc:
@@ -247,6 +250,16 @@ class Alerter:
             logger.debug("Telegram alert sent")
         except Exception as exc:
             logger.error("Telegram send failed: %s", exc)
+
+    def _send_whatsapp(self, message: str) -> None:
+        """Send via WhatsApp webhook."""
+        try:
+            from packages.automation.src.whatsapp_alerts import WhatsAppAlerter
+            alerter = WhatsAppAlerter()
+            alerter.send_alert(message)
+            logger.debug("WhatsApp alert sent")
+        except Exception as exc:
+            logger.error("WhatsApp send failed: %s", exc)
 
     def _send_console(self, message: str) -> None:
         """Log alert to console via Python logging."""

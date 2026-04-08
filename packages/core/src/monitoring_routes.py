@@ -115,7 +115,7 @@ def traffic_stats() -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "minutes must be a positive integer"}), 400
 
-    return jsonify({"status": "ok", "data": _traffic.get_stats(minutes=minutes)}), 200
+    return jsonify({"status": "success", "data": _traffic.get_stats(minutes=minutes)}), 200
 
 
 @monitoring_bp.route("/traffic/recent", methods=["GET"])
@@ -136,7 +136,7 @@ def traffic_recent() -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "n must be a positive integer"}), 400
 
-    return jsonify({"status": "ok", "data": _traffic.get_recent(n=n)}), 200
+    return jsonify({"status": "success", "data": _traffic.get_recent(n=n)}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ def latency_stats() -> tuple[Any, int]:
         JSON ``{"status": "ok", "data": {"BROKER": {count, avg_ms,
         p50_ms, p95_ms, p99_ms}, ...}}``.
     """
-    return jsonify({"status": "ok", "data": _latency.get_stats()}), 200
+    return jsonify({"status": "success", "data": _latency.get_stats()}), 200
 
 
 @monitoring_bp.route("/latency/recent", methods=["GET"])
@@ -173,4 +173,4 @@ def latency_recent() -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "n must be a positive integer"}), 400
 
-    return jsonify({"status": "ok", "data": _latency.get_recent(n=n)}), 200
+    return jsonify({"status": "success", "data": _latency.get_recent(n=n)}), 200

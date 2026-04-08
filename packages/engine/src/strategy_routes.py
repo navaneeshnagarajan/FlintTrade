@@ -128,7 +128,7 @@ def list_strategies() -> Response:
     if err:
         return err
 
-    return jsonify({"status": "success", "strategies": runner.list_strategies()})
+    return jsonify({"status": "success", "data": {"strategies": runner.list_strategies()}})
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def start_strategy(strategy_id: str) -> Response:
         return jsonify({"status": "error", "message": "Start failed. Check server logs."}), 500
 
     status = runner.get_status(strategy_id)
-    return jsonify({"status": "success", "message": "Strategy started", "strategy": status})
+    return jsonify({"status": "success", "data": {"message": "Strategy started", "strategy": status}})
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ def get_strategy_status(strategy_id: str) -> Response:
     except FileNotFoundError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 404
 
-    return jsonify({"status": "success", "strategy": status})
+    return jsonify({"status": "success", "data": {"strategy": status}})
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +284,7 @@ def get_strategy_trades(strategy_id: str) -> Response:
     except FileNotFoundError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 404
 
-    return jsonify({"status": "success", "strategy_id": strategy_id, "trades": []})
+    return jsonify({"status": "success", "data": {"strategy_id": strategy_id, "trades": []}})
 
 
 # ---------------------------------------------------------------------------
@@ -316,4 +316,4 @@ def get_strategy_logs(strategy_id: str) -> Response:
     except FileNotFoundError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 404
 
-    return jsonify({"status": "success", "strategy_id": strategy_id, "lines": log_lines})
+    return jsonify({"status": "success", "data": {"strategy_id": strategy_id, "lines": log_lines}})

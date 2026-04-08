@@ -120,6 +120,12 @@ export const SYMBOLS: SymbolDef[] = [
   { label: "CRUDEOIL",    exchange: "MCX", spotSymbol: "CRUDEOIL",    spotExchange: "MCX" },
   { label: "NATURALGAS",  exchange: "MCX", spotSymbol: "NATURALGAS",  spotExchange: "MCX" },
   { label: "COPPER",      exchange: "MCX", spotSymbol: "COPPER",      spotExchange: "MCX" },
+  { label: "ZINC",        exchange: "MCX", spotSymbol: "ZINC",        spotExchange: "MCX" },
+  { label: "LEAD",        exchange: "MCX", spotSymbol: "LEAD",        spotExchange: "MCX" },
+  { label: "NICKEL",      exchange: "MCX", spotSymbol: "NICKEL",      spotExchange: "MCX" },
+  { label: "ALUMINIUM",   exchange: "MCX", spotSymbol: "ALUMINIUM",   spotExchange: "MCX" },
+  { label: "MENTHAOIL",   exchange: "MCX", spotSymbol: "MENTHAOIL",   spotExchange: "MCX" },
+  { label: "COTTON",      exchange: "MCX", spotSymbol: "COTTON",      spotExchange: "MCX" },
   // Currency Options (CDS)
   { label: "USDINR",      exchange: "CDS", spotSymbol: "USDINR",      spotExchange: "CDS" },
   { label: "EURINR",      exchange: "CDS", spotSymbol: "EURINR",      spotExchange: "CDS" },

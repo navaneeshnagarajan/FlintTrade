@@ -19,6 +19,7 @@ from .risk_manager import (
     TradeGrade,
     TradeQuality,
 )
+from .algomirror_bridge import AlgoMirrorBridge, AlgoMirrorStatus
 from .trailing_sl import (
     SLAdjustment,
     SLTracker,
@@ -53,4 +54,7 @@ __all__ = [
     "AccountRiskState",
     "TradeGrade",
     "TradeQuality",
+    # AlgoMirror bridge
+    "AlgoMirrorBridge",
+    "AlgoMirrorStatus",
 ]

@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isMarketHours } from "../market";
+import { isMarketHours, getMCXStatus, getExchangeStatus, EXCHANGE_HOURS } from "../market";
 
 // ---------------------------------------------------------------------------
 // Helpers — UTC times that correspond to well-known IST moments
@@ -192,5 +192,144 @@ describe("returns false on weekends regardless of the time", () => {
   it("returns false at 15:30 IST on Sunday (would be open on a weekday)", () => {
     vi.setSystemTime(istToUtc(SUN.y, SUN.m, SUN.d, 15, 30));
     expect(isMarketHours()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MCX market hours — 9:00 AM to 11:30 PM IST (Mon–Fri)
+// ---------------------------------------------------------------------------
+
+describe("MCX market hours (9:00–23:30 IST)", () => {
+  it("returns true at 9:00 AM IST (MCX open)", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 9, 0));
+    expect(isMarketHours("MCX")).toBe(true);
+  });
+
+  it("returns true at 10:00 PM IST (MCX evening session)", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 22, 0));
+    expect(isMarketHours("MCX")).toBe(true);
+  });
+
+  it("returns true at 23:30 IST (MCX close — inclusive boundary)", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 23, 30));
+    expect(isMarketHours("MCX")).toBe(true);
+  });
+
+  it("returns false at 23:31 IST (one minute after MCX close)", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 23, 31));
+    expect(isMarketHours("MCX")).toBe(false);
+  });
+
+  it("returns false at 8:59 AM IST (one minute before MCX open)", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 8, 59));
+    expect(isMarketHours("MCX")).toBe(false);
+  });
+
+  it("returns false on Saturday even during MCX hours", () => {
+    vi.setSystemTime(istToUtc(SAT.y, SAT.m, SAT.d, 22, 0));
+    expect(isMarketHours("MCX")).toBe(false);
+  });
+
+  it("MCX is open when NSE is closed (evening)", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 20, 0));
+    expect(isMarketHours("MCX")).toBe(true);
+    expect(isMarketHours("NSE")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CDS market hours — 9:00 AM to 5:00 PM IST
+// ---------------------------------------------------------------------------
+
+describe("CDS market hours (9:00–17:00 IST)", () => {
+  it("returns true at 16:00 IST (CDS open, NSE closed)", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 16, 0));
+    expect(isMarketHours("CDS")).toBe(true);
+    expect(isMarketHours("NSE")).toBe(false);
+  });
+
+  it("returns false at 17:01 IST", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 17, 1));
+    expect(isMarketHours("CDS")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getMCXStatus()
+// ---------------------------------------------------------------------------
+
+describe("getMCXStatus()", () => {
+  it("returns 'open' during MCX hours", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 22, 0));
+    const status = getMCXStatus();
+    expect(status.status).toBe("open");
+    expect(status.label).toBe("MCX Open");
+  });
+
+  it("returns 'pre-market' before MCX open", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 8, 30));
+    const status = getMCXStatus();
+    expect(status.status).toBe("pre-market");
+  });
+
+  it("returns 'closed' after MCX close", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 23, 45));
+    const status = getMCXStatus();
+    expect(status.status).toBe("closed");
+  });
+
+  it("returns 'weekend' on Saturday", () => {
+    vi.setSystemTime(istToUtc(SAT.y, SAT.m, SAT.d, 12, 0));
+    const status = getMCXStatus();
+    expect(status.status).toBe("weekend");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getExchangeStatus()
+// ---------------------------------------------------------------------------
+
+describe("getExchangeStatus()", () => {
+  it("returns 'open' for DELTA at any time", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 3, 0));
+    expect(getExchangeStatus("DELTA").status).toBe("open");
+  });
+
+  it("returns 'closed' for unknown exchange", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 12, 0));
+    expect(getExchangeStatus("FAKE").status).toBe("closed");
+  });
+
+  it("returns correct status for NFO during hours", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 12, 0));
+    expect(getExchangeStatus("NFO").status).toBe("open");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EXCHANGE_HOURS data integrity
+// ---------------------------------------------------------------------------
+
+describe("EXCHANGE_HOURS data", () => {
+  it("has MCX hours 9:00–23:30", () => {
+    expect(EXCHANGE_HOURS.MCX.open).toBe(9 * 60);      // 540
+    expect(EXCHANGE_HOURS.MCX.close).toBe(23 * 60 + 30); // 1410
+  });
+
+  it("has NSE hours 9:15–15:30", () => {
+    expect(EXCHANGE_HOURS.NSE.open).toBe(9 * 60 + 15);  // 555
+    expect(EXCHANGE_HOURS.NSE.close).toBe(15 * 60 + 30); // 930
+  });
+
+  it("has CDS hours 9:00–17:00", () => {
+    expect(EXCHANGE_HOURS.CDS.open).toBe(9 * 60);
+    expect(EXCHANGE_HOURS.CDS.close).toBe(17 * 60);
+  });
+
+  it("contains all major exchanges", () => {
+    const expected = ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"];
+    for (const exch of expected) {
+      expect(EXCHANGE_HOURS).toHaveProperty(exch);
+    }
   });
 });

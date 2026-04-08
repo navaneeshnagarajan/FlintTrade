@@ -85,7 +85,7 @@ def get_capital() -> Response:
     if err:
         return err
 
-    return jsonify({"status": "success", "capital": engine.get_capital()})
+    return jsonify({"status": "success", "data": {"capital": engine.get_capital()}})
 
 
 @data_sandbox_bp.route("/capital/adjust", methods=["POST"])
@@ -119,7 +119,7 @@ def adjust_capital() -> Response:
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
-    return jsonify({"status": "success", "capital": updated})
+    return jsonify({"status": "success", "data": {"capital": updated}})
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ def place_order() -> Response:
     )
 
     http_status = 200 if result["status"] == "COMPLETE" else 400
-    return jsonify({"status": "success", "order": result}), http_status
+    return jsonify({"status": "success", "data": {"order": result}}), http_status
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ def get_positions() -> Response:
     if err:
         return err
 
-    return jsonify({"status": "success", "positions": engine.get_positions()})
+    return jsonify({"status": "success", "data": {"positions": engine.get_positions()}})
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ def get_orders() -> Response:
     if err:
         return err
 
-    return jsonify({"status": "success", "orders": engine.get_orders()})
+    return jsonify({"status": "success", "data": {"orders": engine.get_orders()}})
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +247,7 @@ def get_pnl() -> Response:
     if err:
         return err
 
-    return jsonify({"status": "success", "pnl": engine.get_pnl()})
+    return jsonify({"status": "success", "data": {"pnl": engine.get_pnl()}})
 
 
 # ---------------------------------------------------------------------------
@@ -269,8 +269,10 @@ def reset_sandbox() -> Response:
     backup = engine.reset()
     return jsonify({
         "status": "success",
-        "message": "Sandbox reset — all paper trades cleared",
-        "backup": backup,
+        "data": {
+            "message": "Sandbox reset — all paper trades cleared",
+            "backup": backup,
+        },
     })
 
 
@@ -320,4 +322,4 @@ def import_data() -> Response:
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
-    return jsonify({"status": "success", "stats": stats})
+    return jsonify({"status": "success", "data": {"stats": stats}})

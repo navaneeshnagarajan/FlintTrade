@@ -22,7 +22,9 @@ import {
   ChevronDown,
   ChevronUp,
   Settings2,
+  Code2,
 } from "lucide-react";
+import PineEditor from "@/routes/lab/PineEditor";
 import { AreaChart, BarChart } from "@tremor/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,7 +68,7 @@ import {
 // Tab registry — 4 primary horizontal tabs
 // ---------------------------------------------------------------------------
 
-type TabId = "backtest" | "forward-test" | "optimize" | "results";
+type TabId = "backtest" | "forward-test" | "optimize" | "results" | "pine-editor";
 
 interface TabDef {
   id: TabId;
@@ -79,6 +81,7 @@ const TABS: TabDef[] = [
   { id: "forward-test", label: "Forward Test", icon: PlayCircle },
   { id: "optimize", label: "Optimize", icon: TrendingUp },
   { id: "results", label: "Results", icon: BarChart3 },
+  { id: "pine-editor", label: "Pine Editor", icon: Code2 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1670,9 +1673,9 @@ export default function LabRoute() {
   // Intermediate: Full form + Results (all except Optimize)
   // Advanced: All tabs including Optimize (Monte Carlo / walk-forward)
   const visibleTabIds: TabId[] = (() => {
-    if (level === "beginner") return ["backtest", "results"];
-    if (level === "intermediate") return ["backtest", "forward-test", "results"];
-    return ["backtest", "forward-test", "optimize", "results"];
+    if (level === "beginner") return ["backtest", "results", "pine-editor"];
+    if (level === "intermediate") return ["backtest", "forward-test", "results", "pine-editor"];
+    return ["backtest", "forward-test", "optimize", "results", "pine-editor"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
@@ -1689,6 +1692,8 @@ export default function LabRoute() {
         return <OptimizeSection />;
       case "results":
         return <ResultsSection lastResult={lastResult} />;
+      case "pine-editor":
+        return <PineEditor />;
     }
   }
 

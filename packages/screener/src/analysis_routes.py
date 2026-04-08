@@ -244,7 +244,7 @@ def gex_endpoint() -> Any:
     result = calculate_gex(snapshot, spot=spot, lot_size=lot_size)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "expiry": expiry,
@@ -302,7 +302,7 @@ def vol_surface_endpoint() -> Any:
     result = calculate_vol_surface(chains_by_expiry, spot=spot, strike_count=strike_count)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "spot": spot,
@@ -352,7 +352,7 @@ def iv_smile_endpoint() -> Any:
     result = calculate_iv_smile(snapshot, spot=spot, expiry_date=expiry)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "expiry": expiry,
@@ -431,7 +431,7 @@ def straddle_pnl_endpoint() -> Any:
     )
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "expiry": expiry,
@@ -494,7 +494,7 @@ def oi_profile_endpoint() -> Any:
     result = calculate_oi_profile(snapshot, futures_candles=futures_candles)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "expiry": expiry,
@@ -545,7 +545,7 @@ def max_pain_endpoint() -> Any:
     result = OIAnalysis.max_pain(snapshot)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "expiry": expiry,
@@ -624,7 +624,7 @@ def rrg_sectors_endpoint() -> Any:
     Returns:
         JSON with list of SectorRRG objects plus benchmark info:
         {
-          "status": "ok",
+          "status": "success",
           "benchmark": "NIFTY 50",
           "tail_length": 12,
           "is_sample_data": bool,
@@ -706,7 +706,7 @@ def rrg_sectors_endpoint() -> Any:
     results = build_sector_rrg(sector_prices, benchmark_prices, tail_length=tail_length)
 
     return jsonify({
-        "status": "ok",
+        "status": "success",
         "benchmark": BENCHMARK_SYMBOL,
         "tail_length": tail_length,
         "is_sample_data": is_sample_data,

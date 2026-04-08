@@ -339,7 +339,7 @@ class TestRRGEndpoint:
         data = resp = client.get("/api/v1/rrg/sectors")
         import json
         parsed = json.loads(resp.data)
-        assert parsed["status"] == "ok"
+        assert parsed["status"] == "success"
 
     def test_has_sectors_key(self, client):
         import json

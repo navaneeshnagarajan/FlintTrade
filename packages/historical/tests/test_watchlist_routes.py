@@ -69,7 +69,7 @@ class TestWatchlistRoutes:
         resp = _get(app_client, "/v1/historify/watchlist")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert isinstance(data["data"], list)
 
     def test_add_item(self, app_client):
@@ -77,7 +77,7 @@ class TestWatchlistRoutes:
                      {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
         assert resp.status_code == 201
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert data["data"]["symbol"] == "RELIANCE"
 
     def test_list_after_add(self, app_client):
@@ -93,13 +93,13 @@ class TestWatchlistRoutes:
                        {"symbol": "TEMPSTOCK", "exchange": "NSE"})
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
 
     def test_download_trigger_returns_ok(self, app_client):
         resp = _post(app_client, "/v1/historify/download",
                      {"start_date": "2026-01-01", "end_date": "2026-01-31"})
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert "triggered" in data["data"]
         assert "items" in data["data"]

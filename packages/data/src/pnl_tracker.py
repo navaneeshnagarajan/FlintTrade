@@ -80,6 +80,9 @@ class PnLTracker:
                     trade_count     INTEGER NOT NULL
                 )
             """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pnl_series_ts ON pnl_series (timestamp)"
+            )
             logger.info("PnLTracker: DuckDB initialized at %s", db_path)
         except Exception as exc:
             logger.warning("PnLTracker: DuckDB init failed (%s); running in-memory only", exc)

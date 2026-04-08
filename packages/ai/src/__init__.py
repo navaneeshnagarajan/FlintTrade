@@ -7,6 +7,7 @@ from .analyst_chain import AnalysisState, AnalystChain
 from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
 from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
+from .openclaw_bridge import OpenClawAgent, OpenClawBridge
 from .memory import MemoryItem, MemoryLayer, MemoryQueryResult, TradedMemory
 from .rag import Document, RAGEngine, RAGResponse, RetrievedChunk
 from .sentiment import (
@@ -22,6 +23,9 @@ from .market_simulator import (
     SimulationResult,
 )
 from .pipeline import SignalPipeline
+from .signal_models import Signal as LiveSignal
+from .signal_models import SignalConfig
+from .signal_pipeline import LiveSignalPipeline
 from .signals import Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
 
 __all__ = [
@@ -40,6 +44,10 @@ __all__ = [
     "SignalGenerator",
     "SignalPipeline",
     "Signal",
+    # Live signal pipeline (v0.5.0)
+    "LiveSignal",
+    "LiveSignalPipeline",
+    "SignalConfig",
     # Sentiment
     "SentimentAnalyzer",
     "SentimentScore",
@@ -70,6 +78,9 @@ __all__ = [
     "ParticipantAction",
     "SimulationResult",
     "DEFAULT_PARTICIPANTS",
+    # OpenClaw bridge
+    "OpenClawBridge",
+    "OpenClawAgent",
     # Extended signal functions
     "generate_sharpe_labels",
     "compute_turbulence",

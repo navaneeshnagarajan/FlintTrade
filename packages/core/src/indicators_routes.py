@@ -219,3 +219,112 @@ def indicators_compute() -> tuple[Any, int]:
             result[ind_name] = {"error": str(exc)}
 
     return jsonify({"status": "success", "data": result}), 200
+
+
+# ---------------------------------------------------------------------------
+# Pine Script → Python compilation endpoint
+# ---------------------------------------------------------------------------
+
+# Banned identifiers that must never appear in Pine-converted code
+_PINE_BANNED_NAMES = {
+    "exec", "eval", "compile", "__import__", "open", "os", "sys",
+    "subprocess", "shutil", "pathlib", "importlib", "pickle",
+    "globals", "locals", "getattr", "setattr", "delattr",
+    "__builtins__", "__class__", "__subclasses__",
+}
+
+
+@indicators_bp.route("/indicators/pine/compile", methods=["POST"])
+def pine_compile() -> tuple[Any, int]:
+    """Compile Pine Script text to Python indicator code.
+
+    Request JSON:
+        code (str): Pine Script source text.
+
+    Returns:
+        JSON with ``status`` and ``data`` containing:
+        - ``python_code`` (str): Converted Python code.
+        - ``imports`` (list[str]): Required indicator imports.
+        - ``warnings`` (list[str]): Non-fatal conversion notes.
+        - ``unsupported`` (list[str]): Unrecognised Pine functions.
+        - ``supported_functions`` (list[str]): All supported function names.
+
+        Or ``status: "error"`` with ``message`` on failure.
+    """
+    import ast  # noqa: PLC0415
+
+    from packages.indicators.src.pine_converter import (  # noqa: PLC0415
+        PineConverter,
+    )
+
+    body = request.get_json(silent=True) or {}
+    code = body.get("code")
+
+    if not isinstance(code, str) or not code.strip():
+        return jsonify({
+            "status": "error",
+            "message": "code must be a non-empty string.",
+        }), 400
+
+    # Length guard — reject scripts that are unreasonably large
+    if len(code) > 50_000:
+        return jsonify({
+            "status": "error",
+            "message": "Script too large. Maximum 50,000 characters.",
+        }), 400
+
+    try:
+        converter = PineConverter()
+        result = converter.convert(code)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Pine converter error: %s", exc)
+        return jsonify({
+            "status": "error",
+            "message": f"Conversion failed: {exc}",
+        }), 400
+
+    # AST-based safety validation — ensure the generated Python does not
+    # contain dangerous constructs (imports of os/sys, exec, eval, etc.)
+    safety_errors: list[str] = []
+    try:
+        tree = ast.parse(result.python_code)
+        for node in ast.walk(tree):
+            # Check for banned function calls
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id in _PINE_BANNED_NAMES:
+                    safety_errors.append(
+                        f"Unsafe function call: {func.id}()"
+                    )
+                elif (
+                    isinstance(func, ast.Attribute)
+                    and func.attr in _PINE_BANNED_NAMES
+                ):
+                    safety_errors.append(
+                        f"Unsafe method call: .{func.attr}()"
+                    )
+            # Check for banned name references
+            if isinstance(node, ast.Name) and node.id in _PINE_BANNED_NAMES:
+                safety_errors.append(f"Unsafe identifier: {node.id}")
+    except SyntaxError:
+        # If the converted code doesn't parse as Python, that's OK —
+        # it may contain comments or partial conversions.
+        pass
+
+    if safety_errors:
+        return jsonify({
+            "status": "error",
+            "message": "Generated code contains unsafe constructs.",
+            "data": {"safety_errors": safety_errors},
+        }), 400
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "python_code": result.python_code,
+            "imports": result.imports,
+            "warnings": result.warnings,
+            "unsupported": result.unsupported,
+            "supported_functions": converter.get_supported_functions(),
+        },
+    }), 200

@@ -72,7 +72,7 @@ class TestMonitoringRoutes:
         resp = _get(app_client, "/api/v1/traffic/stats")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert "total_requests" in data["data"]
         assert "error_rate" in data["data"]
         assert "avg_latency_ms" in data["data"]
@@ -81,14 +81,14 @@ class TestMonitoringRoutes:
         resp = _get(app_client, "/api/v1/traffic/recent")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert isinstance(data["data"], list)
 
     def test_latency_stats_has_broker(self, app_client):
         resp = _get(app_client, "/api/v1/latency/stats")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert "BROKER_A" in data["data"]
         broker = data["data"]["BROKER_A"]
         assert broker["count"] == 2
@@ -101,6 +101,6 @@ class TestMonitoringRoutes:
         resp = _get(app_client, "/api/v1/latency/recent")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["status"] == "ok"
+        assert data["status"] == "success"
         assert isinstance(data["data"], list)
         assert len(data["data"]) >= 1

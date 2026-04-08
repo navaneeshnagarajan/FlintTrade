@@ -108,25 +108,45 @@ class OptionChainSnapshot:
 
 # Lot sizes for common underlyings
 LOT_SIZES: dict[str, int] = {
+    # NFO — Index options
     "NIFTY": 75,
     "BANKNIFTY": 30,
     "FINNIFTY": 40,
     "MIDCPNIFTY": 50,
+    # BFO — BSE F&O
     "SENSEX": 20,
     "BANKEX": 30,
     "SENSEX50": 25,
+    # CDS — Currency derivatives
     "USDINR": 1000,
     "EURINR": 1000,
     "GBPINR": 1000,
     "JPYINR": 1000,
-    "CRUDEOIL": 100,
-    "GOLD": 100,
-    "GOLDM": 10,
-    "SILVER": 30,
-    "SILVERM": 5,
-    "NATURALGAS": 1250,
-    "COPPER": 2500,
-    "ZINC": 5000,
+    # MCX — Bullion
+    "GOLD": 100,         # 100 grams
+    "GOLDM": 10,         # 10 grams (Gold Mini)
+    "GOLDPETAL": 1,      # 1 gram (Gold Petal)
+    "SILVER": 30,        # 30 kg
+    "SILVERM": 5,        # 5 kg (Silver Mini)
+    "SILVERMIC": 1,      # 1 kg (Silver Micro)
+    # MCX — Energy
+    "CRUDEOIL": 100,     # 100 barrels
+    "CRUDEOILM": 10,     # 10 barrels (Crude Mini)
+    "NATURALGAS": 1250,  # 1250 MMBtu
+    # MCX — Base metals
+    "COPPER": 2500,      # 2.5 tonnes (in kg)
+    "COPPERM": 250,      # 250 kg (Copper Mini)
+    "ZINC": 5000,        # 5 tonnes (in kg)
+    "ZINCMINI": 1000,    # 1 tonne (in kg)
+    "LEAD": 5000,        # 5 tonnes (in kg)
+    "LEADMINI": 1000,    # 1 tonne (in kg)
+    "NICKEL": 1500,      # 1.5 tonnes (in kg)
+    "NICKELMINI": 100,   # 100 kg (Nickel Mini)
+    "ALUMINIUM": 5000,   # 5 tonnes (in kg)
+    "ALUMINI": 1000,     # 1 tonne (in kg)
+    # MCX — Agri
+    "MENTHAOIL": 360,    # 360 kg
+    "COTTON": 25,        # 25 bales
 }
 
 # Exchange-to-spot-index mapping for fetching spot price

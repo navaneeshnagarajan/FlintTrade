@@ -262,6 +262,10 @@ def create_flask_app(
     from packages.screener.src.stock_routes import stock_bp  # noqa: PLC0415
     app.register_blueprint(stock_bp)
 
+    # Register Mutual Fund NAV blueprint (/api/v1/mf/search, /mf/nav, /mf/categories)
+    from packages.screener.src.mf_routes import mf_bp  # noqa: PLC0415
+    app.register_blueprint(mf_bp)
+
     # Register Action Center blueprint (/api/v1/action-center/*)
     from packages.engine.src.action_center import ActionCenter  # noqa: PLC0415
     from packages.engine.src.action_center_routes import action_center_bp  # noqa: PLC0415
@@ -336,6 +340,9 @@ def create_flask_app(
     from packages.ai.src.ai_routes import ai_bp  # noqa: PLC0415
     app.register_blueprint(ai_bp)
 
+    from packages.ai.src.signal_routes import signal_bp  # noqa: PLC0415
+    app.register_blueprint(signal_bp)
+
     from packages.core.src.backtest_routes import backtest_bp  # noqa: PLC0415
     app.register_blueprint(backtest_bp)
 
@@ -355,6 +362,14 @@ def create_flask_app(
     _auth_db = Path.home() / ".flinttrade" / "auth.db"
     app.config["AUTH_SERVICE"] = _AuthService(db_path=_auth_db)
     app.register_blueprint(auth_bp)
+
+    # Register Multi-user blueprint (/v1/users/*) — opt-in via FLINTTRADE_MULTI_USER=1
+    if os.environ.get("FLINTTRADE_MULTI_USER", "").strip() in ("1", "true", "yes"):
+        from packages.core.src.user_manager import UserManager as _UserManager  # noqa: PLC0415
+        from packages.core.src.user_routes import users_bp  # noqa: PLC0415
+        app.config["USER_MANAGER"] = _UserManager(db_path=_auth_db)
+        app.register_blueprint(users_bp)
+        logger.info("Multi-user mode enabled — /v1/users/* endpoints registered")
 
     # Reconnect saved accounts (best-effort, don't block startup)
     try:
@@ -483,6 +498,7 @@ def create_flask_app(
     # indicators_bp  → packages/core/src/indicators_routes.py
     # advisor_bp     → packages/ai/src/advisor_routes.py
     # ai_bp          → packages/ai/src/ai_routes.py
+    # signal_bp      → packages/ai/src/signal_routes.py
     # backtest_bp    → packages/core/src/backtest_routes.py
     # operations_bp  → packages/core/src/operations_routes.py
 
