@@ -77,6 +77,8 @@ def upload_strategy() -> Response:
         return jsonify({"status": "error", "message": "Strategy name is required"}), 400
     if not code:
         return jsonify({"status": "error", "message": "Strategy code is required"}), 400
+    if len(code) > 100_000:
+        return jsonify({"status": "error", "message": "Strategy code too large — maximum 100KB"}), 413
 
     # Validate first — return violations before saving
     violations = runner.validate(code)

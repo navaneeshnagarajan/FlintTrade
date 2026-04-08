@@ -125,6 +125,11 @@ export function useWsBridge(): void {
       pendingTicks.clear();
       unsubTick();
       unsubStatus();
+      // NOTE: The WebSocket service (getWsService singleton) is intentionally
+      // NOT disconnected here. It persists across hook mount/unmount cycles so
+      // that navigating between routes does not drop the WS connection and
+      // lose real-time market data. The singleton is created once per (wsUrl,
+      // apiKey) pair and lives for the lifetime of the browser tab.
     };
   }, [setWsConnected, store, apiKey, wsUrl]);
 }

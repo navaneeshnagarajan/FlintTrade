@@ -363,7 +363,17 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
         e.preventDefault();
         onRemove(e, item);
       }}
-      title={`${item.symbol} · ${item.exchange} — right-click to remove`}
+      onKeyDown={(e) => {
+        if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          onRemove(
+            { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, preventDefault: () => {} } as React.MouseEvent,
+            item,
+          );
+        }
+      }}
+      title={`${item.symbol} · ${item.exchange} — right-click or Shift+F10 to remove`}
     >
       {/* Symbol + Exchange */}
       <div className="flex flex-col min-w-0 flex-1">

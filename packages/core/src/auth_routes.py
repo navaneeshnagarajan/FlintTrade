@@ -135,11 +135,17 @@ def _next_8am_ist() -> datetime:
     return today_8am_ist - _IST_OFFSET
 
 
-def _create_token(username: str) -> str:
+def _create_token(username: str, *, live_mode_unlocked: bool = False) -> str:
     """Create a JWT that expires at next 8:00 AM IST.
 
     Includes a unique ``jti`` (JWT ID) to enable future token revocation
     via a server-side blocklist.
+
+    Args:
+        username: The authenticated user's name.
+        live_mode_unlocked: If ``True``, the token carries a
+            ``live_mode_unlocked`` claim that authorises live order
+            execution.  Only set after successful PIN verification.
     """
     exp = _next_8am_ist()
     payload = {
@@ -148,8 +154,25 @@ def _create_token(username: str) -> str:
         "exp": exp,
         "type": "session",
         "jti": secrets.token_hex(16),
+        "live_mode_unlocked": live_mode_unlocked,
     }
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
+
+
+def decode_token(token: str) -> dict[str, Any]:
+    """Decode and verify a FlintTrade JWT.
+
+    Args:
+        token: Encoded JWT string.
+
+    Returns:
+        Decoded payload dict.
+
+    Raises:
+        jwt.ExpiredSignatureError: If the token has expired.
+        jwt.InvalidTokenError: If the token is invalid.
+    """
+    return jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
 
 
 @auth_bp.route("/status", methods=["GET"])
@@ -243,7 +266,12 @@ def auth_login() -> tuple[Any, int]:
 @auth_bp.route("/pin", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_pin_verify() -> tuple[Any, int]:
-    """PIN quick-unlock — returns new session token."""
+    """PIN quick-unlock — returns new session token with live mode unlocked.
+
+    After successful PIN verification the returned JWT carries
+    ``live_mode_unlocked: true``, which is checked server-side by
+    ``order_routes`` before any live order is forwarded to OpenAlgo.
+    """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
@@ -255,11 +283,11 @@ def auth_pin_verify() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
     profile = svc.get_profile()
-    token = _create_token(profile.get("username", "user"))
+    token = _create_token(profile.get("username", "user"), live_mode_unlocked=True)
 
     return jsonify({
         "status": "success",
-        "data": {"token": token},
+        "data": {"token": token, "live_mode_unlocked": True},
     }), 200
 
 

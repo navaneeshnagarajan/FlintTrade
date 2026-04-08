@@ -149,7 +149,7 @@ export default function ToolsDropdown({
             onClick={() => handleClick(tool)}
             className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
           >
-            <Icon size={15} className="shrink-0" />
+            <Icon size={15} className="shrink-0" aria-hidden="true" />
             <span>{tool.name}</span>
           </button>
         );

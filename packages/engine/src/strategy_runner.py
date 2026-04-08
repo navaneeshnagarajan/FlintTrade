@@ -78,6 +78,14 @@ _BLOCKED_MODULES: frozenset[str] = frozenset(
         "concurrent",
         "mmap",
         "tempfile",
+        # Network / HTTP modules — prevent data exfiltration
+        "http",
+        "urllib",
+        "requests",
+        "httpx",
+        "ftplib",
+        "smtplib",
+        "webbrowser",
     }
 )
 
@@ -96,6 +104,7 @@ _BLOCKED_BUILTINS: frozenset[str] = frozenset(
         "setattr",
         "delattr",
         "open",
+        "breakpoint",
     }
 )
 
@@ -116,6 +125,17 @@ _BLOCKED_ATTR_PATTERNS: frozenset[tuple[str, str]] = frozenset(
         ("subprocess", "check_call"),
         ("subprocess", "check_output"),
         ("subprocess", "Popen"),
+    }
+)
+
+# Dunder attribute names that enable sandbox escapes (accessed on ANY object)
+_FORBIDDEN_ATTRS: frozenset[str] = frozenset(
+    {
+        "__class__",
+        "__bases__",
+        "__subclasses__",
+        "__globals__",
+        "__code__",
     }
 )
 
@@ -220,6 +240,14 @@ class UserStrategyRunner:
                             violations.append(
                                 f"Blocked import: 'from {node.module} import {alias.name}'"
                             )
+
+            # Block forbidden dunder attribute access on any object
+            # (e.g. obj.__class__, obj.__subclasses__())
+            elif isinstance(node, ast.Attribute):
+                if node.attr in _FORBIDDEN_ATTRS:
+                    violations.append(
+                        f"Blocked attribute: '.{node.attr}' access is not allowed in strategies"
+                    )
 
             # Block dangerous built-in calls: eval("..."), exec("..."), __import__(...)
             elif isinstance(node, ast.Call):

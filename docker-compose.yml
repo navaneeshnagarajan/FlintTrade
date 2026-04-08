@@ -76,6 +76,10 @@ services:
       openalgo:
         condition: service_healthy
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    user: "1000:1000"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:5100/v1/health"]
       interval: 30s
@@ -169,7 +173,7 @@ services:
       glitchtip-db:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:-glitchtip-dev-only}@glitchtip-db:5432/glitchtip"
+      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:?Set GLITCHTIP_DB_PASSWORD in .env}@glitchtip-db:5432/glitchtip"
       SECRET_KEY: "${GLITCHTIP_SECRET_KEY:?Set GLITCHTIP_SECRET_KEY in .env}"
       CELERY_BROKER_URL: "redis://glitchtip-redis:6379/0"
       PORT: "8000"
@@ -188,7 +192,7 @@ services:
       glitchtip-redis:
         condition: service_started
     environment:
-      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:-glitchtip-dev-only}@glitchtip-db:5432/glitchtip"
+      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:?Set GLITCHTIP_DB_PASSWORD in .env}@glitchtip-db:5432/glitchtip"
       SECRET_KEY: "${GLITCHTIP_SECRET_KEY:?Set GLITCHTIP_SECRET_KEY in .env}"
       CELERY_BROKER_URL: "redis://glitchtip-redis:6379/0"
     restart: unless-stopped
@@ -202,7 +206,7 @@ services:
       - glitchtip_pg:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: glitchtip
-      POSTGRES_PASSWORD: "${GLITCHTIP_DB_PASSWORD:-glitchtip-dev-only}"
+      POSTGRES_PASSWORD: "${GLITCHTIP_DB_PASSWORD:?Set GLITCHTIP_DB_PASSWORD in .env}"
       POSTGRES_DB: glitchtip
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U glitchtip"]

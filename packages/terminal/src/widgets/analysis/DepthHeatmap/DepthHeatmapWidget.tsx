@@ -354,16 +354,48 @@ function DepthHeatmapWidget() {
     return () => observer.disconnect();
   }, [paint]);
 
-  // Auto-update simulation: shift data left, add new column every 1s
+  // Auto-update simulation: shift data left, add new column every 1s.
+  // Pauses when the page/tab is hidden (e.g. minimised, background tab) to
+  // avoid wasting CPU on invisible updates.
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (!dataRef.current) return;
-      seedRef.current += 1;
-      dataRef.current = shiftAndAppendColumn(dataRef.current, seedRef.current);
-      paint();
-    }, 1000);
+    let interval: ReturnType<typeof setInterval> | null = null;
 
-    return () => clearInterval(interval);
+    function startInterval() {
+      if (interval !== null) return;
+      interval = setInterval(() => {
+        if (!dataRef.current) return;
+        seedRef.current += 1;
+        dataRef.current = shiftAndAppendColumn(dataRef.current, seedRef.current);
+        paint();
+      }, 1000);
+    }
+
+    function stopInterval() {
+      if (interval !== null) {
+        clearInterval(interval);
+        interval = null;
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        startInterval();
+      } else {
+        stopInterval();
+      }
+    }
+
+    // Only start if the page is currently visible
+    if (document.visibilityState === "visible") {
+      startInterval();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      stopInterval();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [paint, symbol]);
 
   // Repaint on symbol change (data reinitializes)

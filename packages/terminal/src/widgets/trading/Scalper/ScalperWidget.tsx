@@ -306,9 +306,10 @@ interface ActionButtonProps {
   icon: React.ReactNode;
   label: string;
   shortcut: string;
+  "aria-label"?: string;
 }
 
-function ActionButton({ onClick, disabled = false, title, variant, icon, label, shortcut }: ActionButtonProps) {
+function ActionButton({ onClick, disabled = false, title, variant, icon, label, shortcut, "aria-label": ariaLabel }: ActionButtonProps) {
   const variantClasses: Record<string, string> = {
     buy:     "bg-profit/10 text-profit border-profit/30 hover:bg-profit/20",
     sell:    "bg-loss/10 text-loss border-loss/30 hover:bg-loss/20",
@@ -322,6 +323,7 @@ function ActionButton({ onClick, disabled = false, title, variant, icon, label, 
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={ariaLabel}
       className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 border text-sm font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${variantClasses[variant]}`}
     >
       <span className="flex items-center gap-1">
@@ -770,6 +772,7 @@ function ScalperWidget(_props: WidgetProps) {
               icon={<TrendingDown size={14} />}
               label="Sell CE"
               shortcut="Shift + ←"
+              aria-label={`Sell CE ${ceSymbol ?? symbol} ${ceStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
             />
             <ActionButton
               onClick={() => handleOrder(ceSymbol, optExch, "BUY")}
@@ -779,6 +782,7 @@ function ScalperWidget(_props: WidgetProps) {
               icon={<TrendingUp size={14} />}
               label="Buy CE"
               shortcut="Shift + ↑"
+              aria-label={`Buy CE ${ceSymbol ?? symbol} ${ceStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
             />
           </div>
         </div>
@@ -887,6 +891,7 @@ function ScalperWidget(_props: WidgetProps) {
               icon={<TrendingUp size={14} />}
               label="Buy PE"
               shortcut="Shift + ↓"
+              aria-label={`Buy PE ${peSymbol ?? symbol} ${peStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
             />
             <ActionButton
               onClick={() => handleOrder(peSymbol, optExch, "SELL")}
@@ -896,6 +901,7 @@ function ScalperWidget(_props: WidgetProps) {
               icon={<TrendingDown size={14} />}
               label="Sell PE"
               shortcut="Shift + →"
+              aria-label={`Sell PE ${peSymbol ?? symbol} ${peStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
             />
           </div>
         </div>

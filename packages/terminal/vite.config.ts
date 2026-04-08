@@ -38,6 +38,7 @@ export default defineConfig({
     },
   },
   build: {
+    chunkSizeWarningLimit: 300,
     target: "es2022",
     rollupOptions: {
       // Glide Data Grid v6 has optional peer deps we don't use. Externalize them
@@ -143,6 +144,10 @@ export default defineConfig({
           }
           // QR code renderer — only used by the auth/setup flows
           if (id.includes("node_modules/qrcode.react/")) return "vendor-qrcode";
+          // Sentry — error monitoring, loaded lazily
+          if (id.includes("node_modules/@sentry/")) return "vendor-sentry";
+          // Resizable panels — layout utility, loaded with workspace
+          if (id.includes("node_modules/react-resizable-panels")) return "vendor-layout";
           // Everything else in node_modules
           if (id.includes("node_modules/")) {
             return "vendor-misc";

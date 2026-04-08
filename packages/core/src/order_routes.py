@@ -29,6 +29,7 @@ import os
 from typing import Any
 
 import httpx
+import jwt
 from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.order_routes")
@@ -62,6 +63,35 @@ _ENDPOINT_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_live_mode_unlocked() -> bool:
+    """Check whether the current request carries a JWT with ``live_mode_unlocked``.
+
+    Extracts the Bearer token from the ``Authorization`` header, decodes it
+    using the shared JWT secret from :mod:`auth_routes`, and inspects the
+    ``live_mode_unlocked`` claim.
+
+    Returns:
+        ``True`` if the JWT is valid and contains ``live_mode_unlocked: true``.
+        ``False`` otherwise (missing token, expired, invalid, or claim absent).
+    """
+    from packages.core.src.auth_routes import decode_token  # noqa: PLC0415
+
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        # Also try X-API-Key — some callers may send the JWT there
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not token:
+        return False
+
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return False
+
+    return bool(payload.get("live_mode_unlocked"))
 
 
 def _openalgo_base_url() -> str:
@@ -246,8 +276,19 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return jsonify(result), 200
 
     # ------------------------------------------------------------------
-    # Live mode — forward to OpenAlgo
+    # Live mode — verify PIN-unlocked JWT before forwarding to OpenAlgo
     # ------------------------------------------------------------------
+    if not _is_live_mode_unlocked():
+        logger.warning(
+            "Live order rejected — JWT does not contain live_mode_unlocked claim | "
+            "action=%s symbol=%s",
+            ft_action, body.get("symbol", "?"),
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Live mode not unlocked — verify PIN first",
+        }), 403
+
     logger.info(
         "Live order | action=%s symbol=%s exchange=%s qty=%s",
         ft_action,

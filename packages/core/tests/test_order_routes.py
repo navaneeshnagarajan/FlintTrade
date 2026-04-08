@@ -19,6 +19,12 @@ import pytest
 
 _TEST_API_KEY = "test-order-routes-key"
 
+
+def _create_live_token() -> str:
+    """Create a JWT with ``live_mode_unlocked: true`` for live-mode tests."""
+    from packages.core.src.auth_routes import _create_token
+    return _create_token("testuser", live_mode_unlocked=True)
+
 # All order endpoints and their FlintTrade route suffixes
 _ORDER_ENDPOINTS = [
     "/v1/orders/place",
@@ -72,14 +78,28 @@ def client(flask_app):
         yield c
 
 
-def _auth_headers(mode: str | None = None, **extra: str) -> dict[str, str]:
-    """Build request headers with API key and optional mode."""
+def _auth_headers(
+    mode: str | None = None,
+    *,
+    include_live_token: bool = False,
+    **extra: str,
+) -> dict[str, str]:
+    """Build request headers with API key and optional mode.
+
+    Args:
+        mode: Value for the ``X-FlintTrade-Mode`` header.
+        include_live_token: If ``True``, include a JWT ``Authorization``
+            header with ``live_mode_unlocked: true`` — required for live
+            mode orders to pass server-side enforcement.
+    """
     headers: dict[str, str] = {
         "X-API-Key": _TEST_API_KEY,
         "Content-Type": "application/json",
     }
     if mode is not None:
         headers["X-FlintTrade-Mode"] = mode
+    if include_live_token:
+        headers["Authorization"] = f"Bearer {_create_live_token()}"
     headers.update(extra)
     return headers
 
@@ -389,7 +409,7 @@ class TestLiveModeForwarding:
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live"),
+            headers=_auth_headers(mode="live", include_live_token=True),
         )
         assert resp.status_code == 200
         data = resp.get_json()
@@ -428,7 +448,7 @@ class TestLiveModeForwarding:
             resp = client.post(
                 ft_route,
                 json=_SAMPLE_ORDER_BODY,
-                headers=_auth_headers(mode="live"),
+                headers=_auth_headers(mode="live", include_live_token=True),
             )
             assert resp.status_code == 200, f"Failed for {ft_route}"
             call_url = mock_http.post.call_args[0][0]
@@ -454,11 +474,22 @@ class TestLiveModeForwarding:
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live"),
+            headers=_auth_headers(mode="live", include_live_token=True),
         )
         assert resp.status_code == 400
         data = resp.get_json()
         assert data["message"] == "Insufficient margin"
+
+    def test_live_without_pin_token_returns_403(self, client):
+        """Live orders without a PIN-unlocked JWT must be rejected with 403."""
+        resp = client.post(
+            "/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="live"),
+        )
+        assert resp.status_code == 403
+        data = resp.get_json()
+        assert "Live mode not unlocked" in data["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +512,7 @@ class TestLiveModeErrors:
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live"),
+            headers=_auth_headers(mode="live", include_live_token=True),
         )
         assert resp.status_code == 502
         data = resp.get_json()
@@ -499,7 +530,7 @@ class TestLiveModeErrors:
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live"),
+            headers=_auth_headers(mode="live", include_live_token=True),
         )
         assert resp.status_code == 504
         data = resp.get_json()
@@ -517,7 +548,7 @@ class TestLiveModeErrors:
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live"),
+            headers=_auth_headers(mode="live", include_live_token=True),
         )
         assert resp.status_code == 502
 
@@ -532,7 +563,7 @@ class TestLiveModeErrors:
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live"),
+            headers=_auth_headers(mode="live", include_live_token=True),
         )
         assert resp.status_code == 503
         data = resp.get_json()
@@ -553,7 +584,7 @@ class TestLiveModeErrors:
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="live"),
+            headers=_auth_headers(mode="live", include_live_token=True),
         )
         assert resp.status_code == 500
         data = resp.get_json()

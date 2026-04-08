@@ -548,10 +548,24 @@ function ScannerWidget() {
     };
   }, []);
 
+  // Ref to track the manual-refresh timeout so it can be cancelled on unmount
+  const manualRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the manual-refresh timeout on unmount to prevent state updates on
+  // an unmounted component
+  useEffect(() => {
+    return () => {
+      if (manualRefreshTimerRef.current) {
+        clearTimeout(manualRefreshTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleManualRefresh = useCallback(() => {
     setIsRefreshing(true);
     // Simulate refresh delay
-    setTimeout(() => {
+    manualRefreshTimerRef.current = setTimeout(() => {
+      manualRefreshTimerRef.current = null;
       setLastRefresh(new Date());
       setIsRefreshing(false);
     }, 500);

@@ -12,7 +12,7 @@
  * All data fetching lives in routes/invest/InvestContext.tsx
  */
 
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -159,6 +159,7 @@ function InvestShell() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const level = useSkillLevel("invest");
   const { holdings, isLoading } = useInvest();
+  const tablistRef = useRef<HTMLDivElement>(null);
 
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
@@ -168,6 +169,27 @@ function InvestShell() {
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
+
+  // Roving tabindex: arrow key navigation on the horizontal tablist
+  const handleTablistKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      e.preventDefault();
+      const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+      if (!tabs || tabs.length === 0) return;
+      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        e.key === "ArrowRight"
+          ? (idx + 1) % tabs.length
+          : (idx - 1 + tabs.length) % tabs.length;
+      const nextTab = tabs[next];
+      nextTab?.focus();
+      // Activate the focused tab (follows ARIA Tabs pattern)
+      const tabId = visibleTabs[next]?.id;
+      if (tabId) setActiveTab(tabId);
+    },
+    [visibleTabs],
+  );
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -203,9 +225,11 @@ function InvestShell() {
 
           {/* Horizontal tab bar — filtered by skill level */}
           <div
+            ref={tablistRef}
             role="tablist"
             aria-label="Invest sections"
             className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
+            onKeyDown={handleTablistKeyDown}
           >
             {visibleTabs.map((tab) => {
               const Icon = tab.icon;
@@ -217,6 +241,7 @@ function InvestShell() {
                   aria-selected={isActive}
                   aria-controls={`invest-tabpanel-${tab.id}`}
                   id={`invest-tab-${tab.id}`}
+                  tabIndex={isActive ? 0 : -1}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-2 text-xs font-sans font-medium transition-colors border-b-2 whitespace-nowrap shrink-0",

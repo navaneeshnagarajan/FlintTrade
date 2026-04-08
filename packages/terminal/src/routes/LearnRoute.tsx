@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -548,6 +548,7 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
         id={`learn-tab-${tab.id}`}
         aria-selected={isActive}
         aria-controls={`learn-tabpanel-${tab.id}`}
+        tabIndex={isActive ? 0 : -1}
         onClick={onClick}
         title={collapsed ? tab.label : undefined}
         className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-sans transition-colors border-l-2 ${
@@ -630,6 +631,27 @@ export default function LearnRoute() {
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
+  const tablistRef = useRef<HTMLDivElement>(null);
+
+  // Roving tabindex: arrow key navigation on the vertical tablist
+  const handleTablistKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+      if (!tabs || tabs.length === 0) return;
+      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        e.key === "ArrowDown"
+          ? (idx + 1) % tabs.length
+          : (idx - 1 + tabs.length) % tabs.length;
+      const nextTab = tabs[next];
+      nextTab?.focus();
+      const tabId = visibleTabs[next]?.id;
+      if (tabId) setActiveTab(tabId);
+    },
+    [visibleTabs],
+  );
 
   const tabContent = useMemo<Record<TabId, React.ReactNode>>(() => ({
     basics:     <BasicsTab />,
@@ -672,6 +694,7 @@ export default function LearnRoute() {
               type="button"
               onClick={() => setSidebarCollapsed((v) => !v)}
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!sidebarCollapsed}
               className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-base transition-colors"
             >
               {sidebarCollapsed ? (
@@ -684,7 +707,7 @@ export default function LearnRoute() {
 
           {/* Nav items — filtered by skill level */}
           <nav aria-label="Learning sections" className="flex-1 overflow-y-auto" data-tour-target="glossary">
-            <div role="tablist" aria-orientation="vertical" className="flex flex-col">
+            <div ref={tablistRef} role="tablist" aria-orientation="vertical" className="flex flex-col" onKeyDown={handleTablistKeyDown}>
               {visibleTabs.map((tab) => (
                 <SidebarItem
                   key={tab.id}
