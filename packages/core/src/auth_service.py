@@ -365,6 +365,43 @@ class AuthService:
         )
         self._db.commit()
 
+    def get_email(self) -> str | None:
+        """Return the account email, or None if no account is set up."""
+        row = self._db.execute("SELECT email FROM account WHERE id = 1").fetchone()
+        if not row:
+            return None
+        return row["email"]
+
+    def update_password(self, username: str, new_password: str) -> bool:
+        """Update the password for *username*.
+
+        Args:
+            username: Must match the stored username.
+            new_password: The new password (must pass strength check).
+
+        Returns:
+            True on success, False if no matching account.
+
+        Raises:
+            ValueError: If the new password is too weak.
+        """
+        if len(new_password) < 8:
+            raise ValueError("Password too weak — minimum 8 characters")
+
+        row = self._db.execute(
+            "SELECT username FROM account WHERE id = 1"
+        ).fetchone()
+        if not row or row["username"] != username:
+            return False
+
+        password_hash = self._hasher.hash(new_password)
+        self._db.execute(
+            "UPDATE account SET password_hash = ? WHERE id = 1",
+            [password_hash],
+        )
+        self._db.commit()
+        return True
+
     def close(self) -> None:
         if self._conn:
             self._conn.close()

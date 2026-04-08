@@ -356,6 +356,10 @@ def create_flask_app(
     from packages.core.src.order_routes import orders_bp  # noqa: PLC0415
     app.register_blueprint(orders_bp)
 
+    # Register Log Stream blueprint (/v1/logs/*) — SSE + REST log streaming
+    from packages.core.src.log_stream import log_stream_bp  # noqa: PLC0415
+    app.register_blueprint(log_stream_bp)
+
     # Register Auth blueprint (/v1/auth/*) — public endpoints, no API key required
     from packages.core.src.auth_service import AuthService as _AuthService  # noqa: PLC0415
     from packages.core.src.auth_routes import auth_bp  # noqa: PLC0415

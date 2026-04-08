@@ -60,6 +60,25 @@ def log_buffer():
     return LogBuffer()
 
 
+class _AuthClient:
+    """Thin wrapper around Flask test client that injects the API key header."""
+
+    def __init__(self, flask_client):
+        self._c = flask_client
+
+    def get(self, *args, **kwargs):
+        headers = kwargs.pop("headers", {})
+        headers["X-API-Key"] = "test-key"
+        kwargs["headers"] = headers
+        return self._c.get(*args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        headers = kwargs.pop("headers", {})
+        headers["X-API-Key"] = "test-key"
+        kwargs["headers"] = headers
+        return self._c.post(*args, **kwargs)
+
+
 @pytest.fixture(scope="module")
 def client(monkeypatch_module):
     """Return a Flask test client with the log_stream blueprint registered."""
@@ -69,7 +88,7 @@ def client(monkeypatch_module):
     app = create_flask_app()
     app.config["TESTING"] = True
     with app.test_client() as c:
-        yield c
+        yield _AuthClient(c)
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +222,9 @@ class TestRecentEndpoint:
         resp = client.get("/v1/logs/recent")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert "entries" in data
-        assert len(data["entries"]) >= 1
+        assert "data" in data
+        assert "entries" in data["data"]
+        assert len(data["data"]["entries"]) >= 1
 
     def test_n_parameter(self, client, log_buffer):
         """The n query parameter limits returned entries."""
@@ -214,7 +234,7 @@ class TestRecentEndpoint:
         resp = client.get("/v1/logs/recent?n=3")
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert len(data["entries"]) == 3
+        assert len(data["data"]["entries"]) == 3
 
     def test_invalid_n(self, client):
         """Invalid n parameter returns 400."""

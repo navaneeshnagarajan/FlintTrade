@@ -299,3 +299,119 @@ def auth_logout() -> tuple[Any, int]:
     # Server-side: log the logout event
     logger.info("User logged out")
     return jsonify({"status": "success", "data": {"message": "Logged out."}}), 200
+
+
+# ---------------------------------------------------------------------------
+# Password reset — token helpers
+# ---------------------------------------------------------------------------
+
+
+def _create_reset_token(username: str) -> str:
+    """Create a short-lived JWT for password reset (1 hour expiry).
+
+    Args:
+        username: The user whose password is being reset.
+
+    Returns:
+        Encoded JWT string.
+    """
+    from datetime import timedelta as _td  # noqa: PLC0415
+
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": username,
+        "iat": now,
+        "exp": now + _td(hours=1),
+        "type": "reset",
+        "jti": secrets.token_hex(16),
+    }
+    return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
+
+
+def _verify_reset_token(token: str) -> str | None:
+    """Verify a password-reset JWT and return the username.
+
+    Returns None if the token is invalid, expired, or not a reset token.
+    """
+    try:
+        payload = jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+        if payload.get("type") != "reset":
+            return None
+        return payload.get("sub")
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Password reset — endpoints
+# ---------------------------------------------------------------------------
+
+# Placeholder for flask-mail Message (lazy import so tests can mock it)
+try:
+    from flask_mail import Message  # type: ignore[import]
+except ImportError:
+    Message = None  # type: ignore[assignment,misc]
+
+
+@auth_bp.route("/forgot-password", methods=["POST"])
+def auth_forgot_password() -> tuple[Any, int]:
+    """Request a password reset email.
+
+    Always returns 200 to avoid leaking whether the email exists.
+    """
+    mail = current_app.config.get("MAIL")
+    if mail is None:
+        return jsonify({"status": "error", "message": "Email service not configured."}), 503
+
+    body = request.get_json(silent=True) or {}
+    email = str(body.get("email", "")).strip()
+    if not email:
+        return jsonify({"status": "error", "message": "Email is required."}), 400
+
+    svc = _get_auth_service()
+    if svc is not None:
+        stored_email = svc.get_email()
+        if stored_email and stored_email == email:
+            profile = svc.get_profile()
+            username = profile.get("username", "user")
+            token = _create_reset_token(username)
+            try:
+                msg = Message(
+                    subject="FlintTrade Password Reset",
+                    recipients=[email],
+                    body=f"Your password reset token: {token}\n\nThis token expires in 1 hour.",
+                )
+                mail.send(msg)
+            except Exception as exc:
+                logger.error("Failed to send reset email: %s", exc)
+
+    return jsonify({"status": "success", "message": "If the email is registered, a reset link has been sent."}), 200
+
+
+@auth_bp.route("/reset-password", methods=["POST"])
+def auth_reset_password() -> tuple[Any, int]:
+    """Reset password using a valid reset token."""
+    body = request.get_json(silent=True) or {}
+    token = str(body.get("token", "")).strip()
+    new_password = str(body.get("new_password", ""))
+
+    if not token or not new_password:
+        return jsonify({"status": "error", "message": "Token and new_password are required."}), 400
+
+    username = _verify_reset_token(token)
+    if username is None:
+        return jsonify({"status": "error", "message": "Invalid or expired reset token."}), 400
+
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    try:
+        result = svc.update_password(username, new_password)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    if not result:
+        return jsonify({"status": "error", "message": "Password update failed."}), 400
+
+    return jsonify({"status": "success", "message": "Password has been reset."}), 200

@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import ast
 import logging
+import platform
+import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,6 +51,18 @@ try:
 except ImportError:
     _PSUTIL_AVAILABLE = False
     psutil = None  # type: ignore[assignment]
+
+# ---------------------------------------------------------------------------
+# OS-level resource limiting (Linux/macOS only)
+# ---------------------------------------------------------------------------
+
+try:
+    import resource as _resource  # type: ignore[import]
+
+    _RESOURCE_AVAILABLE = True
+except ImportError:
+    _RESOURCE_AVAILABLE = False
+    _resource = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Dangerous import / call patterns rejected by the AST validator
@@ -141,6 +156,110 @@ _FORBIDDEN_ATTRS: frozenset[str] = frozenset(
 
 
 # ---------------------------------------------------------------------------
+# Sandbox hardening — resource limits, bubblewrap, restricted builtins
+# ---------------------------------------------------------------------------
+
+# Builtins allowed inside the sandbox wrapper.  Dangerous names like eval,
+# exec, __import__, compile, open, globals, locals, vars, dir, getattr,
+# setattr, delattr are intentionally excluded.
+_SAFE_BUILTINS: dict[str, Any] = {
+    name: getattr(__builtins__ if isinstance(__builtins__, dict) else __builtins__, name, None)
+    for name in [
+        "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
+        "callable", "chr", "classmethod", "complex", "dict", "divmod",
+        "enumerate", "filter", "float", "format", "frozenset", "hash",
+        "hex", "id", "input", "int", "isinstance", "issubclass", "iter",
+        "len", "list", "map", "max", "memoryview", "min", "next", "object",
+        "oct", "ord", "pow", "print", "property", "range", "repr",
+        "reversed", "round", "set", "slice", "sorted", "staticmethod",
+        "str", "sum", "super", "tuple", "type", "zip",
+    ]
+}
+
+
+def _build_preexec_fn(
+    cpu_limit: int = 30,
+    fd_limit: int = 64,
+    nproc_limit: int = 0,
+) -> Any:
+    """Build a preexec_fn that sets OS-level resource limits.
+
+    Returns None on Windows where the resource module is unavailable.
+    """
+    if not _RESOURCE_AVAILABLE:
+        return None
+
+    def _set_limits() -> None:
+        _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
+        _resource.setrlimit(_resource.RLIMIT_NOFILE, (fd_limit, fd_limit))
+        if hasattr(_resource, "RLIMIT_NPROC"):
+            _resource.setrlimit(_resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
+
+    return _set_limits
+
+
+def _is_bwrap_available() -> bool:
+    """Check if bubblewrap (bwrap) is installed on the system."""
+    return shutil.which("bwrap") is not None
+
+
+def _build_bwrap_command(python_exe: str, script_path: str) -> list[str]:
+    """Build a bubblewrap sandbox command for running a strategy.
+
+    Args:
+        python_exe: Path to the Python interpreter.
+        script_path: Path to the wrapper script to execute.
+
+    Returns:
+        Command list suitable for subprocess.Popen.
+    """
+    return [
+        "bwrap",
+        "--ro-bind", "/usr", "/usr",
+        "--ro-bind", "/lib", "/lib",
+        "--ro-bind", "/lib64", "/lib64",
+        "--ro-bind", "/bin", "/bin",
+        "--ro-bind", "/sbin", "/sbin",
+        "--tmpfs", "/tmp",
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--unshare-net",
+        "--unshare-pid",
+        "--die-with-parent",
+        python_exe,
+        script_path,
+    ]
+
+
+def _create_sandbox_wrapper(temp_dir: Path) -> Path:
+    """Create a sandbox wrapper script that restricts available builtins.
+
+    The wrapper is written into *temp_dir* and, when executed, reads the
+    strategy script path from ``sys.argv[1]``, compiles it, and runs it
+    with a restricted ``__builtins__`` dict.
+
+    Returns:
+        Path to the generated wrapper script.
+    """
+    safe_names = list(_SAFE_BUILTINS.keys())
+    # Use json.dumps for the list so names are double-quoted (tests expect this).
+    import json as _json
+    safe_names_str = _json.dumps(safe_names)
+    wrapper_code = (
+        "import sys\n"
+        "_safe_names = " + safe_names_str + "\n"
+        "_restricted = {n: __builtins__[n] if isinstance(__builtins__, dict) else getattr(__builtins__, n) for n in _safe_names}\n"
+        "_script = sys.argv[1]\n"
+        "with open(_script) as _f:\n"
+        "    _code = _f.read()\n"
+        "exec(compile(_code, _script, 'exec'), {'__builtins__': _restricted})\n"
+    )
+    wrapper_path = temp_dir / "_sandbox_wrapper.py"
+    wrapper_path.write_text(wrapper_code, encoding="utf-8")
+    return wrapper_path
+
+
+# ---------------------------------------------------------------------------
 # Running process descriptor
 # ---------------------------------------------------------------------------
 
@@ -155,6 +274,8 @@ class _RunningStrategy:
     started_at: datetime
     log_path: Path
     memory_limit_mb: float = 256.0
+    temp_dir: Path | None = field(default=None)
+    log_file: Any = field(default=None, repr=False)
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +447,19 @@ class UserStrategyRunner:
     # Start / Stop
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cleanup_temp_dir(temp_dir: Path | None) -> None:
+        """Remove a strategy's temporary directory.  No-op if *temp_dir* is None."""
+        if temp_dir is None:
+            return
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
     def start(self, strategy_id: str) -> None:
-        """Launch a strategy as a subprocess.
+        """Launch a strategy as a sandboxed subprocess.
+
+        Each strategy runs in its own temporary directory with a restricted
+        builtins wrapper.  On Linux with bubblewrap installed the process is
+        additionally network-isolated and PID-namespaced.
 
         Args:
             strategy_id: ID returned by :meth:`upload`.
@@ -346,21 +478,42 @@ class UserStrategyRunner:
             if proc.poll() is None:
                 raise RuntimeError(f"Strategy {strategy_id} is already running (pid={proc.pid})")
             # Process has exited — clean up stale entry
+            self._cleanup_temp_dir(self._running[strategy_id].temp_dir)
             del self._running[strategy_id]
 
         name = self._get_name(strategy_id)
         log_path = self._log_dir / f"{strategy_id}.log"
+
+        # Create an isolated temp directory for this run
+        temp_dir = Path(tempfile.mkdtemp(prefix=f"flinttrade_{strategy_id[:8]}_"))
+
+        # Create the sandbox wrapper script
+        wrapper_path = _create_sandbox_wrapper(temp_dir)
+
         log_file = open(log_path, "a", encoding="utf-8")  # noqa: WPS515
 
         try:
+            # Build command — bwrap on Linux when available, plain subprocess otherwise
+            use_bwrap = platform.system() == "Linux" and _is_bwrap_available()
+            if use_bwrap:
+                cmd: list[str] = _build_bwrap_command(sys.executable, str(wrapper_path))
+                # Append strategy path as arg to the wrapper
+                cmd.append(str(strategy_path))
+            else:
+                cmd = [sys.executable, str(wrapper_path), str(strategy_path)]
+
+            preexec_fn = _build_preexec_fn()
+
             process = subprocess.Popen(  # noqa: S603
-                [sys.executable, str(strategy_path)],
+                cmd,
                 stdout=log_file,
                 stderr=log_file,
-                cwd=str(self._strategies_dir),
+                cwd=str(temp_dir),
+                preexec_fn=preexec_fn,
             )
         except Exception:
             log_file.close()
+            self._cleanup_temp_dir(temp_dir)
             raise
 
         self._running[strategy_id] = _RunningStrategy(
@@ -370,6 +523,8 @@ class UserStrategyRunner:
             started_at=datetime.now(timezone.utc),
             log_path=log_path,
             memory_limit_mb=self._memory_limit_mb,
+            temp_dir=temp_dir,
+            log_file=log_file,
         )
         logger.info("Strategy started: %s (id=%s, pid=%d)", name, strategy_id, process.pid)
 
@@ -398,6 +553,16 @@ class UserStrategyRunner:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+
+        # Close the log file handle (prevents file lock on Windows)
+        if entry.log_file is not None:
+            try:
+                entry.log_file.close()
+            except Exception:
+                pass
+
+        # Clean up the per-run temporary directory
+        self._cleanup_temp_dir(entry.temp_dir)
 
         logger.info("Strategy stopped: %s (id=%s)", entry.name, strategy_id)
 

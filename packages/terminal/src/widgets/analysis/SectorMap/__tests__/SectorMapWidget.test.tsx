@@ -35,6 +35,18 @@ vi.mock("jotai", () => ({
   useAtom: () => [[], vi.fn()],
 }));
 
+// Mock RRG data hook
+vi.mock("@/hooks/useRRGData", () => ({
+  useRRGData: () => ({ data: null, isLoading: false, error: null }),
+}));
+
+// Mock sector map data hook
+vi.mock("@/hooks/useSectorMapData", () => ({
+  __esModule: true,
+  default: () => null,
+  useSectorMapData: () => null,
+}));
+
 // Mock shadcn/ui components to avoid Radix rendering issues in JSDOM
 vi.mock("@/components/ui/select", () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

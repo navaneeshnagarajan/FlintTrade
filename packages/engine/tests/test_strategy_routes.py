@@ -155,7 +155,7 @@ class TestStrategyRoutes:
     def test_list_strategies_empty(self, client):
         resp = client.get("/api/v1/strategies")
         assert resp.status_code == 200
-        assert resp.get_json()["strategies"] == []
+        assert resp.get_json()["data"]["strategies"] == []
 
     def test_list_strategies_after_upload(self, client):
         client.post(
@@ -163,7 +163,7 @@ class TestStrategyRoutes:
             json={"name": "listed", "code": SAFE_CODE},
         )
         resp = client.get("/api/v1/strategies")
-        assert len(resp.get_json()["strategies"]) == 1
+        assert len(resp.get_json()["data"]["strategies"]) == 1
 
     def test_start_strategy(self, client):
         upload_resp = client.post(
@@ -266,7 +266,7 @@ class TestStrategyRoutes:
 
         # Verify it's gone from list
         list_resp = client.get("/api/v1/strategies")
-        ids = [s["strategy_id"] for s in list_resp.get_json()["strategies"]]
+        ids = [s["strategy_id"] for s in list_resp.get_json()["data"]["strategies"]]
         assert strategy_id not in ids
 
     def test_get_status_stopped(self, client):
@@ -278,7 +278,7 @@ class TestStrategyRoutes:
 
         resp = client.get(f"/api/v1/strategies/{strategy_id}/status")
         assert resp.status_code == 200
-        assert resp.get_json()["strategy"]["state"] == "stopped"
+        assert resp.get_json()["data"]["strategy"]["state"] == "stopped"
 
     def test_get_logs_empty(self, client):
         upload_resp = client.post(
@@ -289,7 +289,7 @@ class TestStrategyRoutes:
 
         resp = client.get(f"/api/v1/strategies/{strategy_id}/logs")
         assert resp.status_code == 200
-        assert resp.get_json()["lines"] == []
+        assert resp.get_json()["data"]["lines"] == []
 
     def test_no_runner_returns_503(self, client_no_runner):
         resp = client_no_runner.get("/api/v1/strategies")
