@@ -193,6 +193,28 @@ export default function WelcomeRoute() {
     if (reducedMotion) setStep(5);
   }, [reducedMotion]);
 
+  // Check auth status on mount — WelcomeRoute is not a protected route so
+  // useAuthGuard does not run here. We need to query the backend ourselves
+  // to know whether to show "Get Started" (setup-required) or the login form.
+  useEffect(() => {
+    if (authStatus !== "unknown") return;
+    fetch("/ft-api/v1/auth/status")
+      .then((r) => r.ok ? r.json() : Promise.reject(r))
+      .then((data) => {
+        if (!data.data?.is_setup) {
+          useAuthStore.getState().setSetupRequired();
+        } else {
+          useAuthStore.getState().setLoggedOut();
+        }
+      })
+      .catch(() => {
+        // Backend unreachable — assume setup required for first-time users
+        if (import.meta.env.DEV) {
+          useAuthStore.getState().setSetupRequired();
+        }
+      });
+  }, [authStatus]);
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       // Only intercept Space/Enter when no interactive element (button, a, input) is focused.
