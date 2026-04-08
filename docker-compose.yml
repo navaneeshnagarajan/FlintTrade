@@ -9,10 +9,10 @@
 #   docker compose down                   # stop all services
 #
 # Architecture:
-#   Nginx (80/443) → React static files + reverse proxy to backend services
-#   OpenAlgo (5000/8765) → Broker gateway + WebSocket market data
-#   FlintTrade (5100) → Platform backend (strategy engine, screener, AI)
-#   Monitoring stack → Uptime Kuma, Glitchtip, VictoriaLogs, Netdata
+#   Nginx (80/443) -> React static files + reverse proxy to backend services
+#   OpenAlgo (5000/8765) -> Broker gateway + WebSocket market data
+#   FlintTrade (5100) -> Platform backend (strategy engine, screener, AI)
+#   Monitoring stack -> Uptime Kuma, Glitchtip, VictoriaLogs, Netdata
 #
 # All internal services bind to 127.0.0.1 only. Nginx is the sole entry point.
 # =============================================================================
@@ -47,45 +47,63 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
       - flinttrade
 
   # ---------------------------------------------------------------------------
   # FlintTrade — Platform backend (strategy engine, screener, AI, data)
+  # Multi-stage build with uv for fast dependency installation.
   # ---------------------------------------------------------------------------
   flinttrade:
-    image: python:3.12-slim
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flinttrade:latest
     container_name: flinttrade-backend
-    working_dir: /app
     volumes:
-      - .:/app:ro
       - flinttrade_data:/data/flinttrade
-      - flinttrade_workspace:/root/.flinttrade
-    command: >
-      bash -c "pip install -r requirements.txt --quiet &&
-               gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5100 'packages.core.src.app:app'"
+      - flinttrade_keys:/home/flinttrade/.flinttrade
+      - flinttrade_strategies:/data/flinttrade/strategies
+      - flinttrade_logs:/data/flinttrade/logs
     ports:
       - "127.0.0.1:5100:5100"
     env_file: .env
     environment:
       - FLINTTRADE_DEV=0
       - FLINTTRADE_PORT=5100
+      - OPENALGO_HOST=http://openalgo
+      - OPENALGO_PORT=5000
+      - OPENALGO_WS_PORT=8765
       - OPENBLAS_NUM_THREADS=2
       - OMP_NUM_THREADS=2
+      - GUNICORN_WORKERS=1
+      - GUNICORN_TIMEOUT=120
+      - LOG_LEVEL=info
     depends_on:
       openalgo:
         condition: service_healthy
     restart: unless-stopped
     read_only: true
+    tmpfs:
+      - /tmp:size=100M
     security_opt:
       - "no-new-privileges:true"
-    user: "1000:1000"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:5100/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
       - flinttrade
 
@@ -105,6 +123,11 @@ services:
     environment:
       - NODE_ENV=production
     restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -134,6 +157,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
       - flinttrade
 
@@ -149,6 +177,11 @@ services:
     volumes:
       - uptime_kuma_data:/app/data
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -161,6 +194,11 @@ services:
     image: redis:7-alpine
     container_name: flinttrade-glitchtip-redis
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -179,6 +217,11 @@ services:
       PORT: "8000"
       GLITCHTIP_DOMAIN: "http://127.0.0.1:8000"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -196,6 +239,11 @@ services:
       SECRET_KEY: "${GLITCHTIP_SECRET_KEY:?Set GLITCHTIP_SECRET_KEY in .env}"
       CELERY_BROKER_URL: "redis://glitchtip-redis:6379/0"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -214,6 +262,11 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -232,6 +285,11 @@ services:
       - "-storageDataPath=/victoria-logs-data"
       - "-httpListenAddr=:9090"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -256,6 +314,11 @@ services:
     security_opt:
       - apparmor:unconfined
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - flinttrade
 
@@ -263,18 +326,29 @@ services:
 # Named volumes — persistent data across container restarts
 # =============================================================================
 volumes:
+  # Core application
   openalgo_data:
     name: flinttrade_openalgo_data
   flinttrade_data:
     name: flinttrade_platform_data
-  flinttrade_workspace:
-    name: flinttrade_workspace
+  flinttrade_keys:
+    name: flinttrade_keys
+  flinttrade_strategies:
+    name: flinttrade_strategies
+  flinttrade_logs:
+    name: flinttrade_logs
+
+  # Terminal build
   terminal_dist:
     name: flinttrade_terminal_dist
   terminal_node_modules:
     name: flinttrade_terminal_node_modules
+
+  # Nginx
   nginx_logs:
     name: flinttrade_nginx_logs
+
+  # Monitoring
   uptime_kuma_data:
     name: flinttrade_uptime_kuma_data
   glitchtip_pg:

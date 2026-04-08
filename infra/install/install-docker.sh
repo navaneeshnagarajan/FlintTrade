@@ -127,12 +127,37 @@ ok "Secrets generated and stored"
 
 # ── Step 4: Build and start containers ─────────────────────────────────
 log "Building and starting containers (this may take a few minutes)..."
+log "Using multi-stage build with uv for fast dependency installation..."
 
 cd "$INSTALL_DIR"
-$COMPOSE_CMD build --pull
+
+# Ensure start.sh is executable (git may strip permissions)
+chmod +x "$INSTALL_DIR/infra/docker/start.sh"
+
+# Build the FlintTrade image (multi-stage with uv)
+$COMPOSE_CMD build --pull flinttrade
+
+# Pull external images and start everything
+$COMPOSE_CMD pull --ignore-buildable
 $COMPOSE_CMD up -d
 
 ok "Containers started"
+
+# Wait for health checks to pass
+log "Waiting for services to become healthy..."
+retries=0
+max_retries=30
+until $COMPOSE_CMD ps --format '{{.Status}}' flinttrade-backend 2>/dev/null | grep -q "healthy"; do
+    retries=$((retries + 1))
+    if [ "$retries" -ge "$max_retries" ]; then
+        warn "FlintTrade did not become healthy within expected time. Check logs: $COMPOSE_CMD logs flinttrade"
+        break
+    fi
+    sleep 5
+done
+if [ "$retries" -lt "$max_retries" ]; then
+    ok "FlintTrade backend is healthy"
+fi
 
 # ── Step 5: Set up Nginx and SSL ───────────────────────────────────────
 if [ -n "$DOMAIN_NAME" ]; then

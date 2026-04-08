@@ -222,6 +222,83 @@ export const runBacktest = (config: BacktestConfig) =>
   post<BacktestResult>("backtest/run", config);
 
 // ---------------------------------------------------------------------------
+// Portfolio Backtest
+// ---------------------------------------------------------------------------
+
+export type AllocationStrategy =
+  | "equal_weight"
+  | "inverse_volatility"
+  | "momentum"
+  | "market_cap";
+
+export type RebalanceFreq =
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "quarterly"
+  | "yearly";
+
+export interface PortfolioBacktestConfig {
+  symbols: string[];
+  start_date: string;
+  end_date: string;
+  allocation_strategy?: AllocationStrategy;
+  rebalance_freq?: RebalanceFreq;
+  initial_capital?: number;
+  benchmark?: string;
+  include_benchmark?: boolean;
+  momentum_lookback?: number;
+  vol_lookback?: number;
+  top_n?: number;
+}
+
+export interface RebalanceEntry {
+  date: string;
+  old_weights: Record<string, number>;
+  new_weights: Record<string, number>;
+  trades: Array<{ symbol: string; delta_shares: number; price: number }>;
+}
+
+export interface PortfolioResultData {
+  total_return: number;
+  annual_return: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  max_drawdown: number;
+  calmar_ratio: number;
+  volatility: number;
+  var_95: number;
+  final_equity: number;
+  equity_curve: number[];
+  drawdown_curve: number[];
+  rebalance_log: RebalanceEntry[];
+}
+
+export interface PortfolioBuyHoldData {
+  total_return: number;
+  annual_return: number;
+  sharpe_ratio: number;
+  max_drawdown: number;
+  equity_curve: number[];
+  drawdown_curve: number[];
+}
+
+export interface PortfolioBenchmarkComparison {
+  alpha: number;
+  beta: number;
+  information_ratio: number;
+  buy_hold: PortfolioBuyHoldData;
+}
+
+export interface PortfolioBacktestResult {
+  result: PortfolioResultData;
+  comparison?: PortfolioBenchmarkComparison;
+}
+
+export const runPortfolioBacktest = (config: PortfolioBacktestConfig) =>
+  post<PortfolioBacktestResult>("backtest/portfolio", config);
+
+// ---------------------------------------------------------------------------
 // Strategies
 // ---------------------------------------------------------------------------
 
@@ -784,6 +861,47 @@ export const getFiiDiiData = (days?: number, refresh?: boolean) => {
   if (refresh) params.set("refresh", "true");
   const qs = params.toString();
   return get<FiiDiiResponse>("screener/fii-dii" + (qs ? "?" + qs : ""));
+};
+
+// ---------------------------------------------------------------------------
+// RRG — Relative Rotation Graph
+// ---------------------------------------------------------------------------
+
+export interface RRGTailPoint {
+  date: string;
+  rs_ratio: number;
+  rs_momentum: number;
+}
+
+export type RRGQuadrant = "leading" | "weakening" | "lagging" | "improving" | "neutral";
+
+export interface SectorRRG {
+  symbol: string;
+  name: string;
+  tail: RRGTailPoint[];
+  current_quadrant: RRGQuadrant;
+}
+
+export interface RRGResponse {
+  status: string;
+  benchmark: string;
+  tail_length: number;
+  is_sample_data: boolean;
+  sectors: SectorRRG[];
+}
+
+export const getRRGData = (tailLength?: number): Promise<RRGResponse> => {
+  const params = new URLSearchParams();
+  if (tailLength !== undefined) params.set("tail_length", String(tailLength));
+  const qs = params.toString();
+  // RRG endpoint returns the full envelope — don't unwrap .data
+  const base = (import.meta.env.DEV ? "/ft-api" : "");
+  const url = `${base}/api/v1/rrg/sectors${qs ? "?" + qs : ""}`;
+  return fetch(url)
+    .then((res) => {
+      if (!res.ok) throw new Error(`RRG API: HTTP ${res.status}`);
+      return res.json() as Promise<RRGResponse>;
+    });
 };
 
 // ---------------------------------------------------------------------------

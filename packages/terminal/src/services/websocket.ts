@@ -1,5 +1,30 @@
 import type { WsTick, WsMode, WsInstrument } from "@/types/api";
 
+// ---------------------------------------------------------------------------
+// Public handler types
+// ---------------------------------------------------------------------------
+
+/** Handler for LTP and quote-mode ticks. */
+export type TickHandler = (tick: WsTick) => void;
+/** Handler for depth-mode ticks (raw map, bids/asks arrays present). */
+export type DepthTickHandler = (data: Record<string, unknown>) => void;
+/** Unified per-mode handler — depth mode receives the raw depth map. */
+export type ModeTickHandler = TickHandler | DepthTickHandler;
+
+/** Shape used by batchSubscribe — an instrument with its target mode. */
+export interface SubscribeRequest {
+  instrument: WsInstrument;
+  mode: WsMode;
+}
+
+/** Metadata stored per subscribed symbol (keyed by "EXCHANGE:SYMBOL:mode"). */
+interface SubscriptionInfo {
+  instrument: WsInstrument;
+  mode: WsMode;
+  /** Number of active callers holding this subscription. */
+  refCount: number;
+}
+
 type TickCallback = (tick: WsTick) => void;
 type StatusCallback = (connected: boolean) => void;
 
@@ -18,9 +43,24 @@ export class WebSocketService {
   };
   private connected = false;
   private shouldConnect = false;
+
+  // Legacy broadcast callbacks — kept for backward compatibility.
   private tickCallbacks = new Set<TickCallback>();
   private depthCallbacks = new Set<(data: Record<string, unknown>) => void>();
   private statusCallbacks = new Set<StatusCallback>();
+
+  // Per-mode handler sets (new in v2). Each set holds handlers registered via
+  // registerHandler(). Ticks are dispatched to the matching mode's set AND to
+  // the legacy tickCallbacks/depthCallbacks for backward compat.
+  private modeHandlers: Record<WsMode, Set<ModeTickHandler>> = {
+    ltp: new Set(),
+    quote: new Set(),
+    depth: new Set(),
+  };
+
+  // Reference-counted subscription map.
+  // Key: "<EXCHANGE>:<SYMBOL>:<mode>", value: SubscriptionInfo.
+  private subscriptionMap = new Map<string, SubscriptionInfo>();
 
   constructor(private url: string, private apiKey: string = "") {}
 
@@ -39,6 +79,150 @@ export class WebSocketService {
   onStatus(cb: StatusCallback): () => void {
     this.statusCallbacks.add(cb);
     return () => this.statusCallbacks.delete(cb);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mode-specific handler registration (new API)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Register a handler that receives ticks only for the given mode.
+   *
+   * - `"ltp"` / `"quote"` handlers receive `WsTick` objects.
+   * - `"depth"` handlers receive a raw `Record<string, unknown>` (bids/asks present).
+   *
+   * Returns an unregister function — call it when the component unmounts.
+   *
+   * @example
+   * const off = wsService.registerHandler("ltp", (tick) => { ... });
+   * // on cleanup:
+   * off();
+   */
+  registerHandler(mode: WsMode, handler: ModeTickHandler): () => void {
+    this.modeHandlers[mode].add(handler);
+    return () => {
+      this.modeHandlers[mode].delete(handler);
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Batch subscribe with optional delay between messages
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Subscribe to multiple instruments, optionally sending each subscription
+   * message `delayMs` milliseconds apart. Useful when loading a large option
+   * chain (80+ symbols) to avoid overwhelming the WS server.
+   *
+   * Default delay is 50 ms. Pass 0 for immediate batching.
+   *
+   * Reference counts each subscription — if a symbol is already subscribed by
+   * another caller the ref count is incremented and no duplicate wire message
+   * is sent.
+   */
+  batchSubscribe(requests: SubscribeRequest[], delayMs = 50): Promise<void> {
+    return new Promise((resolve) => {
+      // Group by mode so we can send one subscribe message per mode per batch.
+      const byMode = new Map<WsMode, WsInstrument[]>();
+      for (const req of requests) {
+        const key = `${req.instrument.exchange}:${req.instrument.symbol}:${req.mode}`;
+        const existing = this.subscriptionMap.get(key);
+        if (existing) {
+          // Already subscribed — just increment ref count, skip wire message.
+          existing.refCount += 1;
+          continue;
+        }
+        this.subscriptionMap.set(key, {
+          instrument: req.instrument,
+          mode: req.mode,
+          refCount: 1,
+        });
+        const group = byMode.get(req.mode) ?? [];
+        group.push(req.instrument);
+        byMode.set(req.mode, group);
+      }
+
+      // Also update the plain subscriptions record (used by resubscribeAll).
+      for (const [mode, instruments] of byMode) {
+        this.subscriptions[mode] = [
+          ...this.subscriptions[mode],
+          ...instruments.filter(
+            (inst) =>
+              !this.subscriptions[mode].some(
+                (s) => s.symbol === inst.symbol && s.exchange === inst.exchange,
+              ),
+          ),
+        ];
+      }
+
+      if (byMode.size === 0) {
+        resolve();
+        return;
+      }
+
+      const modes = [...byMode.entries()];
+      let i = 0;
+
+      const sendNext = (): void => {
+        if (i >= modes.length) {
+          resolve();
+          return;
+        }
+        const [mode, instruments] = modes[i++];
+        this.send({
+          action: "subscribe",
+          symbols: instruments.map((inst) => ({
+            symbol: inst.symbol,
+            exchange: inst.exchange,
+          })),
+          mode: mode.toUpperCase(),
+        });
+        if (delayMs > 0) {
+          setTimeout(sendNext, delayMs);
+        } else {
+          sendNext();
+        }
+      };
+
+      sendNext();
+    });
+  }
+
+  /**
+   * Release a reference-counted subscription. The WS unsubscribe message is
+   * only sent when the ref count drops to zero (i.e. no other caller is still
+   * using this subscription).
+   */
+  releaseSubscription(instrument: WsInstrument, mode: WsMode): void {
+    const key = `${instrument.exchange}:${instrument.symbol}:${mode}`;
+    const info = this.subscriptionMap.get(key);
+    if (!info) return;
+    info.refCount -= 1;
+    if (info.refCount > 0) return;
+    // Last reference dropped — unsubscribe from the server.
+    this.subscriptionMap.delete(key);
+    this.unsubscribe([instrument], mode);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Diagnostic helpers
+  // ---------------------------------------------------------------------------
+
+  /** Total number of actively reference-counted subscription slots. */
+  getSubscriptionCount(): number {
+    return this.subscriptionMap.size;
+  }
+
+  /**
+   * Returns a deduplicated list of "EXCHANGE:SYMBOL" strings for all currently
+   * subscribed instruments (across all modes).
+   */
+  getSubscribedSymbols(): string[] {
+    const seen = new Set<string>();
+    for (const info of this.subscriptionMap.values()) {
+      seen.add(`${info.instrument.exchange}:${info.instrument.symbol}`);
+    }
+    return [...seen];
   }
 
   connect(): void {
@@ -72,6 +256,15 @@ export class WebSocketService {
     );
     if (newInsts.length === 0) return;
     this.subscriptions[mode] = [...this.subscriptions[mode], ...newInsts];
+    // Mirror into subscriptionMap so reference counting and diagnostics work.
+    for (const inst of newInsts) {
+      const key = `${inst.exchange}:${inst.symbol}:${mode}`;
+      if (!this.subscriptionMap.has(key)) {
+        this.subscriptionMap.set(key, { instrument: inst, mode, refCount: 1 });
+      } else {
+        // Already tracked (e.g. via batchSubscribe) — don't reset refCount.
+      }
+    }
     // OpenAlgo v2 WS protocol: { action: "subscribe", symbols: [...], mode: "LTP" }
     this.send({
       action: "subscribe",
@@ -86,6 +279,12 @@ export class WebSocketService {
         (inst) => s.symbol === inst.symbol && s.exchange === inst.exchange
       )
     );
+    // Remove from subscriptionMap (unconditional — used by releaseSubscription
+    // which already checked the ref count before calling this method, as well
+    // as direct callers who want a hard unsubscribe).
+    for (const inst of instruments) {
+      this.subscriptionMap.delete(`${inst.exchange}:${inst.symbol}:${mode}`);
+    }
     this.send({
       action: "unsubscribe",
       symbols: instruments.map((i) => ({ symbol: i.symbol, exchange: i.exchange })),
@@ -174,7 +373,12 @@ export class WebSocketService {
 
         // Depth mode (mode 3) sends bids/asks without ltp
         if (Array.isArray(tickData["bids"]) || Array.isArray(tickData["asks"])) {
+          // Legacy broadcast
           this.depthCallbacks.forEach((cb) => cb(tickData));
+          // Mode-specific handlers
+          this.modeHandlers["depth"].forEach((cb) =>
+            (cb as DepthTickHandler)(tickData),
+          );
           return;
         }
 
@@ -193,7 +397,23 @@ export class WebSocketService {
           change: typeof tickData["change"] === "number" ? tickData["change"] : undefined,
           pct: typeof tickData["pct"] === "number" ? tickData["pct"] : undefined,
         };
+
+        // Legacy broadcast — all tick callbacks receive every LTP/quote tick.
         this.tickCallbacks.forEach((cb) => cb(tick));
+
+        // Mode-specific dispatch. The incoming WS message carries a numeric mode
+        // field (1 = LTP, 2 = Quote). Map that to the string mode key. If absent,
+        // dispatch to both "ltp" and "quote" handlers for safety.
+        const wsMode = msg["mode"];
+        if (wsMode === 2) {
+          this.modeHandlers["quote"].forEach((cb) => (cb as TickHandler)(tick));
+        } else if (wsMode === 1) {
+          this.modeHandlers["ltp"].forEach((cb) => (cb as TickHandler)(tick));
+        } else {
+          // Unknown or missing mode — dispatch to all non-depth mode handlers.
+          this.modeHandlers["ltp"].forEach((cb) => (cb as TickHandler)(tick));
+          this.modeHandlers["quote"].forEach((cb) => (cb as TickHandler)(tick));
+        }
       } catch {
         console.warn("[WS] Failed to parse message", event.data);
       }

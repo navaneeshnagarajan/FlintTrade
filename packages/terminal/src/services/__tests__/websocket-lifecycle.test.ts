@@ -463,4 +463,315 @@ describe("WebSocketService — lifecycle", () => {
     expect(depthSub).toBeDefined();
     expect(depthSub!.symbols).toEqual([{ symbol: "RELIANCE", exchange: "NSE" }]);
   });
+
+  // -----------------------------------------------------------------------
+  // Mode-specific handler registration
+  // -----------------------------------------------------------------------
+
+  describe("registerHandler — mode-specific dispatch", () => {
+    it("LTP handler receives only mode=1 ticks and not depth ticks", () => {
+      const svc = createService();
+      const ltpHandler = vi.fn();
+      svc.registerHandler("ltp", ltpHandler);
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+
+      // LTP tick (mode 1)
+      ws._receive({
+        type: "market_data",
+        mode: 1,
+        data: { symbol: "NIFTY", exchange: "NSE_INDEX", ltp: 23000 },
+      });
+
+      expect(ltpHandler).toHaveBeenCalledTimes(1);
+      const tick = ltpHandler.mock.calls[0][0];
+      expect(tick.symbol).toBe("NIFTY");
+      expect(tick.ltp).toBe(23000);
+
+      // Depth tick — must NOT reach the LTP handler
+      ltpHandler.mockClear();
+      ws._receive({
+        type: "market_data",
+        mode: 3,
+        data: {
+          symbol: "NIFTY",
+          exchange: "NSE_INDEX",
+          bids: [{ price: 22999, qty: 10 }],
+          asks: [{ price: 23001, qty: 5 }],
+        },
+      });
+
+      expect(ltpHandler).not.toHaveBeenCalled();
+    });
+
+    it("quote handler receives only mode=2 ticks", () => {
+      const svc = createService();
+      const quoteHandler = vi.fn();
+      const ltpHandler = vi.fn();
+      svc.registerHandler("quote", quoteHandler);
+      svc.registerHandler("ltp", ltpHandler);
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+
+      // Quote tick (mode 2)
+      ws._receive({
+        type: "market_data",
+        mode: 2,
+        data: { symbol: "RELIANCE", exchange: "NSE", ltp: 2500, open: 2490 },
+      });
+
+      expect(quoteHandler).toHaveBeenCalledTimes(1);
+      // LTP handler must NOT fire for a mode=2 message
+      expect(ltpHandler).not.toHaveBeenCalled();
+    });
+
+    it("depth handler receives only depth ticks (bids/asks present)", () => {
+      const svc = createService();
+      const depthHandler = vi.fn();
+      svc.registerHandler("depth", depthHandler);
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+
+      // Regular LTP tick — must NOT reach depth handler
+      ws._receive({
+        type: "market_data",
+        mode: 1,
+        data: { symbol: "INFY", exchange: "NSE", ltp: 1800 },
+      });
+      expect(depthHandler).not.toHaveBeenCalled();
+
+      // Depth tick
+      ws._receive({
+        type: "market_data",
+        mode: 3,
+        data: {
+          symbol: "INFY",
+          exchange: "NSE",
+          bids: [{ price: 1799, qty: 200 }],
+          asks: [{ price: 1801, qty: 100 }],
+        },
+      });
+
+      expect(depthHandler).toHaveBeenCalledTimes(1);
+      const data = depthHandler.mock.calls[0][0] as Record<string, unknown>;
+      expect(Array.isArray(data["bids"])).toBe(true);
+    });
+
+    it("unregister function removes the handler", () => {
+      const svc = createService();
+      const handler = vi.fn();
+      const off = svc.registerHandler("ltp", handler);
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+
+      // Fire once to confirm it was registered
+      ws._receive({
+        type: "market_data",
+        mode: 1,
+        data: { symbol: "NIFTY", exchange: "NSE_INDEX", ltp: 22500 },
+      });
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Unregister and fire again — should be silent
+      off();
+      ws._receive({
+        type: "market_data",
+        mode: 1,
+        data: { symbol: "NIFTY", exchange: "NSE_INDEX", ltp: 22600 },
+      });
+      expect(handler).toHaveBeenCalledTimes(1); // still 1, not 2
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // batchSubscribe with delay
+  // -----------------------------------------------------------------------
+
+  describe("batchSubscribe", () => {
+    it("sends subscription messages with 50ms delay between modes", async () => {
+      // Use real timers for this test — fake timers interact badly with the
+      // heartbeat interval (30s) when runAllTimersAsync() is called, because
+      // it fires ping → pong timeout → reconnect in an infinite loop.
+      vi.useRealTimers();
+
+      const svc = createService();
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+      ws.send.mockClear();
+
+      await svc.batchSubscribe(
+        [
+          { instrument: { symbol: "NIFTY", exchange: "NSE_INDEX" }, mode: "ltp" },
+          { instrument: { symbol: "RELIANCE", exchange: "NSE" }, mode: "quote" },
+        ],
+        10, // short delay for real-timer test
+      );
+
+      expect(ws.send).toHaveBeenCalledTimes(2);
+
+      const calls = ws.send.mock.calls.map((c) => JSON.parse(c[0] as string));
+      const modes = calls.map((c: Record<string, unknown>) => c["mode"]);
+      expect(modes).toContain("LTP");
+      expect(modes).toContain("QUOTE");
+
+      // Restore fake timers for remaining tests in this suite
+      vi.useFakeTimers();
+    });
+
+    it("does not send duplicate wire message when same symbol already subscribed", async () => {
+      const svc = createService();
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+      ws.send.mockClear();
+
+      // First subscription
+      await svc.batchSubscribe(
+        [{ instrument: { symbol: "NIFTY", exchange: "NSE_INDEX" }, mode: "ltp" }],
+        0,
+      );
+      const firstCount = ws.send.mock.calls.length;
+
+      // Second subscription for the same symbol — ref count bumped, no new wire message
+      await svc.batchSubscribe(
+        [{ instrument: { symbol: "NIFTY", exchange: "NSE_INDEX" }, mode: "ltp" }],
+        0,
+      );
+      expect(ws.send.mock.calls.length).toBe(firstCount);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Reference-counted subscriptions
+  // -----------------------------------------------------------------------
+
+  describe("releaseSubscription — reference counting", () => {
+    it("does not unsubscribe until last reference is released", () => {
+      const svc = createService();
+      svc.connect();
+
+      const ws = lastWs();
+      ws._open();
+      ws._receive({ type: "auth", status: "success" });
+
+      const inst = { symbol: "NIFTY", exchange: "NSE_INDEX" };
+
+      // Two callers subscribe to the same instrument
+      svc.subscribe([inst], "ltp"); // refCount = 1 (set by subscribe)
+      // Manually bump the ref count to simulate a second caller
+      const key = "NSE_INDEX:NIFTY:ltp";
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const info = (svc as unknown as Record<string, Map<string, { refCount: number }>>)["subscriptionMap"].get(key);
+      if (info) info.refCount = 2;
+
+      ws.send.mockClear();
+
+      // First release — ref count drops to 1, no unsubscribe sent
+      svc.releaseSubscription(inst, "ltp");
+      const unsubCalls = ws.send.mock.calls.filter((c) => {
+        const p = JSON.parse(c[0] as string);
+        return p.action === "unsubscribe";
+      });
+      expect(unsubCalls).toHaveLength(0);
+
+      // Second release — ref count drops to 0, unsubscribe IS sent
+      svc.releaseSubscription(inst, "ltp");
+      const unsubCalls2 = ws.send.mock.calls.filter((c) => {
+        const p = JSON.parse(c[0] as string);
+        return p.action === "unsubscribe";
+      });
+      expect(unsubCalls2).toHaveLength(1);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Auto-resubscribe on reconnect (batchSubscribe path)
+  // -----------------------------------------------------------------------
+
+  describe("auto-resubscribe after reconnect — batchSubscribe path", () => {
+    it("resubscribes all batchSubscribed symbols on reconnect", async () => {
+      const svc = createService();
+      svc.connect();
+
+      const ws1 = lastWs();
+      ws1._open();
+      ws1._receive({ type: "auth", status: "success" });
+
+      // Use batchSubscribe to add two symbols
+      await svc.batchSubscribe(
+        [
+          { instrument: { symbol: "BANKNIFTY", exchange: "NSE_INDEX" }, mode: "ltp" },
+          { instrument: { symbol: "INDIAVIX", exchange: "NSE_INDEX" }, mode: "ltp" },
+        ],
+        0,
+      );
+
+      // Simulate drop and reconnect
+      ws1._close();
+      vi.advanceTimersByTime(1_000);
+
+      const ws2 = lastWs();
+      ws2._open();
+      ws2.send.mockClear();
+      ws2._receive({ type: "auth", status: "success" });
+
+      // resubscribeAll must replay the ltp subscriptions
+      const sentPayloads = ws2.send.mock.calls.map((c) =>
+        JSON.parse(c[0] as string),
+      );
+      const ltpSubs = sentPayloads.filter(
+        (p) => p.action === "subscribe" && p.mode === "LTP",
+      );
+      expect(ltpSubs).toHaveLength(1);
+      const symbols: string[] = (
+        ltpSubs[0].symbols as Array<{ symbol: string }>
+      ).map((s) => s.symbol);
+      expect(symbols).toContain("BANKNIFTY");
+      expect(symbols).toContain("INDIAVIX");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Diagnostic helpers
+  // -----------------------------------------------------------------------
+
+  describe("getSubscriptionCount / getSubscribedSymbols", () => {
+    it("getSubscriptionCount reflects active subscriptions across modes", () => {
+      const svc = createService();
+      expect(svc.getSubscriptionCount()).toBe(0);
+      svc.subscribe([{ symbol: "NIFTY", exchange: "NSE_INDEX" }], "ltp");
+      expect(svc.getSubscriptionCount()).toBe(1);
+      svc.subscribe([{ symbol: "NIFTY", exchange: "NSE_INDEX" }], "depth");
+      expect(svc.getSubscriptionCount()).toBe(2); // same symbol, different mode
+    });
+
+    it("getSubscribedSymbols deduplicates across modes", () => {
+      const svc = createService();
+      svc.subscribe([{ symbol: "NIFTY", exchange: "NSE_INDEX" }], "ltp");
+      svc.subscribe([{ symbol: "NIFTY", exchange: "NSE_INDEX" }], "depth");
+      svc.subscribe([{ symbol: "RELIANCE", exchange: "NSE" }], "ltp");
+      const symbols = svc.getSubscribedSymbols();
+      // NIFTY appears in two modes but should be listed once
+      expect(symbols).toHaveLength(2);
+      expect(symbols).toContain("NSE_INDEX:NIFTY");
+      expect(symbols).toContain("NSE:RELIANCE");
+    });
+  });
 });

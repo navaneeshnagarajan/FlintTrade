@@ -21,6 +21,7 @@ from .scheduler import (
     StrategyScheduler,
     TimeScheduler,
 )
+from .bracket_order import BracketOrder, BracketOrderError, BracketOrderService, BracketResult
 from .strategy import BaseStrategy, StrategyRegistry, StrategyState
 
 # NOTE: SandboxEngine, SandboxConfig, and UserStrategyRunner are intentionally
@@ -32,6 +33,7 @@ from .strategy import BaseStrategy, StrategyRegistry, StrategyState
 #   from packages.engine.src.strategy_runner import UserStrategyRunner
 #   from packages.engine.src.sandbox_routes import sandbox_bp
 #   from packages.engine.src.strategy_routes import strategy_bp
+#   from packages.engine.src.bracket_routes import bracket_bp
 
 __all__ = [
     # Safety
@@ -59,4 +61,9 @@ __all__ = [
     "BaseStrategy",
     "StrategyState",
     "StrategyRegistry",
+    # Bracket orders
+    "BracketOrder",
+    "BracketOrderService",
+    "BracketOrderError",
+    "BracketResult",
 ]

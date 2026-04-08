@@ -203,6 +203,162 @@ def backtest_run() -> tuple[Any, int]:
     }), 200
 
 
+@backtest_bp.route("/backtest/portfolio", methods=["POST"])
+def backtest_portfolio() -> tuple[Any, int]:
+    """Run a portfolio-level backtest with multi-asset allocation.
+
+    Uses :class:`~portfolio_backtest.PortfolioBacktester` backed by VectorBT
+    when available, otherwise the pure-Python simulator.
+
+    Request JSON:
+        symbols (list[str]): Asset symbols to include in the portfolio.
+        start_date (str): Start date in ``YYYY-MM-DD`` format.
+        end_date (str): End date in ``YYYY-MM-DD`` format.
+        allocation_strategy (str, optional): One of ``"equal_weight"``
+            (default), ``"inverse_volatility"``, ``"momentum"``,
+            ``"market_cap"``.
+        rebalance_freq (str, optional): One of ``"daily"``, ``"weekly"``,
+            ``"monthly"``, ``"quarterly"`` (default), ``"yearly"``.
+        initial_capital (float, optional): Starting capital (default 1 000 000).
+        benchmark (str, optional): Benchmark label (default ``"NIFTY 50"``).
+        include_benchmark (bool, optional): Whether to include benchmark
+            comparison in the response (default ``true``).
+        momentum_lookback (int, optional): Lookback for momentum strategy
+            (default 126 trading days).
+        vol_lookback (int, optional): Lookback for inverse-volatility strategy
+            (default 63 trading days).
+        top_n (int, optional): Top-N symbols for momentum strategy.
+
+    Returns:
+        JSON with ``status`` and ``data`` containing ``result`` and
+        optionally ``comparison`` on success, or ``status`` and ``message``
+        on error.
+    """
+    _be_src = str(Path(_REPO_ROOT) / "packages" / "backtest-engine" / "src")
+    _be_src_added = _be_src not in sys.path
+    if _be_src_added:
+        sys.path.insert(0, _be_src)
+    try:
+        import importlib
+
+        _pb_mod = importlib.import_module("portfolio_backtest")
+        PortfolioBacktester = _pb_mod.PortfolioBacktester
+    except Exception:
+        logger.exception("portfolio_backtest module load error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+    finally:
+        if _be_src_added and _be_src in sys.path:
+            sys.path.remove(_be_src)
+
+    body = request.get_json(silent=True) or {}
+
+    symbols: list[str] = body.get("symbols", [])
+    if not symbols or not isinstance(symbols, list):
+        return jsonify({"status": "error", "message": "symbols must be a non-empty list"}), 400
+    symbols = [str(s).strip() for s in symbols if str(s).strip()]
+    if not symbols:
+        return jsonify({"status": "error", "message": "symbols must contain non-empty strings"}), 400
+
+    start_date: str = body.get("start_date", "").strip()
+    end_date: str = body.get("end_date", "").strip()
+    if not start_date or not end_date:
+        return jsonify({"status": "error", "message": "start_date and end_date are required"}), 400
+
+    allocation_strategy: str = body.get("allocation_strategy", "equal_weight").strip()
+    rebalance_freq: str = body.get("rebalance_freq", "quarterly").strip()
+    benchmark: str = body.get("benchmark", "NIFTY 50").strip()
+    include_benchmark: bool = bool(body.get("include_benchmark", True))
+
+    try:
+        initial_capital = float(body.get("initial_capital", 1_000_000))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "initial_capital must be a number"}), 400
+
+    try:
+        momentum_lookback = int(body.get("momentum_lookback", 126))
+        vol_lookback = int(body.get("vol_lookback", 63))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "lookback values must be integers"}), 400
+
+    top_n: int | None = None
+    if "top_n" in body:
+        try:
+            top_n = int(body["top_n"])
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "top_n must be an integer"}), 400
+
+    try:
+        backtester = PortfolioBacktester(
+            symbols=symbols,
+            benchmark=benchmark,
+            rebalance_freq=rebalance_freq,
+            initial_capital=initial_capital,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    try:
+        result = backtester.run(
+            start_date=start_date,
+            end_date=end_date,
+            allocation_strategy=allocation_strategy,
+            momentum_lookback=momentum_lookback,
+            vol_lookback=vol_lookback,
+            top_n=top_n,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception:
+        logger.exception("Portfolio backtest simulation error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+    result_dict: dict[str, Any] = {
+        "total_return": result.total_return,
+        "annual_return": result.annual_return,
+        "sharpe_ratio": result.sharpe_ratio,
+        "sortino_ratio": result.sortino_ratio,
+        "max_drawdown": result.max_drawdown,
+        "calmar_ratio": result.calmar_ratio,
+        "volatility": result.volatility,
+        "var_95": result.var_95,
+        "final_equity": result.final_equity,
+        "equity_curve": result.equity_curve,
+        "drawdown_curve": result.drawdown_curve,
+        "rebalance_log": [
+            {
+                "date": e.date,
+                "old_weights": e.old_weights,
+                "new_weights": e.new_weights,
+                "trades": e.trades,
+            }
+            for e in result.rebalance_log
+        ],
+    }
+
+    response_data: dict[str, Any] = {"result": result_dict}
+
+    if include_benchmark:
+        try:
+            comparison = backtester.compare_benchmark(result, start_date=start_date, end_date=end_date)
+            response_data["comparison"] = {
+                "alpha": comparison.alpha,
+                "beta": comparison.beta,
+                "information_ratio": comparison.information_ratio,
+                "buy_hold": {
+                    "total_return": comparison.buy_hold.total_return,
+                    "annual_return": comparison.buy_hold.annual_return,
+                    "sharpe_ratio": comparison.buy_hold.sharpe_ratio,
+                    "max_drawdown": comparison.buy_hold.max_drawdown,
+                    "equity_curve": comparison.buy_hold.equity_curve,
+                    "drawdown_curve": comparison.buy_hold.drawdown_curve,
+                },
+            }
+        except Exception as exc:
+            logger.warning("Benchmark comparison failed (non-fatal): %s", exc)
+
+    return jsonify({"status": "success", "data": response_data}), 200
+
+
 @backtest_bp.route("/strategies/uploaded", methods=["GET"])
 def list_uploaded_strategies() -> tuple[Any, int]:
     """Return user-uploaded strategy files managed by the strategy runner.
