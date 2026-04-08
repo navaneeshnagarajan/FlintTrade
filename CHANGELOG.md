@@ -4,11 +4,27 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [Unreleased] — v0.5.0-dev
 
-### Added
+### Added — Features
+- Signals pipeline: real-time signal generation, scoring, and routing to order engine
+- MCX commodity support: symbol normalisation, market hours, lot sizes
+- Mutual Funds module: MutualFundTab in /invest with NAV lookup, SIP calculator, fund comparison
+- WhatsApp notification channel alongside existing Telegram bot
+- ExpiryTrack widget: live countdown, max pain, OI buildup for current expiry
+- Pine Script editor: browser-based Pine-to-Python transpiler (PineTS integration)
+- Chrome extension stub: quick order entry and watchlist from any browser tab
+- Tauri desktop shell: native window wrapper for the React terminal
+- Multi-user support: role-based access (admin/trader/viewer) with JWT claims
+
+### Added — Wiring & Mode System
 - Server-side order safety proxy (order_routes.py) — all orders route through FlintTrade backend
 - Unified mode system: Explore (sample data) / Practice (paper trading) / Live (real orders)
+- useModeData hook: components receive live, mock, or paper data based on active mode
+- MockDataEngine: deterministic sample data generator for Explore mode
+- CSRF token middleware on all state-mutating endpoints
+- Mode reset on disconnect: reverts to Explore when broker session expires
+- Persona-aware setup wizard: interest matrix seeds default workspace and visible routes
 - ModeIndicator component in TopBar with Practice-to-Live toggle
 - Practice section in Settings with SandboxControls
 - DemoChoice overlay on first /explore visit
@@ -16,12 +32,40 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - JWT secret persistence across server restarts
 - SEBI disclaimer banner in practice mode
 
-### Fixed
+### Added — Infrastructure
+- SSE log streaming: /ft-api/v1/logs/stream endpoint for real-time execution log tailing
+- flask-mail integration for password reset and alert emails
+- API key separation: distinct keys for OpenAlgo vs FlintTrade backend
+- Docker hardening: non-root user, read-only filesystem, health checks, resource limits
+- Nginx hardening: rate limiting, CSP headers, HSTS, X-Frame-Options
+
+### Added — Tests
+- LearnRoute tests (3): heading, sidebar sections, default tab content
+- InvestRoute tests (3): heading, tab navigation, default Dashboard tab
+- AutomateRoute tests (3): heading, section tabs, sidebar rendering
+- DittoRoute tests (10): header, tabs, accounts table, mirror tab, risk tab, error handling
+- Total terminal tests: 1,206+ (Vitest) | Python tests: 2,940+ (pytest)
+
+### Fixed — Security
+- JWT revocation: token blacklist on logout and password change
+- Admin role enforcement: /admin route and admin API endpoints require admin JWT claim
+- Scanner subprocess: additional forbidden builtins (__import__, exec, eval, compile)
+- SQL injection fix: parameterised queries in DuckDB historical pipeline
+- Strategy hardening: AST validation rejects os/sys/subprocess imports before execution
+
+### Fixed — API Contracts
+- 15+ endpoint request/response shapes aligned with OpenAlgo 2.0 spec
+- OpenAlgo holidays/timings/intervals changed from POST to GET
+- optionchain response normalised: nested greeks flattened to top-level fields
+- multiquotes response: array wrapper added for consistency with quotes endpoint
+- WebSocket auth error now returns structured JSON instead of plain text disconnect
+- CORS preflight: OPTIONS handler added to all /ft-api routes
+
+### Fixed — General
 - Kill switch now properly awaits async coroutines (was silently failing)
 - Scheduler no longer blocks equity ticks during market hours
 - TOTP encryption upgraded from XOR to Fernet (AES-128-CBC + HMAC)
 - API key moved from localStorage to sessionStorage
-- OpenAlgo holidays/timings/intervals changed from POST to GET
 - 6 window.confirm replaced with AlertDialog (Scalper, ActionCenter, KeyboardSection)
 - British English: Analyse, Behaviour, Centre, Colour (8+ locations)
 - Hardcoded hex colours replaced with design tokens
@@ -31,9 +75,21 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - Cron manager silent exception swallowing replaced with logging
 - Gateway bare imports fixed with relative paths
 
+### Fixed — Accessibility
+- Skip-nav link target corrected to #main-content on all routes
+- Focus trap in modal dialogs (AlertDialog, Dialog) improved for screen readers
+- Colour contrast ratio on muted text raised to WCAG AA minimum (4.5:1)
+
+### Fixed — Performance
+- Lazy-loaded InvestRoute tabs: 14 tabs code-split individually (~142 KB saved from initial bundle)
+- TanStack Query deduplication: identical queries across widgets share a single network request
+- WebSocket reconnect backoff: exponential with jitter, capped at 30 s
+
 ### Removed
 - settingsStore.sandboxMode (mode now in modeStore exclusively)
 - ModePill.tsx and SandboxToggle.tsx (replaced by ModeIndicator)
+- Dead code: unused FlexLayoutNode imports, orphan utility functions, unreachable switch branches
+- Legacy /api/v0/ route prefix (all endpoints now under /api/v1/ or /ft-api/v1/)
 
 ## [0.3.0] — 2026-03-30
 
