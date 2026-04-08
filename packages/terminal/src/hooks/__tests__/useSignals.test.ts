@@ -56,14 +56,14 @@ const mockApiConfig = {
   thresholds: { rsi_oversold: 30, rsi_overbought: 70 },
 };
 
-const getRecentSignalsMock = vi.fn(() => Promise.resolve(mockApiSignals));
+const getRecentSignalsMock = vi.fn((_limit?: number) => Promise.resolve(mockApiSignals));
 const getSignalConfigMock = vi.fn(() => Promise.resolve(mockApiConfig));
-const updateSignalConfigMock = vi.fn(() => Promise.resolve(mockApiConfig));
+const updateSignalConfigMock = vi.fn((_config: unknown) => Promise.resolve(mockApiConfig));
 
 vi.mock("@/services/ftApi", () => ({
-  getRecentSignals: (...args: unknown[]) => getRecentSignalsMock(...args),
+  getRecentSignals: (limit?: number) => getRecentSignalsMock(limit),
   getSignalConfig: () => getSignalConfigMock(),
-  updateSignalConfig: (...args: unknown[]) => updateSignalConfigMock(...args),
+  updateSignalConfig: (config: unknown) => updateSignalConfigMock(config),
 }));
 
 // ---------------------------------------------------------------------------

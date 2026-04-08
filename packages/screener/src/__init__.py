@@ -1,9 +1,10 @@
-"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis, RRG, scanner."""
+"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis, RRG, scanner, fundamentals."""
 
 __version__ = "0.1.0-alpha"
 
 from .scanner import ScannerDef, ScannerEngine, ScanResult
 from .stock_cache import StockCache, StockFundamentals
+from .fundamental_screener import FundamentalData, FundamentalScreener, SearchResult
 
 from .futures_quadrant import FuturesQuadrant, FuturesSnapshot, Quadrant, QuadrantResult
 from .greeks import OptionPosition, PortfolioGreeks, PortfolioGreeksResult, PositionGreeks
@@ -73,4 +74,8 @@ __all__ = [
     "ScannerDef",
     "ScannerEngine",
     "ScanResult",
+    # Fundamental screener
+    "FundamentalScreener",
+    "FundamentalData",
+    "SearchResult",
 ]

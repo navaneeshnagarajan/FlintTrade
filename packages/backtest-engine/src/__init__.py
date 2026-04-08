@@ -24,6 +24,15 @@ try:
         MomentumBreakout, OpeningRangeBreakout, StraddleSell,
         StrangleSell, SupertrendStrategy, VWAPDeviation,
     )
+    from .rl_environment import EnvironmentConfig, TradingEnvironment
+    from .rl_features import (
+        DEFAULT_FEATURES, MINIMAL_FEATURES, RewardState, RewardType,
+        compute_features, compute_reward, normalise_features,
+    )
+    from .rl_trainer import (
+        DEFAULT_PARAMS, RLAlgorithm, RLTrainer,
+        TrainingJob, TrainingResult, register_rl_endpoints,
+    )
 except ImportError:
     from data_connector import (
         CSVConnector, DataConnector, DataResult,
@@ -45,6 +54,15 @@ except ImportError:
         BullPutSpread, EMACrossover, IronCondor, MACDRSIStrategy,
         MomentumBreakout, OpeningRangeBreakout, StraddleSell,
         StrangleSell, SupertrendStrategy, VWAPDeviation,
+    )
+    from rl_environment import EnvironmentConfig, TradingEnvironment
+    from rl_features import (
+        DEFAULT_FEATURES, MINIMAL_FEATURES, RewardState, RewardType,
+        compute_features, compute_reward, normalise_features,
+    )
+    from rl_trainer import (
+        DEFAULT_PARAMS, RLAlgorithm, RLTrainer,
+        TrainingJob, TrainingResult, register_rl_endpoints,
     )
 
 __all__ = [
@@ -88,4 +106,22 @@ __all__ = [
     "BearCallSpread",
     "MomentumBreakout",
     "OpeningRangeBreakout",
+    # RL Environment
+    "TradingEnvironment",
+    "EnvironmentConfig",
+    # RL Features
+    "DEFAULT_FEATURES",
+    "MINIMAL_FEATURES",
+    "RewardType",
+    "RewardState",
+    "compute_features",
+    "compute_reward",
+    "normalise_features",
+    # RL Trainer
+    "RLTrainer",
+    "RLAlgorithm",
+    "TrainingResult",
+    "TrainingJob",
+    "DEFAULT_PARAMS",
+    "register_rl_endpoints",
 ]

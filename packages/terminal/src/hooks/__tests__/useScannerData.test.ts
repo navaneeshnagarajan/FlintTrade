@@ -60,10 +60,10 @@ const mockQuotes = [
   },
 ];
 
-const getMultiQuotesMock = vi.fn(() => Promise.resolve(mockQuotes));
+const getMultiQuotesMock = vi.fn((_symbols: string[]) => Promise.resolve(mockQuotes));
 
 vi.mock("@/services/api", () => ({
-  getMultiQuotes: (...args: unknown[]) => getMultiQuotesMock(...args),
+  getMultiQuotes: (symbols: string[]) => getMultiQuotesMock(symbols),
 }));
 
 // Mock sample data

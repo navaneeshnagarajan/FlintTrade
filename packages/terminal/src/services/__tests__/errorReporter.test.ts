@@ -18,7 +18,8 @@ import { reportError } from "../errorReporter";
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-let fetchSpy: ReturnType<typeof vi.spyOn>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let fetchSpy: any;
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -42,7 +43,7 @@ describe("reportError", () => {
     await reportError(error, { widget: "chart" });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, options] = fetchSpy.mock.calls[0];
+    const [url, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/ft-api/v1/errors");
     expect(options).toMatchObject({
       method: "POST",

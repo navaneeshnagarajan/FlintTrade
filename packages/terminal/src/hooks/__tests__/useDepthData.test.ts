@@ -29,10 +29,10 @@ const mockDepthData = {
   ],
 };
 
-const getDepthMock = vi.fn(() => Promise.resolve(mockDepthData));
+const getDepthMock = vi.fn((_symbol: string, _exchange: string) => Promise.resolve(mockDepthData));
 
 vi.mock("@/services/api", () => ({
-  getDepth: (...args: unknown[]) => getDepthMock(...args),
+  getDepth: (symbol: string, exchange: string) => getDepthMock(symbol, exchange),
 }));
 
 // ---------------------------------------------------------------------------

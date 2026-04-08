@@ -39,7 +39,7 @@ gh run view <id> --log-failed                  # diagnose failure
 ## What This Is
 
 Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
-Built on OpenAlgo (31 broker gateway). 15 packages (13 Python + 1 React + 1 Rust/PyO3), monorepo, AGPL-3.0.
+Built on OpenAlgo (33 broker gateway). 15 packages (13 Python + 1 React + 1 Rust/PyO3), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
 Serves three personas from a single application:
@@ -175,7 +175,7 @@ Two-tier config. No exceptions.
 
 | Package | Description |
 |---|---|
-| `gateway` | Direct broker connections (31 brokers), adapter pattern, encrypted credentials, WebSocket bridge |
+| `gateway` | Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge |
 | `core` | Framework, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions |
 | `engine` | 5-layer safety system, order router, scheduler, base strategy, strategy registry |
 | `data` | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
@@ -259,19 +259,20 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 `placeorder`, `placesmartorder`, `modifyorder`, `cancelorder`, `cancelallorder`, `closeposition`, `openposition`, `orderstatus`, `optionsorder`, `optionsmultiorder`, `basketorder`, `splitorder`
 
 ### Accounts (POST unless noted)
-`funds`, `orderbook`, `tradebook`, `positionbook`, `holdings`, `margin`, `ping` (**POST**), `analyzer/status` (**GET**), `analyzer/toggle`
+`funds`, `orderbook`, `tradebook`, `positionbook`, `holdings`, `margin`, `ping` (**POST**), `analyzer` (**POST**), `analyzer/toggle` (**POST**), `pnl/symbols` (**POST**)
 
 ### Data (POST unless noted)
-`quotes`, `multiquotes`, `depth`, `history`, `optionchain`, `optiongreeks`, `multioptiongreeks`, `optionsymbol`, `symbol`, `search`, `expiry`, `intervals` (**GET**), `syntheticfuture`, `ticker`, `instruments` (**GET**), `gex`, `iv_smile`, `max_pain`, `oi_profile`
+`quotes`, `multiquotes`, `depth`, `history`, `optionchain`, `optiongreeks`, `multioptiongreeks`, `optionsymbol`, `symbol`, `search`, `expiry`, `intervals` (**GET**), `syntheticfuture`, `ticker`, `instruments` (**GET**), `gex`, `iv_smile`, `max_pain`, `oi_profile`, `chart` (**GET/POST** — chart preferences)
 
 ### Utilities
-`holidays` (**GET**), `timings` (**GET**), `telegram` (POST)
+`holidays` (**POST**), `timings` (**POST**), `telegram` (POST)
 
 ### Broker Management (added OpenAlgo 2.0.0.2)
-`broker/capabilities` (**GET**), `broker/credentials` (**GET/POST**), `broker/leverage` (**GET**)
+**NOTE:** These are session-authenticated, NOT under `/api/v1/`.
+`/api/broker/capabilities` (**GET**), `broker/credentials` (**GET/POST**), `/leverage/api/current` (**GET**)
 
 ### WebSocket (port 8765)
-Modes: 1=LTP, 2=Quote, 3=Depth (50 levels in v2)
+Modes: 1=LTP, 2=Quote, 4=Depth (50 levels in v2; was mode 3 in v1)
 Auth: `{ "action": "authenticate", "api_key": "<key>" }`
 Subscribe: `{ "action": "subscribe", "symbols": [{"symbol": "NIFTY", "exchange": "NSE_INDEX"}], "mode": "LTP" }`
 Tick data arrives nested: `{ "type": "market_data", "data": { "ltp": ..., "symbol": ... } }`

@@ -207,6 +207,13 @@ export const cancelAllOrders = (strategy = "Flint") =>
   postOrder<void>("cancel-all", { strategy });
 export const closePosition = (strategy = "Flint") =>
   postOrder<void>("close-position", { strategy });
+export const modifyOrder = (params: object) => post<{ orderId: string }>("modifyorder", params);
+export const orderStatus = (params: object) => post<{ status: string }>("orderstatus", params);
+export const openPosition = (params: object) => postOrder<{ orderId: string }>("openposition", params);
+export const basketOrder = (params: object) => postOrder<{ orderId: string }>("basketorder", params);
+export const optionsOrder = (params: object) => postOrder<{ orderId: string }>("optionsorder", params);
+export const optionsMultiOrder = (params: object) => postOrder<{ orderId: string }>("optionsmultiorder", params);
+export const splitOrder = (params: object) => postOrder<{ orderId: string }>("splitorder", params);
 
 // --- Data ---
 export const getQuotes = (symbol: string, exchange = "NSE") =>
@@ -303,13 +310,26 @@ export const getHoldings = async (): Promise<Holding[]> => {
 
 // --- Utility ---
 export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
-export const getHolidays = () => get<Holiday[]>("holidays");
-export const getTimings = () => get<MarketTiming[]>("timings");
+export const getHolidays = () => post<Holiday[]>("holidays"); // POST with apikey, not GET
+export const getTimings = () => post<MarketTiming[]>("timings"); // POST with apikey, not GET
 export const sendTelegram = (message: string) =>
   post<{ message: string }>("telegram", { message });
 
 // --- Broker Management (OpenAlgo 2.0.0.2) ---
+// NOTE: These endpoints are session-authenticated (not API key), and live
+// outside /api/v1/. In dev mode the Vite proxy forwards them to OpenAlgo.
+// In production, use the full OpenAlgo host.
 export const getBrokerCapabilities = () =>
-  get<BrokerCapabilities>("broker/capabilities");
+  get<BrokerCapabilities>("../broker/capabilities"); // actual path: /api/broker/capabilities
 export const getLeverageSettings = () =>
-  get<LeverageSettings>("broker/leverage");
+  get<LeverageSettings>("../../leverage/api/current"); // actual path: /leverage/api/current
+
+// --- Chart Preferences (OpenAlgo) ---
+export const getChartPreferences = () => get<object>("chart");
+export const updateChartPreferences = (prefs: object) => post<object>("chart", prefs);
+
+// --- Analytics ---
+export const getOptionGreeks = (params: object) => post<Greeks>("optiongreeks", params);
+export const getAnalyzerStatus = () => post<{ enabled: boolean }>("analyzer", {});
+export const toggleAnalyzer = (enable: boolean) => post<{ enabled: boolean }>("analyzer/toggle", { enable });
+export const getPnlSymbols = () => post<Array<{ symbol: string; exchange: string }>>("pnl/symbols", {});

@@ -4,6 +4,8 @@ __version__ = "0.1.0-alpha"
 
 from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRanking
 from .analyst_chain import AnalysisState, AnalystChain
+from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TradeRecommendation
+from .multi_agent import AgentTeam, default_agents
 from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
 from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
@@ -69,6 +71,14 @@ __all__ = [
     # Analyst chain
     "AnalystChain",
     "AnalysisState",
+    # Multi-agent team
+    "AgentTeam",
+    "AgentRole",
+    "AgentRoleType",
+    "AgentAnalysis",
+    "TeamAnalysis",
+    "TradeRecommendation",
+    "default_agents",
     # News summarizer
     "MarketNewsSummarizer",
     "NewsSummary",

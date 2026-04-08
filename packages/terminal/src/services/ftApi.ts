@@ -84,6 +84,94 @@ async function del<T>(endpoint: string): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
+// Fundamental Screener (Screener.in data, 24h cache)
+// ---------------------------------------------------------------------------
+
+export interface FundamentalSearchResult {
+  name: string;
+  symbol: string;
+  url: string;
+}
+
+export interface FundamentalData {
+  symbol: string;
+  company_name: string;
+  current_price: number | null;
+  market_cap: number | null;
+  pe_ratio: number | null;
+  pb_ratio: number | null;
+  book_value: number | null;
+  dividend_yield: number | null;
+  roce: number | null;
+  roe: number | null;
+  face_value: number | null;
+  high_low: { high: number | null; low: number | null } | null;
+  sales: number | null;
+  net_profit: number | null;
+  operating_margin: number | null;
+  sales_growth_3yr: number | null;
+  profit_growth_3yr: number | null;
+  promoter_holding: number | null;
+  fii_holding: number | null;
+  dii_holding: number | null;
+  ev_to_ebitda: number | null;
+  price_to_sales: number | null;
+  sector: string;
+  industry: string;
+  bse_code: string;
+  nse_symbol: string;
+  pros: string[];
+  cons: string[];
+}
+
+export interface FundamentalScreenFilters {
+  pe_min?: number;
+  pe_max?: number;
+  pb_min?: number;
+  pb_max?: number;
+  market_cap_min?: number;
+  market_cap_max?: number;
+  roce_min?: number;
+  roe_min?: number;
+  dividend_yield_min?: number;
+  sector?: string;
+  sort_by?: string;
+  limit?: number;
+}
+
+export interface FundamentalStockRow {
+  symbol: string;
+  name: string;
+  exchange: string;
+  market_cap: number;
+  pe_ratio: number;
+  pb_ratio: number;
+  roe: number;
+  roce: number;
+  dividend_yield: number;
+  sector: string;
+}
+
+export const searchFundamentals = (query: string) =>
+  get<{
+    query: string;
+    results: FundamentalSearchResult[];
+    count: number;
+  }>("screener/fundamental/search?q=" + encodeURIComponent(query));
+
+export const getFundamentals = (symbol: string) =>
+  get<FundamentalData>(
+    "screener/fundamental/" + encodeURIComponent(symbol),
+  );
+
+export const screenStocks = (filters: FundamentalScreenFilters) =>
+  post<{
+    stocks: FundamentalStockRow[];
+    count: number;
+    filters_applied: Record<string, unknown>;
+  }>("screener/fundamental/screen", filters);
+
+// ---------------------------------------------------------------------------
 // Backtest
 // ---------------------------------------------------------------------------
 
@@ -271,6 +359,82 @@ export const queryKnowledge = (query: string, top_k?: number) =>
     query,
     top_k: top_k ?? 5,
   });
+
+// ---------------------------------------------------------------------------
+// AI Team (multi-agent analysis)
+// ---------------------------------------------------------------------------
+
+export interface AgentRoleConfig {
+  name: string;
+  role_type:
+    | "technical"
+    | "fundamental"
+    | "sentiment"
+    | "risk_manager"
+    | "aggregator";
+  system_prompt: string;
+  enabled: boolean;
+  temperature: number | null;
+}
+
+export interface AgentAnalysisResult {
+  agent_name: string;
+  role_type: string;
+  report: string;
+  signal: "BUY" | "SELL" | "HOLD";
+  confidence: number;
+  timestamp: string;
+  error: string;
+}
+
+export interface TeamAnalysisResult {
+  symbol: string;
+  exchange: string;
+  agent_analyses: AgentAnalysisResult[];
+  consensus_signal: "BUY" | "SELL" | "HOLD";
+  consensus_confidence: number;
+  consensus_reasoning: string;
+  timestamp: string;
+  errors: string[];
+}
+
+export interface TeamRecommendation {
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL" | "HOLD";
+  confidence: number;
+  reasoning: string;
+  agent_count: number;
+  bullish_count: number;
+  bearish_count: number;
+  neutral_count: number;
+  timestamp: string;
+}
+
+export interface TeamAnalyzeResponse {
+  analysis: TeamAnalysisResult;
+  recommendation: TeamRecommendation;
+}
+
+export interface TeamConfig {
+  agents: AgentRoleConfig[];
+}
+
+export const runTeamAnalysis = (
+  symbol: string,
+  exchange: string,
+  market_data?: Record<string, unknown>,
+) =>
+  post<TeamAnalyzeResponse>("ai/team/analyze", {
+    symbol,
+    exchange,
+    ...(market_data ? { market_data: market_data } : {}),
+  });
+
+export const getTeamConfig = () => get<TeamConfig>("ai/team/config");
+
+export const updateTeamConfig = (config: TeamConfig) =>
+  post<TeamConfig>("ai/team/config", config);
 
 // ---------------------------------------------------------------------------
 // Cron Jobs

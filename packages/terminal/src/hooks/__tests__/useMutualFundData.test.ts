@@ -35,7 +35,7 @@ vi.mock("@/stores/modeStore", () => ({
 // Mock ftApi service
 // ---------------------------------------------------------------------------
 
-const searchMock = vi.fn(() =>
+const searchMock = vi.fn((_query: string, _category?: string) =>
   Promise.resolve({
     funds: [
       {
@@ -55,7 +55,7 @@ const categoriesMock = vi.fn(() =>
   Promise.resolve({ categories: ["API Category A", "API Category B"] }),
 );
 
-const navMock = vi.fn(() =>
+const navMock = vi.fn((_schemeCode: number) =>
   Promise.resolve({
     fund: {
       scheme_code: 120503,
@@ -70,9 +70,9 @@ const navMock = vi.fn(() =>
 );
 
 vi.mock("@/services/ftApi", () => ({
-  searchMutualFunds: (...args: unknown[]) => searchMock(...args),
+  searchMutualFunds: (query: string, category?: string) => searchMock(query, category),
   getMFCategories: () => categoriesMock(),
-  getMutualFundNAV: (...args: unknown[]) => navMock(...args),
+  getMutualFundNAV: (schemeCode: number) => navMock(schemeCode),
 }));
 
 // ---------------------------------------------------------------------------
