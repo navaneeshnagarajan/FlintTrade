@@ -18,9 +18,10 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     proxy: {
-      // FlintTrade backend (port 5001) — must be listed before /api
+      // FlintTrade backend (port 5100) — must be listed before /api
+      // Port 5100 avoids conflict with OpenAlgo multi-instance (5000-5009)
       "/ft-api": {
-        target: process.env.VITE_FLINTTRADE_HOST || "http://127.0.0.1:5001",
+        target: process.env.VITE_FLINTTRADE_HOST || "http://127.0.0.1:5100",
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/ft-api/, ""),
       },

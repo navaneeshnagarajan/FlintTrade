@@ -47,7 +47,7 @@ interface StockScanResponse {
 // ---------------------------------------------------------------------------
 
 function getBase(): string {
-  // In dev mode, Vite proxy routes /ft-api/* → http://127.0.0.1:5001/*
+  // In dev mode, Vite proxy routes /ft-api/* → http://127.0.0.1:5100/*
   return import.meta.env.DEV ? "/ft-api" : "";
 }
 

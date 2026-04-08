@@ -56,7 +56,7 @@ function getBase(): string {
 }
 
 /** Base URL for the FlintTrade Python backend.
- *  In dev mode the Vite proxy maps /ft-api → localhost:5001.
+ *  In dev mode the Vite proxy maps /ft-api → localhost:5100.
  *  In production the backend shares the same origin. */
 function getFtBase(): string {
   if (import.meta.env.DEV) return "/ft-api";

@@ -1,6 +1,6 @@
 /**
  * FlintTrade Python backend REST API client (TypeScript).
- * Targets port 5001, proxied via /ft-api in dev (see vite.config.ts).
+ * Targets port 5100, proxied via /ft-api in dev (see vite.config.ts).
  * No API key injection — the FT backend uses its own auth layer.
  * No client-side rate limiting — the backend enforces its own limits.
  * All responses are unwrapped: { data: X, status: "success" } → X
