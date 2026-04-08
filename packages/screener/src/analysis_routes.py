@@ -1,6 +1,6 @@
 """Flask blueprint for FlintTrade analysis endpoints.
 
-Provides 7 endpoints under /api/v1/ for the analysis tools:
+Provides 8 endpoints under /api/v1/ for the analysis tools:
     - POST /api/v1/gex
     - POST /api/v1/volsurface
     - POST /api/v1/ivsmile
@@ -8,6 +8,7 @@ Provides 7 endpoints under /api/v1/ for the analysis tools:
     - POST /api/v1/oiprofile
     - POST /api/v1/maxpain
     - GET  /api/v1/rrg/sectors
+    - GET  /api/v1/screener/fii-dii
 
 All endpoints:
 1. Extract params from the JSON request body (or query string for GET).
@@ -877,3 +878,85 @@ def _make_sample_chains_by_expiry(
         result[expiry] = {"dte": dte, "spot": spot, "strikes": strikes_data}
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# FII/DII endpoint (absorbed from MarketCalls/fii-dii-data)
+# ---------------------------------------------------------------------------
+
+
+@analysis_bp.route("/screener/fii-dii", methods=["GET"])
+def fii_dii_endpoint() -> Any:
+    """FII/DII institutional flow data.
+
+    Fetches latest FII/DII cash and F&O data from NSE, caches in DuckDB,
+    and returns the result.  Pattern absorbed from MarketCalls/fii-dii-data.
+
+    Query params:
+        days (int): Number of days for trend data (default 1 = latest only).
+            Use ``days=30`` to get the last 30 trading days.
+        refresh (bool): Force a fresh fetch from NSE (default false).
+
+    Returns:
+        JSON with latest FII/DII snapshot and optional trend data:
+        {
+          "status": "success",
+          "is_sample_data": bool,
+          "latest": { ... FiiDiiSnapshot fields ... },
+          "trend": { ... FiiDiiTrend fields ... } | null
+        }
+    """
+    from .fii_dii import (  # noqa: PLC0415
+        FiiDiiTracker,
+        make_sample_fii_dii,
+        make_sample_trend,
+    )
+
+    days = int(request.args.get("days", 1))
+    days = max(1, min(200, days))
+    force_refresh = request.args.get("refresh", "false").lower() in ("true", "1", "yes")
+
+    is_sample_data = False
+    tracker: FiiDiiTracker | None = None
+    latest = None
+
+    try:
+        tracker = FiiDiiTracker()
+
+        if force_refresh:
+            latest = tracker.fetch_latest()
+        else:
+            latest = tracker.get_latest_cached()
+            if latest is None:
+                latest = tracker.fetch_latest()
+
+    except Exception as exc:
+        logger.warning("FII/DII live data unavailable: %s", exc)
+
+    if latest is None:
+        is_sample_data = True
+        latest = make_sample_fii_dii()
+        logger.info("FII/DII: using sample data")
+
+    trend_data = None
+    if days > 1:
+        if tracker is not None and not is_sample_data:
+            try:
+                trend = tracker.get_trend(days=days)
+                trend_data = trend.to_dict()
+            except Exception as exc:
+                logger.warning("FII/DII trend query failed: %s", exc)
+                trend_data = make_sample_trend(days=days).to_dict()
+                is_sample_data = True
+        else:
+            trend_data = make_sample_trend(days=days).to_dict()
+
+    if tracker is not None:
+        tracker.close()
+
+    return jsonify({
+        "status": "success",
+        "is_sample_data": is_sample_data,
+        "latest": latest.to_dict(),
+        "trend": trend_data,
+    })

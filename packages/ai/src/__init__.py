@@ -29,6 +29,14 @@ from .signal_models import Signal as LiveSignal
 from .signal_models import SignalConfig
 from .signal_pipeline import LiveSignalPipeline
 from .signals import Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
+from .risk_debate import DebateResult, DebateRound, RiskDebate
+from .ensemble_selector import (
+    EnsembleResult,
+    EnsembleSelector,
+    ModelCandidate,
+    compute_dissimilarity_index,
+)
+from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
 
 __all__ = [
     # LLM
@@ -94,4 +102,16 @@ __all__ = [
     # Extended signal functions
     "generate_sharpe_labels",
     "compute_turbulence",
+    # Risk debate (from TradingAgents)
+    "RiskDebate",
+    "DebateResult",
+    "DebateRound",
+    # Ensemble selector (from FinRL)
+    "EnsembleSelector",
+    "EnsembleResult",
+    "ModelCandidate",
+    "compute_dissimilarity_index",
+    # Hyperopt (from freqtrade)
+    "StrategyOptimiser",
+    "OptimisationResult",
 ]

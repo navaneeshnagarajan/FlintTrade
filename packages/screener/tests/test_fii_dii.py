@@ -1,0 +1,292 @@
+"""Tests for FII/DII institutional flow data module.
+
+All tests use synthetic data or in-memory DuckDB — no NSE API calls.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from packages.screener.src.fii_dii import (
+    FiiDiiSnapshot,
+    FiiDiiTracker,
+    FiiDiiTrend,
+    _compute_sentiment,
+    _parse_fao_csv,
+    _transform_data,
+    make_sample_fii_dii,
+    make_sample_trend,
+)
+
+
+# ---------------------------------------------------------------------------
+# FiiDiiSnapshot dataclass
+# ---------------------------------------------------------------------------
+
+
+class TestFiiDiiSnapshot:
+    """Verify FiiDiiSnapshot creation and serialisation."""
+
+    def test_default_values(self):
+        snap = FiiDiiSnapshot()
+        assert snap.trade_date == ""
+        assert snap.fii_net == 0.0
+        assert snap.dii_net == 0.0
+        assert snap.sentiment_score == 50.0
+
+    def test_to_dict(self):
+        snap = FiiDiiSnapshot(trade_date="01-Apr-2026", fii_net=-500.0)
+        d = snap.to_dict()
+        assert d["trade_date"] == "01-Apr-2026"
+        assert d["fii_net"] == -500.0
+        assert isinstance(d, dict)
+
+    def test_custom_values(self):
+        snap = FiiDiiSnapshot(
+            trade_date="02-Apr-2026",
+            fii_buy=12000.0,
+            fii_sell=13000.0,
+            fii_net=-1000.0,
+            dii_buy=11000.0,
+            dii_sell=10000.0,
+            dii_net=1000.0,
+            pcr=0.85,
+            sentiment_score=45.0,
+        )
+        assert snap.fii_buy == 12000.0
+        assert snap.dii_net == 1000.0
+        assert snap.pcr == 0.85
+
+
+# ---------------------------------------------------------------------------
+# FiiDiiTrend
+# ---------------------------------------------------------------------------
+
+
+class TestFiiDiiTrend:
+    """Verify FiiDiiTrend aggregation."""
+
+    def test_empty_trend(self):
+        trend = FiiDiiTrend()
+        assert trend.days == 0
+        assert trend.snapshots == []
+
+    def test_to_dict(self):
+        snap = FiiDiiSnapshot(trade_date="01-Apr-2026", fii_net=100.0)
+        trend = FiiDiiTrend(
+            days=1,
+            snapshots=[snap],
+            fii_net_total=100.0,
+            dii_net_total=0.0,
+            avg_sentiment=50.0,
+        )
+        d = trend.to_dict()
+        assert d["days"] == 1
+        assert len(d["snapshots"]) == 1
+        assert d["fii_net_total"] == 100.0
+
+
+# ---------------------------------------------------------------------------
+# Sentiment computation
+# ---------------------------------------------------------------------------
+
+
+class TestSentimentComputation:
+    """Verify the sentiment scoring heuristic from fii-dii-data."""
+
+    def test_neutral_baseline(self):
+        score = _compute_sentiment(0.0, 0, 1.0)
+        assert score == 50.0
+
+    def test_positive_fii_net_increases_sentiment(self):
+        score = _compute_sentiment(2000.0, 0, 1.0)
+        assert score > 50.0
+
+    def test_negative_fii_net_decreases_sentiment(self):
+        score = _compute_sentiment(-2000.0, 0, 1.0)
+        assert score < 50.0
+
+    def test_high_pcr_bearish(self):
+        score = _compute_sentiment(0.0, 0, 1.5)
+        assert score < 50.0
+
+    def test_low_pcr_bullish(self):
+        score = _compute_sentiment(0.0, 0, 0.5)
+        assert score > 50.0
+
+    def test_clamped_to_0_100(self):
+        very_negative = _compute_sentiment(-50000.0, -500000, 2.0)
+        assert very_negative >= 0.0
+        very_positive = _compute_sentiment(50000.0, 500000, 0.3)
+        assert very_positive <= 100.0
+
+
+# ---------------------------------------------------------------------------
+# F&O CSV parsing
+# ---------------------------------------------------------------------------
+
+
+class TestFaoCsvParsing:
+    """Verify F&O participant OI CSV parsing from fii-dii-data."""
+
+    def test_empty_csv(self):
+        assert _parse_fao_csv(None) == {}
+        assert _parse_fao_csv("") == {}
+
+    def test_valid_csv(self):
+        csv_text = (
+            "Client Type,Idx Fut Long,Idx Fut Short,Stk Fut Long,Stk Fut Short,"
+            "Idx Call Long,Idx Call Short,Idx Put Long,Idx Put Short\n"
+            "FII/FPI,100000,120000,80000,75000,90000,110000,95000,85000\n"
+            "DII,60000,55000,45000,50000,30000,35000,40000,38000\n"
+        )
+        result = _parse_fao_csv(csv_text)
+        assert "FII" in result
+        assert "DII" in result
+        assert result["FII"]["idx_fut_long"] == 100000
+        assert result["FII"]["idx_fut_short"] == 120000
+        assert result["DII"]["stk_fut_long"] == 45000
+
+    def test_ignores_non_fii_dii_rows(self):
+        csv_text = (
+            "Client Type,Col1,Col2,Col3,Col4,Col5,Col6,Col7,Col8\n"
+            "PRO,10,20,30,40,50,60,70,80\n"
+            "FII/FPI,100,200,300,400,500,600,700,800\n"
+        )
+        result = _parse_fao_csv(csv_text)
+        assert "FII" in result
+        assert "PRO" not in result
+
+
+# ---------------------------------------------------------------------------
+# Transform data
+# ---------------------------------------------------------------------------
+
+
+class TestTransformData:
+    """Verify the NSE data transformation pipeline."""
+
+    def test_empty_cash_returns_none(self):
+        assert _transform_data([], None) is None
+
+    def test_basic_cash_data(self):
+        cash = [
+            {"category": "FII/FPI", "buyValue": 12000, "sellValue": 13000, "netValue": -1000, "date": "01-Apr-2026"},
+            {"category": "DII", "buyValue": 11000, "sellValue": 10000, "netValue": 1000, "date": "01-Apr-2026"},
+        ]
+        snap = _transform_data(cash, None)
+        assert snap is not None
+        assert snap.trade_date == "01-Apr-2026"
+        assert snap.fii_net == -1000.0
+        assert snap.dii_net == 1000.0
+
+    def test_with_fao_csv(self):
+        cash = [
+            {"category": "FII/FPI", "buyValue": 12000, "sellValue": 13000, "netValue": -1000, "date": "01-Apr-2026"},
+        ]
+        fao = (
+            "Client Type,Col1,Col2,Col3,Col4,Col5,Col6,Col7,Col8\n"
+            "FII/FPI,100000,120000,80000,75000,90000,110000,95000,85000\n"
+        )
+        snap = _transform_data(cash, fao)
+        assert snap is not None
+        assert snap.fii_idx_fut_long == 100000
+        assert snap.fii_idx_fut_net == -20000
+        assert snap.pcr == round(85000 / 110000, 2)
+
+
+# ---------------------------------------------------------------------------
+# DuckDB tracker
+# ---------------------------------------------------------------------------
+
+
+class TestFiiDiiTracker:
+    """Test the DuckDB-backed FII/DII tracker."""
+
+    def test_store_and_retrieve(self):
+        tracker = FiiDiiTracker(db_path=":memory:")
+        snap = FiiDiiSnapshot(
+            trade_date="01-Apr-2026",
+            fii_net=-500.0,
+            dii_net=300.0,
+            sentiment_score=45.0,
+        )
+        tracker.store_snapshot(snap)
+        retrieved = tracker.get_data_for_date("01-Apr-2026")
+        assert retrieved is not None
+        assert retrieved.fii_net == -500.0
+        assert retrieved.dii_net == 300.0
+        tracker.close()
+
+    def test_upsert_replaces(self):
+        tracker = FiiDiiTracker(db_path=":memory:")
+        snap1 = FiiDiiSnapshot(trade_date="01-Apr-2026", fii_net=-100.0)
+        snap2 = FiiDiiSnapshot(trade_date="01-Apr-2026", fii_net=-200.0)
+        tracker.store_snapshot(snap1)
+        tracker.store_snapshot(snap2)
+        retrieved = tracker.get_data_for_date("01-Apr-2026")
+        assert retrieved is not None
+        assert retrieved.fii_net == -200.0
+        tracker.close()
+
+    def test_get_trend(self):
+        tracker = FiiDiiTracker(db_path=":memory:")
+        for i in range(5):
+            snap = FiiDiiSnapshot(
+                trade_date=f"0{i+1}-Apr-2026",
+                fii_net=float((i + 1) * 100),
+                dii_net=float((i + 1) * -50),
+                sentiment_score=50.0 + i,
+            )
+            tracker.store_snapshot(snap)
+
+        trend = tracker.get_trend(days=3)
+        assert trend.days == 3
+        assert len(trend.snapshots) == 3
+        tracker.close()
+
+    def test_get_latest_cached_empty(self):
+        tracker = FiiDiiTracker(db_path=":memory:")
+        assert tracker.get_latest_cached() is None
+        tracker.close()
+
+    def test_get_latest_cached_returns_most_recent(self):
+        tracker = FiiDiiTracker(db_path=":memory:")
+        tracker.store_snapshot(FiiDiiSnapshot(trade_date="01-Apr-2026", fii_net=100.0))
+        tracker.store_snapshot(FiiDiiSnapshot(trade_date="02-Apr-2026", fii_net=200.0))
+        latest = tracker.get_latest_cached()
+        assert latest is not None
+        assert latest.trade_date == "02-Apr-2026"
+        tracker.close()
+
+    def test_nonexistent_date_returns_none(self):
+        tracker = FiiDiiTracker(db_path=":memory:")
+        assert tracker.get_data_for_date("99-Dec-9999") is None
+        tracker.close()
+
+
+# ---------------------------------------------------------------------------
+# Sample data generators
+# ---------------------------------------------------------------------------
+
+
+class TestSampleData:
+    """Verify sample data generators produce valid output."""
+
+    def test_make_sample_fii_dii(self):
+        snap = make_sample_fii_dii()
+        assert snap.trade_date != ""
+        assert snap.fii_buy > 0
+        assert snap.dii_buy > 0
+        assert 0 <= snap.sentiment_score <= 100
+
+    def test_make_sample_trend(self):
+        trend = make_sample_trend(days=5)
+        assert trend.days == 5
+        assert len(trend.snapshots) == 5
+        for snap in trend.snapshots:
+            assert snap.trade_date != ""
+
+    def test_make_sample_trend_single_day(self):
+        trend = make_sample_trend(days=1)
+        assert trend.days == 1

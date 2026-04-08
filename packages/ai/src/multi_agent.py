@@ -9,6 +9,10 @@ Absorbs patterns from:
   debate (aggressive / conservative / neutral perspectives) refines the
   signal, and a final judge/aggregator synthesises everything into a
   BUY/SELL/HOLD recommendation with confidence.
+- **autoresearch** (MarketCalls/autoresearch): Autonomous experiment loop
+  pattern — run analysis, evaluate results, decide next action, repeat.
+  Applied here as ``AutonomousResearchLoop`` for continuous market
+  monitoring without human intervention.
 
 Key design choices:
 - **No LangGraph / LangChain dependency** — pure Python state machine using
@@ -36,6 +40,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from packages.ai.src.agent_models import (
@@ -505,3 +510,201 @@ class AgentTeam:
                 reasoning = stripped.split(":", 1)[1].strip()
 
         return decision, confidence, reasoning
+
+
+# ---------------------------------------------------------------------------
+# Autonomous Research Loop (absorbed from MarketCalls/autoresearch)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ResearchIteration:
+    """Record of a single autonomous research iteration.
+
+    Mirrors autoresearch's results.tsv row: each iteration records what
+    was tried, the outcome, and whether to keep the result.
+    """
+
+    iteration: int
+    symbol: str
+    exchange: str
+    signal: str = "HOLD"
+    confidence: float = 0.0
+    reasoning: str = ""
+    status: str = "pending"  # pending | completed | failed
+    error: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a serialisable dictionary."""
+        return {
+            "iteration": self.iteration,
+            "symbol": self.symbol,
+            "exchange": self.exchange,
+            "signal": self.signal,
+            "confidence": self.confidence,
+            "reasoning": self.reasoning,
+            "status": self.status,
+            "error": self.error,
+        }
+
+
+class AutonomousResearchLoop:
+    """Autonomous market research loop inspired by autoresearch.
+
+    Runs an ``AgentTeam`` analysis repeatedly on a watchlist, accumulating
+    results for trend detection and signal persistence.  Follows
+    autoresearch's core pattern: run -> evaluate -> decide -> record -> repeat.
+
+    Unlike autoresearch (which modifies code between iterations), this loop
+    re-analyses the same instruments with fresh market data each iteration,
+    looking for signal convergence or divergence across time.
+
+    Args:
+        team: The AgentTeam to use for each analysis.
+        max_iterations: Maximum number of analysis passes (0 = unlimited).
+        on_iteration: Optional callback invoked after each iteration with
+            the ``ResearchIteration`` result.
+
+    Example::
+
+        team = AgentTeam(llm_client=LLMClient())
+        loop = AutonomousResearchLoop(team, max_iterations=5)
+        results = loop.run_sync([("NIFTY", "NSE_INDEX"), ("RELIANCE", "NSE")])
+        for r in results:
+            print(r.symbol, r.signal, r.confidence)
+    """
+
+    def __init__(
+        self,
+        team: AgentTeam,
+        max_iterations: int = 10,
+        on_iteration: Any = None,
+    ) -> None:
+        self._team = team
+        self._max_iterations = max_iterations
+        self._on_iteration = on_iteration
+        self._results: list[ResearchIteration] = []
+        self._stop_requested = False
+
+    @property
+    def results(self) -> list[ResearchIteration]:
+        """All completed research iterations."""
+        return list(self._results)
+
+    def stop(self) -> None:
+        """Request the loop to stop after the current iteration."""
+        self._stop_requested = True
+
+    def run_sync(
+        self,
+        watchlist: list[tuple[str, str]],
+        market_data: dict[str, Any] | None = None,
+    ) -> list[ResearchIteration]:
+        """Run the autonomous research loop synchronously.
+
+        Iterates over the watchlist ``max_iterations`` times (or until
+        ``stop()`` is called), running a full AgentTeam analysis on each
+        symbol per iteration.
+
+        Absorbs autoresearch's "never stop" philosophy: the loop continues
+        until max_iterations or explicit stop, logging each result.
+
+        Args:
+            watchlist: List of (symbol, exchange) tuples.
+            market_data: Optional shared market context for all analyses.
+
+        Returns:
+            List of all ResearchIteration results.
+        """
+        self._stop_requested = False
+        self._results = []
+        iteration = 0
+
+        while True:
+            if self._stop_requested:
+                logger.info("Autonomous loop: stop requested at iteration %d", iteration)
+                break
+            if self._max_iterations > 0 and iteration >= self._max_iterations:
+                break
+
+            for symbol, exchange in watchlist:
+                if self._stop_requested:
+                    break
+
+                record = ResearchIteration(
+                    iteration=iteration,
+                    symbol=symbol,
+                    exchange=exchange,
+                )
+
+                try:
+                    result = self._team.analyze(symbol, exchange, market_data)
+                    rec = self._team.get_recommendation(result)
+                    record.signal = rec.action
+                    record.confidence = rec.confidence
+                    record.reasoning = rec.reasoning
+                    record.status = "completed"
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Autonomous loop: %s/%s failed at iteration %d: %s",
+                        symbol, exchange, iteration, exc,
+                    )
+                    record.status = "failed"
+                    record.error = str(exc)
+
+                self._results.append(record)
+
+                if self._on_iteration is not None:
+                    try:
+                        self._on_iteration(record)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            iteration += 1
+
+        logger.info(
+            "Autonomous loop completed: %d iterations, %d results",
+            iteration, len(self._results),
+        )
+        return self._results
+
+    def get_signal_summary(self) -> dict[str, dict[str, Any]]:
+        """Summarise signals across all iterations per symbol.
+
+        Returns a dict keyed by symbol with:
+        - ``dominant_signal``: Most frequent signal across iterations.
+        - ``avg_confidence``: Mean confidence.
+        - ``iterations``: Number of completed iterations.
+        - ``signal_counts``: Dict of signal -> count.
+
+        Returns:
+            Per-symbol signal summary.
+        """
+        from collections import defaultdict
+
+        by_symbol: dict[str, list[ResearchIteration]] = defaultdict(list)
+        for r in self._results:
+            if r.status == "completed":
+                by_symbol[r.symbol].append(r)
+
+        summary: dict[str, dict[str, Any]] = {}
+        for symbol, iterations in by_symbol.items():
+            counts: dict[str, int] = {"BUY": 0, "SELL": 0, "HOLD": 0}
+            total_conf = 0.0
+            for it in iterations:
+                signal = it.signal.upper()
+                if signal in counts:
+                    counts[signal] += 1
+                total_conf += it.confidence
+
+            dominant = max(counts, key=lambda k: counts[k])
+            avg_conf = total_conf / len(iterations) if iterations else 0.0
+
+            summary[symbol] = {
+                "dominant_signal": dominant,
+                "avg_confidence": round(avg_conf, 4),
+                "iterations": len(iterations),
+                "signal_counts": counts,
+            }
+
+        return summary

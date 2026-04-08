@@ -161,3 +161,102 @@ class TestParseOptionChain:
         ]
         rows = ExpiryTracker._parse_option_chain(data, "NIFTY", "NFO", "260326")
         assert len(rows) == 0
+
+
+# ---------------------------------------------------------------------------
+# ExpiryFlow-absorbed features: rate limiter, metadata, bulk capture
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotRateLimiter:
+    """Verify the rate limiter absorbed from ExpiryFlow."""
+
+    def test_rate_limiter_allows_burst(self):
+        from packages.historical.src.expiry_tracker import SnapshotRateLimiter
+        limiter = SnapshotRateLimiter(max_per_second=10)
+        # Should not raise for a small burst
+        for _ in range(5):
+            limiter.wait_if_needed()
+        assert limiter.requests_today == 5
+
+    def test_rate_limiter_daily_limit_raises(self):
+        import pytest
+        from packages.historical.src.expiry_tracker import SnapshotRateLimiter
+        limiter = SnapshotRateLimiter(max_per_second=100, max_per_day=3)
+        limiter.wait_if_needed()
+        limiter.wait_if_needed()
+        limiter.wait_if_needed()
+        with pytest.raises(RuntimeError, match="Daily API limit"):
+            limiter.wait_if_needed()
+
+
+class TestDownloadMetadata:
+    """Verify download metadata tracking absorbed from ExpiryFlow."""
+
+    def _tracker(self, client=None):
+        from packages.historical.src.expiry_tracker import ExpiryTracker
+        return ExpiryTracker(client=client, db_path=":memory:")
+
+    def test_has_snapshot_false_when_empty(self):
+        tracker = self._tracker()
+        assert tracker.has_snapshot("NIFTY", "260326") is False
+
+    def test_has_snapshot_true_after_capture(self):
+        client = MagicMock()
+        client.optionchain.return_value = [
+            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
+             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
+             "put_ltp": 120, "put_iv": 13},
+        ]
+        tracker = self._tracker(client)
+        tracker.capture_snapshot("NIFTY", "260326")
+        assert tracker.has_snapshot("NIFTY", "260326") is True
+
+    def test_get_download_history(self):
+        client = MagicMock()
+        client.optionchain.return_value = [
+            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
+             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
+             "put_ltp": 120, "put_iv": 13},
+        ]
+        tracker = self._tracker(client)
+        tracker.capture_snapshot("NIFTY", "260326")
+        history = tracker.get_download_history()
+        assert len(history) == 1
+        assert history[0]["symbol"] == "NIFTY"
+        assert history[0]["row_count"] == 2
+
+
+class TestBulkCapture:
+    """Verify bulk capture with skip-existing absorbed from ExpiryFlow."""
+
+    def test_capture_multiple_skips_existing(self):
+        client = MagicMock()
+        client.optionchain.return_value = [
+            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
+             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
+             "put_ltp": 120, "put_iv": 13},
+        ]
+        from packages.historical.src.expiry_tracker import ExpiryTracker
+        tracker = ExpiryTracker(client=client, db_path=":memory:")
+
+        # Capture first expiry
+        tracker.capture_snapshot("NIFTY", "260326")
+
+        # Bulk capture should skip the first and only fetch the second
+        results = tracker.capture_multiple("NIFTY", ["260326", "260402"])
+        assert results["260326"] == 0  # skipped
+        assert results["260402"] == 2  # 1 strike x 2 types
+
+    def test_capture_multiple_no_skip(self):
+        client = MagicMock()
+        client.optionchain.return_value = [
+            {"strike_price": 24000, "call_oi": 100, "call_volume": 50,
+             "call_ltp": 150, "call_iv": 12, "put_oi": 80, "put_volume": 40,
+             "put_ltp": 120, "put_iv": 13},
+        ]
+        from packages.historical.src.expiry_tracker import ExpiryTracker
+        tracker = ExpiryTracker(client=client, db_path=":memory:")
+        results = tracker.capture_multiple("NIFTY", ["260326", "260402"], skip_existing=False)
+        assert results["260326"] == 2
+        assert results["260402"] == 2

@@ -373,3 +373,115 @@ class TestMajorityVoteFallback:
         team._majority_vote_fallback(result)
         assert result.consensus_signal == "HOLD"
         assert result.consensus_confidence == 0.0
+
+
+# ---------------------------------------------------------------------------
+# AutonomousResearchLoop (absorbed from MarketCalls/autoresearch)
+# ---------------------------------------------------------------------------
+
+
+class TestResearchIteration:
+    """Test ResearchIteration dataclass."""
+
+    def test_default_values(self) -> None:
+        from packages.ai.src.multi_agent import ResearchIteration
+        it = ResearchIteration(iteration=0, symbol="NIFTY", exchange="NSE_INDEX")
+        assert it.signal == "HOLD"
+        assert it.confidence == 0.0
+        assert it.status == "pending"
+
+    def test_to_dict(self) -> None:
+        from packages.ai.src.multi_agent import ResearchIteration
+        it = ResearchIteration(
+            iteration=1, symbol="RELIANCE", exchange="NSE",
+            signal="BUY", confidence=0.8, status="completed",
+        )
+        d = it.to_dict()
+        assert d["symbol"] == "RELIANCE"
+        assert d["signal"] == "BUY"
+        assert d["iteration"] == 1
+
+
+class TestAutonomousResearchLoop:
+    """Test the autonomous research loop pattern from autoresearch."""
+
+    def test_basic_loop_runs_all_iterations(self) -> None:
+        from packages.ai.src.multi_agent import AutonomousResearchLoop
+        team, _, _ = _make_team(
+            response_text="Report.\nSIGNAL: BUY\nCONFIDENCE: 0.7\nSUMMARY: Bullish.",
+            deep_response_text="DECISION: BUY\nCONFIDENCE: 0.7\nREASONING: Strong technicals.",
+        )
+        loop = AutonomousResearchLoop(team, max_iterations=3)
+        results = loop.run_sync([("NIFTY", "NSE_INDEX")])
+        # 3 iterations x 1 symbol = 3 results
+        assert len(results) == 3
+        for r in results:
+            assert r.status == "completed"
+            assert r.symbol == "NIFTY"
+
+    def test_loop_with_multiple_symbols(self) -> None:
+        from packages.ai.src.multi_agent import AutonomousResearchLoop
+        team, _, _ = _make_team(
+            response_text="Report.\nSIGNAL: HOLD\nCONFIDENCE: 0.5\nSUMMARY: Neutral.",
+            deep_response_text="DECISION: HOLD\nCONFIDENCE: 0.5\nREASONING: Mixed signals.",
+        )
+        loop = AutonomousResearchLoop(team, max_iterations=2)
+        results = loop.run_sync([("NIFTY", "NSE_INDEX"), ("RELIANCE", "NSE")])
+        # 2 iterations x 2 symbols = 4 results
+        assert len(results) == 4
+        symbols = {r.symbol for r in results}
+        assert symbols == {"NIFTY", "RELIANCE"}
+
+    def test_loop_stop(self) -> None:
+        from packages.ai.src.multi_agent import AutonomousResearchLoop
+        team, _, _ = _make_team(
+            response_text="Report.\nSIGNAL: SELL\nCONFIDENCE: 0.6\nSUMMARY: Bearish.",
+            deep_response_text="DECISION: SELL\nCONFIDENCE: 0.6\nREASONING: Weak.",
+        )
+
+        iterations_completed = []
+
+        def on_iter(record):
+            iterations_completed.append(record)
+            if len(iterations_completed) >= 2:
+                loop.stop()
+
+        loop = AutonomousResearchLoop(team, max_iterations=100, on_iteration=on_iter)
+        results = loop.run_sync([("NIFTY", "NSE_INDEX")])
+        # Should stop after 2 iterations (stop takes effect after current symbol completes)
+        assert len(results) <= 3
+
+    def test_signal_summary(self) -> None:
+        from packages.ai.src.multi_agent import AutonomousResearchLoop
+        team, _, _ = _make_team(
+            response_text="Report.\nSIGNAL: BUY\nCONFIDENCE: 0.8\nSUMMARY: Strong.",
+            deep_response_text="DECISION: BUY\nCONFIDENCE: 0.8\nREASONING: Consensus.",
+        )
+        loop = AutonomousResearchLoop(team, max_iterations=3)
+        loop.run_sync([("NIFTY", "NSE_INDEX")])
+        summary = loop.get_signal_summary()
+        assert "NIFTY" in summary
+        assert summary["NIFTY"]["dominant_signal"] == "BUY"
+        assert summary["NIFTY"]["iterations"] == 3
+        assert summary["NIFTY"]["avg_confidence"] > 0
+
+    def test_loop_handles_failures_gracefully(self) -> None:
+        from packages.ai.src.multi_agent import AutonomousResearchLoop, AgentTeam
+        # Create a team with a broken LLM
+        client = MagicMock()
+        client.chat.side_effect = Exception("LLM unavailable")
+        team = AgentTeam(llm_client=client)
+        loop = AutonomousResearchLoop(team, max_iterations=2)
+        results = loop.run_sync([("NIFTY", "NSE_INDEX")])
+        # Should complete without crashing
+        assert len(results) == 2
+        # Aggregator fails -> majority vote fallback (all agents failed -> HOLD)
+        for r in results:
+            assert r.status == "completed"
+
+    def test_empty_watchlist(self) -> None:
+        from packages.ai.src.multi_agent import AutonomousResearchLoop
+        team, _, _ = _make_team()
+        loop = AutonomousResearchLoop(team, max_iterations=3)
+        results = loop.run_sync([])
+        assert len(results) == 0

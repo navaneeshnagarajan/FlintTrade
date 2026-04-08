@@ -730,6 +730,63 @@ export const getFtOIProfile = (
   });
 
 // ---------------------------------------------------------------------------
+// FII/DII Institutional Flows (absorbed from MarketCalls/fii-dii-data)
+// ---------------------------------------------------------------------------
+
+export interface FiiDiiSnapshot {
+  trade_date: string;
+  fii_buy: number;
+  fii_sell: number;
+  fii_net: number;
+  dii_buy: number;
+  dii_sell: number;
+  dii_net: number;
+  fii_idx_fut_long: number;
+  fii_idx_fut_short: number;
+  fii_idx_fut_net: number;
+  fii_stk_fut_long: number;
+  fii_stk_fut_short: number;
+  fii_stk_fut_net: number;
+  fii_idx_call_long: number;
+  fii_idx_call_short: number;
+  fii_idx_call_net: number;
+  fii_idx_put_long: number;
+  fii_idx_put_short: number;
+  fii_idx_put_net: number;
+  dii_idx_fut_long: number;
+  dii_idx_fut_short: number;
+  dii_idx_fut_net: number;
+  dii_stk_fut_long: number;
+  dii_stk_fut_short: number;
+  dii_stk_fut_net: number;
+  pcr: number;
+  sentiment_score: number;
+  updated_at: string;
+}
+
+export interface FiiDiiTrend {
+  days: number;
+  snapshots: FiiDiiSnapshot[];
+  fii_net_total: number;
+  dii_net_total: number;
+  avg_sentiment: number;
+}
+
+export interface FiiDiiResponse {
+  is_sample_data: boolean;
+  latest: FiiDiiSnapshot;
+  trend: FiiDiiTrend | null;
+}
+
+export const getFiiDiiData = (days?: number, refresh?: boolean) => {
+  const params = new URLSearchParams();
+  if (days !== undefined) params.set("days", String(days));
+  if (refresh) params.set("refresh", "true");
+  const qs = params.toString();
+  return get<FiiDiiResponse>("screener/fii-dii" + (qs ? "?" + qs : ""));
+};
+
+// ---------------------------------------------------------------------------
 // Sandbox / Paper trading
 // ---------------------------------------------------------------------------
 

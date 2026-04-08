@@ -23,6 +23,7 @@ from .option_chain import (
     OptionChainSnapshot,
     StrikeData,
 )
+from .fii_dii import FiiDiiSnapshot, FiiDiiTracker, FiiDiiTrend
 from .rrg import (
     NIFTY_SECTORS,
     RRGPoint,
@@ -78,4 +79,8 @@ __all__ = [
     "FundamentalScreener",
     "FundamentalData",
     "SearchResult",
+    # FII/DII flows
+    "FiiDiiTracker",
+    "FiiDiiSnapshot",
+    "FiiDiiTrend",
 ]
