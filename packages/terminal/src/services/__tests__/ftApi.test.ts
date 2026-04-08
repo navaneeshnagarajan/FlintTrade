@@ -52,7 +52,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   it("get() unwraps response.data correctly", async () => {
     const strategies = [{ name: "SMA Cross", description: "Simple MA crossover", category: "trend", parameters: [] }];
     fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: strategies }),
+      jsonResponse({ status: "success", data: { strategies } }),
     );
 
     const result = await getStrategies();
@@ -131,10 +131,10 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   it("getSafetyConfig() flattens nested 5-layer safety config", async () => {
     const raw = {
       l1_order: { price_deviation_pct: 5, check_market_hours: true, qty_limits: { NSE: 900, NFO: 1200, MCX: 50 } },
-      l2_position: { max_positions: 8 },
-      l3_portfolio: { max_margin_pct: 70, max_net_delta: 800, max_net_vega: 400 },
-      l4_pnl: { pnl_pause_pct: 3, pnl_kill_pct: 6 },
-      l5_kill: { active: false },
+      l2_position: { max_positions: 8, max_margin_pct: 70 },
+      l3_portfolio: { max_net_delta: 800, max_net_vega: 400 },
+      l4_pnl: { pause_pct: 3, kill_pct: 6, is_paused: false, is_killed: false },
+      l5_kill: { is_active: false, reason: "" },
     };
 
     fetchSpy.mockResolvedValueOnce(
@@ -191,12 +191,13 @@ describe("FlintTrade API client (ftApi.ts)", () => {
 
   it("getPnLSummary() returns correct shape", async () => {
     const summary = {
-      realized_pnl: 5000,
-      unrealized_pnl: -200,
-      total_pnl: 4800,
-      max_drawdown: 1200,
-      peak_pnl: 6000,
-      entries: [{ timestamp: "2026-04-08T10:00:00", realized_pnl: 5000, unrealized_pnl: -200, total_pnl: 4800 }],
+      realized: 5000,
+      unrealized: -200,
+      total: 4800,
+      max_total: 6000,
+      min_total: 0,
+      trade_count: 10,
+      data_points: 100,
     };
 
     fetchSpy.mockResolvedValueOnce(
@@ -205,12 +206,13 @@ describe("FlintTrade API client (ftApi.ts)", () => {
 
     const result = await getPnLSummary();
 
-    expect(result).toHaveProperty("realized_pnl", 5000);
-    expect(result).toHaveProperty("unrealized_pnl", -200);
-    expect(result).toHaveProperty("total_pnl", 4800);
-    expect(result).toHaveProperty("max_drawdown", 1200);
-    expect(result).toHaveProperty("peak_pnl", 6000);
-    expect(result.entries).toHaveLength(1);
+    expect(result).toHaveProperty("realized", 5000);
+    expect(result).toHaveProperty("unrealized", -200);
+    expect(result).toHaveProperty("total", 4800);
+    expect(result).toHaveProperty("max_total", 6000);
+    expect(result).toHaveProperty("min_total", 0);
+    expect(result).toHaveProperty("trade_count");
+    expect(result).toHaveProperty("data_points");
   });
 
   // ---- getSecuritySettings fields ----
@@ -218,11 +220,9 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   it("getSecuritySettings() returns all expected fields", async () => {
     const settings = {
       auto_ban_enabled: true,
-      threshold_404: 50,
-      ban_duration_404: 3600,
-      threshold_api: 100,
-      ban_duration_api: 7200,
-      repeat_offender_limit: 3,
+      ban_threshold: 50,
+      notfound_ban_threshold: 100,
+      ban_duration: 3600,
     };
 
     fetchSpy.mockResolvedValueOnce(
@@ -233,11 +233,9 @@ describe("FlintTrade API client (ftApi.ts)", () => {
 
     expect(result).toEqual(settings);
     expect(typeof result.auto_ban_enabled).toBe("boolean");
-    expect(typeof result.threshold_404).toBe("number");
-    expect(typeof result.ban_duration_404).toBe("number");
-    expect(typeof result.threshold_api).toBe("number");
-    expect(typeof result.ban_duration_api).toBe("number");
-    expect(typeof result.repeat_offender_limit).toBe("number");
+    expect(typeof result.ban_threshold).toBe("number");
+    expect(typeof result.notfound_ban_threshold).toBe("number");
+    expect(typeof result.ban_duration).toBe("number");
   });
 
   // ---- Error handling ----

@@ -205,7 +205,7 @@ export function useChartInit(
       };
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartTheme]); // re-create chart when theme changes; setLegend is stable (state setter)
+  }, []); // mount once; ChartWidget.tsx's dedicated theme effect handles theme changes via applyOptions
 
   return { containerRef, chartRef, candleRef, volumeRef, markersPluginRef, indRef };
 }

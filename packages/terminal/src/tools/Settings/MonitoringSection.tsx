@@ -96,61 +96,50 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
 // ---------------------------------------------------------------------------
 
 function HealthPanel({ data }: { data: SystemHealth }) {
-  const diskUsedGb = data.disk_total_gb - data.disk_free_gb;
-  const diskUsedPct = pct(diskUsedGb, data.disk_total_gb);
-  const memUsedPct  = pct(data.memory_used_mb, data.memory_total_mb);
+  const diskFreeGb  = data.disk?.free_gb ?? 0;
+  const diskTotalGb = data.disk?.total_gb ?? 0;
+  const diskUsedGb  = diskTotalGb - diskFreeGb;
+  const diskUsedPct = data.disk?.used_pct ?? pct(diskUsedGb, diskTotalGb);
+  const memUsedMb   = data.memory?.used_mb ?? 0;
+  const memTotalMb  = data.memory?.total_mb ?? 0;
+  const memUsedPct  = data.memory?.used_pct ?? pct(memUsedMb, memTotalMb);
 
   return (
     <div className="space-y-4">
-      {/* Broker connections */}
+      {/* Subsystem status */}
       <div>
         <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">
-          Broker Connections
+          Subsystem Status
         </p>
-        {data.broker_connections.length === 0 ? (
-          <p className="text-xs text-text-muted">No broker accounts configured</p>
-        ) : (
-          <div className="space-y-1">
-            {data.broker_connections.map((bc) => (
-              <div
-                key={bc.account}
-                className="flex items-center justify-between px-2 py-1 rounded bg-surface-card border border-border-default"
-              >
-                <StatusDot ok={bc.connected} label={`${bc.account} (${bc.broker})`} />
-                {bc.latency_ms !== null && (
-                  <span className="text-xxs font-mono tabular-nums text-text-muted">
-                    {bc.latency_ms} ms
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* System status */}
-      <div>
-        <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">
-          System Status
-        </p>
-        <div className="space-y-1 mb-3">
+        <div className="space-y-1">
           <StatusDot
-            ok={data.duckdb_status === "ok"}
-            label={`DuckDB — ${data.duckdb_status === "ok" ? "Healthy" : "Error"}`}
+            ok={data.broker?.status === "ok"}
+            label={`Broker — ${data.broker?.note ?? data.broker?.status ?? "unknown"}`}
+          />
+          <StatusDot
+            ok={data.duckdb?.status === "ok"}
+            label={`DuckDB — ${data.duckdb?.status === "ok" ? "Healthy" : data.duckdb?.note ?? "Error"}`}
           />
         </div>
+      </div>
+
+      {/* Resource usage */}
+      <div>
+        <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">
+          Resources
+        </p>
         <div className="space-y-2">
           <UsageBar
             label="Disk"
             usedPct={diskUsedPct}
             usedLabel={`${diskUsedGb.toFixed(1)} GB`}
-            totalLabel={`${data.disk_total_gb.toFixed(0)} GB`}
+            totalLabel={`${diskTotalGb.toFixed(0)} GB`}
           />
           <UsageBar
             label="Memory"
             usedPct={memUsedPct}
-            usedLabel={fmtBytes(data.memory_used_mb)}
-            totalLabel={fmtBytes(data.memory_total_mb)}
+            usedLabel={fmtBytes(memUsedMb)}
+            totalLabel={fmtBytes(memTotalMb)}
           />
         </div>
       </div>
@@ -166,7 +155,7 @@ function TrafficPanel({ data }: { data: TrafficStats }) {
         ? "text-warning"
         : "text-profit";
 
-  const maxCount = Math.max(...data.top_endpoints.map((e) => e.count), 1);
+  const maxCount = Math.max(...data.top_paths.map((e) => e.count), 1);
 
   return (
     <div className="space-y-3">
@@ -181,7 +170,7 @@ function TrafficPanel({ data }: { data: TrafficStats }) {
         <div className="p-2 rounded bg-surface-card border border-border-default">
           <p className="text-xxs text-text-muted uppercase tracking-wider">Error Rate</p>
           <p className={`font-mono tabular-nums font-bold text-base ${errorColor}`}>
-            {data.error_rate.toFixed(1)}%
+            {(data.error_rate * 100).toFixed(1)}%
           </p>
         </div>
       </div>
@@ -191,14 +180,14 @@ function TrafficPanel({ data }: { data: TrafficStats }) {
         <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">
           Top Endpoints
         </p>
-        {data.top_endpoints.length === 0 ? (
+        {data.top_paths.length === 0 ? (
           <p className="text-xs text-text-muted">No data yet</p>
         ) : (
           <div className="space-y-1">
-            {data.top_endpoints.map((ep) => (
-              <div key={ep.endpoint} className="flex items-center gap-2">
+            {data.top_paths.map((ep) => (
+              <div key={ep.path} className="flex items-center gap-2">
                 <span className="text-xs text-text-muted font-mono min-w-0 truncate flex-1">
-                  {ep.endpoint}
+                  {ep.path}
                 </span>
                 <div className="w-24 h-1.5 rounded-full bg-surface-hover overflow-hidden flex-none">
                   <div
@@ -219,12 +208,13 @@ function TrafficPanel({ data }: { data: TrafficStats }) {
 }
 
 function LatencyPanel({ data }: { data: LatencyStats }) {
+  const entries = Object.entries(data);
   return (
     <div>
       <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">
         Order Latency by Broker
       </p>
-      {data.brokers.length === 0 ? (
+      {entries.length === 0 ? (
         <p className="text-xs text-text-muted">No latency data recorded yet</p>
       ) : (
         <div className="rounded border border-border-default overflow-hidden">
@@ -239,7 +229,7 @@ function LatencyPanel({ data }: { data: LatencyStats }) {
               </tr>
             </thead>
             <tbody>
-              {data.brokers.map((row) => {
+              {entries.map(([broker, row]) => {
                 const p99Color =
                   row.p99_ms > 500
                     ? "text-loss"
@@ -248,10 +238,10 @@ function LatencyPanel({ data }: { data: LatencyStats }) {
                       : "text-profit";
                 return (
                   <tr
-                    key={row.broker}
+                    key={broker}
                     className="border-b border-border-default last:border-0 hover:bg-surface-hover transition-colors"
                   >
-                    <td className="px-3 py-1.5 text-text-secondary font-medium">{row.broker}</td>
+                    <td className="px-3 py-1.5 text-text-secondary font-medium">{broker}</td>
                     <td className="px-3 py-1.5 text-right font-mono tabular-nums text-text-muted">
                       {row.avg_ms} ms
                     </td>

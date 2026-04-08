@@ -4,7 +4,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { getOIProfile } from "@/services/ftApi";
+import { getFtOIProfile } from "@/services/ftApi";
 import { isMarketHours } from "@/lib/market";
 
 export function useOIProfile(
@@ -16,7 +16,7 @@ export function useOIProfile(
 ) {
   return useQuery({
     queryKey: ["oiprofile", symbol, exchange, expiryDate, strikeCount],
-    queryFn: () => getOIProfile(symbol, exchange, expiryDate, strikeCount),
+    queryFn: () => getFtOIProfile(symbol, exchange, expiryDate, strikeCount),
     enabled: isConnected && Boolean(symbol && exchange && expiryDate),
     refetchInterval: isConnected && isMarketHours() ? 30_000 : false,
     staleTime: 25_000,

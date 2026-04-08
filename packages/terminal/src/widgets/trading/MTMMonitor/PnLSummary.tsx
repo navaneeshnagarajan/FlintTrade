@@ -9,7 +9,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, AlertTriangle } from "lucide-react";
-import { getPnLSummary, type PnLSummary } from "@/services/ftApi";
+import {
+  getPnLSummary,
+  getPnLTracker,
+  type PnLSummary as PnLSummaryType,
+  type PnLTrackerEntry,
+} from "@/services/ftApi";
 import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +56,7 @@ function MetricRow({
 // Sparkline (SVG) — minimal realized PnL chart from tracker entries
 // ---------------------------------------------------------------------------
 
-function Sparkline({ entries }: { entries: PnLSummary["entries"] }) {
+function Sparkline({ entries }: { entries: PnLTrackerEntry[] }) {
   if (entries.length < 2) return null;
 
   const width  = 120;
@@ -97,7 +102,13 @@ function Sparkline({ entries }: { entries: PnLSummary["entries"] }) {
 // ---------------------------------------------------------------------------
 
 export function PnLSummary() {
-  const query = useQuery<PnLSummary>({
+  const seriesQuery = useQuery<PnLTrackerEntry[]>({
+    queryKey: ["ft", "pnl-tracker"],
+    queryFn: getPnLTracker,
+    refetchInterval: () => (isMarketHours() ? 10_000 : 60_000),
+  });
+
+  const query = useQuery<PnLSummaryType>({
     queryKey: ["ft", "pnl-tracker", "summary"],
     queryFn: getPnLSummary,
     refetchInterval: () => (isMarketHours() ? 10_000 : 60_000),
@@ -124,9 +135,9 @@ export function PnLSummary() {
   const d = query.data;
   if (!d) return null;
 
-  const totalColor = d.total_pnl >= 0 ? "text-profit" : "text-loss";
-  const rlColor    = d.realized_pnl >= 0 ? "text-profit" : "text-loss";
-  const urColor    = d.unrealized_pnl >= 0 ? "text-profit" : "text-loss";
+  const totalColor = d.total >= 0 ? "text-profit" : "text-loss";
+  const rlColor    = d.realized >= 0 ? "text-profit" : "text-loss";
+  const urColor    = d.unrealized >= 0 ? "text-profit" : "text-loss";
 
   return (
     <div className="border-t border-border-default bg-surface-card">
@@ -136,7 +147,7 @@ export function PnLSummary() {
           P&L Tracker
         </span>
         <div className="flex items-center gap-2">
-          {d.entries.length > 0 && <Sparkline entries={d.entries} />}
+          {(seriesQuery.data ?? []).length > 0 && <Sparkline entries={seriesQuery.data ?? []} />}
           {query.isFetching && (
             <RefreshCw size={9} className="animate-spin text-text-muted" />
           )}
@@ -145,12 +156,12 @@ export function PnLSummary() {
 
       {/* Metrics */}
       <div>
-        <MetricRow label="Realized P&L"   value={fmt(d.realized_pnl)}   colorClass={rlColor}    />
-        <MetricRow label="Unrealized P&L" value={fmt(d.unrealized_pnl)} colorClass={urColor}    />
-        <MetricRow label="Total P&L"      value={fmt(d.total_pnl)}      colorClass={totalColor} />
+        <MetricRow label="Realized P&L"   value={fmt(d.realized)}   colorClass={rlColor}    />
+        <MetricRow label="Unrealized P&L" value={fmt(d.unrealized)} colorClass={urColor}    />
+        <MetricRow label="Total P&L"      value={fmt(d.total)}      colorClass={totalColor} />
         <MetricRow
           label="Max Drawdown"
-          value={fmt(Math.abs(d.max_drawdown))}
+          value={fmt(Math.abs(d.max_total - d.min_total))}
           colorClass="text-warning"
         />
       </div>

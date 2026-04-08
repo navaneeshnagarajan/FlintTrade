@@ -182,22 +182,17 @@ export function SecuritySection() {
         )}
 
         {stats && (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <StatTile label="Total Requests" value={stats.total_requests} />
-            <StatTile
-              label="Failed Auths"
-              value={stats.failed_auths}
-              accent={stats.failed_auths > 0 ? "warning" : undefined}
-            />
-            <StatTile
-              label="404s"
-              value={stats.not_found_count}
-              accent={stats.not_found_count > 50 ? "warning" : undefined}
-            />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <StatTile label="Tracked IPs" value={stats.total_ips} />
             <StatTile
               label="Banned IPs"
               value={stats.banned_count}
               accent={stats.banned_count > 0 ? "loss" : undefined}
+            />
+            <StatTile
+              label="Top Offenders"
+              value={stats.top_offenders.length}
+              accent={stats.top_offenders.length > 5 ? "warning" : undefined}
             />
           </div>
         )}

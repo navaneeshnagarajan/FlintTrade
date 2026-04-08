@@ -4,7 +4,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { getIVSmile } from "@/services/ftApi";
+import { getFtIVSmile } from "@/services/ftApi";
 import { isMarketHours } from "@/lib/market";
 
 export function useIVSmile(
@@ -15,7 +15,7 @@ export function useIVSmile(
 ) {
   return useQuery({
     queryKey: ["ivsmile", symbol, exchange, expiryDates],
-    queryFn: () => getIVSmile(symbol, exchange, expiryDates),
+    queryFn: () => getFtIVSmile(symbol, exchange, expiryDates),
     enabled: isConnected && Boolean(symbol && exchange),
     refetchInterval: isConnected && isMarketHours() ? 30_000 : false,
     staleTime: 25_000,

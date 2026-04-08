@@ -169,8 +169,9 @@ class TestSecuritySettingsGet:
         data = resp.get_json()
         assert data["status"] == "success"
         assert "auto_ban_enabled" in data["data"]
-        assert "threshold_404" in data["data"]
-        assert "ban_duration_404" in data["data"]
+        assert "ban_threshold" in data["data"]
+        assert "notfound_ban_threshold" in data["data"]
+        assert "ban_duration" in data["data"]
 
     def test_returns_503_when_monitor_not_configured(self, flask_app, client):
         original = flask_app.config.get("SECURITY_MONITOR")
@@ -187,16 +188,16 @@ class TestSecuritySettingsUpdate:
 
     def test_update_threshold(self, flask_app, client):
         resp = client.post("/api/v1/security/settings", json={
-            "threshold_404": 50,
+            "notfound_ban_threshold": 50,
         }, headers=_auth_headers())
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
-        assert data["data"]["threshold_404"] == 50
+        assert data["data"]["notfound_ban_threshold"] == 50
 
     def test_invalid_value_returns_400(self, flask_app, client):
         resp = client.post("/api/v1/security/settings", json={
-            "threshold_404": "not-a-number",
+            "notfound_ban_threshold": "not-a-number",
         }, headers=_auth_headers())
         assert resp.status_code == 400
         data = resp.get_json()

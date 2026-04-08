@@ -691,6 +691,71 @@ def api_security_settings_update() -> tuple[Any, int]:
 
 
 # ------------------------------------------------------------------
+# Sandbox config proxy routes (/api/v1/sandbox/config)
+# The engine sandbox blueprint lives at /v1/sandbox-config/ which is
+# outside the /api/v1/ namespace.  These proxies let the frontend call
+# the standard /api/v1/sandbox/config path.
+# ------------------------------------------------------------------
+
+@operations_bp.route("/sandbox/config", methods=["GET"])
+def api_sandbox_config_get() -> tuple[Any, int]:
+    """Proxy GET sandbox config for frontend compatibility."""
+    engine = current_app.config.get("SANDBOX_ENGINE")
+    if engine is None:
+        return jsonify({"status": "error", "message": "Sandbox engine not configured"}), 503
+
+    cfg = engine.config
+    return jsonify({
+        "status": "success",
+        "data": {
+            "enabled": True,
+            "mode": "paper",
+            "starting_capital": cfg.starting_capital,
+            "equity_leverage": cfg.equity_leverage,
+            "futures_leverage": cfg.futures_leverage,
+            "option_buy_leverage": cfg.option_buy_leverage,
+            "option_sell_leverage": cfg.option_sell_leverage,
+            "squareoff_time": cfg.squareoff_time,
+            "mcx_squareoff_time": cfg.mcx_squareoff_time,
+        },
+    }), 200
+
+
+@operations_bp.route("/sandbox/config", methods=["POST"])
+def api_sandbox_config_update() -> tuple[Any, int]:
+    """Proxy POST sandbox config for frontend compatibility."""
+    engine = current_app.config.get("SANDBOX_ENGINE")
+    if engine is None:
+        return jsonify({"status": "error", "message": "Sandbox engine not configured"}), 503
+
+    body = request.get_json(silent=True) or {}
+    cfg = engine.config
+
+    for field_name in (
+        "starting_capital",
+        "equity_leverage",
+        "futures_leverage",
+        "option_buy_leverage",
+        "option_sell_leverage",
+        "squareoff_time",
+        "mcx_squareoff_time",
+    ):
+        if field_name in body:
+            setattr(cfg, field_name, body[field_name])
+
+    enabled = body.get("enabled")
+    mode = body.get("mode", "paper")
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "enabled": enabled if enabled is not None else True,
+            "mode": mode,
+        },
+    }), 200
+
+
+# ------------------------------------------------------------------
 # News (server-side RSS proxy — avoids CORS in browser)
 # ------------------------------------------------------------------
 

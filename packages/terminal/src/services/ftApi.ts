@@ -45,7 +45,7 @@ async function parseResponse<T>(res: Response, endpoint: string): Promise<T> {
 
 async function post<T>(
   endpoint: string,
-  body: Record<string, unknown> = {},
+  body: object = {},
 ): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",
@@ -64,7 +64,7 @@ async function get<T>(endpoint: string): Promise<T> {
 
 async function put<T>(
   endpoint: string,
-  body: Record<string, unknown> = {},
+  body: object = {},
 ): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "PUT",
@@ -131,7 +131,7 @@ export interface BacktestResult {
 }
 
 export const runBacktest = (config: BacktestConfig) =>
-  post<BacktestResult>("backtest/run", config as unknown as Record<string, unknown>);
+  post<BacktestResult>("backtest/run", config);
 
 // ---------------------------------------------------------------------------
 // Strategies
@@ -173,9 +173,13 @@ export interface RunningStrategy {
   virtual_trades?: ForwardTrade[];
 }
 
-export const getStrategies = () => get<StrategyInfo[]>("strategies");
+export const getStrategies = () =>
+  get<{ strategies: StrategyInfo[] }>("strategies").then((r) => r.strategies);
 
-export const getRunningStrategies = () => get<RunningStrategy[]>("strategies/running");
+export const getRunningStrategies = () =>
+  get<{ strategies: RunningStrategy[] }>("strategies/running").then(
+    (r) => r.strategies,
+  );
 
 export const startStrategy = (name: string, config: Record<string, unknown>) =>
   post<{ status: string }>(
@@ -189,9 +193,9 @@ export const stopStrategy = (name: string) =>
   );
 
 export const getForwardTrades = (name: string) =>
-  get<ForwardTrade[]>(
+  get<{ strategy_id: string; trades: ForwardTrade[] }>(
     "strategies/" + encodeURIComponent(name) + "/trades",
-  );
+  ).then((r) => r.trades);
 
 // ---------------------------------------------------------------------------
 // Signals
@@ -237,7 +241,7 @@ export const getRecentSignals = (limit?: number) => {
 export const getSignalConfig = () => get<SignalConfig>("signals/config");
 
 export const updateSignalConfig = (config: Partial<SignalConfig>) =>
-  post<SignalConfig>("signals/configure", config as Record<string, unknown>);
+  post<SignalConfig>("signals/configure", config);
 
 // ---------------------------------------------------------------------------
 // Sentiment
@@ -369,10 +373,10 @@ export const getTradeJournal = (
 /** Raw nested safety config as returned by the backend (5-layer system). */
 export interface SafetyConfigRaw {
   l1_order: { price_deviation_pct: number; check_market_hours: boolean; qty_limits: Record<string, number> };
-  l2_position: { max_positions: number };
-  l3_portfolio: { max_margin_pct: number; max_net_delta: number; max_net_vega: number };
-  l4_pnl: { pnl_pause_pct: number; pnl_kill_pct: number };
-  l5_kill: { active: boolean };
+  l2_position: { max_positions: number; max_margin_pct: number };
+  l3_portfolio: { max_net_delta: number; max_net_vega: number };
+  l4_pnl: { pause_pct: number; kill_pct: number; is_paused: boolean; is_killed: boolean };
+  l5_kill: { is_active: boolean; reason: string };
 }
 
 /** Flattened safety config for UI consumption. */
@@ -398,12 +402,12 @@ function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
     max_qty_nfo: raw.l1_order?.qty_limits?.NFO ?? 1800,
     max_qty_mcx: raw.l1_order?.qty_limits?.MCX ?? 100,
     max_positions: raw.l2_position?.max_positions ?? 10,
-    max_margin_pct: raw.l3_portfolio?.max_margin_pct ?? 80,
+    max_margin_pct: raw.l2_position?.max_margin_pct ?? 80,
     max_net_delta: raw.l3_portfolio?.max_net_delta ?? 1000,
     max_net_vega: raw.l3_portfolio?.max_net_vega ?? 500,
-    daily_loss_pause_pct: raw.l4_pnl?.pnl_pause_pct ?? 2,
-    daily_loss_kill_pct: raw.l4_pnl?.pnl_kill_pct ?? 5,
-    kill_switch_active: raw.l5_kill?.active ?? false,
+    daily_loss_pause_pct: raw.l4_pnl?.pause_pct ?? 2,
+    daily_loss_kill_pct: raw.l4_pnl?.kill_pct ?? 5,
+    kill_switch_active: raw.l5_kill?.is_active ?? false,
   };
 }
 
@@ -412,11 +416,17 @@ export const getSafetyConfig = async (): Promise<SafetyConfig> => {
   return flattenSafetyConfig(raw);
 };
 
-export const updateSafetyConfig = (config: Partial<SafetyConfig>) =>
-  post<{ status: string }>(
-    "safety/config",
-    config as Record<string, unknown>,
-  );
+export const updateSafetyConfig = (config: Partial<SafetyConfig>) => {
+  const body: Record<string, unknown> = {};
+  if (config.check_market_hours !== undefined) body.check_market_hours = config.check_market_hours;
+  if (config.max_positions !== undefined) body.max_positions = config.max_positions;
+  if (config.max_margin_pct !== undefined) body.max_margin_pct = config.max_margin_pct;
+  if (config.max_net_delta !== undefined) body.max_net_delta = config.max_net_delta;
+  if (config.max_net_vega !== undefined) body.max_net_vega = config.max_net_vega;
+  if (config.daily_loss_pause_pct !== undefined) body.pnl_pause_pct = config.daily_loss_pause_pct;
+  if (config.daily_loss_kill_pct !== undefined) body.pnl_kill_pct = config.daily_loss_kill_pct;
+  return post<{ status: string }>("safety/config", body);
+};
 
 export const activateKillSwitch = (reason: string) =>
   post<{ status: string }>("safety/kill-switch", { reason });
@@ -439,7 +449,7 @@ export interface WebhookConfig {
 export const getWebhooks = () => get<{ webhooks: WebhookConfig[] }>("webhooks");
 
 export const createWebhook = (config: Omit<WebhookConfig, "id">) =>
-  post<WebhookConfig>("webhooks", config as unknown as Record<string, unknown>);
+  post<WebhookConfig>("webhooks", config);
 
 export const deleteWebhook = (id: string) =>
   del<{ status: string }>("webhooks/" + encodeURIComponent(id));
@@ -518,7 +528,7 @@ export const getVolSurface = (
     ...(strike_count !== undefined ? { strike_count } : {}),
   });
 
-export const getIVSmile = (
+export const getFtIVSmile = (
   symbol: string,
   exchange: string,
   expiry_dates?: string[],
@@ -542,7 +552,7 @@ export const getStraddlePnL = (
     ...(adjustments ? { adjustments: adjustments as unknown as Record<string, unknown>[] } : {}),
   });
 
-export const getOIProfile = (
+export const getFtOIProfile = (
   symbol: string,
   exchange: string,
   expiry_date: string,
@@ -590,7 +600,9 @@ export interface StrategyLogEntry {
 }
 
 export const getUploadedStrategies = () =>
-  get<UploadedStrategy[]>("strategies/uploaded");
+  get<{ strategies: UploadedStrategy[] }>("strategies/uploaded").then(
+    (r) => r.strategies,
+  );
 
 export const uploadStrategy = (file: File): Promise<UploadedStrategy> => {
   const base = (import.meta.env.DEV ? "/ft-api" : "") + "/api/v1/strategies/upload";
@@ -623,8 +635,20 @@ export const stopUploadedStrategy = (id: string) =>
   );
 
 export const getStrategyLogs = (id: string) =>
-  get<StrategyLogEntry[]>(
+  get<{ strategy_id: string; lines: string[] }>(
     "strategies/uploaded/" + encodeURIComponent(id) + "/logs",
+  ).then((r) =>
+    r.lines.map((line): StrategyLogEntry => {
+      const match = line.match(/^(\\S+ \\S+)\\s+\\[(\\w+)]\\s+(.*)/);
+      if (match) {
+        return {
+          timestamp: match[1],
+          level: match[2] as StrategyLogEntry["level"],
+          message: match[3],
+        };
+      }
+      return { timestamp: "", level: "INFO", message: line };
+    }),
   );
 
 // ---------------------------------------------------------------------------
@@ -646,7 +670,9 @@ export interface PendingOrder {
 }
 
 export const getPendingOrders = () =>
-  get<PendingOrder[]>("action-center/pending");
+  get<{ orders: PendingOrder[] }>("action-center/pending").then(
+    (r) => r.orders,
+  );
 
 export const approveOrder = (id: string) =>
   post<{ status: string }>(
@@ -665,11 +691,19 @@ export const approveAllOrders = () =>
 // Security
 // ---------------------------------------------------------------------------
 
-export interface SecurityStats {
-  total_requests: number;
-  failed_auths: number;
+export interface SecurityStatsOffender {
+  ip: string;
+  request_count: number;
+  failed_auth_count: number;
   not_found_count: number;
+  is_banned: boolean;
+  last_seen: string;
+}
+
+export interface SecurityStats {
+  total_ips: number;
   banned_count: number;
+  top_offenders: SecurityStatsOffender[];
 }
 
 export interface BannedIP {
@@ -688,11 +722,9 @@ export const unbanIP          = (ip: string) =>
 // Auto-ban settings (absorbed from OpenAlgo security dashboard)
 export interface SecuritySettings {
   auto_ban_enabled: boolean;
-  threshold_404: number;
-  ban_duration_404: number;
-  threshold_api: number;
-  ban_duration_api: number;
-  repeat_offender_limit: number;
+  ban_threshold: number;
+  notfound_ban_threshold: number;
+  ban_duration: number;
 }
 
 export const getSecuritySettings = () => get<SecuritySettings>("security/settings");
@@ -704,19 +736,21 @@ export const updateSecuritySettings = (settings: Partial<SecuritySettings>) =>
 // ---------------------------------------------------------------------------
 
 export interface PnLTrackerEntry {
-  timestamp: string;
+  timestamp: number;
   realized_pnl: number;
   unrealized_pnl: number;
   total_pnl: number;
+  trade_count: number;
 }
 
 export interface PnLSummary {
-  realized_pnl: number;
-  unrealized_pnl: number;
-  total_pnl: number;
-  max_drawdown: number;
-  peak_pnl: number;
-  entries: PnLTrackerEntry[];
+  realized: number;
+  unrealized: number;
+  total: number;
+  max_total: number;
+  min_total: number;
+  trade_count: number;
+  data_points: number;
 }
 
 export const getPnLTracker = () => get<PnLTrackerEntry[]>("pnl-tracker");
@@ -726,44 +760,43 @@ export const getPnLSummary = () => get<PnLSummary>("pnl-tracker/summary");
 // Monitoring
 // ---------------------------------------------------------------------------
 
-export interface BrokerConnectionHealth {
-  account: string;
-  broker: string;
-  connected: boolean;
-  latency_ms: number | null;
+export interface HealthSubsystem {
+  status: "ok" | "degraded" | "error";
+  note?: string;
+  [key: string]: unknown;
 }
 
 export interface SystemHealth {
-  broker_connections: BrokerConnectionHealth[];
-  duckdb_status: "ok" | "error";
-  disk_free_gb: number;
-  disk_total_gb: number;
-  memory_used_mb: number;
-  memory_total_mb: number;
+  status: "ok" | "degraded" | "error";
+  broker: HealthSubsystem;
+  duckdb: HealthSubsystem;
+  disk: HealthSubsystem & { free_gb?: number; total_gb?: number; used_pct?: number };
+  memory: HealthSubsystem & { used_mb?: number; total_mb?: number; used_pct?: number };
 }
 
-export interface EndpointStat {
-  endpoint: string;
+export interface PathStat {
+  path: string;
   count: number;
 }
 
 export interface TrafficStats {
+  window_minutes: number;
+  total_requests: number;
   requests_per_sec: number;
   error_rate: number;
-  top_endpoints: EndpointStat[];
+  avg_latency_ms: number;
+  top_paths: PathStat[];
 }
 
 export interface BrokerLatency {
-  broker: string;
+  count: number;
   avg_ms: number;
   p50_ms: number;
   p95_ms: number;
   p99_ms: number;
 }
 
-export interface LatencyStats {
-  brokers: BrokerLatency[];
-}
+export type LatencyStats = Record<string, BrokerLatency>;
 
 export const getHealth       = () => get<SystemHealth>("health");
 export const getTrafficStats = () => get<TrafficStats>("traffic/stats");
@@ -1057,7 +1090,7 @@ export const updateUser = (
 ) =>
   put<UserAccount>(
     "users/" + encodeURIComponent(username),
-    fields as Record<string, unknown>,
+    fields,
   );
 
 export const deleteUser = (username: string) =>

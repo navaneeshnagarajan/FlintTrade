@@ -401,8 +401,9 @@ function OrderPadWidget(_props: WidgetProps) {
     setLoading(true);
     try {
       const result = await placeOrder(params);
-      const orderId = (result as { orderId?: string; order_id?: string }).orderId ??
-        (result as { order_id?: string }).order_id ?? "";
+      const orderId = (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
+        (result as { order_id?: string }).order_id ??
+        (result as { orderid?: string }).orderid ?? "";
       showToast("success", `Order placed${orderId ? ` · ID: ${orderId}` : ""}`, 3000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Order failed";

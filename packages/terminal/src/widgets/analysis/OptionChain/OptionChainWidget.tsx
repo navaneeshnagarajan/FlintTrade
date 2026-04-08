@@ -130,6 +130,14 @@ function OptionChainWidget() {
     pcr,
   } = useOptionChainData(symDef, exchange);
 
+  // Clear stale LTP references when symbol or expiry changes to prevent false flash animations
+  useEffect(() => {
+    prevLtpRef.current.clear();
+    flashStateRef.current.clear();
+    flashTimersRef.current.forEach(clearTimeout);
+    flashTimersRef.current.clear();
+  }, [selectedExpiry, symDef]);
+
   // "Updated Xs ago" counter — ticks every second, resets when lastRefresh changes
   useEffect(() => {
     if (!lastRefresh) { setSecondsAgo(null); return; }
