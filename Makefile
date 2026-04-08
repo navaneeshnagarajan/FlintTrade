@@ -22,7 +22,7 @@ endif
 OPENALGO_PORT ?= 5000
 OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 
-.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check
+.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore
 
 # ======================================================================
 # Setup
@@ -146,6 +146,22 @@ sync-check: ## Check submodule upstream changes
 	@cd infra/openalgo && git fetch origin --quiet 2>/dev/null && echo "openalgo: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openalgo: not available"
 	@cd infra/algomirror && git fetch origin --quiet 2>/dev/null && echo "algomirror: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "algomirror: not available"
 	@cd infra/openclaw && git fetch origin --quiet 2>/dev/null && echo "openclaw: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openclaw: not available"
+
+# ======================================================================
+# Installation and backup
+# ======================================================================
+
+install-docker: ## Install FlintTrade with Docker (production)
+	@bash infra/install/install-docker.sh
+
+install-native: ## Install FlintTrade on bare metal (Ubuntu/Debian)
+	@bash infra/install/install-native.sh
+
+backup: ## Run restic backup of FlintTrade data
+	@bash infra/backup/backup.sh
+
+restore: ## Restore FlintTrade data from restic backup
+	@bash infra/backup/restore.sh
 
 # ======================================================================
 # Info

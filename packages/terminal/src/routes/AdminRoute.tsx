@@ -6,8 +6,8 @@
  * endpoint status, feature flags, absorption tracker, and dependencies.
  */
 
-import { useState, useEffect, type JSX } from "react";
-import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network } from "lucide-react";
+import { useState, useEffect, useRef, useCallback, type JSX } from "react";
+import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 // ---------------------------------------------------------------------------
@@ -57,11 +57,18 @@ interface AbsorptionData {
   repos: Record<string, RepoInfo>;
 }
 
+interface LogEntry {
+  timestamp: string;
+  level: "ERROR" | "WARNING" | "INFO" | "DEBUG";
+  message: string;
+  request_id?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Tab IDs
 // ---------------------------------------------------------------------------
 
-type TabId = "packages" | "widgets" | "endpoints" | "features" | "absorption" | "deps";
+type TabId = "packages" | "widgets" | "endpoints" | "features" | "absorption" | "deps" | "logs";
 
 const TABS: { id: TabId; label: string; icon: typeof Package }[] = [
   { id: "packages", label: "Packages", icon: Package },
@@ -70,6 +77,7 @@ const TABS: { id: TabId; label: string; icon: typeof Package }[] = [
   { id: "features", label: "Features", icon: Flag },
   { id: "absorption", label: "Absorption", icon: GitBranch },
   { id: "deps", label: "Dependencies", icon: Network },
+  { id: "logs", label: "Logs", icon: ScrollText },
 ];
 
 // ---------------------------------------------------------------------------
@@ -500,6 +508,268 @@ function DepsPanel(): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
+// Logs panel
+// ---------------------------------------------------------------------------
+
+type LogLevel = "ALL" | "ERROR" | "WARNING" | "INFO";
+
+const LOG_LEVEL_COLOURS: Record<LogEntry["level"], string> = {
+  ERROR:   "bg-red-500/20 text-red-400 border-red-500/30",
+  WARNING: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  INFO:    "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  DEBUG:   "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
+};
+
+const MAX_ENTRIES = 100;
+const POLL_INTERVAL_MS = 3_000;
+
+function LogLevelBadge({ level }: { level: LogEntry["level"] }): JSX.Element {
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 text-xs font-mono font-semibold rounded border ${LOG_LEVEL_COLOURS[level]}`}>
+      {level}
+    </span>
+  );
+}
+
+function LogsPanel(): JSX.Element {
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [filter, setFilter] = useState<LogLevel>("ALL");
+  const [search, setSearch] = useState("");
+  const [backendAvailable, setBackendAvailable] = useState(true);
+  const [wsConnected, setWsConnected] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const shouldAutoScroll = useRef(true);
+
+  // Append new entries, capping at MAX_ENTRIES.
+  const appendEntries = useCallback((incoming: LogEntry[]): void => {
+    setEntries((prev) => {
+      const merged = [...prev, ...incoming];
+      return merged.length > MAX_ENTRIES ? merged.slice(-MAX_ENTRIES) : merged;
+    });
+  }, []);
+
+  // WebSocket connection — primary path.
+  useEffect(() => {
+    const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ft-api/v1/logs/stream`;
+
+    let ws: WebSocket;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    function connect(): void {
+      try {
+        ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = (): void => {
+          setWsConnected(true);
+          setBackendAvailable(true);
+        };
+
+        ws.onmessage = (event: MessageEvent): void => {
+          try {
+            const entry = JSON.parse(event.data as string) as LogEntry;
+            appendEntries([entry]);
+          } catch {
+            // Ignore malformed frames.
+          }
+        };
+
+        ws.onerror = (): void => {
+          setWsConnected(false);
+        };
+
+        ws.onclose = (): void => {
+          setWsConnected(false);
+          wsRef.current = null;
+          // Retry after 5 s if the component is still mounted.
+          retryTimeout = setTimeout(connect, 5_000);
+        };
+      } catch {
+        setWsConnected(false);
+      }
+    }
+
+    connect();
+
+    return (): void => {
+      if (retryTimeout !== null) clearTimeout(retryTimeout);
+      if (wsRef.current) {
+        wsRef.current.onclose = null; // Prevent retry loop on unmount.
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [appendEntries]);
+
+  // Polling fallback — used when WebSocket is not connected.
+  useEffect(() => {
+    if (wsConnected) return;
+
+    let cancelled = false;
+
+    async function poll(): Promise<void> {
+      try {
+        const res = await fetch("/ft-api/v1/logs/recent");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as { entries: LogEntry[] };
+        if (!cancelled) {
+          setBackendAvailable(true);
+          setEntries(data.entries.slice(-MAX_ENTRIES));
+        }
+      } catch {
+        if (!cancelled) setBackendAvailable(false);
+      }
+    }
+
+    void poll();
+    const id = setInterval(() => { void poll(); }, POLL_INTERVAL_MS);
+
+    return (): void => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [wsConnected]);
+
+  // Auto-scroll to bottom when entries change.
+  useEffect(() => {
+    if (!shouldAutoScroll.current) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [entries]);
+
+  const handleScroll = (): void => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    shouldAutoScroll.current = atBottom;
+  };
+
+  const filtered = entries.filter((e) => {
+    if (filter !== "ALL" && e.level !== filter) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (
+        e.message.toLowerCase().includes(q) ||
+        (e.request_id?.toLowerCase().includes(q) ?? false)
+      );
+    }
+    return true;
+  });
+
+  const FILTER_LEVELS: LogLevel[] = ["ALL", "ERROR", "WARNING", "INFO"];
+
+  return (
+    <div className="space-y-3">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Level filter buttons */}
+        <div className="flex items-center gap-1">
+          {FILTER_LEVELS.map((lvl) => (
+            <button
+              key={lvl}
+              type="button"
+              onClick={() => setFilter(lvl)}
+              className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+                filter === lvl
+                  ? "bg-accent/20 text-accent border-accent/40"
+                  : "bg-surface-elevated text-text-secondary border-border hover:text-text-primary hover:border-border-default"
+              }`}
+            >
+              {lvl}
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <div className="relative flex-1 min-w-40 max-w-72">
+          <input
+            type="search"
+            placeholder="Search logs…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full h-7 pl-2.5 pr-7 text-xs rounded border border-border bg-surface-elevated text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+              aria-label="Clear search"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        {/* Status indicator */}
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">
+          <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-emerald-400" : backendAvailable ? "bg-amber-400" : "bg-red-400"}`} />
+          {wsConnected ? "Live" : backendAvailable ? "Polling" : "Unavailable"}
+        </span>
+
+        {/* Entry count */}
+        <span className="text-xs font-mono text-text-muted">
+          {filtered.length}/{entries.length}
+        </span>
+      </div>
+
+      {/* Log container */}
+      {!backendAvailable && entries.length === 0 ? (
+        <div className="rounded-lg border border-border bg-surface-card p-6 text-center text-sm text-text-muted">
+          Backend unavailable. Ensure the FlintTrade backend is running on port 5001.
+        </div>
+      ) : (
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="h-130 overflow-y-auto rounded-lg border border-border bg-surface-card font-mono text-xs"
+          role="log"
+          aria-live="polite"
+          aria-label="Live log viewer"
+        >
+          {filtered.length === 0 ? (
+            <p className="p-4 text-text-muted text-center">No log entries match the current filter.</p>
+          ) : (
+            <table className="w-full border-collapse">
+              <thead className="sticky top-0 bg-surface-elevated z-10">
+                <tr className="border-b border-border text-left text-text-secondary">
+                  <th className="py-1.5 px-3 font-medium w-36">Timestamp</th>
+                  <th className="py-1.5 px-3 font-medium w-24">Level</th>
+                  <th className="py-1.5 px-3 font-medium">Message</th>
+                  <th className="py-1.5 px-3 font-medium w-28">Request ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((entry, idx) => (
+                  <tr
+                    key={`${entry.timestamp}-${idx}`}
+                    className="border-b border-border/40 hover:bg-surface-hover align-top"
+                  >
+                    <td className="py-1 px-3 text-text-muted whitespace-nowrap">
+                      {entry.timestamp.length > 19
+                        ? entry.timestamp.slice(11, 19)
+                        : entry.timestamp}
+                    </td>
+                    <td className="py-1 px-3">
+                      <LogLevelBadge level={entry.level} />
+                    </td>
+                    <td className="py-1 px-3 text-text-primary break-all">{entry.message}</td>
+                    <td className="py-1 px-3 text-text-muted truncate max-w-28">
+                      {entry.request_id ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main AdminRoute component
 // ---------------------------------------------------------------------------
 
@@ -525,6 +795,8 @@ export default function AdminRoute(): JSX.Element {
         return <AbsorptionPanel />;
       case "deps":
         return <DepsPanel />;
+      case "logs":
+        return <LogsPanel />;
     }
   };
 

@@ -1,23 +1,62 @@
-# Standalone OpenAlgo Service (alternative to flinttrade.service)
-# Use this if you want to run OpenAlgo independently of FlintTrade
+# =============================================================================
+# OpenAlgo Service — systemd unit
+# =============================================================================
+#
+# Broker gateway (31 brokers), REST API on port 5000, WebSocket on port 8765.
+# Both processes run under a single service using a wrapper script.
 #
 # INSTALL:
-#   1. Edit this file — replace REPLACE_USER and REPLACE_DIR
-#   2. sudo cp openalgo.service /etc/systemd/system/
-#   3. sudo systemctl daemon-reload && sudo systemctl enable openalgo
+#   1. sudo cp openalgo.service /etc/systemd/system/
+#   2. sudo systemctl daemon-reload
+#   3. sudo systemctl enable openalgo
+#   4. sudo systemctl start openalgo
+#
+# LOGS:    journalctl -u openalgo -f
+# STATUS:  sudo systemctl status openalgo
+# RESTART: sudo systemctl restart openalgo
+# =============================================================================
 
 [Unit]
-Description=OpenAlgo Trading API
+Description=OpenAlgo Trading API (broker gateway + WebSocket)
+Documentation=https://openalgo.in
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=REPLACE_USER
-WorkingDirectory=REPLACE_DIR/infra/openalgo
-EnvironmentFile=REPLACE_DIR/infra/openalgo/.env
-ExecStart=/usr/bin/gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app
-Restart=on-failure
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/flinttrade/infra/openalgo
+
+# Load OpenAlgo-specific environment (broker credentials, database config)
+EnvironmentFile=/opt/flinttrade/infra/openalgo/.env
+
+# Gunicorn with eventlet — single worker, binds to localhost only
+# The WebSocket server (port 8765) is started by OpenAlgo's app internally.
+ExecStart=/opt/flinttrade/infra/openalgo/.venv/bin/gunicorn \
+    --worker-class eventlet \
+    -w 1 \
+    --bind 127.0.0.1:5000 \
+    --timeout 120 \
+    --graceful-timeout 30 \
+    --access-logfile - \
+    --error-logfile - \
+    app:app
+
+# Restart policy — always restart with a brief cooldown
+Restart=always
 RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/flinttrade/infra/openalgo/db
+PrivateTmp=true
+
+# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=openalgo

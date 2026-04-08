@@ -11,6 +11,25 @@ import AppLayout from "./routes/AppLayout";
 import { useAuthGuard } from "./hooks/useAuthGuard";
 import "./index.css";
 
+// ---------------------------------------------------------------------------
+// Glitchtip error tracking — Sentry SDK compatible (MIT).
+// DSN is empty in dev (no error reporting). Set VITE_GLITCHTIP_DSN in production.
+// ---------------------------------------------------------------------------
+const glitchtipDsn = import.meta.env.VITE_GLITCHTIP_DSN as string | undefined;
+if (glitchtipDsn) {
+  // Dynamic import so the Sentry bundle is excluded entirely when no DSN is set.
+  import("@sentry/react").then((Sentry) => {
+    Sentry.init({
+      dsn: glitchtipDsn,
+      integrations: [Sentry.browserTracingIntegration()],
+      tracesSampleRate: 0.1,
+      environment: import.meta.env.DEV ? "development" : "production",
+    });
+  }).catch(() => {
+    // Silently ignore — error tracking must never break the app.
+  });
+}
+
 const TerminalRoute = lazy(() => import("./routes/TerminalRoute"));
 const SetupRoute = lazy(() => import("./routes/SetupRoute"));
 const SetupAccountRoute = lazy(() => import("./routes/SetupAccountRoute"));

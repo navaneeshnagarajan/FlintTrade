@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 import signal
 import sys
 import threading
@@ -26,7 +27,13 @@ if _REPO_ROOT not in sys.path:
 
 import time  # noqa: E402
 
+import structlog  # noqa: E402
 from flask import Flask, jsonify, request  # noqa: E402
+from flask_cors import CORS  # noqa: E402
+from flask_limiter import Limiter  # noqa: E402
+from flask_limiter.util import get_remote_address  # noqa: E402
+import sentry_sdk  # noqa: E402
+from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 
 from packages.core.src.config import Settings  # noqa: E402
 from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: E402
@@ -134,6 +141,72 @@ def create_flask_app(
     """
     app = Flask(__name__)
 
+    # ------------------------------------------------------------------
+    # Structured logging — structlog with JSON output in production,
+    # coloured console output in debug/dev mode.
+    # ------------------------------------------------------------------
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.StackInfoRenderer(),
+            structlog.dev.set_exc_info,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.JSONRenderer()
+            if not app.debug
+            else structlog.dev.ConsoleRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    # ------------------------------------------------------------------
+    # CORS — allow requests from the Vite dev server and any origins
+    # configured via the CORS_ORIGINS environment variable.
+    # ------------------------------------------------------------------
+    CORS(
+        app,
+        origins=os.environ.get(
+            "CORS_ORIGINS", "http://127.0.0.1:5173"
+        ).split(","),
+        methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=[
+            "Content-Type",
+            "X-API-Key",
+            "X-FlintTrade-Mode",
+            "Authorization",
+        ],
+    )
+
+    # ------------------------------------------------------------------
+    # Rate limiting — 50 req/s default; tighter limits applied per-route
+    # via @limiter.limit() on individual blueprints/views.
+    # ------------------------------------------------------------------
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=["50 per second"],
+        storage_uri="memory://",
+    )
+    app.config["LIMITER"] = limiter
+
+    # ------------------------------------------------------------------
+    # Error tracking — Sentry SDK pointing at a Glitchtip instance (MIT).
+    # Only initialised when GLITCHTIP_DSN is set in the environment; safe
+    # to leave unset in development.
+    # ------------------------------------------------------------------
+    _glitchtip_dsn = os.environ.get("GLITCHTIP_DSN", "")
+    if _glitchtip_dsn:
+        sentry_sdk.init(
+            dsn=_glitchtip_dsn,
+            integrations=[FlaskIntegration()],
+            traces_sample_rate=0.1,
+            environment="production" if not app.debug else "development",
+        )
+        logger.info("Glitchtip error tracking initialised")
+
     # Store injected instances on app.config so endpoint closures can access them
     app.config["SAFETY"] = safety
     app.config["SCHEDULER"] = scheduler
@@ -146,14 +219,12 @@ def create_flask_app(
         registry = BrokerRegistry()
 
     if credential_store is None:
-        import secrets as _secrets  # noqa: PLC0415
-
         flinttrade_dir = Path.home() / ".flinttrade"
         flinttrade_dir.mkdir(exist_ok=True)
         master_password = os.environ.get("MASTER_PASSWORD", "")
         if not master_password:
             if os.environ.get("FLINTTRADE_DEV") or app.debug or "pytest" in sys.modules:
-                master_password = _secrets.token_urlsafe(32)
+                master_password = secrets.token_urlsafe(32)
                 logger.warning(
                     "MASTER_PASSWORD not set — generated random password for this session. "
                     "Set MASTER_PASSWORD env var for persistent credential storage across restarts."
@@ -301,6 +372,34 @@ def create_flask_app(
         "/v1/auth/",          # Auth endpoints are public (login, setup, status)
         "/v1/auth/callback",
     )
+
+    @app.before_request
+    def _bind_request_context() -> None:
+        """Bind per-request fields into the structlog context variable store.
+
+        Attaches a unique request ID (from the X-Request-ID header, or a
+        freshly generated hex token), the HTTP method, and the path so that
+        every log line emitted during this request carries them automatically.
+        """
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(
+            request_id=request.headers.get(
+                "X-Request-ID", secrets.token_hex(8)
+            ),
+            method=request.method,
+            path=request.path,
+        )
+
+    @app.after_request
+    def _log_request(response: Any) -> Any:
+        """Emit a structured log line for every completed HTTP response."""
+        _req_log = structlog.get_logger()
+        _req_log.info(
+            "request",
+            status=response.status_code,
+            content_length=response.content_length,
+        )
+        return response
 
     @app.before_request
     def require_auth() -> Any:
@@ -512,11 +611,10 @@ class FlintTradeApp:
         # Gateway — broker registry + credential store + contract manager
         flinttrade_dir = Path.home() / ".flinttrade"
         flinttrade_dir.mkdir(exist_ok=True)
-        import secrets as _secrets  # noqa: PLC0415
         master_password = os.environ.get("MASTER_PASSWORD", "")
         if not master_password:
             if os.environ.get("FLINTTRADE_DEV") or "pytest" in sys.modules:
-                master_password = _secrets.token_urlsafe(32)
+                master_password = secrets.token_urlsafe(32)
                 logger.warning(
                     "MASTER_PASSWORD not set — generated random password for this session. "
                     "Set MASTER_PASSWORD env var for persistent credential storage across restarts."

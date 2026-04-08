@@ -9,6 +9,7 @@
 import { Component } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { LogoIcon } from "@/components/brand/Logo";
+import { reportError } from "@/services/errorReporter";
 
 interface Props {
   children: ReactNode;
@@ -32,6 +33,16 @@ export class ErrorBoundary extends Component<Props, State> {
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[ErrorBoundary] Uncaught render error:", error, info.componentStack);
+
+    // Report to Glitchtip via backend and Sentry SDK (if DSN configured).
+    void reportError(error, { componentStack: info.componentStack ?? undefined, boundary: "ErrorBoundary" });
+
+    // Forward to Sentry SDK when it has been initialised.
+    if (import.meta.env.VITE_GLITCHTIP_DSN) {
+      import("@sentry/react").then((Sentry) => {
+        Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
+      }).catch(() => undefined);
+    }
   }
 
   private handleReload = (): void => {

@@ -1,55 +1,282 @@
-version: "3.9"
+# =============================================================================
+# FlintTrade Docker Compose — Production Deployment
+# =============================================================================
+#
+# Usage:
+#   docker compose up -d                  # start all services
+#   docker compose up -d --build          # rebuild and start
+#   docker compose logs -f flinttrade     # follow FlintTrade logs
+#   docker compose down                   # stop all services
+#
+# Architecture:
+#   Nginx (80/443) → React static files + reverse proxy to backend services
+#   OpenAlgo (5000/8765) → Broker gateway + WebSocket market data
+#   FlintTrade (5100) → Platform backend (strategy engine, screener, AI)
+#   Monitoring stack → Uptime Kuma, Glitchtip, VictoriaLogs, Netdata
+#
+# All internal services bind to 127.0.0.1 only. Nginx is the sole entry point.
+# =============================================================================
 
 services:
+
+  # ---------------------------------------------------------------------------
+  # OpenAlgo — Broker gateway (31 brokers), REST API + WebSocket
+  # ---------------------------------------------------------------------------
   openalgo:
-    image: python:3.11-slim
+    image: python:3.12-slim
+    container_name: flinttrade-openalgo
     working_dir: /app
     volumes:
-      - ./infra/openalgo:/app
+      - ./infra/openalgo:/app:ro
       - openalgo_data:/app/db
     command: >
-      bash -c "pip install -r requirements.txt -q &&
-               python app.py"
+      bash -c "pip install -r requirements.txt --quiet &&
+               gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app &
+               python websocket_server.py &
+               wait"
     ports:
-      - "5000:5000"
-      - "8765:8765"
-    env_file: .env
+      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:8765:8765"
+    env_file:
+      - .env
+      - ./infra/openalgo/.env
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/v1/ping"]
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/api/v1/ping"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
+    networks:
+      - flinttrade
 
+  # ---------------------------------------------------------------------------
+  # FlintTrade — Platform backend (strategy engine, screener, AI, data)
+  # ---------------------------------------------------------------------------
   flinttrade:
     image: python:3.12-slim
+    container_name: flinttrade-backend
     working_dir: /app
     volumes:
-      - .:/app
-      - audit_data:/data/flinttrade/audit
-    command: python packages/core/src/app.py
+      - .:/app:ro
+      - flinttrade_data:/data/flinttrade
+      - flinttrade_workspace:/root/.flinttrade
+    command: >
+      bash -c "pip install -r requirements.txt --quiet &&
+               gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5100 'packages.core.src.app:app'"
     ports:
-      - "5001:5001"
+      - "127.0.0.1:5100:5100"
     env_file: .env
     environment:
-      - AUDIT_LOG_DIR=/data/flinttrade/audit
+      - FLINTTRADE_DEV=0
+      - FLINTTRADE_PORT=5100
+      - OPENBLAS_NUM_THREADS=2
+      - OMP_NUM_THREADS=2
     depends_on:
       openalgo:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5100/ft-api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - flinttrade
 
+  # ---------------------------------------------------------------------------
+  # Terminal — Build React static files (builder only, no runtime container)
+  # Nginx serves the built dist/ directory.
+  # ---------------------------------------------------------------------------
   terminal:
     image: node:22-alpine
+    container_name: flinttrade-terminal-builder
     working_dir: /app
     volumes:
       - ./packages/terminal:/app
-    command: sh -c "npm install && npm run dev -- --host --port 5173"
-    ports:
-      - "5173:5173"
-    depends_on:
+      - terminal_dist:/app/dist
+      - terminal_node_modules:/app/node_modules
+    command: sh -c "npm ci --silent && npm run build"
+    environment:
+      - NODE_ENV=production
+    restart: "no"
+    networks:
       - flinttrade
-    restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Nginx — Reverse proxy and static file server (sole public entry point)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: flinttrade-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/flinttrade.conf:/etc/nginx/conf.d/default.conf:ro
+      - terminal_dist:/var/www/flinttrade/dist:ro
+      - nginx_logs:/var/log/nginx
+      # Uncomment when SSL certificates are provisioned:
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      terminal:
+        condition: service_completed_successfully
+      flinttrade:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - flinttrade
+
+  # ---------------------------------------------------------------------------
+  # Uptime Kuma — Uptime monitoring dashboard
+  # Internal only (proxied via Nginx at /monitoring/)
+  # ---------------------------------------------------------------------------
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: flinttrade-uptime-kuma
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - uptime_kuma_data:/app/data
+    restart: unless-stopped
+    networks:
+      - flinttrade
+
+  # ---------------------------------------------------------------------------
+  # Glitchtip — Error tracking (Sentry-compatible, MIT licence)
+  # Internal only (proxied via Nginx at /errors/)
+  # Requires PostgreSQL for storage + Celery worker for async processing
+  # ---------------------------------------------------------------------------
+  glitchtip:
+    image: glitchtip/glitchtip:latest
+    container_name: flinttrade-glitchtip
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      glitchtip-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://glitchtip:glitchtip@glitchtip-db:5432/glitchtip
+      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:-change-me-in-production}"
+      PORT: "8000"
+      GLITCHTIP_DOMAIN: "http://127.0.0.1:8000"
+    restart: unless-stopped
+    networks:
+      - flinttrade
+
+  glitchtip-worker:
+    image: glitchtip/glitchtip:latest
+    container_name: flinttrade-glitchtip-worker
+    command: bin/run-celery-with-beat.sh
+    depends_on:
+      glitchtip-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://glitchtip:glitchtip@glitchtip-db:5432/glitchtip
+      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:-change-me-in-production}"
+    restart: unless-stopped
+    networks:
+      - flinttrade
+
+  glitchtip-db:
+    image: postgres:16-alpine
+    container_name: flinttrade-glitchtip-db
+    volumes:
+      - glitchtip_pg:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: glitchtip
+      POSTGRES_PASSWORD: glitchtip
+      POSTGRES_DB: glitchtip
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U glitchtip"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - flinttrade
+
+  # ---------------------------------------------------------------------------
+  # VictoriaLogs — Log aggregation and search
+  # Internal only (proxied via Nginx at /logs/)
+  # ---------------------------------------------------------------------------
+  victorialogs:
+    image: victoriametrics/victoria-logs:latest
+    container_name: flinttrade-victorialogs
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - victorialogs_data:/victoria-logs-data
+    command:
+      - "-storageDataPath=/victoria-logs-data"
+      - "-httpListenAddr=:9090"
+    restart: unless-stopped
+    networks:
+      - flinttrade
+
+  # ---------------------------------------------------------------------------
+  # Netdata — Real-time system performance monitoring
+  # Internal only (proxied via Nginx at /metrics/)
+  # ---------------------------------------------------------------------------
+  netdata:
+    image: netdata/netdata:latest
+    container_name: flinttrade-netdata
+    ports:
+      - "127.0.0.1:19999:19999"
+    volumes:
+      - netdata_config:/etc/netdata
+      - netdata_lib:/var/lib/netdata
+      - netdata_cache:/var/cache/netdata
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
+    restart: unless-stopped
+    networks:
+      - flinttrade
+
+# =============================================================================
+# Named volumes — persistent data across container restarts
+# =============================================================================
 volumes:
   openalgo_data:
-  audit_data:
+    name: flinttrade_openalgo_data
+  flinttrade_data:
+    name: flinttrade_platform_data
+  flinttrade_workspace:
+    name: flinttrade_workspace
+  terminal_dist:
+    name: flinttrade_terminal_dist
+  terminal_node_modules:
+    name: flinttrade_terminal_node_modules
+  nginx_logs:
+    name: flinttrade_nginx_logs
+  uptime_kuma_data:
+    name: flinttrade_uptime_kuma_data
+  glitchtip_pg:
+    name: flinttrade_glitchtip_pg
+  victorialogs_data:
+    name: flinttrade_victorialogs_data
+  netdata_config:
+    name: flinttrade_netdata_config
+  netdata_lib:
+    name: flinttrade_netdata_lib
+  netdata_cache:
+    name: flinttrade_netdata_cache
+
+# =============================================================================
+# Internal network — all services communicate over this bridge
+# =============================================================================
+networks:
+  flinttrade:
+    name: flinttrade
+    driver: bridge

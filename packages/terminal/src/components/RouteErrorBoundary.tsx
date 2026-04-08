@@ -9,6 +9,7 @@
 import { Component } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { LogoIcon } from "@/components/brand/Logo";
+import { reportError } from "@/services/errorReporter";
 
 interface Props {
   children: ReactNode;
@@ -31,11 +32,23 @@ export class RouteErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error(
-      `[RouteErrorBoundary] ${this.props.routeName ?? "Route"} crashed:`,
-      error,
-      info.componentStack,
-    );
+    const routeName = this.props.routeName ?? "Route";
+    console.error(`[RouteErrorBoundary] ${routeName} crashed:`, error, info.componentStack);
+
+    // Report to Glitchtip via backend and Sentry SDK (if DSN configured).
+    void reportError(error, {
+      route: routeName,
+      componentStack: info.componentStack ?? undefined,
+      boundary: "RouteErrorBoundary",
+    });
+
+    if (import.meta.env.VITE_GLITCHTIP_DSN) {
+      import("@sentry/react").then((Sentry) => {
+        Sentry.captureException(error, {
+          extra: { route: routeName, componentStack: info.componentStack },
+        });
+      }).catch(() => undefined);
+    }
   }
 
   private handleReload = (): void => {
