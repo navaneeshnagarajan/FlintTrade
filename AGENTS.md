@@ -6,14 +6,14 @@
 
 ## What This Is
 
-Open-source modular trading platform for Indian F&O, commodities, crypto.
-Built on OpenAlgo (31 broker gateway). 15 packages (13 Python + 1 Rust/PyO3 + 1 React), monorepo, AGPL-3.0.
-Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.3.0
+Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
+Built on OpenAlgo (33 broker gateway). 16 packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri), monorepo, AGPL-3.0.
+Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.5.0-dev
 
 ## Architecture
 
 - FlintTrade sits ON TOP of OpenAlgo (never modifies it)
-- OpenAlgo: broker connections (30+ brokers), REST port 5000, WS port 8765
+- OpenAlgo: broker connections (33 brokers), REST port 5000, WS port 8765
 - FlintTrade: terminal, strategies, backtest, AI, data, screener, multi-account
 - Submodules: `infra/openalgo`, `infra/algomirror`, `infra/openclaw`
 
@@ -26,16 +26,19 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.3.0
 
 ## Packages
 
-**Python (13):** gateway, core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, indicators, tick-engine (PyO3 bindings)
+**Python (12):** gateway, core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, indicators
 **Rust/PyO3 (1):** tick-engine (high-performance tick processing, Python bindings via PyO3)
 **React (1):** terminal (5173)
+**Chrome Extension (1):** chrome-extension (quick order entry from any browser tab)
+**Desktop (1):** desktop (Tauri native shell wrapping the React terminal)
 
-## Current State (v0.3.0, 2026-03-30)
+## Current State (v0.5.0-dev)
 
-- 3,965 tests passing (2,903 Python + 1,062 terminal)
-- Terminal: 30 widgets (TSX), 6 tools, 13 routes, 6 workspace presets, 6 themes (Graphite default)
+- 5,600+ tests passing (3,900+ Python + 1,696 terminal)
+- Terminal: 30 widgets (TSX), 7 tools, 13 routes, 6 workspace presets, 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
+- Mode system: 3 modes (Explore/Practice/Live) with server-side order enforcement
+- Auth: argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry
 - 101 backtest strategies across 16 categories
-- v0.3.0 "Structured Calm" UI: ContentShell centering, 4-level surfaces, react-resizable-panels
 - 20 FlintTrade backend endpoints, 100% OpenAlgo API coverage (45+ endpoints)
 - Read PLAN.md for next tasks
 

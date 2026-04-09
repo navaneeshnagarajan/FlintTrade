@@ -4,22 +4,22 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-5312%2B%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-5600%2B%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
 ![Status](https://img.shields.io/badge/status-v0.5.0--dev-blue)
 
-> **v0.5.0-dev** — 20-wave feature sprint complete. Multi-agent AI, FinRL, signals pipeline, MCX, Pine Script editor, desktop app, Chrome extension, bracket orders, FII/DII tracker, fundamental screener, RRG, and more.
-> 101 strategies, 30 widgets, 17 packages, 13 routes, 5,312+ tests.
+> **v0.5.0-dev** — 23-wave feature sprint complete. Multi-agent AI, FinRL, signals pipeline, MCX, Pine Script editor, desktop app, Chrome extension, bracket orders, FII/DII tracker, fundamental screener, RRG, and more.
+> 101 strategies, 30 widgets + 7 tools, 16 packages, 13 routes, 5,600+ tests.
 
-Open-source modular trading platform for Indian markets with direct broker connections. Built on [OpenAlgo](https://openalgo.in) adapters. Supports 31 brokers, equities, F&O, commodities, currency derivatives, and crypto.
+Open-source modular trading platform for Indian markets with direct broker connections. Built on [OpenAlgo](https://openalgo.in) adapters. Supports 33 brokers, equities, F&O, commodities, currency derivatives, and crypto.
 
 ## What is FlintTrade?
 
-FlintTrade is a self-hosted trading platform with direct broker connections via the gateway package (31 brokers, adapter pattern) and OpenAlgo compatibility. FlintTrade handles strategy execution, risk management, backtesting, real-time analysis, AI-powered signals, and multi-account orchestration.
+FlintTrade is a self-hosted trading platform with direct broker connections via the gateway package (33 brokers, adapter pattern) and OpenAlgo compatibility. FlintTrade handles strategy execution, risk management, backtesting, real-time analysis, AI-powered signals, and multi-account orchestration.
 
-The platform is organized into 17 independent packages (13 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
+The platform is organised into 16 independent packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri). Use what you need — the option chain screener doesn't require the AI module, and the backtester doesn't require a live broker connection. Each package has its own source, tests, and documentation.
 
 FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a platform you run on your own hardware, with your own broker accounts, under your own control. It's designed for SEBI-compliant algorithmic trading in India.
 
@@ -49,19 +49,19 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 │                     │                                │
 │  ┌──────────┐ ┌─────┴────┐ ┌──────────┐             │
 │  │automation│ │integratn │ │ gateway  │  Broker      │
-│  │  cron    │ │ webhooks │ │ 31 broker│  gateway     │
+│  │  cron    │ │ webhooks │ │ 33 broker│  gateway     │
 │  │ telegram │ │ flow     │ │ adapters │  & auth      │
 │  └──────────┘ └──────────┘ └──────────┘             │
 └────────────────────┬─────────────────────────────────┘
                      │ REST API + WebSocket
               ┌──────┴──────┐
               │   OpenAlgo  │  Managed service (port 5000)
-              │  31 brokers │  (or direct via gateway)
+              │  33 brokers │  (or direct via gateway)
               └──────┬──────┘
                      │
               ┌──────┴──────┐
               │  Your Broker │  Dhan, Zerodha, Angel, Fyers,
-              │   Account    │  Kotak, Upstox, Delta, 25+ more
+              │   Account    │  Kotak, Upstox, Delta, 27+ more
               └─────────────┘
 ```
 
@@ -69,7 +69,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 
 | Module | Description | Status |
 |--------|-------------|--------|
-| **gateway** | Direct broker connections (31 brokers), adapter pattern, encrypted credentials | ✅ Built |
+| **gateway** | Direct broker connections (33 brokers), adapter pattern, encrypted credentials | ✅ Built |
 | **core** | OpenAlgo API client (45+ endpoints), config, models | ✅ Built |
 | **engine** | Strategy execution, order routing, 5-layer safety system | ✅ Built |
 | **data** | Tick capture, trade logs, DuckDB storage, SEBI audit trail | ✅ Built |
@@ -90,24 +90,24 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 ## Current State
 
 **What works:**
-- 17 packages (13 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri) with **5,312+ passing tests** (3,700+ Python + 1,612+ terminal)
+- 16 packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri) with **5,600+ passing tests** (3,900+ Python + 1,696 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
 - 101 backtest strategy templates with walk-forward optimizer
 - React terminal with Dockview widget-composable workspace and 6 preset templates
-- 20+ FlintTrade backend endpoints (backtest, signals, sentiment, RAG, cron, audit, safety, screener, IPO, MF)
+- 20+ FlintTrade backend endpoints (backtest, signals, sentiment, RAG, cron, audit, safety, screener, IPO, MF, users)
 - Docker production config (multi-stage, uv, tini, non-root)
 
 **What's complete:**
 - TypeScript strict mode migration (zero JSX/JS files remain)
-- Dockview v5.1 widget-composable workspace with 30 widgets + 6 tools
+- Dockview v5.1 widget-composable workspace with 30 widgets + 7 tools
 - 13 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /ditto, /admin, 404
 - State architecture: Zustand 5 + Jotai + TanStack Query 5
 - Cinematic welcome (/welcome), Explore mode (/explore), Setup wizard (/setup)
 - Investor dashboard (/invest) with Mutual Fund explorer, IPO tracker, SIP calculator
 - Strategy Lab (/lab) with Pine Script editor, Automation Hub (/automate), AI Centre (/ai)
-- 6 cinematic themes with dark/light variants (Graphite, Midnight, Arctic Frost, Monochrome, Solarized Dark, Light)
+- 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
 - 3 UI libraries: Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
 - Full accessibility: WCAG AA landmarks, skip nav, ARIA tabs, reduced-motion support
 - 100% OpenAlgo API coverage (45+ endpoints wired to UI)
@@ -145,7 +145,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 3,700+ tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 3,900+ tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -162,11 +162,11 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 17 packages, 5,312+ tests, CI | ✅ Complete |
+| Foundation | Monorepo, 16 packages, 5,600+ tests, CI | ✅ Complete |
 | Infrastructure | Makefile, systemd, Docker (multi-stage, uv, tini), deploy scripts, submodules synced | ✅ Complete |
 | Live Connection | OpenAlgo sandbox trading, WebSocket data + batch subscribe, REST fallback | ✅ Complete |
-| Terminal UI | 30 widgets, 6 tools, 13 routes, Dockview v5.1, 6 presets | ✅ Complete |
-| Full-Stack Wiring | 20+ backend endpoints, all routes functional, 6 themes | ✅ Complete |
+| Terminal UI | 30 widgets, 7 tools, 13 routes, Dockview v5.1, 6 presets | ✅ Complete |
+| Full-Stack Wiring | 20+ backend endpoints, all routes functional, 3 canonical themes | ✅ Complete |
 | UI/UX Polish | Accessibility, animations, responsive, error handling | ✅ Complete |
 | Feature Sprint | Signals, MCX, Pine Script, MF, IPO, Chrome ext, Desktop, multi-user, FinRL | ✅ Complete |
 | AI & Analysis | Multi-agent AI, risk debate, ensemble selector, FII/DII, RRG, fundamental screener | ✅ Complete |

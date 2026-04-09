@@ -20,7 +20,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - FinRL reinforcement learning: rl_environment.py + rl_trainer.py + rl_features.py
 - OpenClaw bridge: openclaw_bridge.py in both ai and automation packages + routes
 
-### Added — Features (Waves 10-20)
+### Added — Features (Waves 10-23)
 - Multi-agent AI team: MiroFish + TradingAgents architecture (multi_agent.py)
 - Risk debate: multi-perspective risk assessment engine (risk_debate.py)
 - Ensemble selector: strategy ensemble voting system (ensemble_selector.py)
@@ -65,7 +65,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - AutomateRoute tests (3): heading, section tabs, sidebar rendering
 - DittoRoute tests (10): header, tabs, accounts table, mirror tab, risk tab, error handling
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
-- Total terminal tests: 1,612+ (Vitest) | Python tests: 3,700+ (pytest) = 5,312+ total
+- Total terminal tests: 1,696 (Vitest, 168 files) | Python tests: 3,900+ (pytest) = 5,600+ total
 
 ### Fixed — Security
 - JWT revocation: token blacklist on logout and password change

@@ -4,7 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.3.x | :white_check_mark: Current development |
+| 0.5.x | :white_check_mark: Current development |
+| 0.4.x | :white_check_mark: Supported |
+| 0.3.x | :x: End of life |
 
 ## Reporting a Vulnerability
 

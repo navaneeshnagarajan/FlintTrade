@@ -17,7 +17,7 @@ dist/
 build/
 .venv/
 venv/
-.pytest_cache/
+**/.pytest_cache/
 .coverage
 htmlcov/
 .mypy_cache/
@@ -75,7 +75,6 @@ bugs/
 
 # === Internal dev docs (stay in root for AI tools, hidden from public) ===
 DEVLOG.md
-PLAN.md
 SOP.md
 REPOS.md
 packages/*/CLAUDE.md

@@ -580,7 +580,7 @@ Based on this research, here is the complete universe of features FlintTrade cou
 | **Paper trading seamlessly integrated with live** | IBKR PaperTrader/OptionX | Toggle between paper and live in same workspace |
 | **Strategy marketplace** | Tradetron/MT5/QuantConnect | Buy/sell/share strategies with transparent performance |
 | **Net worth dashboard** | INDmoney/Bloomberg | All assets (stocks + MF + FD + property + gold) in one view |
-| **30+ broker support via OpenAlgo** | AlgoTest (60 brokers) | Broker-agnostic platform, no lock-in |
+| **33 broker support via OpenAlgo** | AlgoTest (60 brokers) | Broker-agnostic platform, no lock-in |
 | **Free education integrated** | Zerodha Varsity/ToS | Learn while you trade, contextual education |
 
 ### Tier 2: Trading Power (what active traders demand)

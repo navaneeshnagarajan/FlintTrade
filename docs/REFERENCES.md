@@ -6,7 +6,7 @@
 
 | Project | Repository | License | Used In |
 |---|---|---|---|
-| [OpenAlgo](https://openalgo.in) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | AGPL-3.0 | Broker gateway (30+ brokers) |
+| [OpenAlgo](https://openalgo.in) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | AGPL-3.0 | Broker gateway (33 brokers) |
 | [AlgoMirror](https://github.com/marketcalls/algomirror) | marketcalls/algomirror | AGPL-3.0 | Multi-account mirroring patterns |
 | [OpenClaw](https://github.com/openclaw/openclaw) | openclaw/openclaw | MIT | AI agent framework |
 | [FastScalper](https://github.com/marketcalls/fastscalper-tauri) | marketcalls/fastscalper-tauri | — | Scalper UI patterns |

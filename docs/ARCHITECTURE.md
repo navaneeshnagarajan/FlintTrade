@@ -18,7 +18,7 @@
                      │ REST API + WebSocket
               ┌──────┴───────┐
               │   OpenAlgo   │ infra/openalgo/ (git submodule)
-              │  30+ brokers │
+              │  33 brokers  │
               └──────────────┘
 ```
 

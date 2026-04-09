@@ -312,7 +312,7 @@
 
 **India-specific context:** SEBI's Feb 2025 circular: all algos must have unique Algo ID, exchange approval (or generic tag), audit trails, kill switches. Algo providers must be empaneled with exchanges. Brokers must enforce static-IP, OAuth/2FA. This is a major shift that impacts every retail algo trader.
 
-**How FlintTrade could serve them:** /automate route for strategy deployment. Visual flow builder. /lab for backtesting. Strategy marketplace. SEBI Algo ID compliance. Kill switch controls. Multi-broker execution via OpenAlgo (31 brokers). Performance monitoring. Audit trail for SEBI compliance.
+**How FlintTrade could serve them:** /automate route for strategy deployment. Visual flow builder. /lab for backtesting. Strategy marketplace. SEBI Algo ID compliance. Kill switch controls. Multi-broker execution via OpenAlgo (33 brokers). Performance monitoring. Audit trail for SEBI compliance.
 
 ---
 
@@ -672,7 +672,7 @@
 
 **India-specific context:** Full-service brokers dominated until 2015. Zerodha disrupted with flat Rs 20/order model. Full-service brokers still hold significant HNI/institutional client base. Many now offer discount brokerage alongside full-service.
 
-**How FlintTrade could serve them:** FlintTrade sits on top of OpenAlgo which supports 31 brokers. Brokers could potentially white-label FlintTrade as their trading platform. The analytics and AI features could differentiate their offering.
+**How FlintTrade could serve them:** FlintTrade sits on top of OpenAlgo which supports 33 brokers. Brokers could potentially white-label FlintTrade as their trading platform. The analytics and AI features could differentiate their offering.
 
 ---
 
@@ -686,7 +686,7 @@
 
 **India-specific context:** India has 70+ SEBI-registered brokers. Discount brokers captured 60%+ market share by demat accounts. Revenue model: F&O brokerage, margin interest, account charges. SEBI's F&O regulation changes (lot size increase, weekly expiry restriction) impact revenue.
 
-**How FlintTrade could serve them:** OpenAlgo already supports 31 brokers. FlintTrade could be the "advanced mode" that brokers recommend to their power users. Analytics features that basic broker platforms don't offer. Strategy tools driving more F&O trades.
+**How FlintTrade could serve them:** OpenAlgo already supports 33 brokers. FlintTrade could be the "advanced mode" that brokers recommend to their power users. Analytics features that basic broker platforms don't offer. Strategy tools driving more F&O trades.
 
 ---
 
