@@ -11,6 +11,7 @@ import {
   BarChart2,
   Trash2,
   History,
+  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +26,7 @@ import {
 import { searchSymbol, getHistory, getQuotes, getIntervals } from "@/services/api";
 
 // Local modules
+import { IndicatorSettingsModal } from "./IndicatorSettingsModal";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { ChartLegend } from "./ChartLegend";
 import type { LegendState } from "./ChartLegend";
@@ -539,6 +541,17 @@ function ChartWidget() {
     setIndicators((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  // Indicator settings modal
+  const [indicatorModalOpen, setIndicatorModalOpen] = useState(false);
+
+  const handleIndicatorApply = useCallback(
+    (newIndicators: IndicatorState, newPeriods: IndicatorPeriods) => {
+      setIndicators(newIndicators);
+      setPeriods(newPeriods);
+    },
+    [],
+  );
+
   // Derived display values
   const isPositive = change == null ? null : change >= 0;
   const changeColor = change == null ? "text-text-secondary" : isPositive ? "text-profit" : "text-loss";
@@ -688,6 +701,16 @@ function ChartWidget() {
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Indicator settings modal trigger */}
+        <button
+          onClick={() => setIndicatorModalOpen(true)}
+          title="Indicator settings"
+          className="flex items-center justify-center w-6 h-6 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+          aria-label="Open indicator settings"
+        >
+          <Settings2 size={12} />
+        </button>
+
         {/* Task A: Replay toggle */}
         <button
           onClick={isReplaying ? exitReplay : enterReplay}
@@ -760,6 +783,15 @@ function ChartWidget() {
           onExitReplay={exitReplay}
         />
       )}
+
+      {/* Indicator settings modal */}
+      <IndicatorSettingsModal
+        open={indicatorModalOpen}
+        onClose={() => setIndicatorModalOpen(false)}
+        indicators={indicators}
+        periods={periods}
+        onApply={handleIndicatorApply}
+      />
     </div>
   );
 }

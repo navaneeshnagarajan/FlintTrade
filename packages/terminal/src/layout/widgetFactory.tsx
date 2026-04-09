@@ -50,6 +50,9 @@ const lazyWidgets = {
   scanner: lazy(() => import("@/widgets/utility/Scanner/ScannerWidget")),
   alerts: lazy(() => import("@/widgets/utility/Alerts/AlertsWidget")),
   health: lazy(() => import("@/widgets/utility/Health/HealthWidget")),
+
+  // Analysis widgets (new)
+  threepanel: lazy(() => import("@/widgets/analysis/ThreePanel/ThreePanelWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +91,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility" },
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility" },
   { id: "health", name: "System Health", icon: "Activity", category: "Utility" },
+  { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------
