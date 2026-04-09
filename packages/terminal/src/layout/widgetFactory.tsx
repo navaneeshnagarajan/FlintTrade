@@ -35,6 +35,7 @@ const lazyWidgets = {
   mtmmonitor: lazy(() => import("@/widgets/trading/MTMMonitor/MTMMonitorWidget")),
   riskpanel: lazy(() => import("@/widgets/trading/RiskPanel/RiskPanelWidget")),
   actioncenter: lazy(() => import("@/widgets/trading/ActionCenter/ActionCenterWidget")),
+  positionheatmap: lazy(() => import("@/widgets/trading/PositionHeatMap/PositionHeatMapWidget")),
 
   // New analysis widgets
   sectormap: lazy(() => import("@/widgets/analysis/SectorMap/SectorMapWidget")),
@@ -80,6 +81,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading" },
   { id: "riskpanel", name: "Risk Panel", icon: "ShieldAlert", category: "Trading" },
   { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading" },
+  { id: "positionheatmap", name: "Position Heat Map", icon: "SquareStack", category: "Trading" },
   { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis" },
   { id: "gex", name: "GEX Dashboard", icon: "BarChart2", category: "Analysis" },
   { id: "volsurface", name: "Vol Surface", icon: "Box", category: "Analysis" },
