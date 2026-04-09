@@ -116,6 +116,12 @@ const lazyWidgets = {
   expirycountdown: lazy(() => import("@/widgets/utility/ExpiryCountdown/ExpiryCountdownWidget")),
   positionsizing: lazy(() => import("@/widgets/utility/PositionSizing/PositionSizingWidget")),
   correlationmatrix: lazy(() => import("@/widgets/analysis/CorrelationMatrix/CorrelationMatrixWidget")),
+
+  // Wave 33 widgets
+  ivskew: lazy(() => import("@/widgets/analysis/IVSkew/IVSkewWidget")),
+  marketclock: lazy(() => import("@/widgets/utility/MarketClock/MarketClockWidget")),
+  strategymonitor: lazy(() => import("@/widgets/trading/StrategyMonitor/StrategyMonitorWidget")),
+  netposition: lazy(() => import("@/widgets/trading/NetPosition/NetPositionWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -206,6 +212,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "expirycountdown", name: "Expiry Countdown", icon: "Timer", category: "Utility" },
   { id: "positionsizing", name: "Position Sizing", icon: "Ruler", category: "Utility" },
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis" },
+
+  // Wave 33
+  { id: "ivskew", name: "IV Skew", icon: "Activity", category: "Analysis" },
+  { id: "marketclock", name: "Market Clock", icon: "Clock", category: "Utility" },
+  { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading" },
+  { id: "netposition", name: "Net Positions", icon: "Layers", category: "Trading" },
 ];
 
 // ---------------------------------------------------------------------------
