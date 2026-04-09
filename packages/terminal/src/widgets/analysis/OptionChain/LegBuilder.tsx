@@ -279,9 +279,11 @@ function LegRow({
       }`}
     >
       {/* BUY / SELL toggle */}
-      <div className="flex rounded overflow-hidden border border-border-default shrink-0">
+      <div className="flex rounded overflow-hidden border border-border-default shrink-0" role="group" aria-label="Side">
         <button
           onClick={() => onChangeSide(leg.id, "BUY")}
+          aria-label="Buy"
+          aria-pressed={isBuy}
           className={`px-1.5 py-0.5 text-xxs font-bold transition-colors ${
             isBuy
               ? "bg-profit text-white"
@@ -292,6 +294,8 @@ function LegRow({
         </button>
         <button
           onClick={() => onChangeSide(leg.id, "SELL")}
+          aria-label="Sell"
+          aria-pressed={!isBuy}
           className={`px-1.5 py-0.5 text-xxs font-bold transition-colors ${
             !isBuy
               ? "bg-loss text-white"
@@ -694,7 +698,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
             onClick={addBlankLeg}
             className="flex items-center gap-1 text-xxs text-text-muted hover:text-accent transition-colors px-2 py-0.5 rounded hover:bg-surface-hover"
           >
-            <Plus size={10} />
+            <Plus size={10} aria-hidden="true" />
             Add Leg{legs.length > 0 ? ` (${legs.length}/4)` : ""}
           </button>
         )}

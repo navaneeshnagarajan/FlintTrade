@@ -46,6 +46,14 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -329,28 +337,43 @@ function TradeCopierWidget() {
         <div className="px-3 py-2 border-b border-border-default flex flex-col gap-2">
           {/* Source account */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted w-14 flex-none">Source</span>
-            <select
+            <span className="text-xs text-text-muted w-14 flex-none" id="source-label">Source</span>
+            <Select
               value={config.sourceAccountId}
-              onChange={(e) => handleSourceChange(e.target.value)}
-              className="flex-1 px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-              data-testid="source-select"
+              onValueChange={handleSourceChange}
             >
-              {SAMPLE_ACCOUNTS.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
+              <SelectTrigger
+                className="flex-1 h-7 text-xs bg-surface-hover border-border-default text-text-primary focus:ring-accent/40"
+                aria-label="Source account"
+                aria-labelledby="source-label"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-surface-card border-border-default" data-testid="source-select">
+                {SAMPLE_ACCOUNTS.map((a) => (
+                  <SelectItem key={a.id} value={a.id} className="text-xs text-text-primary focus:bg-surface-hover">
+                    {a.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <StatusDot status="active" />
           </div>
 
           {/* Copy mode */}
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-muted w-14 flex-none">Mode</span>
-            <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
+            <div
+              className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden"
+              role="group"
+              aria-label="Copy mode"
+            >
               {(["mirror", "proportional"] as CopyMode[]).map((m) => (
                 <button
                   key={m}
                   onClick={() => handleModeChange(m)}
+                  aria-label={m === "mirror" ? "Mirror mode" : "Proportional mode"}
+                  aria-pressed={m === config.copyMode}
                   className={`px-2 py-0.5 text-xxs font-medium capitalize transition-colors ${
                     m === config.copyMode
                       ? "bg-accent/15 text-accent"
@@ -393,15 +416,15 @@ function TradeCopierWidget() {
 
               {/* Multiplier */}
               <div className="flex items-center gap-1">
-                <span className="text-xxs text-text-muted">×</span>
-                <input
+                <span className="text-xxs text-text-muted" aria-hidden="true">×</span>
+                <Input
                   type="number"
                   min={0.1}
                   step={0.5}
                   value={target.multiplier}
                   onChange={(e) => handleMultiplierChange(target.id, e.target.value)}
-                  className="w-12 px-1 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary text-center font-mono tabular-nums focus:outline-none focus:border-accent/50"
-                  title="Lot multiplier"
+                  className="w-12 h-6 px-1 py-0.5 text-xs text-center font-mono tabular-nums"
+                  aria-label={`Lot multiplier for ${target.name}`}
                   data-testid={`multiplier-${target.id}`}
                 />
               </div>
@@ -415,10 +438,10 @@ function TradeCopierWidget() {
                   )
                 }
                 className="p-0.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
-                title={target.status === "paused" ? "Resume" : "Pause"}
+                aria-label={target.status === "paused" ? `Resume copying to ${target.name}` : `Pause copying to ${target.name}`}
                 data-testid={`status-toggle-${target.id}`}
               >
-                {target.status === "paused" ? <Play size={11} /> : <Pause size={11} />}
+                {target.status === "paused" ? <Play size={11} aria-hidden="true" /> : <Pause size={11} aria-hidden="true" />}
               </button>
 
               {/* Enable/Disable switch */}
@@ -433,10 +456,10 @@ function TradeCopierWidget() {
               <button
                 onClick={() => handleRemoveTarget(target.id)}
                 className="p-0.5 rounded text-text-muted hover:text-loss hover:bg-loss/10 transition-colors"
-                title="Remove target"
+                aria-label={`Remove ${target.name} from targets`}
                 data-testid={`remove-${target.id}`}
               >
-                <Trash2 size={11} />
+                <Trash2 size={11} aria-hidden="true" />
               </button>
             </div>
           ))}
@@ -444,25 +467,32 @@ function TradeCopierWidget() {
           {/* Add target */}
           {availableToAdd.length > 0 && (
             <div className="flex items-center gap-1.5 mt-1">
-              <select
-                value={newTargetId}
-                onChange={(e) => setNewTargetId(e.target.value)}
-                className="flex-1 px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-                data-testid="add-target-select"
+              <Select
+                value={newTargetId || "__placeholder__"}
+                onValueChange={(v) => setNewTargetId(v === "__placeholder__" ? "" : v)}
               >
-                <option value="">Add account...</option>
-                {availableToAdd.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
+                <SelectTrigger
+                  className="flex-1 h-7 text-xs bg-surface-hover border-border-default text-text-primary focus:ring-accent/40"
+                  aria-label="Add target account"
+                >
+                  <SelectValue placeholder="Add account..." />
+                </SelectTrigger>
+                <SelectContent className="bg-surface-card border-border-default" data-testid="add-target-select">
+                  {availableToAdd.map((a) => (
+                    <SelectItem key={a.id} value={a.id} className="text-xs text-text-primary focus:bg-surface-hover">
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <button
                 onClick={handleAddTarget}
                 disabled={!newTargetId}
                 className="p-1 rounded bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40"
-                title="Add target account"
+                aria-label="Add selected account as target"
                 data-testid="add-target-btn"
               >
-                <Plus size={12} />
+                <Plus size={12} aria-hidden="true" />
               </button>
             </div>
           )}
@@ -485,41 +515,47 @@ function TradeCopierWidget() {
             <div className="mt-2 flex flex-col gap-2" data-testid="risk-panel">
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex flex-col gap-0.5">
-                  <span className="text-xxs text-text-muted">Max Position (lots)</span>
-                  <input
+                  <span className="text-xxs text-text-muted" id={`${formId}-maxpos-label`}>Max Position (lots)</span>
+                  <Input
                     id={`${formId}-maxpos`}
                     type="number"
                     min={1}
                     value={config.riskFilter.maxPositionSize ?? ""}
                     onChange={(e) => handleRiskChange("maxPositionSize", e.target.value)}
                     placeholder="No limit"
-                    className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+                    className="h-7 text-xs font-mono"
+                    aria-label="Maximum position size in lots"
+                    aria-labelledby={`${formId}-maxpos-label`}
                     data-testid="max-position-input"
                   />
                 </label>
                 <label className="flex flex-col gap-0.5">
-                  <span className="text-xxs text-text-muted">Max Daily Loss (₹)</span>
-                  <input
+                  <span className="text-xxs text-text-muted" id={`${formId}-maxloss-label`}>Max Daily Loss (₹)</span>
+                  <Input
                     id={`${formId}-maxloss`}
                     type="number"
                     min={0}
                     value={config.riskFilter.maxDailyLoss ?? ""}
                     onChange={(e) => handleRiskChange("maxDailyLoss", e.target.value)}
                     placeholder="No limit"
-                    className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+                    className="h-7 text-xs font-mono"
+                    aria-label="Maximum daily loss in rupees"
+                    aria-labelledby={`${formId}-maxloss-label`}
                     data-testid="max-daily-loss-input"
                   />
                 </label>
               </div>
               <label className="flex flex-col gap-0.5">
-                <span className="text-xxs text-text-muted">Symbol Whitelist (comma-separated, empty = all)</span>
-                <input
+                <span className="text-xxs text-text-muted" id={`${formId}-whitelist-label`}>Symbol Whitelist (comma-separated, empty = all)</span>
+                <Input
                   id={`${formId}-whitelist`}
                   type="text"
                   value={config.riskFilter.symbolWhitelist}
                   onChange={(e) => handleRiskChange("symbolWhitelist", e.target.value)}
                   placeholder="NIFTY, BANKNIFTY, ..."
-                  className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+                  className="h-7 text-xs"
+                  aria-label="Symbol whitelist, comma-separated"
+                  aria-labelledby={`${formId}-whitelist-label`}
                   data-testid="symbol-whitelist-input"
                 />
               </label>

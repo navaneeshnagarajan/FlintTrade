@@ -34,6 +34,72 @@ vi.mock("@/components/ui/badge", () => ({
   ),
 }));
 
+// Mock shadcn/ui Input to a native <input>
+vi.mock("@/components/ui/input", () => ({
+  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
+}));
+
+// Mock shadcn/ui Select components to render as a native <select> for testability
+vi.mock("@/components/ui/select", async () => {
+  const { createContext, useContext } = await import("react");
+  type SelectCtx = { value?: string; onValueChange?: (v: string) => void };
+  const Ctx = createContext<SelectCtx>({});
+
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      children,
+    }: {
+      value?: string;
+      onValueChange?: (v: string) => void;
+      children?: React.ReactNode;
+    }) => <Ctx.Provider value={{ value, onValueChange }}>{children}</Ctx.Provider>,
+
+    SelectTrigger: ({
+      "data-testid": testId,
+      "aria-label": ariaLabel,
+    }: {
+      "data-testid"?: string;
+      "aria-label"?: string;
+      [key: string]: unknown;
+    }) => <span data-testid={testId} aria-label={ariaLabel} />,
+
+    SelectValue: ({ placeholder }: { placeholder?: string }) => (
+      <span>{placeholder}</span>
+    ),
+
+    SelectContent: ({
+      children,
+      "data-testid": testId,
+    }: {
+      children?: React.ReactNode;
+      "data-testid"?: string;
+    }) => {
+      const ctx = useContext(Ctx);
+      return (
+        <select
+          data-testid={testId}
+          value={ctx.value ?? ""}
+          onChange={(e) => ctx.onValueChange?.(e.target.value)}
+        >
+          {children}
+        </select>
+      );
+    },
+
+    SelectItem: ({
+      value,
+      children,
+    }: {
+      value: string;
+      children?: React.ReactNode;
+    }) => <option value={value}>{children}</option>,
+  };
+});
+
+import React from "react";
+
 // ---------------------------------------------------------------------------
 // Clear localStorage before each test so config doesn't bleed between tests
 // ---------------------------------------------------------------------------
@@ -137,11 +203,11 @@ describe("TradeCopierWidget — target account toggles", () => {
     render(<TradeCopierWidget />);
     // acc-2 starts as "active" → clicking pause should change to "paused"
     const pauseBtn = screen.getByTestId("status-toggle-acc-2");
-    // Should show Pause icon initially (active account)
-    expect(pauseBtn.getAttribute("title")).toBe("Pause");
+    // Should show Pause label initially (active account)
+    expect(pauseBtn.getAttribute("aria-label")).toContain("Pause");
     fireEvent.click(pauseBtn);
     // After click should show Resume
-    expect(pauseBtn.getAttribute("title")).toBe("Resume");
+    expect(pauseBtn.getAttribute("aria-label")).toContain("Resume");
   });
 
   it("remove button removes the target account", () => {

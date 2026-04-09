@@ -339,10 +339,12 @@ export function DrawingToolbar({
               const isFav = favourites.includes(tool.id);
               const isSelected = drawMode === tool.id;
               return (
-                <div
+                <button
                   key={tool.id}
+                  role="menuitem"
+                  disabled={tool.comingSoon}
                   className={[
-                    "flex items-center gap-2 px-2 py-1 rounded cursor-pointer select-none transition-colors",
+                    "w-full flex items-center gap-2 px-2 py-1 rounded select-none transition-colors text-left",
                     tool.comingSoon
                       ? "opacity-50 cursor-not-allowed"
                       : isSelected
@@ -350,15 +352,30 @@ export function DrawingToolbar({
                         : "text-text-secondary hover:text-text-primary hover:bg-surface-hover",
                   ].join(" ")}
                   onClick={() => handleToolClick(tool, group.key)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleToolClick(tool, group.key);
+                    }
+                  }}
                 >
-                  <span className="shrink-0">{tool.icon}</span>
+                  <span className="shrink-0" aria-hidden="true">{tool.icon}</span>
                   <span className="text-xs flex-1 whitespace-nowrap">{tool.label}</span>
                   {tool.comingSoon && (
                     <span className="text-xxs text-text-muted ml-auto">soon</span>
                   )}
                   {!tool.comingSoon && (
-                    <button
+                    <span
+                      role="button"
+                      tabIndex={0}
                       onClick={(e) => { e.stopPropagation(); toggleFavourite(tool.id); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          toggleFavourite(tool.id);
+                        }
+                      }}
                       className={[
                         "ml-auto p-0.5 rounded transition-colors",
                         isFav ? "text-amber-400 hover:text-amber-300" : "text-text-muted hover:text-text-primary",
@@ -367,9 +384,9 @@ export function DrawingToolbar({
                       aria-label={isFav ? "Remove from favourites" : "Add to favourites"}
                     >
                       <Star size={9} fill={isFav ? "currentColor" : "none"} />
-                    </button>
+                    </span>
                   )}
-                </div>
+                </button>
               );
             })}
           </div>
@@ -403,27 +420,43 @@ export function DrawingToolbar({
               const groupKey = TOOL_GROUPS.find((g) => g.tools.some((t) => t.id === id))?.key ?? "";
               const isSelected = drawMode === id;
               return (
-                <div
+                <button
                   key={id}
+                  role="menuitem"
                   className={[
-                    "flex items-center gap-2 px-2 py-1 rounded cursor-pointer select-none transition-colors",
+                    "w-full flex items-center gap-2 px-2 py-1 rounded select-none transition-colors text-left",
                     isSelected
                       ? "bg-accent/15 text-accent"
                       : "text-text-secondary hover:text-text-primary hover:bg-surface-hover",
                   ].join(" ")}
                   onClick={() => handleToolClick(def, groupKey)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleToolClick(def, groupKey);
+                    }
+                  }}
                 >
-                  <span className="shrink-0">{def.icon}</span>
+                  <span className="shrink-0" aria-hidden="true">{def.icon}</span>
                   <span className="text-xs flex-1 whitespace-nowrap">{def.label}</span>
-                  <button
+                  <span
+                    role="button"
+                    tabIndex={0}
                     onClick={(e) => { e.stopPropagation(); toggleFavourite(id); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        toggleFavourite(id);
+                      }
+                    }}
                     className="ml-auto p-0.5 rounded text-amber-400 hover:text-amber-300 transition-colors"
                     title="Remove from favourites"
                     aria-label="Remove from favourites"
                   >
                     <Star size={9} fill="currentColor" />
-                  </button>
-                </div>
+                  </span>
+                </button>
               );
             })}
           </div>

@@ -541,7 +541,7 @@ function AlertRow({ alert, ltp, onDelete }: AlertRowProps) {
       {/* Delete button */}
       <button
         onClick={() => onDelete(alert.id)}
-        className="opacity-0 group-hover:opacity-100 shrink-0 text-text-muted hover:text-loss transition-all"
+        className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0 text-text-muted hover:text-loss transition-all"
         aria-label={`Delete alert for ${alert.symbol}`}
         title="Delete alert"
       >
@@ -595,7 +595,7 @@ function LogRow({ alert, onDelete }: LogRowProps) {
       {/* Delete button */}
       <button
         onClick={() => onDelete(alert.id)}
-        className="opacity-0 group-hover:opacity-100 shrink-0 text-text-muted hover:text-loss transition-all"
+        className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0 text-text-muted hover:text-loss transition-all"
         aria-label={`Remove log entry for ${alert.symbol}`}
         title="Remove log entry"
       >
@@ -864,13 +864,18 @@ function AlertsWidget() {
         aria-label="Alerts tabs"
         className="flex items-end gap-0 px-2 border-b border-border-default bg-surface-card shrink-0"
       >
+        <div role="tablist" aria-label="Alerts tabs" className="flex items-end gap-0 w-full">
         {(["active", "log"] as AlertTab[]).map((tab) => {
           const isActive = activeTab === tab;
           return (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              role="tab"
+              id={`alerts-tab-${tab}`}
+              aria-selected={isActive}
+              aria-controls={`alerts-panel-${tab}`}
               aria-current={isActive ? "true" : undefined}
+              onClick={() => setActiveTab(tab)}
               className={cn(
                 "flex items-center gap-1 px-2.5 py-1.5 text-xxs font-medium transition-colors border-b-2 whitespace-nowrap shrink-0",
                 isActive
@@ -892,10 +897,17 @@ function AlertsWidget() {
             </button>
           );
         })}
+        </div>
       </nav>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-auto" role="list" aria-label={activeTab === "active" ? "Active alerts" : "Alert log"}>
+      <div
+        role="tabpanel"
+        id={`alerts-panel-${activeTab}`}
+        aria-labelledby={`alerts-tab-${activeTab}`}
+        className="flex-1 overflow-auto"
+        aria-label={activeTab === "active" ? "Active alerts" : "Alert log"}
+      >
         {activeTab === "active" && (
           <>
             {activeAlerts.length === 0 ? (

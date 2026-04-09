@@ -85,15 +85,17 @@ interface CommandRowProps {
   cmd: Command;
   isActive: boolean;
   query: string;
+  flatIndex: number;
   onMouseEnter: () => void;
   onClick: () => void;
   rowRef?: React.RefCallback<HTMLLIElement>;
 }
 
-function CommandRow({ cmd, isActive, query, onMouseEnter, onClick, rowRef }: CommandRowProps) {
+function CommandRow({ cmd, isActive, query, onMouseEnter, onClick, rowRef, flatIndex }: CommandRowProps) {
   return (
     <li
       ref={rowRef}
+      id={`cmd-item-${flatIndex}`}
       role="option"
       aria-selected={isActive}
       onMouseEnter={onMouseEnter}
@@ -385,6 +387,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
                 <CommandRow
                   key={cmd.id}
                   cmd={cmd}
+                  flatIndex={flatIndex}
                   isActive={flatIndex === activeIndex}
                   query={query}
                   onMouseEnter={() => setActiveIndex(flatIndex)}

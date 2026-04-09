@@ -25,6 +25,14 @@ import {
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { useGreeksSurface } from "./useGreeksSurface";
 import { SAMPLE_GREEKS_SURFACE_DATA } from "./sampleData";
 import type { GreeksSurfaceExpiry, GreeksSurfacePoint } from "./sampleData";
@@ -411,21 +419,28 @@ function GreeksSurfaceWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-        >
-          {SYMBOLS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <Select value={symbol} onValueChange={setSymbol}>
+          <SelectTrigger
+            className="w-32 h-7 text-xs bg-surface-hover border-border-default text-text-primary focus:ring-accent/40"
+            aria-label="Select symbol"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-surface-card border-border-default">
+            {SYMBOLS.map((s) => (
+              <SelectItem key={s} value={s} className="text-xs text-text-primary focus:bg-surface-hover">
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <input
+        <Input
           value={expiriesInput}
           onChange={(e) => setExpiriesInput(e.target.value)}
           placeholder="Expiries (comma-sep)"
-          className="flex-1 min-w-32 px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+          className="flex-1 min-w-32 h-7 text-xs"
+          aria-label="Expiry dates, comma-separated"
         />
 
         {/* Metric toggle */}

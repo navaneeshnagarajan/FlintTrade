@@ -14,6 +14,50 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
 }));
 
+// Mock shadcn/ui Select to render as native <select> for testability
+vi.mock("@/components/ui/select", async () => {
+  const { createContext, useContext } = await import("react");
+  type SelectCtx = { value?: string; onValueChange?: (v: string) => void };
+  const Ctx = createContext<SelectCtx>({});
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      children,
+    }: {
+      value?: string;
+      onValueChange?: (v: string) => void;
+      children?: React.ReactNode;
+    }) => <Ctx.Provider value={{ value, onValueChange }}>{children}</Ctx.Provider>,
+    SelectTrigger: ({ "aria-label": ariaLabel }: { "aria-label"?: string; [key: string]: unknown }) => (
+      <span aria-label={ariaLabel} />
+    ),
+    SelectValue: () => null,
+    SelectContent: ({ children }: { children?: React.ReactNode }) => {
+      const ctx = useContext(Ctx);
+      return (
+        <select
+          role="combobox"
+          value={ctx.value ?? ""}
+          onChange={(e) => ctx.onValueChange?.(e.target.value)}
+        >
+          {children}
+        </select>
+      );
+    },
+    SelectItem: ({ value, children }: { value: string; children?: React.ReactNode }) => (
+      <option value={value}>{children}</option>
+    ),
+  };
+});
+
+// Mock shadcn/ui Input
+vi.mock("@/components/ui/input", () => ({
+  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
+}));
+
+import React from "react";
+
 vi.mock("@/components/teasers", () => ({
   FeatureTeaser: ({
     children,
@@ -195,8 +239,11 @@ describe("GreeksSurfaceWidget", () => {
 
     render(<GreeksSurfaceWidget />, { wrapper });
 
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.value);
+    // With the mocked Select, SelectContent renders a native <select role="combobox">
+    const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
+    // The symbol selector is the first combobox
+    const symbolSelect = selects[0];
+    const options = Array.from(symbolSelect.options).map((o) => o.value);
     expect(options).toContain("NIFTY");
     expect(options).toContain("BANKNIFTY");
     expect(options).toContain("SENSEX");

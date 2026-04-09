@@ -149,9 +149,34 @@ function NotificationPanel({ onClose }: NotificationPanelProps) {
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // Focus trap — focus panel on mount
+  // Focus trap — focus panel on mount and trap Tab within the panel
   useEffect(() => {
     panelRef.current?.focus();
+  }, []);
+
+  const handleFocusTrap = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const focusable = Array.from(
+      panel.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => !el.hasAttribute("disabled"));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last  = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
   }, []);
 
   const filtered = notifications.filter(
@@ -168,6 +193,8 @@ function NotificationPanel({ onClose }: NotificationPanelProps) {
     [notifications],
   );
 
+  const activeTabId = `notif-tab-${activeFilter}`;
+
   return (
     <div
       ref={panelRef}
@@ -177,6 +204,7 @@ function NotificationPanel({ onClose }: NotificationPanelProps) {
       aria-modal="true"
       tabIndex={-1}
       style={{ outline: "none" }}
+      onKeyDown={handleFocusTrap}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-border-default shrink-0">
@@ -238,6 +266,7 @@ function NotificationPanel({ onClose }: NotificationPanelProps) {
           return (
             <button
               key={tab}
+              id={`notif-tab-${tab}`}
               role="tab"
               aria-selected={isActive}
               onClick={() => setActiveFilter(tab)}
@@ -265,6 +294,8 @@ function NotificationPanel({ onClose }: NotificationPanelProps) {
       {/* Notification list */}
       <div
         className="flex-1 overflow-y-auto divide-y divide-border-subtle"
+        role="tabpanel"
+        aria-labelledby={activeTabId}
         aria-live="polite"
         aria-label={`${filtered.length} notification${filtered.length !== 1 ? "s" : ""}`}
       >

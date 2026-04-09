@@ -10,7 +10,7 @@
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
-import { ArrowLeftRight, RefreshCw } from "lucide-react";
+import { ArrowLeftRight, RefreshCw, AlertTriangle } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -192,7 +192,13 @@ function CurrencyConverterWidget() {
         <ArrowLeftRight size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Currency Converter</span>
         <div className="flex-1" />
-        <span className="text-xxs text-text-muted">Mid-market rates</span>
+        <span
+          className="flex items-center gap-1 text-xxs font-medium text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5"
+          title="Exchange rates are hardcoded and not fetched live"
+        >
+          <AlertTriangle size={9} aria-hidden="true" />
+          Static rates — not live
+        </span>
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-3">
