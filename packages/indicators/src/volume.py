@@ -1,4 +1,5 @@
-"""Volume indicators — OBV, AD, CMF, MFI, VWMA, Elder Force Index, Price Volume Trend.
+"""Volume indicators — OBV, AD, CMF, MFI, VWMA, Elder Force Index, Price Volume
+Trend, Cumulative Delta, Volume Profile.
 
 All functions:
 - Accept numpy float64 arrays
@@ -352,3 +353,115 @@ def pvt(
         result[i] = result[i - 1] + pct_change * volume[i]
 
     return result
+
+
+def cumulative_delta(
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Cumulative Delta — running net buy-minus-sell volume.
+
+    Approximates order flow imbalance by assigning volume as positive (buy) on
+    up-bars and negative (sell) on down-bars.  Flat bars (close == prior close)
+    contribute zero delta.
+
+    This is the batch equivalent of ``StreamingCumulativeDelta``.
+
+    Formula:
+        delta[0] = 0
+        delta[i] = delta[i-1] + volume[i]   if close[i] > close[i-1]
+                 = delta[i-1] - volume[i]   if close[i] < close[i-1]
+                 = delta[i-1]               if close[i] == close[i-1]
+
+    Args:
+        close:  Close prices, shape (n,).
+        volume: Volume,       shape (n,). Values must be >= 0.
+
+    Returns:
+        Cumulative delta values, shape (n,). No NaN warmup — starts at 0.
+
+    Raises:
+        ValueError: If close and volume lengths differ.
+    """
+    validate_series(close, min_length=1)
+    validate_series(volume, min_length=1)
+    if len(close) != len(volume):
+        raise ValueError(
+            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
+        )
+
+    n = len(close)
+    result = np.zeros(n, dtype=np.float64)
+
+    for i in range(1, n):
+        if close[i] > close[i - 1]:
+            result[i] = result[i - 1] + volume[i]
+        elif close[i] < close[i - 1]:
+            result[i] = result[i - 1] - volume[i]
+        else:
+            result[i] = result[i - 1]
+
+    return result
+
+
+def volume_profile(
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+    num_bins: int = 20,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
+    """Volume Profile — distribution of volume across price bins.
+
+    Splits the price range [min_close, max_close] into ``num_bins`` equally
+    spaced bins and sums the volume in each bin.  Returns the bin centre prices,
+    the volume per bin, and the Point of Control (POC) — the price level with
+    the highest accumulated volume.
+
+    Args:
+        close:    Close prices, shape (n,).
+        volume:   Volume,       shape (n,). Values must be >= 0.
+        num_bins: Number of price buckets (default 20, must be >= 2).
+
+    Returns:
+        Tuple of:
+        - price_levels: Centre price of each bin, shape (num_bins,).
+        - bin_volumes:  Total volume in each bin, shape (num_bins,).
+        - poc_price:    Point of Control price (highest-volume bin centre).
+
+    Raises:
+        ValueError: If close and volume lengths differ, num_bins < 2, or
+                    close has fewer than 2 bars.
+    """
+    validate_series(close, min_length=2)
+    validate_series(volume, min_length=2)
+    if len(close) != len(volume):
+        raise ValueError(
+            f"Array length mismatch: close={len(close)}, volume={len(volume)}"
+        )
+    if num_bins < 2:
+        raise ValueError(f"volume_profile num_bins must be >= 2, got {num_bins}")
+
+    price_min = float(np.min(close))
+    price_max = float(np.max(close))
+
+    if price_min == price_max:
+        # All prices identical — single bin
+        price_levels = np.full(num_bins, price_min, dtype=np.float64)
+        bin_volumes = np.zeros(num_bins, dtype=np.float64)
+        bin_volumes[0] = float(np.sum(volume))
+        return price_levels, bin_volumes, price_min
+
+    bin_edges = np.linspace(price_min, price_max, num_bins + 1, dtype=np.float64)
+    price_levels = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+    bin_volumes = np.zeros(num_bins, dtype=np.float64)
+
+    for i in range(len(close)):
+        # Find bin index using linear interpolation
+        frac = (close[i] - price_min) / (price_max - price_min)
+        idx = int(frac * num_bins)
+        idx = min(idx, num_bins - 1)  # clamp the last edge into the final bin
+        bin_volumes[idx] += volume[i]
+
+    poc_idx = int(np.argmax(bin_volumes))
+    poc_price = float(price_levels[poc_idx])
+
+    return price_levels, bin_volumes, poc_price

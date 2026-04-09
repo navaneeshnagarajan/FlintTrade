@@ -3,6 +3,35 @@
 __version__ = "0.1.0-alpha"
 
 try:
+    from .engine import (
+        BacktestEngine, EngineConfig, EngineOrder, EnginePosition,
+        EngineTrade, EngineResult, EngineEquityPoint,
+        OrderSide, OrderType, OrderStatus, FillMode,
+    )
+    from .tax_calculator import (
+        IndianTaxCalculator, TradeType, Exchange,
+        TaxBreakdown, TaxSummary,
+        make_equity_calculator, make_intraday_calculator, make_fo_calculator,
+    )
+    from .base_strategy import (
+        BaseBacktestStrategy, Signal, OrderIntent, indicators,
+    )
+except ImportError:
+    from engine import (
+        BacktestEngine, EngineConfig, EngineOrder, EnginePosition,
+        EngineTrade, EngineResult, EngineEquityPoint,
+        OrderSide, OrderType, OrderStatus, FillMode,
+    )
+    from tax_calculator import (
+        IndianTaxCalculator, TradeType, Exchange,
+        TaxBreakdown, TaxSummary,
+        make_equity_calculator, make_intraday_calculator, make_fo_calculator,
+    )
+    from base_strategy import (
+        BaseBacktestStrategy, Signal, OrderIntent, indicators,
+    )
+
+try:
     from .data_connector import (
         CSVConnector, DataConnector, DataResult,
         DuckDBConnector, JSONConnector, YFinanceConnector,
@@ -66,6 +95,32 @@ except ImportError:
     )
 
 __all__ = [
+    # Event-driven engine (new)
+    "BacktestEngine",
+    "EngineConfig",
+    "EngineOrder",
+    "EnginePosition",
+    "EngineTrade",
+    "EngineResult",
+    "EngineEquityPoint",
+    "OrderSide",
+    "OrderType",
+    "OrderStatus",
+    "FillMode",
+    # Indian tax calculator (new)
+    "IndianTaxCalculator",
+    "TradeType",
+    "Exchange",
+    "TaxBreakdown",
+    "TaxSummary",
+    "make_equity_calculator",
+    "make_intraday_calculator",
+    "make_fo_calculator",
+    # Strategy base class (new)
+    "BaseBacktestStrategy",
+    "Signal",
+    "OrderIntent",
+    "indicators",
     # Simulator
     "BacktestSimulator",
     "BacktestConfig",

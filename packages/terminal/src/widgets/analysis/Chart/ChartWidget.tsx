@@ -32,6 +32,7 @@ import { useChartInit } from "./useChartInit";
 import { useDrawingTools } from "./useDrawingTools";
 import { useIndicators } from "./useIndicators";
 import { useChartReplay } from "./useChartReplay";
+import { useOIOverlay } from "./useOIOverlay";
 import { ReplayBar } from "./ReplayBar";
 import type { OhlcvBar } from "./indicators";
 import type {
@@ -76,6 +77,7 @@ const DEFAULT_INDICATORS: IndicatorState = {
   showRSI: false, showMACD: false, showStoch: false, showATR: false, showADX: false,
   showWilliamsR: false, showCCI: false, showDEMA: false, showHullMA: false,
   showParabolicSAR: false, showOBV: false, showKeltner: false, showVWMA: false,
+  showOI: false,
 };
 
 const DEFAULT_PERIODS: IndicatorPeriods = {
@@ -357,6 +359,9 @@ function ChartWidget() {
     barsRef, timesRef,
     indicators, periods,
   });
+
+  // OI overlay — histogram on separate "oi" price scale, driven by indicators.showOI
+  useOIOverlay({ chartRef, symbol, exchange, isVisible: indicators.showOI });
 
   // Task A: Chart replay — barsRef.current is populated by the OHLCV effect below
   const {
@@ -648,6 +653,9 @@ function ChartWidget() {
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showOBV} onCheckedChange={(v) => toggleIndicator("showOBV", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />OBV
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showOI} onCheckedChange={(v) => toggleIndicator("showOI", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block shrink-0" />OI Overlay
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator className="bg-border-default" />
             <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">Oscillators</DropdownMenuLabel>

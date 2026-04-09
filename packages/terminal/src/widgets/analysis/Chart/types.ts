@@ -89,6 +89,7 @@ export interface IndicatorState {
   showOBV: boolean;
   showKeltner: boolean;
   showVWMA: boolean;
+  showOI: boolean;
 }
 
 export interface IndicatorPeriods {
