@@ -13,12 +13,12 @@ npm install                                    # install deps
 npm run dev                                    # dev server at localhost:5173
 npm run build                                  # tsc --noEmit + vite build
 npm run typecheck                              # tsc --noEmit only
-npx vitest run                                 # all tests (~1,206)
+npx vitest run                                 # all tests (~1,689)
 npx vitest run src/path/to/file.test.ts        # single test file
 npx vitest run -t "test name"                  # single test by name
 
 # Python — run from repo root
-make test                                      # all pytest tests (~2,940)
+make test                                      # all pytest tests (~3,900)
 make test-fast                                 # stop on first failure
 python -m pytest packages/core/tests/test_foo.py -v              # single file
 python -m pytest packages/core/tests/test_foo.py::test_name -v   # single test
@@ -39,7 +39,7 @@ gh run view <id> --log-failed                  # diagnose failure
 ## What This Is
 
 Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
-Built on OpenAlgo (33 broker gateway). 15 packages (13 Python + 1 React + 1 Rust/PyO3), monorepo, AGPL-3.0.
+Built on OpenAlgo (33 broker gateway). 16 packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
 Serves three personas from a single application:
@@ -171,7 +171,7 @@ Two-tier config. No exceptions.
 
 ## Monorepo Structure
 
-### Python packages (13)
+### Python packages (12)
 
 | Package | Description |
 |---|---|
@@ -200,26 +200,33 @@ Two-tier config. No exceptions.
 |---|---|---|
 | `terminal` | 5173 | Single React app. Dockview workspace, route-based personas, widget-composable layout. |
 
+### Additional packages (2)
+
+| Package | Description |
+|---|---|
+| `chrome-extension` | Browser extension for quick trading from any page |
+| `desktop` | Tauri-based native desktop app wrapper |
+
 The `dashboard` and `backtest` stub packages were deleted. Everything is in `terminal` now.
 
 ## Terminal — Widgets & Tools
 
-30 widgets (all TSX) + 6 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
+30 widgets (all TSX) + 7 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
 
 - **Widgets:** `src/widgets/` — Trading (10: dashboard, scalper, positions, orders, holdings, tradebook, orderpad, mtmmonitor, riskpanel, actioncenter), Analysis (14: chart, optionchain, oichart, straddle, depth, greeks, sectormap, gex, volsurface, ivsmile, straddlepnl, oiprofile, orderflow, depthheatmap), Utility (6: watchlist, calculator, news, ticker, aiadvisor, scanner)
-- **Tools:** `src/tools/` — Canvas overlays (3: P&L Dashboard, Market Intelligence, Trade Journal) + Full-page tools (3: Backtest Lab, Flow Builder, Strategy Builder)
+- **Tools:** `src/tools/` — Canvas overlays (3: P&L Dashboard, Market Intelligence, Trade Journal) + Full-page tools (3: Backtest Lab, Flow Builder, Strategy Builder) + Settings
 - **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG)
 - **Workspace presets:** Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View. Serialized via Dockview API.
 
 ## Current State
 
-- **Version:** 0.4.1 "Unified Mode System + Server-Side Order Safety" (2026-04-04)
-- **Tests:** 1,206 terminal (Vitest) + 2,940 Python (pytest) = 4,146 total
-- **Terminal:** 30 widgets (TSX) + 6 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
+- **Version:** 0.5.0-dev — Post-Wave 20 (20-wave absorption session 2026-04-07)
+- **Tests:** 1,689+ terminal (Vitest) + 3,900+ Python (pytest) = 5,589+ total
+- **Terminal:** 30 widgets (TSX) + 7 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement
 - **Auth:** argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
-- **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 6 cinematic themes with dark/light variants, density modes, zero arbitrary values
+- **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 3 cinematic themes (Graphite/Midnight/Ember) with dark/light/system variants, density modes, zero arbitrary values
 - **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
 - **Onboarding:** Cinematic /welcome, /explore demo mode, setup wizard with persona × interest matrix
 - **Routes:** 13 total — 8 app modules (Learn/Invest/Trade/Lab/Automate/AI/Ditto/Settings) + /welcome + /explore + /setup + /admin + 404
@@ -339,7 +346,7 @@ For the complete list of all 222 repositories, libraries, skills, and tools, see
 3. Check `docs/REFERENCES.md` — absorb before building
 4. Use `/brainstorm` and `/write-plan` for non-trivial tasks
 5. Implement — full permissions: create, edit, delete, refactor as needed
-6. Run: `make test` (must pass 2,940+ Python) and `npx vitest run` in terminal (must pass 1,206+)
+6. Run: `make test` (must pass 3,900+ Python) and `npx vitest run` in terminal (must pass 1,689+)
 7. For React: `npm run build` in `packages/terminal` (must build clean)
 8. Mark task done in PLAN.md
 9. Update CHANGELOG.md [Unreleased] section for notable changes
@@ -362,8 +369,8 @@ To set up a new machine:
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
 4. Configure `infra/openalgo/.env` with broker credentials
 5. `make start` (starts OpenAlgo)
-6. `make test` (verify 2,940+ pass)
-7. `cd packages/terminal && npm install && npm run build` (verify clean build, 1,206+ vitest pass)
+6. `make test` (verify 3,900+ pass)
+7. `cd packages/terminal && npm install && npm run build` (verify clean build, 1,689+ vitest pass)
 8. Read PLAN.md, pick a task, start building
 
 See `docs/machine-setup/QUICKSTART.md` for detailed instructions.
