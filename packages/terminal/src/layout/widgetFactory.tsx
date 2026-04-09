@@ -55,6 +55,12 @@ const lazyWidgets = {
 
   // Analysis widgets (new)
   threepanel: lazy(() => import("@/widgets/analysis/ThreePanel/ThreePanelWidget")),
+
+  // OI Heatmap
+  oiheatmap: lazy(() => import("@/widgets/analysis/OIHeatmap/OIHeatmapWidget")),
+
+  // Trade Copier (Ditto route)
+  tradecopier: lazy(() => import("@/widgets/trading/TradeCopier/TradeCopierWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -96,6 +102,8 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility" },
   { id: "health", name: "System Health", icon: "Activity", category: "Utility" },
   { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis" },
+  { id: "oiheatmap", name: "OI Heatmap", icon: "Grid2x2", category: "Analysis" },
+  { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading" },
 ];
 
 // ---------------------------------------------------------------------------
