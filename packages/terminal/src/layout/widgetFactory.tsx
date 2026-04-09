@@ -92,6 +92,12 @@ const lazyWidgets = {
   vwapbands: lazy(() => import("@/widgets/analysis/VWAPBands/VWAPBandsWidget")),
   correlationpairs: lazy(() => import("@/widgets/analysis/CorrelationPairs/CorrelationPairsWidget")),
   multitimeframe: lazy(() => import("@/widgets/analysis/MultiTimeframe/MultiTimeframeWidget")),
+
+  // Wave 29 widgets
+  pcrtrend: lazy(() => import("@/widgets/analysis/PCRTrend/PCRTrendWidget")),
+  tradeperformance: lazy(() => import("@/widgets/trading/TradePerformance/TradePerformanceWidget")),
+  instrumentcompare: lazy(() => import("@/widgets/analysis/InstrumentCompare/InstrumentCompareWidget")),
+  spreadview: lazy(() => import("@/widgets/analysis/SpreadView/SpreadViewWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -158,6 +164,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "vwapbands", name: "VWAP Bands", icon: "Waves", category: "Analysis" },
   { id: "correlationpairs", name: "Correlation Pairs", icon: "Link", category: "Analysis" },
   { id: "multitimeframe", name: "Multi-Timeframe", icon: "Layers", category: "Analysis" },
+
+  // Wave 29
+  { id: "pcrtrend", name: "PCR Trend", icon: "TrendingDown", category: "Analysis" },
+  { id: "tradeperformance", name: "Trade Performance", icon: "Trophy", category: "Trading" },
+  { id: "instrumentcompare", name: "Instrument Compare", icon: "GitCompare", category: "Analysis" },
+  { id: "spreadview", name: "Spread View", icon: "ArrowUpDown", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------
