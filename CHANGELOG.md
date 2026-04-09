@@ -87,7 +87,29 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
 - AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
 - Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
-- Total terminal tests: 1,773 (Vitest, 174 files) | Python engine: 576 | Other pytest: ~3,900 = ~6,249 total
+- Total terminal tests: 1,814 (Vitest, 176 files) | Python: ~4,500 (pytest) = ~6,314 total
+
+### Added — Features (Wave 25 — Engine + Analytics)
+- Backtest engine: event-driven BacktestEngine with MARKET/LIMIT/STOP/STOP_LIMIT orders, slippage, commission (absorbed from trading-strategies-openalgo)
+- Indian tax calculator: STT, stamp duty, exchange charges, SEBI fee, GST — all Decimal precision
+- BaseBacktestStrategy: abstract on_bar/on_tick, enter_long/short, Signal enum, indicator proxy
+- Metrics: Sharpe, Sortino, CAGR, max drawdown (amount + duration), win rate, profit factor, Calmar, VaR/CVaR, streaming Welford
+- 5 streaming indicators: MACD, Bollinger Bands, Supertrend, VWAP, Cumulative Delta (absorbed from pyindicators)
+- 2 batch volume functions: cumulative_delta, volume_profile with Point of Control (absorbed from pyindicators)
+- Portfolio Greeks: IV percentile/rank, P&L attribution (Taylor expansion), portfolio PCR, enhanced max pain (absorbed from openalgo-portfoliogreeks)
+- OI Overlay on ChartWidget: histogram pane showing net CE-PE OI imbalance
+- System Health widget (32nd widget): connections, performance, security, alerts, auto-refresh
+
+### Added — Features (Wave 26 — Strategies + AI)
+- MTM straddle strategies: MTMStraddleStrategy, TrailingStopStraddle, CombinedPremiumStraddle, MTMMonitor (absorbed from algo_trading_strategies_india)
+- RAG pipeline: document loader, text chunker, embedding provider (sentence-transformers/OpenAI), ChromaDB vector store (absorbed from openalgo-chatbot)
+- ML advisor: LightGBM classifier (BUY/HOLD/SELL) with 11 technical features, model persistence (absorbed from openadvisor)
+
+### Added — Features (Wave 27 — Charts + Retraining)
+- Three-Panel Chart widget (33rd widget): CE|Index|PE synchronised LWC v5 charts with auto ATM strike
+- IndicatorSettingsModal: two-column modal with colour picker, line style, period inputs, draft state
+- Auto-retraining loop: continuous ML model retraining (daily), drift detection (KS test), atomic model swap
+- Retrain API: GET /retrain/status, POST /retrain/trigger, GET /retrain/history
 
 ### Fixed — Code Review (Wave 24)
 - AlertsWidget: fixed stale ltpMap closure causing poll data races (functional setLtpMap update)

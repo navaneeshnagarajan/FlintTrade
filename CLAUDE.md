@@ -220,9 +220,9 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.5.0-dev — Post-Wave 23 (23-wave build session 2026-04-07/08)
-- **Tests:** 1,696 terminal (Vitest, 168 files) + 3,900+ Python (pytest) = 5,600+ total
-- **Terminal:** 30 widgets (TSX) + 7 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
+- **Version:** 0.5.0-dev — Post-Wave 27 (build sessions 2026-04-07/08/09)
+- **Tests:** 1,814 terminal (Vitest, 176 files) + ~4,500 Python (pytest) = ~6,314 total
+- **Terminal:** 33 widgets (TSX) + 7 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement
 - **Auth:** argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
