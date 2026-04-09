@@ -41,7 +41,7 @@ check-python: ## Verify Python >= 3.11 (required for StrEnum)
 
 start: ## Start OpenAlgo service
 	@echo -e "$(CYAN)=== Starting FlintTrade ===$(RESET)"
-	@bash infra/scripts/start-openalgo.sh
+	@bash infra/scripts/openalgo/start-openalgo.sh
 	@echo -e "$(GREEN)=== FlintTrade running ===$(RESET)"
 
 # --- Gateway mode (v0.2.0+) — single process, no separate OpenAlgo ---
@@ -53,7 +53,7 @@ start-gateway: ## Start FlintTrade gateway backend (standalone, no OpenAlgo)
 start-legacy: start ## Start in legacy mode (requires separate OpenAlgo instance)
 
 stop: ## Stop OpenAlgo service
-	@bash infra/scripts/stop-openalgo.sh
+	@bash infra/scripts/openalgo/stop-openalgo.sh
 
 restart: stop start ## Restart OpenAlgo
 
@@ -71,7 +71,7 @@ dev: ## Start terminal dev server + OpenAlgo
 	@if [ -n "$(NPM)" ]; then \
 	  cd packages/terminal && npm run dev & \
 	fi
-	@bash infra/scripts/start-openalgo.sh
+	@bash infra/scripts/openalgo/start-openalgo.sh
 
 # ======================================================================
 # Testing and quality
