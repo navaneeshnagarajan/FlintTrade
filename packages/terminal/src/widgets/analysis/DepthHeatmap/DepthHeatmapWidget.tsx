@@ -16,17 +16,24 @@
  * Data: synthetic depth data (200 price levels x 50 time columns) with
  * auto-update simulation (shifts data left, adds new column every 1s).
  *
- * Performance:
- *   - All drawing on a single HTMLCanvasElement (no DOM per cell)
- *   - ResizeObserver keeps canvas resolution in sync with container DPR
- *   - requestAnimationFrame gate prevents redundant repaints
+ * Performance (multi-layer canvas):
+ *   - Layer 1 (canvasRef): main heatmap — repaints ONLY when data changes.
+ *     This is the expensive draw (fills every cell), so we avoid triggering
+ *     it on mouse moves.
+ *   - Layer 2 (crosshairCanvasRef): crosshair overlay — repaints on every
+ *     mouse move at up to 60 fps. It sits on top of the heatmap canvas at
+ *     z-index 1 and is cleared on mouse leave. Because it is a separate
+ *     canvas, the main heatmap canvas is never touched during mouse moves,
+ *     eliminating the single most common source of jank in canvas UIs.
+ *   - ResizeObserver keeps both canvases in sync with the container DPR.
+ *   - requestAnimationFrame gates prevent redundant repaints on each layer.
  *
  * Accessibility:
  *   - Canvas has role="img" and aria-label describing the view
  *   - Symbol selector has visible label via sr-only span
  */
 
-import { useRef, useEffect, useState, useCallback, memo } from "react";
+import { useRef, useEffect, useState, useCallback, memo, type MouseEvent as ReactMouseEvent } from "react";
 import { Flame } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -286,14 +293,66 @@ function drawLegend(
   ctx.restore();
 }
 
+// ─── Crosshair drawing (layer 2 — mouse-only repaint) ────────────────────────
+
+/**
+ * Draw a full-canvas crosshair at the given CSS pixel coordinates onto the
+ * dedicated crosshair canvas.  The crosshair canvas is separate from the
+ * main heatmap canvas so the heatmap does not need to repaint on mouse moves.
+ *
+ * @param ctx    2D context of the crosshair canvas.
+ * @param cssX   Mouse X in CSS pixels (before DPR scaling).
+ * @param cssY   Mouse Y in CSS pixels (before DPR scaling).
+ * @param physW  Physical canvas width (CSS × DPR).
+ * @param physH  Physical canvas height (CSS × DPR).
+ * @param dpr    Device pixel ratio.
+ */
+function drawCrosshair(
+  ctx: CanvasRenderingContext2D,
+  cssX: number,
+  cssY: number,
+  physW: number,
+  physH: number,
+  dpr: number,
+): void {
+  ctx.clearRect(0, 0, physW, physH);
+
+  const x = cssX * dpr;
+  const y = cssY * dpr;
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = dpr;
+  ctx.setLineDash([dpr * 3, dpr * 3]);
+
+  // Horizontal line
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(physW, y);
+  ctx.stroke();
+
+  // Vertical line
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, physH);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
 function DepthHeatmapWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
 
+  // Layer 1: main heatmap canvas — repaints on data change only
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Layer 2: crosshair overlay canvas — repaints on mouse move at 60 fps
+  const crosshairCanvasRef = useRef<HTMLCanvasElement>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
+  const crosshairRafRef = useRef<number | null>(null);
   const sizeRef = useRef({ width: 0, height: 0 });
   const dataRef = useRef<DepthHeatmapData | null>(null);
   const seedRef = useRef(42);
@@ -343,10 +402,24 @@ function DepthHeatmapWidget() {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
+      const physW = Math.floor(width * dpr);
+      const physH = Math.floor(height * dpr);
+
+      // Resize main heatmap canvas (layer 1)
+      canvas.width = physW;
+      canvas.height = physH;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
+
+      // Resize crosshair canvas (layer 2) to match exactly
+      const crosshairCanvas = crosshairCanvasRef.current;
+      if (crosshairCanvas) {
+        crosshairCanvas.width = physW;
+        crosshairCanvas.height = physH;
+        crosshairCanvas.style.width = `${width}px`;
+        crosshairCanvas.style.height = `${height}px`;
+      }
+
       paint();
     });
 
@@ -403,13 +476,49 @@ function DepthHeatmapWidget() {
     paint();
   }, [symbol, paint]);
 
-  // Cleanup rAF on unmount
+  // Cleanup rAF on unmount — cancel both heatmap and crosshair frames
   useEffect(() => {
     return () => {
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
       }
+      if (crosshairRafRef.current !== null) {
+        cancelAnimationFrame(crosshairRafRef.current);
+      }
     };
+  }, []);
+
+  // ── Mouse handlers for crosshair (layer 2 only — never touches heatmap) ──
+
+  const handleMouseMove = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    // Throttle to one crosshair repaint per animation frame (60 fps cap)
+    if (crosshairRafRef.current !== null) return;
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    const cssY = e.clientY - rect.top;
+    crosshairRafRef.current = requestAnimationFrame(() => {
+      crosshairRafRef.current = null;
+      const crosshairCanvas = crosshairCanvasRef.current;
+      if (!crosshairCanvas) return;
+      const ctx = crosshairCanvas.getContext("2d");
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      drawCrosshair(ctx, cssX, cssY, crosshairCanvas.width, crosshairCanvas.height, dpr);
+    });
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    // Cancel any pending crosshair frame and clear the overlay
+    if (crosshairRafRef.current !== null) {
+      cancelAnimationFrame(crosshairRafRef.current);
+      crosshairRafRef.current = null;
+    }
+    const crosshairCanvas = crosshairCanvasRef.current;
+    if (!crosshairCanvas) return;
+    const ctx = crosshairCanvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, crosshairCanvas.width, crosshairCanvas.height);
+    }
   }, []);
 
   const currentPrice = dataRef.current
@@ -464,19 +573,37 @@ function DepthHeatmapWidget() {
         </Badge>
       </div>
 
-      {/* ─── Canvas ─────────────────────────────────────────────────────── */}
+      {/* ─── Canvas (two-layer) ─────────────────────────────────────────── */}
+      {/*
+        Layer 1 (canvasRef):           main heatmap — repaints on data change.
+        Layer 2 (crosshairCanvasRef):  crosshair overlay — repaints on mouse move.
+        The crosshair canvas sits above the heatmap (z-10) and intercepts pointer
+        events. The heatmap canvas has pointer-events:none so mouse events bubble
+        up to the container, which forwards them to the crosshair handler.
+      */}
       <div
         ref={containerRef}
         className="flex-1 relative min-h-0"
         data-testid="depthheatmap-container"
         role="img"
         aria-label={`Depth heatmap for ${symbol}. Shows bid volume (blue) and ask volume (red) at price levels over time. Brighter colors indicate higher volume. Current price highlighted with dashed white line.`}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
       >
+        {/* Layer 1: heatmap — expensive, only repaints when data changes */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 block"
+          className="absolute inset-0 block pointer-events-none"
           data-testid="depthheatmap-canvas"
           aria-hidden="true"
+        />
+        {/* Layer 2: crosshair — cheap, repaints at 60 fps on mouse move */}
+        <canvas
+          ref={crosshairCanvasRef}
+          className="absolute inset-0 block pointer-events-none"
+          data-testid="depthheatmap-crosshair"
+          aria-hidden="true"
+          style={{ zIndex: 1 }}
         />
       </div>
     </div>

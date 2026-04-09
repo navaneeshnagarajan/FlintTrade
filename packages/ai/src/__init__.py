@@ -6,6 +6,7 @@ from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRank
 from .analyst_chain import AnalysisState, AnalystChain
 from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TradeRecommendation
 from .multi_agent import AgentTeam, default_agents
+from .news_scraper import NewsScraper, NewsArticle
 from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
 from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
@@ -87,6 +88,9 @@ __all__ = [
     "TeamAnalysis",
     "TradeRecommendation",
     "default_agents",
+    # News scraper (RSS/httpx)
+    "NewsScraper",
+    "NewsArticle",
     # News summarizer
     "MarketNewsSummarizer",
     "NewsSummary",

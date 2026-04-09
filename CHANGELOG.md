@@ -6,16 +6,33 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5.0-dev
 
-### Added — Features
-- Signals pipeline: real-time signal generation, scoring, and routing to order engine
-- MCX commodity support: symbol normalisation, market hours, lot sizes
-- Mutual Funds module: MutualFundTab in /invest with NAV lookup, SIP calculator, fund comparison
-- WhatsApp notification channel alongside existing Telegram bot
-- ExpiryTrack widget: live countdown, max pain, OI buildup for current expiry
-- Pine Script editor: browser-based Pine-to-Python transpiler (PineTS integration)
-- Chrome extension stub: quick order entry and watchlist from any browser tab
-- Tauri desktop shell: native window wrapper for the React terminal
-- Multi-user support: role-based access (admin/trader/viewer) with JWT claims
+### Added — Features (Waves 1-9)
+- Signals pipeline: real-time signal generation, scoring, and routing to order engine (signal_pipeline.py + signal_routes.py + useSignals hook)
+- MCX commodity support: symbol normalisation, market hours, lot sizes (mcxLots.ts + 46 tests)
+- Mutual Funds module: MutualFundTab in /invest with AMFI NAV lookup, SIP calculator, fund comparison (mf_routes.py)
+- WhatsApp notification channel alongside existing Telegram bot (whatsapp_alerts.py + whatsapp_routes.py)
+- ExpiryTrack: historical expired options tracking with expiry_tracker.py + routes
+- Pine Script editor: browser-based Pine-to-Python transpiler (PineEditor.tsx + compile endpoint)
+- Chrome extension: quick order entry and watchlist from any browser tab (packages/chrome-extension/)
+- Tauri desktop shell: native window wrapper for the React terminal (packages/desktop/)
+- Multi-user support: role-based access (admin/trader/viewer) with JWT claims (user_manager.py + user_routes.py)
+- IPO Tracker: ipo_routes.py + ipo_calendar.json + IpoTab.tsx with NSE data
+- FinRL reinforcement learning: rl_environment.py + rl_trainer.py + rl_features.py
+- OpenClaw bridge: openclaw_bridge.py in both ai and automation packages + routes
+
+### Added — Features (Waves 10-20)
+- Multi-agent AI team: MiroFish + TradingAgents architecture (multi_agent.py)
+- Risk debate: multi-perspective risk assessment engine (risk_debate.py)
+- Ensemble selector: strategy ensemble voting system (ensemble_selector.py)
+- Hyperopt strategy optimiser: hyperparameter optimisation for strategies (hyperopt_strategy.py)
+- Fundamental screener: Screener.in integration for fundamental analysis (fundamental_screener.py)
+- FII/DII tracker: NSE scraper for institutional flow data (fii_dii.py)
+- RRG calculator: Relative Rotation Graph computation + SectorMap RRG view (rrg.py + useRRGData.ts)
+- Portfolio backtester: VectorBT patterns for portfolio-level backtesting (vectorbt_runner.py)
+- Bracket orders: bracket order support with strategy state persistence (bracket_order.py)
+- Order flow inference: trade-side inference from tick data (orderflow_inference.py)
+- Alert trigger log: persistent alert audit trail for compliance (alert_trigger_log.py)
+- Activity log: comprehensive SEBI-compliant user action logging (activity_log.py)
 
 ### Added — Wiring & Mode System
 - Server-side order safety proxy (order_routes.py) — all orders route through FlintTrade backend
@@ -36,15 +53,19 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - SSE log streaming: /ft-api/v1/logs/stream endpoint for real-time execution log tailing
 - flask-mail integration for password reset and alert emails
 - API key separation: distinct keys for OpenAlgo vs FlintTrade backend
-- Docker hardening: non-root user, read-only filesystem, health checks, resource limits
+- Docker production config: multi-stage Dockerfile with uv (10x faster pip), tini init, non-root user, start.sh
 - Nginx hardening: rate limiting, CSP headers, HSTS, X-Frame-Options
+- Security headers middleware: CSP, X-Frame-Options, HSTS, X-Content-Type-Options on all responses
+- WebSocket handler upgrade: mode-specific subscribe, batch subscribe, reference counting
+- All 3 git submodules synced (openalgo, algomirror, openclaw)
 
 ### Added — Tests
 - LearnRoute tests (3): heading, sidebar sections, default tab content
 - InvestRoute tests (3): heading, tab navigation, default Dashboard tab
 - AutomateRoute tests (3): heading, section tabs, sidebar rendering
 - DittoRoute tests (10): header, tabs, accounts table, mirror tab, risk tab, error handling
-- Total terminal tests: 1,206+ (Vitest) | Python tests: 2,940+ (pytest)
+- MCX lot sizes (46 tests), useSignals hook tests, security headers tests
+- Total terminal tests: 1,612+ (Vitest) | Python tests: 3,700+ (pytest) = 5,312+ total
 
 ### Fixed — Security
 - JWT revocation: token blacklist on logout and password change
@@ -84,6 +105,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - Lazy-loaded InvestRoute tabs: 14 tabs code-split individually (~142 KB saved from initial bundle)
 - TanStack Query deduplication: identical queries across widgets share a single network request
 - WebSocket reconnect backoff: exponential with jitter, capped at 30 s
+- WebSocket batch subscribe with reference counting (fewer messages, cleaner unsubscribe)
 
 ### Removed
 - settingsStore.sandboxMode (mode now in modeStore exclusively)

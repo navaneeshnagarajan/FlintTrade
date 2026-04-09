@@ -2,7 +2,13 @@
 
 Uses ChromaDB for vector storage and sentence-transformers for embeddings.
 Indexes strategy docs, market reports, OpenAlgo API docs, and trade journals.
-Chunks documents into 512-token pieces with 50-token overlap.
+Chunks documents into 1000-token pieces with 200-token overlap.
+Retrieval uses a similarity threshold of 0.7 to filter low-quality matches.
+
+Config values absorbed from openalgo-chatbot audit:
+  - chunk_size=1000  (was 512 — larger chunks preserve more context per retrieval)
+  - overlap=200      (was 50  — wider overlap reduces boundary-cut information loss)
+  - similarity_threshold=0.7 (new — drops chunks below 70% similarity to reduce noise)
 """
 
 from __future__ import annotations
@@ -18,8 +24,9 @@ from .llm_client import LLMClient, LLMMessage
 logger = logging.getLogger("flinttrade.ai.rag")
 
 _DEFAULT_COLLECTION = "flinttrade_docs"
-_CHUNK_SIZE = 512
-_CHUNK_OVERLAP = 50
+_CHUNK_SIZE = 1000
+_CHUNK_OVERLAP = 200
+_SIMILARITY_THRESHOLD = 0.7
 
 
 # ---------------------------------------------------------------------------
@@ -237,8 +244,22 @@ class RAGEngine:
         query: str,
         n_results: int = 5,
         doc_type: str | None = None,
+        similarity_threshold: float = _SIMILARITY_THRESHOLD,
     ) -> list[RetrievedChunk]:
-        """Retrieve relevant chunks for a query."""
+        """Retrieve relevant chunks for a query.
+
+        Args:
+            query: The search query text.
+            n_results: Maximum number of results to fetch from the vector store
+                before threshold filtering. The returned list may be smaller.
+            doc_type: Optional filter to restrict results to a specific doc type.
+            similarity_threshold: Minimum cosine similarity (0–1) required for a
+                chunk to be included. Defaults to 0.7. Set to 0.0 to disable.
+
+        Returns:
+            List of chunks whose similarity score meets the threshold, sorted
+            by descending score.
+        """
         collection = self._get_collection()
 
         where_filter = None
@@ -259,11 +280,20 @@ class RAGEngine:
         for i, doc_text in enumerate(documents):
             meta = metadatas[i] if i < len(metadatas) else {}
             dist = distances[i] if i < len(distances) else 1.0
+            score = 1.0 - dist  # Convert L2/cosine distance to similarity
+            if score < similarity_threshold:
+                logger.debug(
+                    "Dropped chunk from '%s' (score=%.3f < threshold=%.3f)",
+                    meta.get("source", ""),
+                    score,
+                    similarity_threshold,
+                )
+                continue
             chunks.append(RetrievedChunk(
                 content=doc_text,
                 source=meta.get("source", ""),
                 doc_type=meta.get("doc_type", ""),
-                score=1.0 - dist,  # Convert distance to similarity
+                score=score,
                 metadata=meta,
             ))
 
@@ -279,12 +309,13 @@ class RAGEngine:
         n_results: int = 5,
         doc_type: str | None = None,
         system_prompt: str = "",
+        similarity_threshold: float = _SIMILARITY_THRESHOLD,
     ) -> RAGResponse:
         """Answer a question using RAG: retrieve relevant chunks, then generate."""
         if not self._llm:
             return RAGResponse(query=question, error="No LLM client configured")
 
-        chunks = self.retrieve(question, n_results, doc_type)
+        chunks = self.retrieve(question, n_results, doc_type, similarity_threshold)
         if not chunks:
             return RAGResponse(query=question, error="No relevant documents found")
 

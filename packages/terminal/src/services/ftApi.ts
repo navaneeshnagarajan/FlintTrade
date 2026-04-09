@@ -883,7 +883,6 @@ export interface SectorRRG {
 }
 
 export interface RRGResponse {
-  status: string;
   benchmark: string;
   tail_length: number;
   is_sample_data: boolean;
@@ -894,14 +893,7 @@ export const getRRGData = (tailLength?: number): Promise<RRGResponse> => {
   const params = new URLSearchParams();
   if (tailLength !== undefined) params.set("tail_length", String(tailLength));
   const qs = params.toString();
-  // RRG endpoint returns the full envelope — don't unwrap .data
-  const base = (import.meta.env.DEV ? "/ft-api" : "");
-  const url = `${base}/api/v1/rrg/sectors${qs ? "?" + qs : ""}`;
-  return fetch(url)
-    .then((res) => {
-      if (!res.ok) throw new Error(`RRG API: HTTP ${res.status}`);
-      return res.json() as Promise<RRGResponse>;
-    });
+  return get<RRGResponse>("rrg/sectors" + (qs ? "?" + qs : ""));
 };
 
 // ---------------------------------------------------------------------------

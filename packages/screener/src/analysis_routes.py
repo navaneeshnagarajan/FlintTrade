@@ -708,10 +708,12 @@ def rrg_sectors_endpoint() -> Any:
 
     return jsonify({
         "status": "success",
-        "benchmark": BENCHMARK_SYMBOL,
-        "tail_length": tail_length,
-        "is_sample_data": is_sample_data,
-        "sectors": results,
+        "data": {
+            "benchmark": BENCHMARK_SYMBOL,
+            "tail_length": tail_length,
+            "is_sample_data": is_sample_data,
+            "sectors": results,
+        },
     })
 
 
@@ -956,7 +958,9 @@ def fii_dii_endpoint() -> Any:
 
     return jsonify({
         "status": "success",
-        "is_sample_data": is_sample_data,
-        "latest": latest.to_dict(),
-        "trend": trend_data,
+        "data": {
+            "is_sample_data": is_sample_data,
+            "latest": latest.to_dict(),
+            "trend": trend_data,
+        },
     })

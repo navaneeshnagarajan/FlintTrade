@@ -246,9 +246,11 @@ def mf_search() -> Any:
 
     return jsonify({
         "status": "success",
-        "query": query,
-        "count": len(results),
-        "funds": [asdict(f) for f in results],
+        "data": {
+            "query": query,
+            "count": len(results),
+            "funds": [asdict(f) for f in results],
+        },
     })
 
 
@@ -271,7 +273,7 @@ def mf_nav(scheme_code: int) -> Any:
         if fund.scheme_code == scheme_code:
             return jsonify({
                 "status": "success",
-                "fund": asdict(fund),
+                "data": {"fund": asdict(fund)},
             })
 
     return jsonify({
@@ -294,6 +296,8 @@ def mf_categories() -> Any:
     cats = _get_categories()
     return jsonify({
         "status": "success",
-        "count": len(cats),
-        "categories": cats,
+        "data": {
+            "count": len(cats),
+            "categories": cats,
+        },
     })

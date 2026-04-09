@@ -113,17 +113,19 @@ class TestMFSearch:
 
     def test_has_funds_list(self, client):
         body = client.get("/api/v1/mf/search?q=axis").get_json()
-        assert "funds" in body
-        assert isinstance(body["funds"], list)
+        data = body["data"]
+        assert "funds" in data
+        assert isinstance(data["funds"], list)
 
     def test_search_matches_name(self, client):
         body = client.get("/api/v1/mf/search?q=axis").get_json()
-        assert body["count"] > 0
-        assert all("axis" in f["scheme_name"].lower() or "axis" in f["amc"].lower() for f in body["funds"])
+        data = body["data"]
+        assert data["count"] > 0
+        assert all("axis" in f["scheme_name"].lower() or "axis" in f["amc"].lower() for f in data["funds"])
 
     def test_search_matches_amc(self, client):
         body = client.get("/api/v1/mf/search?q=hdfc").get_json()
-        assert body["count"] > 0
+        assert body["data"]["count"] > 0
 
     def test_search_query_too_short(self, client):
         resp = client.get("/api/v1/mf/search?q=a")
@@ -133,14 +135,16 @@ class TestMFSearch:
 
     def test_search_no_results(self, client):
         body = client.get("/api/v1/mf/search?q=zzzznotfound").get_json()
+        data = body["data"]
         assert body["status"] == "success"
-        assert body["count"] == 0
-        assert body["funds"] == []
+        assert data["count"] == 0
+        assert data["funds"] == []
 
     def test_fund_entry_shape(self, client):
         body = client.get("/api/v1/mf/search?q=axis").get_json()
-        if body["funds"]:
-            fund = body["funds"][0]
+        data = body["data"]
+        if data["funds"]:
+            fund = data["funds"][0]
             assert "scheme_code" in fund
             assert "scheme_name" in fund
             assert "amc" in fund
@@ -167,9 +171,10 @@ class TestMFNAV:
     def test_fund_data_correct(self, client):
         body = client.get("/api/v1/mf/nav/120503").get_json()
         assert body["status"] == "success"
-        assert body["fund"]["scheme_code"] == 120503
-        assert body["fund"]["nav"] == 62.45
-        assert "Axis" in body["fund"]["scheme_name"]
+        data = body["data"]
+        assert data["fund"]["scheme_code"] == 120503
+        assert data["fund"]["nav"] == 62.45
+        assert "Axis" in data["fund"]["scheme_name"]
 
     def test_returns_404_for_unknown_code(self, client):
         resp = client.get("/api/v1/mf/nav/999999999")
@@ -193,17 +198,20 @@ class TestMFCategories:
     def test_has_categories_list(self, client):
         body = client.get("/api/v1/mf/categories").get_json()
         assert body["status"] == "success"
-        assert "categories" in body
-        assert isinstance(body["categories"], list)
+        data = body["data"]
+        assert "categories" in data
+        assert isinstance(data["categories"], list)
 
     def test_categories_not_empty(self, client):
         body = client.get("/api/v1/mf/categories").get_json()
-        assert body["count"] > 0
-        assert len(body["categories"]) > 0
+        data = body["data"]
+        assert data["count"] > 0
+        assert len(data["categories"]) > 0
 
     def test_categories_are_strings(self, client):
         body = client.get("/api/v1/mf/categories").get_json()
-        for cat in body["categories"]:
+        data = body["data"]
+        for cat in data["categories"]:
             assert isinstance(cat, str)
             assert len(cat) > 0
 

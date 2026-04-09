@@ -345,25 +345,25 @@ class TestRRGEndpoint:
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        assert "sectors" in parsed
+        assert "sectors" in parsed["data"]
 
     def test_sectors_is_list(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        assert isinstance(parsed["sectors"], list)
+        assert isinstance(parsed["data"]["sectors"], list)
 
     def test_has_12_sectors(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        assert len(parsed["sectors"]) == len(NIFTY_SECTORS)
+        assert len(parsed["data"]["sectors"]) == len(NIFTY_SECTORS)
 
     def test_each_sector_has_required_fields(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        for sector in parsed["sectors"]:
+        for sector in parsed["data"]["sectors"]:
             assert "symbol" in sector
             assert "name" in sector
             assert "tail" in sector
@@ -373,14 +373,14 @@ class TestRRGEndpoint:
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        for sector in parsed["sectors"]:
+        for sector in parsed["data"]["sectors"]:
             assert len(sector["tail"]) > 0
 
     def test_tail_points_have_required_keys(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        for sector in parsed["sectors"]:
+        for sector in parsed["data"]["sectors"]:
             for pt in sector["tail"]:
                 assert "date" in pt
                 assert "rs_ratio" in pt
@@ -390,20 +390,20 @@ class TestRRGEndpoint:
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        assert "is_sample_data" in parsed
+        assert "is_sample_data" in parsed["data"]
 
     def test_benchmark_field_present(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
-        assert parsed["benchmark"] == "NIFTY 50"
+        assert parsed["data"]["benchmark"] == "NIFTY 50"
 
     def test_tail_length_query_param(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors?tail_length=6")
         parsed = json.loads(resp.data)
-        assert parsed["tail_length"] == 6
-        for sector in parsed["sectors"]:
+        assert parsed["data"]["tail_length"] == 6
+        for sector in parsed["data"]["sectors"]:
             assert len(sector["tail"]) <= 6
 
     def test_tail_length_clamped_min(self, client):
@@ -411,19 +411,19 @@ class TestRRGEndpoint:
         resp = client.get("/api/v1/rrg/sectors?tail_length=1")
         parsed = json.loads(resp.data)
         # Clamped to minimum of 4
-        assert parsed["tail_length"] == 4
+        assert parsed["data"]["tail_length"] == 4
 
     def test_tail_length_clamped_max(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors?tail_length=999")
         parsed = json.loads(resp.data)
         # Clamped to maximum of 52
-        assert parsed["tail_length"] == 52
+        assert parsed["data"]["tail_length"] == 52
 
     def test_quadrant_values_valid(self, client):
         import json
         resp = client.get("/api/v1/rrg/sectors")
         parsed = json.loads(resp.data)
         valid = {"leading", "weakening", "lagging", "improving", "neutral"}
-        for sector in parsed["sectors"]:
+        for sector in parsed["data"]["sectors"]:
             assert sector["current_quadrant"] in valid
