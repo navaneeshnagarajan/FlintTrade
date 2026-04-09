@@ -110,6 +110,12 @@ const lazyWidgets = {
   riskdashboard: lazy(() => import("@/widgets/trading/RiskDashboard/RiskDashboardWidget")),
   optionsflow: lazy(() => import("@/widgets/analysis/OptionsFlow/OptionsFlowWidget")),
   tradelog: lazy(() => import("@/widgets/trading/TradeLog/TradeLogWidget")),
+
+  // Wave 32 widgets
+  microstructure: lazy(() => import("@/widgets/analysis/Microstructure/MicrostructureWidget")),
+  expirycountdown: lazy(() => import("@/widgets/utility/ExpiryCountdown/ExpiryCountdownWidget")),
+  positionsizing: lazy(() => import("@/widgets/utility/PositionSizing/PositionSizingWidget")),
+  correlationmatrix: lazy(() => import("@/widgets/analysis/CorrelationMatrix/CorrelationMatrixWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -194,6 +200,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "riskdashboard", name: "Risk Dashboard", icon: "ShieldAlert", category: "Trading" },
   { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis" },
   { id: "tradelog", name: "Trade Log", icon: "FileText", category: "Trading" },
+
+  // Wave 32
+  { id: "microstructure", name: "Market Microstructure", icon: "Microscope", category: "Analysis" },
+  { id: "expirycountdown", name: "Expiry Countdown", icon: "Timer", category: "Utility" },
+  { id: "positionsizing", name: "Position Sizing", icon: "Ruler", category: "Utility" },
+  { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------
