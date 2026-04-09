@@ -87,7 +87,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
 - AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
 - Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
-- Total terminal tests: 1,837 (Vitest, 176 files) | Python: ~5,000 (pytest) = ~6,837 total
+- Total terminal tests: 1,837 (Vitest, 176 files) | Python: ~5,200 (pytest) = ~7,037 total
 
 ### Added — Features (Wave 25 — Engine + Analytics)
 - Backtest engine: event-driven BacktestEngine with MARKET/LIMIT/STOP/STOP_LIMIT orders, slippage, commission (absorbed from trading-strategies-openalgo)
@@ -125,6 +125,17 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - DataProvider Protocol: OpenAlgo, OpenChart (NSE free), yfinance (MCX) with fallback chain (absorbed from historify + openchart)
 - OHLCVNormaliser: IST conversion, column aliasing, intraday cutoff, data validation
 - HistoricalCache: DuckDB-backed, TTL freshness, incremental updates, batch fetch
+
+### Added — Features (Wave 31 — AI Refinements)
+- MemoryManager: compound scoring (importance × recency_decay × relevance), exponential time decay, access boost, category defaults, pruning (absorbed from FinMem)
+- TradeReflector: batch analysis every N trades, win/loss pattern extraction, rule-based + LLM paths (absorbed from LLM-TradeBot)
+- NewsScheduler: pre-market 07:00, post-market 16:30, intraday 15min polls (IST), TTL dedup, async callbacks (absorbed from FinSights)
+
+### Added — Features (Wave 32 — Simulation)
+- SimulationEngine: multi-phase simulation wrapping BacktestEngine with 7 phases (warmup → crisis → recovery)
+- MarketEvent injection: price shocks, volume spikes, volatility expansion, gaps
+- 6 pre-built scenarios: flash crash, trend reversal, range bound, gap up, volatility expansion, liquidity crisis
+- StressTestRunner: run strategy against all scenarios, generate survival report (absorbed from Stockagent)
 
 ### Added — Features (Wave 30 — Skill Variants)
 - useSkillContent hook: returns skill-level-appropriate widgets (7/18/33), tools, tooltips, presets
