@@ -104,6 +104,12 @@ const lazyWidgets = {
   marketsummary: lazy(() => import("@/widgets/utility/MarketSummary/MarketSummaryWidget")),
   gapanalysis: lazy(() => import("@/widgets/analysis/GapAnalysis/GapAnalysisWidget")),
   sessionstats: lazy(() => import("@/widgets/trading/SessionStats/SessionStatsWidget")),
+
+  // Wave 31 widgets
+  impliedmove: lazy(() => import("@/widgets/analysis/ImpliedMove/ImpliedMoveWidget")),
+  riskdashboard: lazy(() => import("@/widgets/trading/RiskDashboard/RiskDashboardWidget")),
+  optionsflow: lazy(() => import("@/widgets/analysis/OptionsFlow/OptionsFlowWidget")),
+  tradelog: lazy(() => import("@/widgets/trading/TradeLog/TradeLogWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -182,6 +188,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "marketsummary", name: "Market Summary", icon: "LayoutDashboard", category: "Utility" },
   { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis" },
   { id: "sessionstats", name: "Session Stats", icon: "Clock", category: "Trading" },
+
+  // Wave 31
+  { id: "impliedmove", name: "Implied Move", icon: "MoveHorizontal", category: "Analysis" },
+  { id: "riskdashboard", name: "Risk Dashboard", icon: "ShieldAlert", category: "Trading" },
+  { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis" },
+  { id: "tradelog", name: "Trade Log", icon: "FileText", category: "Trading" },
 ];
 
 // ---------------------------------------------------------------------------
