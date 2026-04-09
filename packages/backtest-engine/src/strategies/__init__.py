@@ -5,7 +5,7 @@ This package shadows the parent ``strategies.py`` module when Python resolves
 we re-export everything from that module here so that existing test imports like
 ``from strategies import EMACrossover`` continue to work.
 
-Sub-modules (~100 total strategies — 12 legacy + 88 sub-module classes):
+Sub-modules (~100 strategies + 29 BaseBacktestStrategy classes — 12 legacy + 88 BaseStrategy + 29 new):
 
 Sub-modules (43 NEW strategies added in this batch):
 
@@ -134,6 +134,31 @@ Sub-modules (38 original strategies across 6 categories):
         options_straddle_strangle — ATMStraddleSell, OTMStrangleSell
         options_iron_condor       — IronCondorStrategy
         options_wheel             — WheelStrategy
+
+Sub-modules (AlgoTrading absorption batch — 29 BaseBacktestStrategy classes):
+
+    Trend-Following (9 — trend_following.py):
+        SupertrendStrategy, EMACrossoverStrategy, MACDStrategy,
+        ADXStrategy, ADXDIStrategy, ParabolicSARStrategy,
+        DonchianBreakoutStrategy, KeltnerBreakoutStrategy, HeikinAshiStrategy
+
+    Mean Reversion (6 — mean_reversion.py):
+        RSIStrategy, BollingerBandStrategy, StochasticStrategy,
+        CCIStrategy, WilliamsRStrategy, KeltnerChannelStrategy
+
+    Momentum (6 — momentum.py):
+        MomentumStrategy, DualMomentumStrategy, VolumeBreakoutStrategy,
+        VWAPStrategy, OBVStrategy, VWMAStrategy
+
+    Volatility (4 — volatility.py):
+        ATRBreakoutStrategy, ATRRangeStrategy,
+        ChoppinessBreakoutStrategy, VolatilityContractionStrategy
+
+    Composite (4 — composite.py):
+        RSI_MACD_Strategy, SupertrendEMAStrategy,
+        TripleScreenStrategy, IchimokuStrategy
+
+    Registry: STRATEGY_REGISTRY (dict) + get_strategy(name) lookup function.
 """
 
 from __future__ import annotations
@@ -461,4 +486,127 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "ScalpTickMomentum": ScalpTickMomentum,
     "ScalpSpreadCapture": ScalpSpreadCapture,
 }
+
+# ---------------------------------------------------------------------------
+# AlgoTrading absorption batch — 5 category files (26 strategy classes)
+# ---------------------------------------------------------------------------
+
+# Trend-following (9)
+from .trend_following import (  # noqa: E402
+    SupertrendStrategy,
+    EMACrossoverStrategy,
+    MACDStrategy,
+    ADXStrategy,
+    ADXDIStrategy,
+    ParabolicSARStrategy,
+    DonchianBreakoutStrategy,
+    KeltnerBreakoutStrategy,
+    HeikinAshiStrategy,
+)
+
+# Mean reversion (6)
+from .mean_reversion import (  # noqa: E402
+    RSIStrategy,
+    BollingerBandStrategy,
+    StochasticStrategy,
+    CCIStrategy,
+    WilliamsRStrategy,
+    KeltnerChannelStrategy,
+)
+
+# Momentum (6)
+from .momentum import (  # noqa: E402
+    MomentumStrategy,
+    DualMomentumStrategy,
+    VolumeBreakoutStrategy,
+    VWAPStrategy,
+    OBVStrategy,
+    VWMAStrategy,
+)
+
+# Volatility (4)
+from .volatility import (  # noqa: E402
+    ATRBreakoutStrategy,
+    ATRRangeStrategy,
+    ChoppinessBreakoutStrategy,
+    VolatilityContractionStrategy,
+)
+
+# Composite (4)
+from .composite import (  # noqa: E402
+    RSI_MACD_Strategy,
+    SupertrendEMAStrategy,
+    TripleScreenStrategy,
+    IchimokuStrategy,
+)
+
+# NOTE: The new BaseBacktestStrategy-based classes are NOT added to ALL_STRATEGIES
+# because ALL_STRATEGIES requires BaseStrategy (packages.engine) in the MRO.
+# They live exclusively in STRATEGY_REGISTRY below.
+
+# ---------------------------------------------------------------------------
+# STRATEGY_REGISTRY and get_strategy() — for the BaseBacktestStrategy-based classes
+# ---------------------------------------------------------------------------
+try:
+    from ..base_strategy import BaseBacktestStrategy as _BaseBacktestStrategy  # noqa: E402
+except ImportError:
+    from base_strategy import BaseBacktestStrategy as _BaseBacktestStrategy  # type: ignore[no-redef]  # noqa: E402
+
+STRATEGY_REGISTRY: dict[str, type[_BaseBacktestStrategy]] = {
+    # Trend-following
+    "SupertrendStrategy": SupertrendStrategy,
+    "EMACrossoverStrategy": EMACrossoverStrategy,
+    "MACDStrategy": MACDStrategy,
+    "ADXStrategy": ADXStrategy,
+    "ADXDIStrategy": ADXDIStrategy,
+    "ParabolicSARStrategy": ParabolicSARStrategy,
+    "DonchianBreakoutStrategy": DonchianBreakoutStrategy,
+    "KeltnerBreakoutStrategy": KeltnerBreakoutStrategy,
+    "HeikinAshiStrategy": HeikinAshiStrategy,
+    # Mean reversion
+    "RSIStrategy": RSIStrategy,
+    "BollingerBandStrategy": BollingerBandStrategy,
+    "StochasticStrategy": StochasticStrategy,
+    "CCIStrategy": CCIStrategy,
+    "WilliamsRStrategy": WilliamsRStrategy,
+    "KeltnerChannelStrategy": KeltnerChannelStrategy,
+    # Momentum
+    "MomentumStrategy": MomentumStrategy,
+    "DualMomentumStrategy": DualMomentumStrategy,
+    "VolumeBreakoutStrategy": VolumeBreakoutStrategy,
+    "VWAPStrategy": VWAPStrategy,
+    "OBVStrategy": OBVStrategy,
+    "VWMAStrategy": VWMAStrategy,
+    # Volatility
+    "ATRBreakoutStrategy": ATRBreakoutStrategy,
+    "ATRRangeStrategy": ATRRangeStrategy,
+    "ChoppinessBreakoutStrategy": ChoppinessBreakoutStrategy,
+    "VolatilityContractionStrategy": VolatilityContractionStrategy,
+    # Composite
+    "RSI_MACD_Strategy": RSI_MACD_Strategy,
+    "SupertrendEMAStrategy": SupertrendEMAStrategy,
+    "TripleScreenStrategy": TripleScreenStrategy,
+    "IchimokuStrategy": IchimokuStrategy,
+}
+
+
+def get_strategy(name: str) -> type[_BaseBacktestStrategy]:
+    """Look up a BaseBacktestStrategy subclass by registry name.
+
+    Args:
+        name: Strategy registry key (e.g. ``"SupertrendStrategy"``).
+
+    Returns:
+        Strategy class.
+
+    Raises:
+        KeyError: If ``name`` is not found in STRATEGY_REGISTRY.
+    """
+    try:
+        return STRATEGY_REGISTRY[name]
+    except KeyError:
+        available = ", ".join(sorted(STRATEGY_REGISTRY))
+        raise KeyError(
+            f"Strategy {name!r} not found. Available: {available}"
+        ) from None
 
