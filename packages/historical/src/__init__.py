@@ -7,6 +7,7 @@ from .expiry_collector import ExpiryDataCollector, ExpiryDataRecord, ExpiryDataR
 from .expiry_manager import ContinuousFuturesBar, ExpiryInfo, ExpiryManager
 from .expiry_tracker import ExpiryTracker
 from .free_data import FreeDataSource
+from .nse_session import NSEBar, NSEDataResult, NSESession
 from .pipeline import DataPipeline
 
 __all__ = [
@@ -21,4 +22,7 @@ __all__ = [
     "ExpiryDataRecord",
     "ExpiryDataResult",
     "ExpiryTracker",
+    "NSESession",
+    "NSEBar",
+    "NSEDataResult",
 ]

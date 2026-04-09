@@ -365,6 +365,30 @@ def create_flask_app(
     from packages.core.src.order_routes import orders_bp  # noqa: PLC0415
     app.register_blueprint(orders_bp)
 
+    # Register AI Team blueprint (/api/v1/ai/team/*)
+    from packages.ai.src.team_routes import team_bp  # noqa: PLC0415
+    app.register_blueprint(team_bp)
+
+    # Register Fundamental Screener blueprint (/api/v1/fundamentals/*)
+    from packages.screener.src.fundamental_routes import fundamental_bp  # noqa: PLC0415
+    app.register_blueprint(fundamental_bp)
+
+    # Register IPO Tracker blueprint (/api/v1/ipo/*)
+    from packages.screener.src.ipo_routes import ipo_bp  # noqa: PLC0415
+    app.register_blueprint(ipo_bp)
+
+    # Register WhatsApp Alerts blueprint (/api/v1/alerts/whatsapp/*)
+    from packages.automation.src.whatsapp_routes import whatsapp_bp  # noqa: PLC0415
+    app.register_blueprint(whatsapp_bp)
+
+    # Register Historical Expiry Tracker blueprint (/api/v1/historical/*)
+    from packages.historical.src.expiry_tracker_routes import expiry_tracker_bp  # noqa: PLC0415
+    app.register_blueprint(expiry_tracker_bp)
+
+    # Register Bracket Order blueprint (/api/v1/orders/bracket*)
+    from packages.engine.src.bracket_routes import bracket_bp  # noqa: PLC0415
+    app.register_blueprint(bracket_bp)
+
     # Register Log Stream blueprint (/v1/logs/*) — SSE + REST log streaming
     from packages.core.src.log_stream import log_stream_bp  # noqa: PLC0415
     app.register_blueprint(log_stream_bp)

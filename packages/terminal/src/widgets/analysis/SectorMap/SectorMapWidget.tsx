@@ -34,6 +34,7 @@ import { useRRGData } from "@/hooks/useRRGData";
 import type { Position } from "@/types/api";
 import type { RRGResponse, SectorRRG, RRGQuadrant } from "@/services/ftApi";
 import type { WidgetProps } from "@/types/widgets";
+import { divergingColourScale } from "@/lib/colourScale";
 
 // ---------------------------------------------------------------------------
 // Treemap layout algorithm (absorbed verbatim from treemapLayout.ts)
@@ -126,30 +127,9 @@ function calculateTreemapLayout(
 }
 
 // ---------------------------------------------------------------------------
-// Color helpers (absorbed from heatmapHelpers.ts)
+// Color helpers — delegates to the shared divergingColourScale utility
 // ---------------------------------------------------------------------------
-function getChangeColor(change: number): string {
-  const abs = Math.abs(change);
-  if (change >= 0) {
-    if (abs > 4) return "#00C853";
-    if (abs > 3) return "#00B248";
-    if (abs > 2) return "#00A63E";
-    if (abs > 1.5) return "#009A38";
-    if (abs > 1) return "#00897B";
-    if (abs > 0.5) return "#0D9668";
-    if (abs > 0.2) return "#26A69A";
-    return "#3D8B80";
-  } else {
-    if (abs > 4) return "#FF1744";
-    if (abs > 3) return "#F5153D";
-    if (abs > 2) return "#E91235";
-    if (abs > 1.5) return "#D8102F";
-    if (abs > 1) return "#C62828";
-    if (abs > 0.5) return "#B71C1C";
-    if (abs > 0.2) return "#A52727";
-    return "#8B3030";
-  }
-}
+const getChangeColor = divergingColourScale;
 
 function getBarWidth(change: number, maxChange: number): number {
   return Math.min((Math.abs(change) / Math.max(maxChange, 1)) * 100, 100);

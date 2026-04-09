@@ -73,7 +73,6 @@ _INTERVAL_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-
 @dataclass
 class NSEBar:
     """A single OHLCV bar from NSE charting API."""

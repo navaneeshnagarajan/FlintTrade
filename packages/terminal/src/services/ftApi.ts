@@ -1428,3 +1428,75 @@ export const deleteUser = (username: string) =>
   del<{ message: string }>(
     "users/" + encodeURIComponent(username),
   );
+
+// ---------------------------------------------------------------------------
+// Bracket Orders
+// ---------------------------------------------------------------------------
+
+export interface BracketOrder {
+  bracket_id: string;
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  entry_price: number;
+  stoploss: number;
+  target: number;
+  trailing_sl?: number;
+  status: "PENDING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
+  entry_order_id: string | null;
+  sl_order_id: string | null;
+  target_order_id: string | null;
+  created_at: string;
+}
+
+export const placeBracketOrder = (
+  entry: Record<string, unknown>,
+  stoploss: number,
+  target: number,
+  trailing_sl?: number,
+) =>
+  post<BracketOrder>("orders/bracket", {
+    ...entry,
+    stoploss,
+    target,
+    ...(trailing_sl !== undefined ? { trailing_sl } : {}),
+  });
+
+export const getActiveBrackets = () =>
+  get<{ brackets: BracketOrder[] }>("orders/brackets");
+
+export const cancelBracketOrder = (bracketId: string) =>
+  del<{ status: string }>(
+    "orders/bracket/" + encodeURIComponent(bracketId),
+  );
+
+// ---------------------------------------------------------------------------
+// Activity Log (admin audit trail)
+// ---------------------------------------------------------------------------
+
+export interface ActivityEntry {
+  id: number;
+  timestamp: string;
+  action: string;
+  user: string;
+  details: string;
+  ip: string;
+}
+
+export const getActivityLog = (params?: {
+  action?: string;
+  user?: string;
+  since?: string;
+  limit?: number;
+}) => {
+  const qs = new URLSearchParams();
+  if (params?.action) qs.set("action", params.action);
+  if (params?.user) qs.set("user", params.user);
+  if (params?.since) qs.set("since", params.since);
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  const query = qs.toString();
+  return get<{ entries: ActivityEntry[]; total: number }>(
+    "admin/activity" + (query ? "?" + query : ""),
+  );
+};
