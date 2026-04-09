@@ -100,6 +100,9 @@ from packages.indicators.src.streaming import (
 # Pipeline
 from packages.indicators.src.pipeline import IndicatorPipeline
 
+# VWAP bands
+from packages.indicators.src.vwap_bands import VWAPResult, calculate_vwap_bands
+
 __all__ = [
     # trend
     "ema",
@@ -170,4 +173,7 @@ __all__ = [
     "StreamingCumulativeDelta",
     # pipeline
     "IndicatorPipeline",
+    # vwap bands
+    "VWAPResult",
+    "calculate_vwap_bands",
 ]

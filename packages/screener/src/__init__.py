@@ -57,6 +57,13 @@ from .economic_calendar import EconomicCalendarProvider, EconomicEvent
 from .orderflow_inference import FlowBucket, OrderFlowInference, PriceLevel
 from .market_breadth import BreadthData, MarketBreadthCalculator
 from .volatility_cone import VolatilityCone, VolatilityConePoint
+from .pair_correlation import PairCorrelationEngine, PairSignal, make_sample_pair_data
+from .multi_timeframe import (
+    MTFAnalysis,
+    MultiTimeframeAnalyser,
+    TimeframeSignal,
+    make_sample_mtf_data,
+)
 from .rrg import (
     NIFTY_SECTORS,
     RRGPoint,
@@ -165,4 +172,13 @@ __all__ = [
     # Volatility cone
     "VolatilityCone",
     "VolatilityConePoint",
+    # Pair correlation
+    "PairCorrelationEngine",
+    "PairSignal",
+    "make_sample_pair_data",
+    # Multi-timeframe analyser
+    "MultiTimeframeAnalyser",
+    "MTFAnalysis",
+    "TimeframeSignal",
+    "make_sample_mtf_data",
 ]

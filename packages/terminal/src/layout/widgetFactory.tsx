@@ -86,6 +86,12 @@ const lazyWidgets = {
   quicktrade: lazy(() => import("@/widgets/trading/QuickTrade/QuickTradeWidget")),
   volatilitycone: lazy(() => import("@/widgets/analysis/VolatilityCone/VolatilityConeWidget")),
   profittarget: lazy(() => import("@/widgets/utility/ProfitTarget/ProfitTargetWidget")),
+
+  // Wave 28 widgets
+  heatcalendar: lazy(() => import("@/widgets/analysis/HeatCalendar/HeatCalendarWidget")),
+  vwapbands: lazy(() => import("@/widgets/analysis/VWAPBands/VWAPBandsWidget")),
+  correlationpairs: lazy(() => import("@/widgets/analysis/CorrelationPairs/CorrelationPairsWidget")),
+  multitimeframe: lazy(() => import("@/widgets/analysis/MultiTimeframe/MultiTimeframeWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -146,6 +152,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "quicktrade", name: "Quick Trade", icon: "Zap", category: "Trading" },
   { id: "volatilitycone", name: "Volatility Cone", icon: "Triangle", category: "Analysis" },
   { id: "profittarget", name: "Profit Target Calc", icon: "Target", category: "Utility" },
+
+  // Wave 28
+  { id: "heatcalendar", name: "Heat Calendar", icon: "Calendar", category: "Analysis" },
+  { id: "vwapbands", name: "VWAP Bands", icon: "Waves", category: "Analysis" },
+  { id: "correlationpairs", name: "Correlation Pairs", icon: "Link", category: "Analysis" },
+  { id: "multitimeframe", name: "Multi-Timeframe", icon: "Layers", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------

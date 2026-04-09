@@ -405,6 +405,11 @@ def create_flask_app(
     from packages.data.src.audit_routes import audit_bp  # noqa: PLC0415
     app.register_blueprint(audit_bp)
 
+    # Register Analytics extensions blueprint (/ft-api/v1/indicators/vwap,
+    # /ft-api/v1/analytics/pairs, /ft-api/v1/analytics/mtf)
+    from packages.screener.src.analytics_routes import analytics_bp  # noqa: PLC0415
+    app.register_blueprint(analytics_bp)
+
     # Register WhatsApp Alerts blueprint (/api/v1/alerts/whatsapp/*)
     from packages.automation.src.whatsapp_routes import whatsapp_bp  # noqa: PLC0415
     app.register_blueprint(whatsapp_bp)
