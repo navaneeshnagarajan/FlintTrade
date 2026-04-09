@@ -389,6 +389,10 @@ def create_flask_app(
     from packages.engine.src.bracket_routes import bracket_bp  # noqa: PLC0415
     app.register_blueprint(bracket_bp)
 
+    # Register Position Sizer blueprint (/api/v1/position/*)
+    from packages.engine.src.position_sizer_routes import position_bp  # noqa: PLC0415
+    app.register_blueprint(position_bp)
+
     # Register Voice Orders blueprint (/api/v1/voice/*)
     from packages.integration.src.voice_orders import voice_bp  # noqa: PLC0415
     app.register_blueprint(voice_bp)

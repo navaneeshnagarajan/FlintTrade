@@ -135,6 +135,61 @@ def sentiment_analyze() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
+@ai_bp.route("/ai/refine-strategy", methods=["POST"])
+def refine_strategy() -> tuple[Any, int]:
+    """Analyse backtest results and suggest parameter improvements.
+
+    Accepts backtest metrics and current strategy parameters, then delegates
+    to :class:`~packages.ai.src.strategy_refiner.StrategyRefiner` — using the
+    configured LLM when available, or falling back to rule-based heuristics.
+
+    Request JSON:
+        strategy_name (str): Name of the strategy.
+        backtest_results (dict): Metrics from the backtest engine.  Expected
+            keys: ``sharpe_ratio``, ``max_drawdown``, ``win_rate``,
+            ``total_trades``, ``total_return``, ``profit_factor``.
+        current_params (dict): Current parameter values for the strategy.
+
+    Returns:
+        JSON with ``status`` and ``data`` containing ``analysis``,
+        ``suggested_params``, ``reasoning``, ``confidence``, and ``timestamp``.
+    """
+    body = request.get_json(silent=True) or {}
+    strategy_name: str = body.get("strategy_name", "").strip()
+    backtest_results: dict = body.get("backtest_results") or {}
+    current_params: dict = body.get("current_params") or {}
+
+    if not strategy_name:
+        return jsonify({"status": "error", "message": "strategy_name is required"}), 400
+    if not backtest_results:
+        return jsonify({"status": "error", "message": "backtest_results is required"}), 400
+
+    try:
+        from packages.ai.src.strategy_refiner import StrategyRefiner  # noqa: PLC0415
+
+        llm_client = None
+        if _is_llm_configured():
+            from packages.ai.src.llm_client import LLMClient  # noqa: PLC0415
+            try:
+                llm_client = LLMClient()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not create LLM client for refiner: %s", exc)
+
+        refiner = StrategyRefiner(llm_client=llm_client)
+        suggestion = refiner.refine(strategy_name, backtest_results, current_params)
+
+        if llm_client is not None:
+            try:
+                llm_client.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+        return jsonify({"status": "success", "data": suggestion.to_dict()}), 200
+    except Exception:
+        logger.exception("refine_strategy error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
 @ai_bp.route("/rag/query", methods=["POST"])
 def rag_query() -> tuple[Any, int]:
     """Query the RAG knowledge base.

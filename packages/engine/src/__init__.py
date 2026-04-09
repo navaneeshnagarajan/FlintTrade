@@ -22,6 +22,7 @@ from .scheduler import (
     TimeScheduler,
 )
 from .bracket_order import BracketOrder, BracketOrderError, BracketOrderService, BracketResult
+from .position_sizer import PositionSizer
 from .strategy import BaseStrategy, StrategyRegistry, StrategyState
 
 # NOTE: SandboxEngine, SandboxConfig, and UserStrategyRunner are intentionally
@@ -66,4 +67,6 @@ __all__ = [
     "BracketOrderService",
     "BracketOrderError",
     "BracketResult",
+    # Position sizer
+    "PositionSizer",
 ]

@@ -38,6 +38,7 @@ from .ensemble_selector import (
     compute_dissimilarity_index,
 )
 from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
+from .strategy_refiner import RefinementSuggestion, StrategyRefiner
 
 __all__ = [
     # LLM
@@ -118,4 +119,7 @@ __all__ = [
     # Hyperopt (from freqtrade)
     "StrategyOptimiser",
     "OptimisationResult",
+    # Strategy refiner
+    "StrategyRefiner",
+    "RefinementSuggestion",
 ]

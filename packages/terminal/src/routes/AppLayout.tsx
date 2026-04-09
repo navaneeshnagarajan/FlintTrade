@@ -7,10 +7,13 @@ import { useWsBridge } from "@/hooks/useWsBridge";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
+import InteractiveTour from "@/components/tour/InteractiveTour";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { LockScreen } from "@/components/LockScreen";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
+
+const TOUR_COMPLETE_KEY = "flinttrade:tourComplete";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -117,6 +120,17 @@ export default function AppLayout() {
     return window.innerWidth < SMALL_SCREEN_BREAKPOINT;
   });
 
+  // Show the interactive tour on /trade for first-time users who haven't seen it.
+  // The tour itself writes TOUR_COMPLETE_KEY to localStorage on skip or completion.
+  const [showTour, setShowTour] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(TOUR_COMPLETE_KEY) !== "true";
+  });
+
+  // Gate the tour to the /trade route — it introduces the trading workspace.
+  const isTradeRoute = location.pathname === "/trade";
+  const tourVisible = showTour && isTradeRoute;
+
   useEffect(() => {
     function handleResize() {
       if (window.innerWidth >= SMALL_SCREEN_BREAKPOINT) {
@@ -190,6 +204,9 @@ export default function AppLayout() {
       )}
       <NoConnectionOverlay />
       {authStatus === "pin-required" && <LockScreen />}
+      {tourVisible && (
+        <InteractiveTour onComplete={() => setShowTour(false)} />
+      )}
     </div>
   );
 }

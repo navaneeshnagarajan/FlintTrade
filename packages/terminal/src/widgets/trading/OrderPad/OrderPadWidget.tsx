@@ -20,7 +20,9 @@
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { useForm, Controller, type SubmitHandler, type Resolver } from "react-hook-form";
+import { useAtomValue } from "jotai";
 import { useModeStore } from "@/stores/modeStore";
+import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -32,6 +34,7 @@ import {
   CheckCircle2,
   AlertCircle,
   FileEdit,
+  IndianRupee,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -264,6 +267,9 @@ function OrderPadWidget(_props: WidgetProps) {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
 
+  // "Calculate from capital" state — user types an INR amount, qty is auto-calculated
+  const [capitalAmount, setCapitalAmount] = useState("");
+
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -297,6 +303,37 @@ function OrderPadWidget(_props: WidgetProps) {
   const priceEnabled = PRICE_ENABLED.has(orderType);
   const triggerEnabled = TRIGGER_ENABLED.has(orderType);
   const isBuy = action === "BUY";
+
+  // Live LTP for the selected symbol — used by the capital-to-quantity calculator.
+  // Key format: "{exchange}:{symbol}" — matches the WS bridge and REST fallback atom keys.
+  const tickKey = `${exchange}:${symbol}`;
+  const tick = useAtomValue(tickAtomFamily(tickKey));
+  const ltp = tick?.ltp ?? 0;
+
+  // When the user types an INR capital amount, auto-calculate quantity = floor(amount / ltp).
+  // Also clears the capital field when qty is edited manually.
+  const handleCapitalChange = useCallback(
+    (raw: string) => {
+      setCapitalAmount(raw);
+      const amount = parseFloat(raw);
+      if (!isNaN(amount) && amount > 0 && ltp > 0) {
+        const calculated = Math.floor(amount / ltp);
+        if (calculated >= 1) {
+          setValue("qty", calculated);
+        }
+      }
+    },
+    [ltp, setValue],
+  );
+
+  const handleQtyChange = useCallback(
+    (v: string, fieldOnChange: (n: number) => void) => {
+      // Manual qty edit clears the capital field to avoid confusion
+      setCapitalAmount("");
+      fieldOnChange(Number(v));
+    },
+    [],
+  );
 
   // Broker capabilities — used to hide product for crypto, show dynamic exchanges
   const { data: brokerCaps } = useBrokerCapabilities();
@@ -605,7 +642,7 @@ function OrderPadWidget(_props: WidgetProps) {
               <StepInput
                 label="Quantity"
                 value={field.value}
-                onChange={(v) => field.onChange(Number(v))}
+                onChange={(v) => handleQtyChange(v, field.onChange)}
                 min={1}
                 step={1}
               />
@@ -624,6 +661,46 @@ function OrderPadWidget(_props: WidgetProps) {
               />
             )}
           />
+        </div>
+
+        {/* Capital-to-quantity calculator */}
+        <div className="flex flex-col gap-0.5">
+          <label
+            htmlFor="orderpad-capital"
+            className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1"
+          >
+            <IndianRupee size={9} aria-hidden="true" />
+            Or enter amount
+          </label>
+          <div className="relative flex items-center">
+            <span className="absolute left-2 text-xs text-text-muted font-mono pointer-events-none select-none">
+              ₹
+            </span>
+            <Input
+              id="orderpad-capital"
+              type="number"
+              min={0}
+              step={100}
+              value={capitalAmount}
+              onChange={(e) => handleCapitalChange(e.target.value)}
+              placeholder="e.g. 50000"
+              className="pl-5 h-8 w-full bg-surface-hover border border-border-default rounded px-2 text-xs font-mono tabular-nums text-text-primary focus-visible:ring-0 focus-visible:border-accent placeholder:text-text-muted"
+            />
+          </div>
+          {capitalAmount !== "" && ltp > 0 && (
+            <p className="text-xxs text-text-muted mt-0.5 font-mono tabular-nums">
+              LTP ₹{ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+              {" · "}
+              {Math.floor(parseFloat(capitalAmount) / ltp) >= 1
+                ? `${Math.floor(parseFloat(capitalAmount) / ltp)} qty`
+                : "Amount too small"}
+            </p>
+          )}
+          {capitalAmount !== "" && ltp === 0 && (
+            <p className="text-xxs text-text-muted mt-0.5">
+              LTP unavailable — quantity not auto-calculated
+            </p>
+          )}
         </div>
 
         {/* Trigger + Disclosed row */}

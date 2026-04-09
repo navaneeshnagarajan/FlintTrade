@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,14 @@ vi.mock("@/components/motion/PageTransition", () => ({
 
 vi.mock("@/components/welcome/DailyWelcome", () => ({
   default: () => null,
+}));
+
+vi.mock("@/components/tour/InteractiveTour", () => ({
+  default: ({ onComplete }: { onComplete: () => void }) => (
+    <div data-testid="interactive-tour">
+      <button onClick={onComplete}>Skip Tour</button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/NoConnectionOverlay", () => ({
@@ -93,6 +101,8 @@ describe("AppLayout", () => {
     vi.clearAllMocks();
     // Reset sessionStorage so DailyWelcome / small screen overlays don't interfere
     sessionStorage.clear();
+    // Reset localStorage so tour state is fresh per test
+    localStorage.clear();
     // Ensure window.innerWidth is large enough to skip small screen overlay
     Object.defineProperty(window, "innerWidth", { value: 1920, writable: true });
   });
@@ -122,5 +132,38 @@ describe("AppLayout", () => {
 
     expect(screen.getByText(/practice mode/i)).toBeInTheDocument();
     expect(screen.getByText(/simulated/i)).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Interactive tour tests
+  // -------------------------------------------------------------------------
+
+  it("shows InteractiveTour on /trade when tour has not been completed", () => {
+    // localStorage is already clear from beforeEach — tour has not been seen
+    render(<AppLayout />);
+
+    expect(screen.getByTestId("interactive-tour")).toBeInTheDocument();
+  });
+
+  it("does not show InteractiveTour when tour has already been completed", () => {
+    localStorage.setItem("flinttrade:tourComplete", "true");
+
+    render(<AppLayout />);
+
+    expect(screen.queryByTestId("interactive-tour")).not.toBeInTheDocument();
+  });
+
+  it("hides InteractiveTour after onComplete is called", () => {
+    render(<AppLayout />);
+
+    expect(screen.getByTestId("interactive-tour")).toBeInTheDocument();
+
+    // Simulate tour completion via the Skip button exposed by the mock.
+    // Wrapped in act() because the click triggers a React state update (setShowTour).
+    act(() => {
+      screen.getByRole("button", { name: /skip tour/i }).click();
+    });
+
+    expect(screen.queryByTestId("interactive-tour")).not.toBeInTheDocument();
   });
 });

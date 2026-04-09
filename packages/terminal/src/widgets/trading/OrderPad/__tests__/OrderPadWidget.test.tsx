@@ -2,11 +2,11 @@
  * OrderPadWidget.test.tsx
  *
  * Tests for the OrderPad trading widget.
- * Verifies rendering, form elements, and buy/sell toggle.
+ * Verifies rendering, form elements, buy/sell toggle, and capital calculator.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -35,11 +35,21 @@ vi.mock("@/lib/market", () => ({
   isMarketHours: () => false,
 }));
 
+// Jotai atoms — default to null tick (no LTP) unless test overrides
+vi.mock("jotai", async () => {
+  const actual = await vi.importActual<typeof import("jotai")>("jotai");
+  return {
+    ...actual,
+    useAtomValue: vi.fn(() => null),
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Import component under test
 // ---------------------------------------------------------------------------
 
 import OrderPadWidget from "../OrderPadWidget";
+import * as jotai from "jotai";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,6 +64,8 @@ const defaultProps = {} as Parameters<typeof OrderPadWidget>[0];
 describe("OrderPadWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // Default: no LTP available
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
   });
 
   it("renders without crashing", () => {
@@ -105,5 +117,52 @@ describe("OrderPadWidget", () => {
     // SL and SL-M appear only in their pill buttons
     expect(screen.getByRole("radio", { name: "SL" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "SL-M" })).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Capital-to-quantity calculator tests
+  // -------------------------------------------------------------------------
+
+  it("renders the capital amount input", () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    expect(screen.getByLabelText(/or enter amount/i)).toBeInTheDocument();
+  });
+
+  it("shows LTP unavailable message when LTP is zero and amount is entered", () => {
+    // useAtomValue returns null → ltp === 0
+    render(<OrderPadWidget {...defaultProps} />);
+
+    const capitalInput = screen.getByLabelText(/or enter amount/i);
+    fireEvent.change(capitalInput, { target: { value: "50000" } });
+
+    expect(
+      screen.getByText(/ltp unavailable/i),
+    ).toBeInTheDocument();
+  });
+
+  it("calculates quantity from capital amount when LTP is available", () => {
+    // Mock tick with LTP = 200
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 200 });
+
+    render(<OrderPadWidget {...defaultProps} />);
+
+    const capitalInput = screen.getByLabelText(/or enter amount/i);
+    fireEvent.change(capitalInput, { target: { value: "50000" } });
+
+    // floor(50000 / 200) = 250
+    expect(screen.getByText(/250 qty/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Amount too small' when capital is less than one unit", () => {
+    // Mock tick with LTP = 200
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 200 });
+
+    render(<OrderPadWidget {...defaultProps} />);
+
+    const capitalInput = screen.getByLabelText(/or enter amount/i);
+    // 100 / 200 = 0.5 → floor = 0 → too small
+    fireEvent.change(capitalInput, { target: { value: "100" } });
+
+    expect(screen.getByText(/amount too small/i)).toBeInTheDocument();
   });
 });

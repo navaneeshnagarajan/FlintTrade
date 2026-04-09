@@ -1744,3 +1744,80 @@ export const getActivityLog = (params?: {
     "admin/activity" + (query ? "?" + query : ""),
   );
 };
+
+// ---------------------------------------------------------------------------
+// AI Strategy Refiner
+// ---------------------------------------------------------------------------
+
+export interface RefinementSuggestion {
+  strategy_name: string;
+  /** LLM's narrative analysis of the backtest results. */
+  analysis: string;
+  /** Recommended parameter values (same keys as current_params). */
+  suggested_params: Record<string, unknown>;
+  /** Explanation of why these changes were suggested. */
+  reasoning: string;
+  /** Confidence in the suggestion: 0.0 (low) to 1.0 (high). */
+  confidence: number;
+  timestamp: string;
+}
+
+export interface RefineStrategyRequest {
+  strategy_name: string;
+  backtest_results: {
+    sharpe_ratio?: number;
+    max_drawdown?: number;
+    win_rate?: number;
+    total_trades?: number;
+    total_return?: number;
+    profit_factor?: number;
+    sortino_ratio?: number;
+    [key: string]: unknown;
+  };
+  current_params: Record<string, unknown>;
+}
+
+export const refineStrategy = (req: RefineStrategyRequest) =>
+  post<RefinementSuggestion>("ai/refine-strategy", req);
+
+// ---------------------------------------------------------------------------
+// Position Sizer
+// ---------------------------------------------------------------------------
+
+export type PositionSizeMethod =
+  | "from_capital"
+  | "from_risk_percent"
+  | "from_kelly"
+  | "max_lots";
+
+export interface PositionSizeRequest {
+  method: PositionSizeMethod;
+  capital: number;
+  /** Required for from_capital and from_kelly. */
+  ltp?: number;
+  /** Lot size (default 1 for equities). */
+  lot_size?: number;
+  /** Risk fraction for from_risk_percent, e.g. 0.01 for 1%. */
+  risk_pct?: number;
+  /** Entry price for from_risk_percent. */
+  entry?: number;
+  /** Stop-loss price for from_risk_percent. */
+  sl?: number;
+  /** Historical win rate for from_kelly (0–1). */
+  win_rate?: number;
+  /** Average winning trade amount for from_kelly. */
+  avg_win?: number;
+  /** Average losing trade amount for from_kelly. */
+  avg_loss?: number;
+  /** Margin required per lot for max_lots. */
+  margin_per_lot?: number;
+}
+
+export interface PositionSizeResult {
+  quantity: number;
+  method: PositionSizeMethod;
+  inputs: PositionSizeRequest;
+}
+
+export const calculatePositionSize = (req: PositionSizeRequest) =>
+  post<PositionSizeResult>("position/size", req);
