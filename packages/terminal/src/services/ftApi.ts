@@ -1952,3 +1952,43 @@ export interface FundingRatesResponse {
  */
 export const getCryptoFundingRates = () =>
   get<FundingRatesResponse>("crypto/funding_rates");
+
+// ---------------------------------------------------------------------------
+// Earnings Calendar
+// ---------------------------------------------------------------------------
+
+export interface EarningsCalendarEntry {
+  symbol: string;
+  company: string;
+  date: string; // ISO date YYYY-MM-DD
+  result?: "beat" | "missed" | "inline";
+  estimate?: number;
+  actual?: number;
+  sector: string;
+}
+
+/**
+ * Fetch earnings calendar entries for a given month.
+ * `month` is 1-indexed (1 = January).
+ */
+export const getEarningsCalendar = (year: number, month: number) =>
+  get<{ entries: EarningsCalendarEntry[] }>(
+    `earnings/calendar?year=${year}&month=${month}`,
+  );
+
+// ---------------------------------------------------------------------------
+// Global Indices
+// ---------------------------------------------------------------------------
+
+export interface GlobalIndexEntry {
+  id: string;
+  name: string;
+  region: "India" | "US" | "Europe" | "Asia";
+  ltp: number;
+  change: number;
+  change_pct: number;
+  history: number[]; // last 30 data points for sparkline
+}
+
+export const getGlobalIndices = () =>
+  get<{ indices: GlobalIndexEntry[]; updated_at: string }>("market/global_indices");

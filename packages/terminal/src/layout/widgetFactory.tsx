@@ -67,6 +67,13 @@ const lazyWidgets = {
 
   // Utility widgets (Wave 24)
   fundingrate: lazy(() => import("@/widgets/utility/FundingRate/FundingRateWidget")),
+
+  // Utility widgets (Wave 25)
+  currencyconverter: lazy(() => import("@/widgets/utility/CurrencyConverter/CurrencyConverterWidget")),
+  earningscalendar: lazy(() => import("@/widgets/utility/EarningsCalendar/EarningsCalendarWidget")),
+  globalindices: lazy(() => import("@/widgets/utility/GlobalIndices/GlobalIndicesWidget")),
+  strategytemplates: lazy(() => import("@/widgets/utility/StrategyTemplates/StrategyTemplatesWidget")),
+  audittrail: lazy(() => import("@/widgets/utility/AuditTrail/AuditTrailWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -112,6 +119,11 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading" },
   { id: "greekssurface", name: "Greeks Surface", icon: "Box", category: "Analysis" },
   { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility" },
+  { id: "currencyconverter", name: "Currency Converter", icon: "ArrowLeftRight", category: "Utility" },
+  { id: "earningscalendar", name: "Earnings Calendar", icon: "CalendarDays", category: "Utility" },
+  { id: "globalindices", name: "Global Indices", icon: "Globe", category: "Utility" },
+  { id: "strategytemplates", name: "Strategy Templates", icon: "BookOpen", category: "Utility" },
+  { id: "audittrail", name: "Audit Trail", icon: "ScrollText", category: "Utility" },
 ];
 
 // ---------------------------------------------------------------------------

@@ -262,6 +262,14 @@ def create_flask_app(
     from packages.screener.src.stock_routes import stock_bp  # noqa: PLC0415
     app.register_blueprint(stock_bp)
 
+    # Register market scanner blueprint (/ft-api/v1/scanner/*)
+    from packages.screener.src.scanner_routes import scanner_bp  # noqa: PLC0415
+    app.register_blueprint(scanner_bp)
+
+    # Register OI analytics blueprint (/ft-api/v1/oi/*)
+    from packages.screener.src.oi_analytics_routes import oi_analytics_bp  # noqa: PLC0415
+    app.register_blueprint(oi_analytics_bp)
+
     # Register Mutual Fund NAV blueprint (/api/v1/mf/search, /mf/nav, /mf/categories)
     from packages.screener.src.mf_routes import mf_bp  # noqa: PLC0415
     app.register_blueprint(mf_bp)
@@ -376,6 +384,14 @@ def create_flask_app(
     # Register IPO Tracker blueprint (/api/v1/ipo/*)
     from packages.screener.src.ipo_routes import ipo_bp  # noqa: PLC0415
     app.register_blueprint(ipo_bp)
+
+    # Register Earnings Calendar blueprint (/ft-api/v1/earnings/*)
+    from packages.screener.src.earnings_routes import earnings_bp  # noqa: PLC0415
+    app.register_blueprint(earnings_bp)
+
+    # Register Audit Trail blueprint (/ft-api/v1/audit/*)
+    from packages.data.src.audit_routes import audit_bp  # noqa: PLC0415
+    app.register_blueprint(audit_bp)
 
     # Register WhatsApp Alerts blueprint (/api/v1/alerts/whatsapp/*)
     from packages.automation.src.whatsapp_routes import whatsapp_bp  # noqa: PLC0415
