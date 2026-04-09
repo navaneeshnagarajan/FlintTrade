@@ -1,12 +1,17 @@
 /**
- * WatchlistWidget — production watchlist for FlintTrade terminal.
+ * WatchlistWidget — multi-tab production watchlist for FlintTrade terminal.
  *
  * Features:
- *   - Persisted to localStorage key `flinttrade:watchlist`
+ *   - Up to 5 watchlist tabs, each with its own symbol list
+ *   - Tab bar: compact pills, active tab highlighted with accent colour
+ *   - "+" button to create a new tab
+ *   - Right-click tab to Rename, Duplicate, or Delete
+ *   - Persisted to localStorage key `flinttrade:watchlists` (all tabs)
+ *   - Backward-compatible: migrates legacy `flinttrade:watchlist` key
  *   - Batch quote polling: 5s market hours, 60s off-hours
  *   - Debounced symbol search (300ms) with dropdown autocomplete
  *   - Per-row sparkline built from last 20 LTP samples
- *   - Right-click context menu to remove a symbol
+ *   - Right-click context menu on symbol to remove
  *   - Click writes { symbol, exchange } to selectedSymbolAtom (Jotai)
  *   - Dense dark layout matching FlintTrade terminal theme
  */
@@ -14,7 +19,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import {
   Plus, X, Search, MoreVertical, Trash2,
-  TrendingUp, TrendingDown,
+  TrendingUp, TrendingDown, Pencil, Copy,
 } from "lucide-react";
 import { useSetAtom } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
@@ -27,7 +32,7 @@ import { isMarketHours } from "@/lib/market";
 // ---------------------------------------------------------------------------
 
 interface WatchlistItem {
-  symbol: string;
+  symbol:   string;
   exchange: string;
 }
 
@@ -36,26 +41,42 @@ interface PartialQuote extends Partial<Quote> {
   prev_close?: number;
 }
 
-type QuoteMap = Record<string, PartialQuote>;
-type SparkMap = Record<string, number[]>;
+type QuoteMap  = Record<string, PartialQuote>;
+type SparkMap  = Record<string, number[]>;
 
-interface ContextMenuState {
-  x: number;
-  y: number;
+interface SymbolContextMenuState {
+  x:    number;
+  y:    number;
   item: WatchlistItem;
 }
 
+interface TabContextMenuState {
+  x:   number;
+  y:   number;
+  idx: number;
+}
+
 interface SearchResult {
-  symbol: string;
+  symbol:   string;
   exchange: string;
-  name?: string;
+  name?:    string;
+}
+
+/** One watchlist tab */
+interface WatchlistTab {
+  id:      string;
+  name:    string;
+  symbols: WatchlistItem[];
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const LS_KEY = "flinttrade:watchlist";
+const LS_KEY_MULTI  = "flinttrade:watchlists";
+const LS_KEY_LEGACY = "flinttrade:watchlist";
+
+const MAX_TABS = 5;
 
 const DEFAULT_SYMBOLS: WatchlistItem[] = [
   { symbol: "NIFTY",     exchange: "NSE_INDEX" },
@@ -72,7 +93,10 @@ const SPARK_MAX = 20;
 // Helpers
 // ---------------------------------------------------------------------------
 
-const FMT = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+const FMT = new Intl.NumberFormat("en-IN", {
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+});
 
 function fmtPrice(v: number | null | undefined): string {
   if (v == null || isNaN(v)) return "—";
@@ -85,24 +109,40 @@ function fmtPct(v: number | null | undefined): string | null {
   return (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
 }
 
-/** Load watchlist from localStorage, fallback to defaults. */
-function loadWatchlist(): WatchlistItem[] {
+function generateId(): string {
+  return Math.random().toString(36).slice(2, 9);
+}
+
+function makeDefaultTab(): WatchlistTab {
+  return { id: generateId(), name: "Watchlist 1", symbols: DEFAULT_SYMBOLS };
+}
+
+/** Load all watchlist tabs from localStorage. Migrates legacy single-list format. */
+function loadTabs(): WatchlistTab[] {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(LS_KEY_MULTI);
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed as WatchlistItem[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed as WatchlistTab[];
+    }
+    // Migrate legacy single-list
+    const legacy = localStorage.getItem(LS_KEY_LEGACY);
+    if (legacy) {
+      const items: unknown = JSON.parse(legacy);
+      if (Array.isArray(items) && items.length > 0) {
+        return [{ id: generateId(), name: "Watchlist 1", symbols: items as WatchlistItem[] }];
+      }
     }
   } catch {
     // ignore parse errors
   }
-  return DEFAULT_SYMBOLS;
+  return [makeDefaultTab()];
 }
 
-/** Persist watchlist to localStorage. */
-function saveWatchlist(list: WatchlistItem[]): void {
+/** Persist all watchlist tabs to localStorage. */
+function saveTabs(tabs: WatchlistTab[]): void {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(list));
+    localStorage.setItem(LS_KEY_MULTI, JSON.stringify(tabs));
   } catch {
     // localStorage unavailable
   }
@@ -113,7 +153,7 @@ function saveWatchlist(list: WatchlistItem[]): void {
 // ---------------------------------------------------------------------------
 
 interface SparklineProps {
-  prices: number[];
+  prices:   number[];
   positive: boolean | null;
 }
 
@@ -130,8 +170,8 @@ function Sparkline({ prices, positive }: SparklineProps) {
 
   const W = 40;
   const H = 16;
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
+  const min   = Math.min(...prices);
+  const max   = Math.max(...prices);
   const range = max - min || 1;
 
   const pts = prices.map((p, i) => {
@@ -143,7 +183,13 @@ function Sparkline({ prices, positive }: SparklineProps) {
   const color = positive === false ? "#ef4444" : "#22c55e";
 
   return (
-    <svg width={W} height={H} className="shrink-0" role="img" aria-label={`Price trend: ${positive === false ? 'falling' : 'rising'}`}>
+    <svg
+      width={W}
+      height={H}
+      className="shrink-0"
+      role="img"
+      aria-label={`Price trend: ${positive === false ? "falling" : "rising"}`}
+    >
       <polyline
         points={pts.join(" ")}
         fill="none"
@@ -161,15 +207,15 @@ function Sparkline({ prices, positive }: SparklineProps) {
 // ---------------------------------------------------------------------------
 
 interface SearchDialogProps {
-  onAdd: (item: WatchlistItem) => void;
-  onClose: () => void;
+  onAdd:    (item: WatchlistItem) => void;
+  onClose:  () => void;
 }
 
 function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
-  const [query, setQuery]     = useState("");
+  const [query,   setQuery]   = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [error,   setError]   = useState<string | null>(null);
   const debounceRef           = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef              = useRef<HTMLInputElement | null>(null);
 
@@ -191,7 +237,6 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
       setLoading(true);
       try {
         const data = await searchSymbol(val.trim());
-        // OpenAlgo returns Array<{ symbol, exchange }> — api.ts types it so
         const list = Array.isArray(data) ? (data as SearchResult[]) : [];
         setResults(list.slice(0, 12));
       } catch (err) {
@@ -203,7 +248,6 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
     }, 300);
   }, []);
 
-  // Cleanup debounce on unmount
   useEffect(() => () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
   }, []);
@@ -225,7 +269,6 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
       className="absolute inset-0 z-50 flex flex-col bg-surface-base/90 backdrop-blur-sm"
       onKeyDown={handleKeyDown}
     >
-      {/* Header */}
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border-default bg-surface-card shrink-0">
         <Search size={11} className="text-text-muted shrink-0" />
         <input
@@ -233,7 +276,7 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
           type="text"
           value={query}
           onChange={(e) => handleQuery(e.target.value)}
-          placeholder="Search symbol... e.g. SBIN, TCS"
+          placeholder="Search symbol… e.g. SBIN, TCS"
           className="flex-1 bg-transparent text-xs text-text-primary placeholder-text-muted focus:outline-none"
         />
         <button
@@ -245,16 +288,11 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
         </button>
       </div>
 
-      {/* Results */}
       <div className="flex-1 overflow-auto">
-        {loading && (
-          <div className="px-3 py-2 text-xs text-text-muted">Searching…</div>
-        )}
-        {error && !loading && (
-          <div className="px-3 py-2 text-xs text-loss">{error}</div>
-        )}
+        {loading && <div className="px-3 py-2 text-xs text-text-muted">Searching…</div>}
+        {error && !loading && <div className="px-3 py-2 text-xs text-loss">{error}</div>}
         {!loading && !error && results.length === 0 && query.trim() && (
-          <div className="px-3 py-2 text-xs text-text-muted">No results for "{query}"</div>
+          <div className="px-3 py-2 text-xs text-text-muted">No results for &quot;{query}&quot;</div>
         )}
         {!loading && !error && results.length === 0 && !query.trim() && (
           <div className="px-3 py-2 text-xs text-text-muted">Type to search symbols</div>
@@ -284,18 +322,18 @@ function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Context menu (right-click)
+// Symbol context menu (right-click on symbol row)
 // ---------------------------------------------------------------------------
 
-interface ContextMenuProps {
-  x: number;
-  y: number;
-  symbol: string;
+interface SymbolContextMenuProps {
+  x:        number;
+  y:        number;
+  symbol:   string;
   onRemove: () => void;
-  onClose: () => void;
+  onClose:  () => void;
 }
 
-function ContextMenu({ x, y, symbol, onRemove, onClose }: ContextMenuProps) {
+function SymbolContextMenu({ x, y, symbol, onRemove, onClose }: SymbolContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -334,15 +372,131 @@ function ContextMenu({ x, y, symbol, onRemove, onClose }: ContextMenuProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Tab context menu (right-click on tab pill)
+// ---------------------------------------------------------------------------
+
+interface TabContextMenuProps {
+  x:           number;
+  y:           number;
+  tabName:     string;
+  canDelete:   boolean;
+  onRename:    () => void;
+  onDuplicate: () => void;
+  onDelete:    () => void;
+  onClose:     () => void;
+}
+
+function TabContextMenu({
+  x, y, tabName, canDelete, onRename, onDuplicate, onDelete, onClose,
+}: TabContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-label={`Tab actions for ${tabName}`}
+      className="fixed z-50 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-40"
+      style={{ top: y, left: x }}
+    >
+      <div className="px-3 py-1 border-b border-border-subtle mb-1">
+        <span className="text-xs text-text-muted truncate">{tabName}</span>
+      </div>
+      <button
+        role="menuitem"
+        onClick={onRename}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+      >
+        <Pencil size={10} />
+        Rename
+      </button>
+      <button
+        role="menuitem"
+        onClick={onDuplicate}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+      >
+        <Copy size={10} />
+        Duplicate
+      </button>
+      {canDelete && (
+        <>
+          <div className="border-t border-border-subtle my-1" />
+          <button
+            role="menuitem"
+            onClick={onDelete}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-loss hover:bg-loss/10 transition-colors"
+          >
+            <Trash2 size={10} />
+            Delete
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rename inline input
+// ---------------------------------------------------------------------------
+
+interface RenameInputProps {
+  initialValue: string;
+  onConfirm:    (name: string) => void;
+  onCancel:     () => void;
+}
+
+function RenameInput({ initialValue, onConfirm, onCancel }: RenameInputProps) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const commit = useCallback(() => {
+    const trimmed = value.trim();
+    if (trimmed) onConfirm(trimmed);
+    else onCancel();
+  }, [value, onConfirm, onCancel]);
+
+  const handleKey = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter")  commit();
+    if (e.key === "Escape") onCancel();
+  }, [commit, onCancel]);
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={handleKey}
+      className="w-24 h-4 bg-surface-elevated border border-accent/50 text-text-primary text-xs rounded px-1 focus:outline-none"
+      maxLength={20}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Symbol row
 // ---------------------------------------------------------------------------
 
 interface SymbolRowProps {
-  item: WatchlistItem;
-  quote: PartialQuote | null;
+  item:        WatchlistItem;
+  quote:       PartialQuote | null;
   sparkPrices: number[];
-  onSelect: (item: WatchlistItem) => void;
-  onRemove: (e: React.MouseEvent, item: WatchlistItem) => void;
+  onSelect:    (item: WatchlistItem) => void;
+  onRemove:    (e: React.MouseEvent, item: WatchlistItem) => void;
 }
 
 function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowProps) {
@@ -368,7 +522,11 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
           e.preventDefault();
           const rect = e.currentTarget.getBoundingClientRect();
           onRemove(
-            { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, preventDefault: () => {} } as React.MouseEvent,
+            {
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2,
+              preventDefault: () => {},
+            } as React.MouseEvent,
             item,
           );
         }
@@ -404,41 +562,47 @@ function SymbolRow({ item, quote, sparkPrices, onSelect, onRemove }: SymbolRowPr
 // ---------------------------------------------------------------------------
 
 interface WatchlistWidgetProps {
-  /** FlexLayout node reference (unused directly but kept for API compat) */
   node?: unknown;
 }
 
 function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
-  const [watchlist, setWatchlist]       = useState<WatchlistItem[]>(() => loadWatchlist());
-  const [quotes, setQuotes]             = useState<QuoteMap>({});
+  const [tabs, setTabs]               = useState<WatchlistTab[]>(() => loadTabs());
+  const [activeTabIdx, setActiveTabIdx] = useState(0);
+  const [quotes, setQuotes]           = useState<QuoteMap>({});
   const [sparkHistory, setSparkHistory] = useState<SparkMap>({});
-  const [showSearch, setShowSearch]     = useState(false);
-  const [showMenu, setShowMenu]         = useState(false);
-  const [contextMenu, setContextMenu]   = useState<ContextMenuState | null>(null);
-  const [fetchError, setFetchError]     = useState<string | null>(null);
-  const pollRef                         = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const menuRef                         = useRef<HTMLDivElement | null>(null);
+  const [showSearch, setShowSearch]   = useState(false);
+  const [showMenu, setShowMenu]       = useState(false);
+  const [symbolCtxMenu, setSymbolCtxMenu] = useState<SymbolContextMenuState | null>(null);
+  const [tabCtxMenu, setTabCtxMenu]   = useState<TabContextMenuState | null>(null);
+  const [renamingIdx, setRenamingIdx] = useState<number | null>(null);
+  const [fetchError, setFetchError]   = useState<string | null>(null);
+  const pollRef                       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuRef                       = useRef<HTMLDivElement | null>(null);
 
-  // Jotai atom setter — replaces dataBus.publish("watchlist:select", ...)
   const setSelectedSymbol = useSetAtom(selectedSymbolAtom);
 
-  // Persist whenever watchlist changes
+  // Keep active index within bounds when tabs change
   useEffect(() => {
-    saveWatchlist(watchlist);
-  }, [watchlist]);
+    setActiveTabIdx((prev) => Math.min(prev, tabs.length - 1));
+  }, [tabs.length]);
+
+  // Persist whenever tabs change
+  useEffect(() => {
+    saveTabs(tabs);
+  }, [tabs]);
+
+  const activeTab = tabs[activeTabIdx] ?? tabs[0];
+  const watchlist = activeTab?.symbols ?? [];
 
   // ---------------------------------------------------------------------------
   // Quote polling
   // ---------------------------------------------------------------------------
 
-  // Stable snapshot of the watchlist for use inside async callbacks. Avoids
-  // adding `watchlist` to deps of `fetchQuotes` only to rebuild on every render.
   const watchlistRef = useRef(watchlist);
   useEffect(() => {
     watchlistRef.current = watchlist;
   }, [watchlist]);
 
-  // Build instrument list for the API call without depending on state.
   const instrumentsMemo = useMemo(
     () => watchlist.map((w): WsInstrument => ({ symbol: w.symbol, exchange: w.exchange })),
     [watchlist],
@@ -457,10 +621,8 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
       const data = await getMultiQuotes(symbols);
       setFetchError(null);
 
-      // Normalise response — OpenAlgo multiquotes returns Quote[]
       if (Array.isArray(data)) {
         const next: QuoteMap = {};
-        // Use functional update so we never close over sparkHistory state.
         setSparkHistory((prevSpark) => {
           const histNext: SparkMap = { ...prevSpark };
           data.forEach((q: PartialQuote, idx: number) => {
@@ -470,17 +632,13 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
             next[key] = q;
             const ltp = q?.ltp ?? q?.close ?? null;
             if (ltp != null) {
-              histNext[key] = [
-                ...(prevSpark[key] ?? []).slice(-(SPARK_MAX - 1)),
-                Number(ltp),
-              ];
+              histNext[key] = [...(prevSpark[key] ?? []).slice(-(SPARK_MAX - 1)), Number(ltp)];
             }
           });
           return histNext;
         });
         setQuotes((prev) => ({ ...prev, ...next }));
       } else if (data && typeof data === "object") {
-        // Object form keyed by symbol or "EXCHANGE:SYMBOL"
         const dataObj = data as Record<string, PartialQuote>;
         const next: QuoteMap = {};
         setSparkHistory((prevSpark) => {
@@ -492,15 +650,11 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
               dataObj[`${item.exchange}:${item.symbol}`] ??
               dataObj[item.symbol] ??
               null;
-
             if (q) {
               next[key] = q;
               const ltp = q?.ltp ?? q?.close ?? null;
               if (ltp != null) {
-                histNext[key] = [
-                  ...(prevSpark[key] ?? []).slice(-(SPARK_MAX - 1)),
-                  Number(ltp),
-                ];
+                histNext[key] = [...(prevSpark[key] ?? []).slice(-(SPARK_MAX - 1)), Number(ltp)];
               }
             }
           });
@@ -511,14 +665,8 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Quote fetch failed");
     }
-    // `fetchQuotes` is now stable: it reads watchlist and instruments via refs,
-    // and reads sparkHistory through the functional-update form of setSparkHistory.
   }, []);
 
-  // Schedule polling — 5s market hours, 60s off-hours.
-  // Re-runs when the watchlist changes (instrumentsMemo identity changes) so
-  // newly-added symbols are fetched immediately without restarting the timer
-  // on every sparkHistory update.
   useEffect(() => {
     void fetchQuotes();
 
@@ -534,63 +682,120 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchQuotes, instrumentsMemo]);
 
   // ---------------------------------------------------------------------------
-  // Add / remove symbols
+  // Tab management
+  // ---------------------------------------------------------------------------
+
+  const handleAddTab = useCallback(() => {
+    if (tabs.length >= MAX_TABS) return;
+    setTabs((prev) => {
+      const n = prev.length + 1;
+      return [...prev, { id: generateId(), name: `Watchlist ${n}`, symbols: [] }];
+    });
+    setActiveTabIdx(tabs.length); // switch to new tab
+  }, [tabs.length]);
+
+  const handleRenameTab = useCallback((idx: number, newName: string) => {
+    setTabs((prev) =>
+      prev.map((t, i) => (i === idx ? { ...t, name: newName } : t)),
+    );
+    setRenamingIdx(null);
+    setTabCtxMenu(null);
+  }, []);
+
+  const handleDuplicateTab = useCallback((idx: number) => {
+    if (tabs.length >= MAX_TABS) return;
+    setTabs((prev) => {
+      const src = prev[idx];
+      if (!src) return prev;
+      const copy: WatchlistTab = {
+        id:      generateId(),
+        name:    `${src.name} (copy)`,
+        symbols: [...src.symbols],
+      };
+      const next = [...prev];
+      next.splice(idx + 1, 0, copy);
+      return next;
+    });
+    setActiveTabIdx(idx + 1);
+    setTabCtxMenu(null);
+  }, [tabs.length]);
+
+  const handleDeleteTab = useCallback((idx: number) => {
+    if (tabs.length <= 1) return;
+    setTabs((prev) => prev.filter((_, i) => i !== idx));
+    setActiveTabIdx((prev) => Math.min(prev, tabs.length - 2));
+    setTabCtxMenu(null);
+  }, [tabs.length]);
+
+  // ---------------------------------------------------------------------------
+  // Symbol management (add / remove on the active tab)
   // ---------------------------------------------------------------------------
 
   const handleAdd = useCallback((item: WatchlistItem) => {
-    setWatchlist((prev) => {
-      const exists = prev.some(
-        (w) => w.symbol === item.symbol && w.exchange === item.exchange,
-      );
-      if (exists) return prev;
-      return [...prev, { symbol: item.symbol, exchange: item.exchange }];
-    });
-  }, []);
-
-  const handleRemove = useCallback((item: WatchlistItem) => {
-    setWatchlist((prev) =>
-      prev.filter((w) => !(w.symbol === item.symbol && w.exchange === item.exchange)),
+    setTabs((prev) =>
+      prev.map((tab, i) => {
+        if (i !== activeTabIdx) return tab;
+        const exists = tab.symbols.some(
+          (w) => w.symbol === item.symbol && w.exchange === item.exchange,
+        );
+        if (exists) return tab;
+        return { ...tab, symbols: [...tab.symbols, { symbol: item.symbol, exchange: item.exchange }] };
+      }),
     );
-    setContextMenu(null);
-  }, []);
+  }, [activeTabIdx]);
+
+  const handleRemoveSymbol = useCallback((item: WatchlistItem) => {
+    setTabs((prev) =>
+      prev.map((tab, i) => {
+        if (i !== activeTabIdx) return tab;
+        return {
+          ...tab,
+          symbols: tab.symbols.filter(
+            (w) => !(w.symbol === item.symbol && w.exchange === item.exchange),
+          ),
+        };
+      }),
+    );
+    setSymbolCtxMenu(null);
+  }, [activeTabIdx]);
 
   const handleClearAll = useCallback(() => {
-    setWatchlist([]);
+    setTabs((prev) =>
+      prev.map((tab, i) => (i !== activeTabIdx ? tab : { ...tab, symbols: [] })),
+    );
     setShowMenu(false);
-  }, []);
+  }, [activeTabIdx]);
 
   const handleResetDefaults = useCallback(() => {
-    setWatchlist(DEFAULT_SYMBOLS);
+    setTabs((prev) =>
+      prev.map((tab, i) => (i !== activeTabIdx ? tab : { ...tab, symbols: DEFAULT_SYMBOLS })),
+    );
     setShowMenu(false);
-  }, []);
+  }, [activeTabIdx]);
 
   // ---------------------------------------------------------------------------
-  // Context menu (right-click)
+  // Context menus
   // ---------------------------------------------------------------------------
 
-  const openContextMenu = useCallback((e: React.MouseEvent, item: WatchlistItem) => {
+  const openSymbolCtxMenu = useCallback((e: React.MouseEvent, item: WatchlistItem) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, item });
+    setSymbolCtxMenu({ x: e.clientX, y: e.clientY, item });
   }, []);
 
-  const closeContextMenu = useCallback(() => setContextMenu(null), []);
-
-  // ---------------------------------------------------------------------------
-  // Symbol select — write to Jotai selectedSymbolAtom
-  // ---------------------------------------------------------------------------
+  const openTabCtxMenu = useCallback((e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    setTabCtxMenu({ x: e.clientX, y: e.clientY, idx });
+  }, []);
 
   const handleSelect = useCallback((item: WatchlistItem) => {
     setSelectedSymbol({ symbol: item.symbol, exchange: item.exchange });
   }, [setSelectedSymbol]);
 
-  // ---------------------------------------------------------------------------
   // Close overflow menu on outside click
-  // ---------------------------------------------------------------------------
-
   useEffect(() => {
     if (!showMenu) return;
     function handle(e: MouseEvent) {
@@ -609,8 +814,10 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   const count = watchlist.length;
 
   return (
-    <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative" data-tour-target="watchlist">
-
+    <div
+      className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative"
+      data-tour-target="watchlist"
+    >
       {/* HEADER */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
         <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
@@ -624,10 +831,7 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
         )}
 
         {fetchError && (
-          <span
-            title={fetchError}
-            className="w-1.5 h-1.5 rounded-full bg-loss shrink-0"
-          />
+          <span title={fetchError} className="w-1.5 h-1.5 rounded-full bg-loss shrink-0" />
         )}
 
         <div className="flex-1" />
@@ -652,7 +856,10 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
           </button>
 
           {showMenu && (
-            <div role="menu" className="absolute right-0 top-6 z-40 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-40">
+            <div
+              role="menu"
+              className="absolute right-0 top-6 z-40 bg-surface-card border border-border-default rounded shadow-2xl py-1 min-w-40"
+            >
               <button
                 role="menuitem"
                 onClick={() => { setShowSearch(true); setShowMenu(false); }}
@@ -683,13 +890,58 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
         </div>
       </div>
 
+      {/* TAB BAR */}
+      <div
+        className="flex items-center gap-1 px-2 py-1 border-b border-border-default bg-surface-card shrink-0 overflow-x-auto scrollbar-none"
+        role="tablist"
+        aria-label="Watchlist tabs"
+      >
+        {tabs.map((tab, idx) => (
+          <div key={tab.id} className="shrink-0 flex items-center">
+            {renamingIdx === idx ? (
+              <RenameInput
+                initialValue={tab.name}
+                onConfirm={(name) => handleRenameTab(idx, name)}
+                onCancel={() => setRenamingIdx(null)}
+              />
+            ) : (
+              <button
+                role="tab"
+                aria-selected={idx === activeTabIdx}
+                onClick={() => setActiveTabIdx(idx)}
+                onContextMenu={(e) => openTabCtxMenu(e, idx)}
+                className={`text-xs px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
+                  idx === activeTabIdx
+                    ? "bg-accent/20 text-accent border border-accent/40"
+                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover border border-transparent"
+                }`}
+                title="Right-click for options"
+              >
+                {tab.name}
+              </button>
+            )}
+          </div>
+        ))}
+
+        {tabs.length < MAX_TABS && (
+          <button
+            onClick={handleAddTab}
+            title="New watchlist"
+            aria-label="Add watchlist tab"
+            className="shrink-0 w-5 h-5 flex items-center justify-center text-text-muted hover:text-accent hover:bg-surface-hover rounded transition-colors border border-transparent hover:border-accent/30"
+          >
+            <Plus size={10} />
+          </button>
+        )}
+      </div>
+
       {/* SYMBOL LIST */}
       <div className="flex-1 overflow-auto">
         {watchlist.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-3 px-4">
             <TrendingUp size={24} className="text-text-muted" />
             <div className="text-center">
-              <p className="text-xs text-text-secondary">Add symbols to your watchlist</p>
+              <p className="text-xs text-text-secondary">Add symbols to {activeTab?.name ?? "watchlist"}</p>
               <p className="text-xs text-text-muted mt-0.5">Track prices in real-time</p>
             </div>
             <button
@@ -710,7 +962,7 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
                 quote={quotes[key] ?? null}
                 sparkPrices={sparkHistory[key] ?? []}
                 onSelect={handleSelect}
-                onRemove={openContextMenu}
+                onRemove={openSymbolCtxMenu}
               />
             );
           })
@@ -725,14 +977,28 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
         />
       )}
 
-      {/* CONTEXT MENU */}
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          symbol={contextMenu.item.symbol}
-          onRemove={() => handleRemove(contextMenu.item)}
-          onClose={closeContextMenu}
+      {/* SYMBOL CONTEXT MENU */}
+      {symbolCtxMenu && (
+        <SymbolContextMenu
+          x={symbolCtxMenu.x}
+          y={symbolCtxMenu.y}
+          symbol={symbolCtxMenu.item.symbol}
+          onRemove={() => handleRemoveSymbol(symbolCtxMenu.item)}
+          onClose={() => setSymbolCtxMenu(null)}
+        />
+      )}
+
+      {/* TAB CONTEXT MENU */}
+      {tabCtxMenu && (
+        <TabContextMenu
+          x={tabCtxMenu.x}
+          y={tabCtxMenu.y}
+          tabName={tabs[tabCtxMenu.idx]?.name ?? ""}
+          canDelete={tabs.length > 1}
+          onRename={() => { setRenamingIdx(tabCtxMenu.idx); setTabCtxMenu(null); }}
+          onDuplicate={() => handleDuplicateTab(tabCtxMenu.idx)}
+          onDelete={() => handleDeleteTab(tabCtxMenu.idx)}
+          onClose={() => setTabCtxMenu(null)}
         />
       )}
     </div>

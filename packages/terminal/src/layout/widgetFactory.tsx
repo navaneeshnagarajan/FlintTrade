@@ -32,6 +32,7 @@ const lazyWidgets = {
   aiadvisor: lazy(() => import("@/widgets/utility/AIAdvisor/AIAdvisorWidget")),
 
   // New trading widgets
+  intradaypnl: lazy(() => import("@/widgets/trading/IntradayPnL/IntradayPnLWidget")),
   mtmmonitor: lazy(() => import("@/widgets/trading/MTMMonitor/MTMMonitorWidget")),
   riskpanel: lazy(() => import("@/widgets/trading/RiskPanel/RiskPanelWidget")),
   actioncenter: lazy(() => import("@/widgets/trading/ActionCenter/ActionCenterWidget")),
@@ -78,6 +79,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "news", name: "News Feed", icon: "Newspaper", category: "Utility" },
   { id: "ticker", name: "Ticker", icon: "TrendingUp", category: "Utility" },
   { id: "aiadvisor", name: "AI Advisor", icon: "Bot", category: "Utility" },
+  { id: "intradaypnl", name: "Intraday P&L", icon: "TrendingUp", category: "Trading" },
   { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading" },
   { id: "riskpanel", name: "Risk Panel", icon: "ShieldAlert", category: "Trading" },
   { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading" },
