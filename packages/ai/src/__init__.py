@@ -39,6 +39,9 @@ from .ensemble_selector import (
 )
 from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
 from .strategy_refiner import RefinementSuggestion, StrategyRefiner
+from .memory_manager import MemoryEntry, MemoryManager, CATEGORY_IMPORTANCE
+from .trade_reflection import ReflectionConfig, ReflectionResult, TradeReflector
+from .news_scheduler import NewsEvent, NewsScheduler, PollType, ScheduledJob
 
 __all__ = [
     # LLM
@@ -122,4 +125,17 @@ __all__ = [
     # Strategy refiner
     "StrategyRefiner",
     "RefinementSuggestion",
+    # Memory manager (FinMem pattern — lightweight in-process)
+    "MemoryManager",
+    "MemoryEntry",
+    "CATEGORY_IMPORTANCE",
+    # Trade reflection (LLM-TradeBot pattern — batch analysis)
+    "TradeReflector",
+    "ReflectionConfig",
+    "ReflectionResult",
+    # News scheduler (FinSights pattern — IST-scheduled RSS polling)
+    "NewsScheduler",
+    "NewsEvent",
+    "PollType",
+    "ScheduledJob",
 ]
