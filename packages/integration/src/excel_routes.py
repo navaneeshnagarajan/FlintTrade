@@ -1,0 +1,193 @@
+"""Flask endpoints for Excel data export and import.
+
+Registered as a Blueprint by ``create_flask_app()``.
+
+Endpoints
+---------
+POST /api/v1/integration/excel/export           — export list[dict] to Excel
+POST /api/v1/integration/excel/portfolio/report — create portfolio report
+GET  /api/v1/integration/excel/import           — import data from an Excel file
+
+Note on file paths:
+    These endpoints operate on server-side file paths. In production they
+    write to a configurable output directory (``EXCEL_OUTPUT_DIR`` app config,
+    defaulting to ``~/.flinttrade/exports/``). Import endpoints read from
+    paths the client specifies, validated against the configured directory.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
+from flask import Blueprint, Response, jsonify, request
+
+from .excel_bridge import ExcelBridge, ExcelBridgeError
+
+logger = logging.getLogger("flinttrade.integration.excel_routes")
+
+excel_bp = Blueprint("excel", __name__, url_prefix="/api/v1/integration/excel")
+
+# Module-level singleton
+_bridge: ExcelBridge | None = None
+
+_DEFAULT_OUTPUT_DIR = os.path.join(
+    os.path.expanduser("~"), ".flinttrade", "exports"
+)
+
+
+def _get_bridge() -> ExcelBridge:
+    """Return the module-level ExcelBridge singleton, creating it lazily."""
+    global _bridge  # noqa: PLW0603
+    if _bridge is None:
+        _bridge = ExcelBridge()
+    return _bridge
+
+
+def init_excel_routes(bridge: ExcelBridge) -> None:
+    """Inject an ExcelBridge instance into the blueprint's singleton.
+
+    Args:
+        bridge: The :class:`ExcelBridge` instance to use for all requests.
+    """
+    global _bridge  # noqa: PLW0603
+    _bridge = bridge
+    logger.info("ExcelBridge singleton injected into excel_routes")
+
+
+def _output_dir() -> str:
+    """Resolve the output directory, creating it if necessary."""
+    from flask import current_app
+    directory: str = current_app.config.get("EXCEL_OUTPUT_DIR", _DEFAULT_OUTPUT_DIR)
+    Path(directory).mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _safe_path(filename: str) -> str:
+    """Build a safe absolute path within the output directory."""
+    safe_name = Path(filename).name  # strip any directory traversal
+    if not safe_name.endswith(".xlsx"):
+        safe_name = safe_name + ".xlsx"
+    return os.path.join(_output_dir(), safe_name)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+
+@excel_bp.route("/export", methods=["POST"])
+def export_data() -> tuple[Response, int]:
+    """Export a list of dicts to an Excel file on the server.
+
+    Request JSON:
+        data       (list[dict], required): Rows to export.
+        sheet_name (str, optional):       Worksheet name (default ``"Data"``).
+        filename   (str, optional):       Output filename (default ``"export.xlsx"``).
+
+    Returns:
+        JSON ``{"status": "success", "data": {"file_path": "...", "rows": N}}``.
+    """
+    bridge = _get_bridge()
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+
+    data: list[dict[str, Any]] = body.get("data", [])
+    if not isinstance(data, list):
+        return jsonify({"status": "error", "message": "data must be a list"}), 400
+
+    sheet_name: str = body.get("sheet_name", "Data")
+    filename: str = body.get("filename", "export.xlsx")
+    file_path = _safe_path(filename)
+
+    try:
+        written_path = bridge.export_to_excel(data, sheet_name, file_path)
+    except ExcelBridgeError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    logger.info("Excel export: %s (%d rows)", written_path, len(data))
+    return jsonify({
+        "status": "success",
+        "data": {"file_path": written_path, "rows": len(data)},
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Portfolio report
+# ---------------------------------------------------------------------------
+
+
+@excel_bp.route("/portfolio/report", methods=["POST"])
+def portfolio_report() -> tuple[Response, int]:
+    """Create a formatted multi-sheet portfolio report.
+
+    Request JSON:
+        positions (list[dict], optional): Position rows (default ``[]``).
+        holdings  (list[dict], optional): Holdings rows (default ``[]``).
+        filename  (str, optional):        Output filename (default ``"portfolio.xlsx"``).
+
+    Returns:
+        JSON ``{"status": "success", "data": {"file_path": "..."}}``.
+    """
+    bridge = _get_bridge()
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+
+    positions: list[dict[str, Any]] = body.get("positions", [])
+    holdings: list[dict[str, Any]] = body.get("holdings", [])
+    filename: str = body.get("filename", "portfolio.xlsx")
+    file_path = _safe_path(filename)
+
+    try:
+        written_path = bridge.create_portfolio_report(positions, holdings, file_path)
+    except ExcelBridgeError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    logger.info(
+        "Portfolio report: %s (%d positions, %d holdings)",
+        written_path, len(positions), len(holdings),
+    )
+    return jsonify({
+        "status": "success",
+        "data": {
+            "file_path": written_path,
+            "positions": len(positions),
+            "holdings": len(holdings),
+        },
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Import
+# ---------------------------------------------------------------------------
+
+
+@excel_bp.route("/import", methods=["POST"])
+def import_data() -> tuple[Response, int]:
+    """Import data from an Excel file on the server.
+
+    Request JSON:
+        file_path  (str, required):  Path to the ``.xlsx`` file.
+        sheet_name (str, optional):  Worksheet to read (default ``"Sheet1"``).
+
+    Returns:
+        JSON ``{"status": "success", "data": {"rows": [...], "count": N}}``.
+    """
+    bridge = _get_bridge()
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+
+    file_path: str = body.get("file_path", "").strip()
+    if not file_path:
+        return jsonify({"status": "error", "message": "file_path is required"}), 400
+
+    sheet_name: str = body.get("sheet_name", "Sheet1")
+
+    try:
+        rows = bridge.import_from_excel(file_path, sheet_name)
+    except ExcelBridgeError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    return jsonify({
+        "status": "success",
+        "data": {"rows": rows, "count": len(rows)},
+    }), 200

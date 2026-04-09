@@ -1472,6 +1472,250 @@ export const cancelBracketOrder = (bracketId: string) =>
   );
 
 // ---------------------------------------------------------------------------
+// Voice Orders
+// ---------------------------------------------------------------------------
+
+/** Parsed result returned by the FlintTrade voice parse endpoint. */
+export interface VoiceCommandResult {
+  /** High-level intent: "place_order" | "cancel_order" | "close_all" | "modify_order" | "query" */
+  intent: string;
+  /** "BUY" or "SELL" — null for non-order intents */
+  action: "BUY" | "SELL" | null;
+  /** OpenAlgo symbol (upper-case, no spaces) */
+  symbol: string | null;
+  /** OpenAlgo exchange code */
+  exchange: string | null;
+  /** Number of units/lots */
+  quantity: number | null;
+  /** "MARKET" or "LIMIT" */
+  price_type: "MARKET" | "LIMIT" | null;
+  /** Limit price — null for market orders */
+  price: number | null;
+  /** Product type: "MIS" | "CNC" | "NRML" */
+  product: string;
+  /** Parser confidence 0.0–1.0 */
+  confidence: number;
+  /** Original input text */
+  raw_text: string;
+  /** Non-empty string when parsing failed */
+  error: string;
+  /** True when all required fields for the intent are present */
+  is_valid: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// n8n Workflow Automation
+// ---------------------------------------------------------------------------
+
+export interface N8nWorkflow {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface N8nWebhookTriggerResult {
+  /** Raw response from n8n (varies by workflow) */
+  [key: string]: unknown;
+}
+
+/** Check if the n8n instance is running and reachable. */
+export const checkN8nHealth = () =>
+  get<{ running: boolean }>("automation/n8n/health");
+
+/** List all workflows in n8n (requires API key on the backend). */
+export const listN8nWorkflows = () =>
+  get<{ workflows: N8nWorkflow[]; count: number }>("automation/n8n/workflows");
+
+/**
+ * Trigger an n8n webhook workflow.
+ * @param webhookId - The UUID from the n8n Webhook node URL.
+ * @param data      - Payload to send to the workflow.
+ */
+export const triggerN8nWebhook = (
+  webhookId: string,
+  data: Record<string, unknown> = {},
+) =>
+  post<N8nWebhookTriggerResult>("automation/n8n/webhook/trigger", {
+    webhook_id: webhookId,
+    data,
+  });
+
+/** Activate an n8n workflow by its numeric ID. */
+export const activateN8nWorkflow = (workflowId: string) =>
+  post<{ workflow_id: string; active: true }>(
+    `automation/n8n/workflows/${encodeURIComponent(workflowId)}/activate`,
+  );
+
+/** Deactivate an n8n workflow by its numeric ID. */
+export const deactivateN8nWorkflow = (workflowId: string) =>
+  post<{ workflow_id: string; active: false }>(
+    `automation/n8n/workflows/${encodeURIComponent(workflowId)}/deactivate`,
+  );
+
+// ---------------------------------------------------------------------------
+// QuestDB Tick Storage
+// ---------------------------------------------------------------------------
+
+export interface QuestDBTick {
+  symbol: string;
+  exchange: string;
+  ltp: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  volume?: number;
+  bid?: number;
+  ask?: number;
+  oi?: number;
+  timestamp?: string;
+  /** Unix nanoseconds — omit to use server time */
+  timestamp_ns?: number;
+}
+
+export interface OHLCVBar {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/** Check if QuestDB is running and reachable. */
+export const checkQuestDBHealth = () =>
+  get<{ running: boolean }>("data/questdb/health");
+
+/**
+ * Bulk insert ticks into QuestDB via ILP over TCP.
+ * @param ticks - Array of tick objects (symbol, exchange, ltp required).
+ */
+export const insertQuestDBTicks = (ticks: QuestDBTick[]) =>
+  post<{ inserted: number }>("data/questdb/ticks", { ticks });
+
+/**
+ * Execute a SQL query against QuestDB.
+ * @param sql - Raw SQL string (server-side only — do not expose to end users).
+ */
+export const queryQuestDB = (sql: string) =>
+  post<{ rows: Record<string, unknown>[]; count: number }>(
+    "data/questdb/query",
+    { sql },
+  );
+
+/**
+ * Aggregate tick data into OHLCV bars using QuestDB SAMPLE BY.
+ * @param symbol   - Instrument symbol e.g. "NIFTY".
+ * @param interval - Bar interval e.g. "1m", "5m", "1h".
+ * @param start    - ISO 8601 start timestamp.
+ * @param end      - ISO 8601 end timestamp.
+ */
+export const aggregateQuestDBOHLCV = (
+  symbol: string,
+  interval: string,
+  start: string,
+  end: string,
+) =>
+  post<{ bars: OHLCVBar[]; count: number }>("data/questdb/ohlcv", {
+    symbol,
+    interval,
+    start,
+    end,
+  });
+
+/** Get the most recent tick for a symbol from QuestDB. */
+export const getQuestDBLatestTick = (symbol: string) =>
+  get<QuestDBTick>(
+    "data/questdb/tick/latest/" + encodeURIComponent(symbol),
+  );
+
+// ---------------------------------------------------------------------------
+// Excel Integration
+// ---------------------------------------------------------------------------
+
+export interface ExcelExportResult {
+  /** Absolute server-side path to the written file */
+  file_path: string;
+  /** Number of rows written */
+  rows: number;
+}
+
+export interface ExcelPortfolioReportResult {
+  file_path: string;
+  positions: number;
+  holdings: number;
+}
+
+export interface ExcelImportResult {
+  rows: Record<string, unknown>[];
+  count: number;
+}
+
+/**
+ * Export an array of objects to an Excel file on the server.
+ * @param data       - Rows to export (each object becomes a row).
+ * @param sheetName  - Worksheet name (default "Data").
+ * @param filename   - Output filename (default "export.xlsx").
+ */
+export const exportToExcel = (
+  data: Record<string, unknown>[],
+  sheetName = "Data",
+  filename = "export.xlsx",
+) =>
+  post<ExcelExportResult>("integration/excel/export", {
+    data,
+    sheet_name: sheetName,
+    filename,
+  });
+
+/**
+ * Create a formatted multi-sheet portfolio report in Excel.
+ * @param positions - Position rows from positionbook.
+ * @param holdings  - Holdings rows from holdings.
+ * @param filename  - Output filename (default "portfolio.xlsx").
+ */
+export const createPortfolioReport = (
+  positions: Record<string, unknown>[],
+  holdings: Record<string, unknown>[],
+  filename = "portfolio.xlsx",
+) =>
+  post<ExcelPortfolioReportResult>("integration/excel/portfolio/report", {
+    positions,
+    holdings,
+    filename,
+  });
+
+/**
+ * Import data from an Excel file on the server.
+ * @param filePath  - Server-side path to the .xlsx file.
+ * @param sheetName - Worksheet to read (default "Sheet1").
+ */
+export const importFromExcel = (filePath: string, sheetName = "Sheet1") =>
+  post<ExcelImportResult>("integration/excel/import", {
+    file_path: filePath,
+    sheet_name: sheetName,
+  });
+
+/**
+ * Send transcribed voice text to the FlintTrade backend for parsing.
+ *
+ * @param text - Raw transcribed voice command string.
+ * @returns Structured VoiceCommandResult.
+ *
+ * @example
+ * ```ts
+ * const cmd = await parseVoiceCommand("Buy 75 Nifty at market");
+ * if (cmd.is_valid && cmd.intent === "place_order") {
+ *   await placeOrder({ symbol: cmd.symbol!, ... });
+ * }
+ * ```
+ */
+export const parseVoiceCommand = (text: string): Promise<VoiceCommandResult> =>
+  post<VoiceCommandResult>("voice/parse", { text });
+
+// ---------------------------------------------------------------------------
 // Activity Log (admin audit trail)
 // ---------------------------------------------------------------------------
 

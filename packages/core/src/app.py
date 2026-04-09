@@ -389,6 +389,22 @@ def create_flask_app(
     from packages.engine.src.bracket_routes import bracket_bp  # noqa: PLC0415
     app.register_blueprint(bracket_bp)
 
+    # Register Voice Orders blueprint (/api/v1/voice/*)
+    from packages.integration.src.voice_orders import voice_bp  # noqa: PLC0415
+    app.register_blueprint(voice_bp)
+
+    # Register n8n bridge blueprint (/api/v1/automation/n8n/*)
+    from packages.automation.src.n8n_routes import n8n_bp  # noqa: PLC0415
+    app.register_blueprint(n8n_bp)
+
+    # Register QuestDB bridge blueprint (/api/v1/data/questdb/*)
+    from packages.data.src.questdb_routes import questdb_bp  # noqa: PLC0415
+    app.register_blueprint(questdb_bp)
+
+    # Register Excel bridge blueprint (/api/v1/integration/excel/*)
+    from packages.integration.src.excel_routes import excel_bp  # noqa: PLC0415
+    app.register_blueprint(excel_bp)
+
     # Register Log Stream blueprint (/v1/logs/*) — SSE + REST log streaming
     from packages.core.src.log_stream import log_stream_bp  # noqa: PLC0415
     app.register_blueprint(log_stream_bp)

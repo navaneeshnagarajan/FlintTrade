@@ -1,10 +1,11 @@
-"""FlintTrade integration package — webhooks, flow builder, alerting."""
+"""FlintTrade integration package — webhooks, flow builder, alerting, Excel."""
 
 __version__ = "0.1.0-alpha"
 
 from .alert_trigger_log import AlertTriggerLog, TriggerEvent
 from .alerter import Alert, AlertChannel, Alerter, AlertType
 from .chartink import ChartInkConfig, ChartInkScanResult, ChartInkWebhook
+from .excel_bridge import ExcelBridge, ExcelBridgeError
 from .flow_builder import (
     ActionType,
     ConditionType,
@@ -17,6 +18,7 @@ from .flow_builder import (
     ValidationResult,
 )
 from .tradingview import TradingViewAlert, TradingViewWebhook
+from .voice_orders import VoiceCommand, VoiceOrderParser, voice_bp
 from .webhook_server import WebhookServer
 
 __all__ = [
@@ -47,4 +49,11 @@ __all__ = [
     # Alert trigger log
     "AlertTriggerLog",
     "TriggerEvent",
+    # Voice orders
+    "VoiceOrderParser",
+    "VoiceCommand",
+    "voice_bp",
+    # Excel
+    "ExcelBridge",
+    "ExcelBridgeError",
 ]

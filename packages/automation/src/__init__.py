@@ -1,8 +1,9 @@
-"""FlintTrade automation package — cron, Telegram, OpenClaw, post-market."""
+"""FlintTrade automation package — cron, Telegram, OpenClaw, post-market, n8n."""
 
 __version__ = "0.1.0-alpha"
 
 from .cron_manager import CronManager, JobDefinition, JobHistory, JobStatus
+from .n8n_bridge import N8nBridge, N8nBridgeError
 from .openclaw_bridge import OpenClawBridge, OpenClawConfig, Skill, SkillResult
 from .post_market import (
     DailyReport,
@@ -40,4 +41,7 @@ __all__ = [
     # WhatsApp
     "WhatsAppAlerter",
     "WhatsAppConfig",
+    # n8n
+    "N8nBridge",
+    "N8nBridgeError",
 ]
