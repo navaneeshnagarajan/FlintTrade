@@ -21,6 +21,7 @@ import { Plus, Trash2, TrendingUp, Zap } from "lucide-react";
 import { basketOrder } from "@/services/api";
 import { NUM, NUM0, fmtLtp } from "./formatters";
 import type { StrikeRow } from "./types";
+import PayoffChart from "./PayoffChart";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,6 +72,8 @@ export interface LegBuilderProps {
   expiry: string | null;
   /** Close the panel */
   onClose: () => void;
+  /** Current live spot price for the payoff chart marker (falls back to atmStrike) */
+  spotPrice?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +376,7 @@ function LegRow({
 // ---------------------------------------------------------------------------
 
 const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBuilder(
-  { strikes, atmStrike, lotSize, symLabel, exchange, expiry, onClose },
+  { strikes, atmStrike, lotSize, symLabel, exchange, expiry, onClose, spotPrice },
   ref,
 ) {
   const [legs, setLegs]           = useState<OptionLeg[]>([]);
@@ -765,6 +768,18 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
             {placing ? "Placing…" : "Place Strategy"}
           </button>
         </div>
+      )}
+
+      {/* ── Payoff chart ─────────────────────────────────────────────────── */}
+      {legs.length > 0 && (
+        <PayoffChart
+          legs={legs}
+          spotPrice={spotPrice ?? atmStrike ?? 0}
+          lotSize={lotSize}
+          maxProfit={metrics.maxProfit}
+          maxLoss={metrics.maxLoss}
+          breakevens={metrics.breakevens}
+        />
       )}
 
       {/* ── Order toast ─────────────────────────────────────────────────── */}
