@@ -17,6 +17,7 @@ import PresetPicker from "@/chrome/PresetPicker";
 import { widgetComponents } from "@/layout/widgetFactory";
 import { applyPreset } from "@/layout/workspacePresets";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useSkillContent } from "@/hooks/useSkillContent";
 import { useDockviewTheme } from "@/hooks/useDockviewTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { RouteBanner } from "@/components/help/RouteBanner";
@@ -203,6 +204,7 @@ export default function TerminalRoute() {
   const rightPanelRef = usePanelRef();
 
   const level = useSkillLevel("trade");
+  const skillContent = useSkillContent();
   const resolvedMode = useThemeStore((s) => s.getResolvedMode());
   const dockviewThemeClass = resolvedMode === "light" ? "dockview-theme-light" : "dockview-theme-dark";
   const dockviewThemeCssVars = useDockviewTheme();
@@ -542,10 +544,11 @@ export default function TerminalRoute() {
         </Group>
       )}
 
-      {/* Widget picker dialog */}
+      {/* Widget picker dialog — filtered to skill-appropriate widgets */}
       <WidgetPicker
         isOpen={widgetPickerOpen}
         onClose={() => setWidgetPickerOpen(false)}
+        allowedIds={skillContent.availableWidgets}
       />
 
       {/* Preset picker dialog */}

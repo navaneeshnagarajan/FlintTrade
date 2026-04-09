@@ -25,6 +25,7 @@ import { getPendingOrders } from "@/services/ftApi";
 import { useTimings } from "@/hooks/useMarketStatus";
 import type { MarketTiming } from "@/types/api";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
+import { useSkillContent } from "@/hooks/useSkillContent";
 import AccountSwitcher from "./AccountSwitcher";
 import ModeIndicator from "./ModeIndicator";
 import QuickAccessPanel from "./QuickAccessPanel";
@@ -153,6 +154,43 @@ function MarketStatusBadge() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// SkillBadge — shows the current global skill level with a link to Settings
+// ---------------------------------------------------------------------------
+
+const SKILL_LABEL: Record<"beginner" | "intermediate" | "advanced", string> = {
+  beginner: "Beginner",
+  intermediate: "Inter.",
+  advanced: "Advanced",
+};
+
+const SKILL_COLOR: Record<"beginner" | "intermediate" | "advanced", string> = {
+  beginner: "text-text-muted border-border-default",
+  intermediate: "text-accent border-accent/40",
+  advanced: "text-profit border-profit/40",
+};
+
+/**
+ * Small badge in the TopBar right section that shows the user's current skill
+ * level and links to Settings where it can be changed.
+ */
+function SkillBadge() {
+  const level = useSkillLevel();
+  const navigate = useNavigate();
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate("/settings")}
+      title="Skill level — click to change in Settings"
+      aria-label={`Skill level: ${level}. Click to change in Settings.`}
+      className={`h-5 flex items-center gap-1 px-1.5 rounded border text-xs font-medium font-sans transition-colors hover:bg-surface-hover shrink-0 ${SKILL_COLOR[level]}`}
+    >
+      {SKILL_LABEL[level]}
+    </button>
+  );
+}
+
 const BASE_ROUTE_TABS = [
   { path: "/learn", label: "Learn" },
   { path: "/invest", label: "Invest" },
@@ -181,6 +219,7 @@ export default function TopBar() {
 
   const glass = useThemeStore(useShallow((s) => s.glass));
   const globalSkill = useSkillLevel();
+  const skillContent = useSkillContent();
   const routeTabs = globalSkill === "advanced"
     ? [...BASE_ROUTE_TABS, ...ADVANCED_ROUTE_TABS]
     : [...BASE_ROUTE_TABS];
@@ -651,6 +690,7 @@ export default function TopBar() {
           onClose={() => setToolsMenuOpen(false)}
           onSelectTool={handleSelectTool}
           anchorRect={toolsButtonRef.current?.getBoundingClientRect()}
+          allowedToolIds={skillContent.availableTools}
         />
 
         {/* WIDGETS: only on /trade (Dockview canvas) */}
@@ -673,6 +713,9 @@ export default function TopBar() {
 
         {/* Mode indicator — Explore / Practice / Live */}
         <ModeIndicator />
+
+        {/* Skill level badge — links to Settings */}
+        <SkillBadge />
 
         {/* Sun/Moon/Monitor quick mode flip — cycles: dark → light → system → dark */}
         <Button

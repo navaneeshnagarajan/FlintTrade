@@ -10,3 +10,5 @@ export { useBrokerList } from "./useBrokerList";
 export { useBrokerConnected } from "./useBrokerConnected";
 export { useBrokerCapabilities, useIsCryptoBroker } from "./useBrokerCapabilities";
 export { useRecentSignals, useSignalConfig, useUpdateSignalConfig, useSignalStream } from "./useSignals";
+export { useSkillContent } from "./useSkillContent";
+export type { SkillContent, TooltipLevel } from "./useSkillContent";

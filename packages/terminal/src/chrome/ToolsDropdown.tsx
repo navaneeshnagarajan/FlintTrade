@@ -44,6 +44,13 @@ interface ToolsDropdownProps {
    * the dropdown escapes any parent overflow/stacking context (Issue #39).
    */
   anchorRect?: DOMRect;
+  /**
+   * Optional allowlist of tool IDs to show on the /trade route. When provided,
+   * only tools whose id is in this set are rendered. "settings" is always
+   * included regardless of the allowlist. Supplied by TerminalRoute via
+   * useSkillContent so beginners see fewer tools.
+   */
+  allowedToolIds?: ReadonlyArray<string>;
 }
 
 /**
@@ -62,6 +69,7 @@ export default function ToolsDropdown({
   onClose,
   onSelectTool,
   anchorRect,
+  allowedToolIds,
 }: ToolsDropdownProps) {
   const ref = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -71,7 +79,15 @@ export default function ToolsDropdown({
   const navigate = useNavigate();
 
   const isTradeRoute = location.pathname === "/trade";
-  const tools = isTradeRoute ? TRADE_TOOLS : SETTINGS_ONLY;
+
+  // On /trade: apply skill allowlist when provided; "settings" is always visible.
+  // On other routes: show Settings only (no allowlist needed — single item).
+  const tools: ToolEntry[] = (() => {
+    if (!isTradeRoute) return SETTINGS_ONLY;
+    if (!allowedToolIds) return TRADE_TOOLS;
+    const allowed = new Set(allowedToolIds);
+    return TRADE_TOOLS.filter((t) => t.id === "settings" || allowed.has(t.id));
+  })();
 
   useEffect(() => {
     if (!isOpen) return;

@@ -70,6 +70,13 @@ const ICON_MAP: Record<string, LucideIcon> = {
 interface WidgetPickerProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Optional allowlist of widget IDs to show. When provided, only widgets
+   * whose id is in this set are rendered. All others are omitted from the
+   * picker entirely (not locked — they simply don't appear). This is used by
+   * TerminalRoute to apply skill-level filtering via useSkillContent.
+   */
+  allowedIds?: ReadonlyArray<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,8 +210,12 @@ function LockedNotice({ widgetName, onDismiss }: LockedNoticeProps) {
  * Uses dockviewApi from layoutStore to add panels directly.
  * Reads feature gate status per widget: locked widgets show a lock icon and
  * inform the user how to unlock; preview widgets show a subtle "Preview" badge.
+ *
+ * When `allowedIds` is provided (e.g. from useSkillContent), only widgets in
+ * that set are shown. This keeps the picker uncluttered for lower skill levels
+ * without touching the feature-gate system.
  */
-export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
+export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPickerProps) {
   const dockviewApi = useLayoutStore((s) => s.dockviewApi);
   const [lockedNotice, setLockedNotice] = useState<string | null>(null);
 
@@ -230,9 +241,16 @@ export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
     onClose();
   };
 
-  // Derive unique ordered category list from the catalog
+  // Apply skill-level allowlist when provided. Convert to a Set for O(1) lookup.
+  const allowedSet = allowedIds ? new Set(allowedIds) : null;
+
+  // Derive unique ordered category list from the (optionally filtered) catalog.
+  const filteredCatalog = allowedSet
+    ? widgetCatalog.filter((w) => allowedSet.has(w.id))
+    : widgetCatalog;
+
   const categories: string[] = [];
-  for (const w of widgetCatalog) {
+  for (const w of filteredCatalog) {
     if (!categories.includes(w.category)) categories.push(w.category);
   }
 
@@ -260,9 +278,7 @@ export default function WidgetPicker({ isOpen, onClose }: WidgetPickerProps) {
         {/* Widget grid grouped by category */}
         <div className="overflow-y-auto p-6 space-y-6 flex-1 min-h-0">
           {categories.map((category) => {
-            const widgets = widgetCatalog.filter(
-              (w) => w.category === category
-            );
+            const widgets = filteredCatalog.filter((w) => w.category === category);
             return (
               <div key={category}>
                 <h3 className="text-xs font-heading font-medium text-text-muted uppercase tracking-widest mb-3">
