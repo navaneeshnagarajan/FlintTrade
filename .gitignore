@@ -69,16 +69,13 @@ chroma_data/
 .playwright-mcp/
 .claude/
 
-# === Local dev (private docs, reference repos, screenshots) ===
+# === Local dev (private docs, reference repos) ===
 .local/
-bugs/
 
-# === Internal dev docs (stay in root for AI tools, hidden from public) ===
+# === Internal dev docs (archived, not in active use) ===
 DEVLOG.md
 SOP.md
 REPOS.md
-packages/*/CLAUDE.md
-packages/*/AGENTS.md
 
 # === Planning files (session-specific) ===
 task_plan.md
@@ -90,5 +87,3 @@ progress.md
 *.tar.gz
 .worktrees/
 qa-*.png
-*.png
-screenshots/
