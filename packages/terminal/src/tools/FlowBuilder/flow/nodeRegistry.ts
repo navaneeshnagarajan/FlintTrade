@@ -1,8 +1,12 @@
 /**
- * nodeRegistry.ts — Node category definitions and lookup maps.
+ * nodeRegistry.ts — Node category definitions, metadata descriptors, and lookup maps.
  *
  * Single source of truth for all 54 flow builder nodes.
  * Absorbed from openalgo-flow node registry.
+ *
+ * Pattern: metadata-driven node rendering (inspired by n8n).
+ * Every node type carries full field descriptors so ConfigPanel can render
+ * forms declaratively without hardcoded field maps.
  */
 
 // ---------------------------------------------------------------------------
@@ -19,11 +23,66 @@ export type NodeCategoryId =
   | "risk"
   | "utilities";
 
+/** Validation constraints for a config field. */
+export interface NodeFieldValidation {
+  min?: number;
+  max?: number;
+  /** RegExp source string (no delimiters). */
+  pattern?: string;
+}
+
+/**
+ * Descriptor for a single configurable field on a node.
+ * Used by ConfigPanel to render the appropriate input widget.
+ */
+export interface NodeFieldDescriptor {
+  key: string;
+  label: string;
+  /**
+   * - string      → plain text Input
+   * - number      → numeric Input (min/max from validation)
+   * - boolean     → Switch
+   * - select      → Select with options[]
+   * - expression  → textarea with {{variable}} interpolation
+   * - symbol      → symbol search autocomplete
+   * - exchange    → exchange selector dropdown
+   */
+  type: "string" | "number" | "boolean" | "select" | "expression" | "symbol" | "exchange";
+  required?: boolean;
+  default?: unknown;
+  placeholder?: string;
+  /** Only meaningful when type === "select". */
+  options?: { label: string; value: string }[];
+  validation?: NodeFieldValidation;
+  helpText?: string;
+}
+
+/** Full metadata for a node type, used by the palette and config panel. */
+export interface NodeTypeDescriptor {
+  type: string;
+  label: string;
+  category: NodeCategoryId;
+  description: string;
+  /** lucide-react icon name (PascalCase). */
+  icon: string;
+  color: string;
+  inputs: { id: string; label: string; type: "default" | "conditional" }[];
+  outputs: { id: string; label: string; type: "default" | "true" | "false" }[];
+  fields: NodeFieldDescriptor[];
+}
+
+/**
+ * Legacy slim definition — kept for nodes that do not yet have full descriptors.
+ * Fields that are present in NodeTypeDescriptor are reused; everything else
+ * defaults to an empty array / sensible fallback.
+ */
 export interface NodeDef {
   type: string;
   label: string;
   description: string;
+  /** Ordered list of field keys — derived from NodeTypeDescriptor.fields when available. */
   configFields?: string[];
+  descriptor?: NodeTypeDescriptor;
 }
 
 export interface NodeCategoryDef {
@@ -34,19 +93,289 @@ export interface NodeCategoryDef {
 }
 
 // ---------------------------------------------------------------------------
-// Category colour map (design tokens: matches task spec)
+// Category colour map (design tokens)
 // ---------------------------------------------------------------------------
 
 export const CATEGORY_COLORS: Record<NodeCategoryId, string> = {
-  triggers: "#f59e0b",   // amber
-  actions: "#22c55e",    // green (orders)
-  conditions: "#818cf8", // indigo
-  logic: "#ec4899",      // pink
-  data: "#38bdf8",       // sky blue
-  websocket: "#34d399",  // teal/emerald
-  risk: "#f97316",       // orange
-  utilities: "#a78bfa",  // violet
+  triggers:   "#f59e0b",   // amber
+  actions:    "#22c55e",   // green (orders)
+  conditions: "#818cf8",   // indigo
+  logic:      "#ec4899",   // pink
+  data:       "#38bdf8",   // sky blue
+  websocket:  "#34d399",   // teal/emerald
+  risk:       "#f97316",   // orange
+  utilities:  "#a78bfa",   // violet
 };
+
+// ---------------------------------------------------------------------------
+// Shared field fragments (reused across multiple node types)
+// ---------------------------------------------------------------------------
+
+const SYMBOL_FIELD: NodeFieldDescriptor = {
+  key: "symbol",
+  label: "Symbol",
+  type: "symbol",
+  required: true,
+  placeholder: "e.g. NIFTY",
+  helpText: "Instrument symbol as recognised by OpenAlgo",
+};
+
+const EXCHANGE_FIELD: NodeFieldDescriptor = {
+  key: "exchange",
+  label: "Exchange",
+  type: "exchange",
+  required: true,
+  default: "NSE",
+  helpText: "Exchange segment",
+};
+
+const QTY_FIELD: NodeFieldDescriptor = {
+  key: "qty",
+  label: "Quantity",
+  type: "number",
+  required: true,
+  default: 1,
+  placeholder: "e.g. 50",
+  validation: { min: 1 },
+  helpText: "Number of units / lots",
+};
+
+const PRODUCT_FIELD: NodeFieldDescriptor = {
+  key: "product",
+  label: "Product",
+  type: "select",
+  required: true,
+  default: "MIS",
+  options: [
+    { label: "MIS (Intraday)", value: "MIS" },
+    { label: "CNC (Delivery)", value: "CNC" },
+    { label: "NRML (Carry Forward)", value: "NRML" },
+  ],
+};
+
+const PRICETYPE_FIELD: NodeFieldDescriptor = {
+  key: "pricetype",
+  label: "Price Type",
+  type: "select",
+  required: true,
+  default: "MARKET",
+  options: [
+    { label: "MARKET", value: "MARKET" },
+    { label: "LIMIT", value: "LIMIT" },
+    { label: "SL", value: "SL" },
+    { label: "SL-M", value: "SL-M" },
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Full NodeTypeDescriptor definitions for key nodes
+// ---------------------------------------------------------------------------
+
+const DESCRIPTOR_PLACE_ORDER: NodeTypeDescriptor = {
+  type: "placeOrder",
+  label: "Place Order",
+  category: "actions",
+  description: "Market / limit / SL order via OpenAlgo",
+  icon: "ShoppingCart",
+  color: CATEGORY_COLORS.actions,
+  inputs: [{ id: "in", label: "In", type: "default" }],
+  outputs: [{ id: "out", label: "Out", type: "default" }],
+  fields: [
+    SYMBOL_FIELD,
+    EXCHANGE_FIELD,
+    {
+      key: "action",
+      label: "Action",
+      type: "select",
+      required: true,
+      default: "BUY",
+      options: [
+        { label: "BUY", value: "BUY" },
+        { label: "SELL", value: "SELL" },
+      ],
+    },
+    QTY_FIELD,
+    PRODUCT_FIELD,
+    PRICETYPE_FIELD,
+    {
+      key: "price",
+      label: "Price",
+      type: "number",
+      placeholder: "0 for MARKET",
+      default: 0,
+      validation: { min: 0 },
+      helpText: "Limit/SL price. Use 0 for MARKET orders.",
+    },
+  ],
+};
+
+const DESCRIPTOR_PRICE_CONDITION: NodeTypeDescriptor = {
+  type: "priceCondition",
+  label: "Price Condition",
+  category: "conditions",
+  description: "If price > / < / = threshold",
+  icon: "TrendingUp",
+  color: CATEGORY_COLORS.conditions,
+  inputs: [{ id: "in", label: "In", type: "default" }],
+  outputs: [
+    { id: "true", label: "True", type: "true" },
+    { id: "false", label: "False", type: "false" },
+  ],
+  fields: [
+    SYMBOL_FIELD,
+    EXCHANGE_FIELD,
+    {
+      key: "operator",
+      label: "Operator",
+      type: "select",
+      required: true,
+      default: "above",
+      options: [
+        { label: "Above", value: "above" },
+        { label: "Below", value: "below" },
+        { label: "Crosses Above", value: "crossesAbove" },
+        { label: "Crosses Below", value: "crossesBelow" },
+        { label: "Equals", value: "equals" },
+      ],
+    },
+    {
+      key: "value",
+      label: "Threshold Value",
+      type: "number",
+      required: true,
+      placeholder: "e.g. 22000",
+      validation: { min: 0 },
+      helpText: "Price level to compare against",
+    },
+  ],
+};
+
+const DESCRIPTOR_TIME_CONDITION: NodeTypeDescriptor = {
+  type: "timeCondition",
+  label: "Time Condition",
+  category: "conditions",
+  description: "Specific time-based gate",
+  icon: "Clock",
+  color: CATEGORY_COLORS.conditions,
+  inputs: [{ id: "in", label: "In", type: "default" }],
+  outputs: [
+    { id: "true", label: "True", type: "true" },
+    { id: "false", label: "False", type: "false" },
+  ],
+  fields: [
+    {
+      key: "time",
+      label: "Time (HH:MM)",
+      type: "string",
+      required: true,
+      placeholder: "09:15",
+      validation: { pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" },
+      helpText: "24-hour time in IST (Asia/Kolkata)",
+    },
+    {
+      key: "timezone",
+      label: "Timezone",
+      type: "select",
+      default: "Asia/Kolkata",
+      options: [
+        { label: "IST (Asia/Kolkata)", value: "Asia/Kolkata" },
+        { label: "UTC", value: "UTC" },
+      ],
+    },
+  ],
+};
+
+const DESCRIPTOR_TELEGRAM_ALERT: NodeTypeDescriptor = {
+  type: "telegramAlert",
+  label: "Telegram Alert",
+  category: "utilities",
+  description: "Send signal to Telegram bot",
+  icon: "Send",
+  color: CATEGORY_COLORS.utilities,
+  inputs: [{ id: "in", label: "In", type: "default" }],
+  outputs: [{ id: "out", label: "Out", type: "default" }],
+  fields: [
+    {
+      key: "message",
+      label: "Message",
+      type: "expression",
+      required: true,
+      placeholder: "Order placed: {{upstream.placeOrder.symbol}} @ {{upstream.placeOrder.price}}",
+      helpText: "Use {{variable}} syntax to interpolate upstream outputs or built-ins like {{$now}}.",
+    },
+  ],
+};
+
+const DESCRIPTOR_DELAY: NodeTypeDescriptor = {
+  type: "delay",
+  label: "Delay",
+  category: "utilities",
+  description: "Wait N seconds before next node",
+  icon: "Timer",
+  color: CATEGORY_COLORS.utilities,
+  inputs: [{ id: "in", label: "In", type: "default" }],
+  outputs: [{ id: "out", label: "Out", type: "default" }],
+  fields: [
+    {
+      key: "seconds",
+      label: "Seconds",
+      type: "number",
+      required: true,
+      default: 5,
+      placeholder: "5",
+      validation: { min: 1, max: 3600 },
+      helpText: "How many seconds to pause execution (1–3600)",
+    },
+  ],
+};
+
+const DESCRIPTOR_IF_ELSE: NodeTypeDescriptor = {
+  type: "ifElse",
+  label: "If / Else",
+  category: "logic",
+  description: "Two-branch conditional",
+  icon: "GitBranch",
+  color: CATEGORY_COLORS.logic,
+  inputs: [{ id: "in", label: "In", type: "default" }],
+  outputs: [
+    { id: "true", label: "True", type: "true" },
+    { id: "false", label: "False", type: "false" },
+  ],
+  fields: [
+    {
+      key: "condition",
+      label: "Condition",
+      type: "expression",
+      required: true,
+      placeholder: "{{upstream.priceCondition.result}} == true",
+      helpText: "Expression that evaluates to true or false. Supports {{variable}} syntax.",
+    },
+  ],
+};
+
+/** Map from node type string to its full NodeTypeDescriptor (only for nodes with one). */
+export const NODE_DESCRIPTORS = new Map<string, NodeTypeDescriptor>([
+  ["placeOrder",      DESCRIPTOR_PLACE_ORDER],
+  ["priceCondition",  DESCRIPTOR_PRICE_CONDITION],
+  ["timeCondition",   DESCRIPTOR_TIME_CONDITION],
+  ["telegramAlert",   DESCRIPTOR_TELEGRAM_ALERT],
+  ["delay",           DESCRIPTOR_DELAY],
+  ["ifElse",          DESCRIPTOR_IF_ELSE],
+]);
+
+// ---------------------------------------------------------------------------
+// Helper: build a legacy NodeDef from a NodeTypeDescriptor
+// ---------------------------------------------------------------------------
+
+function descriptorToNodeDef(d: NodeTypeDescriptor): NodeDef {
+  return {
+    type: d.type,
+    label: d.label,
+    description: d.description,
+    configFields: d.fields.map((f) => f.key),
+    descriptor: d,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Node registry
@@ -69,7 +398,7 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
     label: "Orders",
     color: CATEGORY_COLORS.actions,
     nodes: [
-      { type: "placeOrder", label: "Place Order", description: "Market / limit / SL order via OpenAlgo", configFields: ["symbol", "exchange", "qty", "product", "side", "type", "price"] },
+      descriptorToNodeDef(DESCRIPTOR_PLACE_ORDER),
       { type: "smartOrder", label: "Smart Order", description: "Position-aware order with quantity management", configFields: ["symbol", "exchange", "qty", "product", "side", "type", "positionSize"] },
       { type: "optionsOrder", label: "Options Order", description: "Single options order", configFields: ["symbol", "exchange", "qty", "product", "side", "type", "expiry", "strike", "optionType"] },
       { type: "optionsMultiOrder", label: "Options Multi Order", description: "Basket of options orders", configFields: [] },
@@ -89,8 +418,8 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
       { type: "positionCheck", label: "Position Check", description: "Branch on open position state", configFields: ["symbol"] },
       { type: "fundCheck", label: "Fund Check", description: "Gate on available margin", configFields: ["minFunds"] },
       { type: "timeWindow", label: "Time Window", description: "Allow flow only within market hours", configFields: ["start", "end"] },
-      { type: "timeCondition", label: "Time Condition", description: "Specific time-based gate", configFields: ["time"] },
-      { type: "priceCondition", label: "Price Condition", description: "If price > / < / = threshold", configFields: ["operator", "threshold"] },
+      descriptorToNodeDef(DESCRIPTOR_TIME_CONDITION),
+      descriptorToNodeDef(DESCRIPTOR_PRICE_CONDITION),
     ],
   },
   {
@@ -101,7 +430,7 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
       { type: "andGate", label: "AND Gate", description: "All inputs must be true", configFields: [] },
       { type: "orGate", label: "OR Gate", description: "Any input must be true", configFields: [] },
       { type: "notGate", label: "NOT Gate", description: "Invert boolean signal", configFields: [] },
-      { type: "ifElse", label: "If / Else", description: "Two-branch conditional", configFields: [] },
+      descriptorToNodeDef(DESCRIPTOR_IF_ELSE),
       { type: "switch", label: "Switch", description: "Multi-branch selector on a named variable", configFields: ["variable"] },
       { type: "loop", label: "Loop", description: "Repeat N times or while condition holds", configFields: ["count"] },
       { type: "schedule", label: "Schedule", description: "Cron-style timed trigger within a flow", configFields: ["cron"] },
@@ -157,10 +486,10 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
     label: "Integration",
     color: CATEGORY_COLORS.utilities,
     nodes: [
-      { type: "telegramAlert", label: "Telegram Alert", description: "Send signal to Telegram bot", configFields: ["message"] },
+      descriptorToNodeDef(DESCRIPTOR_TELEGRAM_ALERT),
       { type: "webhookAlert", label: "Webhook (Outgoing)", description: "POST JSON payload to any URL", configFields: ["url"] },
       { type: "emailAlert", label: "Email Alert", description: "Send email notification", configFields: ["to", "subject"] },
-      { type: "delay", label: "Delay", description: "Wait N seconds before next node", configFields: ["seconds"] },
+      descriptorToNodeDef(DESCRIPTOR_DELAY),
       { type: "waitUntil", label: "Wait Until", description: "Pause until condition is met", configFields: [] },
       { type: "group", label: "Group", description: "Bundle nodes into a sub-flow", configFields: ["name"] },
       { type: "variable", label: "Variable", description: "Store and read named values", configFields: ["name", "value"] },

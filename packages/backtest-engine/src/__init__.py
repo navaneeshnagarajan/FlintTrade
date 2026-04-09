@@ -62,6 +62,10 @@ try:
         DEFAULT_PARAMS, RLAlgorithm, RLTrainer,
         TrainingJob, TrainingResult, register_rl_endpoints,
     )
+    from .portfolio_optimiser import (
+        OptimiserConfig, PortfolioOptimiser, PortfolioResult,
+    )
+    from .optimiser_routes import optimiser_bp
 except ImportError:
     from data_connector import (
         CSVConnector, DataConnector, DataResult,
@@ -93,6 +97,10 @@ except ImportError:
         DEFAULT_PARAMS, RLAlgorithm, RLTrainer,
         TrainingJob, TrainingResult, register_rl_endpoints,
     )
+    from portfolio_optimiser import (
+        OptimiserConfig, PortfolioOptimiser, PortfolioResult,
+    )
+    from optimiser_routes import optimiser_bp
 
 __all__ = [
     # Event-driven engine (new)
@@ -179,4 +187,9 @@ __all__ = [
     "TrainingJob",
     "DEFAULT_PARAMS",
     "register_rl_endpoints",
+    # Portfolio optimiser
+    "OptimiserConfig",
+    "PortfolioOptimiser",
+    "PortfolioResult",
+    "optimiser_bp",
 ]
