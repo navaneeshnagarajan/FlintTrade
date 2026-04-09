@@ -115,9 +115,13 @@ class TestResetToken:
     def test_tampered_token(self):
         from packages.core.src.auth_routes import _create_reset_token, _verify_reset_token
 
-        token = _create_reset_token("navaneesh")
-        # Flip a character in the signature
-        tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+        token = _create_reset_token("testuser")
+        # Split JWT into header.payload.signature and corrupt the payload
+        parts = token.split(".")
+        assert len(parts) == 3
+        # Reverse the payload to invalidate the HMAC signature
+        parts[1] = parts[1][::-1]
+        tampered = ".".join(parts)
         assert _verify_reset_token(tampered) is None
 
 
