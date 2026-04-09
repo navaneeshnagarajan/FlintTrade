@@ -87,7 +87,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
 - AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
 - Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
-- Total terminal tests: 1,837 (Vitest, 176 files) | Python: ~5,200 (pytest) = ~7,037 total
+- Total terminal tests: 1,910 (Vitest, 180 files) | Python: ~5,500 (pytest) = ~7,410 total
 
 ### Added — Features (Wave 25 — Engine + Analytics)
 - Backtest engine: event-driven BacktestEngine with MARKET/LIMIT/STOP/STOP_LIMIT orders, slippage, commission (absorbed from trading-strategies-openalgo)
@@ -125,6 +125,18 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - DataProvider Protocol: OpenAlgo, OpenChart (NSE free), yfinance (MCX) with fallback chain (absorbed from historify + openchart)
 - OHLCVNormaliser: IST conversion, column aliasing, intraday cutoff, data validation
 - HistoricalCache: DuckDB-backed, TTL freshness, incremental updates, batch fetch
+
+### Added — Features (Waves 33-35 — Deep Analytics)
+- FlowBuilder: n8n-style NodeTypeDescriptor metadata, expression evaluator (safe {{variable}} interpolation), ExpressionInput with token highlighting and autocomplete
+- Portfolio optimiser: Markowitz, min variance, risk parity, equal weight, Black-Litterman, efficient frontier (scipy SLSQP)
+- Webhook receiver: HMAC-SHA256 verification, TradingView/ChartInk/custom parsers, async dispatch, rate limiter
+- Options payoff engine: expiry/pre-expiry P&L curves, Black-Scholes Greeks, Monte Carlo POP (10k paths)
+- Regime detector: 7-regime classification from VIX, returns, A/D, FII flow, breadth
+- Correlation engine: pairwise Pearson, rolling correlation, regime-tagged matrix
+- PayoffChart: pure SVG P&L visualisation with split green/red segments, hover tooltip
+- Order analytics: fill rate, slippage (bps), execution speed (p50/p95/p99), by-hour/by-symbol
+- Strategy comparator: side-by-side metrics, rankings, weighted scoring, optimal blend weights
+- PositionHeatMapWidget (34th widget): squarified treemap of portfolio exposure
 
 ### Added — Features (Wave 31 — AI Refinements)
 - MemoryManager: compound scoring (importance × recency_decay × relevance), exponential time decay, access boost, category defaults, pruning (absorbed from FinMem)
