@@ -62,6 +62,7 @@ vi.mock("@/services/api", () => ({
   getSymbol: vi.fn().mockResolvedValue({}),
   placeOrder: vi.fn().mockResolvedValue({}),
   getMaxPain: vi.fn().mockResolvedValue({}),
+  basketOrder: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -111,15 +112,42 @@ describe("OptionChainWidget", () => {
 
   it("shows expiry buttons from the data hook", () => {
     render(<OptionChainWidget />, { wrapper: Wrapper });
-    // The useOptionChainData mock returns 3 expiries; the widget shows up to 5
+    // The useOptionChainData mock returns 3 expiries; the widget shows up to 5.
     // Each expiry is formatted via fmtExpiry. Check at least one is present.
     const buttons = screen.getAllByRole("button");
-    // There should be expiry buttons + view toggles + basket + refresh
+    // There should be expiry buttons + view toggles + basket + strategy + refresh
     expect(buttons.length).toBeGreaterThan(3);
   });
 
   it("shows loading state when no expiry is selected", () => {
     render(<OptionChainWidget />, { wrapper: Wrapper });
     expect(screen.getByText("Select an expiry to load chain")).toBeInTheDocument();
+  });
+
+  it("renders the Build Strategy button", () => {
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    const btn = screen.getByTitle("Build multi-leg option strategy");
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("toggles LegBuilder panel when Build Strategy is clicked", async () => {
+    const { user } = await import("@testing-library/user-event").then((m) => ({
+      user: m.default.setup(),
+    }));
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+
+    const btn = screen.getByTitle("Build multi-leg option strategy");
+    // Panel is hidden initially
+    expect(screen.queryByRole("region", { name: "Strategy leg builder" })).toBeNull();
+
+    await user.click(btn);
+    expect(screen.getByRole("region", { name: "Strategy leg builder" })).toBeInTheDocument();
+    expect(btn).toHaveAttribute("aria-pressed", "true");
+
+    // Click again → hides panel
+    await user.click(btn);
+    expect(screen.queryByRole("region", { name: "Strategy leg builder" })).toBeNull();
+    expect(btn).toHaveAttribute("aria-pressed", "false");
   });
 });

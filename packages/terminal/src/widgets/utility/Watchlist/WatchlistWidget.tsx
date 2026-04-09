@@ -609,7 +609,7 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   const count = watchlist.length;
 
   return (
-    <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative">
+    <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative" data-tour-target="watchlist">
 
       {/* HEADER */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">

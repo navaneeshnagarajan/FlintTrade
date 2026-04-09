@@ -36,7 +36,17 @@ vi.mock("@/lib/motion", () => ({
     transitions: { fade: { duration: 0.2 } },
   },
   EASE_ENTER: [0.22, 1, 0.36, 1],
+  EASE_EXIT: [0.0, 0.0, 0.58, 1.0],
+  EASE_MOVE: [0.0, 0.0, 0.58, 1.0],
   DURATION: { fast: 0.15, normal: 0.3, slow: 0.5 },
+}));
+
+vi.mock("@/components/help/SpotlightTour", () => ({
+  SpotlightTour: () => null,
+}));
+
+vi.mock("@/lib/tourDefinitions", () => ({
+  TOUR_DEFINITIONS: {},
 }));
 
 vi.mock("@/hooks/useSkillLevel", () => ({

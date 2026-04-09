@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
+import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -66,7 +68,7 @@ const OVERLAY_SECTIONS = new Set<SectionId>(["suggestions", "signals", "sentimen
 
 function ChatSection() {
   return (
-    <div className="h-full">
+    <div className="h-full" data-tour-target="ai-chat">
       <AIAdvisorWidget />
     </div>
   );
@@ -173,7 +175,7 @@ function SignalsSection() {
   const signals = data?.signals ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-tour-target="ai-signals">
       <Card className="bg-surface-card border border-border-default rounded-lg p-5">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-heading font-semibold text-base text-text-primary">
@@ -956,6 +958,14 @@ export default function AIRoute() {
           />
         )}
       </div>
+
+      {/* Guided tour — beginner only, first visit */}
+      {level === "beginner" && (
+        <SpotlightTour
+          tourId="ai-beginner"
+          steps={TOUR_DEFINITIONS["ai-beginner"] ?? []}
+        />
+      )}
     </div>
   );
 }

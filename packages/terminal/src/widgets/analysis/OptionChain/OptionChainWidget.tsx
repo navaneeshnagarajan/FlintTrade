@@ -32,12 +32,14 @@ import {
   TrendingDown,
   AlertCircle,
   ShoppingBasket,
+  Layers,
 } from "lucide-react";
 import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
 import { useOptionChainData } from "./useOptionChainData";
 import SymbolSearch from "./SymbolSearch";
 import BasketPanel from "./BasketPanel";
+import LegBuilder, { type LegBuilderHandle } from "./LegBuilder";
 import { getColumns, buildGetCellContent, ATM_ROW_THEME } from "./gridConfig";
 import { useGlideTheme } from "@/hooks/useGlideTheme";
 import { NUM, NUM0, fmtExpiry, fmtOI, oiSignalStyle, oiSignalShort } from "./formatters";
@@ -64,6 +66,8 @@ function OptionChainWidget() {
   const [view, setView]                         = useState<ViewType>("LTP");
   const [basket, setBasket]                     = useState<BasketItem[]>([]);
   const [basketOpen, setBasketOpen]             = useState(false);
+  const [legBuilderOpen, setLegBuilderOpen]     = useState(false);
+  const legBuilderRef                           = useRef<LegBuilderHandle>(null);
   const [orderMsg, setOrderMsg]                 = useState<OrderToast | null>(null);
   const [secondsAgo, setSecondsAgo]             = useState<number | null>(null);
   const orderMsgTimerRef                        = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -315,16 +319,24 @@ function OptionChainWidget() {
     if (!strikeRow) return;
     const { strike, call, put } = strikeRow;
     const isCE = colId === "c_act";
+    const optionType = isCE ? "CE" : "PE" as "CE" | "PE";
     const ltp  = isCE
       ? (call?.ltp ?? call?.last_price ?? null)
       : (put?.ltp  ?? put?.last_price  ?? null);
-    if (isInBasket(strike, isCE ? "CE" : "PE")) {
-      removeFromBasket(strike, isCE ? "CE" : "PE");
+
+    if (legBuilderOpen) {
+      // When LegBuilder is open, route the click into it
+      legBuilderRef.current?.addLegFromStrike(strike, optionType);
+      return;
+    }
+
+    if (isInBasket(strike, optionType)) {
+      removeFromBasket(strike, optionType);
     } else {
-      addToBasket(strike, isCE ? "CE" : "PE", ltp);
+      addToBasket(strike, optionType, ltp);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glideColumns, strikes, isInBasket]);
+  }, [glideColumns, strikes, isInBasket, legBuilderOpen]);
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
@@ -381,6 +393,21 @@ function OptionChainWidget() {
               </button>
             ))}
           </div>
+
+          {/* Build Strategy button */}
+          <button
+            onClick={() => setLegBuilderOpen((p) => !p)}
+            className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
+              legBuilderOpen
+                ? "bg-accent/15 border-accent/50 text-accent"
+                : "bg-surface-hover border-border-default text-text-muted hover:text-text-primary hover:border-accent/30"
+            }`}
+            title="Build multi-leg option strategy"
+            aria-pressed={legBuilderOpen}
+          >
+            <Layers size={11} />
+            <span className="hidden sm:inline">Strategy</span>
+          </button>
 
           {/* Basket button */}
           <button
@@ -531,6 +558,20 @@ function OptionChainWidget() {
           onRemove={removeFromBasket}
           onClear={() => setBasket([])}
           onOrder={handleOrder}
+        />
+      )}
+
+      {/* Leg builder panel */}
+      {legBuilderOpen && (
+        <LegBuilder
+          ref={legBuilderRef}
+          strikes={strikes}
+          atmStrike={atmStrike}
+          lotSize={symbolDetails?.lotsize ?? 1}
+          symLabel={symDef.label}
+          exchange={exchange}
+          expiry={selectedExpiry}
+          onClose={() => setLegBuilderOpen(false)}
         />
       )}
 

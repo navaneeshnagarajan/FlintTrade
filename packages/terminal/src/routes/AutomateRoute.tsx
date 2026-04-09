@@ -6,6 +6,8 @@ import TabTransition from "@/components/motion/TabTransition";
 import { getSafetyConfig, getRunningStrategies, getUploadedStrategies } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
+import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 
 import AutomateSidebar, { SECTIONS, type SectionId } from "./automate/AutomateSidebar";
 import FlowsSection       from "./automate/FlowsSection";
@@ -111,6 +113,14 @@ export default function AutomateRoute() {
           </TabTransition>
         </ScrollArea>
       </div>
+
+      {/* Guided tour — beginner only, first visit */}
+      {level === "beginner" && (
+        <SpotlightTour
+          tourId="automate-beginner"
+          steps={TOUR_DEFINITIONS["automate-beginner"] ?? []}
+        />
+      )}
     </div>
   );
 }

@@ -76,7 +76,7 @@ export default function CronSection() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-tour-target="cron-manager">
       <GlassCard className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div>

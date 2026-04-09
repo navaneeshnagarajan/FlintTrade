@@ -40,7 +40,10 @@ vi.mock("@/hooks/useSkillLevel", () => ({
 vi.mock("@/stores/skillStore", () => ({
   useSkillStore: Object.assign(
     vi.fn((selector: (state: Record<string, unknown>) => unknown) =>
-      selector({ globalLevel: "intermediate" }),
+      selector({
+        globalLevel: "intermediate",
+        helpPrefs: { inlineHints: false, spotlightTours: false, aiTutor: false },
+      }),
     ),
     {
       getState: () => ({ globalLevel: "intermediate", trackAction: vi.fn() }),

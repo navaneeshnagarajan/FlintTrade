@@ -104,7 +104,12 @@ vi.mock("@/stores/layoutStore", () => ({
 
 vi.mock("@/stores/themeStore", () => ({
   useThemeStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ getResolvedMode: () => "dark" }),
+    selector({
+      getResolvedMode: () => "dark",
+      setTheme: vi.fn(),
+      setMode: vi.fn(),
+      mode: "dark",
+    }),
   ),
 }));
 
@@ -145,6 +150,13 @@ vi.mock("@/lib/tourDefinitions", () => ({
 // Widget factory
 vi.mock("@/layout/widgetFactory", () => ({
   widgetComponents: {},
+  widgetCatalog: [],
+}));
+
+// Command palette — isolated from TerminalRoute tests
+vi.mock("@/components/CommandPalette/CommandPalette", () => ({
+  default: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="command-palette" /> : null,
 }));
 
 vi.mock("@/layout/workspacePresets", () => ({

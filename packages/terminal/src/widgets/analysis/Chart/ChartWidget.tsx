@@ -6,15 +6,9 @@ import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import {
   Search,
   X,
-  Minus,
   TrendingUp,
   TrendingDown,
   BarChart2,
-  Triangle,
-  Square,
-  Type,
-  AlignJustify,
-  Move,
   Trash2,
   History,
 } from "lucide-react";
@@ -31,6 +25,7 @@ import {
 import { searchSymbol, getHistory, getQuotes, getIntervals } from "@/services/api";
 
 // Local modules
+import { DrawingToolbar } from "./DrawingToolbar";
 import { ChartLegend } from "./ChartLegend";
 import type { LegendState } from "./ChartLegend";
 import { useChartInit } from "./useChartInit";
@@ -234,23 +229,6 @@ function IntervalPills({ intervals, active, onSelect }: IntervalPillsProps) {
         </button>
       ))}
     </div>
-  );
-}
-
-interface DrawToolBtnProps {
-  toolId: DrawToolType; active: DrawToolType | null;
-  onClick: (t: DrawToolType) => void; title: string; children: React.ReactNode;
-}
-
-function DrawToolBtn({ toolId, active, onClick, title, children }: DrawToolBtnProps) {
-  return (
-    <button
-      onClick={() => onClick(toolId)}
-      title={title}
-      className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${active === toolId ? "bg-accent/15 text-accent" : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"}`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -719,18 +697,9 @@ function ChartWidget() {
 
         <div className="w-px h-4 bg-border-default mx-0.5" />
 
-        <span className="text-xxs text-text-muted uppercase tracking-wider mr-0.5">Draw</span>
-        <DrawToolBtn toolId="hline" active={drawMode} onClick={toggleDrawMode} title="Horizontal line — click price level"><Minus size={11} /><span>H-Line</span></DrawToolBtn>
-        <DrawToolBtn toolId="vline" active={drawMode} onClick={toggleDrawMode} title="Vertical line — click bar"><AlignJustify size={11} style={{ transform: "rotate(90deg)" }} /><span>V-Line</span></DrawToolBtn>
-        <DrawToolBtn toolId="trendline" active={drawMode} onClick={toggleDrawMode} title="Trend line — click two points"><TrendingUp size={11} /><span>Trend</span></DrawToolBtn>
-        <DrawToolBtn toolId="ray" active={drawMode} onClick={toggleDrawMode} title="Ray — click origin + direction"><Move size={11} /><span>Ray</span></DrawToolBtn>
-        <DrawToolBtn toolId="fib" active={drawMode} onClick={toggleDrawMode} title="Fibonacci retracement — click high + low"><Triangle size={11} /><span>Fib</span></DrawToolBtn>
-        <DrawToolBtn toolId="rect" active={drawMode} onClick={toggleDrawMode} title="Rectangle — click two corners"><Square size={11} /><span>Rect</span></DrawToolBtn>
-        <DrawToolBtn toolId="text" active={drawMode} onClick={toggleDrawMode} title="Text annotation — click to place"><Type size={11} /><span>Text</span></DrawToolBtn>
-
+        {/* Drawing count + undo/clear in the header */}
         {drawingCount > 0 && (
           <>
-            <div className="w-px h-4 bg-border-default mx-0.5" />
             <button onClick={undoLastDrawing} title="Undo last drawing" className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
               <X size={10} /><span>Undo</span>
             </button>
@@ -739,7 +708,7 @@ function ChartWidget() {
                 <Trash2 size={10} /><span>Clear</span>
               </button>
             )}
-            <span className="text-xxs text-text-muted ml-auto">{drawingCount} drawing{drawingCount !== 1 ? "s" : ""}</span>
+            <span className="text-xxs text-text-muted">{drawingCount} drawing{drawingCount !== 1 ? "s" : ""}</span>
           </>
         )}
 
@@ -749,16 +718,23 @@ function ChartWidget() {
         {drawMode === "text" && awaitingText !== null && <span className="text-xxs text-accent ml-1 animate-pulse">Type text below</span>}
       </div>
 
-      {/* Chart area */}
-      <div className="flex-1 w-full min-h-0 relative">
-        <div
-          ref={containerRef}
-          className="w-full h-full"
-          style={{ cursor: drawMode !== null ? "crosshair" : "default" }}
+      {/* Chart area — DrawingToolbar on left, canvas on right */}
+      <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
+        <DrawingToolbar
+          drawMode={drawMode}
+          onToggle={toggleDrawMode}
+          onClearAll={clearAllDrawings}
         />
-        {awaitingText !== null && (
-          <TextInputOverlay onConfirm={handleTextConfirm} onCancel={handleTextCancel} />
-        )}
+        <div className="relative flex-1 min-w-0">
+          <div
+            ref={containerRef}
+            className="w-full h-full"
+            style={{ cursor: drawMode !== null ? "crosshair" : "default" }}
+          />
+          {awaitingText !== null && (
+            <TextInputOverlay onConfirm={handleTextConfirm} onCancel={handleTextCancel} />
+          )}
+        </div>
       </div>
 
       {/* Task A: Replay control bar — only shown while replay mode is active */}

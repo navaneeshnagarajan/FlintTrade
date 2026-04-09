@@ -293,7 +293,7 @@ export default function FlowsSection() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-tour-target="flow-builder">
       <StaggeredList className="space-y-4">
 
         {/* Overview */}

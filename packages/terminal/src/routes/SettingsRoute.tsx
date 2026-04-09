@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useEffect, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
+import { RouteBanner } from "@/components/help/RouteBanner";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
@@ -99,6 +100,11 @@ export default function SettingsRoute() {
       aria-label="Settings"
       className="h-full flex flex-col overflow-hidden animate-fade-in"
     >
+      {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
+      <RouteBanner
+        hintId="settings-openalgo-connect"
+        text="Go to the API section to connect FlintTrade to your OpenAlgo instance and start live trading."
+      />
       {/* Slim header */}
       <div className="flex items-center gap-3 px-4 h-10 border-b border-border-default bg-surface-card shrink-0">
         <button

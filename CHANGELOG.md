@@ -59,13 +59,47 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - WebSocket handler upgrade: mode-specific subscribe, batch subscribe, reference counting
 - All 3 git submodules synced (openalgo, algomirror, openclaw)
 
+### Added — Features (Wave 24 — Absorption)
+- CommandPalette (Ctrl+K): global command search with 51 commands, fuzzy search, recent history, keyboard navigation (absorbed from openalgo-chart)
+- Price Alerts widget: armed/triggered/expired states, LTP polling, condition types (above/below/crosses), localStorage persistence (31st widget)
+- DrawingToolbar: vertical 20-tool sidebar with 7 groups, favourites, popover selection, lock/hide/clear (absorbed from openalgo-chart)
+- LegBuilder: multi-leg option strategy builder (Straddle/Strangle/Spread/Condor/Butterfly/Custom), payoff calculation, basket order execution (absorbed from openalgo-chart)
+- FlowBuilder rewrite: @xyflow/react v12, Zustand store, 54 node types across 8 categories, node palette, config panel, execution log (absorbed from openalgo-flow)
+- ETF Screener tab: filterable TanStack Table with 12 sortable columns, category pills (absorbed from etftracker)
+- Sector Rotation tab: treemap heatmap + momentum scoreboard (absorbed from etftracker)
+- Risk-Return tab: SVG scatter plot (volatility vs return, Sharpe sizing) with stats cards (absorbed from etftracker)
+- Correlation Matrix tab: HTML heatmap + market regime indicator (Risk-On/Off/Rotation) + VIX/DXY badges (absorbed from etftracker)
+- RouteBanner: dismissible contextual hints on /trade, /invest, /lab, /settings
+- SpotlightTour: wired to /ai and /automate routes for beginners
+- PositionTracker: thread-safe, DuckDB-persisted, R-multiple accounting, MTM square-off (absorbed from nifty-trading-railway)
+- StateManager: 8-state strategy lifecycle with per-strategy locks, audit trail (absorbed from nifty-trading-railway)
+- SwingDetector: watch-based confirmation, multi-symbol support, callbacks (absorbed from nifty-trading-railway)
+- 5 new repos cloned: n8n-io/n8n, marketcalls/Vibe-Trading, openbull, upstox-api-docs, zerodha-api-docs
+- absorption-status.json: 233 repos tracked (was 80)
+- data-tour-target attributes added to WatchlistWidget, AIRoute sections, AutomateRoute sections
+- 4 new ftApi endpoints: getEtfScreener, getSectorRotation, getRiskReturn, getCorrelationMatrix
+
 ### Added — Tests
 - LearnRoute tests (3): heading, sidebar sections, default tab content
 - InvestRoute tests (3): heading, tab navigation, default Dashboard tab
 - AutomateRoute tests (3): heading, section tabs, sidebar rendering
 - DittoRoute tests (10): header, tabs, accounts table, mirror tab, risk tab, error handling
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
-- Total terminal tests: 1,696 (Vitest, 168 files) | Python tests: 3,900+ (pytest) = 5,600+ total
+- AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
+- Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
+- Total terminal tests: 1,773 (Vitest, 174 files) | Python engine: 576 | Other pytest: ~3,900 = ~6,249 total
+
+### Fixed — Code Review (Wave 24)
+- AlertsWidget: fixed stale ltpMap closure causing poll data races (functional setLtpMap update)
+- LegBuilder: fixed mixed UTC/local date accessors in normaliseExpiry (getUTCDate for consistent expiry symbols)
+- CommandPalette: removed `as unknown as string` type lie on JSX prop
+- flowStore: added structural validation before JSON.parse cast (prevents corrupt localStorage crash)
+- PositionTracker: wrapped read methods and close_all in thread lock (TOCTOU fix)
+- StateManager: added cache_lock for all_snapshots/strategies_in_state iteration safety
+- PositionTracker + StateManager: added db_lock for DuckDB connection thread safety
+- SwingDetector: all_swings now returns deepcopy (prevents mutation by _update_extreme)
+- tourDefinitions: fixed target mismatch (orderpad -> order-pad)
+- Ruff: removed unused imports in position_tracker.py and state_manager.py
 
 ### Fixed — Security
 - JWT revocation: token blacklist on logout and password change

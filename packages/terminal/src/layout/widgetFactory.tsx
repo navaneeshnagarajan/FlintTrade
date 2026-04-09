@@ -48,6 +48,7 @@ const lazyWidgets = {
 
   // Utility widgets (new)
   scanner: lazy(() => import("@/widgets/utility/Scanner/ScannerWidget")),
+  alerts: lazy(() => import("@/widgets/utility/Alerts/AlertsWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "orderflow", name: "Order Flow", icon: "BarChart2", category: "Analysis" },
   { id: "depthheatmap", name: "Depth Heatmap", icon: "Flame", category: "Analysis" },
   { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility" },
+  { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility" },
 ];
 
 // ---------------------------------------------------------------------------

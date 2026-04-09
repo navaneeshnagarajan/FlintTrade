@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } from "react";
+import CommandPalette from "@/components/CommandPalette/CommandPalette";
 import { useNavigate } from "react-router-dom";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
@@ -18,6 +19,7 @@ import { applyPreset } from "@/layout/workspacePresets";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useDockviewTheme } from "@/hooks/useDockviewTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { RouteBanner } from "@/components/help/RouteBanner";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -74,7 +76,7 @@ function KillSwitchPill() {
       aria-live="assertive"
       aria-atomic="true"
       aria-label={`Daily loss alert: ₹${Math.abs(totalPnl).toFixed(0)}`}
-      className="fixed bottom-4 left-4 z-40 bg-surface-card border border-loss/30 rounded-lg p-3 backdrop-blur-sm shadow-lg max-w-[180px]"
+      className="fixed bottom-4 left-4 z-40 bg-surface-card border border-loss/30 rounded-lg p-3 backdrop-blur-sm shadow-lg max-w-45"
     >
       <div className="flex items-center gap-1.5 mb-1.5">
         <ShieldOff size={13} className="text-loss shrink-0" aria-hidden="true" />
@@ -172,6 +174,7 @@ const tools: Omit<Record<ToolId, React.LazyExoticComponent<React.ComponentType<{
 export default function TerminalRoute() {
   const navigate = useNavigate();
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [panelCount, setPanelCount] = useState<number | null>(null);
   // d1/d2/d4 — subscriptions created inside onDockviewReady; cleaned up on unmount.
   const readyDisposablesRef = useRef<Array<{ dispose(): void }>>([]);
@@ -221,9 +224,7 @@ export default function TerminalRoute() {
       if (presetPickerOpen) { setPresetPickerOpen(false); return; }
       if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
     }, [activeTool, presetPickerOpen, widgetPickerOpen, setPresetPickerOpen, setWidgetPickerOpen]),
-    onCommandPalette: useCallback(() => {
-      // Future: open command palette (Ctrl+K)
-    }, []),
+    onCommandPalette: useCallback(() => setCmdPaletteOpen((prev) => !prev), []),
   });
 
   // ---------------------------------------------------------------------------
@@ -382,6 +383,11 @@ export default function TerminalRoute() {
     <CinematicLayout mode="focused">
     <div className="h-full flex flex-col text-text-primary overflow-hidden select-none">
       <h1 className="sr-only">Trade Workspace</h1>
+      {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
+      <RouteBanner
+        hintId="trade-shortcuts"
+        text="Press Ctrl+K to open the command palette. Use X to exit all positions and C to cancel all orders."
+      />
       {/* Main content: Dockview canvas OR full-page tool */}
       {activeTool && ToolComponent ? (
         <div className="flex-1 overflow-auto">
@@ -558,6 +564,12 @@ export default function TerminalRoute() {
 
       {/* Kill switch pill — floats over the canvas when daily loss threshold is reached */}
       <KillSwitchPill />
+
+      {/* Command palette — Ctrl+K */}
+      <CommandPalette
+        isOpen={cmdPaletteOpen}
+        onClose={() => setCmdPaletteOpen(false)}
+      />
     </div>
     </CinematicLayout>
   );

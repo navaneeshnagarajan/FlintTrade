@@ -16,6 +16,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { RouteBanner } from "@/components/help/RouteBanner";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import {
   TrendingUp,
@@ -35,6 +36,10 @@ import {
   Activity,
   Target,
   IndianRupee,
+  ScanLine,
+  GitBranch,
+  Crosshair,
+  Grid2X2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -60,6 +65,10 @@ const BenchmarkTab = lazy(() => import("./invest/tabs/BenchmarkTab").then(m => (
 const BasketTab = lazy(() => import("./invest/tabs/BasketTab").then(m => ({ default: m.BasketTab })));
 const GoalTab = lazy(() => import("./invest/tabs/GoalTab").then(m => ({ default: m.GoalTab })));
 const MutualFundTab = lazy(() => import("./invest/tabs/MutualFundTab").then(m => ({ default: m.MutualFundTab })));
+const EtfScreenerTab = lazy(() => import("./invest/tabs/EtfScreenerTab").then(m => ({ default: m.EtfScreenerTab })));
+const SectorRotationTab = lazy(() => import("./invest/tabs/SectorRotationTab").then(m => ({ default: m.SectorRotationTab })));
+const RiskReturnTab = lazy(() => import("./invest/tabs/RiskReturnTab").then(m => ({ default: m.RiskReturnTab })));
+const CorrelationTab = lazy(() => import("./invest/tabs/CorrelationTab").then(m => ({ default: m.CorrelationTab })));
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 
@@ -79,7 +88,11 @@ type TabId =
   | "mutual-funds"
   | "benchmark"
   | "basket"
-  | "goals";
+  | "goals"
+  | "etf-screener"
+  | "sector-rotation"
+  | "risk-return"
+  | "correlation";
 
 interface TabDef {
   id: TabId;
@@ -104,6 +117,10 @@ const TABS: TabDef[] = [
   { id: "benchmark", label: "Benchmark", icon: Activity },
   { id: "basket", label: "Baskets", icon: Layers },
   { id: "goals", label: "Goals", icon: Target },
+  { id: "etf-screener", label: "ETF Screener", icon: ScanLine },
+  { id: "sector-rotation", label: "Sector Rotation", icon: GitBranch },
+  { id: "risk-return", label: "Risk-Return", icon: Crosshair },
+  { id: "correlation", label: "Correlation", icon: Grid2X2 },
 ];
 
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
@@ -141,8 +158,12 @@ function ActiveTabContent({ tabId }: { tabId: TabId }) {
       case "mutual-funds":  return <MutualFundTab />;
       case "benchmark":     return <BenchmarkTab />;
       case "basket":       return <BasketTab />;
-      case "goals":        return <GoalTab />;
-      default:             return null;
+      case "goals":          return <GoalTab />;
+      case "etf-screener":   return <EtfScreenerTab />;
+      case "sector-rotation": return <SectorRotationTab />;
+      case "risk-return":    return <RiskReturnTab />;
+      case "correlation":    return <CorrelationTab />;
+      default:               return null;
     }
   })();
 
@@ -164,8 +185,8 @@ function InvestShell() {
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "goals", "mf-optimizer", "mutual-funds"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "goals"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "etf-screener", "sector-rotation"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "goals", "etf-screener", "sector-rotation", "risk-return", "correlation"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
@@ -193,6 +214,11 @@ function InvestShell() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
+      <RouteBanner
+        hintId="invest-broker-connect"
+        text="Connect a broker in Settings → API to see your real holdings, SIPs, and portfolio value here."
+      />
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm shrink-0">
           {/* Title row */}

@@ -13,3 +13,6 @@ export { SpotlightTour } from "./SpotlightTour";
 export type { SpotlightTourProps } from "./SpotlightTour";
 
 export { AITutorPill } from "./AITutorPill";
+
+export { RouteBanner } from "./RouteBanner";
+export type { RouteBannerProps } from "./RouteBanner";

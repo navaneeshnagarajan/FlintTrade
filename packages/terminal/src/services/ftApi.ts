@@ -1716,6 +1716,104 @@ export const parseVoiceCommand = (text: string): Promise<VoiceCommandResult> =>
   post<VoiceCommandResult>("voice/parse", { text });
 
 // ---------------------------------------------------------------------------
+// Invest Analytics — ETF Screener, Sector Rotation, Risk-Return, Correlation
+// ---------------------------------------------------------------------------
+
+/** A single row in the ETF screener response. */
+export interface EtfScreenerRow {
+  symbol: string;
+  name: string;
+  category: "Equity" | "Gold" | "Silver" | "Debt" | "International";
+  exchange: string;
+  price: number;
+  change_1d: number;
+  change_1w: number;
+  change_1m: number;
+  change_3m: number;
+  change_1y: number;
+  volume: number;
+  week52_high: number;
+  week52_low: number;
+  expense_ratio: number;
+  aum_cr: number;
+}
+
+export interface EtfScreenerResponse {
+  etfs: EtfScreenerRow[];
+  updated_at: string;
+  is_sample_data: boolean;
+}
+
+export const getEtfScreener = () =>
+  get<EtfScreenerResponse>("etf/screener");
+
+/** One sector in the rotation response. */
+export interface SectorRotationRow {
+  symbol: string;
+  name: string;
+  change_1d: number;
+  change_1w: number;
+  change_1m: number;
+  change_3m: number;
+  change_6m: number;
+  change_1y: number;
+  market_cap_cr: number;
+  momentum_score: number;
+  quadrant: "leading" | "weakening" | "lagging" | "improving";
+}
+
+export interface SectorRotationResponse {
+  sectors: SectorRotationRow[];
+  updated_at: string;
+  is_sample_data: boolean;
+}
+
+export const getSectorRotation = () =>
+  get<SectorRotationResponse>("sectors/rotation");
+
+/** One instrument in the risk-return scatter. */
+export interface RiskReturnPoint {
+  symbol: string;
+  name: string;
+  category: string;
+  annualised_return: number;
+  annualised_volatility: number;
+  sharpe_ratio: number;
+}
+
+export interface RiskReturnResponse {
+  points: RiskReturnPoint[];
+  avg_return: number;
+  avg_volatility: number;
+  best_sharpe_symbol: string;
+  best_sharpe: number;
+  updated_at: string;
+  is_sample_data: boolean;
+}
+
+export const getRiskReturn = () =>
+  get<RiskReturnResponse>("analytics/risk-return");
+
+/** Market regime classification. */
+export type MarketRegime = "Risk-On" | "Risk-Off" | "Rotation";
+
+/** Correlation matrix response. */
+export interface CorrelationResponse {
+  symbols: string[];
+  /** Row-major matrix indexed by symbols order. */
+  matrix: number[][];
+  regime: MarketRegime;
+  regime_rationale: string;
+  vix: number;
+  dxy: number;
+  updated_at: string;
+  is_sample_data: boolean;
+}
+
+export const getCorrelationMatrix = () =>
+  get<CorrelationResponse>("analytics/correlation");
+
+// ---------------------------------------------------------------------------
 // Activity Log (admin audit trail)
 // ---------------------------------------------------------------------------
 

@@ -18,6 +18,18 @@ vi.mock("@/lib/motion", () => ({
     prefersReducedMotion: () => true,
     transitions: { tab: { duration: 0 } },
   },
+  EASE_ENTER: [0.22, 1, 0.36, 1],
+  EASE_EXIT: [0.0, 0.0, 0.58, 1.0],
+  EASE_MOVE: [0.0, 0.0, 0.58, 1.0],
+  DURATION: { fast: 0.15, normal: 0.3, slow: 0.5 },
+}));
+
+vi.mock("@/components/help/SpotlightTour", () => ({
+  SpotlightTour: () => null,
+}));
+
+vi.mock("@/lib/tourDefinitions", () => ({
+  TOUR_DEFINITIONS: {},
 }));
 
 // Mock hooks that depend on stores

@@ -24,13 +24,20 @@ export interface IntervalOption {
 // ---------------------------------------------------------------------------
 
 export type DrawToolType =
-  | "hline"
-  | "vline"
-  | "trendline"
-  | "ray"
-  | "fib"
-  | "rect"
-  | "text";
+  // Cursor
+  | "cursor" | "eraser"
+  // Lines
+  | "hline" | "vline" | "trendline" | "ray" | "extended_line" | "parallel_channel"
+  // Fibonacci
+  | "fib" | "fib_extension"
+  // Shapes
+  | "rect" | "circle" | "brush"
+  // Text
+  | "text" | "callout" | "price_label"
+  // Patterns
+  | "elliott_impulse" | "elliott_correction"
+  // Prediction
+  | "long_position" | "short_position" | "measure";
 
 export interface DrawingPoint {
   time: Time;

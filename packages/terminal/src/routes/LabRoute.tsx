@@ -3,6 +3,7 @@ import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "reac
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
+import { RouteBanner } from "@/components/help/RouteBanner";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1699,6 +1700,11 @@ export default function LabRoute() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
+      <RouteBanner
+        hintId="lab-import-strategy"
+        text="Import a ready-made strategy from the library — open the Backtest tab and click 'Choose Strategy' to get started."
+      />
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card px-6 pt-4 pb-0">
         <div className="flex items-center gap-3 pb-3" data-tour-target="strategy-picker">
