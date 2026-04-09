@@ -220,9 +220,9 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.5.0-dev — Post-Wave 38 (build sessions 2026-04-07/08/09)
-- **Tests:** 2,026 terminal (Vitest, 186 files) + ~5,700 Python (pytest) = ~7,726 total
-- **Terminal:** 39 widgets (TSX) + 7 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
+- **Version:** 0.5.0-dev — Post-Wave 41 (build sessions 2026-04-07/08/09)
+- **Tests:** 2,125 terminal (Vitest, 199 files) + ~6,100 Python (pytest) = ~8,225 total
+- **Terminal:** 52 widgets (TSX) + 7 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
 - **Strategies:** 29 backtest templates + 4 MTM straddle + Wheel + 101 engine strategies
 - **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor
 - **Analytics:** Options payoff engine, regime detector, correlation matrix, portfolio optimiser, order analytics, strategy comparator, multi-phase simulation
