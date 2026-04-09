@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Wrench, Grid3x3, Plus, LayoutGrid, Copy, Layers, Pencil, Trash2, Check, X, Sun, Moon, Monitor, Settings } from "lucide-react";
+import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
 import { useShallow } from "zustand/react/shallow";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -676,7 +677,7 @@ export default function TopBar() {
           {/* Pending action center badge */}
           {pendingCount > 0 && (
             <span
-              className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-loss text-white text-xxs font-bold px-1 leading-none"
+              className="absolute -top-1 -right-1 min-w-4 h-4 flex items-center justify-center rounded-full bg-loss text-white text-xxs font-bold px-1 leading-none"
               aria-label={`${pendingCount} pending order approval${pendingCount !== 1 ? "s" : ""}`}
             >
               {pendingCount > 9 ? "9+" : pendingCount}
@@ -707,6 +708,9 @@ export default function TopBar() {
         )}
 
         <div className="w-px h-4 bg-border-default" aria-hidden="true" />
+
+        {/* Notification Centre bell */}
+        <NotificationBell />
 
         {/* Account switcher — hidden when no accounts connected */}
         <AccountSwitcher />

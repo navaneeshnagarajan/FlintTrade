@@ -1919,3 +1919,36 @@ export interface PositionSizeResult {
 
 export const calculatePositionSize = (req: PositionSizeRequest) =>
   post<PositionSizeResult>("position/size", req);
+
+// ---------------------------------------------------------------------------
+// Crypto Funding Rates (Delta Exchange perpetuals)
+// ---------------------------------------------------------------------------
+
+/** One funding rate entry for a crypto perpetual symbol. */
+export interface FundingRateEntry {
+  /** Symbol, e.g. "BTCUSD". */
+  symbol: string;
+  /** Current 8-hour funding rate as a fraction, e.g. 0.0001 = 0.01%. */
+  rate: number;
+  /** Predicted next 8-hour funding rate (model estimate). */
+  predicted_rate: number;
+  /** Unix timestamp (ms) of the next funding event. */
+  next_funding_ms: number;
+  /** Last 7 days of 8-hour funding rates (newest last). */
+  history: number[];
+  /** Open interest in USD notional. */
+  open_interest_usd: number | null;
+}
+
+/** Response from the funding rates endpoint. */
+export interface FundingRatesResponse {
+  rates: FundingRateEntry[];
+  updated_at: string;
+}
+
+/**
+ * Fetch current funding rates for all tracked crypto perpetual pairs.
+ * Backend proxies Delta Exchange REST API and caches for 60s.
+ */
+export const getCryptoFundingRates = () =>
+  get<FundingRatesResponse>("crypto/funding_rates");

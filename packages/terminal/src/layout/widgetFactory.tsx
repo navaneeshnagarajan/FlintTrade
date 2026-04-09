@@ -61,6 +61,12 @@ const lazyWidgets = {
 
   // Trade Copier (Ditto route)
   tradecopier: lazy(() => import("@/widgets/trading/TradeCopier/TradeCopierWidget")),
+
+  // Analysis widgets (Wave 24)
+  greekssurface: lazy(() => import("@/widgets/analysis/GreeksSurface/GreeksSurfaceWidget")),
+
+  // Utility widgets (Wave 24)
+  fundingrate: lazy(() => import("@/widgets/utility/FundingRate/FundingRateWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -104,6 +110,8 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis" },
   { id: "oiheatmap", name: "OI Heatmap", icon: "Grid2x2", category: "Analysis" },
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading" },
+  { id: "greekssurface", name: "Greeks Surface", icon: "Box", category: "Analysis" },
+  { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility" },
 ];
 
 // ---------------------------------------------------------------------------
