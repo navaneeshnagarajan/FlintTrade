@@ -389,6 +389,14 @@ def create_flask_app(
     from packages.screener.src.earnings_routes import earnings_bp  # noqa: PLC0415
     app.register_blueprint(earnings_bp)
 
+    # Register Pivot Calculator blueprint (/ft-api/v1/pivots/*)
+    from packages.screener.src.pivot_routes import pivot_bp  # noqa: PLC0415
+    app.register_blueprint(pivot_bp)
+
+    # Register Economic Calendar blueprint (/ft-api/v1/economic/*)
+    from packages.screener.src.economic_routes import economic_bp  # noqa: PLC0415
+    app.register_blueprint(economic_bp)
+
     # Register Audit Trail blueprint (/ft-api/v1/audit/*)
     from packages.data.src.audit_routes import audit_bp  # noqa: PLC0415
     app.register_blueprint(audit_bp)

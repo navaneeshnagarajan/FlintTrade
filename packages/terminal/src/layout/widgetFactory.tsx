@@ -74,6 +74,12 @@ const lazyWidgets = {
   globalindices: lazy(() => import("@/widgets/utility/GlobalIndices/GlobalIndicesWidget")),
   strategytemplates: lazy(() => import("@/widgets/utility/StrategyTemplates/StrategyTemplatesWidget")),
   audittrail: lazy(() => import("@/widgets/utility/AuditTrail/AuditTrailWidget")),
+
+  // Wave 26 widgets
+  pivotpoints: lazy(() => import("@/widgets/analysis/PivotPoints/PivotPointsWidget")),
+  economiccalendar: lazy(() => import("@/widgets/utility/EconomicCalendar/EconomicCalendarWidget")),
+  portfolioallocation: lazy(() => import("@/widgets/trading/PortfolioAllocation/PortfolioAllocationWidget")),
+  orderbookreplay: lazy(() => import("@/widgets/analysis/OrderBookReplay/OrderBookReplayWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -124,6 +130,10 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "globalindices", name: "Global Indices", icon: "Globe", category: "Utility" },
   { id: "strategytemplates", name: "Strategy Templates", icon: "BookOpen", category: "Utility" },
   { id: "audittrail", name: "Audit Trail", icon: "ScrollText", category: "Utility" },
+  { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis" },
+  { id: "economiccalendar", name: "Economic Calendar", icon: "CalendarClock", category: "Utility" },
+  { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading" },
+  { id: "orderbookreplay", name: "Order Book Replay", icon: "BarChart3", category: "Analysis" },
 ];
 
 // ---------------------------------------------------------------------------
