@@ -98,6 +98,12 @@ const lazyWidgets = {
   tradeperformance: lazy(() => import("@/widgets/trading/TradePerformance/TradePerformanceWidget")),
   instrumentcompare: lazy(() => import("@/widgets/analysis/InstrumentCompare/InstrumentCompareWidget")),
   spreadview: lazy(() => import("@/widgets/analysis/SpreadView/SpreadViewWidget")),
+
+  // Wave 30 widgets
+  greeksheatmap: lazy(() => import("@/widgets/analysis/GreeksHeatmap/GreeksHeatmapWidget")),
+  marketsummary: lazy(() => import("@/widgets/utility/MarketSummary/MarketSummaryWidget")),
+  gapanalysis: lazy(() => import("@/widgets/analysis/GapAnalysis/GapAnalysisWidget")),
+  sessionstats: lazy(() => import("@/widgets/trading/SessionStats/SessionStatsWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -170,6 +176,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "tradeperformance", name: "Trade Performance", icon: "Trophy", category: "Trading" },
   { id: "instrumentcompare", name: "Instrument Compare", icon: "GitCompare", category: "Analysis" },
   { id: "spreadview", name: "Spread View", icon: "ArrowUpDown", category: "Analysis" },
+
+  // Wave 30
+  { id: "greeksheatmap", name: "Greeks Heatmap", icon: "Grid3x3", category: "Analysis" },
+  { id: "marketsummary", name: "Market Summary", icon: "LayoutDashboard", category: "Utility" },
+  { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis" },
+  { id: "sessionstats", name: "Session Stats", icon: "Clock", category: "Trading" },
 ];
 
 // ---------------------------------------------------------------------------
