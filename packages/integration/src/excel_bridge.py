@@ -34,7 +34,7 @@ logger = logging.getLogger("flinttrade.integration.excel_bridge")
 # ---------------------------------------------------------------------------
 
 try:
-    import openpyxl
+    import openpyxl  # noqa: F401
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -330,6 +330,7 @@ class ExcelBridge:
             ("Realised P&L (Positions)", round(realised_pnl, 2)),
             ("Unrealised P&L (Holdings)", round(unrealised_pnl, 2)),
             ("Net P&L", round(realised_pnl + unrealised_pnl, 2)),
+            ("Total Invested (est.)", round(total_invested, 2)),
         ]
 
         for row in summary_rows:

@@ -9,7 +9,7 @@ All amounts are in USD or INR depending on the quote currency of the pair.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Final
 
 
