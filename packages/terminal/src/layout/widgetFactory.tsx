@@ -80,6 +80,12 @@ const lazyWidgets = {
   economiccalendar: lazy(() => import("@/widgets/utility/EconomicCalendar/EconomicCalendarWidget")),
   portfolioallocation: lazy(() => import("@/widgets/trading/PortfolioAllocation/PortfolioAllocationWidget")),
   orderbookreplay: lazy(() => import("@/widgets/analysis/OrderBookReplay/OrderBookReplayWidget")),
+
+  // Wave 27 widgets
+  marketbreadth: lazy(() => import("@/widgets/analysis/MarketBreadth/MarketBreadthWidget")),
+  quicktrade: lazy(() => import("@/widgets/trading/QuickTrade/QuickTradeWidget")),
+  volatilitycone: lazy(() => import("@/widgets/analysis/VolatilityCone/VolatilityConeWidget")),
+  profittarget: lazy(() => import("@/widgets/utility/ProfitTarget/ProfitTargetWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -134,6 +140,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "economiccalendar", name: "Economic Calendar", icon: "CalendarClock", category: "Utility" },
   { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading" },
   { id: "orderbookreplay", name: "Order Book Replay", icon: "BarChart3", category: "Analysis" },
+
+  // Wave 27
+  { id: "marketbreadth", name: "Market Breadth", icon: "BarChart4", category: "Analysis" },
+  { id: "quicktrade", name: "Quick Trade", icon: "Zap", category: "Trading" },
+  { id: "volatilitycone", name: "Volatility Cone", icon: "Triangle", category: "Analysis" },
+  { id: "profittarget", name: "Profit Target Calc", icon: "Target", category: "Utility" },
 ];
 
 // ---------------------------------------------------------------------------

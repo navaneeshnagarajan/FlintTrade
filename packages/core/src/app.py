@@ -274,6 +274,10 @@ def create_flask_app(
     from packages.screener.src.mf_routes import mf_bp  # noqa: PLC0415
     app.register_blueprint(mf_bp)
 
+    # Register breadth + volatility cone blueprints (/ft-api/v1/breadth/*, /ft-api/v1/analytics/volcone)
+    from packages.screener.src.breadth_routes import breadth_bp  # noqa: PLC0415
+    app.register_blueprint(breadth_bp)
+
     # Register Action Center blueprint (/api/v1/action-center/*)
     from packages.engine.src.action_center import ActionCenter  # noqa: PLC0415
     from packages.engine.src.action_center_routes import action_center_bp  # noqa: PLC0415

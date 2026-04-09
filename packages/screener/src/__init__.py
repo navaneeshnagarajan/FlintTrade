@@ -55,6 +55,8 @@ from .earnings_calendar import EarningsCalendar, EarningsEvent
 from .pivot_calculator import PivotCalculator, PivotLevels, PivotMethod
 from .economic_calendar import EconomicCalendarProvider, EconomicEvent
 from .orderflow_inference import FlowBucket, OrderFlowInference, PriceLevel
+from .market_breadth import BreadthData, MarketBreadthCalculator
+from .volatility_cone import VolatilityCone, VolatilityConePoint
 from .rrg import (
     NIFTY_SECTORS,
     RRGPoint,
@@ -157,4 +159,10 @@ __all__ = [
     "OrderFlowInference",
     "FlowBucket",
     "PriceLevel",
+    # Market breadth
+    "BreadthData",
+    "MarketBreadthCalculator",
+    # Volatility cone
+    "VolatilityCone",
+    "VolatilityConePoint",
 ]

@@ -42,7 +42,12 @@ export type WidgetId =
   | "ivsmile"
   | "straddlepnl"
   | "oiprofile"
-  | "scanner";
+  | "scanner"
+  | "positionheatmap"
+  | "marketbreadth"
+  | "quicktrade"
+  | "volatilitycone"
+  | "profittarget";
 
 export type ToolId =
   | "settings"
