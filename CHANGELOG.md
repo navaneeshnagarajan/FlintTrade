@@ -87,7 +87,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
 - AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
 - Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
-- Total terminal tests: 1,814 (Vitest, 176 files) | Python: ~4,500 (pytest) = ~6,314 total
+- Total terminal tests: 1,837 (Vitest, 176 files) | Python: ~5,000 (pytest) = ~6,837 total
 
 ### Added — Features (Wave 25 — Engine + Analytics)
 - Backtest engine: event-driven BacktestEngine with MARKET/LIMIT/STOP/STOP_LIMIT orders, slippage, commission (absorbed from trading-strategies-openalgo)
@@ -110,6 +110,26 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - IndicatorSettingsModal: two-column modal with colour picker, line style, period inputs, draft state
 - Auto-retraining loop: continuous ML model retraining (daily), drift detection (KS test), atomic model swap
 - Retrain API: GET /retrain/status, POST /retrain/trigger, GET /retrain/history
+
+### Added — Features (Wave 28 — Strategies + Journal + Broker)
+- 29 backtest strategy templates across 5 categories: trend following (9), mean reversion (6), momentum (6), volatility (4), composite (4) (absorbed from AlgoTrading)
+- STRATEGY_REGISTRY with name-based lookup, all extending BaseBacktestStrategy
+- Trade Journal: DuckDB-backed CRUD with emotions, quality ratings, tags, auto-computed P&L, CSV export, tradebook import
+- Journal API: 7 endpoints under /ft-api/v1/journal/
+- BrokerInterface Protocol: 10 standard operations, 9 Pydantic models, BrokerRegistry, OpenAlgoBroker implementation (absorbed from openbull)
+
+### Added — Features (Wave 29 — Skills + Swarm + Historical)
+- SkillRegistry: markdown skills with YAML frontmatter, on-demand loading, fuzzy search (absorbed from Vibe-Trading)
+- 10 starter AI skills: OpenAlgo API, option chain, straddle, risk, indicators, backtest, market hours, SEBI, FII/DII, Greeks
+- SwarmExecutor: async DAG task executor with topological layering, cycle detection, event emission (absorbed from Vibe-Trading)
+- DataProvider Protocol: OpenAlgo, OpenChart (NSE free), yfinance (MCX) with fallback chain (absorbed from historify + openchart)
+- OHLCVNormaliser: IST conversion, column aliasing, intraday cutoff, data validation
+- HistoricalCache: DuckDB-backed, TTL freshness, incremental updates, batch fetch
+
+### Added — Features (Wave 30 — Skill Variants)
+- useSkillContent hook: returns skill-level-appropriate widgets (7/18/33), tools, tooltips, presets
+- WidgetPicker + ToolsDropdown: filter by skill level via allowedIds props
+- SkillBadge in TopBar showing current level with link to Settings
 
 ### Fixed — Code Review (Wave 24)
 - AlertsWidget: fixed stale ltpMap closure causing poll data races (functional setLtpMap update)
