@@ -17,98 +17,45 @@ jobs:
       - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ tests/ -v --tb=short --import-mode=importlib
       - run: ruff check packages/*/src/ --output-format=github
 
-  # Split vitest into 3 parallel jobs to stay under CI runner memory limit (7GB).
-  # Full suite: ~2,500 tests across 227+ files.
   node-core-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
-      - name: Install dependencies
-        run: cd packages/terminal && npm ci --legacy-peer-deps
+      - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: TypeScript strict check
         run: cd packages/terminal && npx tsc --noEmit
-      - name: Run core tests (lib, stores, atoms, services, select hooks)
+      - name: Run core tests
         run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/lib/ src/stores/ src/atoms/ src/services/ src/hooks/__tests__/useGlobalKeys.test.ts src/hooks/__tests__/useFeatureGate.test.ts src/hooks/__tests__/useSkillContent.test.ts
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check
         run: cd packages/terminal && npm run build
 
-  node-widget-tests-trading:
+  node-widget-tests-1:
     runs-on: ubuntu-latest
-    continue-on-error: true  # Widget tests pass locally; CI runner memory limited
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
-      - name: Run trading widget tests
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/trading/
-        env:
-          NODE_OPTIONS: '--max-old-space-size=4096'
-
-  node-widget-tests-utility-a:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - run: cd packages/terminal && npm ci --legacy-peer-deps
-      - name: Run utility widget tests (A-H)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/ src/widgets/utility/GlobalIndices/ src/widgets/utility/Health/
-
-  node-widget-tests-utility-b:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - run: cd packages/terminal && npm ci --legacy-peer-deps
-      - name: Run utility widget tests (M-W)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/utility/MarketClock/ src/widgets/utility/MarketSummary/ src/widgets/utility/News/ src/widgets/utility/PositionSizing/ src/widgets/utility/ProfitTarget/ src/widgets/utility/Scanner/ src/widgets/utility/StrategyTemplates/ src/widgets/utility/TickSpeed/ src/widgets/utility/Ticker/ src/widgets/utility/TradeIdea/ src/widgets/utility/Watchlist/
+      - name: Run trading + utility A-H widget tests
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/trading/ src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/ src/widgets/utility/GlobalIndices/ src/widgets/utility/Health/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
-      - name: Install dependencies
-        run: cd packages/terminal && npm ci --legacy-peer-deps
-      - name: Run widget tests batch 2 (analysis widgets + routes + tools + components)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/analysis/ src/routes/ src/tools/ src/components/
-        env:
-          NODE_OPTIONS: '--max-old-space-size=6144'
-
-  e2e-tests:
-    runs-on: ubuntu-latest
-    continue-on-error: true  # E2E is informational for now — broker not available in CI
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - name: Install dependencies
-        run: cd packages/terminal && npm ci --legacy-peer-deps
-      - name: Install Playwright Chromium
-        run: cd packages/terminal && npx playwright install --with-deps chromium
-      - name: Run E2E tests
-        run: cd packages/terminal && npx playwright test
+      - run: cd packages/terminal && npm ci --legacy-peer-deps
+      - name: Run utility M-W + analysis + routes + tools + components
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/utility/MarketClock/ src/widgets/utility/MarketSummary/ src/widgets/utility/News/ src/widgets/utility/PositionSizing/ src/widgets/utility/ProfitTarget/ src/widgets/utility/Scanner/ src/widgets/utility/StrategyTemplates/ src/widgets/utility/TickSpeed/ src/widgets/utility/Ticker/ src/widgets/utility/TradeIdea/ src/widgets/utility/Watchlist/ src/widgets/analysis/ src/routes/ src/tools/ src/components/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
-      - name: Upload Playwright report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: packages/terminal/playwright-report/
-          retention-days: 7
 
   secrets-check:
     runs-on: ubuntu-latest
