@@ -10,8 +10,6 @@ modes.
 """
 from __future__ import annotations
 
-import json
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,10 +18,27 @@ import pytest
 _TEST_API_KEY = "test-order-routes-key"
 
 
+def _make_jwt(mode: str, *, live_mode_unlocked: bool = False) -> str:
+    """Create a signed JWT with the given mode claim for use in test headers.
+
+    Uses the same ``_create_token`` function as the production auth routes so
+    that the JWT secret and algorithm are always in sync.
+
+    Args:
+        mode: Trading mode claim — ``"explore"``, ``"practice"``, or ``"live"``.
+        live_mode_unlocked: If ``True``, the token carries ``live_mode_unlocked:
+            true``, which is required for live order forwarding.
+
+    Returns:
+        Encoded JWT string.
+    """
+    from packages.core.src.auth_routes import _create_token
+    return _create_token("testuser", mode=mode, live_mode_unlocked=live_mode_unlocked)
+
+
 def _create_live_token() -> str:
     """Create a JWT with ``live_mode_unlocked: true`` for live-mode tests."""
-    from packages.core.src.auth_routes import _create_token
-    return _create_token("testuser", live_mode_unlocked=True)
+    return _make_jwt("live", live_mode_unlocked=True)
 
 # All order endpoints and their FlintTrade route suffixes
 _ORDER_ENDPOINTS = [
@@ -84,22 +99,38 @@ def _auth_headers(
     include_live_token: bool = False,
     **extra: str,
 ) -> dict[str, str]:
-    """Build request headers with API key and optional mode.
+    """Build request headers with API key and a mode-bearing JWT.
+
+    The mode is embedded in a signed JWT ``Authorization: Bearer`` header so
+    that the server-side ``_get_mode_from_jwt()`` enforcement path is exercised.
+    The legacy ``X-FlintTrade-Mode`` header is NOT set here — it is no longer
+    trusted by ``order_routes.py``.
 
     Args:
-        mode: Value for the ``X-FlintTrade-Mode`` header.
-        include_live_token: If ``True``, include a JWT ``Authorization``
-            header with ``live_mode_unlocked: true`` — required for live
-            mode orders to pass server-side enforcement.
+        mode: Trading mode to embed as the ``mode`` claim in the JWT.
+            Pass ``None`` to omit the ``Authorization`` header entirely
+            (simulates an unauthenticated / no-JWT request).
+        include_live_token: If ``True``, override the JWT with one that
+            carries ``live_mode_unlocked: true`` regardless of *mode*.
+            The *mode* argument is still used when ``include_live_token``
+            is ``False``.
     """
     headers: dict[str, str] = {
         "X-API-Key": _TEST_API_KEY,
         "Content-Type": "application/json",
     }
-    if mode is not None:
-        headers["X-FlintTrade-Mode"] = mode
     if include_live_token:
+        # Live-unlocked token always carries mode="live"
         headers["Authorization"] = f"Bearer {_create_live_token()}"
+    elif mode is not None and mode.strip():
+        # Embed whichever mode was requested (including invalid ones, which the
+        # production code will reject with 400 after JWT decode).
+        try:
+            token = _make_jwt(mode.strip().lower())
+            headers["Authorization"] = f"Bearer {token}"
+        except Exception:
+            # If _make_jwt itself fails (shouldn't happen in tests), omit header
+            pass
     headers.update(extra)
     return headers
 
@@ -125,8 +156,14 @@ class TestExploreModeBlocked:
         assert "Explore mode" in data["message"]
 
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
-    def test_explore_mode_case_insensitive(self, client, endpoint):
-        """Mode header should be case-insensitive (EXPLORE, Explore, etc.)."""
+    def test_explore_mode_upper_case_jwt_normalised(self, client, endpoint):
+        """``_auth_headers`` lowercases the mode before embedding in JWT.
+
+        The JWT claim is therefore ``"explore"`` regardless of what case the
+        caller passes, and the endpoint correctly returns 403.
+        """
+        # _auth_headers normalises to lowercase before calling _make_jwt,
+        # so "EXPLORE" → JWT mode="explore" → 403 blocked.
         resp = client.post(
             endpoint,
             json=_SAMPLE_ORDER_BODY,
@@ -159,45 +196,69 @@ class TestExploreModeBlocked:
 
 
 class TestMissingOrInvalidMode:
-    """Requests without a valid mode header must be rejected."""
+    """Requests without a valid JWT mode claim must be rejected."""
 
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
-    def test_missing_mode_header_returns_400(self, client, endpoint):
+    def test_missing_jwt_returns_401(self, client, endpoint):
+        """No ``Authorization`` header → 401 (no mode claim to extract)."""
         resp = client.post(
             endpoint,
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode=None),
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 401
         data = resp.get_json()
         assert data["status"] == "error"
-        assert "X-FlintTrade-Mode" in data["message"]
+        assert "JWT" in data["message"] or "Authentication" in data["message"]
 
-    def test_empty_mode_header_returns_400(self, client):
+    def test_empty_mode_omits_jwt_returns_401(self, client):
+        """Empty mode string → no JWT attached → 401."""
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode=""),
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 401
 
-    def test_invalid_mode_returns_400(self, client):
+    def test_invalid_mode_in_jwt_returns_400(self, client):
+        """A JWT that encodes an unrecognised mode value → 400."""
+        import jwt as _jwt
+        import secrets
+        from datetime import datetime, timezone, timedelta
+        from packages.core.src.auth_routes import _get_jwt_secret
+
+        payload = {
+            "sub": "testuser",
+            "iat": datetime.now(timezone.utc),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "type": "session",
+            "jti": secrets.token_hex(16),
+            "live_mode_unlocked": False,
+            "mode": "yolo",
+        }
+        token = _jwt.encode(payload, _get_jwt_secret(), algorithm="HS256")
+
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="yolo"),
+            headers={
+                "X-API-Key": _TEST_API_KEY,
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
         )
         assert resp.status_code == 400
         data = resp.get_json()
         assert "Invalid mode" in data["message"]
 
-    def test_whitespace_only_mode_returns_400(self, client):
+    def test_whitespace_only_mode_omits_jwt_returns_401(self, client):
+        """Whitespace-only mode → no JWT attached → 401."""
         resp = client.post(
             "/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="   "),
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
