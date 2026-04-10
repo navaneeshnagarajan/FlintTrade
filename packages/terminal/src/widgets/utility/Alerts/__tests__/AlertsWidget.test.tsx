@@ -109,7 +109,7 @@ describe("AlertsWidget", () => {
 
   it("shows Active Alerts tab by default", () => {
     render(<AlertsWidget />);
-    const activeTab = screen.getByRole("tab", { name: /active alerts/i });
+    const activeTab = screen.getAllByRole("tab", { name: /active alerts/i })[0];
     expect(activeTab).toHaveAttribute("aria-current", "true");
   });
 
