@@ -120,7 +120,7 @@ describe("AlertsWidget", () => {
 
   it("renders Create Alert button in header", () => {
     render(<AlertsWidget />);
-    expect(screen.getByRole("button", { name: "Create alert" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /create alert/i })[0]).toBeInTheDocument();
   });
 
   // ─── Tab switching ────────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ describe("AlertsWidget", () => {
 
   it("opens the create alert form when Create Alert button is clicked", () => {
     render(<AlertsWidget />);
-    fireEvent.click(screen.getByRole("button", { name: "Create alert" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /create alert/i })[0]);
     expect(screen.getByText("New Alert")).toBeInTheDocument();
     expect(screen.getByLabelText("Symbol search")).toBeInTheDocument();
     expect(screen.getByLabelText("Alert condition")).toBeInTheDocument();
@@ -162,7 +162,7 @@ describe("AlertsWidget", () => {
 
   it("closes the create form when Cancel is clicked", () => {
     render(<AlertsWidget />);
-    fireEvent.click(screen.getByRole("button", { name: "Create alert" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /create alert/i })[0]);
     expect(screen.getByText("New Alert")).toBeInTheDocument();
 
     // Use the text-labelled Cancel button inside the form footer (not the X icon)
@@ -174,7 +174,7 @@ describe("AlertsWidget", () => {
 
   it("shows validation error when submitting form without a symbol", () => {
     render(<AlertsWidget />);
-    fireEvent.click(screen.getByRole("button", { name: "Create alert" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /create alert/i })[0]);
 
     const targetInput = screen.getByLabelText("Target price");
     fireEvent.change(targetInput, { target: { value: "500" } });
@@ -185,7 +185,7 @@ describe("AlertsWidget", () => {
 
   it("shows 'Symbol is required' validation error when submitting empty form", () => {
     render(<AlertsWidget />);
-    fireEvent.click(screen.getByRole("button", { name: "Create alert" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /create alert/i })[0]);
 
     // Submit without filling any field — symbol state is empty
     fireEvent.click(screen.getByRole("button", { name: "Set Alert" }));
@@ -196,7 +196,7 @@ describe("AlertsWidget", () => {
 
   it("calls searchSymbol when typing in the symbol input", async () => {
     render(<AlertsWidget />);
-    fireEvent.click(screen.getByRole("button", { name: "Create alert" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /create alert/i })[0]);
 
     const symbolInput = screen.getByLabelText("Symbol search");
     fireEvent.change(symbolInput, { target: { value: "SBI" } });
@@ -211,7 +211,7 @@ describe("AlertsWidget", () => {
 
   it("shows search suggestions after typing", async () => {
     render(<AlertsWidget />);
-    fireEvent.click(screen.getByRole("button", { name: "Create alert" }));
+    fireEvent.click(screen.getAllByRole("button", { name: /create alert/i })[0]);
 
     const symbolInput = screen.getByLabelText("Symbol search");
     fireEvent.change(symbolInput, { target: { value: "SBI" } });
