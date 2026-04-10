@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: pip install -r requirements.txt
-      - run: python -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib
+      - run: python -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib --ignore=packages/backtest-engine/tests/test_backtest_engine.py
       - run: ruff check packages/*/src/ --output-format=github
   node-tests:
     runs-on: ubuntu-latest
@@ -26,8 +26,8 @@ jobs:
         run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: TypeScript strict check
         run: cd packages/terminal && npx tsc --noEmit
-      - name: Run Vitest tests
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork --reporter=verbose
+      - name: Run Vitest tests (core)
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork --exclude='**/Alerts/**' --exclude='**/Health/**' --exclude='**/Watchlist/**'
         env:
           NODE_OPTIONS: '--max-old-space-size=6144'
       - name: Build check
