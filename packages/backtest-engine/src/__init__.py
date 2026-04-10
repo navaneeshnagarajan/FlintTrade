@@ -66,6 +66,14 @@ try:
         OptimiserConfig, PortfolioOptimiser, PortfolioResult,
     )
     from .optimiser_routes import optimiser_bp
+    from .permutation_test import (
+        PermutationConfig, PermutationResult, PermutationTester,
+    )
+    from .walk_forward import (
+        WalkForwardConfig as WFConfig, WalkForwardResult as WFResult,
+        WalkForwardAnalyser, SplitDetail,
+    )
+    from .permutation_routes import permutation_bp
 except ImportError:
     from data_connector import (
         CSVConnector, DataConnector, DataResult,
@@ -101,6 +109,14 @@ except ImportError:
         OptimiserConfig, PortfolioOptimiser, PortfolioResult,
     )
     from optimiser_routes import optimiser_bp
+    from permutation_test import (
+        PermutationConfig, PermutationResult, PermutationTester,
+    )
+    from walk_forward import (
+        WalkForwardConfig as WFConfig, WalkForwardResult as WFResult,
+        WalkForwardAnalyser, SplitDetail,
+    )
+    from permutation_routes import permutation_bp
 
 __all__ = [
     # Event-driven engine (new)
@@ -192,4 +208,14 @@ __all__ = [
     "PortfolioOptimiser",
     "PortfolioResult",
     "optimiser_bp",
+    # Permutation testing
+    "PermutationConfig",
+    "PermutationResult",
+    "PermutationTester",
+    # Walk-forward analysis
+    "WFConfig",
+    "WFResult",
+    "WalkForwardAnalyser",
+    "SplitDetail",
+    "permutation_bp",
 ]

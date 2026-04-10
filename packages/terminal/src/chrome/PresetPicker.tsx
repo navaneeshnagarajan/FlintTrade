@@ -5,6 +5,12 @@ import {
   BarChart3,
   ShieldAlert,
   TrendingUp,
+  Sigma,
+  Map,
+  Bot,
+  PieChart,
+  Globe,
+  Gauge,
   Box,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -26,6 +32,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
   BarChart3,
   ShieldAlert,
   TrendingUp,
+  Sigma,
+  Map,
+  Bot,
+  PieChart,
+  Globe,
+  Gauge,
 };
 
 interface PresetPickerProps {
@@ -49,8 +61,8 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-xl bg-surface-card border-border-default p-0 animate-fade-in-scale">
-        <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default">
+      <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
+        <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default shrink-0">
           <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
             Choose a Workspace Template
           </DialogTitle>
@@ -60,7 +72,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="p-4 grid grid-cols-2 gap-3">
+        <div className="p-4 grid grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0">
           {WORKSPACE_PRESETS.map((preset) => {
             const Icon: LucideIcon = ICON_MAP[preset.icon] ?? Box;
             return (

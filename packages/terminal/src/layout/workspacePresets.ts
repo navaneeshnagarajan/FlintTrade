@@ -336,6 +336,352 @@ function applyInvestorView(api: DockviewApi): void {
 }
 
 // ---------------------------------------------------------------------------
+// Preset 7 — Options Analysis
+//
+// ┌──────────────────────────────┐
+// │        Option Chain          │
+// ├──────────┬───────────────────┤
+// │ IV Skew  │  Greeks Heatmap   │
+// ├──────────┼───────────────────┤
+// │ Implied  │   Straddle P&L    │
+// │  Move    │                   │
+// └──────────┴───────────────────┘
+// ---------------------------------------------------------------------------
+function applyOptionsAnalysis(api: DockviewApi): void {
+  const optionChainId = pid("optionchain");
+  const ivSkewId = pid("ivskew");
+  const greeksHeatmapId = pid("greeksheatmap");
+  const impliedMoveId = pid("impliedmove");
+  const straddlePnlId = pid("straddlepnl");
+
+  api.addPanel({
+    id: optionChainId,
+    component: "optionchain",
+    title: "Option Chain",
+    initialHeight: 320,
+  });
+
+  api.addPanel({
+    id: ivSkewId,
+    component: "ivskew",
+    title: "IV Skew",
+    position: { referencePanel: optionChainId, direction: "below" },
+    initialWidth: 340,
+  });
+
+  api.addPanel({
+    id: greeksHeatmapId,
+    component: "greeksheatmap",
+    title: "Greeks Heatmap",
+    position: { referencePanel: ivSkewId, direction: "right" },
+  });
+
+  api.addPanel({
+    id: impliedMoveId,
+    component: "impliedmove",
+    title: "Implied Move",
+    position: { referencePanel: ivSkewId, direction: "below" },
+    initialHeight: 220,
+  });
+
+  api.addPanel({
+    id: straddlePnlId,
+    component: "straddlepnl",
+    title: "Straddle P&L",
+    position: { referencePanel: impliedMoveId, direction: "right" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preset 8 — Sector View
+//
+// ┌──────────────┬───────────────┐
+// │  Sector Map  │ Sector Perf.  │
+// ├──────────────┼───────────────┤
+// │Market Breadth│ Heat Calendar │
+// ├──────────────┴───────────────┤
+// │     Correlation Matrix       │
+// └──────────────────────────────┘
+// ---------------------------------------------------------------------------
+function applySectorView(api: DockviewApi): void {
+  const sectorMapId = pid("sectormap");
+  const sectorPerfId = pid("sectorperformance");
+  const marketBreadthId = pid("marketbreadth");
+  const heatCalendarId = pid("heatcalendar");
+  const correlationMatrixId = pid("correlationmatrix");
+
+  api.addPanel({
+    id: sectorMapId,
+    component: "sectormap",
+    title: "Sector Map",
+  });
+
+  api.addPanel({
+    id: sectorPerfId,
+    component: "sectorperformance",
+    title: "Sector Performance",
+    position: { referencePanel: sectorMapId, direction: "right" },
+    initialWidth: 360,
+  });
+
+  api.addPanel({
+    id: marketBreadthId,
+    component: "marketbreadth",
+    title: "Market Breadth",
+    position: { referencePanel: sectorMapId, direction: "below" },
+    initialHeight: 220,
+  });
+
+  api.addPanel({
+    id: heatCalendarId,
+    component: "heatcalendar",
+    title: "Heat Calendar",
+    position: { referencePanel: marketBreadthId, direction: "right" },
+  });
+
+  api.addPanel({
+    id: correlationMatrixId,
+    component: "correlationmatrix",
+    title: "Correlation Matrix",
+    position: { referencePanel: marketBreadthId, direction: "below" },
+    initialHeight: 200,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preset 9 — Algo Trading
+//
+// ┌────────────────┬──────────────┐
+// │Strategy Monitor│  Flow Builder│  (tab)
+// │                │  Backtest Lab│
+// ├────────────────┼──────────────┤
+// │Strategy        │ Session Stats│
+// │ Templates      │              │
+// └────────────────┴──────────────┘
+// ---------------------------------------------------------------------------
+function applyAlgoTrading(api: DockviewApi): void {
+  const strategyMonitorId = pid("strategymonitor");
+  const flowBuilderId = pid("flowbuilder-tab");
+  const strategyTemplatesId = pid("strategytemplates");
+  const sessionStatsId = pid("sessionstats");
+
+  api.addPanel({
+    id: strategyMonitorId,
+    component: "strategymonitor",
+    title: "Strategy Monitor",
+  });
+
+  // Flow Builder lives at /automate — open chart as a stand-in analysis panel
+  api.addPanel({
+    id: flowBuilderId,
+    component: "chart",
+    title: "Chart (Algo)",
+    position: { referencePanel: strategyMonitorId, direction: "right" },
+    initialWidth: 400,
+  });
+
+  api.addPanel({
+    id: strategyTemplatesId,
+    component: "strategytemplates",
+    title: "Strategy Templates",
+    position: { referencePanel: strategyMonitorId, direction: "below" },
+    initialHeight: 240,
+  });
+
+  api.addPanel({
+    id: sessionStatsId,
+    component: "sessionstats",
+    title: "Session Stats",
+    position: { referencePanel: strategyTemplatesId, direction: "right" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preset 10 — Portfolio Manager
+//
+// ┌──────────────────┬────────────┐
+// │PortfolioAllocation│Net Position│
+// ├──────────────────┼────────────┤
+// │ Position Heatmap  │RiskDashboard│
+// ├──────────────────┴────────────┤
+// │       Trade Performance        │
+// └────────────────────────────────┘
+// ---------------------------------------------------------------------------
+function applyPortfolioManager(api: DockviewApi): void {
+  const portfolioAllocId = pid("portfolioallocation");
+  const netPositionId = pid("netposition");
+  const positionHeatmapId = pid("positionheatmap");
+  const riskDashboardId = pid("riskdashboard");
+  const tradePerformanceId = pid("tradeperformance");
+
+  api.addPanel({
+    id: portfolioAllocId,
+    component: "portfolioallocation",
+    title: "Portfolio Allocation",
+  });
+
+  api.addPanel({
+    id: netPositionId,
+    component: "netposition",
+    title: "Net Positions",
+    position: { referencePanel: portfolioAllocId, direction: "right" },
+    initialWidth: 340,
+  });
+
+  api.addPanel({
+    id: positionHeatmapId,
+    component: "positionheatmap",
+    title: "Position Heat Map",
+    position: { referencePanel: portfolioAllocId, direction: "below" },
+    initialHeight: 220,
+  });
+
+  api.addPanel({
+    id: riskDashboardId,
+    component: "riskdashboard",
+    title: "Risk Dashboard",
+    position: { referencePanel: positionHeatmapId, direction: "right" },
+  });
+
+  api.addPanel({
+    id: tradePerformanceId,
+    component: "tradeperformance",
+    title: "Trade Performance",
+    position: { referencePanel: positionHeatmapId, direction: "below" },
+    initialHeight: 200,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preset 11 — Market Overview
+//
+// ┌──────────────┬───────────────┐
+// │Market Summary│ Global Indices│
+// ├──────────────┼───────────────┤
+// │Economic Cal. │ Earnings Cal. │
+// ├──────────────┼───────────────┤
+// │ Market Clock │    News       │
+// └──────────────┴───────────────┘
+// ---------------------------------------------------------------------------
+function applyMarketOverview(api: DockviewApi): void {
+  const marketSummaryId = pid("marketsummary");
+  const globalIndicesId = pid("globalindices");
+  const economicCalId = pid("economiccalendar");
+  const earningsCalId = pid("earningscalendar");
+  const marketClockId = pid("marketclock");
+  const newsId = pid("news");
+
+  api.addPanel({
+    id: marketSummaryId,
+    component: "marketsummary",
+    title: "Market Summary",
+  });
+
+  api.addPanel({
+    id: globalIndicesId,
+    component: "globalindices",
+    title: "Global Indices",
+    position: { referencePanel: marketSummaryId, direction: "right" },
+    initialWidth: 360,
+  });
+
+  api.addPanel({
+    id: economicCalId,
+    component: "economiccalendar",
+    title: "Economic Calendar",
+    position: { referencePanel: marketSummaryId, direction: "below" },
+    initialHeight: 220,
+  });
+
+  api.addPanel({
+    id: earningsCalId,
+    component: "earningscalendar",
+    title: "Earnings Calendar",
+    position: { referencePanel: economicCalId, direction: "right" },
+  });
+
+  api.addPanel({
+    id: marketClockId,
+    component: "marketclock",
+    title: "Market Clock",
+    position: { referencePanel: economicCalId, direction: "below" },
+    initialHeight: 160,
+  });
+
+  api.addPanel({
+    id: newsId,
+    component: "news",
+    title: "News Feed",
+    position: { referencePanel: marketClockId, direction: "right" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preset 12 — Quick Scalper
+//
+// ┌────────────┬──────────────┬──────────┐
+// │ Quick Trade│DepthHeatmap  │TickSpeed │
+// ├────────────┼──────────────┴──────────┤
+// │ Order Lad. │   Microstructure        │
+// ├────────────┴─────────────────────────┤
+// │          Intraday P&L                │
+// └──────────────────────────────────────┘
+// ---------------------------------------------------------------------------
+function applyQuickScalper(api: DockviewApi): void {
+  const quickTradeId = pid("quicktrade");
+  const depthHeatmapId = pid("depthheatmap");
+  const tickSpeedId = pid("tickspeed");
+  const orderLadderId = pid("orderladder");
+  const microstructureId = pid("microstructure");
+  const intradayPnlId = pid("intradaypnl");
+
+  api.addPanel({
+    id: quickTradeId,
+    component: "quicktrade",
+    title: "Quick Trade",
+    initialWidth: 260,
+  });
+
+  api.addPanel({
+    id: depthHeatmapId,
+    component: "depthheatmap",
+    title: "Depth Heatmap",
+    position: { referencePanel: quickTradeId, direction: "right" },
+  });
+
+  api.addPanel({
+    id: tickSpeedId,
+    component: "tickspeed",
+    title: "Tick Speed",
+    position: { referencePanel: depthHeatmapId, direction: "right" },
+    initialWidth: 200,
+  });
+
+  api.addPanel({
+    id: orderLadderId,
+    component: "orderladder",
+    title: "Order Ladder",
+    position: { referencePanel: quickTradeId, direction: "below" },
+    initialHeight: 260,
+  });
+
+  api.addPanel({
+    id: microstructureId,
+    component: "microstructure",
+    title: "Market Microstructure",
+    position: { referencePanel: orderLadderId, direction: "right" },
+  });
+
+  api.addPanel({
+    id: intradayPnlId,
+    component: "intradaypnl",
+    title: "Intraday P&L",
+    position: { referencePanel: orderLadderId, direction: "below" },
+    initialHeight: 180,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Preset registry (exported)
 // ---------------------------------------------------------------------------
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
@@ -380,6 +726,48 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     description: "Chart + Watchlist + Holdings + Dashboard",
     icon: "TrendingUp",
     apply: applyInvestorView,
+  },
+  {
+    id: "options-analysis",
+    name: "Options Analysis",
+    description: "Option Chain + IV Skew + Greeks Heatmap + Implied Move + Straddle P&L",
+    icon: "Sigma",
+    apply: applyOptionsAnalysis,
+  },
+  {
+    id: "sector-view",
+    name: "Sector View",
+    description: "Sector Map + Sector Performance + Market Breadth + Heat Calendar + Correlation Matrix",
+    icon: "Map",
+    apply: applySectorView,
+  },
+  {
+    id: "algo-trading",
+    name: "Algo Trading",
+    description: "Strategy Monitor + Chart + Strategy Templates + Session Stats",
+    icon: "Bot",
+    apply: applyAlgoTrading,
+  },
+  {
+    id: "portfolio-manager",
+    name: "Portfolio Manager",
+    description: "Portfolio Allocation + Net Positions + Position Heatmap + Risk Dashboard + Trade Performance",
+    icon: "PieChart",
+    apply: applyPortfolioManager,
+  },
+  {
+    id: "market-overview",
+    name: "Market Overview",
+    description: "Market Summary + Global Indices + Economic Calendar + Earnings Calendar + Market Clock + News",
+    icon: "Globe",
+    apply: applyMarketOverview,
+  },
+  {
+    id: "quick-scalper",
+    name: "Quick Scalper",
+    description: "Quick Trade + Order Ladder + Depth Heatmap + Microstructure + Tick Speed + Intraday P&L",
+    icon: "Gauge",
+    apply: applyQuickScalper,
   },
 ];
 

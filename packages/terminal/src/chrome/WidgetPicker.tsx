@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   LayoutDashboard,
   Zap,
@@ -25,6 +25,7 @@ import {
   Lock,
   Eye,
   X,
+  Search,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -33,6 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import { useFeatureGate } from "@/hooks/useFeatureGate";
@@ -83,13 +85,33 @@ interface WidgetPickerProps {
 // Per-widget button — reads its own gate status (stable hook call count)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Highlight matching text in widget names
+// ---------------------------------------------------------------------------
+
+function HighlightMatch({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const index = text.toLowerCase().indexOf(query.toLowerCase());
+  if (index === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark className="bg-accent/25 text-accent rounded-sm px-0 not-italic">
+        {text.slice(index, index + query.length)}
+      </mark>
+      {text.slice(index + query.length)}
+    </>
+  );
+}
+
 interface WidgetButtonProps {
   widget: WidgetMeta;
   onAdd: (widget: WidgetMeta) => void;
   onLocked: (widgetName: string) => void;
+  searchQuery?: string;
 }
 
-function WidgetButton({ widget, onAdd, onLocked }: WidgetButtonProps) {
+function WidgetButton({ widget, onAdd, onLocked, searchQuery = "" }: WidgetButtonProps) {
   const gateStatus: GateStatus = useFeatureGate(`widget:${widget.id}`, "trade");
   const Icon: LucideIcon = ICON_MAP[widget.icon] ?? Box;
 
@@ -166,7 +188,7 @@ function WidgetButton({ widget, onAdd, onLocked }: WidgetButtonProps) {
             : "text-text-secondary group-hover:text-text-primary",
         )}
       >
-        {widget.name}
+        <HighlightMatch text={widget.name} query={searchQuery} />
       </span>
     </button>
   );
@@ -218,11 +240,24 @@ function LockedNotice({ widgetName, onDismiss }: LockedNoticeProps) {
 export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPickerProps) {
   const dockviewApi = useLayoutStore((s) => s.dockviewApi);
   const [lockedNotice, setLockedNotice] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const handleAddWidget = (widget: WidgetMeta) => {
+  // Auto-focus search when dialog opens; clear query when it closes.
+  useEffect(() => {
+    if (isOpen) {
+      // Let the dialog animation settle before focusing
+      const timer = setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    } else {
+      setSearchQuery("");
+    }
+  }, [isOpen]);
+
+  const handleAddWidget = useCallback((widget: WidgetMeta) => {
     if (!dockviewApi) return;
-
-    // Generate unique panel id to allow multiple instances
     const panelId = `${widget.id}-${Date.now()}`;
     dockviewApi.addPanel({
       id: panelId,
@@ -230,7 +265,7 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
       title: widget.name,
     });
     onClose();
-  };
+  }, [dockviewApi, onClose]);
 
   const handleLocked = (widgetName: string) => {
     setLockedNotice(widgetName);
@@ -238,29 +273,84 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
 
   const handleClose = () => {
     setLockedNotice(null);
+    setSearchQuery("");
     onClose();
   };
 
   // Apply skill-level allowlist when provided. Convert to a Set for O(1) lookup.
   const allowedSet = allowedIds ? new Set(allowedIds) : null;
 
-  // Derive unique ordered category list from the (optionally filtered) catalog.
-  const filteredCatalog = allowedSet
+  // Derive the catalog after applying the allowlist filter.
+  const allowlistFiltered = allowedSet
     ? widgetCatalog.filter((w) => allowedSet.has(w.id))
     : widgetCatalog;
 
+  // Apply search filter on top of the allowlist filter.
+  const trimmedQuery = searchQuery.trim();
+  const isSearching = trimmedQuery.length > 0;
+
+  const searchFiltered = isSearching
+    ? allowlistFiltered.filter((w) =>
+        w.name.toLowerCase().includes(trimmedQuery.toLowerCase())
+      )
+    : allowlistFiltered;
+
+  // Derive unique ordered category list for the grouped view.
   const categories: string[] = [];
-  for (const w of filteredCatalog) {
+  for (const w of allowlistFiltered) {
     if (!categories.includes(w.category)) categories.push(w.category);
   }
+
+  // Handle Enter key on search — select the first matching result.
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && isSearching && searchFiltered.length > 0) {
+      handleAddWidget(searchFiltered[0]);
+    }
+  }
+
+  const matchCount = isSearching ? searchFiltered.length : allowlistFiltered.length;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
       <DialogContent className="sm:max-w-130 max-h-[80vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
-        <DialogHeader className="px-6 pt-5 pb-4 border-b border-border-default">
-          <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
-            Add Widget
-          </DialogTitle>
+        <DialogHeader className="px-6 pt-5 pb-3 border-b border-border-default">
+          <div className="flex items-center justify-between">
+            <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
+              Add Widget
+            </DialogTitle>
+            <span className="text-xs text-text-muted tabular-nums" aria-live="polite">
+              {isSearching ? `${matchCount} matching` : `${matchCount} widgets`}
+            </span>
+          </div>
+
+          {/* Search input */}
+          <div className="relative mt-3">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none"
+              aria-hidden="true"
+            />
+            <Input
+              ref={searchInputRef}
+              type="search"
+              role="searchbox"
+              aria-label="Search widgets"
+              placeholder="Search widgets…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              className="pl-8 h-8 text-sm bg-surface-base border-border-default placeholder:text-text-muted focus-visible:ring-accent/40"
+            />
+            {isSearching && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => { setSearchQuery(""); searchInputRef.current?.focus(); }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </DialogHeader>
 
         {/* Legend */}
@@ -275,28 +365,55 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
           </span>
         </div>
 
-        {/* Widget grid grouped by category */}
-        <div className="overflow-y-auto p-6 space-y-6 flex-1 min-h-0">
-          {categories.map((category) => {
-            const widgets = filteredCatalog.filter((w) => w.category === category);
-            return (
-              <div key={category}>
-                <h3 className="text-xs font-heading font-medium text-text-muted uppercase tracking-widest mb-3">
-                  {category}
-                </h3>
-                <div className="grid grid-cols-4 gap-2">
-                  {widgets.map((widget) => (
-                    <WidgetButton
-                      key={widget.id}
-                      widget={widget}
-                      onAdd={handleAddWidget}
-                      onLocked={handleLocked}
-                    />
-                  ))}
-                </div>
+        {/* Widget grid — flat when searching, grouped by category otherwise */}
+        <div className="overflow-y-auto p-6 flex-1 min-h-0">
+          {isSearching ? (
+            /* Flat search results */
+            searchFiltered.length > 0 ? (
+              <div className="grid grid-cols-4 gap-2">
+                {searchFiltered.map((widget) => (
+                  <WidgetButton
+                    key={widget.id}
+                    widget={widget}
+                    onAdd={handleAddWidget}
+                    onLocked={handleLocked}
+                    searchQuery={trimmedQuery}
+                  />
+                ))}
               </div>
-            );
-          })}
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 gap-2">
+                <Search className="w-8 h-8 text-text-muted/40" aria-hidden="true" />
+                <p className="text-sm text-text-muted">
+                  No widgets match &ldquo;{trimmedQuery}&rdquo;
+                </p>
+              </div>
+            )
+          ) : (
+            /* Grouped by category */
+            <div className="space-y-6">
+              {categories.map((category) => {
+                const widgets = allowlistFiltered.filter((w) => w.category === category);
+                return (
+                  <div key={category}>
+                    <h3 className="text-xs font-heading font-medium text-text-muted uppercase tracking-widest mb-3">
+                      {category}
+                    </h3>
+                    <div className="grid grid-cols-4 gap-2">
+                      {widgets.map((widget) => (
+                        <WidgetButton
+                          key={widget.id}
+                          widget={widget}
+                          onAdd={handleAddWidget}
+                          onLocked={handleLocked}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Locked notice — shown below the grid when a locked widget is clicked */}
