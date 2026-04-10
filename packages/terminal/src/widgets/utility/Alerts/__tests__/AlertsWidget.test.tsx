@@ -102,7 +102,7 @@ describe("AlertsWidget", () => {
 
   it("renders Active Alerts and Alert Log tabs", () => {
     render(<AlertsWidget />);
-    const nav = screen.getByRole("navigation", { name: "Alerts tabs" });
+    const nav = screen.getByRole("tablist", { name: "Alerts tabs" });
     expect(within(nav).getByText("Active Alerts")).toBeInTheDocument();
     expect(within(nav).getByText("Alert Log")).toBeInTheDocument();
   });
@@ -127,7 +127,7 @@ describe("AlertsWidget", () => {
 
   it("switches to Alert Log tab on click", () => {
     render(<AlertsWidget />);
-    const nav = screen.getByRole("navigation", { name: "Alerts tabs" });
+    const nav = screen.getByRole("tablist", { name: "Alerts tabs" });
     const logTab = within(nav).getByText("Alert Log").closest("button")!;
 
     fireEvent.click(logTab);
@@ -138,7 +138,7 @@ describe("AlertsWidget", () => {
 
   it("switches back to Active Alerts tab from Alert Log", () => {
     render(<AlertsWidget />);
-    const nav = screen.getByRole("navigation", { name: "Alerts tabs" });
+    const nav = screen.getByRole("tablist", { name: "Alerts tabs" });
 
     // Go to Log
     fireEvent.click(within(nav).getByText("Alert Log").closest("button")!);
@@ -335,7 +335,7 @@ describe("AlertsWidget", () => {
     render(<AlertsWidget />);
 
     // Switch to log tab
-    const nav = screen.getByRole("navigation", { name: "Alerts tabs" });
+    const nav = screen.getByRole("tablist", { name: "Alerts tabs" });
     fireEvent.click(within(nav).getByText("Alert Log").closest("button")!);
 
     expect(screen.getByText("WIPRO")).toBeInTheDocument();
@@ -375,7 +375,7 @@ describe("AlertsWidget", () => {
     render(<AlertsWidget />);
 
     // Switch to log tab
-    const nav = screen.getByRole("navigation", { name: "Alerts tabs" });
+    const nav = screen.getByRole("tablist", { name: "Alerts tabs" });
     fireEvent.click(within(nav).getByText("Alert Log").closest("button")!);
 
     expect(screen.getByText("COALINDIA")).toBeInTheDocument();

@@ -860,11 +860,11 @@ function AlertsWidget() {
       )}
 
       {/* Tab bar */}
-      <nav
+      <div
+        role="tablist"
         aria-label="Alerts tabs"
         className="flex items-end gap-0 px-2 border-b border-border-default bg-surface-card shrink-0"
       >
-        <div role="tablist" aria-label="Alerts tabs" className="flex items-end gap-0 w-full">
         {(["active", "log"] as AlertTab[]).map((tab) => {
           const isActive = activeTab === tab;
           return (
@@ -897,8 +897,7 @@ function AlertsWidget() {
             </button>
           );
         })}
-        </div>
-      </nav>
+      </div>
 
       {/* Tab content */}
       <div
