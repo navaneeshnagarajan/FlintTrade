@@ -28,6 +28,8 @@ jobs:
         run: cd packages/terminal && npx tsc --noEmit
       - name: Run Vitest tests
         run: cd packages/terminal && npx vitest run
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
       - name: Build check
         run: cd packages/terminal && npm run build
   secrets-check:
