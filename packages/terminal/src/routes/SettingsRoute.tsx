@@ -29,6 +29,7 @@ import { PracticeSection }   from "@/tools/Settings/PracticeSection";
 import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 import { SkillSection }      from "@/tools/Settings/SkillSection";
+import { PresetSection }     from "@/tools/Settings/PresetSection";
 import { SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
 import { useSettingsState } from "@/hooks/useSettingsState";
 
@@ -90,6 +91,7 @@ export default function SettingsRoute() {
       case "security":   return <SecuritySection />;
       case "monitoring": return <MonitoringSection />;
       case "skill":      return <SkillSection />;
+      case "presets":    return <PresetSection />;
       case "about":      return <AboutSection />;
     }
   }

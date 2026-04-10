@@ -21,6 +21,7 @@ import {
   Info,
   Scale,
   FlaskConical,
+  LayoutTemplate,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,6 +44,7 @@ export type SectionId =
   | "security"
   | "monitoring"
   | "skill"
+  | "presets"
   | "about";
 
 export interface SectionDef {
@@ -69,6 +71,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "dataPaths",  label: "Data Paths",         icon: HardDrive    },
   { id: "security",   label: "Security",           icon: ShieldCheck  },
   { id: "monitoring", label: "Monitoring",         icon: Activity     },
-  { id: "skill",      label: "Skill & Experience", icon: GraduationCap },
-  { id: "about",      label: "About",              icon: Info         },
+  { id: "skill",      label: "Skill & Experience", icon: GraduationCap   },
+  { id: "presets",    label: "Workspace Presets",  icon: LayoutTemplate  },
+  { id: "about",      label: "About",              icon: Info            },
 ];

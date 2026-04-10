@@ -1992,3 +1992,73 @@ export interface GlobalIndexEntry {
 
 export const getGlobalIndices = () =>
   get<{ indices: GlobalIndexEntry[]; updated_at: string }>("market/global_indices");
+
+// ---------------------------------------------------------------------------
+// Workspace Presets
+// ---------------------------------------------------------------------------
+
+/** A single widget entry inside a saved preset */
+export interface PresetWidgetEntry {
+  id: string;
+  component: string;
+  title: string;
+  /** Relative position within the preset layout */
+  position?: {
+    direction?: "left" | "right" | "above" | "below" | "within";
+    referenceComponent?: string;
+  };
+  initialWidth?: number;
+  initialHeight?: number;
+}
+
+/** A workspace preset as returned by the backend */
+export interface WorkspacePresetRecord {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  /** "builtin" presets cannot be edited or deleted, only forked */
+  source: "builtin" | "custom";
+  widget_count: number;
+  widgets: PresetWidgetEntry[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreatePresetPayload {
+  name: string;
+  description: string;
+  icon?: string;
+  widgets: PresetWidgetEntry[];
+}
+
+export interface UpdatePresetPayload {
+  name?: string;
+  description?: string;
+  icon?: string;
+  widgets?: PresetWidgetEntry[];
+}
+
+/** GET /ft-api/api/v1/presets/ — list all presets (built-in + custom) */
+export const listPresets = () =>
+  get<{ presets: WorkspacePresetRecord[] }>("presets/");
+
+/** GET /ft-api/api/v1/presets/:id — fetch a single preset */
+export const getPreset = (id: string) =>
+  get<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}`);
+
+/** POST /ft-api/api/v1/presets/ — create a new custom preset */
+export const createPreset = (payload: CreatePresetPayload) =>
+  post<WorkspacePresetRecord>("presets/", payload);
+
+/** PUT /ft-api/api/v1/presets/:id — update an existing custom preset */
+export const updatePreset = (id: string, payload: UpdatePresetPayload) =>
+  put<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}`, payload);
+
+/** DELETE /ft-api/api/v1/presets/:id — delete a custom preset */
+export const deletePreset = (id: string) =>
+  del<{ success: boolean }>(`presets/${encodeURIComponent(id)}`);
+
+/** POST /ft-api/api/v1/presets/:id/fork — fork a built-in preset into a custom one */
+export const forkPreset = (id: string, name: string) =>
+  post<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}/fork`, { name });
