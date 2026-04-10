@@ -134,7 +134,7 @@ function WidgetButton({ widget, onAdd, onLocked, searchQuery = "" }: WidgetButto
           ? `${widget.name} — Unlock by reaching intermediate or advanced level`
           : isPreview
             ? `${widget.name} — Preview available`
-            : widget.name
+            : (widget.description ?? widget.name)
       }
       aria-label={
         isLocked
@@ -144,7 +144,7 @@ function WidgetButton({ widget, onAdd, onLocked, searchQuery = "" }: WidgetButto
             : `Add ${widget.name} widget`
       }
       className={cn(
-        "relative flex flex-col items-center gap-2 p-3 rounded transition-colors group",
+        "relative flex flex-col items-start gap-1.5 p-3 rounded transition-colors group text-left",
         isLocked
           ? "opacity-40 cursor-not-allowed hover:bg-surface-hover/40"
           : "hover:bg-surface-hover cursor-pointer",
@@ -172,9 +172,9 @@ function WidgetButton({ widget, onAdd, onLocked, searchQuery = "" }: WidgetButto
       )}
 
       <Icon
-        size={22}
+        size={18}
         className={cn(
-          "transition-colors",
+          "transition-colors shrink-0",
           isLocked
             ? "text-text-muted"
             : "text-text-secondary group-hover:text-text-primary",
@@ -182,7 +182,7 @@ function WidgetButton({ widget, onAdd, onLocked, searchQuery = "" }: WidgetButto
       />
       <span
         className={cn(
-          "text-sm transition-colors text-center leading-tight",
+          "text-sm font-medium transition-colors leading-tight",
           isLocked
             ? "text-text-muted"
             : "text-text-secondary group-hover:text-text-primary",
@@ -190,6 +190,16 @@ function WidgetButton({ widget, onAdd, onLocked, searchQuery = "" }: WidgetButto
       >
         <HighlightMatch text={widget.name} query={searchQuery} />
       </span>
+      {widget.description && (
+        <span
+          className={cn(
+            "text-[11px] leading-snug transition-colors line-clamp-2",
+            isLocked ? "text-text-muted/60" : "text-text-muted group-hover:text-text-secondary",
+          )}
+        >
+          {widget.description}
+        </span>
+      )}
     </button>
   );
 }
@@ -290,9 +300,13 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
   const isSearching = trimmedQuery.length > 0;
 
   const searchFiltered = isSearching
-    ? allowlistFiltered.filter((w) =>
-        w.name.toLowerCase().includes(trimmedQuery.toLowerCase())
-      )
+    ? allowlistFiltered.filter((w) => {
+        const q = trimmedQuery.toLowerCase();
+        return (
+          w.name.toLowerCase().includes(q) ||
+          (w.description?.toLowerCase().includes(q) ?? false)
+        );
+      })
     : allowlistFiltered;
 
   // Derive unique ordered category list for the grouped view.
@@ -312,7 +326,7 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
-      <DialogContent className="sm:max-w-130 max-h-[80vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale">
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border-default">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
@@ -370,7 +384,7 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
           {isSearching ? (
             /* Flat search results */
             searchFiltered.length > 0 ? (
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {searchFiltered.map((widget) => (
                   <WidgetButton
                     key={widget.id}
@@ -399,7 +413,7 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
                     <h3 className="text-xs font-heading font-medium text-text-muted uppercase tracking-widest mb-3">
                       {category}
                     </h3>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {widgets.map((widget) => (
                         <WidgetButton
                           key={widget.id}

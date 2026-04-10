@@ -4,6 +4,8 @@ import { cancelAllOrders, closePosition } from "@/services/api";
 interface GlobalKeyHandlers {
   onEscape?: () => void;
   onCommandPalette?: () => void;
+  /** Fired when `?` is pressed with no input focused — opens the shortcuts dialog. */
+  onShowShortcuts?: () => void;
 }
 
 /**
@@ -11,15 +13,17 @@ interface GlobalKeyHandlers {
  * Only fires when no input/textarea is focused.
  *
  * Shortcuts:
- *   Ctrl+K  -- Command palette (future)
+ *   Ctrl+K  -- Command palette
  *   X       -- Exit all positions (Shift+X = immediate, no confirm)
  *   C       -- Cancel all orders
  *   Esc     -- Close active tool/modal
+ *   ?       -- Show keyboard shortcuts reference dialog
  *   F1-F8   -- Reserved for widget focus (future)
  */
 export default function useGlobalKeys({
   onEscape,
   onCommandPalette,
+  onShowShortcuts,
 }: GlobalKeyHandlers): void {
   useEffect(() => {
     function handler(e: KeyboardEvent): void {
@@ -45,6 +49,13 @@ export default function useGlobalKeys({
       if (e.key === "Escape") {
         e.preventDefault();
         onEscape?.();
+        return;
+      }
+
+      // ? -- Show keyboard shortcuts dialog
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        onShowShortcuts?.();
         return;
       }
 
@@ -77,5 +88,5 @@ export default function useGlobalKeys({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onEscape, onCommandPalette]);
+  }, [onEscape, onCommandPalette, onShowShortcuts]);
 }

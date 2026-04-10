@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import TopBar from "@/chrome/TopBar";
 import PageTransition from "@/components/motion/PageTransition";
@@ -12,6 +12,8 @@ import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
 import { LockScreen } from "@/components/LockScreen";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
+import useGlobalKeys from "@/hooks/useGlobalKeys";
+import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
 
 const TOUR_COMPLETE_KEY = "flinttrade:tourComplete";
 
@@ -131,6 +133,14 @@ export default function AppLayout() {
   const isTradeRoute = location.pathname === "/trade";
   const tourVisible = showTour && isTradeRoute;
 
+  // Keyboard shortcuts dialog — opened by `?` key or programmatically.
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const handleShowShortcuts = useCallback(() => setShowShortcuts(true), []);
+  const handleCloseShortcuts = useCallback(() => setShowShortcuts(false), []);
+
+  // Global keyboard shortcuts listener.
+  useGlobalKeys({ onShowShortcuts: handleShowShortcuts });
+
   useEffect(() => {
     function handleResize() {
       if (window.innerWidth >= SMALL_SCREEN_BREAKPOINT) {
@@ -207,6 +217,10 @@ export default function AppLayout() {
       {tourVisible && (
         <InteractiveTour onComplete={() => setShowTour(false)} />
       )}
+      <KeyboardShortcutsDialog
+        isOpen={showShortcuts}
+        onClose={handleCloseShortcuts}
+      />
     </div>
   );
 }
