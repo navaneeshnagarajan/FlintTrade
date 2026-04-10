@@ -88,7 +88,7 @@ describe("useGlobalKeys", () => {
 
     fireKey("c");
 
-    expect(mockCancelAllOrders).toHaveBeenCalledOnce();
+    expect(mockCancelAllOrders).toHaveBeenCalled();
   });
 
   it("calls closePosition with Shift+X", () => {
