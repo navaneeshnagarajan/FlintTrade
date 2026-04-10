@@ -159,13 +159,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    setupFiles: [
-      "./src/test-setup.ts",
-      // Mocks all shadcn/ui (Radix) components as simple HTML equivalents so
-      // that widget/component tests produce deterministic DOM in jsdom (CI).
-      // Eliminates duplicate role+name matches caused by Radix portal containers.
-      "./src/test/setup-widgets.ts",
-    ],
+    setupFiles: ["./src/test-setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
   },
 });
