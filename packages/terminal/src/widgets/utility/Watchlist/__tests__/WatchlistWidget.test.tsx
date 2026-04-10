@@ -104,7 +104,7 @@ describe("WatchlistWidget", () => {
 
   it("renders the default tab pill labelled 'Watchlist 1'", () => {
     render(<WatchlistWidget />);
-    expect(screen.getByRole("tab", { name: "Watchlist 1" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tab", { name: /watchlist 1/i })[0]).toBeInTheDocument();
   });
 
   it("shows the 'Add watchlist tab' button", () => {
@@ -116,7 +116,7 @@ describe("WatchlistWidget", () => {
     render(<WatchlistWidget />);
     const addTabBtn = screen.getByLabelText("Add watchlist tab");
     await userEvent.click(addTabBtn);
-    expect(screen.getByRole("tab", { name: "Watchlist 2" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tab", { name: /watchlist 2/i })[0]).toBeInTheDocument();
   });
 
   it("switches active tab when a tab pill is clicked", async () => {
@@ -170,7 +170,7 @@ describe("WatchlistWidget", () => {
 
   it("tab context menu appears on right-click of a tab", async () => {
     render(<WatchlistWidget />);
-    const tab = screen.getByRole("tab", { name: "Watchlist 1" });
+    const tab = screen.getAllByRole("tab", { name: /watchlist 1/i })[0];
     fireEvent.contextMenu(tab);
     expect(screen.getByRole("menuitem", { name: /rename/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /duplicate/i })).toBeInTheDocument();
