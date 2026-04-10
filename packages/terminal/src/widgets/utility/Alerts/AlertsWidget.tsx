@@ -621,6 +621,7 @@ function EmptyActive({ onCreateClick }: { onCreateClick: () => void }) {
       </div>
       <button
         onClick={onCreateClick}
+        aria-label="Add first price alert"
         className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/10 hover:bg-accent/20 text-accent border border-accent/30 rounded text-xs font-medium transition-colors"
       >
         <Plus className="size-3" />

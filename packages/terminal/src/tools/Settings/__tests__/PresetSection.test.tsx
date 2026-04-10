@@ -30,11 +30,15 @@ const mockInvalidateQueries = vi.fn();
 const mockUseQuery = vi.fn();
 const mockUseMutation = vi.fn();
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: (...args: Parameters<typeof mockUseQuery>) => mockUseQuery(...args),
-  useMutation: (...args: Parameters<typeof mockUseMutation>) => mockUseMutation(...args),
-  useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }),
-}));
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
+  return {
+    ...actual,
+    useQuery: (...args: Parameters<typeof mockUseQuery>) => mockUseQuery(...args),
+    useMutation: (...args: Parameters<typeof mockUseMutation>) => mockUseMutation(...args),
+    useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }),
+  };
+});
 
 // ftApi preset service functions
 const mockListPresets = vi.fn();
@@ -103,6 +107,7 @@ vi.mock("@/components/ui/badge", () => ({
 }));
 
 import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -176,6 +181,22 @@ function setupMutations() {
 import { PresetSection } from "../PresetSection";
 
 // ---------------------------------------------------------------------------
+// QueryClient wrapper — ensures hooks have a provider even if vi.mock hoisting
+// is incomplete in some CI environments.
+// ---------------------------------------------------------------------------
+
+function makeWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return function Wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -192,7 +213,7 @@ describe("PresetSection", () => {
   describe("toolbar", () => {
     it("renders the section title, Import button, and New Preset button", () => {
       setupQuery([]);
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
 
       expect(screen.getByText("Workspace Presets")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /import preset/i })).toBeInTheDocument();
@@ -201,7 +222,7 @@ describe("PresetSection", () => {
 
     it("disables New Preset while a form is already open", () => {
       setupQuery([]);
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
 
       const newBtn = screen.getByRole("button", { name: /create a new workspace preset/i });
       fireEvent.click(newBtn);
@@ -217,7 +238,7 @@ describe("PresetSection", () => {
   describe("query states", () => {
     it("shows loading indicator while fetching", () => {
       mockUseQuery.mockReturnValue({ data: undefined, isLoading: true, isError: false, error: null });
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
 
       expect(screen.getByText(/loading presets/i)).toBeInTheDocument();
     });
@@ -229,7 +250,7 @@ describe("PresetSection", () => {
         isError: true,
         error: new Error("Network error"),
       });
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
 
       expect(screen.getByText(/failed to load presets/i)).toBeInTheDocument();
       expect(screen.getByText(/network error/i)).toBeInTheDocument();
@@ -244,12 +265,12 @@ describe("PresetSection", () => {
     beforeEach(() => setupQuery([BUILTIN_PRESET]));
 
     it("renders a card for each built-in preset with the name", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       expect(screen.getByText("Scalper Zone")).toBeInTheDocument();
     });
 
     it("shows 'Built-in' badge on built-in presets", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       // The section heading "Built-in (1)" and the card badge "Built-in" both render;
       // confirm at least one match is the badge (a <span>)
       const matches = screen.getAllByText("Built-in");
@@ -258,30 +279,30 @@ describe("PresetSection", () => {
     });
 
     it("shows the widget count", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       expect(screen.getByText("4 widgets")).toBeInTheDocument();
     });
 
     it("shows a Fork button (not Edit or Delete)", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       expect(screen.getByRole("button", { name: "Fork Scalper Zone" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Edit Scalper Zone" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Delete Scalper Zone" })).not.toBeInTheDocument();
     });
 
     it("shows an Export button", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       expect(screen.getByRole("button", { name: "Export Scalper Zone" })).toBeInTheDocument();
     });
 
     it("opens the fork form when Fork is clicked", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: "Fork Scalper Zone" }));
       expect(screen.getByLabelText("Fork Preset form")).toBeInTheDocument();
     });
 
     it("pre-fills the fork form name with '(copy)' suffix", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: "Fork Scalper Zone" }));
       const nameInput = screen.getByLabelText("Name *") as HTMLInputElement;
       expect(nameInput.value).toBe("Scalper Zone (copy)");
@@ -296,12 +317,12 @@ describe("PresetSection", () => {
     beforeEach(() => setupQuery([CUSTOM_PRESET]));
 
     it("renders a card for each custom preset", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       expect(screen.getByText("My Layout")).toBeInTheDocument();
     });
 
     it("shows 'Custom' badge on the card", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       // The section heading "Custom (1)" and the card badge "Custom" both render;
       // confirm at least one match is the badge (a <span>)
       const matches = screen.getAllByText("Custom");
@@ -310,14 +331,14 @@ describe("PresetSection", () => {
     });
 
     it("shows Edit and Delete buttons (not Fork)", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       expect(screen.getByRole("button", { name: "Edit My Layout" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Delete My Layout" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Fork My Layout" })).not.toBeInTheDocument();
     });
 
     it("shows Export button on custom presets", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       expect(screen.getByRole("button", { name: "Export My Layout" })).toBeInTheDocument();
     });
   });
@@ -328,7 +349,7 @@ describe("PresetSection", () => {
 
   it("shows placeholder when there are no custom presets", () => {
     setupQuery([BUILTIN_PRESET]);
-    render(<PresetSection />);
+    render(<PresetSection />, { wrapper: makeWrapper() });
     expect(screen.getByText(/no custom presets yet/i)).toBeInTheDocument();
   });
 
@@ -340,26 +361,26 @@ describe("PresetSection", () => {
     beforeEach(() => setupQuery([]));
 
     it("opens the create form when New Preset is clicked", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: /create a new workspace preset/i }));
       expect(screen.getByLabelText("New Preset form")).toBeInTheDocument();
     });
 
     it("renders name and description inputs", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: /create a new workspace preset/i }));
       expect(screen.getByLabelText("Name *")).toBeInTheDocument();
       expect(screen.getByLabelText("Description")).toBeInTheDocument();
     });
 
     it("Create button is disabled when name is empty", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: /create a new workspace preset/i }));
       expect(screen.getByRole("button", { name: /^create$/i })).toBeDisabled();
     });
 
     it("Cancel closes the form", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: /create a new workspace preset/i }));
       fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
       expect(screen.queryByLabelText("New Preset form")).not.toBeInTheDocument();
@@ -368,7 +389,7 @@ describe("PresetSection", () => {
     it("calls createPreset mutation on submit", async () => {
       const mutateFn = vi.fn();
       mockUseMutation.mockReturnValue(makeMutation({ mutate: mutateFn }));
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
 
       fireEvent.click(screen.getByRole("button", { name: /create a new workspace preset/i }));
       fireEvent.change(screen.getByLabelText("Name *"), {
@@ -393,7 +414,7 @@ describe("PresetSection", () => {
     beforeEach(() => setupQuery([CUSTOM_PRESET]));
 
     it("opens the edit form with pre-filled name", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
 
       expect(screen.getByLabelText("Edit Preset form")).toBeInTheDocument();
@@ -404,7 +425,7 @@ describe("PresetSection", () => {
     it("Save button calls updatePreset mutation", async () => {
       const mutateFn = vi.fn();
       mockUseMutation.mockReturnValue(makeMutation({ mutate: mutateFn }));
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
 
       fireEvent.click(screen.getByRole("button", { name: "Edit My Layout" }));
       fireEvent.change(screen.getByLabelText("Name *"), {
@@ -429,7 +450,7 @@ describe("PresetSection", () => {
     beforeEach(() => setupQuery([CUSTOM_PRESET]));
 
     it("shows a confirmation dialog when Delete is clicked", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: "Delete My Layout" }));
 
       expect(screen.getByRole("alertdialog")).toBeInTheDocument();
@@ -439,7 +460,7 @@ describe("PresetSection", () => {
     it("calls deletePreset mutation when confirmed", async () => {
       const mutateFn = vi.fn();
       mockUseMutation.mockReturnValue(makeMutation({ mutate: mutateFn }));
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
 
       fireEvent.click(screen.getByRole("button", { name: "Delete My Layout" }));
       fireEvent.click(screen.getByRole("button", { name: /confirm delete/i }));
@@ -450,7 +471,7 @@ describe("PresetSection", () => {
     });
 
     it("dismisses the dialog on Cancel", () => {
-      render(<PresetSection />);
+      render(<PresetSection />, { wrapper: makeWrapper() });
       fireEvent.click(screen.getByRole("button", { name: "Delete My Layout" }));
       fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
 
@@ -467,7 +488,7 @@ describe("PresetSection", () => {
       makeMutation({ isError: true, error: new Error("Duplicate name") }),
     );
     setupQuery([]);
-    render(<PresetSection />);
+    render(<PresetSection />, { wrapper: makeWrapper() });
 
     expect(screen.getByText(/duplicate name/i)).toBeInTheDocument();
   });
@@ -478,7 +499,7 @@ describe("PresetSection", () => {
 
   it("renders the Import button", () => {
     setupQuery([]);
-    render(<PresetSection />);
+    render(<PresetSection />, { wrapper: makeWrapper() });
     expect(screen.getByRole("button", { name: /import preset from json file/i })).toBeInTheDocument();
   });
 
@@ -488,7 +509,7 @@ describe("PresetSection", () => {
 
   it("widget selector expands and shows categories when toggled", () => {
     setupQuery([]);
-    render(<PresetSection />);
+    render(<PresetSection />, { wrapper: makeWrapper() });
     fireEvent.click(screen.getByRole("button", { name: /create a new workspace preset/i }));
     fireEvent.click(screen.getByRole("button", { name: /toggle widget list/i }));
 
@@ -500,7 +521,7 @@ describe("PresetSection", () => {
 
   it("selecting a widget adds it to the chip list", () => {
     setupQuery([]);
-    render(<PresetSection />);
+    render(<PresetSection />, { wrapper: makeWrapper() });
 
     // Open form
     fireEvent.click(screen.getByRole("button", { name: /create a new workspace preset/i }));
@@ -521,7 +542,7 @@ describe("PresetSection", () => {
 
   it("renders 'Built-in' and 'Custom' section headings", () => {
     setupQuery([BUILTIN_PRESET, CUSTOM_PRESET]);
-    render(<PresetSection />);
+    render(<PresetSection />, { wrapper: makeWrapper() });
 
     const headings = screen.getAllByText(/^Built-in|^Custom/);
     expect(headings.length).toBeGreaterThanOrEqual(2);
