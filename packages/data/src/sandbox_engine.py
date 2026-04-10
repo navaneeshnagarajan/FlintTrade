@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS sandbox_positions (
 
 _ALL_DDL = [_DDL_CAPITAL, _DDL_ORDERS, _DDL_POSITIONS]
 
+# ---------------------------------------------------------------------------
+# Table name allowlist — prevents SQL injection via dynamic table names
+# ---------------------------------------------------------------------------
+
+_VALID_TABLES = frozenset({"sandbox_capital", "sandbox_orders", "sandbox_positions"})
+
+
+def _validate_table(table: str) -> str:
+    """Return *table* unchanged if it is in the allowlist, else raise."""
+    if table not in _VALID_TABLES:
+        raise ValueError(f"Invalid table name: {table}")
+    return table
+
 _SANDBOX_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sandbox_orders_created ON sandbox_orders (created_at)",
     "CREATE INDEX IF NOT EXISTS idx_sandbox_positions_sym_ex ON sandbox_positions (symbol, exchange, product)",
@@ -470,7 +483,7 @@ class SandboxEngine:
         }
 
         for table in ("sandbox_orders", "sandbox_positions", "sandbox_capital"):
-            self._conn.execute(f"DELETE FROM {table}")  # noqa: S608
+            self._conn.execute(f"DELETE FROM {_validate_table(table)}")  # noqa: S608
 
         # Re-seed capital
         now = datetime.now(timezone.utc)
@@ -542,7 +555,7 @@ class SandboxEngine:
 
         # --- Clear and restore ---
         for table in ("sandbox_orders", "sandbox_positions", "sandbox_capital"):
-            self._conn.execute(f"DELETE FROM {table}")  # noqa: S608
+            self._conn.execute(f"DELETE FROM {_validate_table(table)}")  # noqa: S608
 
         now = datetime.now(timezone.utc)
 

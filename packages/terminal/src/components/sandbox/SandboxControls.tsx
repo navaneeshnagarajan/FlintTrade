@@ -12,7 +12,7 @@
  * All API calls go to /ft-api/v1/sandbox/* endpoints.
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -129,8 +129,17 @@ function formatInr(value: number): string {
 export default function SandboxControls() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [importError, setImportError] = useState("");
   const [importSuccess, setImportSuccess] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (importSuccessTimerRef.current !== null) {
+        clearTimeout(importSuccessTimerRef.current);
+      }
+    };
+  }, []);
 
   // Status query
   const { data: status, isLoading } = useQuery({
@@ -179,7 +188,7 @@ export default function SandboxControls() {
       void queryClient.invalidateQueries({ queryKey: ["sandboxStatus"] });
       setImportError("");
       setImportSuccess(true);
-      setTimeout(() => setImportSuccess(false), 3000);
+      importSuccessTimerRef.current = setTimeout(() => setImportSuccess(false), 3000);
     },
     onError: (err: Error) => {
       setImportError(err.message);

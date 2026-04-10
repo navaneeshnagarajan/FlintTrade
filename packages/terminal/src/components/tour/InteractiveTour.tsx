@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 interface TourStep {
   id: string;
@@ -55,9 +55,18 @@ interface InteractiveTourProps {
 export default function InteractiveTour({ onComplete }: InteractiveTourProps) {
   const [visitedSteps, setVisitedSteps] = useState<Set<string>>(new Set());
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const completedCount = visitedSteps.size;
   const totalCount = TOUR_STEPS.length;
+
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current !== null) {
+        clearTimeout(completeTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleDotClick = useCallback(
     (stepId: string) => {
@@ -70,7 +79,7 @@ export default function InteractiveTour({ onComplete }: InteractiveTourProps) {
         const next = new Set(prev);
         next.add(stepId);
         if (next.size === totalCount) {
-          setTimeout(() => {
+          completeTimerRef.current = setTimeout(() => {
             localStorage.setItem(STORAGE_KEY, "true");
             onComplete();
           }, 600);

@@ -8,7 +8,7 @@
  * - Fully controlled: value/onChange follow standard React patterns
  */
 
-import { useRef, useState, useCallback, useId } from "react";
+import { useRef, useState, useCallback, useEffect, useId } from "react";
 import { Label } from "@/components/ui/label";
 import { validateExpression, extractTokenPaths } from "./expressionEvaluator";
 import type { ExpressionContext } from "./expressionEvaluator";
@@ -125,6 +125,15 @@ export function ExpressionInput({
 }: ExpressionInputProps) {
   const labelId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current !== null) {
+        clearTimeout(blurTimerRef.current);
+      }
+    };
+  }, []);
 
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [autocompleteFilter, setAutocompleteFilter] = useState("");
@@ -172,7 +181,7 @@ export function ExpressionInput({
   const handleBlur = useCallback(() => {
     setIsFocused(false);
     // Delay closing autocomplete so click on suggestion registers first.
-    setTimeout(() => setShowAutocomplete(false), 150);
+    blurTimerRef.current = setTimeout(() => setShowAutocomplete(false), 150);
 
     // Validate expression
     const errors = validateExpression(value, context);

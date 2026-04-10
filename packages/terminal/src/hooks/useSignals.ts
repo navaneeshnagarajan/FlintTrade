@@ -19,6 +19,7 @@ import {
 } from "@/services/ftApi";
 import type { LiveSignal, SignalConfig } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
+import { isMarketHours } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Sample data for explore mode
@@ -88,7 +89,7 @@ export function useRecentSignals(limit = 20) {
       return getRecentSignals(limit);
     },
     staleTime: 5_000,
-    refetchInterval: 5_000,
+    refetchInterval: () => (isMarketHours() ? 5_000 : false),
     retry: false,
   });
 }

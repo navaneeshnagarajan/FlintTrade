@@ -6,7 +6,7 @@
  * output panel showing the result or errors.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   Code2,
@@ -124,6 +124,15 @@ alertcondition(ta.crossover(close, st), title="Buy Signal")`,
 export default function PineEditor() {
   const [code, setCode] = useState<string>(PINE_TEMPLATES[0].code);
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
 
   const compileMutation = useMutation({
     mutationFn: (pineCode: string) => compilePineScript(pineCode),
@@ -150,7 +159,7 @@ export default function PineEditor() {
     if (result?.python_code) {
       navigator.clipboard.writeText(result.python_code).then(() => {
         setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
       });
     }
   }, [result]);

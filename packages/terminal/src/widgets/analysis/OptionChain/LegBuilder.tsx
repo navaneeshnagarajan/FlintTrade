@@ -16,7 +16,7 @@
  *     strike-click events in when the panel is open
  */
 
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, TrendingUp, Zap } from "lucide-react";
 import { basketOrder } from "@/services/api";
 import { NUM, NUM0, fmtLtp } from "./formatters";
@@ -387,6 +387,15 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   const [activeTemplate, setActiveTemplate] = useState<string>("straddle");
   const [placing, setPlacing]     = useState(false);
   const [orderMsg, setOrderMsg]   = useState<{ text: string; ok: boolean } | null>(null);
+  const orderMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (orderMsgTimerRef.current !== null) {
+        clearTimeout(orderMsgTimerRef.current);
+      }
+    };
+  }, []);
 
   const strikeGap = useMemo(() => inferStrikeGap(strikes), [strikes]);
 
@@ -583,10 +592,10 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
 
       await basketOrder({ strategy: "FlintLegBuilder", orders });
       setOrderMsg({ text: `${legs.length} leg${legs.length > 1 ? "s" : ""} placed`, ok: true });
-      setTimeout(() => setOrderMsg(null), 4000);
+      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
     } catch (e) {
       setOrderMsg({ text: (e as Error).message || "Order failed", ok: false });
-      setTimeout(() => setOrderMsg(null), 4000);
+      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
     } finally {
       setPlacing(false);
     }

@@ -19,6 +19,7 @@
 import {
   useState,
   useCallback,
+  useEffect,
   useRef,
   type ChangeEvent,
   type MouseEvent,
@@ -387,6 +388,15 @@ export function ThemePicker() {
   const [importText,  setImportText]  = useState("");
   const [importError, setImportError] = useState("");
   const [copied,      setCopied]      = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
 
   // All themes (built-in + custom)
   const allBuiltIn = [...CINEMATIC_THEMES];
@@ -431,7 +441,7 @@ export function ThemePicker() {
     try {
       await navigator.clipboard.writeText(json);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard access denied — silent fail
     }

@@ -10,7 +10,7 @@
  * gamma-concentrated expiries at a glance.
  */
 
-import { useState, useMemo, useCallback, useEffect, memo } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
 import { Grid3x3, RefreshCw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -293,16 +293,25 @@ function GreeksHeatmapWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [greek, setGreek] = useState<GreekKey>("delta");
   const [isLoading, setIsLoading] = useState(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     track("trade", "widget_view_greeks_heatmap");
   }, [track]);
 
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current !== null) {
+        clearTimeout(refreshTimerRef.current);
+      }
+    };
+  }, []);
+
   // Simulate refresh without live API wiring (data from option chain endpoint in live mode)
   const handleRefresh = useCallback(() => {
     if (!isConnected) return;
     setIsLoading(true);
-    setTimeout(() => setIsLoading(false), 600);
+    refreshTimerRef.current = setTimeout(() => setIsLoading(false), 600);
   }, [isConnected]);
 
   const data = SAMPLE_GREEKS_HEATMAP_DATA;

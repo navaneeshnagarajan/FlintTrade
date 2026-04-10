@@ -10,6 +10,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getDepth } from "@/services/api";
 import type { MarketDepth } from "@/types/api";
+import { isMarketHours } from "@/lib/market";
 
 /**
  * Fetch market depth for a symbol.
@@ -27,7 +28,7 @@ export function useDepthData(
     queryKey: ["depth", symbol, exchange],
     queryFn: () => getDepth(symbol, exchange),
     enabled: enabled && !!symbol,
-    refetchInterval: 1_000,
+    refetchInterval: () => (isMarketHours() ? 1_000 : false),
     // Keep previous data while refetching to avoid flicker
     placeholderData: (prev) => prev,
   });

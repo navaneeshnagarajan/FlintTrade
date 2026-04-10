@@ -9,7 +9,7 @@
  *   - Sample data shown when disconnected; live data uses /api/v1/history
  */
 
-import { useState, useMemo, useEffect, useCallback, memo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, memo } from "react";
 import { ArrowUpFromLine, RefreshCw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -209,15 +209,24 @@ function GapAnalysisWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [isLoading, setIsLoading] = useState(false);
   const [filter, setFilter] = useState<"all" | "gap-up" | "gap-down">("all");
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     track("trade", "widget_view_gap_analysis");
   }, [track]);
 
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current !== null) {
+        clearTimeout(refreshTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleRefresh = useCallback(() => {
     if (!isConnected) return;
     setIsLoading(true);
-    setTimeout(() => setIsLoading(false), 700);
+    refreshTimerRef.current = setTimeout(() => setIsLoading(false), 700);
   }, [isConnected]);
 
   const filteredEvents = useMemo(

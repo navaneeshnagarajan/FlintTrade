@@ -39,8 +39,8 @@ function injectTVScript(
   script.type = "text/javascript";
   script.src = scriptSrc;
   script.async = true;
-  // TradingView reads the script's innerHTML as JSON config
-  script.innerHTML = JSON.stringify(config);
+  // TradingView reads the script's textContent as JSON config
+  script.textContent = JSON.stringify(config);
   container.appendChild(script);
   return script;
 }
@@ -70,8 +70,9 @@ export const TVTickerTape = memo(function TVTickerTape({
     if (!container) return;
 
     // Clear any previously injected widget (e.g. after a theme change)
-    container.innerHTML =
-      '<div class="tradingview-widget-container__widget"></div>';
+    const inner = document.createElement("div");
+    inner.className = "tradingview-widget-container__widget";
+    container.replaceChildren(inner);
 
     const script = injectTVScript(
       container,
@@ -137,8 +138,9 @@ export const TVMiniChart = memo(function TVMiniChart({
     const container = containerRef.current;
     if (!container) return;
 
-    container.innerHTML =
-      '<div class="tradingview-widget-container__widget"></div>';
+    const inner = document.createElement("div");
+    inner.className = "tradingview-widget-container__widget";
+    container.replaceChildren(inner);
 
     const script = injectTVScript(
       container,
@@ -197,8 +199,9 @@ export const TVMarketOverview = memo(function TVMarketOverview({
     const container = containerRef.current;
     if (!container) return;
 
-    container.innerHTML =
-      '<div class="tradingview-widget-container__widget"></div>';
+    const inner = document.createElement("div");
+    inner.className = "tradingview-widget-container__widget";
+    container.replaceChildren(inner);
 
     const script = injectTVScript(
       container,
@@ -306,8 +309,9 @@ export const TVTechnicalAnalysis = memo(function TVTechnicalAnalysis({
     const container = containerRef.current;
     if (!container) return;
 
-    container.innerHTML =
-      '<div class="tradingview-widget-container__widget"></div>';
+    const inner = document.createElement("div");
+    inner.className = "tradingview-widget-container__widget";
+    container.replaceChildren(inner);
 
     const script = injectTVScript(
       container,
@@ -370,8 +374,9 @@ export const TVScreener = memo(function TVScreener({
     const container = containerRef.current;
     if (!container) return;
 
-    container.innerHTML =
-      '<div class="tradingview-widget-container__widget"></div>';
+    const inner = document.createElement("div");
+    inner.className = "tradingview-widget-container__widget";
+    container.replaceChildren(inner);
 
     const script = injectTVScript(
       container,
