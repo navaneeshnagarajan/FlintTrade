@@ -27,9 +27,9 @@ jobs:
       - name: TypeScript strict check
         run: cd packages/terminal && npx tsc --noEmit
       - name: Run Vitest tests
-        run: cd packages/terminal && npx vitest run
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork --reporter=verbose
         env:
-          NODE_OPTIONS: '--max-old-space-size=8192'
+          NODE_OPTIONS: '--max-old-space-size=6144'
       - name: Build check
         run: cd packages/terminal && npm run build
   secrets-check:
