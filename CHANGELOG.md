@@ -87,7 +87,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
 - AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
 - Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
-- Total terminal tests: 1,910 (Vitest, 180 files) | Python: ~5,500 (pytest) = ~7,410 total
+- Total terminal tests: ~2,500 (Vitest, 227 files) | Python: ~6,400 (pytest) = ~8,900 total
 
 ### Added — Features (Wave 25 — Engine + Analytics)
 - Backtest engine: event-driven BacktestEngine with MARKET/LIMIT/STOP/STOP_LIMIT orders, slippage, commission (absorbed from trading-strategies-openalgo)
@@ -125,6 +125,48 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - DataProvider Protocol: OpenAlgo, OpenChart (NSE free), yfinance (MCX) with fallback chain (absorbed from historify + openchart)
 - OHLCVNormaliser: IST conversion, column aliasing, intraday cutoff, data validation
 - HistoricalCache: DuckDB-backed, TTL freshness, incremental updates, batch fetch
+
+### Added — Widgets (Waves 39-48 — 80 Widget Milestone)
+- CurrencyConverterWidget, EarningsCalendarWidget, GlobalIndicesWidget, StrategyTemplatesWidget, AuditTrailWidget (Wave 39)
+- PivotPointsWidget, EconomicCalendarWidget, PortfolioAllocationWidget, OrderBookReplayWidget (Wave 40)
+- MarketBreadthWidget, QuickTradeWidget, VolatilityConeWidget, ProfitTargetWidget (Wave 41)
+- HeatCalendarWidget, VWAPBandsWidget, CorrelationPairsWidget, MultiTimeframeWidget (Wave 42)
+- PCRTrendWidget, TradePerformanceWidget, InstrumentCompareWidget, SpreadViewWidget (Wave 43)
+- GreeksHeatmapWidget, MarketSummaryWidget, GapAnalysisWidget, SessionStatsWidget (Wave 44)
+- ImpliedMoveWidget, RiskDashboardWidget, OptionsFlowWidget, TradeLogWidget (Wave 45)
+- MicrostructureWidget, ExpiryCountdownWidget, PositionSizingWidget, CorrelationMatrixWidget (Wave 46)
+- IVSkewWidget, MarketClockWidget, StrategyMonitorWidget, NetPositionWidget (Wave 47)
+- TradeIdeaWidget, SectorPerformanceWidget, TickSpeedWidget, OrderLadderWidget (Wave 48)
+- Total: 80 widgets across 3 categories (22 Trading + 36 Analysis + 22 Utility)
+
+### Added — Python Backends (Waves 39-42)
+- Earnings calendar: NIFTY 50 quarterly events, sample data generator, 3 Flask endpoints
+- Enhanced audit routes: paginated log, CSV export (100K row SEBI compliance), action stats
+- Pivot calculator: 5 methods (Standard/Fibonacci/Woodie/Camarilla/DeMark)
+- Economic calendar: 26 event templates across 6 countries, cadence-based generation
+- Market breadth: McClellan Oscillator, breadth thrust, A/D line, sample data
+- Volatility cone: rolling HV percentile bands, IV percentile scoring
+- VWAP bands calculator: session-aware, single-pass running variance
+- Pair correlation: 5 preset Indian pairs, z-score classification
+- Multi-timeframe analyser: RSI/MACD/EMA per-TF confluence scoring
+
+### Added — Features (Wave 49 — Quality of Life)
+- WidgetPicker search: filter 80 widgets by name, highlight matches, live count
+- 6 new workspace presets (12 total): Options Analysis, Sector View, Algo Trading, Portfolio Manager, Market Overview, Quick Scalper
+- PermutationTester: statistical significance testing, Monte Carlo equity curve bands
+- WalkForwardAnalyser: rolling/expanding window OOS validation, robustness check
+
+### Fixed — CI (Wave 48)
+- Node heap increased to 8GB (NODE_OPTIONS=--max-old-space-size=8192) for 227+ test files
+
+### Fixed — Accessibility (Wave 39)
+- 13 WCAG 2.1 AA issues fixed across 11 widgets (3 critical, 4 serious, 3 moderate)
+- CommandPalette: aria-activedescendant ID linkage
+- NotificationCentre: focus trap implementation
+- DrawingToolbar: keyboard-operable popover items
+- AlertsWidget: proper tab ARIA pattern
+- TradeCopierWidget: shadcn/ui components, aria-labels
+- LegBuilder: aria-pressed on BUY/SELL toggle
 
 ### Added — Features (Waves 33-35 — Deep Analytics)
 - FlowBuilder: n8n-style NodeTypeDescriptor metadata, expression evaluator (safe {{variable}} interpolation), ExpressionInput with token highlighting and autocomplete
