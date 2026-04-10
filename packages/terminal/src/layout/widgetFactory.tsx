@@ -122,6 +122,12 @@ const lazyWidgets = {
   marketclock: lazy(() => import("@/widgets/utility/MarketClock/MarketClockWidget")),
   strategymonitor: lazy(() => import("@/widgets/trading/StrategyMonitor/StrategyMonitorWidget")),
   netposition: lazy(() => import("@/widgets/trading/NetPosition/NetPositionWidget")),
+
+  // Wave 34 widgets
+  tradeidea: lazy(() => import("@/widgets/utility/TradeIdea/TradeIdeaWidget")),
+  sectorperformance: lazy(() => import("@/widgets/analysis/SectorPerformance/SectorPerformanceWidget")),
+  tickspeed: lazy(() => import("@/widgets/utility/TickSpeed/TickSpeedWidget")),
+  orderladder: lazy(() => import("@/widgets/trading/OrderLadder/OrderLadderWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -218,6 +224,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "marketclock", name: "Market Clock", icon: "Clock", category: "Utility" },
   { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading" },
   { id: "netposition", name: "Net Positions", icon: "Layers", category: "Trading" },
+
+  // Wave 34
+  { id: "tradeidea", name: "Trade Ideas", icon: "Lightbulb", category: "Utility" },
+  { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis" },
+  { id: "tickspeed", name: "Tick Speed", icon: "Gauge", category: "Utility" },
+  { id: "orderladder", name: "Order Ladder", icon: "ArrowUpDown", category: "Trading" },
 ];
 
 // ---------------------------------------------------------------------------
