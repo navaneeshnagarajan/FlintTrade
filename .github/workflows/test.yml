@@ -36,18 +36,29 @@ jobs:
       - name: Build check
         run: cd packages/terminal && npm run build
 
-  node-widget-tests-1:
+  node-widget-tests-trading:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
-      - name: Install dependencies
-        run: cd packages/terminal && npm ci --legacy-peer-deps
-      - name: Run widget tests batch 1 (trading + utility widgets)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/widgets/trading/ src/widgets/utility/
+      - run: cd packages/terminal && npm ci --legacy-peer-deps
+      - name: Run trading widget tests
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/widgets/trading/
         env:
-          NODE_OPTIONS: '--max-old-space-size=6144'
+          NODE_OPTIONS: '--max-old-space-size=4096'
+
+  node-widget-tests-utility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: cd packages/terminal && npm ci --legacy-peer-deps
+      - name: Run utility widget tests
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/widgets/utility/
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2:
     runs-on: ubuntu-latest
