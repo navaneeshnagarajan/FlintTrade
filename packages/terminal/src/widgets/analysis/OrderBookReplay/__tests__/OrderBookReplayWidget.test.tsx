@@ -4,7 +4,7 @@
  * Tests: render, controls, ladder, stats bar, speed pills.
  */
 
-import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -19,6 +19,12 @@ beforeAll(() => {
 
 afterEach(() => {
   vi.clearAllTimers();
+});
+
+// Restore real timers after this file's tests complete so that later test
+// files in singleFork mode are not affected by the fake-timer environment.
+afterAll(() => {
+  vi.useRealTimers();
 });
 
 vi.mock("@/hooks/useTrackBehavior", () => ({

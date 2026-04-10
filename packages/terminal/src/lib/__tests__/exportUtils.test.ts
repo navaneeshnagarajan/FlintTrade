@@ -1,5 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { exportToCSV, printCurrentView } from "../exportUtils";
+
+// Restore all vi.stubGlobal() calls after each test so that URL and print
+// are not left as stubs in singleFork mode (they would break connectionStore
+// and other modules that use the real URL constructor).
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("exportToCSV", () => {
   let createObjectURLSpy: ReturnType<typeof vi.fn>;

@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { ContextTipCard } from "../ContextTipCard";
@@ -56,28 +56,17 @@ vi.mock("@/stores/skillStore", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// localStorage mock
+// localStorage setup — use real jsdom localStorage + clear between tests.
+// Spying on Storage.prototype is fragile in singleFork mode when multiple
+// test files share one jsdom instance and some call vi.restoreAllMocks().
+// The real localStorage is simpler and equally reliable here.
 // ---------------------------------------------------------------------------
 
-let storage: Record<string, string> = {};
-
 beforeEach(() => {
-  storage = {};
-  vi.spyOn(Storage.prototype, "getItem").mockImplementation(
-    (key: string) => storage[key] ?? null,
-  );
-  vi.spyOn(Storage.prototype, "setItem").mockImplementation(
-    (key: string, value: string) => {
-      storage[key] = value;
-    },
-  );
+  localStorage.clear();
   mockState.globalLevel = "beginner";
   mockState.helpPrefs.inlineHints = true;
   mockNavigate.mockClear();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 // ---------------------------------------------------------------------------
@@ -113,7 +102,7 @@ describe("ContextTipCard", () => {
     fireEvent.click(gotIt);
 
     // After dismiss, the tip should be stored in localStorage
-    const stored = JSON.parse(storage["flinttrade:dismissed-tips"] ?? "[]") as string[];
+    const stored = JSON.parse(localStorage.getItem("flinttrade:dismissed-tips") ?? "[]") as string[];
     expect(stored.length).toBeGreaterThan(0);
   });
 

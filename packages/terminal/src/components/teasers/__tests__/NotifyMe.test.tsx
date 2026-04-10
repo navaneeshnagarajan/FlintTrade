@@ -58,8 +58,6 @@ describe("NotifyMe", () => {
   });
 
   it("clicking stores the notification preference in localStorage", () => {
-    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
-
     render(<NotifyMe config={{ featureName: "Strategy Lab", notifyChannel: "telegram" }} />);
 
     const button = screen.getByRole("button", {
@@ -67,13 +65,10 @@ describe("NotifyMe", () => {
     });
     fireEvent.click(button);
 
-    // setItem must have been called with the correct key
-    expect(setItemSpy).toHaveBeenCalledWith(
-      NOTIFY_PREFS_KEY,
-      expect.any(String),
-    );
-
-    // Verify stored value contains correct featureName and channel
+    // Verify stored value contains correct featureName and channel.
+    // Read directly from localStorage rather than via Storage.prototype spy —
+    // the spy is fragile in singleFork mode when another file has replaced
+    // window.localStorage with a non-Storage mock object.
     const storedRaw = localStorage.getItem(NOTIFY_PREFS_KEY);
     expect(storedRaw).not.toBeNull();
     const stored = JSON.parse(storedRaw!) as Array<{ featureName: string; channel: string }>;
