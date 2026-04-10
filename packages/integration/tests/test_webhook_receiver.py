@@ -122,8 +122,15 @@ class TestWebhookPayload:
 
 
 class TestVerifySignature:
-    def test_no_secret_always_true(self):
+    def test_no_secret_rejects_when_skip_false(self):
+        """Empty secret with skip_verification=False (default) must return False."""
         r = _make_receiver(secret="")
+        assert r.verify_signature(b"payload", "sha256=wrongsig") is False
+
+    def test_no_secret_skip_verification_true(self):
+        """skip_verification=True bypasses HMAC check regardless of secret."""
+        cfg = WebhookConfig(secret="", skip_verification=True)
+        r = WebhookReceiver(cfg)
         assert r.verify_signature(b"payload", "sha256=wrongsig") is True
 
     def test_valid_signature(self):
@@ -471,7 +478,7 @@ def no_sig_client():
     )
 
     app = Flask("test_webhooks_nosig")
-    receiver = WebhookReceiver(WebhookConfig(secret="", rate_limit=100))
+    receiver = WebhookReceiver(WebhookConfig(secret="", rate_limit=100, skip_verification=True))
     init_webhook_routes(receiver)
     app.register_blueprint(webhook_bp)
     app.config["TESTING"] = True
@@ -581,7 +588,7 @@ class TestWebhookRoutes:
         )
 
         app = Flask("rate_limit_test")
-        receiver = WebhookReceiver(WebhookConfig(rate_limit=2, secret=""))
+        receiver = WebhookReceiver(WebhookConfig(rate_limit=2, secret="", skip_verification=True))
         init_webhook_routes(receiver)
         app.register_blueprint(webhook_bp)
         app.config["TESTING"] = True

@@ -108,7 +108,7 @@ class TestActivityLog:
         log.log("strategy.start", {"name": "second"})
         log.log("strategy.start", {"name": "third"})
         results = log.query(action="strategy.start")
-        # Most recent entry is "third" — timestamps are IST ISO strings, sortable
+        # Most recent entry is "third" — ordered by TIMESTAMPTZ column DESC
         assert results[0].details["name"] == "third"
         log.close()
 
