@@ -26,6 +26,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+from datetime import datetime
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, make_response, request
@@ -107,7 +108,8 @@ def audit_log() -> tuple[Response, int]:
 
     # Apply until filter (activity_log.query only supports since, not until)
     if until:
-        entries = [e for e in entries if e.timestamp <= until]
+        until_dt = datetime.fromisoformat(until) if isinstance(until, str) else until
+        entries = [e for e in entries if e.timestamp <= until_dt]
 
     total = len(entries)
     import math  # noqa: PLC0415
@@ -177,7 +179,8 @@ def audit_export() -> tuple[Response, int]:
     entries = log.query(action=action, user=user, since=since, limit=100_000)
 
     if until:
-        entries = [e for e in entries if e.timestamp <= until]
+        until_dt = datetime.fromisoformat(until) if isinstance(until, str) else until
+        entries = [e for e in entries if e.timestamp <= until_dt]
 
     # Build CSV in memory — acceptable for audit exports (regulatory, not streaming)
     output = io.StringIO()
