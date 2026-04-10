@@ -75,7 +75,7 @@ jobs:
           done
           exit $FAIL
         env:
-          NODE_OPTIONS: '--max-old-space-size=4096'
+          NODE_OPTIONS: '--max-old-space-size=6144'
 
   node-widget-tests-3:
     runs-on: ubuntu-latest
