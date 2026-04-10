@@ -8,22 +8,10 @@ availability flag) run unconditionally.
 from __future__ import annotations
 
 import math
-import os
-import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Path setup — mirrors test_backtest_engine.py
-# ---------------------------------------------------------------------------
-
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "core", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "engine", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 # ---------------------------------------------------------------------------
 # Availability markers

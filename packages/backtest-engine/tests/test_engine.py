@@ -5,19 +5,10 @@ All tests use synthetic bar data. No live data or broker connections required.
 
 from __future__ import annotations
 
-import os
-import sys
 from decimal import Decimal
 from typing import Any
 
 import pytest
-
-# Path setup — same pattern as existing tests in this package
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "core", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "engine", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 
 # ---------------------------------------------------------------------------

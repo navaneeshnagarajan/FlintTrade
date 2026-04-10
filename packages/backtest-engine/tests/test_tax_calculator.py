@@ -5,15 +5,9 @@ All monetary values use Decimal for precision. Known-input → expected-output t
 
 from __future__ import annotations
 
-import os
-import sys
 from decimal import Decimal
 
 import pytest
-
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 
 # ---------------------------------------------------------------------------

@@ -442,6 +442,10 @@ def create_flask_app(
     from packages.integration.src.excel_routes import excel_bp  # noqa: PLC0415
     app.register_blueprint(excel_bp)
 
+    # Register Workspace Preset blueprint (/ft-api/v1/presets/*)
+    from packages.core.src.preset_routes import preset_bp  # noqa: PLC0415
+    app.register_blueprint(preset_bp)
+
     # Register Log Stream blueprint (/v1/logs/*) — SSE + REST log streaming
     from packages.core.src.log_stream import log_stream_bp  # noqa: PLC0415
     app.register_blueprint(log_stream_bp)

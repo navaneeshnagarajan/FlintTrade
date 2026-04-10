@@ -14,20 +14,9 @@ All tests use synthetic bar data; no external dependencies required.
 
 from __future__ import annotations
 
-import os
-import sys
 from typing import Any
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Path setup — mirrors the existing test files in this package
-# ---------------------------------------------------------------------------
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "core", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "engine", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 
 # ===========================================================================

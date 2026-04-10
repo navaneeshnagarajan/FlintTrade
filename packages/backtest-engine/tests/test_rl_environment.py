@@ -6,16 +6,9 @@ without gymnasium or stable-baselines3 installed.
 
 from __future__ import annotations
 
-import os
-import sys
-
 import numpy as np
 import pandas as pd
 import pytest
-
-# Path setup for flat package layout
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, '..', 'src'))
 
 
 from rl_environment import EnvironmentConfig, TradingEnvironment

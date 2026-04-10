@@ -6,17 +6,7 @@ probability of loss, empty trades guard.
 
 from __future__ import annotations
 
-import os
-import sys
-
 import pytest
-
-# Fix import paths for hyphenated package name (backtest-engine can't be a Python identifier)
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, '..', 'src'))
-sys.path.insert(0, os.path.join(_test_dir, '..', '..', '..'))
-sys.path.insert(0, os.path.join(_test_dir, '..', '..', 'core', 'src'))
-sys.path.insert(0, os.path.join(_test_dir, '..', '..', 'engine', 'src'))
 
 from monte_carlo import (
     MonteCarloConfig,

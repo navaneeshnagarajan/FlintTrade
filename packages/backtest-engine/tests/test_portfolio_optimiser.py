@@ -19,18 +19,8 @@ from __future__ import annotations
 
 import json
 import math
-import sys
-import os
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Path bootstrap — keep consistent with other test files in this package
-# ---------------------------------------------------------------------------
-
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 
 # ---------------------------------------------------------------------------

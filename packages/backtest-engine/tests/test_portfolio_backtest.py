@@ -8,22 +8,10 @@ decorated with ``@_VBT`` and skipped when the library is absent.
 from __future__ import annotations
 
 import math
-import os
-import sys
 from typing import Any
 from unittest.mock import patch
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Path setup — mirrors test_vectorbt_runner.py
-# ---------------------------------------------------------------------------
-
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "core", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "engine", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 from portfolio_backtest import (  # noqa: E402
     BenchmarkComparison,

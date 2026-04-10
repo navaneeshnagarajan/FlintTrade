@@ -15,22 +15,10 @@ All tests use synthetic bars only. No broker or live-data connections.
 
 from __future__ import annotations
 
-import os
-import sys
 from decimal import Decimal
 from typing import Any
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Path setup — consistent with other tests in this package
-# ---------------------------------------------------------------------------
-
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "core", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "engine", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 from engine import BacktestEngine, EngineConfig  # noqa: E402
 from base_strategy import BaseBacktestStrategy  # noqa: E402

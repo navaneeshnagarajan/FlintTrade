@@ -10,19 +10,7 @@ All tests use only synthetic data; no external broker/network dependency.
 
 from __future__ import annotations
 
-import os
-import sys
 from typing import Any
-
-
-# ---------------------------------------------------------------------------
-# Path bootstrap (mirrors test_strategies_new.py)
-# ---------------------------------------------------------------------------
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "core", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "engine", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 
 # ---------------------------------------------------------------------------

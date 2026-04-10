@@ -12,21 +12,10 @@ give warmup-heavy strategies (Ichimoku, TripleScreen) enough data to warm up.
 
 from __future__ import annotations
 
-import os
-import sys
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Path bootstrap — mirrors the rest of the test suite
-# ---------------------------------------------------------------------------
-_test_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", ".."))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "core", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "..", "engine", "src"))
-sys.path.insert(0, os.path.join(_test_dir, "..", "src"))
 
 
 # ---------------------------------------------------------------------------
