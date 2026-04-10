@@ -109,7 +109,9 @@ def audit_log() -> tuple[Response, int]:
     # Apply until filter (activity_log.query only supports since, not until)
     if until:
         until_dt = datetime.fromisoformat(until) if isinstance(until, str) else until
-        entries = [e for e in entries if e.timestamp <= until_dt]
+        # Strip timezone for comparison — TIMESTAMP column stores naive datetimes
+        until_naive = until_dt.replace(tzinfo=None) if until_dt.tzinfo else until_dt
+        entries = [e for e in entries if (e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp) <= until_naive]
 
     total = len(entries)
     import math  # noqa: PLC0415
@@ -180,7 +182,9 @@ def audit_export() -> tuple[Response, int]:
 
     if until:
         until_dt = datetime.fromisoformat(until) if isinstance(until, str) else until
-        entries = [e for e in entries if e.timestamp <= until_dt]
+        # Strip timezone for comparison — TIMESTAMP column stores naive datetimes
+        until_naive = until_dt.replace(tzinfo=None) if until_dt.tzinfo else until_dt
+        entries = [e for e in entries if (e.timestamp.replace(tzinfo=None) if e.timestamp.tzinfo else e.timestamp) <= until_naive]
 
     # Build CSV in memory — acceptable for audit exports (regulatory, not streaming)
     output = io.StringIO()
