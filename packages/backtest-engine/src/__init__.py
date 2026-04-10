@@ -12,7 +12,7 @@ def _try_import(relative_name: str, bare_name: str, names: list[str]) -> dict:
         mod = __import__(relative_name, globals(), locals(), names, 1)
         for n in names:
             result[n] = getattr(mod, n)
-    except (ImportError, SystemError):
+    except (ImportError, SystemError, ValueError):
         try:
             mod = __import__(bare_name, globals(), locals(), names, 0)
             for n in names:
