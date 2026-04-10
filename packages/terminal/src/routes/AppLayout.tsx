@@ -14,6 +14,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
+import { Button } from "@/components/ui/button";
 
 const TOUR_COMPLETE_KEY = "flinttrade:tourComplete";
 
@@ -53,14 +54,15 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
             For the best experience, use a screen wider than 768px. The workspace, charts, and data grids require more horizontal space.
           </p>
         </div>
-        <button
+        <Button
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
+          variant="outline"
           onClick={onDismiss}
-          className="mt-2 px-5 py-2 rounded-lg bg-accent/10 border border-accent/30 text-accent text-sm font-medium hover:bg-accent/20 transition-colors"
+          className="mt-2 border-accent/30 text-accent hover:bg-accent/20 hover:text-accent"
         >
           Continue anyway
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -156,6 +158,11 @@ export default function AppLayout() {
     setShowSmallScreenWarning(false);
   }
 
+  const handleDismissWelcome = useCallback(() => {
+    sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
+    setShowWelcome(false);
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-surface-base overflow-hidden">
       {showSmallScreenWarning && (
@@ -171,21 +178,23 @@ export default function AppLayout() {
       {mode === "live" && (
         <div className="h-px bg-profit/60 shrink-0" aria-hidden="true" />
       )}
-      {/* Mode disclaimer banners */}
-      {mode === "practice" && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center">
-          <p className="text-xs text-amber-400">
-            PRACTICE MODE — Virtual trading results are simulated and do not represent actual trading outcomes
-          </p>
-        </div>
-      )}
-      {mode === "explore" && (
-        <div className="bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center">
-          <p className="text-xs text-text-muted">
-            EXPLORE MODE — All data shown is sample only
-          </p>
-        </div>
-      )}
+      {/* Mode disclaimer banners — aria-live so screen readers announce mode changes */}
+      <div aria-live="polite" role="status" className="contents">
+        {mode === "practice" && (
+          <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center">
+            <p className="text-xs text-amber-400">
+              PRACTICE MODE — Virtual trading results are simulated and do not represent actual trading outcomes
+            </p>
+          </div>
+        )}
+        {mode === "explore" && (
+          <div className="bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center">
+            <p className="text-xs text-text-muted">
+              EXPLORE MODE — All data shown is sample only
+            </p>
+          </div>
+        )}
+      </div>
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
       <a
@@ -207,10 +216,7 @@ export default function AppLayout() {
         </PageTransition>
       </main>
       {showWelcome && (
-        <DailyWelcome onDismiss={() => {
-          sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
-          setShowWelcome(false);
-        }} />
+        <DailyWelcome onDismiss={handleDismissWelcome} />
       )}
       <NoConnectionOverlay />
       {authStatus === "pin-required" && <LockScreen />}

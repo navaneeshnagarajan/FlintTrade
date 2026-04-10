@@ -8,7 +8,7 @@
  *   4. Error responses throw with the server error message
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Import module under test
@@ -31,8 +31,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let fetchSpy: any;
+let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");

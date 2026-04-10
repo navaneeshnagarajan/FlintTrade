@@ -364,13 +364,22 @@ class AutoRetrainer:
                         self._config.drift_threshold,
                     )
 
-        # ---- Step 4: train new model -------------------------------------
-        # Run blocking training in a thread pool so the event loop stays free.
-        new_advisor = MLAdvisor(self._advisor_config, self._feature_engineer)
+        # ---- Step 4: split data BEFORE training to ensure honest val accuracy
+        # The training split feeds MLAdvisor.train(); the held-out validation
+        # split is predicted against separately so train_accuracy and
+        # val_accuracy are independent metrics.
+        split_idx = int(len(featured_df) * (1 - self._config.validation_split))
+        train_df = featured_df.iloc[:split_idx]
+        val_df = featured_df.iloc[split_idx:]
+
+        # Build a train-only advisor config that does NOT reserve an internal
+        # test split (we are doing our own here).
+        train_only_config = self._advisor_config.model_copy(update={"test_size": 0.01})
+        new_advisor = MLAdvisor(train_only_config, self._feature_engineer)
 
         try:
             metrics = await asyncio.get_running_loop().run_in_executor(
-                None, new_advisor.train, df
+                None, new_advisor.train, train_df
             )
         except Exception as exc:  # noqa: BLE001
             duration = time.monotonic() - t_start
@@ -388,11 +397,38 @@ class AutoRetrainer:
             self._record(result)
             return result
 
-        # ---- Step 5: compute validation accuracy -------------------------
-        # ``MLAdvisor.train`` uses ``test_size`` as validation split and returns
-        # ``accuracy`` which is the out-of-sample accuracy on that split.
+        # ---- Step 5: compute validation accuracy on the held-out split ----
+        # ``metrics["accuracy"]`` is the in-sample (train split) metric.
+        # We compute val_accuracy independently by predicting on val_df rows.
         train_accuracy: float = metrics.get("accuracy", 0.0)
-        val_accuracy: float = train_accuracy  # same split used during training
+
+        val_accuracy: float = 0.0
+        try:
+            fe = self._feature_engineer
+            val_featured = fe.build_features(val_df)
+            # Reuse the same label-generation logic via the advisor's private helper.
+            val_featured = new_advisor._add_labels(val_featured)
+            feature_cols = list(new_advisor._feature_names)
+            val_clean = val_featured.dropna(subset=feature_cols + ["label"])
+            if len(val_clean) > 0:
+                import numpy as _np  # already imported at module level
+                X_val = val_clean[feature_cols].values
+                y_val = val_clean["label"].values.astype(int)
+                y_pred = new_advisor._model.predict(X_val)
+                val_accuracy = float(_np.mean(y_pred == y_val))
+            else:
+                logger.warning(
+                    "[AutoRetrainer] No usable rows in validation split for %s — "
+                    "val_accuracy set to 0.0",
+                    symbol,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[AutoRetrainer] Val accuracy computation failed for %s: %s — "
+                "defaulting to 0.0",
+                symbol,
+                exc,
+            )
 
         # ---- Step 6: accept or reject ------------------------------------
         if val_accuracy >= self._config.min_accuracy:

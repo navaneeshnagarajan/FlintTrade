@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mock Zustand stores and rate limiters BEFORE importing the module under test.
@@ -55,8 +55,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 // ---------------------------------------------------------------------------
 
 describe("OpenAlgo API client (api.ts)", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let fetchSpy: any;
+  let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch");

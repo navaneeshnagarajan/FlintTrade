@@ -2,19 +2,24 @@
 
 This module is a CRITICAL SAFETY LAYER.  Every order request from the
 frontend MUST pass through here before reaching OpenAlgo.  The blueprint
-reads the ``X-FlintTrade-Mode`` header set by the frontend and routes
-accordingly:
+reads the ``mode`` claim from the *server-issued JWT* (not from any
+client-controlled header) and routes accordingly:
 
 - ``explore``  → 403 — no orders permitted in demo mode
 - ``practice`` → SandboxEngine (paper trading, no real money)
 - ``live``     → OpenAlgo REST API (real broker, real money)
+
+The ``mode`` claim is set at login/PIN-verify time and cannot be forged
+without the JWT secret.  The legacy ``X-FlintTrade-Mode`` header is still
+read as a *hint* for logging/debugging purposes only — it is never trusted
+for routing decisions.
 
 Any ambiguity defaults to rejection rather than accidental live execution.
 
 Architecture::
 
     Frontend → POST /v1/orders/<action>
-             → order_routes.py (reads X-FlintTrade-Mode)
+             → order_routes.py (reads JWT ``mode`` claim)
              → explore  → 403
              → practice → SandboxEngine.place_order(...)
              → live     → httpx → OpenAlgo /api/v1/<endpoint>
@@ -63,6 +68,31 @@ _ENDPOINT_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _get_mode_from_jwt() -> str | None:
+    """Extract the ``mode`` claim from the request's Bearer JWT.
+
+    Returns:
+        The mode string (``"explore"``, ``"practice"``, or ``"live"``) from
+        the JWT payload, or ``None`` if the token is absent, expired, or
+        invalid.
+    """
+    from packages.core.src.auth_routes import decode_token  # noqa: PLC0415
+
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not token:
+        return None
+
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+
+    return payload.get("mode") or None
 
 
 def _is_live_mode_unlocked() -> bool:
@@ -198,26 +228,36 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     Returns:
         A ``(flask.Response, http_status_code)`` tuple.
     """
-    mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
+    # Read mode from the JWT claim — never trust the client-supplied header.
+    mode = _get_mode_from_jwt()
+
+    # Log if the client-supplied header disagrees with the JWT claim (debugging aid).
+    header_mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
+    if header_mode and mode and header_mode != mode:
+        logger.warning(
+            "Order request to /%s — X-FlintTrade-Mode header ('%s') disagrees with "
+            "JWT mode claim ('%s'); using JWT claim",
+            ft_action, header_mode, mode,
+        )
 
     if not mode:
         logger.warning(
-            "Order request to /%s missing X-FlintTrade-Mode header — rejected", ft_action
+            "Order request to /%s missing valid JWT with mode claim — rejected", ft_action
         )
         return jsonify({
             "status": "error",
-            "message": "X-FlintTrade-Mode header is required (explore | practice | live)",
-        }), 400
+            "message": "Authentication required — provide a valid JWT with a mode claim",
+        }), 401
 
     if mode not in _VALID_MODES:
         logger.warning(
-            "Order request to /%s has invalid mode '%s' — rejected", ft_action, mode
+            "Order request to /%s has invalid JWT mode '%s' — rejected", ft_action, mode
         )
         return jsonify({
             "status": "error",
             "message": (
-                f"Invalid mode '{mode}'. "
-                "X-FlintTrade-Mode must be one of: explore, practice, live"
+                f"Invalid mode '{mode}' in JWT claim. "
+                "Expected one of: explore, practice, live"
             ),
         }), 400
 

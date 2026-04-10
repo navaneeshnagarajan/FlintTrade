@@ -69,7 +69,7 @@ function OrdersWidget(_props: WidgetProps) {
 
   useEffect(() => {
     if (rows.length > 0) track("trade", "ordersPlaced");
-  }, [rows.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows.length, track]);
 
   const columns = useMemo<ColumnDef<OrderRow>[]>(
     () => [

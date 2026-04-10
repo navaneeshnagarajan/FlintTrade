@@ -81,17 +81,35 @@ interface PillGroupProps {
   options: readonly string[];
   onChange: (v: string) => void;
   className?: string;
+  label?: string;
 }
 
-function PillGroup({ value, options, onChange, className = "" }: PillGroupProps) {
+function PillGroup({ value, options, onChange, className = "", label }: PillGroupProps) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const idx = options.indexOf(value);
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      onChange(options[(idx + 1) % options.length]);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      onChange(options[(idx - 1 + options.length) % options.length]);
+    }
+  }
+
   return (
-    <div role="radiogroup" className={`flex border border-border-default rounded overflow-hidden ${className}`}>
+    <div
+      role="radiogroup"
+      aria-label={label}
+      onKeyDown={handleKeyDown}
+      className={`flex border border-border-default rounded overflow-hidden ${className}`}
+    >
       {options.map((opt) => (
         <button
           key={opt}
           type="button"
           role="radio"
           aria-checked={value === opt}
+          tabIndex={value === opt ? 0 : -1}
           onClick={() => onChange(opt)}
           className={`flex-1 h-8 text-xs font-medium transition-colors ${
             value === opt
@@ -567,36 +585,56 @@ function OrderPadWidget(_props: WidgetProps) {
         <Controller
           control={control}
           name="action"
-          render={({ field }) => (
-            <div role="radiogroup" aria-label="Transaction type" className="flex gap-2">
-              <button
-                type="button"
-                role="radio"
-                aria-checked={field.value === "BUY"}
-                onClick={() => field.onChange("BUY")}
-                className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
-                  field.value === "BUY"
-                    ? "bg-bullish-bg border-bullish-border text-profit"
-                    : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary"
-                }`}
+          render={({ field }) => {
+            const actions = ["BUY", "SELL"] as const;
+            function handleActionKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+              const idx = actions.indexOf(field.value as "BUY" | "SELL");
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                e.preventDefault();
+                field.onChange(actions[(idx + 1) % actions.length]);
+              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                e.preventDefault();
+                field.onChange(actions[(idx - 1 + actions.length) % actions.length]);
+              }
+            }
+            return (
+              <div
+                role="radiogroup"
+                aria-label="Transaction type"
+                onKeyDown={handleActionKeyDown}
+                className="flex gap-2"
               >
-                BUY
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={field.value === "SELL"}
-                onClick={() => field.onChange("SELL")}
-                className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
-                  field.value === "SELL"
-                    ? "bg-bearish-bg border-bearish-border text-loss"
-                    : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                SELL
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={field.value === "BUY"}
+                  tabIndex={field.value === "BUY" ? 0 : -1}
+                  onClick={() => field.onChange("BUY")}
+                  className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
+                    field.value === "BUY"
+                      ? "bg-bullish-bg border-bullish-border text-profit"
+                      : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  BUY
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={field.value === "SELL"}
+                  tabIndex={field.value === "SELL" ? 0 : -1}
+                  onClick={() => field.onChange("SELL")}
+                  className={`flex-1 h-9 rounded font-semibold text-sm transition-colors border ${
+                    field.value === "SELL"
+                      ? "bg-bearish-bg border-bearish-border text-loss"
+                      : "bg-surface-hover border-border-default text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  SELL
+                </button>
+              </div>
+            );
+          }}
         />
 
         {/* Order type */}

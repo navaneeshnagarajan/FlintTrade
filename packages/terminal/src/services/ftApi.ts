@@ -713,7 +713,7 @@ export const computeIndicators = (
   indicators: string[],
 ) =>
   post<Record<string, unknown>>("indicators/compute", {
-    bars: bars as unknown as Record<string, unknown>[],
+    bars: bars as IndicatorBar[],
     indicators,
   });
 
@@ -790,7 +790,7 @@ export const getStraddlePnL = (
     symbol,
     exchange,
     expiry_date,
-    ...(adjustments ? { adjustments: adjustments as unknown as Record<string, unknown>[] } : {}),
+    ...(adjustments ? { adjustments } : {}),
   });
 
 export const getFtOIProfile = (

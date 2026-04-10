@@ -60,14 +60,16 @@ class TestActivityLog:
         assert entries[0].ip is None
         log.close()
 
-    def test_log_timestamp_is_iso8601(self):
+    def test_log_timestamp_is_datetime(self):
+        from datetime import datetime
+
         log = self._make_log()
         log.log("mode.switch", {"from": "explore", "to": "live"})
         entries = log.query()
         ts = entries[0].timestamp
-        # ISO-8601 format check: contains date, time separator, and offset
-        assert "T" in ts
-        assert len(ts) >= 19
+        # Timestamp is now a proper datetime object (TIMESTAMPTZ column).
+        assert isinstance(ts, datetime)
+        assert ts.year >= 2024
         log.close()
 
     # --- query() filters ---
@@ -117,7 +119,6 @@ class TestActivityLog:
 
         IST = timezone(timedelta(hours=5, minutes=30))
         # Log an "old" entry with a backdated details field (timestamp is real)
-        past = datetime(2020, 1, 1, tzinfo=IST).isoformat()
         log.log("order.place", {"era": "old"}, user="ghost")
         log.log("auth.login", {"era": "new"})
         # Use a since value that excludes the first logged entry by using a

@@ -4,10 +4,11 @@ import { getPositionbook } from "@/services/api";
 import { useTradingStore } from "@/stores/tradingStore";
 import type { Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
+import { queryKeys } from "@/services/queryKeys";
 
 export function usePositions() {
   const query = useQuery<Position[]>({
-    queryKey: ["positions"],
+    queryKey: queryKeys.positions.all,
     queryFn: getPositionbook,
     staleTime: 3_000,
     refetchInterval: () => (isMarketHours() ? 5_000 : 60_000),

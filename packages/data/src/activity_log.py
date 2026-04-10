@@ -45,7 +45,7 @@ KNOWN_ACTIONS: frozenset[str] = frozenset(
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS activity_log (
     log_id      VARCHAR PRIMARY KEY,
-    timestamp   VARCHAR NOT NULL,
+    timestamp   TIMESTAMPTZ NOT NULL,
     action      VARCHAR NOT NULL,
     user        VARCHAR NOT NULL,
     ip          VARCHAR,
@@ -66,7 +66,7 @@ class ActivityEntry:
 
     Attributes:
         log_id: Unique identifier for this log entry (8-char hex token).
-        timestamp: ISO-8601 timestamp in IST.
+        timestamp: Timezone-aware datetime of the event (stored as TIMESTAMPTZ).
         action: Dot-namespaced action string (e.g. ``order.place``).
         user: Username or ``system`` for automated actions.
         ip: Remote IP address if available; ``None`` for internal actions.
@@ -74,7 +74,7 @@ class ActivityEntry:
     """
 
     log_id: str
-    timestamp: str
+    timestamp: datetime
     action: str
     user: str
     ip: str | None
@@ -136,7 +136,7 @@ class ActivityLog:
             The unique ``log_id`` assigned to this entry (8-character hex).
         """
         log_id = secrets.token_hex(8)
-        timestamp = datetime.now(IST).isoformat()
+        timestamp = datetime.now(IST)
         details_json = json.dumps(details, default=str, ensure_ascii=False)
 
         self._conn.execute(
@@ -153,7 +153,7 @@ class ActivityLog:
         self,
         action: str | None = None,
         user: str | None = None,
-        since: str | None = None,
+        since: str | datetime | None = None,
         limit: int = 100,
     ) -> list[ActivityEntry]:
         """Query the activity log with optional filters.
@@ -161,7 +161,8 @@ class ActivityLog:
         Args:
             action: Filter by exact action string (e.g. ``"order.place"``).
             user: Filter by username.
-            since: ISO-8601 timestamp lower-bound (inclusive).
+            since: Lower-bound datetime (inclusive).  Accepts a
+                timezone-aware ``datetime`` object or an ISO-8601 string.
             limit: Maximum number of entries to return (most recent first).
 
         Returns:
@@ -177,8 +178,9 @@ class ActivityLog:
             clauses.append("user = ?")
             params.append(user)
         if since is not None:
+            since_dt: datetime = datetime.fromisoformat(since) if isinstance(since, str) else since
             clauses.append("timestamp >= ?")
-            params.append(since)
+            params.append(since_dt)
 
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = f"""
@@ -189,32 +191,47 @@ class ActivityLog:
             LIMIT {int(limit)}
         """
         rows = self._conn.execute(sql, params).fetchall()
-        return [
-            ActivityEntry(
-                log_id=row[0],
-                timestamp=row[1],
-                action=row[2],
-                user=row[3],
-                ip=row[4],
-                details=json.loads(row[5]),
+        result: list[ActivityEntry] = []
+        for row in rows:
+            ts = row[1]
+            # DuckDB returns TIMESTAMPTZ as a datetime; guard against
+            # legacy VARCHAR rows in existing databases.
+            if isinstance(ts, str):
+                ts = datetime.fromisoformat(ts)
+            result.append(
+                ActivityEntry(
+                    log_id=row[0],
+                    timestamp=ts,
+                    action=row[2],
+                    user=row[3],
+                    ip=row[4],
+                    details=json.loads(row[5]),
+                )
             )
-            for row in rows
-        ]
+        return result
 
-    def count_actions(self, action: str, since: str | None = None) -> int:
+    def count_actions(self, action: str, since: str | datetime | None = None) -> int:
         """Count occurrences of an action, optionally after a timestamp.
 
         Args:
             action: Exact action string to count.
-            since: ISO-8601 lower-bound timestamp (inclusive); ``None`` counts all.
+            since: Lower-bound datetime (inclusive).  Accepts a
+                timezone-aware ``datetime`` object or an ISO-8601 string.
+                ``None`` counts all rows.
 
         Returns:
             Integer count of matching rows.
         """
         if since is not None:
+            # Normalise string to datetime so DuckDB compares against TIMESTAMPTZ.
+            since_dt: datetime
+            if isinstance(since, str):
+                since_dt = datetime.fromisoformat(since)
+            else:
+                since_dt = since
             row = self._conn.execute(
                 "SELECT COUNT(*) FROM activity_log WHERE action = ? AND timestamp >= ?",
-                [action, since],
+                [action, since_dt],
             ).fetchone()
         else:
             row = self._conn.execute(

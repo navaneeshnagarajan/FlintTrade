@@ -333,11 +333,18 @@ export class WebSocketService {
         const msg = JSON.parse(event.data) as Record<string, unknown>;
 
         // Auth response: { type: "auth", status: "success", message: "Authentication successful" }
-        if (msg["type"] === "auth" && msg["status"] === "success") {
-          if (!this.connected) {
-            this.setConnected(true);
-            this.resubscribeAll();
-            this.drainPendingMessages();
+        if (msg["type"] === "auth") {
+          if (msg["status"] === "success") {
+            if (!this.connected) {
+              this.setConnected(true);
+              this.resubscribeAll();
+              this.drainPendingMessages();
+            }
+          } else {
+            // Auth failure — close the socket so the reconnect cycle kicks in.
+            // This prevents the service from hanging in an unauthenticated state.
+            console.warn("[WS] Auth failed:", msg["message"] ?? "unknown reason");
+            this.ws?.close();
           }
           return;
         }
@@ -420,19 +427,60 @@ export class WebSocketService {
     };
   }
 
+  private static readonly MAX_PENDING = 50;
+
   private send(payload: Record<string, unknown>): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
     } else if (payload.action === "subscribe") {
-      // Buffer subscription requests to replay after reconnect
+      // Buffer subscription requests to replay after reconnect.
+      // Deduplicate by symbol+exchange+mode — avoid redundant entries when the
+      // same instrument is subscribed multiple times before a connection is up.
+      const incomingSymbols = Array.isArray(payload.symbols)
+        ? (payload.symbols as Array<{ symbol: string; exchange: string }>)
+        : [];
+      const incomingMode = typeof payload.mode === "string" ? payload.mode : "";
+
+      // Remove any existing pending entry that overlaps with these symbols+mode.
+      this.pendingMessages = this.pendingMessages.filter((pending) => {
+        if (pending.mode !== incomingMode) return true;
+        const ps = Array.isArray(pending.symbols)
+          ? (pending.symbols as Array<{ symbol: string; exchange: string }>)
+          : [];
+        // Keep if there is NO overlap with incoming symbols.
+        return !ps.some((p) =>
+          incomingSymbols.some(
+            (n) => n.symbol === p.symbol && n.exchange === p.exchange,
+          ),
+        );
+      });
+
       this.pendingMessages.push(payload);
+
+      // Hard cap — drop oldest entries to stay within budget.
+      if (this.pendingMessages.length > WebSocketService.MAX_PENDING) {
+        this.pendingMessages = this.pendingMessages.slice(
+          this.pendingMessages.length - WebSocketService.MAX_PENDING,
+        );
+      }
     }
   }
 
   private drainPendingMessages(): void {
+    // Only replay messages that are still relevant — i.e. the symbol is still
+    // in our subscriptionMap (user hasn't unsubscribed during the outage).
     const msgs = this.pendingMessages.splice(0);
     for (const msg of msgs) {
-      this.send(msg);
+      const symbols = Array.isArray(msg.symbols)
+        ? (msg.symbols as Array<{ symbol: string; exchange: string }>)
+        : [];
+      const mode = typeof msg.mode === "string" ? (msg.mode.toLowerCase() as WsMode) : "ltp";
+      const fresh = symbols.filter((s) =>
+        this.subscriptionMap.has(`${s.exchange}:${s.symbol}:${mode}`),
+      );
+      if (fresh.length > 0) {
+        this.send({ ...msg, symbols: fresh });
+      }
     }
   }
 

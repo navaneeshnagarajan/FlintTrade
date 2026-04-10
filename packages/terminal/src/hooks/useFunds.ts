@@ -3,10 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { getFunds } from "@/services/api";
 import { useTradingStore } from "@/stores/tradingStore";
 import type { Funds } from "@/types/api";
+import { queryKeys } from "@/services/queryKeys";
 
 export function useFunds() {
   const query = useQuery<Funds>({
-    queryKey: ["funds"],
+    queryKey: queryKeys.funds.all,
     queryFn: getFunds,
     staleTime: 15_000,
     refetchInterval: 30_000,

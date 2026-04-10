@@ -1,4 +1,4 @@
-import { lazy, Suspense, Component } from "react";
+import { lazy, Suspense, Component, useCallback } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import type { IDockviewPanelProps } from "dockview-react";
 import type { WidgetMeta } from "@/types/widgets";
@@ -224,19 +224,30 @@ export const widgetCatalog: WidgetMeta[] = [
 // ---------------------------------------------------------------------------
 // Fallback / Error UI
 // ---------------------------------------------------------------------------
-function WidgetFallback() {
+function WidgetSkeleton() {
   return (
-    <div className="flex items-center justify-center h-full text-text-secondary text-sm">
-      Loading widget...
+    <div className="h-full w-full p-3 flex flex-col gap-3 animate-pulse" aria-hidden="true">
+      <div className="h-4 w-2/5 rounded bg-surface-hover" />
+      <div className="h-3 w-3/4 rounded bg-surface-hover" />
+      <div className="h-3 w-1/2 rounded bg-surface-hover" />
+      <div className="flex-1 rounded bg-surface-hover" />
     </div>
   );
 }
 
-function WidgetError({ name }: { name: string }) {
+function WidgetError({ name, onRetry }: { name: string; onRetry: () => void }) {
+  const handleRetry = useCallback(() => onRetry(), [onRetry]);
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-2">
+    <div className="flex flex-col items-center justify-center h-full gap-3">
       <span className="text-loss text-sm">Failed to load &quot;{name}&quot;</span>
       <span className="text-text-muted text-xs">Check console for errors</span>
+      <button
+        type="button"
+        onClick={handleRetry}
+        className="px-3 py-1.5 text-xs font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+      >
+        Retry
+      </button>
     </div>
   );
 }
@@ -257,6 +268,7 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
+    this.handleRetry = this.handleRetry.bind(this);
   }
 
   static getDerivedStateFromError(): ErrorBoundaryState {
@@ -267,9 +279,13 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
     console.error(`Widget "${this.props.name}" crashed:`, error, info);
   }
 
+  handleRetry(): void {
+    this.setState({ hasError: false });
+  }
+
   render(): ReactNode {
     if (this.state.hasError) {
-      return <WidgetError name={this.props.name} />;
+      return <WidgetError name={this.props.name} onRetry={this.handleRetry} />;
     }
     return this.props.children;
   }
@@ -283,7 +299,7 @@ function createWidgetPanel(
   LazyWidget: React.LazyExoticComponent<React.ComponentType<IDockviewPanelProps>>
 ): React.FC<IDockviewPanelProps> {
   const PanelComponent: React.FC<IDockviewPanelProps> = (props) => (
-    <Suspense fallback={<WidgetFallback />}>
+    <Suspense fallback={<WidgetSkeleton />}>
       <WidgetErrorBoundary name={widgetId}>
         <LazyWidget {...props} />
       </WidgetErrorBoundary>

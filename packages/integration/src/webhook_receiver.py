@@ -56,11 +56,14 @@ class WebhookConfig(BaseModel):
     """Configuration for :class:`WebhookReceiver`.
 
     Attributes:
-        secret: HMAC-SHA256 signing secret.  Empty string disables verification.
+        secret: HMAC-SHA256 signing secret.  Empty string disables verification
+            only when ``skip_verification`` is explicitly set to ``True``.
         allowed_sources: Sources whose payloads are accepted.
         rate_limit: Maximum webhooks allowed per 60-second window.
         log_payloads: When ``True``, raw payload dicts are stored in
             :attr:`WebhookReceiver.log`.
+        skip_verification: When ``True``, HMAC verification is skipped even
+            if ``secret`` is empty.  Must be set explicitly — opt-in only.
     """
 
     secret: str = ""
@@ -69,6 +72,7 @@ class WebhookConfig(BaseModel):
     )
     rate_limit: int = Field(default=60, ge=1, le=10_000)
     log_payloads: bool = True
+    skip_verification: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +211,14 @@ class WebhookReceiver:
         self._limiter = _SlidingWindowLimiter(config.rate_limit)
         self.log: list[WebhookLogEntry] = []
 
+        if not config.secret and not config.skip_verification:
+            logger.warning(
+                "WebhookReceiver initialised without a signing secret and "
+                "skip_verification=False — all incoming webhooks will be REJECTED. "
+                "Set config.secret or set skip_verification=True to explicitly "
+                "disable signature verification."
+            )
+
     # ------------------------------------------------------------------
     # Signature verification
     # ------------------------------------------------------------------
@@ -217,19 +229,28 @@ class WebhookReceiver:
         Accepts signatures in the format ``sha256=<hex>`` (GitHub style)
         or plain ``<hex>``.
 
-        When ``config.secret`` is empty, always returns ``True`` (no
-        signature verification is configured).
+        When ``config.secret`` is empty and ``config.skip_verification`` is
+        ``False`` (the default), returns ``False`` so that unsigned webhooks are
+        rejected.  To explicitly disable verification set
+        ``skip_verification=True`` on :class:`WebhookConfig`.
 
         Args:
             payload: Raw request body bytes.
             signature: Value of the ``X-Signature`` header.
 
         Returns:
-            ``True`` if the signature is valid (or verification is
-            disabled), ``False`` otherwise.
+            ``True`` if the signature is valid or verification is explicitly
+            skipped via ``skip_verification=True``.  ``False`` otherwise.
         """
         if not self._config.secret:
-            return True
+            # Explicit opt-out: caller has acknowledged there is no secret.
+            if self._config.skip_verification:
+                return True
+            # Secret is absent and skip_verification is False — reject.
+            logger.warning(
+                "verify_signature called with no secret configured — rejecting request"
+            )
+            return False
         if not signature:
             return False
 

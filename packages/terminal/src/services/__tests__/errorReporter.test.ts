@@ -6,7 +6,7 @@
  *   2. reportError silently swallows fetch failures
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Import module under test
@@ -18,8 +18,7 @@ import { reportError } from "../errorReporter";
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let fetchSpy: any;
+let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");

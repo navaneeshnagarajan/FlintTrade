@@ -12,9 +12,12 @@ Public endpoints (no API key required):
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import secrets
+import time
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,6 +29,103 @@ logger = logging.getLogger("flinttrade.auth")
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/v1/auth")
 
+# ---------------------------------------------------------------------------
+# JWT revocation blocklist
+# ---------------------------------------------------------------------------
+
+# Maps jti → expiry epoch (UTC seconds).  Checked on every token decode.
+_REVOKED_JTIS: dict[str, float] = {}
+
+
+def _revoke_jti(jti: str, exp: float) -> None:
+    """Add a JTI to the revocation blocklist.
+
+    Args:
+        jti: JWT ID claim from the token.
+        exp: Token expiry as a UTC epoch float.  Used for cleanup.
+    """
+    _REVOKED_JTIS[jti] = exp
+    _cleanup_revoked_jtis()
+
+
+def _cleanup_revoked_jtis() -> None:
+    """Remove expired entries from the JTI blocklist.
+
+    Expired tokens cannot be replayed anyway (signature check fails), so
+    keeping them in the set wastes memory.  Called on every revocation.
+    """
+    now = datetime.now(timezone.utc).timestamp()
+    expired = [jti for jti, exp in _REVOKED_JTIS.items() if exp <= now]
+    for jti in expired:
+        del _REVOKED_JTIS[jti]
+
+
+def _is_jti_revoked(jti: str) -> bool:
+    """Check whether a JTI has been revoked.
+
+    Args:
+        jti: JWT ID claim to check.
+
+    Returns:
+        ``True`` if the token has been explicitly revoked.
+    """
+    return jti in _REVOKED_JTIS
+
+
+# ---------------------------------------------------------------------------
+# In-memory rate limiter (fallback when Flask-Limiter is absent)
+# ---------------------------------------------------------------------------
+
+# {(endpoint_name, ip): [epoch_float, ...]}
+_RATE_LIMIT_STORE: dict[tuple[str, str], list[float]] = defaultdict(list)
+
+
+def _parse_limit(limit_string: str) -> tuple[int, int]:
+    """Parse a limit string like ``"10 per minute"`` into ``(count, seconds)``.
+
+    Args:
+        limit_string: Rate limit descriptor, e.g. ``"5 per minute"``.
+
+    Returns:
+        ``(max_requests, window_seconds)`` tuple.
+    """
+    parts = limit_string.lower().split()
+    count = int(parts[0])
+    unit = parts[-1] if len(parts) >= 3 else "minute"
+    unit_map = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+    seconds = unit_map.get(unit, 60)
+    return count, seconds
+
+
+def _check_in_memory_rate_limit(endpoint: str, max_requests: int, window_seconds: int) -> bool:
+    """Sliding-window in-memory rate limit check.
+
+    Returns ``True`` if the request is within the limit; ``False`` otherwise.
+    Mutates ``_RATE_LIMIT_STORE`` to record the new request timestamp.
+
+    Args:
+        endpoint: Endpoint name used as part of the bucket key.
+        max_requests: Maximum number of requests allowed in the window.
+        window_seconds: Duration of the sliding window in seconds.
+
+    Returns:
+        ``True`` if allowed, ``False`` if limit exceeded.
+    """
+    ip = request.remote_addr or "unknown"
+    key = (endpoint, ip)
+    now = time.monotonic()
+    cutoff = now - window_seconds
+
+    timestamps = _RATE_LIMIT_STORE[key]
+    # Prune expired entries
+    _RATE_LIMIT_STORE[key] = [t for t in timestamps if t > cutoff]
+
+    if len(_RATE_LIMIT_STORE[key]) >= max_requests:
+        return False
+
+    _RATE_LIMIT_STORE[key].append(now)
+    return True
+
 
 def _get_limiter():
     """Get the flask-limiter instance from the app config."""
@@ -33,21 +133,42 @@ def _get_limiter():
 
 
 def _rate_limit(limit_string: str):
-    """Apply a flask-limiter rate limit lazily (limiter lives in app config).
+    """Apply a rate limit to a route function.
 
-    Returns a decorator that applies the rate limit at request time,
-    allowing the blueprint to be registered before the limiter is created.
+    Tries Flask-Limiter first (if configured in ``app.config["LIMITER"]``).
+    Falls back to the in-memory sliding-window limiter when Flask-Limiter is
+    absent.  Either path *enforces* the limit — this is no longer a no-op.
+
+    Args:
+        limit_string: Limit descriptor, e.g. ``"10 per minute"``.
+
+    Returns:
+        Decorator that wraps the route function.
     """
-    import functools
+    max_requests, window_seconds = _parse_limit(limit_string)
 
-    def decorator(f):
+    def decorator(f: Any) -> Any:
         @functools.wraps(f)
-        def wrapper(*args, **kwargs):
-            # The actual rate-limit enforcement is handled by flask-limiter
-            # via the deferred decoration below; this wrapper is a no-op.
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            limiter = _get_limiter()
+            if limiter is not None:
+                # Flask-Limiter is available — it handles enforcement via the
+                # deferred decorator applied in ``_apply_rate_limits``.
+                return f(*args, **kwargs)
+
+            # Fallback: enforce with the in-memory sliding-window limiter.
+            if not _check_in_memory_rate_limit(f.__name__, max_requests, window_seconds):
+                logger.warning(
+                    "Rate limit exceeded for %s from %s", f.__name__, request.remote_addr
+                )
+                return jsonify({
+                    "status": "error",
+                    "message": "Too many requests. Please try again later.",
+                }), 429
+
             return f(*args, **kwargs)
 
-        # Store the limit string so we can apply it once the app is ready.
+        # Preserve limit metadata for the deferred Flask-Limiter path.
         if not hasattr(wrapper, "_rate_limits"):
             wrapper._rate_limits = []
         wrapper._rate_limits.append(limit_string)
@@ -61,7 +182,9 @@ def _apply_rate_limits(state):
     """Apply deferred rate limits once the blueprint is registered on an app."""
     limiter = state.app.config.get("LIMITER")
     if limiter is None:
-        logger.warning("No LIMITER in app config — auth rate limits not applied")
+        logger.warning(
+            "No LIMITER in app config — auth rate limits enforced by in-memory fallback"
+        )
         return
 
     for rule_func in [auth_status, auth_setup, auth_login, auth_pin_verify, auth_logout]:
@@ -135,17 +258,26 @@ def _next_8am_ist() -> datetime:
     return today_8am_ist - _IST_OFFSET
 
 
-def _create_token(username: str, *, live_mode_unlocked: bool = False) -> str:
+def _create_token(
+    username: str,
+    *,
+    live_mode_unlocked: bool = False,
+    mode: str = "explore",
+) -> str:
     """Create a JWT that expires at next 8:00 AM IST.
 
-    Includes a unique ``jti`` (JWT ID) to enable future token revocation
-    via a server-side blocklist.
+    Includes a unique ``jti`` (JWT ID) for server-side revocation and a
+    ``mode`` claim so that ``order_routes`` can enforce the trading mode
+    without trusting a client-controlled header.
 
     Args:
         username: The authenticated user's name.
         live_mode_unlocked: If ``True``, the token carries a
             ``live_mode_unlocked`` claim that authorises live order
             execution.  Only set after successful PIN verification.
+        mode: Trading mode at token-issue time: ``"explore"``,
+            ``"practice"``, or ``"live"``.  Defaults to ``"explore"`` so
+            that freshly issued (non-PIN) tokens cannot place live orders.
     """
     exp = _next_8am_ist()
     payload = {
@@ -155,12 +287,16 @@ def _create_token(username: str, *, live_mode_unlocked: bool = False) -> str:
         "type": "session",
         "jti": secrets.token_hex(16),
         "live_mode_unlocked": live_mode_unlocked,
+        "mode": mode,
     }
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 
 
 def decode_token(token: str) -> dict[str, Any]:
     """Decode and verify a FlintTrade JWT.
+
+    Also checks the server-side JTI revocation blocklist so that tokens
+    invalidated by logout or password change are rejected even before expiry.
 
     Args:
         token: Encoded JWT string.
@@ -170,9 +306,13 @@ def decode_token(token: str) -> dict[str, Any]:
 
     Raises:
         jwt.ExpiredSignatureError: If the token has expired.
-        jwt.InvalidTokenError: If the token is invalid.
+        jwt.InvalidTokenError: If the token is invalid or has been revoked.
     """
-    return jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+    payload = jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+    jti = payload.get("jti", "")
+    if jti and _is_jti_revoked(jti):
+        raise jwt.InvalidTokenError("Token has been revoked")
+    return payload
 
 
 @auth_bp.route("/status", methods=["GET"])
@@ -283,7 +423,11 @@ def auth_pin_verify() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
     profile = svc.get_profile()
-    token = _create_token(profile.get("username", "user"), live_mode_unlocked=True)
+    token = _create_token(
+        profile.get("username", "user"),
+        live_mode_unlocked=True,
+        mode="live",
+    )
 
     return jsonify({
         "status": "success",
@@ -294,9 +438,26 @@ def auth_pin_verify() -> tuple[Any, int]:
 @auth_bp.route("/logout", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_logout() -> tuple[Any, int]:
-    """Invalidate current session."""
-    # JWT is stateless — client discards token
-    # Server-side: log the logout event
+    """Invalidate current session by revoking the JWT on the server side."""
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+
+    if token:
+        try:
+            # Decode without blocklist check so we can extract the jti even
+            # for tokens that were already revoked (idempotent logout).
+            payload = jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+            jti = payload.get("jti", "")
+            exp = float(payload.get("exp", 0))
+            if jti:
+                _revoke_jti(jti, exp)
+                logger.info("JWT revoked on logout — jti=%s", jti)
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError) as exc:
+            # Token already expired or invalid — nothing to revoke.
+            logger.debug("Logout with invalid/expired token: %s", exc)
+
     logger.info("User logged out")
     return jsonify({"status": "success", "data": {"message": "Logged out."}}), 200
 
@@ -413,5 +574,29 @@ def auth_reset_password() -> tuple[Any, int]:
 
     if not result:
         return jsonify({"status": "error", "message": "Password update failed."}), 400
+
+    # Revoke the one-time reset token so it cannot be replayed.
+    try:
+        rt_payload = jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+        rt_jti = rt_payload.get("jti", "")
+        rt_exp = float(rt_payload.get("exp", 0))
+        if rt_jti:
+            _revoke_jti(rt_jti, rt_exp)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        pass
+
+    # Also revoke any active session token provided in the Authorization header
+    # so all open sessions are invalidated after a password change.
+    auth_header = request.headers.get("Authorization", "")
+    session_token = auth_header.removeprefix("Bearer ").strip()
+    if session_token:
+        try:
+            sess_payload = jwt.decode(session_token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+            sess_jti = sess_payload.get("jti", "")
+            sess_exp = float(sess_payload.get("exp", 0))
+            if sess_jti:
+                _revoke_jti(sess_jti, sess_exp)
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            pass
 
     return jsonify({"status": "success", "message": "Password has been reset."}), 200
