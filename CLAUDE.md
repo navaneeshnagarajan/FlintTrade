@@ -220,8 +220,9 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.5.0-dev — Post-Wave 52 (build sessions 2026-04-07/08/09/10)
+- **Version:** 0.5.0-dev — Post-Wave 53 (build sessions 2026-04-07/08/09/10)
 - **Tests:** ~2,500 terminal (Vitest, 227+ files) + ~6,500 Python (pytest) = ~9,000 total
+- **CI:** 5 parallel jobs (python-tests, node-core-tests, node-widget-tests-1, node-widget-tests-2, secrets-check)
 - **Terminal:** 80 widgets (TSX) + 7 tools + 13 routes + 12 workspace presets in Dockview v5.1 shell
 - **AI Skills:** 30 markdown files covering trading, analysis, execution, compliance, options, psychology domains
 - **Strategies:** 29 backtest templates + 4 MTM straddle + Wheel + 101 engine strategies

@@ -87,7 +87,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
 - AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
 - Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
-- Total terminal tests: ~2,500 (Vitest, 227 files) | Python: ~6,400 (pytest) = ~8,900 total
+- Total terminal tests: ~2,500 (Vitest, 227+ files) | Python: ~6,500 (pytest) = ~9,000 total
 
 ### Added — Features (Wave 25 — Engine + Analytics)
 - Backtest engine: event-driven BacktestEngine with MARKET/LIMIT/STOP/STOP_LIMIT orders, slippage, commission (absorbed from trading-strategies-openalgo)
@@ -125,6 +125,21 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - DataProvider Protocol: OpenAlgo, OpenChart (NSE free), yfinance (MCX) with fallback chain (absorbed from historify + openchart)
 - OHLCVNormaliser: IST conversion, column aliasing, intraday cutoff, data validation
 - HistoricalCache: DuckDB-backed, TTL freshness, incremental updates, batch fetch
+
+### Added — Features (Waves 49-53 — Quality + Skills)
+- WidgetPicker search: filter 80 widgets by name/description, highlight matches, live count
+- 6 new workspace presets (12 total): Options Analysis, Sector View, Algo Trading, Portfolio Manager, Market Overview, Quick Scalper
+- PermutationTester: statistical significance testing, Monte Carlo equity curve confidence bands
+- WalkForwardAnalyser: rolling/expanding window OOS validation, 6 metrics, robustness check
+- KeyboardShortcutsDialog: ? key opens reference, 15 shortcuts, platform-aware labels, searchable
+- Widget descriptions: all 80 widgets have one-line description in picker
+- Preset management API: CRUD endpoints /ft-api/v1/presets/ with fork, export, import
+- PresetSection in Settings: card grid, create/edit/fork/delete presets, widget selector
+- 15 new AI skills (30 total): scalping, bracket orders, expiry day, algo deployment, India macro,
+  candlestick patterns, support/resistance, intermarket, iron condor, earnings options, margin
+  optimisation, Greeks guide, trading psychology, drawdown management, portfolio hedging
+- conftest.py for backtest-engine: eliminated sys.path hacks from 20 test files
+- CI split: 3 parallel vitest jobs (core + trading/utility + analysis/routes/tools)
 
 ### Added — Widgets (Waves 39-48 — 80 Widget Milestone)
 - CurrencyConverterWidget, EarningsCalendarWidget, GlobalIndicesWidget, StrategyTemplatesWidget, AuditTrailWidget (Wave 39)
