@@ -30,7 +30,7 @@ jobs:
       - name: TypeScript strict check
         run: cd packages/terminal && npx tsc --noEmit
       - name: Run core tests (lib, stores, atoms, services, select hooks)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/lib/ src/stores/ src/atoms/ src/services/ src/hooks/__tests__/useGlobalKeys.test.ts src/hooks/__tests__/useFeatureGate.test.ts src/hooks/__tests__/useSkillContent.test.ts
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/lib/ src/stores/ src/atoms/ src/services/ src/hooks/__tests__/useGlobalKeys.test.ts src/hooks/__tests__/useFeatureGate.test.ts src/hooks/__tests__/useSkillContent.test.ts
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check
@@ -44,7 +44,7 @@ jobs:
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run trading widget tests
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/widgets/trading/
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/trading/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
@@ -56,7 +56,7 @@ jobs:
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run utility widget tests (A-H)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/ src/widgets/utility/GlobalIndices/ src/widgets/utility/Health/
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/ src/widgets/utility/GlobalIndices/ src/widgets/utility/Health/
 
   node-widget-tests-utility-b:
     runs-on: ubuntu-latest
@@ -66,7 +66,7 @@ jobs:
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run utility widget tests (M-W)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/widgets/utility/MarketClock/ src/widgets/utility/MarketSummary/ src/widgets/utility/News/ src/widgets/utility/PositionSizing/ src/widgets/utility/ProfitTarget/ src/widgets/utility/Scanner/ src/widgets/utility/StrategyTemplates/ src/widgets/utility/TickSpeed/ src/widgets/utility/Ticker/ src/widgets/utility/TradeIdea/ src/widgets/utility/Watchlist/
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/utility/MarketClock/ src/widgets/utility/MarketSummary/ src/widgets/utility/News/ src/widgets/utility/PositionSizing/ src/widgets/utility/ProfitTarget/ src/widgets/utility/Scanner/ src/widgets/utility/StrategyTemplates/ src/widgets/utility/TickSpeed/ src/widgets/utility/Ticker/ src/widgets/utility/TradeIdea/ src/widgets/utility/Watchlist/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
@@ -79,7 +79,7 @@ jobs:
       - name: Install dependencies
         run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run widget tests batch 2 (analysis widgets + routes + tools + components)
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.singleFork src/widgets/analysis/ src/routes/ src/tools/ src/components/
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/analysis/ src/routes/ src/tools/ src/components/
         env:
           NODE_OPTIONS: '--max-old-space-size=6144'
 
