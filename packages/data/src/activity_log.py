@@ -45,7 +45,7 @@ KNOWN_ACTIONS: frozenset[str] = frozenset(
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS activity_log (
     log_id      VARCHAR PRIMARY KEY,
-    timestamp   TIMESTAMPTZ NOT NULL,
+    timestamp   TIMESTAMP NOT NULL,
     action      VARCHAR NOT NULL,
     user        VARCHAR NOT NULL,
     ip          VARCHAR,
@@ -66,7 +66,7 @@ class ActivityEntry:
 
     Attributes:
         log_id: Unique identifier for this log entry (8-char hex token).
-        timestamp: Timezone-aware datetime of the event (stored as TIMESTAMPTZ).
+        timestamp: Timezone-aware datetime of the event (stored as TIMESTAMP).
         action: Dot-namespaced action string (e.g. ``order.place``).
         user: Username or ``system`` for automated actions.
         ip: Remote IP address if available; ``None`` for internal actions.
@@ -194,7 +194,7 @@ class ActivityLog:
         result: list[ActivityEntry] = []
         for row in rows:
             ts = row[1]
-            # DuckDB returns TIMESTAMPTZ as a datetime; guard against
+            # DuckDB returns TIMESTAMP as a datetime; guard against
             # legacy VARCHAR rows in existing databases.
             if isinstance(ts, str):
                 ts = datetime.fromisoformat(ts)
@@ -223,7 +223,7 @@ class ActivityLog:
             Integer count of matching rows.
         """
         if since is not None:
-            # Normalise string to datetime so DuckDB compares against TIMESTAMPTZ.
+            # Normalise string to datetime so DuckDB compares against TIMESTAMP.
             since_dt: datetime
             if isinstance(since, str):
                 since_dt = datetime.fromisoformat(since)
