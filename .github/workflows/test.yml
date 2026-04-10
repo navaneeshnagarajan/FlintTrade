@@ -52,8 +52,20 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
-      - name: Run utility M-W + analysis + routes + tools + components
-        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/utility/MarketClock/ src/widgets/utility/MarketSummary/ src/widgets/utility/News/ src/widgets/utility/PositionSizing/ src/widgets/utility/ProfitTarget/ src/widgets/utility/Scanner/ src/widgets/utility/StrategyTemplates/ src/widgets/utility/TickSpeed/ src/widgets/utility/Ticker/ src/widgets/utility/TradeIdea/ src/widgets/utility/Watchlist/ src/widgets/analysis/ src/routes/ src/tools/ src/components/
+      - name: Run utility M-W widget tests
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/utility/MarketClock/ src/widgets/utility/MarketSummary/ src/widgets/utility/News/ src/widgets/utility/PositionSizing/ src/widgets/utility/ProfitTarget/ src/widgets/utility/Scanner/ src/widgets/utility/StrategyTemplates/ src/widgets/utility/TickSpeed/ src/widgets/utility/Ticker/ src/widgets/utility/TradeIdea/ src/widgets/utility/Watchlist/
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+
+  node-widget-tests-3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: cd packages/terminal && npm ci --legacy-peer-deps
+      - name: Run analysis + routes + tools + components tests
+        run: cd packages/terminal && npx vitest run --pool=forks --poolOptions.forks.maxForks=1 --fileParallelism=false src/widgets/analysis/ src/routes/ src/tools/ src/components/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
