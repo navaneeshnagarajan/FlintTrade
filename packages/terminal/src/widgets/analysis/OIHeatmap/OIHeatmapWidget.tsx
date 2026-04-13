@@ -26,6 +26,7 @@ import { getOptionChain, getExpiry } from "@/services/api";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { FeatureTeaser } from "@/components/teasers";
 import { isMarketHours } from "@/lib/market";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type {
   RawOptionChain,
   RawOptionRow,
@@ -543,28 +544,28 @@ function OIHeatmapWidget() {
 
       {/* Header */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
-        <select
-          value={symbolIdx}
-          onChange={(e) => setSymbolIdx(Number(e.target.value))}
-          className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-          data-testid="symbol-select"
-        >
-          {SYMBOLS.map((s, i) => (
-            <option key={s.label} value={i}>{s.label}</option>
-          ))}
-        </select>
+        <Select value={String(symbolIdx)} onValueChange={(v) => setSymbolIdx(Number(v))}>
+          <SelectTrigger className="h-7 px-2 text-xs w-36" data-testid="symbol-select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SYMBOLS.map((s, i) => (
+              <SelectItem key={s.label} value={String(i)} className="text-xs">{s.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {isConnected && expiries.length > 0 && (
-          <select
-            value={selectedExpiry}
-            onChange={(e) => setSelectedExpiry(e.target.value)}
-            className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-            data-testid="expiry-select"
-          >
-            {expiries.map((ex) => (
-              <option key={ex} value={ex}>{ex}</option>
-            ))}
-          </select>
+          <Select value={selectedExpiry} onValueChange={setSelectedExpiry}>
+            <SelectTrigger className="h-7 px-2 text-xs w-32" data-testid="expiry-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {expiries.map((ex) => (
+                <SelectItem key={ex} value={ex} className="text-xs">{ex}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
 
         <div className="flex-1" />

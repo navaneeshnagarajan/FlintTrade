@@ -18,6 +18,7 @@ import { MoveHorizontal, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -214,16 +215,16 @@ function ImpliedMoveWidget() {
         )}
         <div className="flex-1" />
         {/* Symbol picker */}
-        <select
-          value={selectedSymbol}
-          onChange={(e) => setSymbolIdx(SYMBOLS.indexOf(e.target.value))}
-          className="px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-          aria-label="Select symbol"
-        >
-          {SYMBOLS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <Select value={selectedSymbol} onValueChange={(v) => setSymbolIdx(SYMBOLS.indexOf(v))}>
+          <SelectTrigger className="h-6 px-2 text-xs w-32" aria-label="Select symbol">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SYMBOLS.map((s) => (
+              <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <button
           onClick={() => setRefreshKey((k) => k + 1)}
           className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"

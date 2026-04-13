@@ -17,6 +17,7 @@ import { SAMPLE_VOL_SURFACE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Data, Layout } from "plotly.js";
 
 // ---------------------------------------------------------------------------
@@ -113,15 +114,16 @@ function VolSurfaceWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-        >
-          {SYMBOLS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <Select value={symbol} onValueChange={setSymbol}>
+          <SelectTrigger className="h-7 px-2 text-xs w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SYMBOLS.map((s) => (
+              <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="px-1.5 py-0.5 text-xs text-text-muted bg-surface-base border border-border-default rounded">
           {exchange}
         </span>

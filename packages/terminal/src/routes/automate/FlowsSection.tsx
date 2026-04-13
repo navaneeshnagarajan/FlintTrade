@@ -31,6 +31,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table as UITable, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -368,15 +369,16 @@ export default function FlowsSection() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-text-muted">Type</label>
-                  <select
-                    value={form.type}
-                    onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as WebhookFormState["type"] }))}
-                    className="w-full h-8 rounded-md border border-border-default bg-surface-card text-text-primary text-xs px-2 focus:outline-none focus:ring-1 focus:ring-accent"
-                  >
-                    <option value="tradingview">TradingView</option>
-                    <option value="chartink">ChartInk</option>
-                    <option value="custom">Custom</option>
-                  </select>
+                  <Select value={form.type} onValueChange={(v) => setForm((f) => ({ ...f, type: v as WebhookFormState["type"] }))}>
+                    <SelectTrigger className="w-full h-8 text-xs bg-surface-card border-border-default">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tradingview">TradingView</SelectItem>
+                      <SelectItem value="chartink">ChartInk</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-text-muted">Path (e.g. /webhook/my-alert)</label>

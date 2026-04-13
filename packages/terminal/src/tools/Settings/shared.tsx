@@ -6,6 +6,13 @@
 import { useEffect } from "react";
 import { CheckCircle2, Info } from "lucide-react";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -78,16 +85,16 @@ interface SelectInputProps {
 
 export function SelectInput({ value, onChange, options, "aria-label": ariaLabel }: SelectInputProps) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={ariaLabel}
-      className="w-full px-3 py-1.5 text-xs bg-surface-base border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/20 transition-colors appearance-none cursor-pointer"
-    >
-      {options.map(({ value: v, label }) => (
-        <option key={v} value={v}>{label}</option>
-      ))}
-    </select>
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="w-full h-8 text-xs bg-surface-base border-border-default" aria-label={ariaLabel}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map(({ value: v, label }) => (
+          <SelectItem key={v} value={v}>{label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

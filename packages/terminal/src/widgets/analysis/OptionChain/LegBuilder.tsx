@@ -22,6 +22,7 @@ import { basketOrder } from "@/services/api";
 import { NUM, NUM0, fmtLtp } from "./formatters";
 import type { StrikeRow } from "./types";
 import PayoffChart from "./PayoffChart";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -331,18 +332,18 @@ function LegRow({
       </div>
 
       {/* Strike selector */}
-      <select
-        value={leg.strike}
-        onChange={(e) => onChangeStrike(leg.id, Number(e.target.value))}
-        className="flex-1 min-w-0 bg-surface-base border border-border-default text-text-primary text-xs font-mono rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent/40"
-        aria-label="Strike price"
-      >
-        {strikes.map((r) => (
-          <option key={r.strike} value={r.strike}>
-            {NUM0.format(r.strike)}
-          </option>
-        ))}
-      </select>
+      <Select value={String(leg.strike)} onValueChange={(v) => onChangeStrike(leg.id, Number(v))}>
+        <SelectTrigger className="flex-1 min-w-0 h-6 px-1 text-xs font-mono" aria-label="Strike price">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {strikes.map((r) => (
+            <SelectItem key={r.strike} value={String(r.strike)} className="text-xs font-mono">
+              {NUM0.format(r.strike)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {/* Lots */}
       <input

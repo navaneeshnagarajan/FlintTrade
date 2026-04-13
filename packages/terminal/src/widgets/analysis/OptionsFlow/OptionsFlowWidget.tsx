@@ -18,6 +18,7 @@ import { Workflow, ArrowUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -235,28 +236,28 @@ function OptionsFlowWidget() {
         aria-label="Filter controls"
       >
         {/* Symbol */}
-        <select
-          value={symbolFilter}
-          onChange={(e) => setSymbolFilter(e.target.value)}
-          className="px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-          aria-label="Filter by symbol"
-        >
-          {SYMBOLS_ALL.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <Select value={symbolFilter} onValueChange={setSymbolFilter}>
+          <SelectTrigger className="h-6 px-2 text-xs w-32" aria-label="Filter by symbol">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SYMBOLS_ALL.map((s) => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
 
         {/* Activity type */}
-        <select
-          value={activityFilter}
-          onChange={(e) => setActivityFilter(e.target.value as ActivityFilter)}
-          className="px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-          aria-label="Filter by activity type"
-        >
-          {ACTIVITY_ALL.map((a) => (
-            <option key={a} value={a}>
-              {a === "All" ? "All Types" : ACTIVITY_LABELS[a as ActivityType]}
-            </option>
-          ))}
-        </select>
+        <Select value={activityFilter} onValueChange={(v) => setActivityFilter(v as ActivityFilter)}>
+          <SelectTrigger className="h-6 px-2 text-xs w-28" aria-label="Filter by activity type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ACTIVITY_ALL.map((a) => (
+              <SelectItem key={a} value={a} className="text-xs">
+                {a === "All" ? "All Types" : ACTIVITY_LABELS[a as ActivityType]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Sort toggle */}
         <button

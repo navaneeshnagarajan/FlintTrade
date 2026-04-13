@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory, getQuotes } from "@/services/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   calcPivots,
   getPriceZone,
@@ -190,18 +191,17 @@ function PivotPointsWidget() {
 
       {/* Symbol selector */}
       <div className="flex-none flex items-center gap-2 px-3 py-1.5 bg-surface-elevated border-b border-border-subtle">
-        <label className="text-xxs text-text-muted uppercase tracking-wide shrink-0" htmlFor="pp-symbol-select">
+        <span className="text-xxs text-text-muted uppercase tracking-wide shrink-0">
           Symbol
-        </label>
-        <select
-          id="pp-symbol-select"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-          aria-label="Select symbol"
-        >
-          {SYMBOLS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        </span>
+        <Select value={symbol} onValueChange={setSymbol}>
+          <SelectTrigger className="h-6 px-2 text-xs w-36" aria-label="Select symbol">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SYMBOLS.map((s) => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
         {loadError && (
           <span className="text-xxs text-loss ml-auto truncate max-w-40" title={loadError}>
             {loadError}
