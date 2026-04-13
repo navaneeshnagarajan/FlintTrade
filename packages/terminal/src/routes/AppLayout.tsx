@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import TopBar from "@/chrome/TopBar";
+import TopBarV2 from "@/chrome/TopBarV2";
+import DockSidebar from "@/chrome/DockSidebar";
 import PageTransition from "@/components/motion/PageTransition";
 import TickerBar from "@/chrome/TickerBar";
 import { useWsBridge } from "@/hooks/useWsBridge";
@@ -22,6 +23,7 @@ const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
 
 const ROUTE_TITLES: Record<string, string> = {
+  "/home": "Home",
   "/trade": "Trading Workspace",
   "/invest": "Investment Dashboard",
   "/learn": "Learning Centre",
@@ -70,7 +72,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
 
 /**
  * AppLayout -- shared chrome for all app routes (/terminal, /invest, /learn).
- * Renders TopBar (with route tabs) + TickerBar + nested route content.
+ * Renders TopBar (with route tabs) + TickerBar + DockSidebar + nested route content.
  * Flow routes (/welcome, /explore, /setup) render outside this layout.
  */
 export default function AppLayout() {
@@ -204,17 +206,21 @@ export default function AppLayout() {
         Skip to main content
       </a>
       <header>
-        <TopBar />
+        <TopBarV2 />
         <TickerBar />
       </header>
+      {/* Content area: DockSidebar + main panel side by side */}
       {/* Issue #47: visually-hidden H1 for screen readers reflecting the current route */}
       {/* Issue #54: aria-label on main landmark mirrors the route title */}
-      <main id="main-content" aria-label={routeTitle} className="flex-1 overflow-hidden">
-        <h1 className="sr-only">{routeTitle}</h1>
-        <PageTransition locationKey={location.pathname}>
-          <Outlet />
-        </PageTransition>
-      </main>
+      <div className="flex flex-1 overflow-hidden">
+        <DockSidebar />
+        <main id="main-content" aria-label={routeTitle} className="flex-1 overflow-hidden">
+          <h1 className="sr-only">{routeTitle}</h1>
+          <PageTransition locationKey={location.pathname}>
+            <Outlet />
+          </PageTransition>
+        </main>
+      </div>
       {showWelcome && (
         <DailyWelcome onDismiss={handleDismissWelcome} />
       )}

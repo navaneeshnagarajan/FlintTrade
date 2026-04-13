@@ -30,6 +30,7 @@ if (glitchtipDsn) {
   });
 }
 
+const HomeRoute = lazy(() => import("./routes/HomeRoute"));
 const TerminalRoute = lazy(() => import("./routes/TerminalRoute"));
 const SetupRoute = lazy(() => import("./routes/SetupRoute"));
 const SetupAccountRoute = lazy(() => import("./routes/SetupAccountRoute"));
@@ -74,9 +75,9 @@ function getInitialRoute(): string {
     const envelope = JSON.parse(raw) as { state?: { persona?: string } };
     const persona = envelope?.state?.persona;
     if (!persona) return "/welcome";
-    if (persona === "investor") return "/invest";
-    if (persona === "beginner") return "/learn";
-    return "/trade";
+    if (persona === "investor") return "/home";
+    if (persona === "beginner") return "/home";
+    return "/home";
   } catch {
     return "/welcome";
   }
@@ -101,6 +102,7 @@ const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
+          { path: "home", element: <ProtectedRoute><RouteErrorBoundary routeName="Home"><Suspense fallback={<Loading />}><HomeRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "trade", element: <ProtectedRoute><RouteErrorBoundary routeName="Trade"><Suspense fallback={<Loading />}><TerminalRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "terminal", element: <Navigate to="/trade" replace /> },
           { path: "invest", element: <ProtectedRoute><RouteErrorBoundary routeName="Invest"><Suspense fallback={<Loading />}><InvestRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },

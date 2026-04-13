@@ -21,8 +21,12 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
 }));
 
-vi.mock("@/chrome/TopBar", () => ({
+vi.mock("@/chrome/TopBarV2", () => ({
   default: () => <div data-testid="topbar">TopBar</div>,
+}));
+
+vi.mock("@/chrome/DockSidebar", () => ({
+  default: () => null,
 }));
 
 vi.mock("@/chrome/TickerBar", () => ({

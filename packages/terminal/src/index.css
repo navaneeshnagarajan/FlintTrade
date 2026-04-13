@@ -19,6 +19,66 @@
   line-height: 14px;
 }
 
+/* ---------- Glass Adaptive utilities (Tailwind v4) ---------- */
+@utility bg-glass-l1 {
+  background-color: var(--glass-l1-bg);
+}
+@utility bg-glass-l2 {
+  background-color: var(--glass-l2-bg);
+}
+@utility bg-glass-l3 {
+  background-color: var(--glass-l3-bg);
+}
+@utility bg-glass-chrome {
+  background-color: var(--glass-chrome-bg);
+}
+@utility border-glass-l1 {
+  border-color: var(--glass-l1-border);
+}
+@utility border-glass-l2 {
+  border-color: var(--glass-l2-border);
+}
+@utility border-glass-chrome {
+  border-color: var(--glass-chrome-border);
+}
+@utility rounded-glass-card {
+  border-radius: var(--glass-radius-card);
+}
+@utility rounded-glass-inner {
+  border-radius: var(--glass-radius-inner);
+}
+@utility rounded-glass-control {
+  border-radius: var(--glass-radius-control);
+}
+@utility backdrop-glass {
+  backdrop-filter: var(--glass-blur);
+}
+@utility glass-hover {
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  &:hover {
+    transform: var(--glass-hover-lift);
+    box-shadow: var(--glass-hover-shadow), var(--glass-hover-inset);
+    border-color: var(--glass-hover-border);
+  }
+}
+@utility glass-surface-l1 {
+  background-color: var(--glass-l1-bg);
+  border: 1px solid var(--glass-l1-border);
+  border-radius: var(--glass-radius-card);
+  backdrop-filter: var(--glass-blur);
+}
+@utility glass-surface-l2 {
+  background-color: var(--glass-l2-bg);
+  border: 1px solid var(--glass-l2-border);
+  border-radius: var(--glass-radius-card);
+  backdrop-filter: var(--glass-blur);
+}
+@utility glass-surface-l3 {
+  background-color: var(--glass-l3-bg);
+  border-radius: var(--glass-radius-inner);
+  backdrop-filter: var(--glass-blur);
+}
+
 /* ---------- Base variables (shadcn/ui compat) ---------- */
 @layer base {
   :root {
@@ -49,6 +109,24 @@
     --chart-5: 280 65% 60%;
     --text-2xl: clamp(20px, 2vw, 24px);
     --text-lg: clamp(16px, 1.5vw, 18px);
+
+    /* Glass Adaptive surfaces */
+    --glass-base: #08080e;
+    --glass-l1-bg: rgba(255, 255, 255, 0.018);
+    --glass-l1-border: rgba(255, 255, 255, 0.045);
+    --glass-l2-bg: rgba(255, 255, 255, 0.03);
+    --glass-l2-border: rgba(255, 255, 255, 0.06);
+    --glass-l3-bg: rgba(255, 255, 255, 0.06);
+    --glass-blur: blur(16px);
+    --glass-radius-card: 14px;
+    --glass-radius-inner: 10px;
+    --glass-radius-control: 8px;
+    --glass-chrome-bg: rgba(12, 12, 20, 0.85);
+    --glass-chrome-border: rgba(255, 255, 255, 0.05);
+    --glass-hover-lift: translateY(-1px);
+    --glass-hover-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    --glass-hover-border: rgba(255, 255, 255, 0.09);
+    --glass-hover-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
     /* Surface defaults (overridden by theme CSS files) */
     --color-surface-base: #0a0a0f;
@@ -238,6 +316,24 @@
   --title-route: var(--title-route);
   --title-section: var(--title-section);
   --title-card: var(--title-card);
+
+  /* --- Glass Adaptive tokens (forwarded for Tailwind utilities) --- */
+  --glass-base: var(--glass-base);
+  --glass-l1-bg: var(--glass-l1-bg);
+  --glass-l1-border: var(--glass-l1-border);
+  --glass-l2-bg: var(--glass-l2-bg);
+  --glass-l2-border: var(--glass-l2-border);
+  --glass-l3-bg: var(--glass-l3-bg);
+  --glass-blur: var(--glass-blur);
+  --glass-radius-card: var(--glass-radius-card);
+  --glass-radius-inner: var(--glass-radius-inner);
+  --glass-radius-control: var(--glass-radius-control);
+  --glass-chrome-bg: var(--glass-chrome-bg);
+  --glass-chrome-border: var(--glass-chrome-border);
+  --glass-hover-lift: var(--glass-hover-lift);
+  --glass-hover-shadow: var(--glass-hover-shadow);
+  --glass-hover-border: var(--glass-hover-border);
+  --glass-hover-inset: var(--glass-hover-inset);
 }
 
 /* ---------- Density overrides for typography scale ---------- */
