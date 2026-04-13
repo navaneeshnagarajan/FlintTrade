@@ -154,6 +154,43 @@ class TestActivityLog:
         assert log.count_actions("order.place", since=future_bound) == 0
         log.close()
 
+    # --- source field ---
+
+    def test_log_stores_source(self):
+        log = self._make_log()
+        log.log("order.place", {"symbol": "NIFTY"}, user="nav", source="SCALPER")
+        entries = log.query()
+        assert entries[0].source == "SCALPER"
+        log.close()
+
+    def test_log_source_defaults_to_none(self):
+        log = self._make_log()
+        log.log("order.place", {"symbol": "NIFTY"})
+        entries = log.query()
+        assert entries[0].source is None
+        log.close()
+
+    def test_query_filter_by_source(self):
+        log = self._make_log()
+        log.log("order.place", {}, source="SCALPER")
+        log.log("order.place", {}, source="ORDERPAD")
+        log.log("order.place", {}, source="WEBHOOK")
+        results = log.query(source="SCALPER")
+        assert len(results) == 1
+        assert results[0].source == "SCALPER"
+        log.close()
+
+    def test_source_values_accepted(self):
+        """All documented source values should be accepted."""
+        log = self._make_log()
+        for src in ("SCALPER", "ORDERPAD", "FLOW", "WEBHOOK", "API"):
+            log.log("order.place", {}, source=src)
+        results = log.query(action="order.place")
+        assert len(results) == 5
+        sources = {e.source for e in results}
+        assert sources == {"SCALPER", "ORDERPAD", "FLOW", "WEBHOOK", "API"}
+        log.close()
+
     # --- context manager ---
 
     def test_context_manager(self):

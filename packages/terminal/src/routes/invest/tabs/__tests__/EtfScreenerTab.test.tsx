@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ vi.mock("@/components/ui/DemoBanner", () => ({
   DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
 }));
 
-// Mock TanStack Query — data=undefined, isError=false → isDemo path (uses DEMO_ROWS)
+// Mock TanStack Query — data=undefined, isError=false → demo path
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return {
@@ -76,11 +76,9 @@ describe("EtfScreenerTab", () => {
     expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
   });
 
-  it("renders category filter pills including All and Equity", () => {
+  it("renders the category select with default All", () => {
     render(<EtfScreenerTab />);
-    expect(screen.getByRole("radio", { name: "All" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Equity" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Gold" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /filter by etf category/i })).toBeInTheDocument();
   });
 
   it("renders the search input", () => {
@@ -88,16 +86,42 @@ describe("EtfScreenerTab", () => {
     expect(screen.getByRole("textbox", { name: /search etfs/i })).toBeInTheDocument();
   });
 
-  it("renders the ETF table with expected column headers", () => {
+  it("renders the ETF table with new column headers", () => {
     render(<EtfScreenerTab />);
     expect(screen.getByRole("table", { name: /etf screener/i })).toBeInTheDocument();
-    expect(screen.getByText("1D%")).toBeInTheDocument();
-    expect(screen.getByText("1Y%")).toBeInTheDocument();
+    expect(screen.getByText("1M%")).toBeInTheDocument();
+    expect(screen.getByText("12M%")).toBeInTheDocument();
+    expect(screen.getByText("Momentum")).toBeInTheDocument();
+    expect(screen.getByText("AUM")).toBeInTheDocument();
   });
 
   it("renders demo ETF rows", () => {
     render(<EtfScreenerTab />);
     expect(screen.getByText("NIFTYBEES")).toBeInTheDocument();
     expect(screen.getByText("GOLDBEES")).toBeInTheDocument();
+  });
+
+  it("renders table view toggle buttons", () => {
+    render(<EtfScreenerTab />);
+    expect(screen.getByRole("button", { name: /table view/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /asset quilt view/i })).toBeInTheDocument();
+  });
+
+  it("switches to quilt view on button click", () => {
+    render(<EtfScreenerTab />);
+    const quiltBtn = screen.getByRole("button", { name: /asset quilt view/i });
+    fireEvent.click(quiltBtn);
+    // Quilt renders without the table
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    // The quilt note text is present
+    expect(screen.getByText(/ranked within each calendar year/i)).toBeInTheDocument();
+  });
+
+  it("filters rows when searching", () => {
+    render(<EtfScreenerTab />);
+    const searchInput = screen.getByRole("textbox", { name: /search etfs/i });
+    fireEvent.change(searchInput, { target: { value: "GOLD" } });
+    expect(screen.getByText("GOLDBEES")).toBeInTheDocument();
+    expect(screen.queryByText("NIFTYBEES")).not.toBeInTheDocument();
   });
 });

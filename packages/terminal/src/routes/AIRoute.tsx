@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
+import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -19,9 +21,15 @@ import {
   Loader2,
   CheckCircle2,
   X,
+  BarChart2,
+  Activity,
+  Share2,
+  Check,
 } from "lucide-react";
 import AIAdvisorWidget from "@/widgets/utility/AIAdvisor/AIAdvisorWidget";
 import AISuggestionsPanel from "@/routes/ai/AISuggestionsPanel";
+import SentimentPanel from "@/routes/ai/SentimentPanel";
+import RegimePanel from "@/routes/ai/RegimePanel";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,7 +50,15 @@ import { motionConfig, EASE_ENTER, DURATION } from "@/lib/motion";
 // Section registry
 // ---------------------------------------------------------------------------
 
-type SectionId = "chat" | "suggestions" | "signals" | "sentiment" | "knowledge" | "settings";
+type SectionId =
+  | "chat"
+  | "suggestions"
+  | "signals"
+  | "sentiment"
+  | "knowledge"
+  | "settings"
+  | "market-sentiment"
+  | "regime";
 
 interface SectionDef {
   id: SectionId;
@@ -54,13 +70,23 @@ const SECTIONS: SectionDef[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "suggestions", label: "Suggest", icon: Lightbulb },
   { id: "signals", label: "Signals", icon: Zap },
+  { id: "market-sentiment", label: "Market", icon: BarChart2 },
+  { id: "regime", label: "Regime", icon: Activity },
   { id: "sentiment", label: "Sentiment", icon: TrendingUp },
   { id: "knowledge", label: "KB", icon: BookOpen },
   { id: "settings", label: "Settings", icon: Settings2 },
 ];
 
 // Sections that appear as right-side overlay panels (not full-height)
-const OVERLAY_SECTIONS = new Set<SectionId>(["suggestions", "signals", "sentiment", "knowledge", "settings"]);
+const OVERLAY_SECTIONS = new Set<SectionId>([
+  "suggestions",
+  "signals",
+  "market-sentiment",
+  "regime",
+  "sentiment",
+  "knowledge",
+  "settings",
+]);
 
 // ---------------------------------------------------------------------------
 // Section: Chat — full height, no chrome
@@ -860,6 +886,8 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   chat: <ChatSection />,
   suggestions: <AISuggestionsPanel />,
   signals: <SignalsSection />,
+  "market-sentiment": <SentimentPanel />,
+  regime: <RegimePanel />,
   sentiment: <SentimentSection />,
   knowledge: <KnowledgeSection />,
   settings: <AISettingsSection />,
@@ -869,6 +897,8 @@ const SECTION_LABELS: Record<SectionId, string> = {
   chat: "AI Chat",
   suggestions: "AI Strategy Suggestions",
   signals: "Signals",
+  "market-sentiment": "Market Sentiment Dashboard",
+  regime: "Regime Detector",
   sentiment: "Sentiment Analysis",
   knowledge: "Knowledge Base",
   settings: "AI Settings",
@@ -881,8 +911,32 @@ const SECTION_LABELS: Record<SectionId, string> = {
 export default function AIRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("ai", "daysActive"); }, []);
 
+  const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
+  const [shareCopied, setShareCopied] = useState(false);
   const level = useSkillLevel("ai");
+
+  const loadConversation = useAIConversationStore((s) => s.loadConversation);
+  const saveConversation = useAIConversationStore((s) => s.saveConversation);
+  const messages = useAIConversationStore((s) => s.messages);
+
+  // Restore shared conversation from ?chat=<id> query param
+  useEffect(() => {
+    const chatId = searchParams.get("chat");
+    if (chatId) {
+      loadConversation(chatId);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once on mount
+
+  const handleShare = useCallback(() => {
+    if (messages.length === 0) return;
+    const id = saveConversation();
+    const url = new URL(window.location.href);
+    url.searchParams.set("chat", id);
+    void navigator.clipboard.writeText(url.toString());
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 2000);
+  }, [messages.length, saveConversation]);
 
   // Density adaptation:
   // Beginner: Chat only — guided prompts, larger focused input
@@ -890,8 +944,18 @@ export default function AIRoute() {
   // Advanced: All sections (chat, signals, sentiment, knowledge, settings)
   const visibleSectionIds: SectionId[] = useMemo(() => {
     if (level === "beginner") return ["chat", "suggestions"];
-    if (level === "intermediate") return ["chat", "suggestions", "signals"];
-    return ["chat", "suggestions", "signals", "sentiment", "knowledge", "settings"];
+    if (level === "intermediate")
+      return ["chat", "suggestions", "signals", "market-sentiment", "regime"];
+    return [
+      "chat",
+      "suggestions",
+      "signals",
+      "market-sentiment",
+      "regime",
+      "sentiment",
+      "knowledge",
+      "settings",
+    ];
   }, [level]);
 
   const visibleSections = SECTIONS.filter((s) => visibleSectionIds.includes(s.id));
@@ -913,7 +977,7 @@ export default function AIRoute() {
       <div className="border-b border-border-default bg-surface-card px-5 py-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <Bot className="w-5 h-5 text-accent" />
-            <div>
+            <div className="flex-1">
               <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
                 AI Center
               </h1>
@@ -921,10 +985,30 @@ export default function AIRoute() {
                 {level === "beginner"
                   ? "Ask me anything about markets, stocks, or how to trade"
                   : level === "intermediate"
-                    ? "Local LLM advisor · ML signals"
-                    : "Local LLM advisor · ML signals · Sentiment · Knowledge base"}
+                    ? "Local LLM advisor · ML signals · Market sentiment · Regime detector"
+                    : "Local LLM advisor · ML signals · Market sentiment · Regime · Knowledge base"}
               </p>
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleShare}
+              disabled={messages.length === 0}
+              className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs shrink-0"
+              aria-label="Share conversation"
+            >
+              {shareCopied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-profit" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-3.5 h-3.5" />
+                  Share
+                </>
+              )}
+            </Button>
           </div>
       </div>
 

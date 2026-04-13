@@ -682,6 +682,144 @@ function applyQuickScalper(api: DockviewApi): void {
 }
 
 // ---------------------------------------------------------------------------
+// Preset 13 — Everything
+//
+// Every widget in the catalogue, organised into 6 tabbed groups:
+//   Charts | Trading | Options | Analysis | Positions/Risk | Utility
+//
+// Use this to explore every widget in a single workspace.
+// ---------------------------------------------------------------------------
+function applyEverything(api: DockviewApi): void {
+  // ---------- Column 1: Charts ----------
+  const chartId = pid("chart");
+  api.addPanel({ id: chartId, component: "chart", title: "Chart" });
+
+  for (const comp of ["chartgrid", "threepanel", "multitimeframe"] as const) {
+    api.addPanel({
+      id: pid(comp),
+      component: comp,
+      title: comp,
+      position: { referencePanel: chartId, direction: "within" },
+    });
+  }
+
+  // ---------- Column 2: Trading core ----------
+  const scalperId = pid("scalper");
+  api.addPanel({
+    id: scalperId,
+    component: "scalper",
+    title: "Scalper",
+    position: { referencePanel: chartId, direction: "right" },
+    initialWidth: 360,
+  });
+
+  for (const comp of ["orderpad", "quicktrade", "orderladder"] as const) {
+    api.addPanel({
+      id: pid(comp),
+      component: comp,
+      title: comp,
+      position: { referencePanel: scalperId, direction: "within" },
+    });
+  }
+
+  // ---------- Column 3: Options ----------
+  const optionChainId = pid("optionchain");
+  api.addPanel({
+    id: optionChainId,
+    component: "optionchain",
+    title: "Option Chain",
+    position: { referencePanel: scalperId, direction: "right" },
+    initialWidth: 380,
+  });
+
+  for (const comp of [
+    "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
+    "greekssurface", "ivsmile", "ivskew", "oiprofile", "oiheatmap",
+    "impliedmove", "optionsflow", "volatilitycone",
+  ] as const) {
+    api.addPanel({
+      id: pid(comp),
+      component: comp,
+      title: comp,
+      position: { referencePanel: optionChainId, direction: "within" },
+    });
+  }
+
+  // ---------- Row 2 left: Analysis ----------
+  const depthId = pid("depth");
+  api.addPanel({
+    id: depthId,
+    component: "depth",
+    title: "Depth",
+    position: { referencePanel: chartId, direction: "below" },
+    initialHeight: 300,
+  });
+
+  for (const comp of [
+    "depthheatmap", "gex", "volsurface", "orderflow", "sectormap",
+    "sectorperformance", "marketbreadth", "correlationpairs",
+    "correlationmatrix", "instrumentcompare", "spreadview", "pcrtrend",
+    "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
+    "orderbookreplay", "microstructure",
+  ] as const) {
+    api.addPanel({
+      id: pid(comp),
+      component: comp,
+      title: comp,
+      position: { referencePanel: depthId, direction: "within" },
+    });
+  }
+
+  // ---------- Row 2 center: Positions / Risk ----------
+  const dashboardId = pid("dashboard");
+  api.addPanel({
+    id: dashboardId,
+    component: "dashboard",
+    title: "Dashboard",
+    position: { referencePanel: depthId, direction: "right" },
+  });
+
+  for (const comp of [
+    "positions", "orders", "holdings", "tradebook", "intradaypnl",
+    "mtmmonitor", "positionheatmap", "portfolioallocation", "netposition",
+    "sessionstats", "tradeperformance", "tradelog", "riskpanel",
+    "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
+  ] as const) {
+    api.addPanel({
+      id: pid(comp),
+      component: comp,
+      title: comp,
+      position: { referencePanel: dashboardId, direction: "within" },
+    });
+  }
+
+  // ---------- Row 2 right: Utility ----------
+  const watchlistId = pid("watchlist");
+  api.addPanel({
+    id: watchlistId,
+    component: "watchlist",
+    title: "Watchlist",
+    position: { referencePanel: dashboardId, direction: "right" },
+    initialWidth: 320,
+  });
+
+  for (const comp of [
+    "calculator", "news", "ticker", "aiadvisor", "scanner", "alerts",
+    "health", "fundingrate", "currencyconverter", "earningscalendar",
+    "globalindices", "strategytemplates", "audittrail", "economiccalendar",
+    "profittarget", "expirycountdown", "positionsizing", "marketclock",
+    "tradeidea", "tickspeed", "marketsummary",
+  ] as const) {
+    api.addPanel({
+      id: pid(comp),
+      component: comp,
+      title: comp,
+      position: { referencePanel: watchlistId, direction: "within" },
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Preset registry (exported)
 // ---------------------------------------------------------------------------
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
@@ -768,6 +906,13 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     description: "Quick Trade + Order Ladder + Depth Heatmap + Microstructure + Tick Speed + Intraday P&L",
     icon: "Gauge",
     apply: applyQuickScalper,
+  },
+  {
+    id: "everything",
+    name: "Everything",
+    description: "All widgets in one workspace — Charts, Trading, Options, Analysis, Positions, Utility",
+    icon: "LayoutDashboard",
+    apply: applyEverything,
   },
 ];
 

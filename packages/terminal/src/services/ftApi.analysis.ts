@@ -30,19 +30,30 @@ export interface PineCompileResult {
 export interface EtfScreenerRow {
   symbol: string;
   name: string;
-  category: "Equity" | "Gold" | "Silver" | "Debt" | "International";
+  category: "Equity" | "Gold" | "Silver" | "Debt" | "International" | "Sector";
   exchange: string;
   price: number;
   change_1d: number;
   change_1w: number;
   change_1m: number;
   change_3m: number;
+  change_6m: number;
   change_1y: number;
   volume: number;
   week52_high: number;
   week52_low: number;
   expense_ratio: number;
   aum_cr: number;
+  momentum_score: number;
+  /** 30 normalised prices [0, 1] for sparkline rendering. */
+  sparkline: number[];
+  /** Calendar-year returns keyed by year string e.g. "2023". */
+  annual_returns: Record<string, number>;
+}
+
+export interface EtfCalendarYear {
+  year: string;
+  returns: Record<string, number>; // symbol → return%
 }
 
 export interface EtfScreenerResponse {

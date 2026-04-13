@@ -1,0 +1,169 @@
+{
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-charts",
+                "activeView": "chart",
+                "views": ["chart", "chartgrid", "threepanel", "multitimeframe"]
+              },
+              "size": 500
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-trading-core",
+                "activeView": "scalper",
+                "views": ["scalper", "orderpad", "quicktrade", "orderladder"]
+              },
+              "size": 400
+            }
+          ],
+          "size": 600
+        },
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-options",
+                "activeView": "optionchain",
+                "views": ["optionchain", "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap", "greekssurface", "ivsmile", "ivskew", "oiprofile", "oiheatmap", "impliedmove", "optionsflow", "volatilitycone"]
+              },
+              "size": 400
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-analysis",
+                "activeView": "depth",
+                "views": ["depth", "depthheatmap", "gex", "volsurface", "orderflow", "sectormap", "sectorperformance", "marketbreadth", "correlationpairs", "correlationmatrix", "instrumentcompare", "spreadview", "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints", "orderbookreplay", "microstructure"]
+              },
+              "size": 400
+            }
+          ],
+          "size": 500
+        },
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-positions",
+                "activeView": "dashboard",
+                "views": ["dashboard", "positions", "orders", "holdings", "tradebook", "intradaypnl", "mtmmonitor", "positionheatmap", "portfolioallocation", "netposition", "sessionstats", "tradeperformance", "tradelog", "riskpanel", "riskdashboard", "actioncenter", "strategymonitor", "tradecopier"]
+              },
+              "size": 400
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "id": "group-utility",
+                "activeView": "watchlist",
+                "views": ["watchlist", "calculator", "news", "ticker", "aiadvisor", "scanner", "alerts", "health", "fundingrate", "currencyconverter", "earningscalendar", "globalindices", "strategytemplates", "audittrail", "economiccalendar", "profittarget", "expirycountdown", "positionsizing", "marketclock", "tradeidea", "tickspeed", "marketsummary"]
+              },
+              "size": 400
+            }
+          ],
+          "size": 400
+        }
+      ],
+      "size": 1
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "chart": { "id": "chart", "contentComponent": "chart", "title": "Chart" },
+    "chartgrid": { "id": "chartgrid", "contentComponent": "chartgrid", "title": "Multi Chart" },
+    "threepanel": { "id": "threepanel", "contentComponent": "threepanel", "title": "Three-Panel Chart" },
+    "multitimeframe": { "id": "multitimeframe", "contentComponent": "multitimeframe", "title": "Multi-Timeframe" },
+    "scalper": { "id": "scalper", "contentComponent": "scalper", "title": "Scalper" },
+    "orderpad": { "id": "orderpad", "contentComponent": "orderpad", "title": "Order Pad" },
+    "quicktrade": { "id": "quicktrade", "contentComponent": "quicktrade", "title": "Quick Trade" },
+    "orderladder": { "id": "orderladder", "contentComponent": "orderladder", "title": "Order Ladder" },
+    "optionchain": { "id": "optionchain", "contentComponent": "optionchain", "title": "Option Chain" },
+    "oichart": { "id": "oichart", "contentComponent": "oichart", "title": "OI Chart" },
+    "straddle": { "id": "straddle", "contentComponent": "straddle", "title": "Straddle" },
+    "straddlepnl": { "id": "straddlepnl", "contentComponent": "straddlepnl", "title": "Straddle P&L" },
+    "greeks": { "id": "greeks", "contentComponent": "greeks", "title": "Greeks" },
+    "greeksheatmap": { "id": "greeksheatmap", "contentComponent": "greeksheatmap", "title": "Greeks Heatmap" },
+    "greekssurface": { "id": "greekssurface", "contentComponent": "greekssurface", "title": "Greeks Surface" },
+    "ivsmile": { "id": "ivsmile", "contentComponent": "ivsmile", "title": "IV Smile" },
+    "ivskew": { "id": "ivskew", "contentComponent": "ivskew", "title": "IV Skew" },
+    "oiprofile": { "id": "oiprofile", "contentComponent": "oiprofile", "title": "OI Profile" },
+    "oiheatmap": { "id": "oiheatmap", "contentComponent": "oiheatmap", "title": "OI Heatmap" },
+    "impliedmove": { "id": "impliedmove", "contentComponent": "impliedmove", "title": "Implied Move" },
+    "optionsflow": { "id": "optionsflow", "contentComponent": "optionsflow", "title": "Options Flow" },
+    "volatilitycone": { "id": "volatilitycone", "contentComponent": "volatilitycone", "title": "Volatility Cone" },
+    "depth": { "id": "depth", "contentComponent": "depth", "title": "Depth" },
+    "depthheatmap": { "id": "depthheatmap", "contentComponent": "depthheatmap", "title": "Depth Heatmap" },
+    "gex": { "id": "gex", "contentComponent": "gex", "title": "GEX Dashboard" },
+    "volsurface": { "id": "volsurface", "contentComponent": "volsurface", "title": "Vol Surface" },
+    "orderflow": { "id": "orderflow", "contentComponent": "orderflow", "title": "Order Flow" },
+    "sectormap": { "id": "sectormap", "contentComponent": "sectormap", "title": "Sector Map" },
+    "sectorperformance": { "id": "sectorperformance", "contentComponent": "sectorperformance", "title": "Sector Performance" },
+    "marketbreadth": { "id": "marketbreadth", "contentComponent": "marketbreadth", "title": "Market Breadth" },
+    "correlationpairs": { "id": "correlationpairs", "contentComponent": "correlationpairs", "title": "Correlation Pairs" },
+    "correlationmatrix": { "id": "correlationmatrix", "contentComponent": "correlationmatrix", "title": "Correlation Matrix" },
+    "instrumentcompare": { "id": "instrumentcompare", "contentComponent": "instrumentcompare", "title": "Instrument Compare" },
+    "spreadview": { "id": "spreadview", "contentComponent": "spreadview", "title": "Spread View" },
+    "pcrtrend": { "id": "pcrtrend", "contentComponent": "pcrtrend", "title": "PCR Trend" },
+    "gapanalysis": { "id": "gapanalysis", "contentComponent": "gapanalysis", "title": "Gap Analysis" },
+    "heatcalendar": { "id": "heatcalendar", "contentComponent": "heatcalendar", "title": "Heat Calendar" },
+    "vwapbands": { "id": "vwapbands", "contentComponent": "vwapbands", "title": "VWAP Bands" },
+    "pivotpoints": { "id": "pivotpoints", "contentComponent": "pivotpoints", "title": "Pivot Points" },
+    "orderbookreplay": { "id": "orderbookreplay", "contentComponent": "orderbookreplay", "title": "Order Book Replay" },
+    "microstructure": { "id": "microstructure", "contentComponent": "microstructure", "title": "Market Microstructure" },
+    "dashboard": { "id": "dashboard", "contentComponent": "dashboard", "title": "Dashboard" },
+    "positions": { "id": "positions", "contentComponent": "positions", "title": "Positions" },
+    "orders": { "id": "orders", "contentComponent": "orders", "title": "Orders" },
+    "holdings": { "id": "holdings", "contentComponent": "holdings", "title": "Holdings" },
+    "tradebook": { "id": "tradebook", "contentComponent": "tradebook", "title": "Trade Book" },
+    "intradaypnl": { "id": "intradaypnl", "contentComponent": "intradaypnl", "title": "Intraday P&L" },
+    "mtmmonitor": { "id": "mtmmonitor", "contentComponent": "mtmmonitor", "title": "MTM Monitor" },
+    "positionheatmap": { "id": "positionheatmap", "contentComponent": "positionheatmap", "title": "Position Heat Map" },
+    "portfolioallocation": { "id": "portfolioallocation", "contentComponent": "portfolioallocation", "title": "Portfolio Allocation" },
+    "netposition": { "id": "netposition", "contentComponent": "netposition", "title": "Net Positions" },
+    "sessionstats": { "id": "sessionstats", "contentComponent": "sessionstats", "title": "Session Stats" },
+    "tradeperformance": { "id": "tradeperformance", "contentComponent": "tradeperformance", "title": "Trade Performance" },
+    "tradelog": { "id": "tradelog", "contentComponent": "tradelog", "title": "Trade Log" },
+    "riskpanel": { "id": "riskpanel", "contentComponent": "riskpanel", "title": "Risk Panel" },
+    "riskdashboard": { "id": "riskdashboard", "contentComponent": "riskdashboard", "title": "Risk Dashboard" },
+    "actioncenter": { "id": "actioncenter", "contentComponent": "actioncenter", "title": "Action Center" },
+    "strategymonitor": { "id": "strategymonitor", "contentComponent": "strategymonitor", "title": "Strategy Monitor" },
+    "tradecopier": { "id": "tradecopier", "contentComponent": "tradecopier", "title": "Trade Copier" },
+    "watchlist": { "id": "watchlist", "contentComponent": "watchlist", "title": "Watchlist" },
+    "calculator": { "id": "calculator", "contentComponent": "calculator", "title": "Calculator" },
+    "news": { "id": "news", "contentComponent": "news", "title": "News Feed" },
+    "ticker": { "id": "ticker", "contentComponent": "ticker", "title": "Ticker" },
+    "aiadvisor": { "id": "aiadvisor", "contentComponent": "aiadvisor", "title": "AI Advisor" },
+    "scanner": { "id": "scanner", "contentComponent": "scanner", "title": "Pre-Market Scanner" },
+    "alerts": { "id": "alerts", "contentComponent": "alerts", "title": "Price Alerts" },
+    "health": { "id": "health", "contentComponent": "health", "title": "System Health" },
+    "fundingrate": { "id": "fundingrate", "contentComponent": "fundingrate", "title": "Funding Rates" },
+    "currencyconverter": { "id": "currencyconverter", "contentComponent": "currencyconverter", "title": "Currency Converter" },
+    "earningscalendar": { "id": "earningscalendar", "contentComponent": "earningscalendar", "title": "Earnings Calendar" },
+    "globalindices": { "id": "globalindices", "contentComponent": "globalindices", "title": "Global Indices" },
+    "strategytemplates": { "id": "strategytemplates", "contentComponent": "strategytemplates", "title": "Strategy Templates" },
+    "audittrail": { "id": "audittrail", "contentComponent": "audittrail", "title": "Audit Trail" },
+    "economiccalendar": { "id": "economiccalendar", "contentComponent": "economiccalendar", "title": "Economic Calendar" },
+    "profittarget": { "id": "profittarget", "contentComponent": "profittarget", "title": "Profit Target Calc" },
+    "expirycountdown": { "id": "expirycountdown", "contentComponent": "expirycountdown", "title": "Expiry Countdown" },
+    "positionsizing": { "id": "positionsizing", "contentComponent": "positionsizing", "title": "Position Sizing" },
+    "marketclock": { "id": "marketclock", "contentComponent": "marketclock", "title": "Market Clock" },
+    "tradeidea": { "id": "tradeidea", "contentComponent": "tradeidea", "title": "Trade Ideas" },
+    "tickspeed": { "id": "tickspeed", "contentComponent": "tickspeed", "title": "Tick Speed" },
+    "marketsummary": { "id": "marketsummary", "contentComponent": "marketsummary", "title": "Market Summary" }
+  },
+  "activeGroup": "group-charts"
+}

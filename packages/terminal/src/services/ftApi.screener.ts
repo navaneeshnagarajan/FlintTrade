@@ -163,3 +163,86 @@ export const getRRGData = (tailLength?: number): Promise<RRGResponse> => {
   const qs = params.toString();
   return get<RRGResponse>("rrg/sectors" + (qs ? "?" + qs : ""));
 };
+
+// ─── Shareholding ─────────────────────────────────────────────────────────────
+
+export interface QuarterlyHolding {
+  quarter: string;
+  percentage: number;
+}
+
+export interface ShareholdingData {
+  symbol: string;
+  as_of_quarter: string;
+  promoter_pct: number;
+  fii_pct: number;
+  dii_pct: number;
+  public_pct: number;
+  government_pct: number;
+  promoter_history: QuarterlyHolding[];
+  fii_history: QuarterlyHolding[];
+  dii_history: QuarterlyHolding[];
+  public_history: QuarterlyHolding[];
+}
+
+export interface AnnualFinancial {
+  year: string;
+  revenue: number | null;
+  net_profit: number | null;
+  operating_cash_flow: number | null;
+}
+
+export interface FinancialSummary {
+  symbol: string;
+  revenue: number | null;
+  net_profit: number | null;
+  operating_cash_flow: number | null;
+  debt_to_equity: number | null;
+  roe: number | null;
+  roce: number | null;
+  pe_ratio: number | null;
+  market_cap: number | null;
+  book_value: number | null;
+  annual_history: AnnualFinancial[];
+}
+
+export interface CorporateAnnouncement {
+  symbol: string;
+  date: string;
+  category: string;
+  headline: string;
+  attachment_url: string;
+}
+
+export interface ShareholdingResponse {
+  is_sample_data: boolean;
+  shareholding: ShareholdingData;
+  financials: FinancialSummary;
+  announcements: CorporateAnnouncement[];
+}
+
+export const getShareholding = (symbol: string): Promise<ShareholdingResponse> =>
+  get<ShareholdingResponse>(
+    "screener/shareholding?symbol=" + encodeURIComponent(symbol.toUpperCase()),
+  );
+
+// ─── Lot Size ────────────────────────────────────────────────────────────────
+
+export interface LotSizeResponse {
+  symbol: string;
+  exchange: string;
+  lot_size: number;
+}
+
+/**
+ * Fetch the lot size for a given symbol from the FlintTrade backend.
+ * Falls back to the built-in table on the server side if live data
+ * is unavailable.
+ */
+export const getLotSize = (
+  symbol: string,
+  exchange: string = "NFO",
+): Promise<LotSizeResponse> =>
+  get<LotSizeResponse>(
+    `screener/lot-size?symbol=${encodeURIComponent(symbol)}&exchange=${encodeURIComponent(exchange)}`,
+  );

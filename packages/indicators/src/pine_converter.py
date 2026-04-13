@@ -126,6 +126,7 @@ _TA_FUNCTION_MAP: list[tuple[str, str, list[str]]] = [
     ("ta.hma",         "hull",             ["hull"]),
     ("ta.dema",        "dema",             ["dema"]),
     ("ta.tema",        "tema",             ["tema"]),
+    ("ta.rma",         "rma",              ["rma"]),
     ("ta.linreg",      "linreg",           ["linreg"]),
     # ─── momentum ──────────────────────────────────────────────────────────
     ("ta.rsi",         "rsi",              ["rsi"]),
@@ -134,12 +135,20 @@ _TA_FUNCTION_MAP: list[tuple[str, str, list[str]]] = [
     ("ta.mom",         "mom",              ["mom"]),
     ("ta.roc",         "roc",              ["roc"]),
     ("ta.cci",         "cci",              ["cci"]),
+    ("ta.change",      "change",           ["change"]),
     ("ta.williamsR",   "williams_r",       ["williams_r"]),
     ("ta.mfi",         "mfi",              ["mfi"]),
     # ─── volatility ────────────────────────────────────────────────────────
     ("ta.atr",         "atr",              ["atr"]),
     ("ta.bb",          "bollinger_bands",  ["bollinger_bands"]),
     ("ta.natr",        "natr",             ["natr"]),
+    ("ta.stdev",       "stdev",            ["stdev"]),
+    ("ta.variance",    "variance",         ["variance"]),
+    ("ta.dev",         "dev",              ["dev"]),
+    # ─── statistical series ────────────────────────────────────────────────
+    ("ta.highest",     "highest",          ["highest"]),
+    ("ta.lowest",      "lowest",           ["lowest"]),
+    ("ta.median",      "median",           ["median"]),
     # ─── trend ─────────────────────────────────────────────────────────────
     ("ta.supertrend",  "supertrend",       ["supertrend"]),
     ("ta.adx",         "adx",              ["adx"]),
@@ -414,6 +423,10 @@ class PineConverter:
             "alertcondition", "alert",
             "strategy.entry", "strategy.close", "strategy.exit",
             "if", "else", "for", "while",
+            # NOTE: request.security() (multi-timeframe) is NOT supported by
+            # this converter — it requires the full PineTS runtime with async
+            # data fetching and a ScopeManager for variable scoping.
+            # PineTS reference: PineRequest.ts / ScopeManager.class.ts
         ]
         return sorted(set(supported))
 
@@ -612,6 +625,15 @@ class PineConverter:
         for name in remaining:
             unsupported.append(f"ta.{name}")
 
+        # Detect request.security() (multi-timeframe) — not convertible here
+        if re.search(r"\brequest\.security\s*\(", line):
+            unsupported.append("request.security")
+            line = re.sub(
+                r"\brequest\.security\s*\(",
+                "# UNSUPPORTED: request.security(",
+                line,
+            )
+
         return line, imports, warnings, unsupported
 
     def _apply_custom_arrays(self, expr: str) -> str:
@@ -690,6 +712,32 @@ class PineConverter:
             length = args[1] if len(args) > 1 else "20"
             mult   = args[2] if len(args) > 2 else "2.0"
             call_args = f"{source}, {length}, {mult}"
+        elif py_func == "rma":
+            # ta.rma(source, length)  — Wilder's RMA (same signature as ema/sma)
+            source = args[0] if args else c
+            length = args[1] if len(args) > 1 else "14"
+            call_args = f"{source}, {length}"
+        elif py_func == "change":
+            # ta.change(source, length=1)
+            source = args[0] if args else c
+            length = args[1] if len(args) > 1 else "1"
+            call_args = f"{source}, {length}"
+        elif py_func in {"stdev", "variance", "dev"}:
+            # ta.stdev(source, length, biased=true)
+            # ta.variance(source, length)
+            # ta.dev(source, length)
+            source = args[0] if args else c
+            length = args[1] if len(args) > 1 else "20"
+            if py_func == "stdev" and len(args) > 2:
+                biased = args[2]
+                call_args = f"{source}, {length}, {biased}"
+            else:
+                call_args = f"{source}, {length}"
+        elif py_func in {"highest", "lowest", "median"}:
+            # ta.highest(source, length)
+            source = args[0] if args else c
+            length = args[1] if len(args) > 1 else "20"
+            call_args = f"{source}, {length}"
         elif py_func in {"crossover", "crossunder"}:
             # ta.crossover(a, b)
             a = args[0] if args else "series_a"

@@ -40,6 +40,7 @@ import {
   GitBranch,
   Crosshair,
   Grid2X2,
+  PieChart,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -66,6 +67,7 @@ const BasketTab = lazy(() => import("./invest/tabs/BasketTab").then(m => ({ defa
 const GoalTab = lazy(() => import("./invest/tabs/GoalTab").then(m => ({ default: m.GoalTab })));
 const MutualFundTab = lazy(() => import("./invest/tabs/MutualFundTab").then(m => ({ default: m.MutualFundTab })));
 const EtfScreenerTab = lazy(() => import("./invest/tabs/EtfScreenerTab").then(m => ({ default: m.EtfScreenerTab })));
+const ShareholdingTab = lazy(() => import("./invest/tabs/ShareholdingTab").then(m => ({ default: m.ShareholdingTab })));
 const SectorRotationTab = lazy(() => import("./invest/tabs/SectorRotationTab").then(m => ({ default: m.SectorRotationTab })));
 const RiskReturnTab = lazy(() => import("./invest/tabs/RiskReturnTab").then(m => ({ default: m.RiskReturnTab })));
 const CorrelationTab = lazy(() => import("./invest/tabs/CorrelationTab").then(m => ({ default: m.CorrelationTab })));
@@ -90,6 +92,7 @@ type TabId =
   | "basket"
   | "goals"
   | "etf-screener"
+  | "shareholding"
   | "sector-rotation"
   | "risk-return"
   | "correlation";
@@ -118,6 +121,7 @@ const TABS: TabDef[] = [
   { id: "basket", label: "Baskets", icon: Layers },
   { id: "goals", label: "Goals", icon: Target },
   { id: "etf-screener", label: "ETF Screener", icon: ScanLine },
+  { id: "shareholding", label: "Shareholding", icon: PieChart },
   { id: "sector-rotation", label: "Sector Rotation", icon: GitBranch },
   { id: "risk-return", label: "Risk-Return", icon: Crosshair },
   { id: "correlation", label: "Correlation", icon: Grid2X2 },
@@ -160,6 +164,7 @@ function ActiveTabContent({ tabId }: { tabId: TabId }) {
       case "basket":       return <BasketTab />;
       case "goals":          return <GoalTab />;
       case "etf-screener":   return <EtfScreenerTab />;
+      case "shareholding":   return <ShareholdingTab />;
       case "sector-rotation": return <SectorRotationTab />;
       case "risk-return":    return <RiskReturnTab />;
       case "correlation":    return <CorrelationTab />;
@@ -185,8 +190,8 @@ function InvestShell() {
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "goals", "mf-optimizer", "mutual-funds"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "etf-screener", "sector-rotation"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "goals", "etf-screener", "sector-rotation", "risk-return", "correlation"];
+    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "etf-screener", "shareholding", "sector-rotation"];
+    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "goals", "etf-screener", "shareholding", "sector-rotation", "risk-return", "correlation"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));

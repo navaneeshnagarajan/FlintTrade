@@ -509,9 +509,13 @@ export class WebSocketService {
 
   private scheduleReconnect(): void {
     if (!this.shouldConnect) return;
+    // Exponential backoff with jitter: base 1s, multiplier 2, max 30s, jitter +/-500ms
+    const jitter = Math.round((Math.random() - 0.5) * 1000); // -500ms to +500ms
+    const delay = Math.max(0, Math.min(this.reconnectDelay + jitter, this.maxDelay));
+    console.info(`[WS] Scheduling reconnect in ${delay}ms (base=${this.reconnectDelay}ms, jitter=${jitter}ms)`);
     this.reconnectTimer = setTimeout(() => {
       this.doConnect();
-    }, this.reconnectDelay);
+    }, delay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxDelay);
   }
 

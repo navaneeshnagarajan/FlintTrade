@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS activity_log (
     action      VARCHAR NOT NULL,
     user        VARCHAR NOT NULL,
     ip          VARCHAR,
-    details     VARCHAR NOT NULL
+    details     VARCHAR NOT NULL,
+    source      VARCHAR
 )
 """
 
@@ -57,7 +58,11 @@ _INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_activity_action ON activity_log(action)",
     "CREATE INDEX IF NOT EXISTS idx_activity_user   ON activity_log(user)",
     "CREATE INDEX IF NOT EXISTS idx_activity_ts     ON activity_log(timestamp)",
+    "CREATE INDEX IF NOT EXISTS idx_activity_source ON activity_log(source)",
 ]
+
+# Migration: add source column to existing databases that lack it.
+_MIGRATE_ADD_SOURCE = "ALTER TABLE activity_log ADD COLUMN source VARCHAR"
 
 
 @dataclass
@@ -71,6 +76,8 @@ class ActivityEntry:
         user: Username or ``system`` for automated actions.
         ip: Remote IP address if available; ``None`` for internal actions.
         details: Arbitrary JSON-serialisable payload describing the mutation.
+        source: Origin of the action (e.g. ``"SCALPER"``, ``"ORDERPAD"``,
+            ``"FLOW"``, ``"WEBHOOK"``, ``"API"``).  ``None`` for legacy entries.
     """
 
     log_id: str
@@ -79,6 +86,7 @@ class ActivityEntry:
     user: str
     ip: str | None
     details: dict[str, Any] = field(default_factory=dict)
+    source: str | None = None
 
 
 class ActivityLog:
@@ -108,6 +116,11 @@ class ActivityLog:
 
         self._conn = duckdb.connect(db_path)
         self._conn.execute(_CREATE_TABLE_SQL)
+        # Migrate existing databases that lack the source column.
+        try:
+            self._conn.execute(_MIGRATE_ADD_SOURCE)
+        except duckdb.CatalogException:
+            pass  # Column already exists — nothing to do.
         for idx_sql in _INDEX_SQL:
             self._conn.execute(idx_sql)
 
@@ -121,6 +134,7 @@ class ActivityLog:
         details: dict[str, Any],
         user: str = "system",
         ip: str | None = None,
+        source: str | None = None,
     ) -> str:
         """Log an activity and return the generated ``log_id``.
 
@@ -131,6 +145,9 @@ class ActivityLog:
             details: Arbitrary JSON-serialisable payload.
             user: Actor performing the action; defaults to ``"system"``.
             ip: Remote IP address of the caller; ``None`` for internal calls.
+            source: Origin widget or subsystem that triggered this action
+                (e.g. ``"SCALPER"``, ``"ORDERPAD"``, ``"FLOW"``,
+                ``"WEBHOOK"``, ``"API"``).  ``None`` for untagged entries.
 
         Returns:
             The unique ``log_id`` assigned to this entry (8-character hex).
@@ -140,8 +157,8 @@ class ActivityLog:
         details_json = json.dumps(details, default=str, ensure_ascii=False)
 
         self._conn.execute(
-            "INSERT INTO activity_log VALUES (?, ?, ?, ?, ?, ?)",
-            [log_id, timestamp, action, user, ip, details_json],
+            "INSERT INTO activity_log VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [log_id, timestamp, action, user, ip, details_json, source],
         )
         return log_id
 
@@ -154,6 +171,7 @@ class ActivityLog:
         action: str | None = None,
         user: str | None = None,
         since: str | datetime | None = None,
+        source: str | None = None,
         limit: int = 100,
     ) -> list[ActivityEntry]:
         """Query the activity log with optional filters.
@@ -163,6 +181,7 @@ class ActivityLog:
             user: Filter by username.
             since: Lower-bound datetime (inclusive).  Accepts a
                 timezone-aware ``datetime`` object or an ISO-8601 string.
+            source: Filter by source origin (e.g. ``"SCALPER"``).
             limit: Maximum number of entries to return (most recent first).
 
         Returns:
@@ -181,10 +200,13 @@ class ActivityLog:
             since_dt: datetime = datetime.fromisoformat(since) if isinstance(since, str) else since
             clauses.append("timestamp >= ?")
             params.append(since_dt)
+        if source is not None:
+            clauses.append("source = ?")
+            params.append(source)
 
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = f"""
-            SELECT log_id, timestamp, action, user, ip, details
+            SELECT log_id, timestamp, action, user, ip, details, source
             FROM activity_log
             {where}
             ORDER BY timestamp DESC
@@ -206,6 +228,7 @@ class ActivityLog:
                     user=row[3],
                     ip=row[4],
                     details=json.loads(row[5]),
+                    source=row[6],
                 )
             )
         return result

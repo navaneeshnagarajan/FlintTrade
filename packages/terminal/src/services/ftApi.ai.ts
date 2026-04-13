@@ -167,3 +167,91 @@ export const getOpenClawAgents = () =>
 
 export const parseVoiceCommand = (text: string): Promise<VoiceCommandResult> =>
   post<VoiceCommandResult>("voice/parse", { text });
+
+// ---------------------------------------------------------------------------
+// Market Sentiment Dashboard (structured_sentiment.py — MarketSummary schema)
+// ---------------------------------------------------------------------------
+
+export type SentimentLabel =
+  | "STRONGLY_BULLISH"
+  | "BULLISH"
+  | "NEUTRAL"
+  | "BEARISH"
+  | "STRONGLY_BEARISH";
+
+export type IndexSignal = "BUY" | "SELL" | "HOLD" | "WATCH";
+
+export interface IndexSnapshot {
+  name: string;
+  value: number;
+  change_pct: number;
+  signal: IndexSignal;
+}
+
+export interface SectorOutlook {
+  name: string;
+  /** "Outperforming" | "Underperforming" | "Neutral" */
+  performance: string;
+  outlook: string;
+}
+
+export interface FiiDiiFlow {
+  fii_net: number;
+  dii_net: number;
+  interpretation: string;
+}
+
+export interface MarketSummary {
+  sentiment_score: number;
+  market_sentiment: SentimentLabel;
+  indices: IndexSnapshot[];
+  sectors: SectorOutlook[];
+  key_points: string[];
+  fii_dii_flow: FiiDiiFlow;
+  risks: string[];
+  opportunities: string[];
+}
+
+export const getMarketSentimentSummary = () =>
+  get<MarketSummary>("ai/sentiment/summary");
+
+// ---------------------------------------------------------------------------
+// Regime Detector (regime_detector.py — RegimeResult)
+// ---------------------------------------------------------------------------
+
+export type RegimeState =
+  | "TRENDING_UP"
+  | "TRENDING_DOWN"
+  | "RANGING"
+  | "VOLATILE_DIRECTIONAL"
+  | "VOLATILE_DIRECTIONLESS"
+  | "LOW_VOLATILITY";
+
+export interface RegimeResult {
+  state: RegimeState;
+  adx: number;
+  bb_width: number;
+  atr_current: number;
+  atr_slope: number;
+  plus_di: number;
+  minus_di: number;
+  close: number;
+  n_bars: number;
+}
+
+export const getRegimeDetector = (symbol: string) =>
+  get<RegimeResult>(`ai/regime?symbol=${encodeURIComponent(symbol)}`);
+
+// ---------------------------------------------------------------------------
+// Per-ticker Sentiment Table (visual_sentiment.py or LLM-derived)
+// ---------------------------------------------------------------------------
+
+export interface TickerSentiment {
+  ticker: string;
+  score: number; // -10 to +10
+  label: "positive" | "negative" | "neutral";
+  key_factor: string;
+}
+
+export const getTickerSentiments = () =>
+  get<{ tickers: TickerSentiment[] }>("ai/sentiment/tickers");

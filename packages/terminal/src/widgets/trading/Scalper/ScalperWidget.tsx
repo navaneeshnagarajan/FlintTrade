@@ -9,7 +9,9 @@ import {
   getExpiry,
   getQuotes,
 } from "@/services/api";
+import { getLotSize } from "@/services/ftApi";
 import useWebSocket from "@/hooks/useWebSocket";
+import { useVoiceAlert } from "@/hooks/useVoiceAlert";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { ScalperControls } from "./ScalperControls";
@@ -52,12 +54,31 @@ function ScalperWidget(_props: WidgetProps) {
   const [focused, setFocused] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const { announceOrder } = useVoiceAlert();
 
   const cfg = INDEX_CONFIG[symbol] ?? INDEX_CONFIG[DEFAULT_SYMBOL];
   const step = cfg.step;
-  const lotSize = cfg.lotSize;
   const spotExch = cfg.exchange;
   const optExch = cfg.optExchange;
+
+  // Dynamic lot size — fetch from backend, fall back to built-in config
+  const [dynamicLotSize, setDynamicLotSize] = useState<number | null>(null);
+  const lotSize = dynamicLotSize ?? cfg.lotSize;
+
+  useEffect(() => {
+    let cancelled = false;
+    setDynamicLotSize(null); // reset on symbol change
+    getLotSize(symbol, optExch)
+      .then((res) => {
+        if (!cancelled && res.lot_size > 0) {
+          setDynamicLotSize(res.lot_size);
+        }
+      })
+      .catch(() => {
+        // Fallback to built-in config silently
+      });
+    return () => { cancelled = true; };
+  }, [symbol, optExch]);
 
   const ceStrike = atmStrike != null ? atmStrike + ceOffset * step : null;
   const peStrike = atmStrike != null ? atmStrike + peOffset * step : null;
@@ -162,11 +183,12 @@ function ScalperWidget(_props: WidgetProps) {
       try {
         await placeOrder(params);
         showStatus(`${action} ${sym} filled`, "success");
+        announceOrder(action, sym, qty);
       } catch (err) {
         showStatus(err instanceof Error ? err.message : "Order failed", "error");
       }
     },
-    [lots, lotSize, orderType, product, showStatus],
+    [lots, lotSize, orderType, product, showStatus, announceOrder],
   );
 
   const handleOrder = useCallback(

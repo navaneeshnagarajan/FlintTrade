@@ -19,6 +19,7 @@ export { BenchmarkTab } from "./BenchmarkTab";
 export { BasketTab } from "./BasketTab";
 export { MutualFundTab } from "./MutualFundTab";
 export { EtfScreenerTab } from "./EtfScreenerTab";
+export { ShareholdingTab } from "./ShareholdingTab";
 export { SectorRotationTab } from "./SectorRotationTab";
 export { RiskReturnTab } from "./RiskReturnTab";
 export { CorrelationTab } from "./CorrelationTab";

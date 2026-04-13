@@ -35,6 +35,12 @@ export interface IndexConfig {
   step: number;
 }
 
+/**
+ * Default lot sizes used as fallback when the backend is unreachable.
+ * The Scalper widget fetches live lot sizes from
+ * ``/ft-api/v1/screener/lot-size`` on symbol change and overrides
+ * these values dynamically.
+ */
 export const INDEX_CONFIG: Record<string, IndexConfig> = {
   NIFTY:      { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 75,  step: 50  },
   BANKNIFTY:  { exchange: "NSE_INDEX", optExchange: "NFO",  lotSize: 30,  step: 100 },

@@ -34,12 +34,18 @@ export interface AIConversationState {
   messages: Message[];
   isStreaming: boolean;
   currentRoute: string;
+  /** Unique conversation ID for sharing. Generated on first message. */
+  conversationId: string | null;
 
   // Actions
   addMessage: (role: "user" | "assistant", content: string, route?: string) => void;
   setStreaming: (streaming: boolean) => void;
   setCurrentRoute: (route: string) => void;
   clearMessages: () => void;
+  /** Save the current conversation to localStorage keyed by its ID. */
+  saveConversation: () => string;
+  /** Load a conversation by ID from localStorage. Returns true on success. */
+  loadConversation: (id: string) => boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,16 +60,22 @@ function generateId(): string {
 // Store implementation
 // ---------------------------------------------------------------------------
 
+/** localStorage key prefix for saved conversations. */
+const SAVED_CHAT_PREFIX = "flinttrade:saved-chat:";
+
 const storeImpl: StateCreator<
   AIConversationState,
   [["zustand/persist", unknown]]
-> = (set) => ({
+> = (set, get) => ({
   messages: [],
   isStreaming: false,
   currentRoute: "/",
+  conversationId: null,
 
   addMessage: (role, content, route) =>
     set((state) => ({
+      // Generate a conversation ID on the first message if one does not exist.
+      conversationId: state.conversationId ?? crypto.randomUUID(),
       messages: [
         ...state.messages,
         {
@@ -80,7 +92,37 @@ const storeImpl: StateCreator<
 
   setCurrentRoute: (route) => set({ currentRoute: route }),
 
-  clearMessages: () => set({ messages: [], isStreaming: false }),
+  clearMessages: () => set({ messages: [], isStreaming: false, conversationId: null }),
+
+  saveConversation: () => {
+    const state = get();
+    const id = state.conversationId ?? crypto.randomUUID();
+    if (!state.conversationId) {
+      set({ conversationId: id });
+    }
+    try {
+      localStorage.setItem(
+        `${SAVED_CHAT_PREFIX}${id}`,
+        JSON.stringify({ messages: state.messages, savedAt: Date.now() }),
+      );
+    } catch {
+      // Storage full or unavailable — ignore silently.
+    }
+    return id;
+  },
+
+  loadConversation: (id: string) => {
+    try {
+      const raw = localStorage.getItem(`${SAVED_CHAT_PREFIX}${id}`);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as { messages: Message[] };
+      if (!Array.isArray(parsed.messages)) return false;
+      set({ messages: parsed.messages, conversationId: id, isStreaming: false });
+      return true;
+    } catch {
+      return false;
+    }
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -89,10 +131,11 @@ const storeImpl: StateCreator<
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:ai-conversation",
-  version: 1,
+  version: 2,
   partialize: (state) => ({
     messages: state.messages,
     currentRoute: state.currentRoute,
+    conversationId: state.conversationId,
   }),
 });
 
