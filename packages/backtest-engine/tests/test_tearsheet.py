@@ -249,6 +249,15 @@ class TestGenerateSnapshotNoQS:
 # ---------------------------------------------------------------------------
 
 
+_has_matplotlib = False
+try:
+    import matplotlib  # noqa: F401
+    _has_matplotlib = True
+except ImportError:
+    pass
+
+
+@pytest.mark.skipif(not _has_matplotlib, reason="matplotlib not installed")
 class TestGenerateSnapshotWithQS:
     @patch("tearsheet._QS_AVAILABLE", True)
     @patch("tearsheet.qs")
@@ -305,6 +314,7 @@ class TestCompareStrategiesNoQS:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _has_matplotlib, reason="matplotlib not installed")
 class TestCompareStrategiesWithQS:
     @patch("tearsheet._QS_AVAILABLE", True)
     @patch("tearsheet.qs")

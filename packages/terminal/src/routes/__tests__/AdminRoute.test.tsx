@@ -27,7 +27,13 @@ vi.stubGlobal("fetch", mockFetch);
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import AdminRoute from "../AdminRoute";
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const Wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -40,13 +46,13 @@ describe("AdminRoute", () => {
   });
 
   it("renders the admin dashboard heading", () => {
-    render(<AdminRoute />);
+    render(<AdminRoute />, { wrapper: Wrapper });
 
     expect(screen.getByText("Admin Dashboard")).toBeInTheDocument();
   });
 
   it("shows all navigation tabs", () => {
-    render(<AdminRoute />);
+    render(<AdminRoute />, { wrapper: Wrapper });
 
     expect(screen.getByRole("tab", { name: /packages/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /widgets/i })).toBeInTheDocument();
@@ -58,7 +64,7 @@ describe("AdminRoute", () => {
   });
 
   it("shows DEV badge", () => {
-    render(<AdminRoute />);
+    render(<AdminRoute />, { wrapper: Wrapper });
 
     expect(screen.getByText("DEV")).toBeInTheDocument();
   });

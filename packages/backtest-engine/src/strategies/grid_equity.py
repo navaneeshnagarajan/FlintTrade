@@ -153,13 +153,15 @@ class GridEquityStrategy(BaseStrategy, _BacktestStrategyMixin):
 
     def __init__(
         self,
-        config: GridConfig,
+        config: GridConfig | None = None,
         symbol: str = "",
         exchange: str = "NFO",
         product: str = "MIS",
         qty_per_grid: int = 1,
         **kwargs: Any,
     ) -> None:
+        if config is None:
+            config = GridConfig(lower_bound=100.0, upper_bound=200.0, n_grids=10)
         name = kwargs.pop("name", f"GridEquity_{symbol}_{config.lower_bound}_{config.upper_bound}")
         super().__init__(name=name, exchange=exchange, product=product)
         self._init_history()
