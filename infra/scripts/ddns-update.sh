@@ -10,7 +10,7 @@ USERNAME="${DDNS_USERNAME:-}"
 PASSWORD="${DDNS_PASSWORD:-}"
 
 CURRENT_IP=$(curl -s https://api.ipify.org)
-LAST_IP_FILE="/tmp/flinttrade_last_ip.txt"
+LAST_IP_FILE="${TMPDIR:-/tmp}/flinttrade_last_ip.txt"
 LAST_IP=$(cat "$LAST_IP_FILE" 2>/dev/null || echo "")
 
 if [ "$CURRENT_IP" != "$LAST_IP" ]; then

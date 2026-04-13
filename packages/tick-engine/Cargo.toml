@@ -1,16 +1,24 @@
 [package]
 name = "tick-engine"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "High-performance tick-level backtesting simulator for FlintTrade"
 license = "AGPL-3.0"
 
 [lib]
 name = "tick_engine"
-crate-type = ["cdylib"]
+# cdylib: Python extension module (maturin)
+# rlib: required for `cargo test` on Windows (avoids python3xx.dll resolution)
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-pyo3 = { version = "0.24", features = ["abi3-py312", "extension-module"] }
+pyo3 = { version = "0.24", features = ["abi3-py312"] }
+rayon = "1.10"
+thiserror = "2.0"
 
 [profile.release]
 opt-level = 3

@@ -1,4 +1,4 @@
-"""Tests for MemoryManager — lightweight in-process agent memory with compound scoring.
+"""Tests for MemoryManager and HierarchicalMemoryManager.
 
 All tests are purely in-process (no ChromaDB, no I/O).
 """
@@ -13,8 +13,10 @@ import pytest
 
 from packages.ai.src.memory_manager import (
     CATEGORY_IMPORTANCE,
+    HierarchicalMemoryManager,
     MemoryEntry,
     MemoryManager,
+    MemoryTier,
 )
 
 
@@ -318,3 +320,212 @@ class TestHelpers:
         assert mgr.size == 5
         mgr.clear()
         assert mgr.size == 0
+
+
+# ===========================================================================
+# HierarchicalMemoryManager (3-tier FinMem pattern)
+# ===========================================================================
+
+
+@pytest.fixture
+def hmgr() -> HierarchicalMemoryManager:
+    """Fresh HierarchicalMemoryManager for each test."""
+    return HierarchicalMemoryManager()
+
+
+class TestHierarchicalAdd:
+    def test_returns_string_id(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("NIFTY broke resistance", category="signal")
+        assert isinstance(entry_id, str)
+        assert len(entry_id) > 0
+
+    def test_starts_in_working_tier(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("test content", category="signal")
+        assert hmgr.get_tier(entry_id) == MemoryTier.WORKING
+
+    def test_size_increments(self, hmgr: HierarchicalMemoryManager) -> None:
+        assert hmgr.size == 0
+        hmgr.add("content 1", category="signal")
+        hmgr.add("content 2", category="trade")
+        assert hmgr.size == 2
+
+    def test_explicit_tier(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("long-term memory", category="trade", tier=MemoryTier.LONG_TERM)
+        assert hmgr.get_tier(entry_id) == MemoryTier.LONG_TERM
+
+    def test_category_default_importance(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("trade result", category="trade")
+        entry = hmgr.get_by_id(entry_id)
+        assert entry is not None
+        assert entry.importance == CATEGORY_IMPORTANCE["trade"]
+
+
+class TestHierarchicalTierSizes:
+    def test_initial_sizes_zero(self, hmgr: HierarchicalMemoryManager) -> None:
+        sizes = hmgr.tier_sizes()
+        assert sizes == {"working": 0, "medium": 0, "long_term": 0}
+
+    def test_add_reflects_in_working(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("entry", category="signal")
+        sizes = hmgr.tier_sizes()
+        assert sizes["working"] == 1
+        assert sizes["medium"] == 0
+        assert sizes["long_term"] == 0
+
+
+class TestHierarchicalRetrieve:
+    def test_empty_returns_empty(self, hmgr: HierarchicalMemoryManager) -> None:
+        assert hmgr.retrieve("NIFTY") == []
+
+    def test_returns_at_most_top_k(self, hmgr: HierarchicalMemoryManager) -> None:
+        for i in range(8):
+            hmgr.add(f"NIFTY signal {i}", category="signal")
+        results = hmgr.retrieve("NIFTY signal", top_k=3)
+        assert len(results) <= 3
+
+    def test_increments_access_count(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("NIFTY breakout confirmed", category="signal")
+        hmgr.retrieve("NIFTY breakout")
+        entry = hmgr.get_by_id(entry_id)
+        assert entry is not None
+        assert entry.access_count == 1
+
+    def test_query_alias_works(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("NIFTY data", category="signal")
+        results = hmgr.query("NIFTY", top_k=5)
+        assert len(results) >= 1
+
+    def test_searches_all_tiers(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("working entry NIFTY", category="signal", tier=MemoryTier.WORKING)
+        hmgr.add("medium entry NIFTY", category="signal", tier=MemoryTier.MEDIUM)
+        hmgr.add("long-term entry NIFTY", category="signal", tier=MemoryTier.LONG_TERM)
+        results = hmgr.query("NIFTY entry", top_k=10)
+        assert len(results) == 3
+
+
+class TestHierarchicalPromotion:
+    def test_promotes_working_to_medium(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("NIFTY signal promote", category="signal")
+        assert hmgr.get_tier(entry_id) == MemoryTier.WORKING
+
+        # Access 3 times to trigger promotion
+        for _ in range(3):
+            hmgr.retrieve("NIFTY signal promote")
+
+        assert hmgr.get_tier(entry_id) == MemoryTier.MEDIUM
+
+    def test_promotes_medium_to_long_term(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("NIFTY long memory", category="trade", tier=MemoryTier.MEDIUM)
+        assert hmgr.get_tier(entry_id) == MemoryTier.MEDIUM
+
+        # Access 5 times to trigger promotion
+        for _ in range(5):
+            hmgr.retrieve("NIFTY long memory")
+
+        assert hmgr.get_tier(entry_id) == MemoryTier.LONG_TERM
+
+    def test_working_to_medium_updates_tier_sizes(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("promote me NIFTY", category="signal")
+        assert hmgr.tier_sizes()["working"] == 1
+        assert hmgr.tier_sizes()["medium"] == 0
+
+        for _ in range(3):
+            hmgr.retrieve("promote me NIFTY")
+
+        assert hmgr.tier_sizes()["working"] == 0
+        assert hmgr.tier_sizes()["medium"] == 1
+
+    def test_no_promotion_below_threshold(self, hmgr: HierarchicalMemoryManager) -> None:
+        entry_id = hmgr.add("stay in working NIFTY", category="signal")
+
+        # Access only 2 times (below threshold of 3)
+        hmgr.retrieve("stay in working NIFTY")
+        hmgr.retrieve("stay in working NIFTY")
+
+        assert hmgr.get_tier(entry_id) == MemoryTier.WORKING
+
+
+class TestHierarchicalPrune:
+    def test_prune_empty_returns_zero(self, hmgr: HierarchicalMemoryManager) -> None:
+        assert hmgr.prune() == 0
+
+    def test_prune_respects_zero_threshold(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("entry", category="signal")
+        removed = hmgr.prune(min_score=0.0)
+        assert removed == 0
+
+    def test_prune_removes_stale(self) -> None:
+        hmgr = HierarchicalMemoryManager(
+            importance_weight=0.0,
+            recency_weight=1.0,
+            relevance_weight=0.0,
+        )
+        entry_id = hmgr.add("old stale signal", category="signal", importance=0.1)
+        # Backdate the entry so its recency decays below threshold
+        entry = hmgr.get_by_id(entry_id)
+        assert entry is not None
+        entry.timestamp = datetime.now(timezone.utc) - timedelta(hours=500)
+        removed = hmgr.prune(min_score=0.05)
+        assert removed >= 1
+
+
+class TestHierarchicalSummariseContext:
+    def test_empty_returns_empty_string(self, hmgr: HierarchicalMemoryManager) -> None:
+        assert hmgr.summarise_context("NIFTY") == ""
+
+    def test_includes_tier_label(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("NIFTY broke 22500 CE", category="signal")
+        context = hmgr.summarise_context("NIFTY")
+        assert "[signal|working]" in context
+
+    def test_starts_with_header(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("NIFTY data", category="signal")
+        context = hmgr.summarise_context("NIFTY")
+        assert context.startswith("[Memory Context]")
+
+
+class TestHierarchicalHelpers:
+    def test_get_by_id_across_tiers(self, hmgr: HierarchicalMemoryManager) -> None:
+        id1 = hmgr.add("working", category="signal", tier=MemoryTier.WORKING)
+        id2 = hmgr.add("medium", category="signal", tier=MemoryTier.MEDIUM)
+        id3 = hmgr.add("long", category="signal", tier=MemoryTier.LONG_TERM)
+        assert hmgr.get_by_id(id1) is not None
+        assert hmgr.get_by_id(id2) is not None
+        assert hmgr.get_by_id(id3) is not None
+
+    def test_get_by_id_unknown_returns_none(self, hmgr: HierarchicalMemoryManager) -> None:
+        assert hmgr.get_by_id("nonexistent-uuid") is None
+
+    def test_get_by_category_across_tiers(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("trade 1", category="trade", tier=MemoryTier.WORKING)
+        hmgr.add("trade 2", category="trade", tier=MemoryTier.LONG_TERM)
+        hmgr.add("signal 1", category="signal")
+        trades = hmgr.get_by_category("trade")
+        assert len(trades) == 2
+        assert all(e.category == "trade" for e in trades)
+
+    def test_clear_removes_all(self, hmgr: HierarchicalMemoryManager) -> None:
+        for i in range(5):
+            hmgr.add(f"entry {i}", category="signal")
+        assert hmgr.size == 5
+        hmgr.clear()
+        assert hmgr.size == 0
+        assert hmgr.tier_sizes() == {"working": 0, "medium": 0, "long_term": 0}
+
+    def test_get_tier_returns_none_for_unknown(self, hmgr: HierarchicalMemoryManager) -> None:
+        assert hmgr.get_tier("nonexistent") is None
+
+
+class TestHierarchicalBackwardCompatibility:
+    """Ensure HierarchicalMemoryManager can be used as a drop-in for MemoryManager."""
+
+    def test_add_retrieve_cycle(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("NIFTY bullish signal", category="signal", importance=0.8)
+        results = hmgr.retrieve("NIFTY bullish", top_k=1)
+        assert len(results) == 1
+        assert "NIFTY" in results[0].content
+
+    def test_summarise_context_works(self, hmgr: HierarchicalMemoryManager) -> None:
+        hmgr.add("test entry for context", category="analysis")
+        context = hmgr.summarise_context("test entry")
+        assert len(context) > 0

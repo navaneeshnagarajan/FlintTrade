@@ -121,6 +121,48 @@ describe("OrderFlowWidget", () => {
     expect(screen.getByText("No data")).toBeInTheDocument();
   });
 
+  it("shows 'Live' badge when is_live is true", () => {
+    const sampleData = {
+      buckets: [
+        {
+          time_label: "09:15",
+          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+          poc_price: 22500,
+          total_volume: 180,
+          delta: 20,
+        },
+      ],
+      symbol: "NIFTY",
+      exchange: "NFO",
+      interval: 300,
+      is_live: true,
+    };
+    mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(screen.getByText("Live")).toBeInTheDocument();
+  });
+
+  it("shows 'Sample' badge when is_live is false", () => {
+    const sampleData = {
+      buckets: [
+        {
+          time_label: "09:15",
+          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+          poc_price: 22500,
+          total_volume: 180,
+          delta: 20,
+        },
+      ],
+      symbol: "NIFTY",
+      exchange: "NFO",
+      interval: 300,
+      is_live: false,
+    };
+    mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(screen.getByText("Sample")).toBeInTheDocument();
+  });
+
   it("shows loading skeletons when loading with no data", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({ isLoading: true }));
     render(<OrderFlowWidget {...defaultProps} />);

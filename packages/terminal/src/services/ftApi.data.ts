@@ -1,5 +1,46 @@
 import { get, post } from "./ftApi.helpers";
 
+// ─── Order Flow ───────────────────────────────────────────────────────────────
+
+export interface OrderFlowCell {
+  buy_volume: number;
+  sell_volume: number;
+}
+
+export interface OrderFlowBucket {
+  time_label: string;
+  cells: Record<string, OrderFlowCell>;
+  poc_price: number;
+  total_volume: number;
+  delta: number;
+}
+
+export interface OrderFlowResponse {
+  buckets: OrderFlowBucket[];
+  symbol: string;
+  exchange: string;
+  interval: number;
+  /** True when data comes from the live OrderFlowAggregatorV2, false when synthetic. */
+  is_live: boolean;
+}
+
+export const getOrderFlow = (
+  symbol: string,
+  exchange = "NFO",
+  bins = 50,
+  interval = 300,
+) => {
+  const params = new URLSearchParams({
+    symbol,
+    exchange,
+    bins: String(bins),
+    interval: String(interval),
+  });
+  return get<OrderFlowResponse>(`data/orderflow?${params.toString()}`);
+};
+
+// ─── Trade Journal ────────────────────────────────────────────────────────────
+
 export interface JournalTrade {
   timestamp: string;
   symbol: string;

@@ -1,5 +1,19 @@
 # FlintTrade Makefile
 # Usage: make help
+#
+# ============================================================================
+# Windows compatibility
+# ============================================================================
+# The following targets work natively on Windows (via GNU Make + Python/npm):
+#   make test, make test-fast, make lint, make docker-up, make docker-down,
+#   make docker-build, make version, make help, make full-check
+#
+# The following targets require WSL2 or Docker on Windows (they use bash
+# scripts, systemd, or Linux-only tools):
+#   make start, make stop, make restart, make dev, make status, make health,
+#   make setup, make update, make clean, make install-docker, make install-native,
+#   make backup, make restore, make sync-check, make audit
+# ============================================================================
 
 SHELL := /usr/bin/env bash
 PYTHON := $(shell which python3 2>/dev/null || which python 2>/dev/null)
@@ -20,7 +34,11 @@ ifneq (,$(wildcard .env))
 endif
 
 OPENALGO_PORT ?= 5000
-OPENALGO_PID := /tmp/flinttrade-openalgo.pid
+ifeq ($(OS),Windows_NT)
+  OPENALGO_PID := $(TEMP)/flinttrade-openalgo.pid
+else
+  OPENALGO_PID := /tmp/flinttrade-openalgo.pid
+endif
 
 .PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore
 
@@ -78,17 +96,29 @@ dev: ## Start terminal dev server + OpenAlgo
 # ======================================================================
 
 test: ## Run all tests
+ifeq ($(OS),Windows_NT)
+	@$(PYTHON) -m pytest packages/core/tests/ packages/engine/tests/ packages/gateway/tests/ packages/screener/tests/ packages/data/tests/ packages/historical/tests/ packages/indicators/tests/ packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/integration/tests/ tests/ -v --tb=short --import-mode=importlib
+else
 	@$(PYTHON) -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib
+endif
 
 test-fast: ## Run tests, stop on first failure
+ifeq ($(OS),Windows_NT)
+	@$(PYTHON) -m pytest packages/core/tests/ packages/engine/tests/ packages/gateway/tests/ packages/screener/tests/ packages/data/tests/ packages/historical/tests/ packages/indicators/tests/ packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/integration/tests/ tests/ -x --tb=short --import-mode=importlib
+else
 	@$(PYTHON) -m pytest packages/*/tests/ tests/ -x --tb=short --import-mode=importlib
+endif
 
 lint: ## Run linter (ruff)
+ifeq ($(OS),Windows_NT)
+	@$(PYTHON) -m ruff check packages/ tests/ || echo ruff not installed. Install with: pip install ruff
+else
 	@if command -v ruff >/dev/null 2>&1; then \
 	  ruff check packages/ tests/; \
 	else \
 	  echo -e "$(YELLOW)ruff not installed. Install with: pip install ruff$(RESET)"; \
 	fi
+endif
 
 # ======================================================================
 # Maintenance

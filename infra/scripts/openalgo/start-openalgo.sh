@@ -4,7 +4,7 @@ set -euo pipefail
 
 FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 OPENALGO_DIR="$FLINTTRADE_DIR/infra/openalgo"
-PID_FILE="/tmp/flinttrade-openalgo.pid"
+PID_FILE="${TMPDIR:-/tmp}/flinttrade-openalgo.pid"
 
 # Source .env
 [ -f "$FLINTTRADE_DIR/.env" ] && { set -a; source "$FLINTTRADE_DIR/.env"; set +a; }
@@ -37,7 +37,7 @@ if command -v gunicorn >/dev/null 2>&1; then
         --daemon --pid "$PID_FILE" app:app
 else
     echo "gunicorn not found, starting with python directly"
-    nohup python3 app.py > /tmp/flinttrade-openalgo.log 2>&1 &
+    nohup python3 app.py > "${TMPDIR:-/tmp}/flinttrade-openalgo.log" 2>&1 &
     echo $! > "$PID_FILE"
 fi
 
@@ -53,6 +53,6 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     fi
 else
     echo "✗ OpenAlgo failed to start"
-    [ -f /tmp/flinttrade-openalgo.log ] && tail -10 /tmp/flinttrade-openalgo.log
+    [ -f "${TMPDIR:-/tmp}/flinttrade-openalgo.log" ] && tail -10 "${TMPDIR:-/tmp}/flinttrade-openalgo.log"
     exit 1
 fi

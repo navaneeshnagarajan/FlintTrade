@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 import type { IDockviewPanelProps } from "dockview-react";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
+// useOrderFlow hits GET /ft-api/api/v1/data/orderflow and includes is_live flag.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -465,12 +466,17 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
     [intervalLabel],
   );
 
-  // Fetch footprint data from backend (interval in seconds for the API)
+  // Fetch footprint data from backend.
+  // Exchange is NFO (where NIFTY/BANKNIFTY futures/options live).
+  // Bins = 20 matches the backend's default bucket count.
   const { data, isLoading, isError, error } = useOrderFlow(
     symbol,
-    "NSE",
+    "NFO",
     intervalMinutes * 60,
+    20,
   );
+
+  const isLive = data?.is_live ?? false;
 
   const columns = useMemo(
     () => (data?.buckets ? bucketsToColumns(data.buckets) : []),
@@ -663,14 +669,24 @@ function OrderFlowWidget(_props: IDockviewPanelProps) {
             Error
           </Badge>
         )}
-        {!isLoading && !isError && columns.length > 0 && (
+        {!isLoading && !isError && columns.length > 0 && isLive && (
+          <Badge
+            variant="outline"
+            className="text-xs border-emerald-500/40 text-emerald-400 bg-emerald-500/10 h-5 px-1.5"
+            aria-label="Live order flow data from the aggregator"
+          >
+            <span className="size-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse inline-block" aria-hidden="true" />
+            Live
+          </Badge>
+        )}
+        {!isLoading && !isError && columns.length > 0 && !isLive && (
           <Badge
             variant="outline"
             className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
-            aria-label="Displaying synthetic data from backend — live tick data requires WebSocket"
+            aria-label="Sample data — live tick aggregator not yet active"
           >
             <AlertCircle className="size-2.5 mr-1" aria-hidden="true" />
-            Synthetic
+            Sample
           </Badge>
         )}
       </div>

@@ -239,6 +239,41 @@ export interface LotSizeResponse {
  * Falls back to the built-in table on the server side if live data
  * is unavailable.
  */
+// ─── Sector Constituents ─────────────────────────────────────────────────────
+
+export interface SectorConstituentRRG {
+  symbol: string;
+  name: string;
+  weight: number;
+  tail: RRGTailPoint[];
+  current_quadrant: RRGQuadrant;
+}
+
+export interface SectorConstituentsResponse {
+  sector: string;
+  benchmark: string;
+  is_sample_data: boolean;
+  constituents: SectorConstituentRRG[];
+}
+
+/**
+ * Fetch the individual stock RRG positions within a sector.
+ * Used for the drill-down view in the Portfolio RRG tab.
+ */
+export const getSectorConstituents = (
+  sector: string,
+  tailLength?: number,
+): Promise<SectorConstituentsResponse> => {
+  const params = new URLSearchParams();
+  params.set("sector", sector);
+  if (tailLength !== undefined) params.set("tail_length", String(tailLength));
+  return get<SectorConstituentsResponse>(
+    "screener/sector-constituents?" + params.toString(),
+  );
+};
+
+// ─── Lot Size ────────────────────────────────────────────────────────────────
+
 export const getLotSize = (
   symbol: string,
   exchange: string = "NFO",

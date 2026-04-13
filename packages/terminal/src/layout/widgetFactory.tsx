@@ -129,6 +129,10 @@ const lazyWidgets = {
   sectorperformance: lazy(() => import("@/widgets/analysis/SectorPerformance/SectorPerformanceWidget")),
   tickspeed: lazy(() => import("@/widgets/utility/TickSpeed/TickSpeedWidget")),
   orderladder: lazy(() => import("@/widgets/trading/OrderLadder/OrderLadderWidget")),
+
+  // Wave 35 — order flow visualisation
+  footprint: lazy(() => import("@/widgets/analysis/Footprint/FootprintWidget")),
+  domheatmap: lazy(() => import("@/widgets/analysis/DOMHeatmap/DOMHeatmapWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -197,6 +201,8 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
   { id: "ivskew", name: "IV Skew", icon: "Activity", category: "Analysis", description: "Skew chart showing the difference in IV between OTM puts and calls" },
   { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis", description: "Bar chart of intraday performance ranked by sector" },
+  { id: "footprint", name: "Footprint Chart", icon: "BarChart2", category: "Analysis", description: "Footprint chart with per-cell buy/sell volume, delta, POC, and cumulative delta strip" },
+  { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Historical depth-of-market heatmap showing where large orders sit and are pulled over time" },
 
   // Utility
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility", description: "Customisable instrument watchlist with live LTP and change data" },

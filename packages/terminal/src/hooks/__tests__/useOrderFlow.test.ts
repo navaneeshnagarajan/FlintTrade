@@ -2,7 +2,9 @@
  * useOrderFlow tests
  *
  * Tests the TanStack Query hook for fetching order flow footprint data.
- * The fetch helper is internal to the module, so we mock the global fetch.
+ * The hook now delegates to getOrderFlow() from ftApi.data which uses
+ * ftApi.helpers.get(). We mock the global fetch and verify that the
+ * correct URL is called and that data / errors flow correctly.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -68,7 +70,9 @@ describe("useOrderFlow", () => {
         },
       ],
       symbol: "NIFTY",
-      interval: 60,
+      exchange: "NFO",
+      interval: 300,
+      is_live: false,
     };
 
     mockFetch.mockResolvedValue({
@@ -76,7 +80,7 @@ describe("useOrderFlow", () => {
       json: () => Promise.resolve({ status: "success", data: mockData }),
     });
 
-    const { result } = renderHook(() => useOrderFlow("NIFTY", "NSE", 60), {
+    const { result } = renderHook(() => useOrderFlow("NIFTY"), {
       wrapper: createWrapper(),
     });
 
@@ -84,10 +88,20 @@ describe("useOrderFlow", () => {
     expect(result.current.data).toEqual(mockData);
   });
 
-  it("uses default exchange NSE and interval 60", async () => {
+  it("uses default exchange NFO, interval 300, and bins 50", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ status: "success", data: { buckets: [], symbol: "NIFTY", interval: 60 } }),
+      json: () =>
+        Promise.resolve({
+          status: "success",
+          data: {
+            buckets: [],
+            symbol: "NIFTY",
+            exchange: "NFO",
+            interval: 300,
+            is_live: false,
+          },
+        }),
     });
 
     renderHook(() => useOrderFlow("NIFTY"), { wrapper: createWrapper() });
@@ -95,11 +109,41 @@ describe("useOrderFlow", () => {
     await waitFor(() => expect(mockFetch).toHaveBeenCalled());
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).toContain("symbol=NIFTY");
+    expect(url).toContain("exchange=NFO");
+    expect(url).toContain("interval=300");
+    expect(url).toContain("bins=50");
+  });
+
+  it("uses provided exchange and interval when overridden", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          status: "success",
+          data: {
+            buckets: [],
+            symbol: "BANKNIFTY",
+            exchange: "NSE",
+            interval: 60,
+            is_live: false,
+          },
+        }),
+    });
+
+    renderHook(() => useOrderFlow("BANKNIFTY", "NSE", 60, 20), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("symbol=BANKNIFTY");
     expect(url).toContain("exchange=NSE");
     expect(url).toContain("interval=60");
+    expect(url).toContain("bins=20");
   });
 
   it("throws on HTTP error", async () => {
+    // ftApi.helpers.get() throws "FT API endpoint: HTTP <status>" on !ok
     mockFetch.mockResolvedValue({
       ok: false,
       status: 500,
@@ -111,13 +155,14 @@ describe("useOrderFlow", () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toContain("Internal error");
+    expect(result.current.error?.message).toContain("HTTP 500");
   });
 
-  it("throws on API error status", async () => {
+  it("throws on API error status in JSON body", async () => {
+    // parseResponse in ftApi.helpers.ts throws when status === "error"
     mockFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ status: "error", message: "No data" }),
+      json: () => Promise.resolve({ status: "error", message: "No data available" }),
     });
 
     const { result } = renderHook(() => useOrderFlow("NIFTY"), {
@@ -125,6 +170,6 @@ describe("useOrderFlow", () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error?.message).toContain("No data");
+    expect(result.current.error?.message).toContain("No data available");
   });
 });

@@ -3,7 +3,7 @@
 set -u
 
 FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
-PID_FILE="/tmp/flinttrade-openalgo.pid"
+PID_FILE="${TMPDIR:-/tmp}/flinttrade-openalgo.pid"
 
 # Source .env
 [ -f "$FLINTTRADE_DIR/.env" ] && { set -a; source "$FLINTTRADE_DIR/.env"; set +a; }

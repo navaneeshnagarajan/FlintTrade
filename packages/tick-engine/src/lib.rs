@@ -1,8 +1,14 @@
 //! FlintTrade tick-engine — high-performance tick-level backtesting simulator.
 //!
-//! Exposed to Python via PyO3. Simulates order execution bar-by-bar with
-//! configurable slippage, commission, and lot size. Includes a built-in
-//! EMA crossover strategy for quick experimentation.
+//! Exposed to Python via PyO3. Provides:
+//! - Bar-by-bar simulation with configurable slippage, commission, lot size
+//! - Built-in EMA crossover strategy
+//! - Pairs trading with OLS cointegration signal
+//! - Options strategy (straddle / strangle) with Black-Scholes Greeks
+//! - Multi-leg spread backtesting with parallel batch execution (Rayon)
+//! - Enhanced metrics: Sharpe, Sortino, Omega, SQN, Payoff, Recovery Factor
+//! - Indian market session tracker (NSE/MCX/CDS)
+//! - Monte Carlo GBM simulation with Cholesky correlated paths
 //!
 //! # Example (Python)
 //! ```python
@@ -12,15 +18,48 @@
 //! bars = [[t, o, h, l, c, v], ...]   # [timestamp, open, high, low, close, volume]
 //! result = sim.run_ema_crossover(bars, fast_period=9, slow_period=21)
 //! print(result)
+//!
+//! from tick_engine import SessionTracker, SessionConfig
+//! tracker = SessionTracker(SessionConfig.nse_equity())
+//!
+//! from tick_engine import simulate, confidence_intervals
+//! paths = simulate(returns, n_paths=1000, n_steps=252)
+//! ci = confidence_intervals(paths, [0.05, 0.50, 0.95])
 //! ```
+
+// Suppress warning from PyO3 macro expansion (fixed in newer PyO3 versions)
+#![allow(non_local_definitions)]
 
 use pyo3::prelude::*;
 
 // ---------------------------------------------------------------------------
-// Data types
+// Sub-modules
 // ---------------------------------------------------------------------------
 
-/// A single OHLCV bar.
+pub mod errors;
+pub mod metrics;
+pub mod monte_carlo;
+pub mod session;
+pub mod strategies;
+pub mod types;
+
+// Convenience re-exports
+pub use session::{SessionConfig, SessionState, SessionTracker};
+pub use strategies::{
+    options::{black_scholes_greeks, Greeks, OptionStrategyType, OptionsConfig, OptionsStrategy},
+    pairs::PairsStrategy,
+    spreads::{
+        iron_condor_config, run_batch, run_spreads_batch, straddle_config, strangle_config,
+        LegConfig, OptionType, SpreadBacktest, SpreadConfig,
+    },
+};
+pub use types::{BacktestResult, Signal, Tick};
+
+// ---------------------------------------------------------------------------
+// Legacy types (kept for backward compatibility with v0.1 API)
+// ---------------------------------------------------------------------------
+
+/// A single OHLCV bar (legacy v0.1 type — use `Tick` for new code).
 #[pyclass(get_all, set_all)]
 #[derive(Clone, Debug)]
 pub struct Bar {
@@ -71,14 +110,13 @@ pub struct Trade {
 impl Trade {
     fn __repr__(&self) -> String {
         let dir = if self.direction > 0 { "LONG" } else { "SHORT" };
-        format!(
-            "Trade({} entry={:.2} exit={:.2} pnl={:.2})",
-            dir, self.entry_price, self.exit_price, self.pnl
-        )
+        format!("Trade({} entry={:.2} exit={:.2} pnl={:.2})", dir, self.entry_price, self.exit_price, self.pnl)
     }
 }
 
-/// Full simulation output.
+/// Full simulation output (legacy v0.1 type).
+///
+/// For new code use `BacktestResult` from `types.rs`.
 #[pyclass(get_all)]
 pub struct SimulationResult {
     /// Net P&L = final_capital - initial_capital.
@@ -112,7 +150,7 @@ impl SimulationResult {
 }
 
 // ---------------------------------------------------------------------------
-// TickSimulator
+// TickSimulator (legacy v0.1 entry point, fully retained)
 // ---------------------------------------------------------------------------
 
 /// Bar-by-bar backtesting simulator written in Rust.
@@ -176,7 +214,6 @@ impl TickSimulator {
         let mut equity_curve: Vec<f64> = Vec::with_capacity(n + 1);
         equity_curve.push(capital);
 
-        // Position state
         let mut in_trade = false;
         let mut entry_price = 0.0f64;
         let mut entry_time = 0i64;
@@ -188,15 +225,14 @@ impl TickSimulator {
         for i in 0..n - 1 {
             let signal = signals[i];
             let next_bar = &bars[i + 1];
-            let next_open = next_bar[1]; // open
-            let next_time = next_bar[0] as i64; // timestamp
+            let next_open = next_bar[1];
+            let next_time = next_bar[0] as i64;
 
             if !in_trade && signal != 0 {
-                // Enter new position (long for +1, short for -1)
                 let fill_price = if signal > 0 {
-                    next_open * (1.0 + self.slippage_pct) // buy at ask
+                    next_open * (1.0 + self.slippage_pct)
                 } else {
-                    next_open * (1.0 - self.slippage_pct) // sell at bid
+                    next_open * (1.0 - self.slippage_pct)
                 };
                 capital -= self.commission;
                 entry_price = fill_price;
@@ -204,84 +240,51 @@ impl TickSimulator {
                 direction = signal;
                 in_trade = true;
             } else if in_trade && signal != 0 && signal != direction {
-                // Close the current position (opposite signal = exit only, no reversal)
                 let exit_price = if direction > 0 {
-                    next_open * (1.0 - self.slippage_pct) // long exit: sell at bid
+                    next_open * (1.0 - self.slippage_pct)
                 } else {
-                    next_open * (1.0 + self.slippage_pct) // short exit: buy at ask
+                    next_open * (1.0 + self.slippage_pct)
                 };
                 capital -= self.commission;
                 let pnl = (exit_price - entry_price) * (direction as f64) * self.lot_size;
                 capital += pnl;
 
                 let prev_equity = *equity_curve.last().unwrap_or(&self.initial_capital);
-                let ret = if prev_equity > 0.0 {
-                    (capital - prev_equity) / prev_equity
-                } else {
-                    0.0
-                };
+                let ret = if prev_equity > 0.0 { (capital - prev_equity) / prev_equity } else { 0.0 };
                 trade_returns.push(ret);
 
-                trades.push(Trade {
-                    entry_time,
-                    exit_time: next_time,
-                    entry_price,
-                    exit_price,
-                    qty: self.lot_size,
-                    pnl,
-                    direction,
-                });
+                trades.push(Trade { entry_time, exit_time: next_time, entry_price, exit_price, qty: self.lot_size, pnl, direction });
                 in_trade = false;
                 direction = 0;
             }
             equity_curve.push(capital);
         }
 
-        // Force-close open position at last bar's close
         if in_trade {
             let last_bar = &bars[n - 1];
-            let exit_price = last_bar[4]; // close
+            let exit_price = last_bar[4];
             let exit_time = last_bar[0] as i64;
             capital -= self.commission;
             let pnl = (exit_price - entry_price) * (direction as f64) * self.lot_size;
             capital += pnl;
 
             let prev_equity = *equity_curve.last().unwrap_or(&self.initial_capital);
-            let ret = if prev_equity > 0.0 {
-                (capital - prev_equity) / prev_equity
-            } else {
-                0.0
-            };
+            let ret = if prev_equity > 0.0 { (capital - prev_equity) / prev_equity } else { 0.0 };
             trade_returns.push(ret);
 
-            trades.push(Trade {
-                entry_time,
-                exit_time,
-                entry_price,
-                exit_price,
-                qty: self.lot_size,
-                pnl,
-                direction,
-            });
+            trades.push(Trade { entry_time, exit_time, entry_price, exit_price, qty: self.lot_size, pnl, direction });
         }
         equity_curve.push(capital);
 
-        // Compute aggregate metrics
         let total_pnl = capital - self.initial_capital;
         let total_trades = trades.len();
         let win_count = trades.iter().filter(|t| t.pnl > 0.0).count();
-        let win_rate = if total_trades > 0 {
-            win_count as f64 / total_trades as f64
-        } else {
-            0.0
-        };
-        let sharpe_ratio = compute_sharpe(&trade_returns);
-        let max_drawdown = compute_max_drawdown(&equity_curve);
+        let win_rate = if total_trades > 0 { win_count as f64 / total_trades as f64 } else { 0.0 };
 
         Ok(SimulationResult {
             total_pnl,
-            sharpe_ratio,
-            max_drawdown,
+            sharpe_ratio: metrics::sharpe_ratio(&trade_returns),
+            max_drawdown: metrics::max_drawdown_frac(&equity_curve),
             win_rate,
             total_trades,
             trades,
@@ -290,18 +293,6 @@ impl TickSimulator {
     }
 
     /// Run a built-in EMA crossover strategy.
-    ///
-    /// Generates signals when fast EMA crosses slow EMA:
-    ///   fast > slow (golden cross) → BUY signal
-    ///   fast < slow (death cross)  → SELL signal
-    ///
-    /// Args:
-    ///     bars: List of [timestamp, open, high, low, close, volume] sub-lists.
-    ///     fast_period: Fast EMA period (default 9).
-    ///     slow_period: Slow EMA period (default 21).
-    ///
-    /// Returns:
-    ///     SimulationResult from executing the EMA crossover signals.
     #[pyo3(signature = (bars, fast_period=9, slow_period=21))]
     fn run_ema_crossover(
         &self,
@@ -335,10 +326,9 @@ impl TickSimulator {
 }
 
 // ---------------------------------------------------------------------------
-// Pure Rust helpers (not exposed to Python)
+// Pure Rust helpers
 // ---------------------------------------------------------------------------
 
-/// Compute EMA series. Returns None for insufficient data.
 fn compute_ema(values: &[f64], period: usize) -> Vec<Option<f64>> {
     let mut result = vec![None; values.len()];
     if values.is_empty() || period == 0 || values.len() < period {
@@ -356,7 +346,6 @@ fn compute_ema(values: &[f64], period: usize) -> Vec<Option<f64>> {
     result
 }
 
-/// Generate EMA crossover signals for a bar slice.
 fn ema_crossover_signals(bars: &[[f64; 6]], fast: usize, slow: usize) -> Vec<i8> {
     let closes: Vec<f64> = bars.iter().map(|b| b[4]).collect();
     let fast_ema = compute_ema(&closes, fast);
@@ -367,9 +356,9 @@ fn ema_crossover_signals(bars: &[[f64; 6]], fast: usize, slow: usize) -> Vec<i8>
         match (fast_ema[i], slow_ema[i], fast_ema[i - 1], slow_ema[i - 1]) {
             (Some(f), Some(s), Some(pf), Some(ps)) => {
                 if f > s && pf <= ps {
-                    signals[i] = 1; // golden cross
+                    signals[i] = 1;
                 } else if f < s && pf >= ps {
-                    signals[i] = -1; // death cross
+                    signals[i] = -1;
                 }
             }
             _ => {}
@@ -378,40 +367,65 @@ fn ema_crossover_signals(bars: &[[f64; 6]], fast: usize, slow: usize) -> Vec<i8>
     signals
 }
 
-/// Annualised Sharpe ratio (252-day basis) from per-trade returns.
-fn compute_sharpe(returns: &[f64]) -> f64 {
-    if returns.len() < 2 {
-        return 0.0;
-    }
-    let n = returns.len() as f64;
-    let mean = returns.iter().sum::<f64>() / n;
-    let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
-    let std_dev = variance.sqrt();
-    if std_dev < 1e-10 {
-        return 0.0;
-    }
-    mean / std_dev * (252.0_f64).sqrt()
+// ---------------------------------------------------------------------------
+// Monte Carlo Python wrappers
+// ---------------------------------------------------------------------------
+
+/// Simulate GBM paths for a single asset.
+///
+/// Args:
+///     historical_returns: List of fractional per-period returns.
+///     n_paths: Number of paths.
+///     n_steps: Steps per path.
+///
+/// Returns:
+///     List of lists, each inner list is one simulated price path.
+#[pyfunction]
+#[pyo3(signature = (historical_returns, n_paths, n_steps))]
+pub fn simulate(
+    historical_returns: Vec<f64>,
+    n_paths: usize,
+    n_steps: usize,
+) -> PyResult<Vec<Vec<f64>>> {
+    monte_carlo::simulate(&historical_returns, n_paths, n_steps).map_err(pyo3::PyErr::from)
 }
 
-/// Maximum peak-to-trough drawdown as a fraction (0.0–1.0).
-fn compute_max_drawdown(equity: &[f64]) -> f64 {
-    if equity.is_empty() {
-        return 0.0;
-    }
-    let mut peak = equity[0];
-    let mut max_dd = 0.0f64;
-    for &e in equity {
-        if e > peak {
-            peak = e;
-        }
-        if peak > 0.0 {
-            let dd = (peak - e) / peak;
-            if dd > max_dd {
-                max_dd = dd;
-            }
-        }
-    }
-    max_dd
+/// Compute confidence-interval terminal values from simulated paths.
+///
+/// Args:
+///     paths: Output from `simulate()`.
+///     levels: Quantile levels, e.g. [0.05, 0.50, 0.95].
+///
+/// Returns:
+///     Dict mapping "p{pct}" keys to terminal-value quantiles.
+#[pyfunction]
+pub fn confidence_intervals(
+    paths: Vec<Vec<f64>>,
+    levels: Vec<f64>,
+) -> std::collections::HashMap<String, f64> {
+    monte_carlo::confidence_intervals(&paths, &levels)
+}
+
+/// Simulate correlated multi-asset GBM paths using Cholesky decomposition.
+///
+/// Args:
+///     asset_returns: One list per asset of historical fractional returns.
+///     correlation_matrix: Flat row-major n×n correlation matrix.
+///     n_paths: Number of paths.
+///     n_steps: Steps per path.
+///
+/// Returns:
+///     List of length n_assets, each containing n_paths paths of n_steps values.
+#[pyfunction]
+#[pyo3(signature = (asset_returns, correlation_matrix, n_paths, n_steps))]
+pub fn simulate_correlated(
+    asset_returns: Vec<Vec<f64>>,
+    correlation_matrix: Vec<f64>,
+    n_paths: usize,
+    n_steps: usize,
+) -> PyResult<Vec<Vec<Vec<f64>>>> {
+    monte_carlo::simulate_correlated(&asset_returns, &correlation_matrix, n_paths, n_steps)
+        .map_err(pyo3::PyErr::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -420,9 +434,51 @@ fn compute_max_drawdown(equity: &[f64]) -> f64 {
 
 #[pymodule]
 fn tick_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // ---- Legacy v0.1 classes (backward compatible) ----
     m.add_class::<Bar>()?;
     m.add_class::<Trade>()?;
     m.add_class::<SimulationResult>()?;
     m.add_class::<TickSimulator>()?;
+
+    // ---- New shared types ----
+    m.add_class::<Tick>()?;
+    m.add_class::<Signal>()?;
+    m.add_class::<BacktestResult>()?;
+
+    // ---- Session tracker ----
+    m.add_class::<SessionConfig>()?;
+    m.add_class::<SessionState>()?;
+    m.add_class::<SessionTracker>()?;
+
+    // ---- Options strategy ----
+    m.add_class::<OptionStrategyType>()?;
+    m.add_class::<OptionsConfig>()?;
+    m.add_class::<OptionsStrategy>()?;
+    m.add_class::<Greeks>()?;
+    m.add_function(wrap_pyfunction!(black_scholes_greeks, m)?)?;
+
+    // ---- Pairs strategy ----
+    m.add_class::<PairsStrategy>()?;
+
+    // ---- Spread / multi-leg strategy ----
+    m.add_class::<OptionType>()?;
+    m.add_class::<LegConfig>()?;
+    m.add_class::<SpreadConfig>()?;
+    m.add_class::<SpreadBacktest>()?;
+
+    // Convenience constructors
+    m.add_function(wrap_pyfunction!(straddle_config, m)?)?;
+    m.add_function(wrap_pyfunction!(strangle_config, m)?)?;
+    m.add_function(wrap_pyfunction!(iron_condor_config, m)?)?;
+
+    // Parallel batch functions
+    m.add_function(wrap_pyfunction!(run_spreads_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(run_batch, m)?)?;
+
+    // ---- Monte Carlo ----
+    m.add_function(wrap_pyfunction!(simulate, m)?)?;
+    m.add_function(wrap_pyfunction!(confidence_intervals, m)?)?;
+    m.add_function(wrap_pyfunction!(simulate_correlated, m)?)?;
+
     Ok(())
 }

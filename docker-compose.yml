@@ -15,6 +15,11 @@
 #   Monitoring stack -> Uptime Kuma, Glitchtip, VictoriaLogs, Netdata
 #
 # All internal services bind to 127.0.0.1 only. Nginx is the sole entry point.
+#
+# Multi-arch builds:
+#   All base images (python:3.12-slim, node:22-alpine, nginx:alpine, etc.) support
+#   linux/amd64 and linux/arm64. To build the FlintTrade image for multiple platforms:
+#     docker buildx build --platform linux/amd64,linux/arm64 -t flinttrade:latest .
 # =============================================================================
 
 services:
@@ -24,6 +29,7 @@ services:
   # ---------------------------------------------------------------------------
   openalgo:
     image: python:3.12-slim
+    platform: linux/amd64
     container_name: flinttrade-openalgo
     working_dir: /app
     volumes:
@@ -64,6 +70,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: flinttrade:latest
+    platform: linux/amd64
     container_name: flinttrade-backend
     volumes:
       - flinttrade_data:/data/flinttrade
@@ -113,6 +120,7 @@ services:
   # ---------------------------------------------------------------------------
   terminal:
     image: node:22-alpine
+    platform: linux/amd64
     container_name: flinttrade-terminal-builder
     working_dir: /app
     volumes:
@@ -136,6 +144,7 @@ services:
   # ---------------------------------------------------------------------------
   nginx:
     image: nginx:alpine
+    platform: linux/amd64
     container_name: flinttrade-nginx
     ports:
       - "80:80"
@@ -171,6 +180,7 @@ services:
   # ---------------------------------------------------------------------------
   uptime-kuma:
     image: louislam/uptime-kuma:1
+    platform: linux/amd64
     container_name: flinttrade-uptime-kuma
     ports:
       - "127.0.0.1:3001:3001"
@@ -192,6 +202,7 @@ services:
   # ---------------------------------------------------------------------------
   glitchtip-redis:
     image: redis:7-alpine
+    platform: linux/amd64
     container_name: flinttrade-glitchtip-redis
     restart: unless-stopped
     logging:
@@ -204,6 +215,7 @@ services:
 
   glitchtip:
     image: glitchtip/glitchtip:latest
+    platform: linux/amd64
     container_name: flinttrade-glitchtip
     ports:
       - "127.0.0.1:8000:8000"
@@ -227,6 +239,7 @@ services:
 
   glitchtip-worker:
     image: glitchtip/glitchtip:latest
+    platform: linux/amd64
     container_name: flinttrade-glitchtip-worker
     command: bin/run-celery-with-beat.sh
     depends_on:
@@ -249,6 +262,7 @@ services:
 
   glitchtip-db:
     image: postgres:16-alpine
+    platform: linux/amd64
     container_name: flinttrade-glitchtip-db
     volumes:
       - glitchtip_pg:/var/lib/postgresql/data
@@ -276,6 +290,7 @@ services:
   # ---------------------------------------------------------------------------
   victorialogs:
     image: victoriametrics/victoria-logs:latest
+    platform: linux/amd64
     container_name: flinttrade-victorialogs
     ports:
       - "127.0.0.1:9090:9090"
@@ -299,6 +314,7 @@ services:
   # ---------------------------------------------------------------------------
   netdata:
     image: netdata/netdata:latest
+    platform: linux/amd64
     container_name: flinttrade-netdata
     ports:
       - "127.0.0.1:19999:19999"

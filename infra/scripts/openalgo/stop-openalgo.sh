@@ -2,7 +2,7 @@
 # Stop OpenAlgo gracefully
 set -euo pipefail
 
-PID_FILE="/tmp/flinttrade-openalgo.pid"
+PID_FILE="${TMPDIR:-/tmp}/flinttrade-openalgo.pid"
 
 if [ ! -f "$PID_FILE" ]; then
     echo "OpenAlgo is not running (no PID file)"
