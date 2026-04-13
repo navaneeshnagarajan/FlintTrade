@@ -44,6 +44,15 @@ from packages.ai.src.signals import (
     generate_labels,
 )
 
+# Re-export calculate_di so callers can import it from this module directly.
+__all__ = [
+    "ModelCandidate",
+    "EnsembleResult",
+    "EnsembleSelector",
+    "calculate_di",
+    "compute_dissimilarity_index",
+]
+
 logger = logging.getLogger("flinttrade.ai.ensemble_selector")
 
 
@@ -97,16 +106,183 @@ class EnsembleResult:
 # ---------------------------------------------------------------------------
 
 
+def _pca_reduce(
+    matrix: list[list[float]],
+    n_components: int,
+) -> list[list[float]]:
+    """Reduce a feature matrix to ``n_components`` dimensions via PCA.
+
+    Pure-Python implementation that avoids a NumPy/sklearn dependency by
+    using the standard library's ``statistics`` module.  Centred data is
+    projected onto the top ``n_components`` principal components derived
+    from the covariance matrix via power iteration.
+
+    Falls back to the original matrix when ``n_components`` ≥ the number
+    of features, or when fewer than 2 samples are present.
+
+    Args:
+        matrix: 2D list ``[n_samples x n_features]``.
+        n_components: Target dimensionality.
+
+    Returns:
+        Reduced matrix ``[n_samples x n_components]``.
+    """
+    n_samples = len(matrix)
+    if n_samples < 2 or not matrix[0]:
+        return matrix
+
+    n_features = len(matrix[0])
+    if n_components >= n_features:
+        return matrix
+
+    # Centre each feature
+    col_means = [
+        sum(matrix[r][c] for r in range(n_samples)) / n_samples
+        for c in range(n_features)
+    ]
+    centred = [
+        [matrix[r][c] - col_means[c] for c in range(n_features)]
+        for r in range(n_samples)
+    ]
+
+    def _mat_mul(A: list[list[float]], B: list[list[float]]) -> list[list[float]]:
+        rows_a, cols_a = len(A), len(A[0])
+        cols_b = len(B[0])
+        result = [[0.0] * cols_b for _ in range(rows_a)]
+        for i in range(rows_a):
+            for k in range(cols_a):
+                if A[i][k] == 0.0:
+                    continue
+                for j in range(cols_b):
+                    result[i][j] += A[i][k] * B[k][j]
+        return result
+
+    def _transpose(M: list[list[float]]) -> list[list[float]]:
+        if not M:
+            return M
+        rows, cols = len(M), len(M[0])
+        return [[M[r][c] for r in range(rows)] for c in range(cols)]
+
+    def _norm(v: list[float]) -> float:
+        return math.sqrt(sum(x * x for x in v))
+
+    # Covariance matrix (n_features × n_features) = centred^T · centred / n_samples
+    cT = _transpose(centred)
+    cov: list[list[float]] = [
+        [sum(cT[i][k] * cT[j][k] for k in range(n_samples)) / n_samples
+         for j in range(n_features)]
+        for i in range(n_features)
+    ]
+
+    # Extract top-k PCs via deflated power iteration (100 iterations each)
+    components: list[list[float]] = []
+    mat = [row[:] for row in cov]
+    for _ in range(n_components):
+        # Random-ish starting vector (deterministic seed)
+        vec = [float((i * 31 + 17) % 97 + 1) for i in range(n_features)]
+        for _iter in range(100):
+            new_vec = [
+                sum(mat[i][j] * vec[j] for j in range(n_features))
+                for i in range(n_features)
+            ]
+            magnitude = _norm(new_vec)
+            if magnitude == 0.0:
+                break
+            vec = [x / magnitude for x in new_vec]
+
+        components.append(vec)
+
+        # Deflate: mat = mat - (vec · vec^T) * eigenvalue
+        eigenvalue = sum(
+            sum(mat[i][j] * vec[j] for j in range(n_features)) * vec[i]
+            for i in range(n_features)
+        )
+        for i in range(n_features):
+            for j in range(n_features):
+                mat[i][j] -= eigenvalue * vec[i] * vec[j]
+
+    # Project centred matrix onto components
+    comps_T = components  # shape: n_components × n_features
+    reduced = [
+        [sum(centred[r][c] * comps_T[k][c] for c in range(n_features))
+         for k in range(n_components)]
+        for r in range(n_samples)
+    ]
+    return reduced
+
+
+def calculate_di(
+    train_features: list[list[float]],
+    live_features: list[list[float]],
+    n_pca_components: int = 3,
+) -> float:
+    """Compute the Dissimilarity Index (DI) between training and live distributions.
+
+    Implements freqtrade FreqAI's DataKitchen DI pattern: features are
+    first reduced via PCA, then the average Euclidean distance from each
+    live sample to its nearest training neighbour is computed and
+    normalised by the average intra-training spread.
+
+    The PCA step removes correlated noise dimensions so that the distance
+    metric is meaningful even with high-dimensional feature vectors (50+
+    columns after TA-Lib engineering).
+
+    Args:
+        train_features: 2D list ``[n_train × n_features]`` — feature
+            vectors from the training window.
+        live_features: 2D list ``[n_live × n_features]`` — feature
+            vectors from recent live data.
+        n_pca_components: Number of principal components to retain before
+            computing distances.  Defaults to 3.
+
+    Returns:
+        Dissimilarity index ``float ≥ 0``.  Values above the configured
+        threshold (default 2.0) indicate distribution drift and should
+        trigger a retrain.
+    """
+    if not train_features or not live_features:
+        return 0.0
+
+    # Reduce both sets to the same PCA space fitted on training data
+    combined = train_features + live_features
+    all_reduced = _pca_reduce(combined, n_components=n_pca_components)
+    n_train = len(train_features)
+    train_reduced = all_reduced[:n_train]
+    live_reduced = all_reduced[n_train:]
+
+    def _euclidean(a: list[float], b: list[float]) -> float:
+        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+
+    # Average distance from each live point to its nearest training neighbour
+    live_to_train: list[float] = []
+    for lp in live_reduced:
+        min_dist = min(_euclidean(lp, tp) for tp in train_reduced)
+        live_to_train.append(min_dist)
+    avg_live_dist = sum(live_to_train) / len(live_to_train)
+
+    # Average intra-training spread (sampled for efficiency)
+    sample_size = min(50, len(train_reduced))
+    intra_dists: list[float] = []
+    for i in range(sample_size):
+        for j in range(i + 1, min(i + 5, len(train_reduced))):
+            intra_dists.append(_euclidean(train_reduced[i], train_reduced[j]))
+
+    if not intra_dists:
+        return 0.0
+
+    avg_intra_dist = sum(intra_dists) / len(intra_dists)
+    if avg_intra_dist == 0.0:
+        return 0.0
+
+    return avg_live_dist / avg_intra_dist
+
+
+# Keep backward-compatible alias
 def compute_dissimilarity_index(
     train_features: list[list[float]],
     live_features: list[list[float]],
 ) -> float:
-    """Compute dissimilarity index between training and live feature distributions.
-
-    Uses average Euclidean distance from each live point to the nearest
-    training point, normalised by the average intra-training distance.
-    High values (> 1.0) suggest the live data is significantly different
-    from training data, indicating a retrain is needed.
+    """Backward-compatible wrapper around ``calculate_di``.
 
     Absorbs freqtrade FreqAI's DI_threshold pattern.
 
@@ -115,36 +291,10 @@ def compute_dissimilarity_index(
         live_features: 2D list of live/recent feature vectors.
 
     Returns:
-        Dissimilarity index (float).  Values > 1.0 suggest distribution drift.
+        Dissimilarity index (float).  Values > 1.0 suggest distribution
+        drift; values > 2.0 (default threshold) trigger retrain.
     """
-    if not train_features or not live_features:
-        return 0.0
-
-    def _euclidean(a: list[float], b: list[float]) -> float:
-        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
-
-    # Average distance from each live point to nearest training point
-    live_to_train_dists: list[float] = []
-    for lp in live_features:
-        min_dist = min(_euclidean(lp, tp) for tp in train_features)
-        live_to_train_dists.append(min_dist)
-    avg_live_dist = sum(live_to_train_dists) / len(live_to_train_dists)
-
-    # Average intra-training distance (sample for efficiency)
-    sample_size = min(50, len(train_features))
-    intra_dists: list[float] = []
-    for i in range(sample_size):
-        for j in range(i + 1, min(i + 5, len(train_features))):
-            intra_dists.append(_euclidean(train_features[i], train_features[j]))
-
-    if not intra_dists:
-        return 0.0
-
-    avg_intra_dist = sum(intra_dists) / len(intra_dists)
-    if avg_intra_dist == 0:
-        return 0.0
-
-    return avg_live_dist / avg_intra_dist
+    return calculate_di(train_features, live_features)
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +380,9 @@ class EnsembleSelector:
         val_ratio: Fraction of data used for validation (walk-forward).
         di_threshold: Dissimilarity index threshold for staleness.
             Values above this trigger a retrain recommendation.
+            Defaults to 2.0 (aligned with FreqAI's DataKitchen DI).
+        di_pca_components: Number of PCA components used when computing
+            the DI distance in reduced feature space.  Defaults to 3.
     """
 
     def __init__(
@@ -237,12 +390,14 @@ class EnsembleSelector:
         lookahead: int = 5,
         threshold_pct: float = 0.5,
         val_ratio: float = 0.2,
-        di_threshold: float = 1.5,
+        di_threshold: float = 2.0,
+        di_pca_components: int = 3,
     ) -> None:
         self._lookahead = lookahead
         self._threshold_pct = threshold_pct
         self._val_ratio = val_ratio
         self._di_threshold = di_threshold
+        self._di_pca_components = di_pca_components
         self._candidates: list[ModelCandidate] = []
         self._best: ModelCandidate | None = None
         self._train_features: list[list[float]] = []
@@ -461,9 +616,10 @@ class EnsembleSelector:
         if not features.values:
             return False, 0.0
 
-        di = compute_dissimilarity_index(
+        di = calculate_di(
             self._train_features,
             features.values[-10:],  # Check last 10 feature rows
+            n_pca_components=self._di_pca_components,
         )
 
         is_stale = di > self._di_threshold

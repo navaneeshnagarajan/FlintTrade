@@ -1,4 +1,4 @@
-"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis, RRG, scanner, fundamentals."""
+"""FlintTrade screener package — OI analysis, Greeks, futures quadrant, IV analysis, RRG, scanner, fundamentals, ETF screener, shareholding."""
 
 __version__ = "0.1.0-alpha"
 
@@ -71,6 +71,31 @@ from .rrg import (
     build_sector_rrg,
     classify_quadrant,
     compute_rrg,
+)
+from .etf_screener import (
+    ETF_CATALOGUE,
+    ETFRecord,
+    ETFScreenResult,
+    calculate_momentum_score,
+    calculate_asset_quilt,
+    get_52w_high_low,
+    get_sparkline,
+    screen_etfs,
+)
+from .shareholding import (
+    Announcement,
+    AnnualFinancial,
+    FinancialSummary,
+    QuarterlyHolding,
+    ShareholdingData,
+    fetch_shareholding,
+    fetch_financial_summary,
+    fetch_corporate_announcements,
+)
+from .lot_sizes import (
+    FALLBACK_LOT_SIZES,
+    LotSizeResolver,
+    get_lot_size_sync,
 )
 
 __all__ = [
@@ -181,4 +206,26 @@ __all__ = [
     "MTFAnalysis",
     "TimeframeSignal",
     "make_sample_mtf_data",
+    # ETF screener
+    "ETF_CATALOGUE",
+    "ETFRecord",
+    "ETFScreenResult",
+    "calculate_momentum_score",
+    "calculate_asset_quilt",
+    "get_52w_high_low",
+    "get_sparkline",
+    "screen_etfs",
+    # Shareholding + fundamentals
+    "Announcement",
+    "AnnualFinancial",
+    "FinancialSummary",
+    "QuarterlyHolding",
+    "ShareholdingData",
+    "fetch_shareholding",
+    "fetch_financial_summary",
+    "fetch_corporate_announcements",
+    # Lot sizes
+    "FALLBACK_LOT_SIZES",
+    "LotSizeResolver",
+    "get_lot_size_sync",
 ]

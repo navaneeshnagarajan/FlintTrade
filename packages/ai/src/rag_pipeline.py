@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -158,6 +160,153 @@ class RAGResult:
     def success(self) -> bool:
         """True when an answer was generated without error."""
         return bool(self.answer) and not self.error
+
+
+# ---------------------------------------------------------------------------
+# DomainFilter — topic guard for the RAG pipeline
+# ---------------------------------------------------------------------------
+
+
+class DomainFilter:
+    """Pre-query topic guard that rejects off-topic questions.
+
+    Absorbed from openalgo-chatbot's intent-filtering pattern: before
+    hitting the vector store we confirm the query is finance/trading
+    related via keyword matching.  An optional semantic similarity check
+    can be wired in when an embedding provider is available.
+
+    Two-stage check:
+    1. **Keyword match** — fast O(n) scan against ``TRADING_KEYWORDS``.
+       Any hit → on-topic.
+    2. **Semantic similarity** (optional) — cosine similarity of the query
+       embedding against a set of seed trading phrases.  If the similarity
+       exceeds ``semantic_threshold`` the query is on-topic.
+
+    If both stages fail the query is considered off-topic and
+    ``is_on_topic`` returns False.
+
+    Attributes:
+        TRADING_KEYWORDS: Frozenset of 50+ trading and finance terms.
+        REFUSAL_MESSAGE: Polite message returned to off-topic queries.
+
+    Example::
+
+        f = DomainFilter()
+        if not f.is_on_topic("What is the weather today?"):
+            print(f.REFUSAL_MESSAGE)
+        # → "I can only help with trading and market-related questions."
+    """
+
+    TRADING_KEYWORDS: frozenset[str] = frozenset({
+        # Indian markets & instruments
+        "nifty", "banknifty", "sensex", "nse", "bse", "mcx",
+        "nfo", "fut", "ce", "pe", "otm", "itm", "atm",
+        # Order types & execution
+        "order", "buy", "sell", "trade", "position", "holding",
+        "orderbook", "tradebook", "bracket", "cover", "limit", "market",
+        "sl", "stoploss", "stop-loss", "target", "entry", "exit",
+        # Options concepts
+        "option", "options", "call", "put", "strike", "expiry", "expiration",
+        "premium", "theta", "delta", "gamma", "vega", "rho", "iv",
+        "implied volatility", "greeks", "hedging", "hedge",
+        "straddle", "strangle", "spread", "iron condor", "butterfly",
+        # Technical analysis
+        "chart", "candle", "indicator", "rsi", "macd", "ema", "sma",
+        "bollinger", "atr", "adx", "momentum", "volume", "support", "resistance",
+        "breakout", "breakdown", "trend", "signal",
+        # Portfolio & risk
+        "portfolio", "pnl", "profit", "loss", "drawdown", "sharpe",
+        "margin", "risk", "exposure", "allocation", "rebalance",
+        # Market data & finance
+        "market", "price", "ltp", "ohlc", "ohlcv", "quote", "depth",
+        "oi", "open interest", "pcr", "max pain", "vix", "fii", "dii",
+        "sector", "equity", "fund", "etf", "mutual fund", "sip",
+        "broker", "api", "backtest", "strategy", "algo", "automation",
+        "ticker", "symbol", "exchange", "intraday", "swing", "positional",
+    })
+
+    REFUSAL_MESSAGE: str = (
+        "I can only help with trading and market-related questions."
+    )
+
+    def __init__(
+        self,
+        extra_keywords: set[str] | None = None,
+        semantic_threshold: float = 0.35,
+        embedding_provider: "EmbeddingProvider | None" = None,
+    ) -> None:
+        base = (
+            self.TRADING_KEYWORDS | {k.lower() for k in extra_keywords}
+            if extra_keywords
+            else self.TRADING_KEYWORDS
+        )
+        # Pre-compile one regex per keyword using word boundaries so that
+        # short abbreviations like "iv", "pe", "ce" do not match within
+        # unrelated English words (e.g. "recipe", "sentence", "live").
+        self._keyword_patterns: list[re.Pattern[str]] = [
+            re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE)
+            for kw in base
+        ]
+        self._semantic_threshold = semantic_threshold
+        self._embedding_provider = embedding_provider
+
+        # Seed phrases used for the optional semantic similarity check.
+        self._seed_phrases: list[str] = [
+            "stock market trading strategy",
+            "options greeks delta gamma theta",
+            "NIFTY futures open interest",
+            "portfolio risk management drawdown",
+            "technical analysis RSI MACD chart",
+        ]
+        self._seed_embeddings: list[list[float]] | None = None
+
+    def is_on_topic(self, query: str) -> bool:
+        """Return True when the query is finance / trading related.
+
+        Stage 1: keyword match (fast, no external calls).
+        Stage 2: semantic similarity (only when an EmbeddingProvider is
+        configured and stage 1 fails).
+
+        Args:
+            query: Raw user query string.
+
+        Returns:
+            True if the query is on-topic; False if it should be refused.
+        """
+        # Stage 1 — keyword match (word-boundary regex to avoid false positives
+        # from short abbreviations like "iv", "pe", "ce" inside common words)
+        for pattern in self._keyword_patterns:
+            if pattern.search(query):
+                return True
+
+        # Stage 2 — optional semantic similarity
+        if self._embedding_provider is not None:
+            try:
+                if self._seed_embeddings is None:
+                    self._seed_embeddings = self._embedding_provider.embed(
+                        self._seed_phrases
+                    )
+                query_vec = self._embedding_provider.embed([query])[0]
+                max_sim = max(
+                    self._cosine(query_vec, seed)
+                    for seed in self._seed_embeddings
+                )
+                if max_sim >= self._semantic_threshold:
+                    return True
+            except Exception:  # noqa: BLE001
+                pass  # Embedding failure does not block the query
+
+        return False
+
+    @staticmethod
+    def _cosine(a: list[float], b: list[float]) -> float:
+        """Cosine similarity between two equal-length float vectors."""
+        dot = sum(ai * bi for ai, bi in zip(a, b))
+        norm_a = math.sqrt(sum(ai * ai for ai in a))
+        norm_b = math.sqrt(sum(bi * bi for bi in b))
+        if norm_a == 0.0 or norm_b == 0.0:
+            return 0.0
+        return dot / (norm_a * norm_b)
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +792,8 @@ class RAGPipeline:
         chunker: TextChunker | None = None,
         embedding_provider: EmbeddingProvider | None = None,
         vector_store: VectorStore | None = None,
+        domain_filter: DomainFilter | None = None,
+        enable_domain_filter: bool = True,
     ) -> None:
         self.config = config or PipelineConfig()
 
@@ -664,6 +815,13 @@ class RAGPipeline:
             persist_directory=self.config.persist_directory,
             embedding_provider=_embedding,
         )
+        # Domain filter — guards query() against off-topic questions.
+        # Receives the same embedding provider for optional semantic check.
+        self._domain_filter: DomainFilter | None = None
+        if enable_domain_filter:
+            self._domain_filter = domain_filter or DomainFilter(
+                embedding_provider=_embedding,
+            )
 
     # ------------------------------------------------------------------
     # Indexing
@@ -769,6 +927,14 @@ class RAGPipeline:
         """
         if self._llm is None:
             return RAGResult(query=question, error="No LLM client configured")
+
+        # Domain filter pre-check — refuse off-topic questions before retrieval.
+        if self._domain_filter is not None and not self._domain_filter.is_on_topic(question):
+            logger.info("Domain filter rejected query: %r", question[:80])
+            return RAGResult(
+                query=question,
+                answer=DomainFilter.REFUSAL_MESSAGE,
+            )
 
         chunks = self.retrieve(question, top_k, doc_type, similarity_threshold)
         if not chunks:

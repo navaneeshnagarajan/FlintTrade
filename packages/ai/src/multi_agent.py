@@ -39,6 +39,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -248,6 +249,7 @@ class AgentTeam:
         symbol: str,
         exchange: str,
         market_data: dict[str, Any] | None = None,
+        parallel: bool = False,
     ) -> TeamAnalysis:
         """Run team analysis on a symbol.
 
@@ -255,8 +257,8 @@ class AgentTeam:
         aggregator synthesises all reports into a consensus.
 
         Inspired by TradingAgents' flow: analysts produce reports in
-        parallel (here sequential), then the research manager + risk
-        manager debate and judge.  We collapse that into a single
+        parallel (here sequential by default), then the research manager
+        + risk manager debate and judge.  We collapse that into a single
         aggregator step for simplicity while preserving the multi-
         perspective pattern.
 
@@ -265,6 +267,10 @@ class AgentTeam:
             exchange: Exchange code (e.g. "NSE_INDEX", "NSE", "NFO").
             market_data: Optional dict of market context to include in
                 the user prompt (indicators, prices, news snippets).
+            parallel: When True, run all analyst agents concurrently via
+                ``asyncio.gather`` with a semaphore of 4 concurrent LLM
+                calls.  When False (default), agents run sequentially as
+                a safe fallback.
 
         Returns:
             A ``TeamAnalysis`` with all agent analyses and the consensus.
@@ -279,11 +285,20 @@ class AgentTeam:
             return result
 
         # Phase 1: Each agent produces an independent analysis
-        for agent in enabled:
-            analysis = self._run_agent(agent, symbol, exchange, market_data)
+        if parallel:
+            analyses = asyncio.run(
+                self._run_agents_parallel(enabled, symbol, exchange, market_data)
+            )
+        else:
+            analyses = [
+                self._run_agent(agent, symbol, exchange, market_data)
+                for agent in enabled
+            ]
+
+        for analysis in analyses:
             result.agent_analyses.append(analysis)
             if analysis.error:
-                result.errors.append(f"{agent.name}: {analysis.error}")
+                result.errors.append(f"{analysis.agent_name}: {analysis.error}")
 
         # Phase 2: Aggregator synthesises all reports
         try:
@@ -296,9 +311,107 @@ class AgentTeam:
 
         return result
 
+    async def run_parallel(
+        self,
+        agents: list[AgentRole],
+        context: dict[str, Any],
+        max_concurrent: int = 4,
+    ) -> list[AgentAnalysis]:
+        """Run a list of agents concurrently against a market context dict.
+
+        This is the primary public async entry point for parallel
+        execution.  It wraps ``_run_agents_parallel`` with a configurable
+        concurrency limit, making it safe to call from external async code
+        such as a FastAPI route handler or an async research loop.
+
+        Absorbs the MiroFish parallel-agent pattern: agents are
+        independent observers that run simultaneously and write their
+        reports into a shared result.
+
+        Args:
+            agents: List of ``AgentRole`` objects to execute.
+            context: Market context dict forwarded to each agent as
+                ``market_data``.  Expected keys (all optional):
+                ``symbol``, ``exchange``, plus any indicator values.
+            max_concurrent: Maximum number of simultaneous LLM calls
+                (semaphore limit).  Defaults to 4.
+
+        Returns:
+            List of ``AgentAnalysis`` in the same order as ``agents``.
+
+        Example::
+
+            team = AgentTeam(llm_client=LLMClient())
+            analyses = await team.run_parallel(
+                team.enabled_agents,
+                {"symbol": "NIFTY", "exchange": "NSE_INDEX", "rsi": 55},
+            )
+        """
+        symbol = str(context.get("symbol", ""))
+        exchange = str(context.get("exchange", ""))
+        market_data = {k: v for k, v in context.items() if k not in ("symbol", "exchange")}
+
+        return await self._run_agents_parallel(
+            agents, symbol, exchange, market_data or None, max_concurrent=max_concurrent
+        )
+
     def get_recommendation(self, team_analysis: TeamAnalysis) -> TradeRecommendation:
         """Convert a TeamAnalysis into a simplified TradeRecommendation."""
         return TradeRecommendation.from_team_analysis(team_analysis)
+
+    # ------------------------------------------------------------------
+    # Internal: parallel agent execution
+    # ------------------------------------------------------------------
+
+    async def _run_agents_parallel(
+        self,
+        agents: list[AgentRole],
+        symbol: str,
+        exchange: str,
+        market_data: dict[str, Any] | None,
+        max_concurrent: int = 4,
+    ) -> list[AgentAnalysis]:
+        """Run all agents concurrently with a semaphore-limited gather.
+
+        Uses ``asyncio.Semaphore`` to cap simultaneous LLM calls at
+        ``max_concurrent`` (default 4), preventing rate-limit errors
+        on local LLM Studio and cloud providers alike.
+
+        Each agent wraps the synchronous ``_run_agent`` call in
+        ``asyncio.get_event_loop().run_in_executor`` so the actual
+        blocking HTTP call does not stall the event loop.
+
+        Args:
+            agents: Enabled agents to run.
+            symbol: Instrument symbol.
+            exchange: Exchange code.
+            market_data: Optional market context dict.
+            max_concurrent: Semaphore concurrency limit.
+
+        Returns:
+            Ordered list of ``AgentAnalysis`` results.
+        """
+        semaphore = asyncio.Semaphore(max_concurrent)
+        loop = asyncio.get_event_loop()
+
+        async def _guarded(agent: AgentRole) -> AgentAnalysis:
+            async with semaphore:
+                return await loop.run_in_executor(
+                    None,
+                    self._run_agent,
+                    agent,
+                    symbol,
+                    exchange,
+                    market_data,
+                )
+
+        logger.debug(
+            "Running %d agents in parallel (max_concurrent=%d)",
+            len(agents),
+            max_concurrent,
+        )
+        results = await asyncio.gather(*[_guarded(a) for a in agents])
+        return list(results)
 
     # ------------------------------------------------------------------
     # Internal: run a single agent

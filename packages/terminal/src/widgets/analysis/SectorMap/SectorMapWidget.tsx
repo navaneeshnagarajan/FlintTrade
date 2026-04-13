@@ -24,7 +24,7 @@
  */
 
 import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react";
-import { LayoutGrid, Grid3X3, BarChart3, TrendingUp, TrendingDown } from "lucide-react";
+import { LayoutGrid, Grid3X3, BarChart3, TrendingUp, TrendingDown, Target } from "lucide-react";
 import { atom, useAtom } from "jotai";
 import {
   Select,
@@ -42,6 +42,7 @@ import { divergingColourScale } from "@/lib/colourScale";
 
 import { calculateTreemapLayout } from "./treemapLayout";
 import { RRGCanvas } from "./RRGCanvas";
+import { PortfolioRRGTab } from "./PortfolioRRGTab";
 import { TreemapView, GridView, SectorTableView, EmptyView } from "./SectorRenderModes";
 import type {
   ActiveMode,
@@ -95,6 +96,7 @@ const HEATMAP_MODES: { id: ActiveMode; label: string; icon: typeof LayoutGrid }[
   { id: "grid", label: "Grid", icon: Grid3X3 },
   { id: "sector", label: "Sectors", icon: BarChart3 },
   { id: "rrg", label: "RRG", icon: TrendingUp },
+  { id: "portfolio", label: "Portfolio", icon: Target },
 ];
 
 function SectorMapWidget(_props: WidgetProps) {
@@ -321,7 +323,9 @@ function SectorMapWidget(_props: WidgetProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden relative">
-        {activeMode === "rrg"
+        {activeMode === "portfolio"
+          ? <PortfolioRRGTab />
+          : activeMode === "rrg"
           ? rrgData.data ? <RRGCanvas data={rrgData.data} tailLength={8} /> : <EmptyView />
           : filteredStockData.length === 0
           ? <EmptyView />
@@ -352,7 +356,7 @@ function SectorMapWidget(_props: WidgetProps) {
           </div>
         </div>
         <span className="text-xxs text-text-disabled">
-          {activeMode === "rrg" ? "RS-Ratio (x) vs RS-Momentum (y) · 100 = neutral" : activeMode === "treemap" ? "Tile = equal weight · Color = change %" : "Color = change %"}
+          {(activeMode === "rrg" || activeMode === "portfolio") ? "RS-Ratio (x) vs RS-Momentum (y) · 100 = neutral" : activeMode === "treemap" ? "Tile = equal weight · Color = change %" : "Color = change %"}
         </span>
       </div>
     </div>

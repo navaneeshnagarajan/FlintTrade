@@ -7,8 +7,9 @@
  */
 
 import { useState, useEffect, useRef, useCallback, type JSX } from "react";
-import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X } from "lucide-react";
+import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X, Activity } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { SystemMetricsPanel } from "./admin/SystemMetricsPanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,9 +69,10 @@ interface LogEntry {
 // Tab IDs
 // ---------------------------------------------------------------------------
 
-type TabId = "packages" | "widgets" | "endpoints" | "features" | "absorption" | "deps" | "logs";
+type TabId = "packages" | "widgets" | "endpoints" | "features" | "absorption" | "deps" | "logs" | "system";
 
 const TABS: { id: TabId; label: string; icon: typeof Package }[] = [
+  { id: "system", label: "System", icon: Activity },
   { id: "packages", label: "Packages", icon: Package },
   { id: "widgets", label: "Widgets", icon: LayoutGrid },
   { id: "endpoints", label: "Endpoints", icon: Globe },
@@ -777,7 +779,7 @@ function LogsPanel(): JSX.Element {
 
 export default function AdminRoute(): JSX.Element {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<TabId>("packages");
+  const [activeTab, setActiveTab] = useState<TabId>("system");
   const { data: introspect, loading: introLoading, error: introError } = useIntrospect();
 
   const packages = introspect?.packages ?? [];
@@ -785,6 +787,8 @@ export default function AdminRoute(): JSX.Element {
 
   const renderPanel = (): JSX.Element => {
     switch (activeTab) {
+      case "system":
+        return <SystemMetricsPanel />;
       case "packages":
         return <PackagesPanel packages={packages} loading={introLoading} error={introError} />;
       case "widgets":

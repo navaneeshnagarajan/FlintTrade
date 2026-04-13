@@ -43,10 +43,14 @@ from .models import (
 )
 from .openalgo_client import OpenAlgoClient
 from .app import FlintTradeApp
+from .system_metrics import SystemMetrics, get_system_metrics
 
 __all__ = [
     # App
     "FlintTradeApp",
+    # System metrics
+    "SystemMetrics",
+    "get_system_metrics",
     # Client
     "OpenAlgoClient",
     # Config

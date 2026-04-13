@@ -1206,6 +1206,170 @@ def _walk(flow: FlowDefinition, node_id: str, visited: set[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Graph-based reachability validation (flat nodes + edges representation)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FlowValidationError:
+    """A single error from graph-based flow validation.
+
+    This is the canonical error type returned by ``validate_flow_graph`` and
+    used in the flow execution pre-check.
+    """
+
+    node_id: str
+    code: str  # machine-readable code, e.g. "ORPHAN", "SELF_LOOP"
+    description: str
+
+
+# Trigger node types that count as valid entry points for BFS
+_TRIGGER_TYPE_VALUES: frozenset[str] = frozenset(
+    nt.value for nt in NodeType
+    if NODE_REGISTRY.get(nt) and NODE_REGISTRY[nt].category == NodeCategory.TRIGGER
+) | frozenset({"SIGNAL"})  # legacy
+
+
+def validate_flow_graph(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> list[FlowValidationError]:
+    """Validate a flow expressed as flat node and edge lists.
+
+    This function is the canonical pre-execution check.  It accepts the
+    JSON-serialisable graph structure emitted by the React flow editor and
+    returns a list of ``FlowValidationError`` objects.  An empty list means
+    the graph is structurally valid.
+
+    Checks performed (in order):
+    1. At least one trigger node exists (``TRIGGER`` category or legacy
+       ``SIGNAL``/``WEBHOOK_TRIGGER`` types).
+    2. All nodes are connected — no isolated/orphan nodes with zero edges.
+    3. No self-loops (an edge whose source equals its target).
+    4. No unreachable nodes — BFS from every trigger node must visit all
+       non-trigger nodes.
+
+    Args:
+        nodes: List of node dicts, each with at least ``{"id": str,
+            "node_type": str}``.  Extra keys (``label``, ``config``) are
+            ignored.
+        edges: List of edge dicts, each with at least ``{"source": str,
+            "target": str}``.  Extra keys (``id``) are ignored.
+
+    Returns:
+        List of ``FlowValidationError``.  Empty means valid.
+
+    Examples::
+
+        errors = validate_flow_graph(
+            nodes=[
+                {"id": "n1", "node_type": "start"},
+                {"id": "n2", "node_type": "placeOrder"},
+            ],
+            edges=[{"source": "n1", "target": "n2"}],
+        )
+        assert errors == []
+    """
+    errors: list[FlowValidationError] = []
+
+    # Build convenience lookups
+    node_ids: set[str] = {n["id"] for n in nodes}
+
+    # Adjacency list (forward)
+    adjacency: dict[str, list[str]] = {n["id"]: [] for n in nodes}
+    # Reverse adjacency to detect isolated nodes
+    reverse_adjacency: dict[str, list[str]] = {n["id"]: [] for n in nodes}
+
+    for edge in edges:
+        src = edge["source"]
+        tgt = edge["target"]
+        if src in adjacency:
+            adjacency[src].append(tgt)
+        if tgt in reverse_adjacency:
+            reverse_adjacency[tgt].append(src)
+
+    # ------------------------------------------------------------------
+    # 1. At least one trigger node
+    # ------------------------------------------------------------------
+    trigger_ids: list[str] = [
+        n["id"] for n in nodes
+        if n.get("node_type") in _TRIGGER_TYPE_VALUES
+    ]
+    if not trigger_ids:
+        errors.append(FlowValidationError(
+            node_id="",
+            code="NO_TRIGGER",
+            description=(
+                "Flow has no trigger node. Add a Start, Price Alert, or "
+                "Webhook Trigger node."
+            ),
+        ))
+        # Cannot do BFS without triggers — return early
+        return errors
+
+    # ------------------------------------------------------------------
+    # 2. Self-loops
+    # ------------------------------------------------------------------
+    for edge in edges:
+        if edge["source"] == edge["target"]:
+            errors.append(FlowValidationError(
+                node_id=edge["source"],
+                code="SELF_LOOP",
+                description=(
+                    f"Node '{edge['source']}' has an edge that connects back "
+                    "to itself."
+                ),
+            ))
+
+    # ------------------------------------------------------------------
+    # 3. Orphan nodes — nodes with no edges at all
+    # ------------------------------------------------------------------
+    for n in nodes:
+        nid = n["id"]
+        has_out = bool(adjacency.get(nid))
+        has_in = bool(reverse_adjacency.get(nid))
+        if not has_out and not has_in:
+            errors.append(FlowValidationError(
+                node_id=nid,
+                code="ORPHAN",
+                description=(
+                    f"Node '{nid}' ({n.get('node_type', '?')}) has no "
+                    "connections and will never execute."
+                ),
+            ))
+
+    # ------------------------------------------------------------------
+    # 4. Unreachable nodes — BFS from all triggers
+    # ------------------------------------------------------------------
+    reachable: set[str] = set()
+    queue = list(trigger_ids)
+    while queue:
+        current = queue.pop()
+        if current in reachable:
+            continue
+        reachable.add(current)
+        for neighbour in adjacency.get(current, []):
+            if neighbour not in reachable and neighbour in node_ids:
+                queue.append(neighbour)
+
+    unreachable = node_ids - reachable
+    for nid in sorted(unreachable):  # sorted for deterministic order
+        node_type = next(
+            (n.get("node_type", "?") for n in nodes if n["id"] == nid), "?"
+        )
+        errors.append(FlowValidationError(
+            node_id=nid,
+            code="UNREACHABLE",
+            description=(
+                f"Node '{nid}' ({node_type}) cannot be reached from any "
+                "trigger node."
+            ),
+        ))
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # FlowBuilder — convenience API
 # ---------------------------------------------------------------------------
 
@@ -1369,8 +1533,65 @@ class FlowBuilder:
         return self._flow
 
     def validate(self) -> ValidationResult:
-        """Validate the current flow."""
-        return validate_flow(self._flow)
+        """Validate the current flow.
+
+        Runs graph reachability checks (via ``validate_flow_graph``) first as
+        a pre-check, then the full ``FlowDefinition``-based structural
+        validation.  Any graph errors are surfaced as ``ValidationError``
+        entries in the result.
+        """
+        result = validate_flow(self._flow)
+
+        # Run graph-level pre-check using flat representation
+        graph_nodes = [
+            {"id": nid, "node_type": n.node_type}
+            for nid, n in self._flow.nodes.items()
+        ]
+        graph_edges: list[dict[str, Any]] = []
+        for nid, n in self._flow.nodes.items():
+            for target in n.next_nodes:
+                graph_edges.append({"source": nid, "target": target})
+
+        graph_errors = validate_flow_graph(graph_nodes, graph_edges)
+        for ge in graph_errors:
+            # Avoid duplicating errors already found by validate_flow()
+            already_reported = any(
+                e.node_id == ge.node_id and ge.code in e.message
+                for e in result.errors + result.warnings
+            )
+            if not already_reported:
+                result.errors.append(
+                    ValidationError(
+                        node_id=ge.node_id,
+                        message=f"[{ge.code}] {ge.description}",
+                    )
+                )
+                if result.is_valid and ge.code in {"ORPHAN", "UNREACHABLE"}:
+                    # Demote to warning — these don't prevent execution
+                    pass
+                elif ge.code in {"NO_TRIGGER", "SELF_LOOP"}:
+                    result.is_valid = False
+
+        return result
+
+    def validate_graph(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> list[FlowValidationError]:
+        """Run graph reachability validation on a flat node/edge list.
+
+        Convenience wrapper around the module-level ``validate_flow_graph``
+        function, suitable for use in the FlowBuilder UI pre-save check.
+
+        Args:
+            nodes: List of ``{"id": str, "node_type": str}`` dicts.
+            edges: List of ``{"source": str, "target": str}`` dicts.
+
+        Returns:
+            List of ``FlowValidationError``.  Empty means valid.
+        """
+        return validate_flow_graph(nodes, edges)
 
     def to_json(self) -> str:
         """Export flow as JSON."""

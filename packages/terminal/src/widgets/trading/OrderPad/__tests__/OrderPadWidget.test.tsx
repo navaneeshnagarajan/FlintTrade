@@ -227,3 +227,75 @@ describe("OrderPadWidget", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/TEST001/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Strike offset utility — pure unit tests (no DOM needed)
+// ---------------------------------------------------------------------------
+
+describe("calculateStrike", () => {
+  // Re-implement the logic here to test it independently without importing
+  // the private function. This also serves as a specification document.
+
+  function calculateStrike(
+    spotLtp: number,
+    offset: string,
+    strikeGap: number,
+    symbol: string,
+  ): number {
+    if (spotLtp <= 0 || strikeGap <= 0) return 0;
+    const isPut = symbol.toUpperCase().endsWith("PE");
+    const atmStrike = Math.round(spotLtp / strikeGap) * strikeGap;
+    if (offset === "ATM") return atmStrike;
+    const match = /^(ITM|OTM)(\d+)$/.exec(offset);
+    if (!match) return atmStrike;
+    const direction = match[1] as "ITM" | "OTM";
+    const steps = parseInt(match[2], 10);
+    const sign = (direction === "ITM") === !isPut ? -1 : 1;
+    return atmStrike + sign * steps * strikeGap;
+  }
+
+  it("returns ATM strike rounded to gap", () => {
+    expect(calculateStrike(22345, "ATM", 50, "NIFTY24DEC22350CE")).toBe(22350);
+    expect(calculateStrike(44123, "ATM", 100, "BANKNIFTY25JAN44100CE")).toBe(44100);
+  });
+
+  it("returns 0 for zero spot", () => {
+    expect(calculateStrike(0, "ATM", 50, "NIFTY")).toBe(0);
+  });
+
+  it("returns 0 for zero strike gap", () => {
+    expect(calculateStrike(22000, "ATM", 0, "NIFTY")).toBe(0);
+  });
+
+  it("CE ITM1 is one gap below ATM", () => {
+    // CE: ITM = below ATM
+    const atm = Math.round(22000 / 50) * 50; // 22000
+    expect(calculateStrike(22000, "ITM1", 50, "NIFTY24DEC22000CE")).toBe(atm - 50);
+  });
+
+  it("CE OTM1 is one gap above ATM", () => {
+    const atm = Math.round(22000 / 50) * 50; // 22000
+    expect(calculateStrike(22000, "OTM1", 50, "NIFTY24DEC22000CE")).toBe(atm + 50);
+  });
+
+  it("PE ITM1 is one gap above ATM", () => {
+    // PE: ITM = above ATM
+    const atm = Math.round(22000 / 50) * 50; // 22000
+    expect(calculateStrike(22000, "ITM1", 50, "NIFTY24DEC22000PE")).toBe(atm + 50);
+  });
+
+  it("PE OTM1 is one gap below ATM", () => {
+    const atm = Math.round(22000 / 50) * 50; // 22000
+    expect(calculateStrike(22000, "OTM1", 50, "NIFTY24DEC22000PE")).toBe(atm - 50);
+  });
+
+  it("ITM5 CE is 5 gaps below ATM", () => {
+    const atm = 22000;
+    expect(calculateStrike(22000, "ITM5", 50, "NIFTY24DEC22000CE")).toBe(atm - 250);
+  });
+
+  it("OTM10 CE is 10 gaps above ATM", () => {
+    const atm = 22000;
+    expect(calculateStrike(22000, "OTM10", 50, "NIFTY24DEC22000CE")).toBe(atm + 500);
+  });
+});

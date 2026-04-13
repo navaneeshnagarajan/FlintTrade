@@ -14,6 +14,7 @@ from .post_market import (
 from .telegram_bot import BotConfig, CommandResult, TelegramBot
 from .totp_login import LoginResult, is_trading_day
 from .whatsapp_alerts import WhatsAppAlerter, WhatsAppConfig
+from .whatsapp_alerter import AlertRouter, AlertRouterConfig, WhatsAppAlerter as WhatsAppBridgeAlerter
 
 __all__ = [
     # Trading day utilities (retained from totp_login)
@@ -38,9 +39,13 @@ __all__ = [
     "DailyReport",
     "TradeEntry",
     "StrategyPerformance",
-    # WhatsApp
+    # WhatsApp (webhook-based)
     "WhatsAppAlerter",
     "WhatsAppConfig",
+    # WhatsApp (wabridge sidecar)
+    "WhatsAppBridgeAlerter",
+    "AlertRouter",
+    "AlertRouterConfig",
     # n8n
     "N8nBridge",
     "N8nBridgeError",

@@ -1,9 +1,12 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import {
   Search,
   BookOpen,
   AlertCircle,
   RefreshCw,
+  Camera,
+  Eye,
+  X,
 } from "lucide-react";
 import { formatCurrencyCompact } from "@/lib/formatters";
 import { type TradeAnalytics } from "@/lib/journalAnalytics";
@@ -11,6 +14,12 @@ import { type JournalTrade } from "@/services/ftApi";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -23,6 +32,111 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { SummaryCards } from "./SummaryCards";
 import { SkeletonRows } from "./StatCard";
 import { formatDate, formatTime, formatPrice, pnlColor } from "./utils";
+
+// ---------------------------------------------------------------------------
+// Screenshot storage
+// ---------------------------------------------------------------------------
+
+const SCREENSHOTS_KEY = "flinttrade_journal_screenshots";
+
+/** Max file size: 2 MB to stay within localStorage limits. */
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
+function loadScreenshots(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(SCREENSHOTS_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, string>;
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveScreenshots(map: Record<string, string>): void {
+  try {
+    localStorage.setItem(SCREENSHOTS_KEY, JSON.stringify(map));
+  } catch { /* ignore storage quota errors */ }
+}
+
+function tradeKey(trade: JournalTrade, idx: number): string {
+  return `${trade.timestamp}-${trade.symbol}-${idx}`;
+}
+
+// ---------------------------------------------------------------------------
+// Screenshot cell component
+// ---------------------------------------------------------------------------
+
+interface ScreenshotCellProps {
+  tKey: string;
+  screenshots: Record<string, string>;
+  onAttach: (key: string, dataUrl: string) => void;
+  onView: (dataUrl: string, symbol: string) => void;
+}
+
+function ScreenshotCell({ tKey, screenshots, onAttach, onView }: ScreenshotCellProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const existing = screenshots[tKey];
+
+  const handleFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      alert("Screenshot must be under 2 MB.");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      alert("Only image files are supported.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        onAttach(tKey, reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Reset input so the same file can be re-attached
+    e.target.value = "";
+  }, [tKey, onAttach]);
+
+  if (existing) {
+    return (
+      <button
+        type="button"
+        onClick={() => onView(existing, tKey)}
+        className="flex items-center justify-center w-10 h-7 rounded overflow-hidden border border-border-default hover:border-accent transition-colors group"
+        aria-label="View screenshot"
+        title="Click to view screenshot"
+      >
+        <img
+          src={existing}
+          alt="Trade screenshot thumbnail"
+          className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+        />
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFile}
+        aria-label="Attach screenshot"
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="flex items-center justify-center w-8 h-7 rounded border border-dashed border-border-default text-text-disabled hover:text-text-muted hover:border-border-hover transition-colors"
+        aria-label="Attach screenshot"
+        title="Attach screenshot"
+      >
+        <Camera size={11} />
+      </button>
+    </>
+  );
+}
 
 export function TradeLogTab({
   trades,
@@ -38,9 +152,23 @@ export function TradeLogTab({
   onRetry: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [filterAction, setFilterAction] = useState<"ALL" | "BUY" | "SELL">(
-    "ALL",
-  );
+  const [filterAction, setFilterAction] = useState<"ALL" | "BUY" | "SELL">("ALL");
+
+  // Screenshot state — loaded from localStorage on mount
+  const [screenshots, setScreenshots] = useState<Record<string, string>>(loadScreenshots);
+  const [viewingScreenshot, setViewingScreenshot] = useState<{ dataUrl: string; label: string } | null>(null);
+
+  const handleAttachScreenshot = useCallback((key: string, dataUrl: string) => {
+    setScreenshots((prev) => {
+      const updated = { ...prev, [key]: dataUrl };
+      saveScreenshots(updated);
+      return updated;
+    });
+  }, []);
+
+  const handleViewScreenshot = useCallback((dataUrl: string, label: string) => {
+    setViewingScreenshot({ dataUrl, label });
+  }, []);
 
   // Sort newest first
   const sorted = useMemo(
@@ -64,6 +192,50 @@ export function TradeLogTab({
 
   return (
     <div className="flex flex-col h-full gap-2">
+      {/* Screenshot viewer dialog */}
+      <Dialog open={viewingScreenshot !== null} onOpenChange={(open) => { if (!open) setViewingScreenshot(null); }}>
+        <DialogContent className="max-w-2xl bg-surface-card border-border-default">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold text-text-primary flex items-center gap-2">
+              <Eye size={14} />
+              Trade Screenshot
+              {viewingScreenshot && (
+                <span className="text-text-muted font-mono text-xs font-normal ml-1">
+                  {viewingScreenshot.label.split("-")[1]}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {viewingScreenshot && (
+            <div className="relative">
+              <img
+                src={viewingScreenshot.dataUrl}
+                alt="Trade screenshot"
+                className="w-full rounded border border-border-default object-contain max-h-[60vh]"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const key = viewingScreenshot.label;
+                  setScreenshots((prev) => {
+                    const updated = { ...prev };
+                    delete updated[key];
+                    saveScreenshots(updated);
+                    return updated;
+                  });
+                  setViewingScreenshot(null);
+                }}
+                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-loss/80 text-white text-xs hover:bg-loss transition-colors"
+                aria-label="Remove screenshot"
+              >
+                <X size={11} />
+                Remove
+              </button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Summary cards */}
       {!isLoading && !isError && trades.length > 0 && (
         <SummaryCards analytics={analytics} />
@@ -142,6 +314,12 @@ export function TradeLogTab({
               <TableHead className="text-xs text-text-muted h-7 font-normal">
                 Strategy
               </TableHead>
+              <TableHead className="text-xs text-text-muted h-7 font-normal w-12">
+                <span className="flex items-center gap-1">
+                  <Camera size={10} />
+                  Shot
+                </span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -150,7 +328,7 @@ export function TradeLogTab({
             {isError && (
               <TableRow>
                 <TableCell
-                  colSpan={10}
+                  colSpan={11}
                   className="text-center py-8 text-text-muted"
                 >
                   <div className="flex flex-col items-center gap-2">
@@ -173,7 +351,7 @@ export function TradeLogTab({
             {!isLoading && !isError && filtered.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={10}
+                  colSpan={11}
                   className="text-center py-8 text-text-muted"
                 >
                   <div className="flex flex-col items-center gap-2">
@@ -188,9 +366,11 @@ export function TradeLogTab({
 
             {!isLoading &&
               !isError &&
-              filtered.map((trade, idx) => (
+              filtered.map((trade, idx) => {
+                const tKey = tradeKey(trade, idx);
+                return (
                 <TableRow
-                  key={`${trade.timestamp}-${trade.symbol}-${idx}`}
+                  key={tKey}
                   className="border-border-subtle hover:bg-surface-card"
                 >
                   <TableCell className="py-1 text-xs text-text-secondary whitespace-nowrap">
@@ -237,8 +417,17 @@ export function TradeLogTab({
                   <TableCell className="py-1 text-xs text-text-muted max-w-24 truncate">
                     {trade.strategy || "-"}
                   </TableCell>
+                  <TableCell className="py-1">
+                    <ScreenshotCell
+                      tKey={tKey}
+                      screenshots={screenshots}
+                      onAttach={handleAttachScreenshot}
+                      onView={(dataUrl) => handleViewScreenshot(dataUrl, tKey)}
+                    />
+                  </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
           </TableBody>
         </Table>
       </ScrollArea>

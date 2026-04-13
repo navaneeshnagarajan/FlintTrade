@@ -226,6 +226,23 @@ def admin_repos() -> tuple[Response, int]:
         }), 500
 
 
+@admin_bp.route("/system", methods=["GET"])
+def admin_system() -> tuple[Response, int]:
+    """Return current host resource metrics for the /admin dashboard.
+
+    Delegates to :func:`~packages.core.src.system_metrics.get_system_metrics`.
+    When psutil is not installed the response is still HTTP 200 with all
+    metric fields set to zero and ``psutil_available: false``.
+    """
+    from packages.core.src.system_metrics import get_system_metrics  # noqa: PLC0415
+
+    metrics = get_system_metrics()
+    return jsonify({
+        "status": "success",
+        "data": metrics.to_dict(),
+    }), 200
+
+
 @admin_bp.route("/features", methods=["GET"])
 def admin_features() -> tuple[Response, int]:
     """Return feature flag status."""

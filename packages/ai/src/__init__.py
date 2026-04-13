@@ -5,7 +5,8 @@ __version__ = "0.1.0-alpha"
 from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRanking
 from .analyst_chain import AnalysisState, AnalystChain
 from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TradeRecommendation
-from .multi_agent import AgentTeam, default_agents
+from .multi_agent import AgentTeam, AutonomousResearchLoop, ResearchIteration, default_agents
+from .rag_pipeline import DomainFilter
 from .news_scraper import NewsScraper, NewsArticle
 from .news_summarizer import MarketNewsSummarizer, NewsSummary
 from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
@@ -35,7 +36,14 @@ from .ensemble_selector import (
     EnsembleResult,
     EnsembleSelector,
     ModelCandidate,
+    calculate_di,
     compute_dissimilarity_index,
+)
+from .regime_detector import (
+    RegimeResult,
+    RegimeState,
+    detect_regime,
+    detect_regime_detailed,
 )
 from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
 from .strategy_refiner import RefinementSuggestion, StrategyRefiner
@@ -92,6 +100,8 @@ __all__ = [
     "TeamAnalysis",
     "TradeRecommendation",
     "default_agents",
+    "AutonomousResearchLoop",
+    "ResearchIteration",
     # News scraper (RSS/httpx)
     "NewsScraper",
     "NewsArticle",
@@ -114,11 +124,19 @@ __all__ = [
     "RiskDebate",
     "DebateResult",
     "DebateRound",
-    # Ensemble selector (from FinRL)
+    # Ensemble selector (from FinRL + FreqAI DI)
     "EnsembleSelector",
     "EnsembleResult",
     "ModelCandidate",
+    "calculate_di",
     "compute_dissimilarity_index",
+    # Regime detector (ADX + BB + ATR)
+    "RegimeState",
+    "RegimeResult",
+    "detect_regime",
+    "detect_regime_detailed",
+    # RAG domain filter
+    "DomainFilter",
     # Hyperopt (from freqtrade)
     "StrategyOptimiser",
     "OptimisationResult",

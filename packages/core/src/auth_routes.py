@@ -600,3 +600,418 @@ def auth_reset_password() -> tuple[Any, int]:
             pass
 
     return jsonify({"status": "success", "message": "Password has been reset."}), 200
+
+
+# ---------------------------------------------------------------------------
+# Email OTP password reset
+# ---------------------------------------------------------------------------
+#
+# Separate from the JWT-token reset above.  Uses a short-lived 6-digit OTP
+# stored in memory with a 10-minute TTL.  No DB required.
+#
+# Endpoints:
+#   POST /v1/auth/forgot-password-otp   — generate & send OTP
+#   POST /v1/auth/reset-password-otp    — validate OTP + apply new password
+#
+# Rate limit: max 3 OTP requests per email per hour.
+# ---------------------------------------------------------------------------
+
+import random  # noqa: E402 (standard library, safe here)
+import smtplib  # noqa: E402
+from email.mime.text import MIMEText  # noqa: E402
+from email.mime.multipart import MIMEMultipart  # noqa: E402
+
+# {email: [(otp_str, expiry_epoch), ...]}
+# Each email can have at most one live OTP; older entries are replaced.
+_OTP_STORE: dict[str, dict[str, Any]] = {}
+
+# {email: [epoch, epoch, ...]} — timestamps of OTP issue attempts this hour
+_OTP_REQUEST_LOG: dict[str, list[float]] = {}
+
+_OTP_TTL_SECONDS = 600          # 10 minutes
+_OTP_MAX_REQUESTS_PER_HOUR = 3  # per email address
+
+
+def _otp_rate_ok(email: str) -> bool:
+    """Check whether ``email`` is within the 3-per-hour OTP request limit.
+
+    Prunes stale timestamps before counting.  Mutates ``_OTP_REQUEST_LOG``
+    to record the new request when the limit is not exceeded.
+
+    Args:
+        email: The requester's email address used as the rate-limit key.
+
+    Returns:
+        ``True`` if the request is permitted; ``False`` if the hourly cap
+        has been reached.
+    """
+    now = time.monotonic()
+    cutoff = now - 3600
+    log = _OTP_REQUEST_LOG.get(email, [])
+    log = [t for t in log if t > cutoff]
+    if len(log) >= _OTP_MAX_REQUESTS_PER_HOUR:
+        return False
+    log.append(now)
+    _OTP_REQUEST_LOG[email] = log
+    return True
+
+
+def _generate_otp() -> str:
+    """Generate a cryptographically random 6-digit OTP string.
+
+    Returns:
+        Zero-padded 6-digit string, e.g. ``"042731"``.
+    """
+    return f"{random.SystemRandom().randint(0, 999999):06d}"
+
+
+def _store_otp(email: str, otp: str) -> None:
+    """Persist an OTP for ``email`` with a TTL of 10 minutes.
+
+    Replaces any existing OTP for the same address so there is always at
+    most one live entry per email.
+
+    Args:
+        email: The recipient's email address.
+        otp: The 6-digit OTP string to store.
+    """
+    _OTP_STORE[email] = {
+        "otp": otp,
+        "expiry": time.monotonic() + _OTP_TTL_SECONDS,
+    }
+
+
+def _verify_and_consume_otp(email: str, otp: str) -> bool:
+    """Verify ``otp`` for ``email`` and remove it from the store if valid.
+
+    An OTP is considered invalid if it does not match, has expired, or there
+    is no entry for the given email address.  Expired entries are cleaned up
+    regardless of the ``otp`` value supplied.
+
+    Args:
+        email: The requester's email address.
+        otp: The 6-digit code supplied by the user.
+
+    Returns:
+        ``True`` if the OTP matched and was consumed; ``False`` otherwise.
+    """
+    entry = _OTP_STORE.get(email)
+    if entry is None:
+        return False
+
+    if time.monotonic() > entry["expiry"]:
+        del _OTP_STORE[email]
+        return False
+
+    if entry["otp"] != otp.strip():
+        return False
+
+    del _OTP_STORE[email]
+    return True
+
+
+# ---------------------------------------------------------------------------
+# EmailTransport
+# ---------------------------------------------------------------------------
+
+
+class EmailTransport:
+    """Send OTP emails via SMTP or Amazon SES (boto3).
+
+    Transport is chosen automatically based on available configuration:
+
+    * If ``AWS_SES_REGION`` (or ``AWS_DEFAULT_REGION``) is set *and* boto3
+      is importable → use Amazon SES.
+    * Otherwise → fall back to SMTP (``SMTP_HOST``, ``SMTP_PORT``,
+      ``SMTP_USER``, ``SMTP_PASSWORD``).
+
+    Configuration env vars
+    ----------------------
+    SMTP_HOST     — SMTP server hostname (default ``localhost``).
+    SMTP_PORT     — SMTP port (default ``587``).
+    SMTP_USER     — SMTP username / sender address.
+    SMTP_PASSWORD — SMTP password.
+    SMTP_FROM     — From address (falls back to SMTP_USER).
+    AWS_SES_REGION / AWS_DEFAULT_REGION — triggers SES transport.
+    """
+
+    def __init__(self) -> None:
+        self._smtp_host = os.environ.get("SMTP_HOST", "localhost")
+        self._smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        self._smtp_user = os.environ.get("SMTP_USER", "")
+        self._smtp_password = os.environ.get("SMTP_PASSWORD", "")
+        self._smtp_from = os.environ.get("SMTP_FROM", self._smtp_user)
+        self._ses_region = os.environ.get(
+            "AWS_SES_REGION", os.environ.get("AWS_DEFAULT_REGION", "")
+        )
+
+    def send_otp(self, email: str, otp: str) -> bool:
+        """Deliver a 6-digit OTP to ``email``.
+
+        Attempts SES first (if configured), then falls back to SMTP.  Any
+        failure is logged and ``False`` is returned so callers can decide
+        whether to surface the error to the user.
+
+        Args:
+            email: Recipient email address.
+            otp: The 6-digit OTP code to include in the message body.
+
+        Returns:
+            ``True`` if the email was dispatched without errors; ``False``
+            if both transports failed or are not configured.
+        """
+        subject = "FlintTrade — password reset OTP"
+        body = (
+            f"Your FlintTrade password reset OTP is: {otp}\n\n"
+            f"This code is valid for {_OTP_TTL_SECONDS // 60} minutes.\n"
+            "If you did not request a password reset, please ignore this email."
+        )
+
+        if self._ses_region:
+            success = self._send_ses(email, subject, body)
+            if success:
+                return True
+            logger.warning("SES delivery failed — falling back to SMTP")
+
+        return self._send_smtp(email, subject, body)
+
+    def _send_smtp(self, to: str, subject: str, body: str) -> bool:
+        """Send an email via SMTP.
+
+        Args:
+            to: Recipient address.
+            subject: Email subject line.
+            body: Plain-text message body.
+
+        Returns:
+            ``True`` on success, ``False`` on any SMTP exception.
+        """
+        if not self._smtp_host or not self._smtp_from:
+            logger.warning("SMTP not configured (missing SMTP_HOST or SMTP_USER/SMTP_FROM)")
+            return False
+
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = self._smtp_from
+            msg["To"] = to
+            msg.attach(MIMEText(body, "plain"))
+
+            with smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=10) as server:
+                server.ehlo()
+                if self._smtp_port == 587:
+                    server.starttls()
+                    server.ehlo()
+                if self._smtp_user and self._smtp_password:
+                    server.login(self._smtp_user, self._smtp_password)
+                server.sendmail(self._smtp_from, [to], msg.as_string())
+
+            logger.info("OTP email sent via SMTP to %s", to)
+            return True
+        except smtplib.SMTPException as exc:
+            logger.error("SMTP error sending OTP email to %s: %s", to, exc)
+            return False
+        except OSError as exc:
+            logger.error("Network error sending OTP email to %s: %s", to, exc)
+            return False
+
+    def _send_ses(self, to: str, subject: str, body: str) -> bool:
+        """Send an email via Amazon SES using boto3.
+
+        Args:
+            to: Recipient address.
+            subject: Email subject line.
+            body: Plain-text message body.
+
+        Returns:
+            ``True`` on success, ``False`` if boto3 is unavailable or SES
+            raises an exception.
+        """
+        try:
+            import boto3  # type: ignore[import]
+        except ImportError:
+            logger.debug("boto3 not installed — cannot use SES transport")
+            return False
+
+        if not self._smtp_from:
+            logger.warning("SES: no From address configured (set SMTP_FROM)")
+            return False
+
+        try:
+            client = boto3.client("ses", region_name=self._ses_region)
+            client.send_email(
+                Source=self._smtp_from,
+                Destination={"ToAddresses": [to]},
+                Message={
+                    "Subject": {"Data": subject, "Charset": "UTF-8"},
+                    "Body": {"Text": {"Data": body, "Charset": "UTF-8"}},
+                },
+            )
+            logger.info("OTP email sent via SES to %s", to)
+            return True
+        except Exception as exc:
+            logger.error("SES error sending OTP email to %s: %s", to, exc)
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Module-level EmailTransport singleton (replaced in tests via injection)
+# ---------------------------------------------------------------------------
+
+_email_transport: EmailTransport | None = None
+
+
+def _get_email_transport() -> EmailTransport:
+    """Return the module-level :class:`EmailTransport` singleton.
+
+    Created lazily on first call.  Tests can replace the singleton by
+    calling :func:`set_email_transport`.
+
+    Returns:
+        The active :class:`EmailTransport` instance.
+    """
+    global _email_transport  # noqa: PLW0603
+    if _email_transport is None:
+        _email_transport = EmailTransport()
+    return _email_transport
+
+
+def set_email_transport(transport: EmailTransport) -> None:
+    """Inject a custom :class:`EmailTransport` (primarily for testing).
+
+    Args:
+        transport: The replacement transport to use.
+    """
+    global _email_transport  # noqa: PLW0603
+    _email_transport = transport
+
+
+# ---------------------------------------------------------------------------
+# OTP password reset endpoints
+# ---------------------------------------------------------------------------
+
+
+@auth_bp.route("/forgot-password-otp", methods=["POST"])
+@_rate_limit("5 per minute")
+def auth_forgot_password_otp() -> tuple[Any, int]:
+    """Request a 6-digit OTP for password reset.
+
+    Accepts an email address, generates a 6-digit OTP valid for 10 minutes,
+    and sends it to the registered address.  The response is always HTTP 200
+    to avoid leaking whether the address is registered.
+
+    Rate limit: max 3 OTP requests per email per hour.
+
+    Request JSON:
+        email (str): The account email address.
+
+    Returns:
+        ``{"status": "success", "message": "..."}`` (always 200 when email
+        field is present, even if the address is not registered).
+    """
+    body = request.get_json(silent=True) or {}
+    email = str(body.get("email", "")).strip().lower()
+
+    if not email:
+        return jsonify({"status": "error", "message": "Email is required."}), 400
+
+    # Enforce per-email hourly rate limit
+    if not _otp_rate_ok(email):
+        return jsonify({
+            "status": "error",
+            "message": "Too many OTP requests. Please wait an hour before trying again.",
+        }), 429
+
+    # Only generate and send the OTP if the email is registered
+    svc = _get_auth_service()
+    if svc is not None:
+        stored_email = svc.get_email()
+        if stored_email and stored_email.lower() == email:
+            otp = _generate_otp()
+            _store_otp(email, otp)
+            transport = _get_email_transport()
+            sent = transport.send_otp(email, otp)
+            if not sent:
+                # Don't reveal the failure to the caller — log it internally.
+                logger.error(
+                    "Failed to deliver OTP to %s — check email transport config", email
+                )
+
+    # Always return success to avoid email-enumeration attacks
+    return jsonify({
+        "status": "success",
+        "message": "If the email is registered, a reset OTP has been sent.",
+    }), 200
+
+
+@auth_bp.route("/reset-password-otp", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_reset_password_otp() -> tuple[Any, int]:
+    """Reset password using a valid email + OTP pair.
+
+    Validates the OTP (must match and be within the 10-minute TTL), then
+    applies the new password via the auth service.  The OTP is consumed
+    on first successful use — it cannot be replayed.
+
+    Request JSON:
+        email (str): The account email address.
+        otp (str): The 6-digit OTP code received by email.
+        new_password (str): The desired new password.
+
+    Returns:
+        ``{"status": "success", "message": "Password has been reset."}`` on
+        success, or an error response on validation failure.
+    """
+    body = request.get_json(silent=True) or {}
+    email = str(body.get("email", "")).strip().lower()
+    otp = str(body.get("otp", "")).strip()
+    new_password = str(body.get("new_password", ""))
+
+    if not email or not otp or not new_password:
+        return jsonify({
+            "status": "error",
+            "message": "email, otp, and new_password are all required.",
+        }), 400
+
+    if not _verify_and_consume_otp(email, otp):
+        return jsonify({
+            "status": "error",
+            "message": "Invalid or expired OTP.",
+        }), 400
+
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    # Verify the email belongs to the registered account
+    stored_email = svc.get_email()
+    if not stored_email or stored_email.lower() != email:
+        return jsonify({"status": "error", "message": "Email not registered."}), 400
+
+    try:
+        profile = svc.get_profile()
+        username = profile.get("username", "user")
+        result = svc.update_password(username, new_password)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    if not result:
+        return jsonify({"status": "error", "message": "Password update failed."}), 400
+
+    # Invalidate any active session so all open logins are forced to re-auth.
+    auth_header = request.headers.get("Authorization", "")
+    session_token = auth_header.removeprefix("Bearer ").strip()
+    if session_token:
+        try:
+            sess_payload = jwt.decode(
+                session_token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM]
+            )
+            sess_jti = sess_payload.get("jti", "")
+            sess_exp = float(sess_payload.get("exp", 0))
+            if sess_jti:
+                _revoke_jti(sess_jti, sess_exp)
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            pass
+
+    logger.info("Password reset via OTP for email=%s", email)
+    return jsonify({"status": "success", "message": "Password has been reset."}), 200

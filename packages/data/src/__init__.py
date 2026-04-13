@@ -5,7 +5,12 @@ __version__ = "0.1.0-alpha"
 from .activity_log import ActivityEntry, ActivityLog
 from .audit_logger import AuditLogger
 from .orderflow import FootprintBucket, FootprintCell, OrderFlowAggregator
+from .orderflow_aggregator import (
+    FootprintBucket as FootprintBucketV2,
+    OrderFlowAggregator as OrderFlowAggregatorV2,
+)
 from .questdb_bridge import QuestDBBridge, QuestDBBridgeError
+from .questdb_client import OHLCV, MarketStats, QuestDBClient, QuestDBClientError
 from .storage import StorageManager
 from .tick_recorder import TickRecorder
 from .trade_journal import JournalEntry, JournalFilters, JournalStats, TradeJournal
@@ -27,7 +32,15 @@ __all__ = [
     "JournalEntry",
     "JournalFilters",
     "JournalStats",
-    # QuestDB
+    # QuestDB — ILP bridge (existing)
     "QuestDBBridge",
     "QuestDBBridgeError",
+    # QuestDB — PostgreSQL wire client (new)
+    "QuestDBClient",
+    "QuestDBClientError",
+    "OHLCV",
+    "MarketStats",
+    # OrderFlow — per-symbol aggregator with IST bins (new)
+    "OrderFlowAggregatorV2",
+    "FootprintBucketV2",
 ]

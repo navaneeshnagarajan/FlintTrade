@@ -2,7 +2,7 @@
  * SectorMapWidget — shared types.
  */
 
-export type ActiveMode = "treemap" | "grid" | "sector" | "rrg";
+export type ActiveMode = "treemap" | "grid" | "sector" | "rrg" | "portfolio";
 export type SizingMode = "equal" | "value";
 
 export interface StockData {

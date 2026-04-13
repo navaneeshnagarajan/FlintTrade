@@ -37,9 +37,17 @@ import {
   IndianRupee,
   Hash,
   Wallet,
+  Target,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { searchSymbol, placeOrder } from "@/services/api";
 import { useMargin } from "@/hooks/useMargin";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
@@ -59,6 +67,73 @@ const PRICE_ENABLED = new Set<OrderTypeValue>(["LIMIT", "SL"]);
 const TRIGGER_ENABLED = new Set<OrderTypeValue>(["SL", "SL-M"]);
 
 const DEBOUNCE_MS = 300;
+
+/** Exchanges that have option strikes (NFO = NSE F&O, BFO = BSE F&O). */
+const OPTIONS_EXCHANGES = new Set(["NFO", "BFO"]);
+
+/** Strike offset values. ATM = 0, ITMn = negative offset, OTMn = positive offset. */
+type StrikeOffset =
+  | "ATM"
+  | "ITM1" | "ITM2" | "ITM3" | "ITM4" | "ITM5"
+  | "ITM6" | "ITM7" | "ITM8" | "ITM9" | "ITM10"
+  | "OTM1" | "OTM2" | "OTM3" | "OTM4" | "OTM5"
+  | "OTM6" | "OTM7" | "OTM8" | "OTM9" | "OTM10";
+
+const STRIKE_OFFSET_OPTIONS: StrikeOffset[] = [
+  "ITM10", "ITM9", "ITM8", "ITM7", "ITM6", "ITM5", "ITM4", "ITM3", "ITM2", "ITM1",
+  "ATM",
+  "OTM1", "OTM2", "OTM3", "OTM4", "OTM5", "OTM6", "OTM7", "OTM8", "OTM9", "OTM10",
+];
+
+/**
+ * Common strike gaps per instrument.
+ * Falls back to 50 for NIFTY/BANKNIFTY/FINNIFTY etc.
+ * These are standard NSE F&O strike intervals.
+ */
+const STRIKE_GAP_MAP: Record<string, number> = {
+  NIFTY: 50,
+  BANKNIFTY: 100,
+  FINNIFTY: 50,
+  MIDCPNIFTY: 25,
+  SENSEX: 100,
+  BANKEX: 100,
+};
+
+function getStrikeGap(symbol: string): number {
+  const base = symbol.replace(/\d+/g, "").toUpperCase();
+  return STRIKE_GAP_MAP[base] ?? 50;
+}
+
+/**
+ * Calculate target strike from spot price, offset label, and strike gap.
+ * For a BUY call (CE): ITM = lower strike, OTM = higher strike.
+ * For a BUY put (PE): ITM = higher strike, OTM = lower strike.
+ * We detect CE/PE from the symbol suffix; default to CE behaviour.
+ */
+function calculateStrike(
+  spotLtp: number,
+  offset: StrikeOffset,
+  strikeGap: number,
+  symbol: string,
+): number {
+  if (spotLtp <= 0 || strikeGap <= 0) return 0;
+
+  const isPut = symbol.toUpperCase().endsWith("PE");
+  const atmStrike = Math.round(spotLtp / strikeGap) * strikeGap;
+
+  if (offset === "ATM") return atmStrike;
+
+  const match = /^(ITM|OTM)(\d+)$/.exec(offset);
+  if (!match) return atmStrike;
+
+  const direction = match[1] as "ITM" | "OTM";
+  const steps = parseInt(match[2], 10);
+
+  // CE: ITM = below ATM, OTM = above ATM
+  // PE: ITM = above ATM, OTM = below ATM
+  const sign = (direction === "ITM") === !isPut ? -1 : 1;
+  return atmStrike + sign * steps * strikeGap;
+}
 
 // ─── Zod schema ───────────────────────────────────────────────────────────────
 
@@ -297,6 +372,9 @@ function OrderPadWidget(_props: WidgetProps) {
   type InputMode = "qty" | "fund";
   const [inputMode, setInputMode] = useState<InputMode>("qty");
 
+  // Strike offset for options orders (NFO / BFO exchange)
+  const [strikeOffset, setStrikeOffset] = useState<StrikeOffset>("ATM");
+
   // "Calculate from capital" state — user types an INR amount, qty is auto-calculated
   const [capitalAmount, setCapitalAmount] = useState("");
 
@@ -344,6 +422,15 @@ function OrderPadWidget(_props: WidgetProps) {
   const tickKey = `${exchange}:${symbol}`;
   const tick = useAtomValue(tickAtomFamily(tickKey));
   const ltp = tick?.ltp ?? 0;
+
+  // Options-specific: show strike offset selector when exchange is NFO or BFO
+  const isOptionsExchange = OPTIONS_EXCHANGES.has(exchange);
+  const strikeGap = getStrikeGap(symbol);
+
+  // Auto-fill price when strike offset changes and we have LTP + LIMIT order
+  const calculatedStrike = isOptionsExchange && ltp > 0
+    ? calculateStrike(ltp, strikeOffset, strikeGap, symbol)
+    : 0;
 
   // When the user types an INR capital amount, auto-calculate quantity.
   // If lotSize > 0 the quantity is rounded down to the nearest lot:
@@ -438,6 +525,13 @@ function OrderPadWidget(_props: WidgetProps) {
     if (!priceEnabled) setValue("price", undefined);
     if (!triggerEnabled) setValue("trigPrice", undefined);
   }, [orderType, priceEnabled, triggerEnabled, setValue]);
+
+  // When strike offset changes on a LIMIT/SL options order, auto-fill the price field
+  useEffect(() => {
+    if (isOptionsExchange && priceEnabled && calculatedStrike > 0) {
+      setValue("price", calculatedStrike);
+    }
+  }, [strikeOffset, isOptionsExchange, priceEnabled, calculatedStrike, setValue]);
 
   const handleSelect = useCallback(
     (item: SymbolSuggestion) => {
@@ -679,6 +773,53 @@ function OrderPadWidget(_props: WidgetProps) {
             )}
           />
         </div>
+
+        {/* Strike offset selector — only shown for options exchanges (NFO/BFO) */}
+        {isOptionsExchange && (
+          <div className="flex flex-col gap-0.5">
+            <label className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1">
+              <Target size={9} aria-hidden="true" />
+              Strike Offset
+            </label>
+            <div className="flex items-center gap-2">
+              <Select
+                value={strikeOffset}
+                onValueChange={(v) => setStrikeOffset(v as StrikeOffset)}
+              >
+                <SelectTrigger className="h-8 text-xs px-2 border-border-default bg-surface-hover text-text-primary flex-1 focus:ring-0 focus-visible:ring-0 focus-visible:border-accent">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-surface-card border-border-default text-xs max-h-60">
+                  {STRIKE_OFFSET_OPTIONS.map((opt) => (
+                    <SelectItem
+                      key={opt}
+                      value={opt}
+                      className={`text-xs font-mono ${
+                        opt === "ATM"
+                          ? "text-accent font-semibold"
+                          : opt.startsWith("ITM")
+                          ? "text-profit"
+                          : "text-loss"
+                      }`}
+                    >
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {calculatedStrike > 0 && (
+                <span className="text-xs font-mono tabular-nums text-text-secondary shrink-0">
+                  → {calculatedStrike}
+                </span>
+              )}
+            </div>
+            {calculatedStrike > 0 && (
+              <p className="text-xxs text-text-muted">
+                Spot ≈ {ltp > 0 ? ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"} · Gap {strikeGap} · Strike {calculatedStrike}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Product type — hidden for crypto brokers (no product concept) */}
         {!isCryptoBroker && (

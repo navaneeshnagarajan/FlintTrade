@@ -252,32 +252,112 @@ def vwap(
     low: NDArray[np.float64],
     close: NDArray[np.float64],
     volume: NDArray[np.float64],
+    timestamps: list[str] | None = None,
+    session_reset_times: list[str] | None = None,
 ) -> NDArray[np.float64]:
-    """Volume Weighted Average Price (intraday, cumulative from bar 0).
+    """Volume Weighted Average Price with optional intraday session resets.
 
     VWAP = cumsum(typical_price * volume) / cumsum(volume)
     where typical_price = (high + low + close) / 3.
 
-    Designed for intraday data — reset at session open by slicing the input
-    arrays to the current session before calling.
+    When ``timestamps`` and ``session_reset_times`` are provided, cumulative
+    sums are reset at each session boundary.  This is essential for intraday
+    VWAP accuracy — without it, VWAP from a prior day bleeds into the current
+    session.
+
+    Session boundary detection: a boundary occurs at bar ``i`` when the
+    HH:MM portion of ``timestamps[i]`` is less than the HH:MM portion of
+    ``timestamps[i-1]`` (i.e. the clock went backwards, meaning a new trading
+    day started) OR when the HH:MM portion of ``timestamps[i]`` exactly
+    matches one of the ``session_reset_times``.
+
+    When no ``timestamps`` are supplied the function behaves identically to
+    the original cumulative-from-bar-0 version.
 
     Args:
         high: High prices, shape (n,).
         low: Low prices, shape (n,).
         close: Close prices, shape (n,).
         volume: Volume, shape (n,). Values must be >= 0.
+        timestamps: ISO-8601 or "HH:MM" or "YYYY-MM-DD HH:MM" strings, one
+            per bar.  When supplied must be the same length as close.
+        session_reset_times: List of "HH:MM" strings at which the VWAP
+            accumulator is reset.  Defaults to ``["09:15"]`` (NSE market
+            open in IST) when ``timestamps`` is provided and this argument
+            is omitted.
 
     Returns:
         VWAP values, shape (n,). NaN where cumulative volume is 0.
+
+    Raises:
+        ValueError: If timestamps length does not match close length.
     """
     validate_ohlcv(high, low, close)
     validate_series(volume, min_length=1)
 
+    n = len(close)
+
+    if timestamps is not None and len(timestamps) != n:
+        raise ValueError(
+            f"timestamps length {len(timestamps)} does not match close length {n}"
+        )
+
     typical_price = (high + low + close) / 3.0
-    cum_tp_vol = np.cumsum(typical_price * volume)
-    cum_vol = np.cumsum(volume)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        result = np.where(cum_vol > 0, cum_tp_vol / cum_vol, np.nan)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    if timestamps is None:
+        # Original behaviour: simple cumulative VWAP from bar 0
+        cum_tp_vol = np.cumsum(typical_price * volume)
+        cum_vol = np.cumsum(volume)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result = np.where(cum_vol > 0, cum_tp_vol / cum_vol, np.nan)
+        return result
+
+    # Resolve session reset times (default: NSE market open)
+    reset_hhmm: set[str]
+    if session_reset_times is None:
+        reset_hhmm = {"09:15"}
+    else:
+        reset_hhmm = set(session_reset_times)
+
+    def _extract_hhmm(ts: str) -> str:
+        """Extract 'HH:MM' from various timestamp formats."""
+        stripped = ts.strip()
+        # "HH:MM" or "HH:MM:SS" — already short
+        if len(stripped) <= 8 and ":" in stripped:
+            return stripped[:5]
+        # "YYYY-MM-DD HH:MM..." or ISO-8601 with T separator
+        for sep in (" ", "T"):
+            if sep in stripped:
+                return stripped.split(sep)[1][:5]
+        # Fallback: last 5 chars
+        return stripped[-5:]
+
+    cum_tp_vol = 0.0
+    cum_vol = 0.0
+    prev_hhmm = ""
+
+    for i in range(n):
+        hhmm = _extract_hhmm(timestamps[i])
+
+        # Detect session boundary:
+        # (a) clock went backwards → new calendar day
+        # (b) this bar's time is an explicit reset time
+        should_reset = False
+        if prev_hhmm and hhmm < prev_hhmm:
+            should_reset = True
+        elif hhmm in reset_hhmm:
+            should_reset = True
+
+        if should_reset:
+            cum_tp_vol = 0.0
+            cum_vol = 0.0
+
+        cum_tp_vol += float(typical_price[i]) * float(volume[i])
+        cum_vol += float(volume[i])
+        result[i] = cum_tp_vol / cum_vol if cum_vol > 0.0 else np.nan
+        prev_hhmm = hhmm
+
     return result
 
 

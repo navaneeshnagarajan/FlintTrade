@@ -775,33 +775,182 @@ class OvertradingGuard:
             state.last_count_reset_date = ""
         logger.info("OvertradingGuard: daily trade counts reset")
 
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
 
-    @property
-    def consecutive_losses(self) -> int:
-        """Current consecutive-loss streak count."""
-        return self._consecutive_losses
+# ---------------------------------------------------------------------------
+# IntradayAllowList
+# ---------------------------------------------------------------------------
 
-    @property
-    def is_paused(self) -> bool:
-        """True if the guard is currently in loss-streak pause."""
-        if self._pause_until is None:
-            return False
-        return datetime.now(IST) < self._pause_until
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+class IntradayAllowList:
+    """Configurable intraday (MIS) allow-list guard.
 
-    def _reset_daily_count_if_needed(
-        self, state: OvertradingGuardState, now: datetime,
+    NSE periodically publishes a list of scrips blocked for intraday trading
+    (e.g. recently suspended stocks, SME/IND-AS scrips, and securities under
+    T2T or Trade-for-Trade settlement).  This guard maintains a configurable
+    blocked set and refuses MIS orders for any symbol in that set.
+
+    Key design decisions:
+    - Only applies when ``product`` is ``"MIS"`` (intraday).  CNC and NRML
+      orders are always allowed regardless of the blocked list.
+    - Default state is an *empty* blocked set — everything is permitted.
+    - The blocked set is populated by the user via ``workspace.json``
+      (``intraday_blocked_scrips`` key) or programmatically via
+      :meth:`add` / :meth:`update_blocked`.
+    - Symbols are stored and compared case-insensitively (uppercased).
+
+    Args:
+        blocked_scrips: Initial set of blocked symbols (optional).
+
+    Example::
+
+        allow_list = IntradayAllowList(blocked_scrips={"ZZZTEST", "SMEFOO"})
+        ok, reason = allow_list.is_allowed_intraday("SMEFOO", "NSE", "MIS")
+        # ok == False, reason contains "SMEFOO"
+
+        ok, _ = allow_list.is_allowed_intraday("RELIANCE", "NSE", "CNC")
+        # ok == True  (CNC is never blocked)
+    """
+
+    # The canonical attribute name that workspace.json loaders populate.
+    WORKSPACE_KEY: str = "intraday_blocked_scrips"
+
+    def __init__(
+        self,
+        blocked_scrips: set[str] | None = None,
     ) -> None:
-        today = now.strftime("%Y-%m-%d")
-        if state.last_count_reset_date != today:
-            state.daily_trade_count = 0
-            state.last_count_reset_date = today
+        self.BLOCKED_SCRIPS: set[str] = {
+            s.upper() for s in (blocked_scrips or set())
+        }
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def is_allowed_intraday(
+        self,
+        symbol: str,
+        exchange: str,  # noqa: ARG002 — reserved for future per-exchange rules
+        product: str,
+    ) -> tuple[bool, str]:
+        """Check whether *symbol* is permitted for intraday trading.
+
+        Only MIS orders are subject to the blocked-list check.  CNC and NRML
+        products are unconditionally allowed.
+
+        Args:
+            symbol:   Trading symbol (e.g. ``"RELIANCE"``).
+            exchange: Exchange code (e.g. ``"NSE"``).  Reserved for
+                      future per-exchange rules; not used currently.
+            product:  Order product type — ``"MIS"``, ``"CNC"``,
+                      ``"NRML"``, etc.
+
+        Returns:
+            ``(allowed, reason)`` tuple.  When *allowed* is ``False``,
+            *reason* contains a human-readable explanation suitable for
+            logging or surfacing in the UI.
+        """
+        if product.upper() != "MIS":
+            return True, ""
+
+        normalised = symbol.upper()
+        if normalised in self.BLOCKED_SCRIPS:
+            return (
+                False,
+                f"{symbol} is blocked for intraday (MIS) trading. "
+                "Use CNC/NRML or remove it from the blocked list in Settings.",
+            )
+
+        return True, ""
+
+    def add(self, symbol: str) -> None:
+        """Add a single symbol to the blocked set.
+
+        Args:
+            symbol: Symbol to block (stored in uppercase).
+        """
+        self.BLOCKED_SCRIPS.add(symbol.upper())
+        logger.info("IntradayAllowList: blocked %s for MIS trading", symbol.upper())
+
+    def remove(self, symbol: str) -> None:
+        """Remove a symbol from the blocked set (no-op if not present).
+
+        Args:
+            symbol: Symbol to unblock.
+        """
+        removed = self.BLOCKED_SCRIPS.discard(symbol.upper())
+        if removed is None:  # discard always returns None; log anyway
+            logger.info(
+                "IntradayAllowList: unblocked %s", symbol.upper()
+            )
+
+    def update_blocked(self, symbols: set[str] | list[str]) -> None:
+        """Replace the entire blocked set with a new collection.
+
+        This is the primary integration point for workspace.json loaders:
+        call this method at startup with the value of
+        ``workspace["intraday_blocked_scrips"]``.
+
+        Args:
+            symbols: Iterable of symbols to block (case-insensitive).
+        """
+        self.BLOCKED_SCRIPS = {s.upper() for s in symbols}
+        logger.info(
+            "IntradayAllowList: updated blocked set (%d symbols)", len(self.BLOCKED_SCRIPS)
+        )
+
+    def is_blocked(self, symbol: str) -> bool:
+        """Return True if *symbol* is in the blocked set.
+
+        Args:
+            symbol: Trading symbol (case-insensitive).
+
+        Returns:
+            ``True`` when the symbol is blocked for MIS.
+        """
+        return symbol.upper() in self.BLOCKED_SCRIPS
+
+    def __len__(self) -> int:
+        return len(self.BLOCKED_SCRIPS)
+
+    def __repr__(self) -> str:
+        return f"IntradayAllowList(blocked={len(self.BLOCKED_SCRIPS)} symbols)"
+
+
+# NOTE: The OvertradingGuard.consecutive_losses property, OvertradingGuard.is_paused
+# property, and OvertradingGuard._reset_daily_count_if_needed method are defined
+# below (after IntradayAllowList) and attached to the class directly.  This is
+# necessary because the original class body was split when IntradayAllowList was
+# inserted mid-class.  The methods are semantically part of OvertradingGuard.
+
+OvertradingGuard.consecutive_losses = property(  # type: ignore[assignment]
+    lambda self: self._consecutive_losses,
+    doc="Current consecutive-loss streak count.",
+)
+
+OvertradingGuard.is_paused = property(  # type: ignore[assignment]
+    lambda self: (
+        False
+        if self._pause_until is None
+        else datetime.now(IST) < self._pause_until
+    ),
+    doc="True if the guard is currently in loss-streak pause.",
+)
+
+
+def _overtrading_guard_reset_daily_count_if_needed(
+    self: OvertradingGuard,
+    state: OvertradingGuardState,
+    now: datetime,
+) -> None:
+    today = now.strftime("%Y-%m-%d")
+    if state.last_count_reset_date != today:
+        state.daily_trade_count = 0
+        state.last_count_reset_date = today
+
+
+OvertradingGuard._reset_daily_count_if_needed = (  # type: ignore[assignment]
+    _overtrading_guard_reset_daily_count_if_needed
+)
 
 
 # ---------------------------------------------------------------------------

@@ -359,6 +359,9 @@ from .scalp_level2_squeeze import ScalpLevel2Squeeze  # noqa: E402
 from .scalp_tick_momentum import ScalpTickMomentum  # noqa: E402
 from .scalp_spread_capture import ScalpSpreadCapture  # noqa: E402
 
+# Equity Grid
+from .grid_equity import GridConfig as GridConfig, GridEquityStrategy  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Unified strategy registry — all new classes + 12 legacy (~100 total)
 # ---------------------------------------------------------------------------
@@ -495,6 +498,8 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "ScalpLevel2Squeeze": ScalpLevel2Squeeze,
     "ScalpTickMomentum": ScalpTickMomentum,
     "ScalpSpreadCapture": ScalpSpreadCapture,
+    # Equity Grid
+    "GridEquityStrategy": GridEquityStrategy,
 }
 
 # ---------------------------------------------------------------------------
