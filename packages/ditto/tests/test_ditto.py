@@ -676,3 +676,159 @@ class TestPackageExports:
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         assert os.path.exists(os.path.join(pkg_dir, "src", "__init__.py"))
         assert os.path.exists(os.path.join(pkg_dir, "README.md"))
+
+class TestEncryptionDecryptionExtra:
+    def test_encrypt_value_default_key(self, monkeypatch):
+        from packages.ditto.src.account_manager import encrypt_value, decrypt_value
+        from cryptography.fernet import Fernet
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", key)
+
+        plaintext = "secret"
+        # Test without passing key
+        encrypted = encrypt_value(plaintext)
+        assert encrypted != plaintext
+        decrypted = decrypt_value(encrypted)
+        assert decrypted == plaintext
+
+    def test_encrypt_value_bytes_key(self, monkeypatch):
+        from packages.ditto.src.account_manager import encrypt_value, decrypt_value
+        from cryptography.fernet import Fernet
+        key = Fernet.generate_key()
+        monkeypatch.setenv("DITTO_ENCRYPTION_KEY", key.decode())
+
+        plaintext = "secret2"
+        # Test with explicitly passing key
+        encrypted = encrypt_value(plaintext, key=key.decode())
+        assert encrypted != plaintext
+        decrypted = decrypt_value(encrypted, key=key.decode())
+        assert decrypted == plaintext
+
+    def test_get_fernet_import_error(self, monkeypatch):
+        import sys
+        from packages.ditto.src.account_manager import _get_fernet
+
+        # Force ImportError
+        monkeypatch.setitem(sys.modules, 'cryptography.fernet', None)
+
+        with pytest.raises(ImportError, match="cryptography required — pip install cryptography"):
+            _get_fernet("some_key")
+
+class TestDefaultDB:
+    def test_default_db_with_env_var(self, monkeypatch):
+        from packages.ditto.src.account_manager import _default_db
+        monkeypatch.setenv("DATA_DIR", "/tmp/data")
+        assert _default_db() == "/tmp/data/ditto_accounts.sqlite"
+
+    def test_default_db_with_workspace(self, monkeypatch):
+        import sys
+        from pathlib import Path
+        from packages.ditto.src.account_manager import _default_db
+        monkeypatch.delenv("DATA_DIR", raising=False)
+
+        # Mock workspace module
+        mock_core = MagicMock()
+        mock_workspace = MagicMock()
+        mock_workspace_instance = MagicMock()
+        mock_workspace_instance.fast_data_dir = Path("/workspace/data")
+        mock_workspace.Workspace.return_value = mock_workspace_instance
+        mock_core.src.workspace = mock_workspace
+        monkeypatch.setitem(sys.modules, 'packages.core.src.workspace', mock_core.src.workspace)
+
+        assert _default_db() == "/workspace/data/ditto_accounts.sqlite"
+
+    def test_default_db_fallback(self, monkeypatch):
+        import sys
+        from pathlib import Path
+        from packages.ditto.src.account_manager import _default_db
+        monkeypatch.delenv("DATA_DIR", raising=False)
+
+        # Ensure importing workspace fails
+        monkeypatch.setitem(sys.modules, 'packages.core.src.workspace', None)
+
+        # Mock Path.home()
+        mock_home = Path("/home/mockuser")
+        monkeypatch.setattr(Path, "home", lambda: mock_home)
+
+        assert _default_db() == "/home/mockuser/.flinttrade/data/ditto_accounts.sqlite"
+
+
+class TestAccountManagerExtra:
+    def test_enter_exit(self, tmp_path):
+        from packages.ditto.src.account_manager import AccountManager
+        with AccountManager(db_path=str(tmp_path / "test.sqlite")) as mgr:
+            mgr.add_account(_make_account("a1"))
+            assert len(mgr.list_accounts()) == 1
+
+    def test_get_account_not_in_cache(self, tmp_path):
+        from packages.ditto.src.account_manager import AccountManager
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr.add_account(_make_account("a1"))
+        # Clear cache to force DB lookup
+        mgr._cache.clear()
+        acc = mgr.get_account("a1")
+        assert acc is not None
+        assert acc.account_id == "a1"
+        mgr.close()
+
+    def test_health_check_http_error(self, tmp_path):
+        from packages.ditto.src.account_manager import AccountManager
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        acc = _make_account("a1")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mgr._http = MagicMock()
+        mgr._http.post.return_value = mock_resp
+
+        health = mgr.health_check(acc)
+        assert not health.reachable
+        assert health.error == "HTTP 500"
+        mgr.close()
+
+    def test_health_check_exception(self, tmp_path):
+        from packages.ditto.src.account_manager import AccountManager
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        acc = _make_account("a1")
+
+        mgr._http = MagicMock()
+        mgr._http.post.side_effect = Exception("Connection Refused")
+
+        health = mgr.health_check(acc)
+        assert not health.reachable
+        assert "Connection Refused" in health.error
+        mgr.close()
+
+    def test_health_check_all(self, tmp_path):
+        from packages.ditto.src.account_manager import AccountManager
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"))
+        mgr.add_account(_make_account("a1", enabled=True))
+        mgr.add_account(_make_account("a2", enabled=False)) # Should be skipped
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mgr._http = MagicMock()
+        mgr._http.post.return_value = mock_resp
+
+        results = mgr.health_check_all()
+        assert len(results) == 1
+        assert results[0].account_id == "a1"
+        assert results[0].reachable
+        mgr.close()
+
+    def test_row_to_account_decryption_failure(self, tmp_path):
+        from packages.ditto.src.account_manager import AccountManager
+        mgr = AccountManager(db_path=str(tmp_path / "test.sqlite"), encryption_key="wrong_key")
+
+        # Create a valid account first (encrypted with a different key for testing)
+        from cryptography.fernet import Fernet
+        key1 = Fernet.generate_key()
+        f1 = Fernet(key1)
+        enc_api_key = f1.encrypt(b"my_api_key").decode()
+
+        row = ("a1", "Test", "http://host", enc_api_key, 1, 1.0, "default", 50000.0, 0)
+
+        acc = mgr._row_to_account(row)
+        assert acc.account_id == "a1"
+        assert acc.api_key == "" # Failed to decrypt
+        mgr.close()
