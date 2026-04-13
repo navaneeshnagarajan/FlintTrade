@@ -123,44 +123,42 @@ describe("OrderPadWidget", () => {
   // Capital-to-quantity calculator tests
   // -------------------------------------------------------------------------
 
-  it("renders the capital amount input", () => {
+  it("renders Fund toggle and switches to fund mode", () => {
     render(<OrderPadWidget {...defaultProps} />);
-    expect(screen.getByLabelText(/or enter amount/i)).toBeInTheDocument();
+    const fundBtn = screen.getByRole("button", { name: /fund/i });
+    expect(fundBtn).toBeTruthy();
+    fireEvent.click(fundBtn);
+    expect(screen.getByLabelText(/fund amount/i)).toBeInTheDocument();
   });
 
-  it("shows LTP unavailable message when LTP is zero and amount is entered", () => {
-    // useAtomValue returns null → ltp === 0
+  it("shows LTP unavailable message when LTP is zero and fund amount is entered", () => {
     render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /fund/i }));
 
-    const capitalInput = screen.getByLabelText(/or enter amount/i);
+    const capitalInput = screen.getByLabelText(/fund amount/i);
     fireEvent.change(capitalInput, { target: { value: "50000" } });
 
-    expect(
-      screen.getByText(/ltp unavailable/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/ltp unavailable/i)).toBeInTheDocument();
   });
 
-  it("calculates quantity from capital amount when LTP is available", () => {
-    // Mock tick with LTP = 200
+  it("calculates quantity from fund amount when LTP is available", () => {
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 200 });
-
     render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /fund/i }));
 
-    const capitalInput = screen.getByLabelText(/or enter amount/i);
+    const capitalInput = screen.getByLabelText(/fund amount/i);
     fireEvent.change(capitalInput, { target: { value: "50000" } });
 
     // floor(50000 / 200) = 250
-    expect(screen.getByText(/250 qty/i)).toBeInTheDocument();
+    expect(screen.getByText("250")).toBeInTheDocument();
   });
 
-  it("shows 'Amount too small' when capital is less than one unit", () => {
-    // Mock tick with LTP = 200
+  it("shows 'amount too small' when fund value is less than one unit", () => {
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 200 });
-
     render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /fund/i }));
 
-    const capitalInput = screen.getByLabelText(/or enter amount/i);
-    // 100 / 200 = 0.5 → floor = 0 → too small
+    const capitalInput = screen.getByLabelText(/fund amount/i);
     fireEvent.change(capitalInput, { target: { value: "100" } });
 
     expect(screen.getByText(/amount too small/i)).toBeInTheDocument();

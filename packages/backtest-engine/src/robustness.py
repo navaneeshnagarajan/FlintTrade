@@ -38,7 +38,6 @@ Usage::
 
 from __future__ import annotations
 
-import copy
 import logging
 import math
 import random
@@ -582,7 +581,6 @@ class RobustnessTester:
         mean_eq = _mean(final_equities)
         std_eq = _std(final_equities)
         cv = std_eq / abs(mean_eq) if mean_eq != 0 else float("inf")
-        n = len(final_equities)
 
         return MCShuffleResult(
             mean_equity=mean_eq,

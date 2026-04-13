@@ -301,12 +301,12 @@ from .stat_regime_hmm import StatRegimeHMM  # noqa: E402
 from .stat_kalman_filter import StatKalmanFilter  # noqa: E402
 from .stat_pairs_trading import (  # noqa: E402
     StatPairsTrading,
-    PairsTradingConfig,
-    cointegration_test,
-    adf_stationarity,
-    ou_half_life,
-    zscore as pairs_zscore,
-    select_best_pair,
+    PairsTradingConfig as PairsTradingConfig,
+    cointegration_test as cointegration_test,
+    adf_stationarity as adf_stationarity,
+    ou_half_life as ou_half_life,
+    zscore as pairs_zscore,  # noqa: F401
+    select_best_pair as select_best_pair,
 )
 
 # Intraday India-specific (6)
