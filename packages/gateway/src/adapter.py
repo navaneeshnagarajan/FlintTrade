@@ -337,7 +337,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         auth_flow=AuthFlowType.oauth_redirect,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
     ),
-    # ---- TOTP form flow (11) ---------------------------------------------
+    # ---- TOTP form flow (10) ---------------------------------------------
     "angel": BrokerInfo(
         name="angel",
         display_name="Angel One",
@@ -398,11 +398,20 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         auth_flow=AuthFlowType.totp_form,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
     ),
+    # ---- OTP multistep flow (1) ------------------------------------------
     "samco": BrokerInfo(
         name="samco",
         display_name="Samco",
-        auth_flow=AuthFlowType.totp_form,
+        # Samco uses a 4-step OTP 2FA flow, NOT a TOTP authenticator app:
+        #   1. Request OTP → sent to registered mobile
+        #   2. Submit OTP → secret API key e-mailed to user (one-time setup)
+        #   3. Generate access token from secret key (daily, via secret key)
+        #   4. Login with access token + password → session token
+        # The secret_api_key and IP registration fields are stored encrypted
+        # in the CredentialStore alongside the standard client credentials.
+        auth_flow=AuthFlowType.otp_multistep,
         exchanges=["NSE", "BSE", "NFO", "CDS", "MCX"],
+        aux_params=["secret_api_key", "primary_ip", "secondary_ip"],
     ),
     # ---- API key direct flow (9) -----------------------------------------
     "deltaexchange": BrokerInfo(

@@ -103,6 +103,19 @@ if "WalkForwardResult" in _ns:
 globals().update(_ns)
 globals().update(_try_import(".permutation_routes", "permutation_routes", ["permutation_bp"]))
 
+# --- Walk-forward analysis (WFE ratio) ---
+globals().update(_try_import(".walk_forward_analysis", "walk_forward_analysis", [
+    "WFAnalysis", "WFAConfig", "WFAFold", "WalkForwardAnalysisResult",
+]))
+
+# --- Robustness testing suite ---
+globals().update(_try_import(".robustness", "robustness", [
+    "RobustnessTester", "RobustnessConfig", "RobustnessReport",
+    "MCShuffleResult", "NoiseInjectionResult",
+    "ParamSensitivityResult", "ParamSensitivityEntry",
+    "DelayTestResult", "DelayTestEntry", "CrossSymbolResult",
+]))
+
 # --- Strategy comparison ---
 globals().update(_try_import(".strategy_comparison", "strategy_comparison", [
     "StrategyComparator", "StrategyComparisonResult",
@@ -148,4 +161,11 @@ __all__ = [
     "StrategyComparator", "StrategyComparisonResult",
     "SimulationEngine", "SimulationScenario", "SimulationPhase",
     "MarketEvent", "SimulationResult", "StressTestRunner",
+    # Walk-forward analysis (WFE ratio)
+    "WFAnalysis", "WFAConfig", "WFAFold", "WalkForwardAnalysisResult",
+    # Robustness testing suite
+    "RobustnessTester", "RobustnessConfig", "RobustnessReport",
+    "MCShuffleResult", "NoiseInjectionResult",
+    "ParamSensitivityResult", "ParamSensitivityEntry",
+    "DelayTestResult", "DelayTestEntry", "CrossSymbolResult",
 ]

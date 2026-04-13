@@ -18,6 +18,7 @@ const lazyWidgets = {
 
   // Analysis widgets
   chart: lazy(() => import("@/widgets/analysis/Chart/ChartWidget")),
+  chartgrid: lazy(() => import("@/widgets/analysis/Chart/ChartGrid")),
   optionchain: lazy(() => import("@/widgets/analysis/OptionChain/OptionChainWidget")),
   oichart: lazy(() => import("@/widgets/analysis/OIChart/OIChartWidget")),
   straddle: lazy(() => import("@/widgets/analysis/Straddle/StraddleWidget")),
@@ -160,6 +161,7 @@ export const widgetCatalog: WidgetMeta[] = [
 
   // Analysis
   { id: "chart", name: "Chart", icon: "CandlestickChart", category: "Analysis", description: "Interactive candlestick chart with indicators, drawing tools, and replay" },
+  { id: "chartgrid", name: "Multi Chart", icon: "LayoutGrid", category: "Analysis", description: "1×1, 1×2, 2×1, or 2×2 grid of independent charts with per-cell symbol and interval" },
   { id: "optionchain", name: "Option Chain", icon: "Grid3x3", category: "Analysis", description: "Live option chain with strike-level OI, volume, IV, and Greek data" },
   { id: "oichart", name: "OI Chart", icon: "BarChart3", category: "Analysis", description: "Open interest change chart across strikes for a selected expiry" },
   { id: "straddle", name: "Straddle", icon: "Activity", category: "Analysis", description: "Straddle and strangle builder with premium, breakeven, and IV display" },

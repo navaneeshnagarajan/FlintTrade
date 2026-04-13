@@ -35,6 +35,8 @@ import {
   AlertCircle,
   FileEdit,
   IndianRupee,
+  Hash,
+  Wallet,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -291,8 +293,17 @@ function OrderPadWidget(_props: WidgetProps) {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
 
+  // Qty vs Fund mode toggle — "qty" = manual quantity, "fund" = enter INR amount and auto-calculate lots
+  type InputMode = "qty" | "fund";
+  const [inputMode, setInputMode] = useState<InputMode>("qty");
+
   // "Calculate from capital" state — user types an INR amount, qty is auto-calculated
   const [capitalAmount, setCapitalAmount] = useState("");
+
+  // Lot size for the current symbol (0 = no lot constraint, e.g. equities).
+  // TODO: populate from instrument master / option chain metadata when symbol changes.
+  const [lotSize, _setLotSize] = useState(0);
+  void _setLotSize; // suppress unused warning — will be wired to symbol metadata
 
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -334,20 +345,28 @@ function OrderPadWidget(_props: WidgetProps) {
   const tick = useAtomValue(tickAtomFamily(tickKey));
   const ltp = tick?.ltp ?? 0;
 
-  // When the user types an INR capital amount, auto-calculate quantity = floor(amount / ltp).
+  // When the user types an INR capital amount, auto-calculate quantity.
+  // If lotSize > 0 the quantity is rounded down to the nearest lot:
+  //   lots = floor(amount / (ltp * lotSize)),  qty = lots * lotSize
   // Also clears the capital field when qty is edited manually.
   const handleCapitalChange = useCallback(
     (raw: string) => {
       setCapitalAmount(raw);
       const amount = parseFloat(raw);
       if (!isNaN(amount) && amount > 0 && ltp > 0) {
-        const calculated = Math.floor(amount / ltp);
+        let calculated: number;
+        if (lotSize > 0) {
+          const lots = Math.floor(amount / (ltp * lotSize));
+          calculated = lots * lotSize;
+        } else {
+          calculated = Math.floor(amount / ltp);
+        }
         if (calculated >= 1) {
           setValue("qty", calculated);
         }
       }
     },
-    [ltp, setValue],
+    [ltp, lotSize, setValue],
   );
 
   const handleQtyChange = useCallback(
@@ -679,75 +698,172 @@ function OrderPadWidget(_props: WidgetProps) {
           </div>
         )}
 
-        {/* Qty + Price row */}
-        <div className="grid grid-cols-2 gap-3">
-          <Controller
-            control={control}
-            name="qty"
-            render={({ field }) => (
-              <StepInput
-                label="Quantity"
-                value={field.value}
-                onChange={(v) => handleQtyChange(v, field.onChange)}
-                min={1}
-                step={1}
-              />
-            )}
-          />
-          <Controller
-            control={control}
-            name="price"
-            render={({ field }) => (
-              <NumField
-                label="Price"
-                value={field.value ?? ""}
-                onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
-                disabled={!priceEnabled}
-                placeholder={priceEnabled ? "0.00" : "N/A"}
-              />
-            )}
-          />
+        {/* Input mode toggle: Qty vs Fund */}
+        <div className="flex items-center gap-2">
+          <span className="text-xxs text-text-muted uppercase tracking-wider">Input</span>
+          <div className="flex border border-border-default rounded overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setInputMode("qty")}
+              className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
+                inputMode === "qty"
+                  ? "bg-accent text-white"
+                  : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
+              }`}
+              aria-pressed={inputMode === "qty"}
+            >
+              <Hash size={10} aria-hidden="true" />
+              Qty
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode("fund")}
+              className={`flex items-center gap-1 px-2.5 h-7 text-xs font-medium transition-colors ${
+                inputMode === "fund"
+                  ? "bg-accent text-white"
+                  : "bg-surface-hover text-text-secondary hover:text-text-primary hover:bg-surface-card"
+              }`}
+              aria-pressed={inputMode === "fund"}
+            >
+              <Wallet size={10} aria-hidden="true" />
+              Fund
+            </button>
+          </div>
+          {lotSize > 0 && (
+            <span className="ml-auto text-xxs text-text-muted font-mono tabular-nums">
+              Lot: {lotSize}
+            </span>
+          )}
         </div>
 
-        {/* Capital-to-quantity calculator */}
-        <div className="flex flex-col gap-0.5">
-          <label
-            htmlFor="orderpad-capital"
-            className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1"
-          >
-            <IndianRupee size={9} aria-hidden="true" />
-            Or enter amount
-          </label>
-          <div className="relative flex items-center">
-            <span className="absolute left-2 text-xs text-text-muted font-mono pointer-events-none select-none">
-              ₹
-            </span>
-            <Input
-              id="orderpad-capital"
-              type="number"
-              min={0}
-              step={100}
-              value={capitalAmount}
-              onChange={(e) => handleCapitalChange(e.target.value)}
-              placeholder="e.g. 50000"
-              className="pl-5 h-8 w-full bg-surface-hover border border-border-default rounded px-2 text-xs font-mono tabular-nums text-text-primary focus-visible:ring-0 focus-visible:border-accent placeholder:text-text-muted"
+        {/* Qty mode: manual quantity + price row */}
+        {inputMode === "qty" && (
+          <div className="grid grid-cols-2 gap-3">
+            <Controller
+              control={control}
+              name="qty"
+              render={({ field }) => (
+                <StepInput
+                  label="Quantity"
+                  value={field.value}
+                  onChange={(v) => handleQtyChange(v, field.onChange)}
+                  min={1}
+                  step={lotSize > 0 ? lotSize : 1}
+                />
+              )}
+            />
+            <Controller
+              control={control}
+              name="price"
+              render={({ field }) => (
+                <NumField
+                  label="Price"
+                  value={field.value ?? ""}
+                  onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
+                  disabled={!priceEnabled}
+                  placeholder={priceEnabled ? "0.00" : "N/A"}
+                />
+              )}
             />
           </div>
-          {capitalAmount !== "" && ltp > 0 && (
-            <p className="text-xxs text-text-muted mt-0.5 font-mono tabular-nums">
-              LTP ₹{ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-              {" · "}
-              {Math.floor(parseFloat(capitalAmount) / ltp) >= 1
-                ? `${Math.floor(parseFloat(capitalAmount) / ltp)} qty`
-                : "Amount too small"}
-            </p>
-          )}
-          {capitalAmount !== "" && ltp === 0 && (
-            <p className="text-xxs text-text-muted mt-0.5">
-              LTP unavailable — quantity not auto-calculated
-            </p>
-          )}
-        </div>
+        )}
+
+        {/* Fund mode: enter rupee amount, auto-calculate lots */}
+        {inputMode === "fund" && (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
+              <label
+                htmlFor="orderpad-capital"
+                className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1"
+              >
+                <IndianRupee size={9} aria-hidden="true" />
+                Fund Amount
+              </label>
+              <div className="relative flex items-center">
+                <span className="absolute left-2 text-xs text-text-muted font-mono pointer-events-none select-none">
+                  ₹
+                </span>
+                <Input
+                  id="orderpad-capital"
+                  type="number"
+                  min={0}
+                  step={1000}
+                  value={capitalAmount}
+                  onChange={(e) => handleCapitalChange(e.target.value)}
+                  placeholder="e.g. 50000"
+                  className="pl-5 h-8 w-full bg-surface-hover border border-border-default rounded px-2 text-xs font-mono tabular-nums text-text-primary focus-visible:ring-0 focus-visible:border-accent placeholder:text-text-muted"
+                />
+              </div>
+            </div>
+
+            {/* Calculated quantity & approximate cost */}
+            {capitalAmount !== "" && ltp > 0 && (() => {
+              const amount = parseFloat(capitalAmount);
+              let calculatedQty: number;
+              let lots: number;
+              if (lotSize > 0) {
+                lots = Math.floor(amount / (ltp * lotSize));
+                calculatedQty = lots * lotSize;
+              } else {
+                calculatedQty = Math.floor(amount / ltp);
+                lots = calculatedQty;
+              }
+              const approxCost = calculatedQty * ltp;
+              return (
+                <div className="rounded border border-border-subtle bg-surface-card px-3 py-2 space-y-0.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">LTP</span>
+                    <span className="font-mono tabular-nums text-text-primary">
+                      ₹{ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  {lotSize > 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-muted">Lots</span>
+                      <span className="font-mono tabular-nums text-text-primary font-semibold">
+                        {lots >= 1 ? lots : <span className="text-loss">0 — amount too small</span>}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">Quantity</span>
+                    <span className="font-mono tabular-nums text-text-primary font-semibold">
+                      {calculatedQty >= 1 ? calculatedQty : <span className="text-loss">0 — amount too small</span>}
+                    </span>
+                  </div>
+                  {calculatedQty >= 1 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-muted">Approx Cost</span>
+                      <span className="font-mono tabular-nums text-text-primary">
+                        ₹{approxCost.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {capitalAmount !== "" && ltp === 0 && (
+              <p className="text-xxs text-text-muted">
+                LTP unavailable — quantity not auto-calculated
+              </p>
+            )}
+
+            {/* Price input in fund mode too */}
+            <Controller
+              control={control}
+              name="price"
+              render={({ field }) => (
+                <NumField
+                  label="Price"
+                  value={field.value ?? ""}
+                  onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
+                  disabled={!priceEnabled}
+                  placeholder={priceEnabled ? "0.00" : "N/A"}
+                />
+              )}
+            />
+          </div>
+        )}
 
         {/* Trigger + Disclosed row */}
         <div className="grid grid-cols-2 gap-3">

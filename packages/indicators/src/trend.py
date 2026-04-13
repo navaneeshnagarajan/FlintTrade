@@ -1,5 +1,6 @@
 """Trend indicators — EMA, SMA, DEMA, TEMA, WMA, HMA, Ichimoku, Parabolic SAR,
-Supertrend, VWAP, KAMA, ADX, DMI, LinReg.
+Supertrend, VWAP, KAMA, ADX, DMI, LinReg, ALMA, T3, FRAMA, McGinley Dynamic,
+VIDYA, Alligator, MovingAverageEnvelopes, TRIMA.
 
 All functions:
 - Accept numpy float64 arrays
@@ -64,6 +65,30 @@ def ema(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
         for i in range(period, n):
             result[i] = close[i] * k + result[i - 1] * (1.0 - k)
 
+    return result
+
+
+def _rma(close: NDArray[np.float64], period: int) -> NDArray[np.float64]:
+    """Wilder / Running Moving Average (internal helper).
+
+    RMA uses alpha = 1 / period, seeded with the SMA of the first ``period``
+    bars.  This is the same smoothing used by ATR and ADX.
+
+    Args:
+        close: Input series, shape (n,).
+        period: Smoothing period (>= 1).
+
+    Returns:
+        RMA values, shape (n,). First ``period - 1`` values are NaN.
+    """
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+    if n < period:
+        return result
+    alpha = 1.0 / period
+    result[period - 1] = float(np.mean(close[:period]))
+    for i in range(period, n):
+        result[i] = alpha * close[i] + (1.0 - alpha) * result[i - 1]
     return result
 
 
@@ -774,5 +799,467 @@ def linreg(close: NDArray[np.float64], period: int = 14) -> NDArray[np.float64]:
         cov = float(np.sum((x - x_mean) * (y - y_mean)))
         slope = cov / x_var
         result[i] = y_mean + slope * (x[-1] - x_mean)
+
+    return result
+
+
+def alma(
+    close: NDArray[np.float64],
+    period: int = 9,
+    offset: float = 0.85,
+    sigma: float = 6.0,
+) -> NDArray[np.float64]:
+    """Arnaud Legoux Moving Average.
+
+    ALMA uses a Gaussian distribution of weights along the window to combine
+    low lag (high offset) with low noise (high sigma). It is computed as the
+    normalised weighted sum of prices within the rolling window.
+
+    Formula:
+        m = floor(offset * (period - 1))
+        s = period / sigma
+        w[j] = exp(-((j - m)^2) / (2 * s^2))   for j in 0..period-1
+        ALMA[i] = sum(w[j] * close[i - period + 1 + j]) / sum(w)
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Window length (default 9).
+        offset: Gaussian centre offset in [0, 1]. Higher values favour recent
+            prices (lower lag); lower values favour older prices (more smooth).
+            Default 0.85.
+        sigma: Gaussian width divisor. Higher values produce smoother output.
+            Default 6.0.
+
+    Returns:
+        ALMA values, shape (n,). First ``period - 1`` values are NaN.
+
+    Raises:
+        ValueError: If period < 1 or sigma <= 0.
+    """
+    validate_series(close, min_length=period)
+    if period < 1:
+        raise ValueError(f"alma period must be >= 1, got {period}")
+    if sigma <= 0.0:
+        raise ValueError(f"alma sigma must be > 0, got {sigma}")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    m = float(np.floor(offset * (period - 1)))
+    s = period / sigma
+    j_arr = np.arange(period, dtype=np.float64)
+    weights = np.exp(-((j_arr - m) ** 2) / (2.0 * s * s))
+    w_sum = float(np.sum(weights))
+
+    if w_sum == 0.0:
+        return result
+
+    for i in range(period - 1, n):
+        window = close[i - period + 1 : i + 1]
+        result[i] = float(np.dot(window, weights)) / w_sum
+
+    return result
+
+
+def t3(
+    close: NDArray[np.float64],
+    period: int = 5,
+    vfactor: float = 0.7,
+) -> NDArray[np.float64]:
+    """T3 Moving Average (Tillson).
+
+    T3 is a six-stage EMA combination that achieves extremely low lag while
+    remaining smooth. The volume factor ``vfactor`` (default 0.7) controls the
+    trade-off between smoothness and responsiveness.
+
+    Formula (each stage applied on the previous stage's output):
+        c1 = -(vfactor^3)
+        c2 =  3*vfactor^2 + 3*vfactor^3
+        c3 = -6*vfactor^2 - 3*vfactor - 3*vfactor^3
+        c4 =  1 + 3*vfactor + vfactor^3 + 3*vfactor^2
+        e1..e6 = successive EMA passes
+        T3 = c1*e6 + c2*e5 + c3*e4 + c4*e3
+
+    Args:
+        close: Close prices, shape (n,).
+        period: EMA period for each of the six passes (default 5).
+        vfactor: Volume factor controlling smoothness vs lag (default 0.7).
+
+    Returns:
+        T3 values, shape (n,). Leading NaN region grows with each EMA pass.
+
+    Raises:
+        ValueError: If vfactor not in (0, 1] or period < 1.
+    """
+    validate_series(close, min_length=period)
+    if period < 1:
+        raise ValueError(f"t3 period must be >= 1, got {period}")
+    if not (0.0 < vfactor <= 1.0):
+        raise ValueError(f"t3 vfactor must be in (0, 1], got {vfactor}")
+
+    v2 = vfactor * vfactor
+    v3 = v2 * vfactor
+    c1 = -v3
+    c2 = 3.0 * v2 + 3.0 * v3
+    c3 = -6.0 * v2 - 3.0 * vfactor - 3.0 * v3
+    c4 = 1.0 + 3.0 * vfactor + v3 + 3.0 * v2
+
+    def _ema_valid(arr: NDArray[np.float64], p: int) -> NDArray[np.float64]:
+        """EMA computed only over the valid (non-NaN) portion of arr."""
+        mask = ~np.isnan(arr)
+        valid = arr[mask]
+        if len(valid) < p:
+            return arr.copy()
+        e_valid = ema(valid, p)
+        out = arr.copy()
+        out[mask] = e_valid
+        return out
+
+    e1 = ema(close, period)
+    e2 = _ema_valid(e1, period)
+    e3 = _ema_valid(e2, period)
+    e4 = _ema_valid(e3, period)
+    e5 = _ema_valid(e4, period)
+    e6 = _ema_valid(e5, period)
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+    valid = ~np.isnan(e3) & ~np.isnan(e4) & ~np.isnan(e5) & ~np.isnan(e6)
+    result[valid] = (
+        c1 * e6[valid] + c2 * e5[valid] + c3 * e4[valid] + c4 * e3[valid]
+    )
+    return result
+
+
+def frama(
+    close: NDArray[np.float64],
+    period: int = 16,
+) -> NDArray[np.float64]:
+    """Fractal Adaptive Moving Average.
+
+    FRAMA dynamically adjusts its smoothing constant using the fractal dimension
+    of the price series over the window.  In trending markets the fractal
+    dimension is near 1 (fast tracking); in choppy markets it approaches 2
+    (slow, highly smoothed).
+
+    Formula:
+        For each window of size ``period`` (must be even):
+          n1 = (highest(close, half) - lowest(close, half)) / half
+          n2 = (highest(close[half:], half) - lowest(close[half:], half)) / half
+          n3 = (highest(close, period) - lowest(close, period)) / period
+          D  = (log(n1 + n2) - log(n3)) / log(2)
+          alpha = exp(-4.6 * (D - 1))
+          alpha = clamp(alpha, 0.01, 1.0)
+          FRAMA[i] = alpha * close[i] + (1 - alpha) * FRAMA[i-1]
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Window length (default 16, must be even and >= 4).
+
+    Returns:
+        FRAMA values, shape (n,). First ``period - 1`` values are NaN.
+
+    Raises:
+        ValueError: If period is odd or < 4.
+    """
+    validate_series(close, min_length=period)
+    if period < 4:
+        raise ValueError(f"frama period must be >= 4, got {period}")
+    if period % 2 != 0:
+        raise ValueError(f"frama period must be even, got {period}")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+    half = period // 2
+
+    # Seed FRAMA at first valid bar
+    result[period - 1] = close[period - 1]
+
+    for i in range(period - 1, n):
+        window = close[i - period + 1 : i + 1]
+        w1 = window[:half]
+        w2 = window[half:]
+
+        hi1, lo1 = float(np.max(w1)), float(np.min(w1))
+        hi2, lo2 = float(np.max(w2)), float(np.min(w2))
+        hi3, lo3 = float(np.max(window)), float(np.min(window))
+
+        n1 = (hi1 - lo1) / half
+        n2 = (hi2 - lo2) / half
+        n3 = (hi3 - lo3) / period if period > 0 else 0.0
+
+        if n1 + n2 <= 0.0 or n3 <= 0.0:
+            alpha = 0.01
+        else:
+            denom = np.log(2.0)
+            d = (np.log(n1 + n2) - np.log(n3)) / denom if denom != 0.0 else 1.0
+            alpha = float(np.exp(-4.6 * (d - 1.0)))
+            alpha = max(0.01, min(1.0, alpha))
+
+        if i == period - 1:
+            result[i] = close[i]
+        else:
+            prev = result[i - 1]
+            if np.isnan(prev):
+                result[i] = close[i]
+            else:
+                result[i] = alpha * close[i] + (1.0 - alpha) * prev
+
+    return result
+
+
+def mcginley_dynamic(
+    close: NDArray[np.float64],
+    period: int = 14,
+) -> NDArray[np.float64]:
+    """McGinley Dynamic Indicator.
+
+    Developed by John R. McGinley, this indicator automatically adjusts its
+    speed based on the ratio between the current price and the previous
+    indicator value.  This self-adjusting nature eliminates whipsaws and keeps
+    the line closely aligned with prices.
+
+    Formula:
+        MD[i] = MD[i-1] + (close[i] - MD[i-1]) / (period * (close[i] / MD[i-1])^4)
+
+    Seeded with the SMA of the first ``period`` bars.
+
+    Args:
+        close: Close prices, shape (n,). All values must be > 0.
+        period: Period constant (default 14).
+
+    Returns:
+        McGinley Dynamic values, shape (n,). First ``period - 1`` values are
+        NaN.
+
+    Raises:
+        ValueError: If period < 1 or any close <= 0.
+    """
+    validate_series(close, min_length=period)
+    if period < 1:
+        raise ValueError(f"mcginley_dynamic period must be >= 1, got {period}")
+    if np.any(close <= 0.0):
+        raise ValueError("mcginley_dynamic requires all close prices to be strictly positive.")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    # Seed with SMA of first period bars
+    seed = float(np.mean(close[:period]))
+    result[period - 1] = seed
+
+    for i in range(period, n):
+        prev = result[i - 1]
+        ratio = close[i] / prev
+        denom = period * (ratio ** 4)
+        result[i] = prev + (close[i] - prev) / denom if denom != 0.0 else prev
+
+    return result
+
+
+def vidya(
+    close: NDArray[np.float64],
+    cmo_period: int = 9,
+    ema_period: int = 12,
+) -> NDArray[np.float64]:
+    """Variable Index Dynamic Average.
+
+    VIDYA was introduced by Tushar Chande. It adapts its smoothing constant
+    using the absolute value of the Chande Momentum Oscillator (CMO) as a
+    volatility index — the faster the momentum, the faster the average tracks.
+
+    Formula:
+        vi    = abs(CMO(close, cmo_period)) / 100  (volatility index in [0, 1])
+        alpha = 2 / (ema_period + 1)
+        VIDYA[i] = alpha * vi * close[i] + (1 - alpha * vi) * VIDYA[i-1]
+
+    Args:
+        close: Close prices, shape (n,).
+        cmo_period: Period for the CMO volatility index (default 9).
+        ema_period: Base EMA period controlling the alpha constant (default 12).
+
+    Returns:
+        VIDYA values, shape (n,). NaN until both CMO and VIDYA are seeded.
+
+    Raises:
+        ValueError: If either period < 1.
+    """
+    from packages.indicators.src.momentum import cmo as _cmo
+
+    validate_series(close, min_length=cmo_period + 1)
+    if cmo_period < 1:
+        raise ValueError(f"vidya cmo_period must be >= 1, got {cmo_period}")
+    if ema_period < 1:
+        raise ValueError(f"vidya ema_period must be >= 1, got {ema_period}")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+    cmo_vals = _cmo(close, cmo_period)
+    alpha = 2.0 / (ema_period + 1.0)
+
+    # First valid bar: seed with close value
+    first_valid = cmo_period  # cmo produces first valid at index cmo_period
+    if first_valid >= n:
+        return result
+
+    result[first_valid] = close[first_valid]
+
+    for i in range(first_valid + 1, n):
+        if np.isnan(cmo_vals[i]):
+            continue
+        vi = abs(cmo_vals[i]) / 100.0
+        prev = result[i - 1]
+        if np.isnan(prev):
+            result[i] = close[i]
+        else:
+            sc = alpha * vi
+            result[i] = sc * close[i] + (1.0 - sc) * prev
+
+    return result
+
+
+def alligator(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    jaw_period: int = 13,
+    jaw_offset: int = 8,
+    teeth_period: int = 8,
+    teeth_offset: int = 5,
+    lips_period: int = 5,
+    lips_offset: int = 3,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Williams Alligator Indicator.
+
+    Developed by Bill Williams.  Three smoothed moving averages of the bar
+    midpoint are computed and then shifted forward (displaced into the future)
+    by different amounts to visualise trend and its absence.
+
+    Components:
+        Jaw   (Blue):   SMMA(midpoint, jaw_period)   shifted forward jaw_offset bars
+        Teeth (Red):    SMMA(midpoint, teeth_period) shifted forward teeth_offset bars
+        Lips  (Green):  SMMA(midpoint, lips_period)  shifted forward lips_offset bars
+
+    where midpoint = (high + low) / 2 and SMMA = Smoothed Moving Average (Wilder RMA).
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        jaw_period: Jaw SMMA period (default 13).
+        jaw_offset: Jaw displacement bars (default 8).
+        teeth_period: Teeth SMMA period (default 8).
+        teeth_offset: Teeth displacement bars (default 5).
+        lips_period: Lips SMMA period (default 5).
+        lips_offset: Lips displacement bars (default 3).
+
+    Returns:
+        Tuple of (jaw, teeth, lips) arrays, each shape (n,).  Values are NaN
+        where the SMMA has not yet warmed up AND for the final
+        ``offset`` bars of each line (shifted out of range).
+    """
+    validate_ohlcv(high, low, high, min_length=1)
+    n = len(high)
+    midpoint = (high + low) / 2.0
+
+    def _smma_shifted(period: int, offset: int) -> NDArray[np.float64]:
+        raw = _rma(midpoint, period)
+        out = np.full(n, np.nan, dtype=np.float64)
+        # Shift the series forward by ``offset`` bars
+        end = n - offset
+        if end > 0:
+            out[offset : offset + end] = raw[:end]
+        return out
+
+    jaw = _smma_shifted(jaw_period, jaw_offset)
+    teeth = _smma_shifted(teeth_period, teeth_offset)
+    lips = _smma_shifted(lips_period, lips_offset)
+
+    return jaw, teeth, lips
+
+
+def moving_average_envelopes(
+    close: NDArray[np.float64],
+    period: int = 20,
+    pct: float = 2.5,
+    ma_type: str = "sma",
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Moving Average Envelopes.
+
+    Bands are placed a fixed percentage above and below a central moving
+    average.  The envelope defines a "normal" price range; moves outside the
+    bands are potential signals.
+
+    Formula:
+        upper = MA * (1 + pct / 100)
+        lower = MA * (1 - pct / 100)
+
+    Args:
+        close: Close prices, shape (n,).
+        period: MA period (default 20).
+        pct: Envelope width as a percentage of the MA (default 2.5).
+        ma_type: Moving average type — ``"sma"`` or ``"ema"`` (default ``"sma"``).
+
+    Returns:
+        Tuple of (upper, middle, lower) arrays, each shape (n,).
+
+    Raises:
+        ValueError: If pct <= 0 or ma_type is unrecognised.
+    """
+    validate_series(close, min_length=period)
+    if pct <= 0.0:
+        raise ValueError(f"moving_average_envelopes pct must be > 0, got {pct}")
+    ma_type = ma_type.lower()
+    if ma_type not in ("sma", "ema"):
+        raise ValueError(f"moving_average_envelopes ma_type must be 'sma' or 'ema', got {ma_type!r}")
+
+    middle = sma(close, period) if ma_type == "sma" else ema(close, period)
+    factor = pct / 100.0
+    upper = middle * (1.0 + factor)
+    lower = middle * (1.0 - factor)
+    return upper, middle, lower
+
+
+def trima(close: NDArray[np.float64], period: int = 20) -> NDArray[np.float64]:
+    """Triangular Moving Average.
+
+    TRIMA is a double-smoothed SMA that places more weight on the middle
+    portion of the data.  It is equivalent to the SMA of an SMA and is notably
+    smoother than a plain SMA of the same period.
+
+    Formula:
+        half = ceil(period / 2)
+        first_sma  = SMA(close, half)
+        TRIMA      = SMA(first_sma, half)
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Total TRIMA period (default 20).
+
+    Returns:
+        TRIMA values, shape (n,). First ``period - 1`` values are NaN.
+
+    Raises:
+        ValueError: If period < 2.
+    """
+    validate_series(close, min_length=period)
+    if period < 2:
+        raise ValueError(f"trima period must be >= 2, got {period}")
+
+    half = int(np.ceil(period / 2.0))
+
+    first_sma = sma(close, half)
+
+    # Compute the second SMA only over the valid portion of first_sma
+    valid_mask = ~np.isnan(first_sma)
+    valid_first = first_sma[valid_mask]
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    if len(valid_first) < half:
+        return result
+
+    second_sma_valid = sma(valid_first, half)
+    valid_indices = np.where(valid_mask)[0]
+    result[valid_indices] = second_sma_valid
 
     return result

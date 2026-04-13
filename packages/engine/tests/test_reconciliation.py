@@ -97,6 +97,11 @@ class TestReconcilePositions:
         assert MismatchKind.MISSING_IN_LOCAL in kinds
 
     def test_missing_in_broker_detected_for_nonzero_qty(self):
+        """A non-zero local position absent from the broker is now CLOSED_MANUAL.
+
+        This represents an external close (manual trade or broker risk system)
+        rather than a generic MISSING_IN_BROKER discrepancy.
+        """
         from packages.engine.src.reconciliation import MismatchKind
         engine = self._engine()
         broker = [_pos("RELIANCE", 10)]
@@ -104,7 +109,9 @@ class TestReconcilePositions:
         result = engine.reconcile_positions(broker, local)
         assert result.has_mismatches
         kinds = [m.kind for m in result.mismatches]
-        assert MismatchKind.MISSING_IN_BROKER in kinds
+        # Changed from MISSING_IN_BROKER → CLOSED_MANUAL: a position that was
+        # open locally but has disappeared from the broker was closed externally.
+        assert MismatchKind.CLOSED_MANUAL in kinds
 
     def test_missing_in_broker_ignored_for_zero_qty(self):
         """Zero-quantity local positions (already closed) should not raise mismatch."""

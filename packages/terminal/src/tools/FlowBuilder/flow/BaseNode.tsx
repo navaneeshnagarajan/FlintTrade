@@ -12,6 +12,7 @@
 import { memo } from "react";
 import { Handle, Position, useStore } from "@xyflow/react";
 import { CONDITIONAL_NODE_TYPES, START_NODE_TYPES } from "./nodeRegistry";
+import { PriceAlertNode } from "./nodes/PriceAlertNode";
 import type { FlowNodeData } from "@/stores/flowStore";
 import type { NodeProps, Node } from "@xyflow/react";
 
@@ -213,4 +214,5 @@ BaseNode.displayName = "BaseNode";
 // React Flow nodeTypes map — imported in the canvas
 export const REACT_FLOW_NODE_TYPES = {
   flowNode: BaseNode,
+  priceAlertNode: PriceAlertNode,
 } as const;

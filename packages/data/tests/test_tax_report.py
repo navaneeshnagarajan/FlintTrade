@@ -137,8 +137,8 @@ class TestComputeSTT:
             TaxableTransaction("2025-01-20", "NIFTY25JANFUT", "NFO", "SELL", 50, 21800.0, "futures", 0, 21500.0),
         ]
         stt = generator.compute_stt(trades)
-        # Only sell side: 50 * 21800 * 0.000125 = 136.25
-        assert stt == pytest.approx(136.25, abs=0.01)
+        # Only sell side: 50 * 21800 * 0.0005 = 545.0 (updated April 2026 per Finance Act)
+        assert stt == pytest.approx(545.0, abs=0.01)
 
     def test_options_stt_sell_only(self, generator: TaxReportGenerator) -> None:
         trades = [
@@ -146,8 +146,8 @@ class TestComputeSTT:
             TaxableTransaction("2025-01-15", "NIFTY25JAN21500CE", "NFO", "SELL", 50, 380.0, "options", 0, 250.0),
         ]
         stt = generator.compute_stt(trades)
-        # Only sell side: 50 * 380 * 0.001 = 19.0
-        assert stt == pytest.approx(19.0, abs=0.01)
+        # Only sell side: 50 * 380 * 0.0015 = 28.5 (updated April 2026 per Finance Act)
+        assert stt == pytest.approx(28.5, abs=0.01)
 
     def test_commodity_ctt(self, generator: TaxReportGenerator) -> None:
         trades = [

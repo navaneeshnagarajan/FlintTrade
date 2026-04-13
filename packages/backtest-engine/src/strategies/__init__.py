@@ -294,11 +294,20 @@ from .mtf_vwap_scalp import MTFVWAPScalp  # noqa: E402
 from .mtf_supertrend_confluence import MTFSupertrendConfluence  # noqa: E402
 from .mtf_macd_momentum import MTFMACDMomentum  # noqa: E402
 
-# Pairs / Statistical (4)
+# Pairs / Statistical (5)
 from .pairs_ratio_reversion import PairsRatioReversion  # noqa: E402
 from .pairs_cointegration import PairsCointegration  # noqa: E402
 from .stat_regime_hmm import StatRegimeHMM  # noqa: E402
 from .stat_kalman_filter import StatKalmanFilter  # noqa: E402
+from .stat_pairs_trading import (  # noqa: E402
+    StatPairsTrading,
+    PairsTradingConfig,
+    cointegration_test,
+    adf_stationarity,
+    ou_half_life,
+    zscore as pairs_zscore,
+    select_best_pair,
+)
 
 # Intraday India-specific (6)
 from .intraday_orb_atr import IntradayORBATR  # noqa: E402
@@ -437,11 +446,12 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "MTFVWAPScalp": MTFVWAPScalp,
     "MTFSupertrendConfluence": MTFSupertrendConfluence,
     "MTFMACDMomentum": MTFMACDMomentum,
-    # Pairs / Statistical (4)
+    # Pairs / Statistical (5)
     "PairsRatioReversion": PairsRatioReversion,
     "PairsCointegration": PairsCointegration,
     "StatRegimeHMM": StatRegimeHMM,
     "StatKalmanFilter": StatKalmanFilter,
+    "StatPairsTrading": StatPairsTrading,
     # Intraday India-specific (6)
     "IntradayORBATR": IntradayORBATR,
     "IntradayGapFill": IntradayGapFill,

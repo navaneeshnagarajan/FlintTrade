@@ -353,6 +353,107 @@ const DESCRIPTOR_IF_ELSE: NodeTypeDescriptor = {
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Price Alert trigger — 10 condition types
+// ---------------------------------------------------------------------------
+
+export type PriceAlertCondition =
+  | "crossingUp"
+  | "crossingDown"
+  | "enteringChannel"
+  | "exitingChannel"
+  | "movingUpPct"
+  | "movingDownPct"
+  | "greaterThan"
+  | "lessThan"
+  | "insideChannel"
+  | "outsideChannel";
+
+export const PRICE_ALERT_CONDITIONS: { label: string; value: PriceAlertCondition }[] = [
+  { label: "Crossing Up",       value: "crossingUp" },
+  { label: "Crossing Down",     value: "crossingDown" },
+  { label: "Entering Channel",  value: "enteringChannel" },
+  { label: "Exiting Channel",   value: "exitingChannel" },
+  { label: "Moving Up %",       value: "movingUpPct" },
+  { label: "Moving Down %",     value: "movingDownPct" },
+  { label: "Greater Than",      value: "greaterThan" },
+  { label: "Less Than",         value: "lessThan" },
+  { label: "Inside Channel",    value: "insideChannel" },
+  { label: "Outside Channel",   value: "outsideChannel" },
+];
+
+/** Conditions that require two price inputs (upper + lower bound). */
+export const CHANNEL_CONDITIONS = new Set<PriceAlertCondition>([
+  "enteringChannel",
+  "exitingChannel",
+  "insideChannel",
+  "outsideChannel",
+]);
+
+/** Conditions that require a percentage value rather than an absolute price. */
+export const PERCENT_CONDITIONS = new Set<PriceAlertCondition>([
+  "movingUpPct",
+  "movingDownPct",
+]);
+
+const DESCRIPTOR_PRICE_ALERT: NodeTypeDescriptor = {
+  type: "priceAlert",
+  label: "Price Alert",
+  category: "triggers",
+  description: "Trigger when a price condition is met (10 condition types)",
+  icon: "BellRing",
+  color: CATEGORY_COLORS.triggers,
+  inputs: [],
+  outputs: [{ id: "out", label: "Triggered", type: "default" }],
+  fields: [
+    SYMBOL_FIELD,
+    EXCHANGE_FIELD,
+    {
+      key: "condition",
+      label: "Condition",
+      type: "select",
+      required: true,
+      default: "crossingUp",
+      options: PRICE_ALERT_CONDITIONS,
+      helpText: "The type of price condition to monitor",
+    },
+    {
+      key: "price",
+      label: "Price / Lower Bound",
+      type: "number",
+      required: true,
+      placeholder: "e.g. 22000",
+      validation: { min: 0 },
+      helpText: "Target price. For channel conditions, this is the lower bound.",
+    },
+    {
+      key: "priceUpper",
+      label: "Upper Bound",
+      type: "number",
+      placeholder: "e.g. 22500",
+      validation: { min: 0 },
+      helpText: "Upper bound for channel conditions (Entering/Exiting/Inside/Outside Channel)",
+    },
+    {
+      key: "pctValue",
+      label: "Percentage (%)",
+      type: "number",
+      placeholder: "e.g. 2.5",
+      validation: { min: 0.01, max: 100 },
+      helpText: "Percentage move threshold for Moving Up % / Moving Down % conditions",
+    },
+    {
+      key: "cooldownSecs",
+      label: "Cooldown (seconds)",
+      type: "number",
+      default: 60,
+      placeholder: "60",
+      validation: { min: 0, max: 86400 },
+      helpText: "Minimum time between repeated triggers (0 = trigger every tick)",
+    },
+  ],
+};
+
 /** Map from node type string to its full NodeTypeDescriptor (only for nodes with one). */
 export const NODE_DESCRIPTORS = new Map<string, NodeTypeDescriptor>([
   ["placeOrder",      DESCRIPTOR_PLACE_ORDER],
@@ -361,6 +462,7 @@ export const NODE_DESCRIPTORS = new Map<string, NodeTypeDescriptor>([
   ["telegramAlert",   DESCRIPTOR_TELEGRAM_ALERT],
   ["delay",           DESCRIPTOR_DELAY],
   ["ifElse",          DESCRIPTOR_IF_ELSE],
+  ["priceAlert",      DESCRIPTOR_PRICE_ALERT],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -388,7 +490,7 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
     color: CATEGORY_COLORS.triggers,
     nodes: [
       { type: "start", label: "Start", description: "Manual or scheduled entry point", configFields: [] },
-      { type: "priceAlert", label: "Price Alert", description: "Trigger on price threshold breach", configFields: ["symbol", "exchange", "threshold", "operator"] },
+      descriptorToNodeDef(DESCRIPTOR_PRICE_ALERT),
       { type: "webhookTrigger", label: "Webhook Trigger", description: "TradingView / Chartink webhook", configFields: ["path"] },
       { type: "httpRequest", label: "HTTP Request", description: "External HTTP event trigger", configFields: ["url", "method"] },
     ],

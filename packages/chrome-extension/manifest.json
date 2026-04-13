@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "FlintTrade",
-  "version": "0.1.0",
-  "description": "Quick trade from any webpage — FlintTrade companion extension",
+  "version": "0.2.0",
+  "description": "Quick trade from any webpage — FlintTrade companion extension with LE/LX/SE/SX buttons",
   "permissions": ["activeTab", "storage"],
   "action": {
     "default_popup": "popup.html",
@@ -19,12 +19,9 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "*://*.nseindia.com/*",
-        "*://*.moneycontrol.com/*"
-      ],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "css": ["content.css"]
+      "run_at": "document_idle"
     }
   ]
 }

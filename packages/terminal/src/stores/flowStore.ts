@@ -168,9 +168,11 @@ export const useFlowStore = create<FlowState>((set, get) => ({
 
   addNode: (nodeType, position, label, category, color) => {
     const id = `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    // Custom canvas renderers for specific node types; falls back to generic flowNode.
+    const rfNodeType = nodeType === "priceAlert" ? "priceAlertNode" : "flowNode";
     const newNode: Node<FlowNodeData> = {
       id,
-      type: "flowNode",
+      type: rfNodeType,
       position,
       data: {
         label,

@@ -67,18 +67,22 @@ class Exchange(StrEnum):
 
 
 # ---------------------------------------------------------------------------
-# Rate tables (FY 2024-25)
+# Rate tables (Updated April 2026 per Finance Act)
 # ---------------------------------------------------------------------------
 
 # STT rates (applied on trade value, as fraction)
+# April 2026 changes: Futures 0.02% → 0.05%; Options 0.1% → 0.15% (on premium)
+# TradeType.FO covers both futures and options; rate here uses the futures rate.
+# For options-specific STT (0.15% on premium), use the data.tax_report module
+# which handles the futures/options split at the segment level.
 _STT_RATES: dict[tuple[TradeType, bool], Decimal] = {
     # (trade_type, is_buy) -> rate
-    (TradeType.DELIVERY, True):  Decimal("0.001"),    # 0.1% on buy
-    (TradeType.DELIVERY, False): Decimal("0.001"),    # 0.1% on sell
+    (TradeType.DELIVERY, True):  Decimal("0.001"),    # 0.1% on buy (unchanged)
+    (TradeType.DELIVERY, False): Decimal("0.001"),    # 0.1% on sell (unchanged)
     (TradeType.INTRADAY, True):  Decimal("0"),        # No STT on intraday buy
-    (TradeType.INTRADAY, False): Decimal("0.00025"),  # 0.025% on sell
-    (TradeType.FO, True):        Decimal("0"),        # No STT on F&O buy (futures)
-    (TradeType.FO, False):       Decimal("0.0001250"),# 0.0125% on F&O sell (options sell side)
+    (TradeType.INTRADAY, False): Decimal("0.00025"),  # 0.025% on sell (unchanged)
+    (TradeType.FO, True):        Decimal("0"),        # No STT on F&O buy
+    (TradeType.FO, False):       Decimal("0.0005"),   # 0.05% on F&O sell (futures, Apr 2026)
 }
 
 # Stamp duty — buy side only, as fraction of trade value

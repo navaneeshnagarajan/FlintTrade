@@ -5,12 +5,17 @@ Layer 2: Position limits (max simultaneous, margin usage)
 Layer 3: Portfolio risk (net delta/vega limits for options)
 Layer 4: Daily P&L limits (pause trigger, kill switch)
 Layer 5: Kill switch (cancel all + close all)
+
+Additional guards (not part of the 5-layer per-order pipeline):
+- OvertradingGuard: per-symbol cooldown, consecutive-loss streak, daily trade count
+- MTMCircuitBreaker: account-level daily MTM loss auto-exit
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, time as dt_time, timedelta, timezone
 from enum import StrEnum
@@ -563,3 +568,335 @@ class SafetySystem:
         results.append(r3)
 
         return results
+
+
+# ---------------------------------------------------------------------------
+# OvertradingGuard
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OvertradingConfig:
+    """Configurable thresholds for the OvertradingGuard."""
+
+    cooldown_seconds: int = 60
+    """Minimum seconds between successive orders for the same symbol."""
+
+    max_consecutive_losses: int = 3
+    """Pause all new orders for ``loss_pause_seconds`` after this many consecutive losses."""
+
+    loss_pause_seconds: int = 300
+    """How long (seconds) to pause after hitting ``max_consecutive_losses``."""
+
+    max_hold_hours: float = 6.0
+    """Warn (but do not block) when a position has been held beyond this many hours."""
+
+    daily_trade_limit_per_symbol: int = 10
+    """Maximum trades per symbol per day (0 = unlimited)."""
+
+
+@dataclass
+class OvertradingGuardState:
+    """Internal per-symbol state tracked by OvertradingGuard."""
+
+    last_order_at: datetime | None = None
+    daily_trade_count: int = 0
+    last_count_reset_date: str = ""  # ISO date string, e.g. "2026-04-13"
+
+
+class OvertradingGuard:
+    """Additional trade-frequency and loss-streak safety guard.
+
+    This guard is **not** part of the 5-layer per-order pipeline.  It is
+    meant to be called *before* :meth:`SafetySystem.check_order` as a
+    pre-filter, or used independently inside strategy logic.
+
+    Absorbed from LLM-TradeBot's ``OvertradingGuard`` (decision_core_agent.py)
+    and adapted to FlintTrade's time-based (rather than cycle-based) design.
+
+    Features:
+    - Per-symbol cooldown (configurable, default 60 s between orders).
+    - Consecutive-loss streak tracker — pause after N consecutive losses.
+    - 6-hour max position hold warning (non-blocking).
+    - Daily trade count limit per symbol.
+
+    Args:
+        config: Tuneable thresholds.  Defaults to :class:`OvertradingConfig`.
+
+    Example::
+
+        guard = OvertradingGuard()
+        ok, reason = guard.can_trade("NIFTY25APRFUT")
+        if not ok:
+            raise OrderBlockedError(reason)
+        # ... place order ...
+        guard.record_order("NIFTY25APRFUT")
+        # ... on trade completion ...
+        guard.record_trade_result("NIFTY25APRFUT", pnl=-800.0)
+    """
+
+    def __init__(self, config: OvertradingConfig | None = None) -> None:
+        self._cfg = config or OvertradingConfig()
+        self._symbol_state: dict[str, OvertradingGuardState] = defaultdict(OvertradingGuardState)
+        self._consecutive_losses: int = 0
+        self._pause_until: datetime | None = None
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def can_trade(self, symbol: str, at: datetime | None = None) -> tuple[bool, str]:
+        """Check whether a new order for *symbol* is allowed right now.
+
+        Args:
+            symbol: Trading symbol (e.g. ``"NIFTY25APRFUT"``).
+            at:     Override "now" for testing.  Defaults to current IST time.
+
+        Returns:
+            ``(allowed, reason)`` — if *allowed* is ``False``, *reason*
+            describes which guard triggered.
+        """
+        now = at or datetime.now(IST)
+
+        # 1. Consecutive-loss pause (global — not per symbol)
+        if self._pause_until is not None and now < self._pause_until:
+            remaining = int((self._pause_until - now).total_seconds())
+            return (
+                False,
+                f"Trading paused after {self._consecutive_losses} consecutive losses — "
+                f"resumes in {remaining}s",
+            )
+
+        state = self._symbol_state[symbol]
+        self._reset_daily_count_if_needed(state, now)
+
+        # 2. Per-symbol cooldown
+        if state.last_order_at is not None:
+            elapsed = (now - state.last_order_at).total_seconds()
+            if elapsed < self._cfg.cooldown_seconds:
+                remaining = int(self._cfg.cooldown_seconds - elapsed)
+                return (
+                    False,
+                    f"{symbol}: cooldown active — next order allowed in {remaining}s",
+                )
+
+        # 3. Daily trade count limit
+        if (
+            self._cfg.daily_trade_limit_per_symbol > 0
+            and state.daily_trade_count >= self._cfg.daily_trade_limit_per_symbol
+        ):
+            return (
+                False,
+                f"{symbol}: daily trade limit of {self._cfg.daily_trade_limit_per_symbol} reached",
+            )
+
+        return True, ""
+
+    def check_hold_duration(
+        self,
+        symbol: str,
+        position_opened_at: datetime,
+        at: datetime | None = None,
+    ) -> tuple[bool, str]:
+        """Warn if a position has been held beyond the configured hold limit.
+
+        This is a *warning only* — it never blocks an order.  Callers should
+        log or surface the message without preventing execution.
+
+        Args:
+            symbol:             Trading symbol.
+            position_opened_at: When the position was originally opened (IST-aware).
+            at:                 Override "now" for testing.
+
+        Returns:
+            ``(over_limit, message)`` — *over_limit* is ``True`` when the
+            hold duration exceeds :attr:`OvertradingConfig.max_hold_hours`.
+        """
+        now = at or datetime.now(IST)
+        hold_hours = (now - position_opened_at).total_seconds() / 3600.0
+        if hold_hours > self._cfg.max_hold_hours:
+            msg = (
+                f"{symbol}: position held for {hold_hours:.1f}h "
+                f"(warning limit {self._cfg.max_hold_hours}h)"
+            )
+            logger.warning("OvertradingGuard: %s", msg)
+            return True, msg
+        return False, ""
+
+    def record_order(self, symbol: str, at: datetime | None = None) -> None:
+        """Record that an order was placed for *symbol*.
+
+        Call this immediately after an order is submitted to update the
+        cooldown clock and daily count.
+
+        Args:
+            symbol: Trading symbol.
+            at:     Override "now" for testing.
+        """
+        now = at or datetime.now(IST)
+        state = self._symbol_state[symbol]
+        self._reset_daily_count_if_needed(state, now)
+        state.last_order_at = now
+        state.daily_trade_count += 1
+        logger.debug("OvertradingGuard: recorded order for %s (daily count=%d)", symbol, state.daily_trade_count)
+
+    def record_trade_result(self, symbol: str, pnl: float) -> None:
+        """Record the P&L outcome of a completed trade.
+
+        Updates the consecutive-loss streak.  A loss is any trade where
+        ``pnl < 0``.
+
+        Args:
+            symbol: Trading symbol.
+            pnl:    Realised P&L of the trade (negative = loss).
+        """
+        if pnl < 0:
+            self._consecutive_losses += 1
+            if self._consecutive_losses >= self._cfg.max_consecutive_losses:
+                self._pause_until = datetime.now(IST) + timedelta(
+                    seconds=self._cfg.loss_pause_seconds,
+                )
+                logger.warning(
+                    "OvertradingGuard: %d consecutive losses — trading paused for %ds",
+                    self._consecutive_losses,
+                    self._cfg.loss_pause_seconds,
+                )
+        else:
+            self._consecutive_losses = 0
+        logger.debug(
+            "OvertradingGuard: trade result for %s pnl=%.2f consecutive_losses=%d",
+            symbol, pnl, self._consecutive_losses,
+        )
+
+    def reset_daily(self) -> None:
+        """Reset daily trade counts for all symbols (call at market open)."""
+        for state in self._symbol_state.values():
+            state.daily_trade_count = 0
+            state.last_count_reset_date = ""
+        logger.info("OvertradingGuard: daily trade counts reset")
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def consecutive_losses(self) -> int:
+        """Current consecutive-loss streak count."""
+        return self._consecutive_losses
+
+    @property
+    def is_paused(self) -> bool:
+        """True if the guard is currently in loss-streak pause."""
+        if self._pause_until is None:
+            return False
+        return datetime.now(IST) < self._pause_until
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _reset_daily_count_if_needed(
+        self, state: OvertradingGuardState, now: datetime,
+    ) -> None:
+        today = now.strftime("%Y-%m-%d")
+        if state.last_count_reset_date != today:
+            state.daily_trade_count = 0
+            state.last_count_reset_date = today
+
+
+# ---------------------------------------------------------------------------
+# MTMCircuitBreaker
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MTMCircuitBreakerConfig:
+    """Configuration for the account-level MTM circuit breaker."""
+
+    daily_loss_limit: float = -50_000.0
+    """Daily MTM loss threshold (negative INR).  When total P&L across all
+    positions drops below this value, all positions are exited."""
+
+
+class MTMCircuitBreaker:
+    """Account-level daily MTM loss circuit breaker.
+
+    Monitors total P&L across all positions and auto-exits everything when
+    the configurable daily loss threshold is breached.  Fires once per
+    trading day — once triggered it stays triggered until :meth:`reset_daily`
+    is called (typically at the next market open).
+
+    Absorbed from the MTM-based short straddle pattern in
+    ``algo_trading_strategies_india``, adapted for async OpenAlgo execution.
+
+    Args:
+        config:  :class:`MTMCircuitBreakerConfig` with the loss limit.
+        client:  Optional :class:`~packages.core.src.openalgo_client.OpenAlgoClient`
+                 used to close all positions when the breaker trips.
+
+    Example::
+
+        mtm_cb = MTMCircuitBreaker(config=MTMCircuitBreakerConfig(daily_loss_limit=-30000))
+        result = await mtm_cb.check_and_act(daily_pnl=-35000, activity_logger=my_logger)
+        if result:
+            # breaker fired — all positions were closed
+    """
+
+    def __init__(
+        self,
+        config: MTMCircuitBreakerConfig | None = None,
+        client: OpenAlgoClient | None = None,
+    ) -> None:
+        self._cfg = config or MTMCircuitBreakerConfig()
+        self._client = client
+        self._triggered = False
+
+    @property
+    def is_triggered(self) -> bool:
+        """True after the circuit breaker has fired today."""
+        return self._triggered
+
+    async def check_and_act(
+        self,
+        daily_pnl: float,
+        activity_logger: logging.Logger | None = None,
+    ) -> bool:
+        """Check daily P&L and trigger auto-exit if threshold is breached.
+
+        Args:
+            daily_pnl:        Current total daily MTM P&L (negative = loss).
+            activity_logger:  Optional logger for structured audit output.
+                              If ``None`` the module logger is used.
+
+        Returns:
+            ``True`` if the breaker fired (and close_position was attempted),
+            ``False`` if still within limits or already triggered today.
+        """
+        if self._triggered:
+            return False
+
+        if daily_pnl > self._cfg.daily_loss_limit:
+            return False
+
+        # Threshold breached — fire the breaker
+        self._triggered = True
+        log = activity_logger or logger
+        log.critical(
+            "MTMCircuitBreaker: daily P&L %.2f breached limit %.2f — exiting ALL positions",
+            daily_pnl,
+            self._cfg.daily_loss_limit,
+        )
+
+        if self._client is not None:
+            try:
+                await self._client.close_position()
+                log.info("MTMCircuitBreaker: close_position API call successful")
+            except Exception as exc:
+                log.error("MTMCircuitBreaker: close_position failed: %s", exc)
+
+        return True
+
+    def reset_daily(self) -> None:
+        """Reset the triggered state at the start of a new trading day."""
+        self._triggered = False
+        logger.info("MTMCircuitBreaker: reset for new trading day")

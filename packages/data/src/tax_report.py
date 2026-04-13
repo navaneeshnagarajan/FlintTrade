@@ -9,11 +9,10 @@ Tax rates as of Budget 2024:
 - Equity STCG (<12 months): 20%
 - Intraday / F&O / Commodity: Business income — taxed at slab rate (estimated 30%)
 
-STT rates:
-- Futures: 0.0125% on sell side
-- Options (buy premium): 0.1% on sell side
-- Options (sell premium): 0.0625% on sell side
-- Equity delivery: 0.1% on buy + sell
+STT rates (updated April 1, 2026 per Finance Act):
+- Futures: 0.05% on sell side (was 0.02%)
+- Options: 0.15% on premium (was 0.1%)
+- Equity delivery: 0.1% on buy + sell (unchanged)
 
 Usage::
 
@@ -51,11 +50,10 @@ LTCG_RATE = 0.125        # 12.5%
 STCG_RATE = 0.20         # 20%
 BUSINESS_INCOME_RATE = 0.30  # estimated slab rate for business income
 
-# STT rates
-STT_FUTURES_SELL = 0.000125       # 0.0125% on sell side
-STT_OPTIONS_BUY_PREMIUM = 0.001  # 0.1% on sell side (buyer's premium)
-STT_OPTIONS_SELL_PREMIUM = 0.000625  # 0.0625% on sell side (seller's premium)
-STT_EQUITY_DELIVERY = 0.001      # 0.1% on both buy and sell
+# STT rates (updated April 1, 2026 per Finance Act)
+STT_FUTURES_SELL = 0.0005         # 0.05% on sell side (was 0.000125 / 0.0125%)
+STT_OPTIONS_PREMIUM = 0.0015      # 0.15% on premium (was 0.001 / 0.1%)
+STT_EQUITY_DELIVERY = 0.001       # 0.1% on both buy and sell (unchanged)
 
 # Audit thresholds (₹)
 AUDIT_TURNOVER_ABSOLUTE = 10_00_00_000.0  # 10 crore
@@ -216,13 +214,13 @@ class TaxReportGenerator:
                 if t.action.upper() == "SELL":
                     total_stt += value * 0.00025
             elif seg == "futures":
-                # 0.0125% on sell side
+                # 0.05% on sell side (updated April 2026 per Finance Act)
                 if t.action.upper() == "SELL":
                     total_stt += value * STT_FUTURES_SELL
             elif seg == "options":
-                # 0.1% on sell side (buyer exercises) or 0.0625% (seller writes)
+                # 0.15% on premium (updated April 2026 per Finance Act)
                 if t.action.upper() == "SELL":
-                    total_stt += value * STT_OPTIONS_BUY_PREMIUM
+                    total_stt += value * STT_OPTIONS_PREMIUM
             elif seg == "commodity":
                 # CTT on sell side for non-agri: 0.01%
                 if t.action.upper() == "SELL":

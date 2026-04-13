@@ -9,6 +9,12 @@ The :class:`ReconciliationEngine` is designed to run periodically (e.g., every
 30 seconds or on reconnect) and reports mismatches without taking action —
 resolution is left to the caller or a higher-level recovery strategy.
 
+The :class:`BackgroundReconciler` wraps :class:`ReconciliationEngine` in an
+asyncio task that polls every 60 s and logs all discrepancies.  It also
+detects :data:`MismatchKind.CLOSED_MANUAL` — positions that were open in the
+local DB but have disappeared from the broker's positionbook (externally
+closed by the trader or broker system).
+
 Typical usage::
 
     engine = ReconciliationEngine()
@@ -16,14 +22,25 @@ Typical usage::
     if result.has_mismatches:
         for m in result.mismatches:
             logger.warning("Drift: %s", m)
+
+Background reconciliation::
+
+    reconciler = BackgroundReconciler(
+        openalgo_client=client,
+        get_local_positions=my_store.get_positions,
+    )
+    await reconciler.start()          # fire-and-forget asyncio task
+    # ...
+    await reconciler.stop()
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger("flinttrade.engine.reconciliation")
 
@@ -50,6 +67,11 @@ class MismatchKind(StrEnum):
 
     PRICE_MISMATCH = "price_mismatch"
     """Both sides agree on quantity but differ on average price beyond tolerance."""
+
+    CLOSED_MANUAL = "closed_manual"
+    """Position was open in local state but broker reports zero or missing quantity —
+    the position was closed externally (manually by the trader or by the broker's
+    risk system).  Absorbed from openalgo-execution-system reconciliation loop."""
 
 
 @dataclass
@@ -282,20 +304,25 @@ class ReconciliationEngine:
                             detail=f"diff={diff_pct*100:.3f}%",
                         ))
 
-        # 4. Present locally, missing from broker
+        # 4. Present locally, missing from broker — distinguish CLOSED_MANUAL
         for key, lp in local_map.items():
             sym = key.split(":")[0]
             if key not in broker_map:
                 lq = _position_qty(lp)
                 # Ignore stale zero-quantity local positions — these are
                 # expected after a position is closed.
-                if lq != 0:
-                    mismatches.append(Mismatch(
-                        kind=MismatchKind.MISSING_IN_BROKER,
-                        symbol=sym,
-                        local_value=lq,
-                        detail=f"key={key}",
-                    ))
+                if lq == 0:
+                    continue
+
+                # Non-zero local position not found in broker positionbook —
+                # the position was closed externally (manually or by broker
+                # risk system).  Absorbed from openalgo-execution-system.
+                mismatches.append(Mismatch(
+                    kind=MismatchKind.CLOSED_MANUAL,
+                    symbol=sym,
+                    local_value=lq,
+                    detail=f"key={key} — position closed externally",
+                ))
 
         result.mismatches = mismatches
         if mismatches:
@@ -403,5 +430,150 @@ class ReconciliationEngine:
             )
         else:
             logger.info("Order reconciliation clean — %d orders checked", result.checked_count)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# BackgroundReconciler — async periodic background check
+# ---------------------------------------------------------------------------
+
+
+class BackgroundReconciler:
+    """Runs :class:`ReconciliationEngine` as a periodic asyncio background task.
+
+    Polls every :attr:`interval_seconds` (default 60), fetches live broker
+    positions, compares against the locally tracked state, and logs all
+    discrepancies.  Specially highlights :data:`MismatchKind.CLOSED_MANUAL`
+    events — positions closed externally without FlintTrade's knowledge.
+
+    Absorbed from the 60-second reconciliation loop in
+    ``openalgo-execution-system/backend/engine/reconciliation.py``.
+
+    Args:
+        get_broker_positions:  Async callable returning the live broker
+            position list (dicts or Pydantic models).
+        get_local_positions:   Sync or async callable returning the local
+            in-memory position list.
+        on_closed_manual:      Optional async callback invoked with
+            ``(symbol, local_qty)`` whenever a CLOSED_MANUAL event is detected.
+            Use this to update your DB or notify strategies.
+        interval_seconds:      Polling interval in seconds.  Default 60.
+        price_tolerance_pct:   Passed to :class:`ReconciliationEngine`.
+
+    Example::
+
+        async def fetch_broker():
+            resp = await client.positionbook()
+            return resp.get("data", [])
+
+        reconciler = BackgroundReconciler(
+            get_broker_positions=fetch_broker,
+            get_local_positions=my_store.positions,
+            on_closed_manual=handle_closed_manual,
+        )
+        await reconciler.start()
+    """
+
+    def __init__(
+        self,
+        get_broker_positions: Callable[[], Coroutine[Any, Any, list[Any]]],
+        get_local_positions: Callable[[], list[Any]],
+        on_closed_manual: Callable[[str, int], Coroutine[Any, Any, None]] | None = None,
+        interval_seconds: int = 60,
+        price_tolerance_pct: float = 0.1,
+    ) -> None:
+        self._get_broker = get_broker_positions
+        self._get_local = get_local_positions
+        self._on_closed_manual = on_closed_manual
+        self._interval = interval_seconds
+        self._engine = ReconciliationEngine(price_tolerance_pct=price_tolerance_pct)
+        self._task: asyncio.Task[None] | None = None
+        self._running = False
+
+    async def start(self) -> None:
+        """Start the background reconciliation loop.
+
+        Safe to call multiple times — subsequent calls are no-ops if already
+        running.
+        """
+        if self._running:
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._loop(), name="flinttrade.reconciliation")
+        logger.info(
+            "BackgroundReconciler started — polling every %ds",
+            self._interval,
+        )
+
+    async def stop(self) -> None:
+        """Stop the background reconciliation loop gracefully."""
+        self._running = False
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        logger.info("BackgroundReconciler stopped")
+
+    @property
+    def is_running(self) -> bool:
+        """True while the background task is active."""
+        return self._running
+
+    # ------------------------------------------------------------------
+    # Internal loop
+    # ------------------------------------------------------------------
+
+    async def _loop(self) -> None:
+        """Main reconciliation loop — runs until :meth:`stop` is called."""
+        while self._running:
+            try:
+                await self._run_once()
+            except Exception as exc:
+                logger.error("BackgroundReconciler: unhandled error: %s", exc)
+            await asyncio.sleep(self._interval)
+
+    async def _run_once(self) -> ReconciliationResult:
+        """Execute a single reconciliation pass and log results.
+
+        Returns the :class:`ReconciliationResult` (useful for testing).
+        """
+        try:
+            broker_positions = await self._get_broker()
+        except Exception as exc:
+            logger.error("BackgroundReconciler: failed to fetch broker positions: %s", exc)
+            return ReconciliationResult()
+
+        # Support both sync and async get_local_positions callables
+        local_raw = self._get_local()
+        if asyncio.iscoroutine(local_raw):
+            local_positions = await local_raw  # type: ignore[assignment]
+        else:
+            local_positions = local_raw  # type: ignore[assignment]
+
+        result = self._engine.reconcile_positions(broker_positions, local_positions)
+
+        # Log and dispatch CLOSED_MANUAL events
+        for mismatch in result.mismatches:
+            if mismatch.kind == MismatchKind.CLOSED_MANUAL:
+                logger.warning(
+                    "CLOSED_MANUAL detected: symbol=%s local_qty=%s — "
+                    "position closed externally (manual/broker risk system)",
+                    mismatch.symbol,
+                    mismatch.local_value,
+                )
+                if self._on_closed_manual is not None:
+                    try:
+                        await self._on_closed_manual(
+                            mismatch.symbol,
+                            int(mismatch.local_value or 0),
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "BackgroundReconciler: on_closed_manual callback failed: %s", exc,
+                        )
 
         return result

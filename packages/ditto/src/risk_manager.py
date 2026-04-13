@@ -3,13 +3,18 @@
 Absorbs AlgoMirror's risk_manager.py patterns. Tracks daily P&L, position
 counts, margin utilization, and trade quality per account. Auto-pauses
 accounts when risk thresholds are breached.
+
+Also provides :class:`RiskEvent` — a structured audit record for every risk
+threshold breach, absorbed from AlgoMirror's ``RiskEvent`` SQLAlchemy model
+(app/models.py ~line 893) and adapted as a pure-Python dataclass for
+FlintTrade's non-ORM architecture.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 
 
@@ -344,3 +349,190 @@ class RiskManager:
             if state.status == RiskStatus.PAUSED.value:
                 state.status = RiskStatus.OK.value
         logger.info("Daily risk counters reset for %d accounts", len(self._states))
+
+
+# ---------------------------------------------------------------------------
+# RiskEvent — structured audit log for every risk threshold breach
+# ---------------------------------------------------------------------------
+
+
+class RiskEventType(StrEnum):
+    """Category of risk threshold that was breached.
+
+    Absorbed from AlgoMirror's ``RiskEvent.event_type`` column choices
+    (app/models.py ~line 903).
+    """
+
+    MAX_LOSS = "max_loss"
+    """Daily maximum loss threshold crossed."""
+
+    MAX_PROFIT = "max_profit"
+    """Profit target reached (trailing or absolute)."""
+
+    TRAILING_SL = "trailing_sl"
+    """Trailing stop-loss triggered."""
+
+    MARGIN_BLOCK = "margin_block"
+    """Margin utilisation exceeded the block threshold."""
+
+    POSITION_LIMIT = "position_limit"
+    """Maximum simultaneous position count reached."""
+
+    KILL_SWITCH = "kill_switch"
+    """Emergency kill switch activated."""
+
+    MTM_CIRCUIT = "mtm_circuit"
+    """Account-level MTM circuit breaker fired."""
+
+    COMBINED_LOSS = "combined_loss"
+    """Combined loss across all accounts exceeded limit."""
+
+
+class RiskActionTaken(StrEnum):
+    """What action the risk system took in response to the breach."""
+
+    CLOSE_ALL = "close_all"
+    CLOSE_PARTIAL = "close_partial"
+    ALERT_ONLY = "alert_only"
+    PAUSE_ACCOUNT = "pause_account"
+    KILL_SWITCH = "kill_switch"
+
+
+@dataclass
+class RiskEvent:
+    """Structured audit record for a single risk threshold breach.
+
+    Absorbed from AlgoMirror's SQLAlchemy ``RiskEvent`` model
+    (app/models.py ~line 893) and re-implemented as a pure-Python dataclass
+    for FlintTrade's non-ORM architecture.
+
+    Every time the :class:`RiskManager` or :class:`MTMCircuitBreaker` takes
+    protective action it should create one of these records and append it to
+    a :class:`RiskEventLog`.
+
+    Attributes:
+        timestamp:        UTC-aware datetime when the breach was detected.
+        event_type:       Category of breach (see :class:`RiskEventType`).
+        account_id:       Account identifier (empty string for system-level events).
+        threshold_value:  The configured threshold that was breached.
+        current_value:    The actual value that exceeded the threshold.
+        action_taken:     What protective action was taken.
+        exit_order_ids:   List of order IDs placed to exit positions.
+        notes:            Free-text annotation for debugging or audit review.
+
+    Example::
+
+        event = RiskEvent(
+            event_type=RiskEventType.MAX_LOSS,
+            account_id="acc-001",
+            threshold_value=-50000.0,
+            current_value=-62000.0,
+            action_taken=RiskActionTaken.CLOSE_ALL,
+            exit_order_ids=["OID123", "OID124"],
+        )
+        risk_log.append(event)
+    """
+
+    event_type: str
+    account_id: str = ""
+    threshold_value: float = 0.0
+    current_value: float = 0.0
+    action_taken: str = RiskActionTaken.ALERT_ONLY
+    exit_order_ids: list[str] = field(default_factory=list)
+    notes: str = ""
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialise to a plain dict for JSON logging or API responses."""
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "event_type": self.event_type,
+            "account_id": self.account_id,
+            "threshold_value": self.threshold_value,
+            "current_value": self.current_value,
+            "action_taken": self.action_taken,
+            "exit_order_ids": list(self.exit_order_ids),
+            "notes": self.notes,
+        }
+
+    def __str__(self) -> str:
+        return (
+            f"RiskEvent({self.event_type} account={self.account_id!r} "
+            f"threshold={self.threshold_value} current={self.current_value} "
+            f"action={self.action_taken})"
+        )
+
+
+class RiskEventLog:
+    """In-memory append-only log of :class:`RiskEvent` records.
+
+    Provides helper methods for filtering and summarising events.  Intended
+    to be held as a singleton per :class:`RiskManager` instance.
+
+    Args:
+        max_events: Maximum number of events to keep in memory before the
+            oldest entries are discarded.  Default 1000.
+    """
+
+    def __init__(self, max_events: int = 1000) -> None:
+        self._events: list[RiskEvent] = []
+        self._max = max_events
+
+    def append(self, event: RiskEvent) -> None:
+        """Record a new risk event and log it at WARNING level.
+
+        Args:
+            event: The :class:`RiskEvent` to record.
+        """
+        if len(self._events) >= self._max:
+            self._events.pop(0)
+        self._events.append(event)
+        logger.warning(
+            "RiskEvent: type=%s account=%s threshold=%.2f current=%.2f action=%s orders=%s",
+            event.event_type,
+            event.account_id,
+            event.threshold_value,
+            event.current_value,
+            event.action_taken,
+            event.exit_order_ids,
+        )
+
+    def all(self) -> list[RiskEvent]:
+        """Return all recorded events in chronological order."""
+        return list(self._events)
+
+    def by_account(self, account_id: str) -> list[RiskEvent]:
+        """Return events for a specific account.
+
+        Args:
+            account_id: Account identifier to filter by.
+        """
+        return [e for e in self._events if e.account_id == account_id]
+
+    def by_type(self, event_type: str) -> list[RiskEvent]:
+        """Return events of a specific type.
+
+        Args:
+            event_type: One of the :class:`RiskEventType` values.
+        """
+        return [e for e in self._events if e.event_type == event_type]
+
+    def since(self, cutoff: datetime) -> list[RiskEvent]:
+        """Return events recorded after *cutoff*.
+
+        Args:
+            cutoff: Timezone-aware datetime lower bound.
+        """
+        return [e for e in self._events if e.timestamp >= cutoff]
+
+    def clear(self) -> None:
+        """Remove all recorded events (e.g. at start of day)."""
+        self._events.clear()
+
+    def __len__(self) -> int:
+        return len(self._events)
+
+    def __repr__(self) -> str:
+        return f"RiskEventLog({len(self._events)} events)"

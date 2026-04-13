@@ -1,5 +1,6 @@
 """Momentum indicators — RSI, MACD, Stochastic, Williams %R, CCI, ROC, CMO,
-TRIX, StochRSI, BOP, MOM, Awesome Oscillator, Squeeze Momentum, DPO.
+TRIX, StochRSI, BOP, MOM, Awesome Oscillator, Squeeze Momentum, DPO,
+Fisher Transform, CRSI, ElderRay.
 
 All functions:
 - Accept numpy float64 arrays
@@ -644,3 +645,169 @@ def dpo(close: NDArray[np.float64], period: int = 20) -> NDArray[np.float64]:
             result[i] = close[past_idx] - sma_past
 
     return result
+
+
+def fisher_transform(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    period: int = 9,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Fisher Transform.
+
+    Converts prices into a Gaussian normal distribution. Extreme readings
+    (above +2.5 or below -2.5) indicate potential reversals.
+
+    Formula:
+        HL2  = (high + low) / 2
+        val  = 2 * ((HL2 - lowest(HL2, period)) /
+                    (highest(HL2, period) - lowest(HL2, period))) - 1
+        val  = clamp(val, -0.999, 0.999)
+        fisher = 0.5 * ln((1 + val) / (1 - val))
+        signal = fisher[i-1]
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        period: Lookback period for highest/lowest midpoint (default 9).
+
+    Returns:
+        Tuple of (fisher, signal) arrays, each shape (n,).
+        First ``period`` values are NaN.
+    """
+    validate_ohlcv(high, low, high, min_length=period)
+    n = len(high)
+    hl2 = (high + low) / 2.0
+
+    fisher = np.full(n, np.nan, dtype=np.float64)
+    signal = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(period - 1, n):
+        window = hl2[i - period + 1 : i + 1]
+        hi = float(np.max(window))
+        lo = float(np.min(window))
+        denom = hi - lo
+        if denom == 0.0:
+            val = 0.0
+        else:
+            val = 2.0 * ((hl2[i] - lo) / denom) - 1.0
+        # Clamp to avoid log of zero / negative
+        val = max(-0.999, min(0.999, val))
+        fisher[i] = 0.5 * float(np.log((1.0 + val) / (1.0 - val)))
+        if i > period - 1:
+            signal[i] = fisher[i - 1]
+
+    return fisher, signal
+
+
+def crsi(
+    close: NDArray[np.float64],
+    rsi_period: int = 3,
+    streak_period: int = 2,
+    rank_period: int = 100,
+) -> NDArray[np.float64]:
+    """Connors RSI.
+
+    Connors RSI is a composite momentum oscillator that combines three
+    components into a single 0-100 oscillator:
+    1. Short RSI of close prices
+    2. RSI of the up/down streak length
+    3. Percentile rank of the current period's return vs the past ``rank_period`` returns
+
+    Formula:
+        CRSI = (RSI(close, rsi_period)
+               + RSI(streak, streak_period)
+               + PercentRank(roc_1, rank_period)) / 3
+
+    Args:
+        close: Close prices, shape (n,).
+        rsi_period: Period for the RSI of close (default 3).
+        streak_period: Period for the RSI of the streak (default 2).
+        rank_period: Lookback for the percentile rank of 1-bar returns (default 100).
+
+    Returns:
+        CRSI values, shape (n,). NaN during warm-up.
+    """
+    validate_series(close, min_length=max(rsi_period, streak_period, rank_period) + 2)
+
+    n = len(close)
+
+    # Component 1: Short RSI
+    rsi_vals = rsi(close, rsi_period)
+
+    # Component 2: Consecutive up/down streak
+    streak = np.zeros(n, dtype=np.float64)
+    for i in range(1, n):
+        if close[i] > close[i - 1]:
+            streak[i] = max(streak[i - 1] + 1.0, 1.0)
+        elif close[i] < close[i - 1]:
+            streak[i] = min(streak[i - 1] - 1.0, -1.0)
+        else:
+            streak[i] = 0.0
+
+    streak_rsi = rsi(streak, streak_period)
+
+    # Component 3: Percentile rank of 1-bar ROC
+    roc1 = np.full(n, np.nan, dtype=np.float64)
+    for i in range(1, n):
+        prev = close[i - 1]
+        roc1[i] = ((close[i] - prev) / prev * 100.0) if prev != 0.0 else 0.0
+
+    pct_rank = np.full(n, np.nan, dtype=np.float64)
+    for i in range(rank_period, n):
+        window = roc1[i - rank_period : i]
+        if np.any(np.isnan(window)):
+            continue
+        count_below = float(np.sum(window < roc1[i]))
+        pct_rank[i] = (count_below / rank_period) * 100.0
+
+    result = np.full(n, np.nan, dtype=np.float64)
+    for i in range(n):
+        if not (np.isnan(rsi_vals[i]) or np.isnan(streak_rsi[i]) or np.isnan(pct_rank[i])):
+            result[i] = (rsi_vals[i] + streak_rsi[i] + pct_rank[i]) / 3.0
+
+    return result
+
+
+def elder_ray(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    period: int = 13,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Elder Ray Index — Bull Power and Bear Power.
+
+    Developed by Alexander Elder.  The indicator measures buying and selling
+    power in the market by comparing highs and lows to an EMA of closes.
+
+    Formula:
+        EMA     = EMA(close, period)
+        Bull Power = high - EMA
+        Bear Power = low  - EMA
+
+    Positive Bull Power indicates buyers pushing prices above the average.
+    Negative Bear Power indicates sellers pushing prices below the average.
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        close: Close prices, shape (n,).
+        period: EMA period (default 13).
+
+    Returns:
+        Tuple of (bull_power, bear_power) arrays, each shape (n,).
+        First ``period - 1`` values are NaN.
+    """
+    from packages.indicators.src.trend import ema as _ema
+
+    validate_ohlcv(high, low, close, min_length=period)
+
+    ema_vals = _ema(close, period)
+    bull_power = high - ema_vals
+    bear_power = low - ema_vals
+
+    # Mask bars where EMA is NaN
+    nan_mask = np.isnan(ema_vals)
+    bull_power[nan_mask] = np.nan
+    bear_power[nan_mask] = np.nan
+
+    return bull_power, bear_power

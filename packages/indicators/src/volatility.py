@@ -1,5 +1,6 @@
 """Volatility indicators — ATR, Bollinger Bands, Keltner Channels, Donchian
-Channel, NATR, Historical Volatility, Williams VIX Fix, Chaikin Volatility.
+Channel, NATR, Historical Volatility, Williams VIX Fix, Chaikin Volatility,
+BBPercent (%B), BBWidth, ChandelierExit, UlcerIndex, STARC Bands.
 
 All functions:
 - Accept numpy float64 arrays
@@ -354,3 +355,214 @@ def chaikin_volatility(
         result[i] = (hl_ema[i] - prev) / prev * 100.0
 
     return result
+
+
+def bb_percent(
+    close: NDArray[np.float64],
+    period: int = 20,
+    std_dev: float = 2.0,
+) -> NDArray[np.float64]:
+    """Bollinger %B — position of price within the Bollinger Bands.
+
+    %B indicates where the price is relative to the Bollinger Bands. A value
+    of 1.0 means the price equals the upper band; 0.0 means it equals the
+    lower band; 0.5 means it is at the midline.
+
+    Formula:
+        %B = (close - lower) / (upper - lower)
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Bollinger Bands period (default 20).
+        std_dev: Standard deviation multiplier (default 2.0).
+
+    Returns:
+        %B values, shape (n,). First ``period - 1`` values are NaN.
+        Returns 0.5 when the band width is zero (flat price series).
+    """
+    upper, _mid, lower = bollinger_bands(close, period, std_dev)
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(period - 1, n):
+        bw = upper[i] - lower[i]
+        if np.isnan(bw):
+            continue
+        result[i] = (close[i] - lower[i]) / bw if bw != 0.0 else 0.5
+
+    return result
+
+
+def bb_width(
+    close: NDArray[np.float64],
+    period: int = 20,
+    std_dev: float = 2.0,
+) -> NDArray[np.float64]:
+    """Bollinger Band Width — (upper - lower) / middle.
+
+    Bandwidth measures the relative width of the Bollinger Bands.  The Squeeze
+    occurs near historical bandwidth lows; breakouts typically follow.
+
+    Formula:
+        BBW = (upper - lower) / middle * 100
+
+    Args:
+        close: Close prices, shape (n,).
+        period: Bollinger Bands period (default 20).
+        std_dev: Standard deviation multiplier (default 2.0).
+
+    Returns:
+        BBWidth values as percentages, shape (n,). First ``period - 1`` values
+        are NaN.  NaN is returned when the middle (SMA) is zero.
+    """
+    upper, middle, lower = bollinger_bands(close, period, std_dev)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = np.where(
+            (~np.isnan(upper)) & (middle != 0.0),
+            (upper - lower) / middle * 100.0,
+            np.nan,
+        )
+    return result.astype(np.float64)
+
+
+def chandelier_exit(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    period: int = 22,
+    multiplier: float = 3.0,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Chandelier Exit.
+
+    Developed by Charles Le Beau.  The Chandelier Exit sets a trailing stop
+    loss based on the ATR to keep traders in trending moves without stopping
+    out on normal retracements.
+
+    Formula:
+        CE Long  = highest(high, period) - multiplier * ATR(period)
+        CE Short = lowest(low, period)   + multiplier * ATR(period)
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        close: Close prices, shape (n,).
+        period: ATR and lookback period (default 22).
+        multiplier: ATR multiplier (default 3.0).
+
+    Returns:
+        Tuple of (long_stop, short_stop) arrays, each shape (n,).
+        First ``period - 1`` values are NaN.
+    """
+    validate_ohlcv(high, low, close, min_length=period)
+    n = len(close)
+    atr_vals = atr(high, low, close, period)
+
+    long_stop = np.full(n, np.nan, dtype=np.float64)
+    short_stop = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(period - 1, n):
+        if np.isnan(atr_vals[i]):
+            continue
+        highest_high = float(np.max(high[i - period + 1 : i + 1]))
+        lowest_low = float(np.min(low[i - period + 1 : i + 1]))
+        long_stop[i] = highest_high - multiplier * atr_vals[i]
+        short_stop[i] = lowest_low + multiplier * atr_vals[i]
+
+    return long_stop, short_stop
+
+
+def ulcer_index(
+    close: NDArray[np.float64],
+    period: int = 14,
+) -> NDArray[np.float64]:
+    """Ulcer Index.
+
+    Developed by Peter Martin and Byron McCann.  The Ulcer Index measures
+    downside risk based on drawdowns from a rolling highest close.  The larger
+    or longer the drawdown, the higher the index.
+
+    Formula:
+        pct_drawdown[i] = ((close[i] - max(close, period)[i]) / max(close, period)[i]) * 100
+        UI[i] = sqrt(mean(pct_drawdown^2, period))
+
+    Args:
+        close: Close prices, shape (n,). All values must be > 0.
+        period: Rolling lookback window (default 14).
+
+    Returns:
+        Ulcer Index values, shape (n,). First ``2 * period - 2`` values are NaN
+        (warmup for both the highest-close window and the variance window).
+
+    Raises:
+        ValueError: If any close price <= 0.
+    """
+    validate_series(close, min_length=period)
+    if np.any(close <= 0.0):
+        raise ValueError("ulcer_index requires all close prices to be strictly positive.")
+
+    n = len(close)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    # Step 1: rolling highest close over the window
+    highest_close = np.full(n, np.nan, dtype=np.float64)
+    for i in range(period - 1, n):
+        highest_close[i] = float(np.max(close[i - period + 1 : i + 1]))
+
+    # Step 2: percentage drawdown from highest close
+    pct_dd = np.full(n, np.nan, dtype=np.float64)
+    for i in range(period - 1, n):
+        if highest_close[i] != 0.0:
+            pct_dd[i] = ((close[i] - highest_close[i]) / highest_close[i]) * 100.0
+
+    # Step 3: rolling RMS of pct_drawdown
+    for i in range(2 * period - 2, n):
+        window = pct_dd[i - period + 1 : i + 1]
+        if np.any(np.isnan(window)):
+            continue
+        result[i] = float(np.sqrt(float(np.mean(window ** 2))))
+
+    return result
+
+
+def starc_bands(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    sma_period: int = 5,
+    atr_period: int = 15,
+    multiplier: float = 1.33,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """STARC Bands (Stoller Average Range Channel).
+
+    Developed by Manning Stoller.  STARC Bands use an ATR-derived channel
+    around a short-period SMA.  Buying near the lower band and selling near
+    the upper band is a low-risk strategy; a close outside the bands is a
+    high-risk extreme.
+
+    Formula:
+        middle      = SMA(close, sma_period)
+        atr_val     = ATR(period=atr_period)
+        upper_band  = middle + multiplier * atr_val
+        lower_band  = middle - multiplier * atr_val
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        close: Close prices, shape (n,).
+        sma_period: SMA period for the middle band (default 5).
+        atr_period: ATR period for the channel width (default 15).
+        multiplier: ATR multiplier (default 1.33).
+
+    Returns:
+        Tuple of (upper, middle, lower) arrays, each shape (n,).
+    """
+    from packages.indicators.src.trend import sma as _sma
+
+    validate_ohlcv(high, low, close, min_length=max(sma_period, atr_period))
+
+    middle = _sma(close, sma_period)
+    atr_vals = atr(high, low, close, atr_period)
+
+    upper = middle + multiplier * atr_vals
+    lower = middle - multiplier * atr_vals
+    return upper, middle, lower

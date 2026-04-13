@@ -3,7 +3,17 @@ import { useRef, useEffect, useState, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
+import { isMarketHours } from "@/lib/market";
 import type { WsTick } from "@/types/api";
+
+// MCX commodity instruments — these stay visible even when NSE/BSE is closed
+// because MCX trades until 23:30 IST on weekdays.
+const MCX_NAMES = new Set(["GOLD", "SILVER", "CRUDEOIL", "NATGAS"]);
+
+/** True when the MCX session is currently active (weekdays 09:00–23:30 IST). */
+function isMcxOpen(): boolean {
+  return isMarketHours("MCX");
+}
 
 interface IndexChipProps {
   name: string;
@@ -110,11 +120,21 @@ const IndexChip = memo(function IndexChip({ name, data }: IndexChipProps) {
  * TickerBar -- always-visible bar at h-7 showing live index prices.
  * Reads from Jotai indicesSummaryAtom (populated by useWsBridge).
  * LTP numbers flash green on price increase and red on decrease (200ms).
+ *
+ * NSE/BSE indices are shown first, followed by a visual separator and
+ * MCX commodity instruments (GOLD, SILVER, CRUDEOIL, NATGAS).
+ * MCX instruments remain visible even when NSE/BSE is closed because
+ * MCX trades until 23:30 IST on weekdays.
  */
 export default function TickerBar() {
   const indices = useAtomValue(indicesSummaryAtom);
   const hasData = hasAnyLiveData(indices);
   const navigate = useNavigate();
+  const mcxOpen = isMcxOpen();
+
+  // Split indices into NSE/BSE section and MCX section
+  const nseIndices = indices.filter((idx) => !MCX_NAMES.has(idx.name));
+  const mcxIndices = indices.filter((idx) => MCX_NAMES.has(idx.name));
 
   return (
     <div
@@ -122,9 +142,36 @@ export default function TickerBar() {
       role="region"
       aria-label="Market indices"
     >
-      {indices.map((idx) => (
+      {/* NSE/BSE index section */}
+      {nseIndices.map((idx) => (
         <IndexChip key={idx.name} name={idx.name} data={idx.data} />
       ))}
+
+      {/* MCX separator + session badge */}
+      {mcxIndices.length > 0 && (
+        <div
+          className="flex items-center gap-1.5 px-2 shrink-0 border-l border-r border-border-default h-full"
+          aria-label="MCX commodities section"
+        >
+          <span
+            className={`text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
+              mcxOpen
+                ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
+                : "text-text-disabled border-border-default"
+            }`}
+            title={mcxOpen ? "MCX session is open (09:00–23:30 IST)" : "MCX session is closed"}
+            aria-label={mcxOpen ? "MCX open" : "MCX closed"}
+          >
+            MCX
+          </span>
+        </div>
+      )}
+
+      {/* MCX commodity chips */}
+      {mcxIndices.map((idx) => (
+        <IndexChip key={idx.name} name={idx.name} data={idx.data} />
+      ))}
+
       {!hasData && (
         <button
           onClick={() => navigate("/settings#api")}
@@ -133,6 +180,7 @@ export default function TickerBar() {
           Connect OpenAlgo for live prices →
         </button>
       )}
+
       {/* Accessibility: one polite live region summarises all index prices for
           screen readers (Issue #50). Individual IndexChip spans stay aria-live="off"
           to prevent per-tick noise. aria-atomic ensures the whole summary is

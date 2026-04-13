@@ -77,12 +77,12 @@ class TestSTT:
         assert bd.stt == Decimal("0")
 
     def test_fo_sell_stt(self):
-        """F&O sell: 0.0125% STT."""
+        """F&O sell: 0.05% STT (updated April 2026 per Finance Act)."""
         from tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=False)
-        # 0.0125% of 100,000 = 12.50
-        assert bd.stt == Decimal("12.50")
+        # 0.05% of 100,000 = 50.00
+        assert bd.stt == Decimal("50.00")
 
     def test_stt_zero_for_small_fo_buy(self):
         from tax_calculator import TradeType
@@ -404,8 +404,8 @@ class TestFactoryFunctions:
         from tax_calculator import make_fo_calculator, TradeType
         calc = make_fo_calculator()
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=False)
-        # 0.0125% of 100,000 = 12.50
-        assert bd.stt == Decimal("12.50")
+        # 0.05% of 100,000 = 50.00 (updated April 2026 per Finance Act)
+        assert bd.stt == Decimal("50.00")
 
 
 # ---------------------------------------------------------------------------

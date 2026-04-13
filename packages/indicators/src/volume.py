@@ -1,5 +1,6 @@
 """Volume indicators — OBV, AD, CMF, MFI, VWMA, Elder Force Index, Price Volume
-Trend, Cumulative Delta, Volume Profile.
+Trend, Cumulative Delta, Volume Profile, EMV, NVI, KlingerVolumeOscillator,
+OBVSmoothed, RVOL, VROC, FI (Force Index).
 
 All functions:
 - Accept numpy float64 arrays
@@ -465,3 +466,293 @@ def volume_profile(
     poc_price = float(price_levels[poc_idx])
 
     return price_levels, bin_volumes, poc_price
+
+
+def emv(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    volume: NDArray[np.float64],
+    period: int = 14,
+    divisor: float = 1e4,
+) -> NDArray[np.float64]:
+    """Ease of Movement (EMV).
+
+    Developed by Richard W. Arms Jr.  EMV relates an asset's price change to
+    its volume and is used to assess the ease with which a security's price
+    moves.  A smoothed (SMA) version is returned.
+
+    Formula:
+        midpoint_move = (high + low) / 2 - (high[i-1] + low[i-1]) / 2
+        box_ratio     = (volume / divisor) / (high - low)
+        raw_emv       = midpoint_move / box_ratio
+        EMV           = SMA(raw_emv, period)
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        volume: Volume values, shape (n,).
+        period: SMA smoothing period (default 14).
+        divisor: Volume scale divisor (default 1e4; adjust for large volume series).
+
+    Returns:
+        EMV values, shape (n,). NaN until warmed up.
+    """
+    from packages.indicators.src.trend import sma as _sma
+
+    validate_ohlcv(high, low, high, min_length=2)
+    validate_series(volume, min_length=2)
+    if len(high) != len(volume):
+        raise ValueError(f"Array length mismatch: high={len(high)}, volume={len(volume)}")
+
+    n = len(high)
+    raw = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(1, n):
+        hl = high[i] - low[i]
+        if hl == 0.0 or volume[i] == 0.0:
+            raw[i] = 0.0
+            continue
+        mid_move = (high[i] + low[i]) / 2.0 - (high[i - 1] + low[i - 1]) / 2.0
+        box_ratio = (volume[i] / divisor) / hl
+        raw[i] = mid_move / box_ratio if box_ratio != 0.0 else 0.0
+
+    # Smooth over valid portion
+    valid_mask = ~np.isnan(raw)
+    valid_raw = raw[valid_mask]
+    result = np.full(n, np.nan, dtype=np.float64)
+    if len(valid_raw) >= period:
+        sma_vals = _sma(valid_raw, period)
+        result[valid_mask] = sma_vals
+    return result
+
+
+def nvi(
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Negative Volume Index (NVI).
+
+    The NVI focuses on days when volume decreases from the previous day.  The
+    idea is that informed ("smart money") trades occur on low-volume days.
+
+    Formula:
+        NVI[0] = 1000
+        NVI[i] = NVI[i-1] * (1 + pct_change(close)) if volume[i] < volume[i-1]
+               = NVI[i-1]                             otherwise
+
+    Args:
+        close: Close prices, shape (n,).
+        volume: Volume values, shape (n,).
+
+    Returns:
+        NVI values, shape (n,). Starts at 1000 for bar 0.
+    """
+    validate_series(close, min_length=1)
+    validate_series(volume, min_length=1)
+    if len(close) != len(volume):
+        raise ValueError(f"Array length mismatch: close={len(close)}, volume={len(volume)}")
+
+    n = len(close)
+    result = np.full(n, 1000.0, dtype=np.float64)
+
+    for i in range(1, n):
+        if volume[i] < volume[i - 1]:
+            prev = close[i - 1]
+            pct = (close[i] - prev) / prev if prev != 0.0 else 0.0
+            result[i] = result[i - 1] * (1.0 + pct)
+        else:
+            result[i] = result[i - 1]
+
+    return result
+
+
+def klinger_volume_oscillator(
+    high: NDArray[np.float64],
+    low: NDArray[np.float64],
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+    fast: int = 34,
+    slow: int = 55,
+    signal: int = 13,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Klinger Volume Oscillator (KVO).
+
+    Developed by Stephen J. Klinger.  KVO attempts to predict price reversals
+    by comparing the volume of a stock with its price movement.
+
+    Formula:
+        trend = +1 if (high + low + close) > prev(high + low + close) else -1
+        dm    = high - low
+        cm[i] = cm[i-1] + dm[i] if trend == prev_trend else dm[i]
+        VF    = volume * |2 * dm/cm - 1| * trend * 100
+        KVO   = EMA(VF, fast) - EMA(VF, slow)
+        Signal = EMA(KVO, signal)
+
+    Args:
+        high: High prices, shape (n,).
+        low: Low prices, shape (n,).
+        close: Close prices, shape (n,).
+        volume: Volume values, shape (n,).
+        fast: Fast EMA period (default 34).
+        slow: Slow EMA period (default 55).
+        signal: Signal EMA period (default 13).
+
+    Returns:
+        Tuple of (kvo, signal_line) arrays, each shape (n,).
+    """
+    from packages.indicators.src.trend import ema as _ema
+
+    validate_ohlcv(high, low, close, min_length=2)
+    validate_series(volume, min_length=2)
+    if len(volume) != len(close):
+        raise ValueError(f"Array length mismatch: volume={len(volume)}, close={len(close)}")
+
+    n = len(close)
+    hlc = high + low + close
+
+    # Volume force
+    vf = np.zeros(n, dtype=np.float64)
+    cm = 0.0
+    prev_trend = 0
+
+    for i in range(1, n):
+        trend = 1 if hlc[i] >= hlc[i - 1] else -1
+        dm = high[i] - low[i]
+        if trend == prev_trend:
+            cm += dm
+        else:
+            cm = high[i - 1] - low[i - 1] + dm  # reset cm
+        prev_trend = trend
+        vf[i] = volume[i] * (abs(2.0 * dm / cm - 1.0) if cm != 0.0 else 0.0) * trend * 100.0
+
+    kvo_line = _ema(vf, fast) - _ema(vf, slow)
+
+    valid_mask = ~np.isnan(kvo_line)
+    valid_kvo = kvo_line[valid_mask]
+    sig = np.full(n, np.nan, dtype=np.float64)
+    if len(valid_kvo) >= signal:
+        sig_vals = _ema(valid_kvo, signal)
+        sig[valid_mask] = sig_vals
+
+    return kvo_line, sig
+
+
+def obv_smoothed(
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+    period: int = 10,
+) -> NDArray[np.float64]:
+    """On Balance Volume — EMA smoothed.
+
+    Computes standard OBV and then applies an EMA of the given period to
+    reduce noise.  Useful for identifying the underlying trend of OBV.
+
+    Args:
+        close: Close prices, shape (n,).
+        volume: Volume values, shape (n,).
+        period: EMA smoothing period (default 10).
+
+    Returns:
+        Smoothed OBV values, shape (n,). First ``period - 1`` values are NaN.
+    """
+    from packages.indicators.src.trend import ema as _ema
+
+    obv_raw = obv(close, volume)
+    return _ema(obv_raw, period)
+
+
+def rvol(
+    volume: NDArray[np.float64],
+    period: int = 20,
+) -> NDArray[np.float64]:
+    """Relative Volume (RVOL).
+
+    RVOL compares the current bar's volume to the average volume over the
+    preceding ``period`` bars.  A value of 2.0 means volume is twice the average.
+
+    Formula:
+        RVOL[i] = volume[i] / SMA(volume, period)[i-1]
+
+    The comparison uses the SMA of the *prior* ``period`` bars (not including
+    the current bar) to avoid lookahead.
+
+    Args:
+        volume: Volume values, shape (n,).
+        period: Lookback for average volume (default 20).
+
+    Returns:
+        RVOL values, shape (n,). First ``period`` values are NaN.
+        NaN is returned when average volume is zero.
+    """
+    from packages.indicators.src.trend import sma as _sma
+
+    validate_series(volume, min_length=period + 1)
+
+    n = len(volume)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    # Compute SMA of volume; we compare bar i to SMA ending at i-1
+    sma_vol = _sma(volume, period)
+
+    for i in range(period, n):
+        avg = sma_vol[i - 1]
+        if not np.isnan(avg) and avg != 0.0:
+            result[i] = volume[i] / avg
+
+    return result
+
+
+def vroc(
+    volume: NDArray[np.float64],
+    period: int = 14,
+) -> NDArray[np.float64]:
+    """Volume Rate of Change (VROC).
+
+    Measures the percentage change in volume over a given period, analogous to
+    the Price ROC for price data.
+
+    Formula:
+        VROC[i] = (volume[i] - volume[i - period]) / volume[i - period] * 100
+
+    Args:
+        volume: Volume values, shape (n,).
+        period: Lookback period (default 14).
+
+    Returns:
+        VROC values, shape (n,). First ``period`` values are NaN.
+    """
+    validate_series(volume, min_length=period + 1)
+    n = len(volume)
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(period, n):
+        prev = volume[i - period]
+        result[i] = ((volume[i] - prev) / prev * 100.0) if prev != 0.0 else 0.0
+
+    return result
+
+
+def fi(
+    close: NDArray[np.float64],
+    volume: NDArray[np.float64],
+    period: int = 13,
+) -> NDArray[np.float64]:
+    """Force Index (FI).
+
+    Developed by Alexander Elder.  The Force Index combines price direction,
+    magnitude, and volume.  This is the same calculation as ``efi`` but uses
+    the common short name ``fi`` as an alias for ergonomics.
+
+    Formula:
+        raw[i] = (close[i] - close[i-1]) * volume[i]
+        FI     = EMA(raw, period)
+
+    Args:
+        close: Close prices, shape (n,).
+        volume: Volume values, shape (n,).
+        period: EMA smoothing period (default 13).
+
+    Returns:
+        Force Index values, shape (n,). First ``period`` values are NaN.
+    """
+    return efi(close, volume, period)

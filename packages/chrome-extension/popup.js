@@ -1,7 +1,8 @@
 /**
  * FlintTrade Chrome Extension — Popup Script
  *
- * Handles connection to FlintTrade, quick order placement, and signal display.
+ * Handles connection to FlintTrade, quick order placement, signal display,
+ * and LE/LX/SE/SX button bar settings.
  */
 
 // ---------------------------------------------------------------------------
@@ -10,6 +11,13 @@
 
 const DEFAULT_HOST = "http://localhost:5173";
 const STORAGE_KEYS = { host: "ft_host", apiKey: "ft_api_key" };
+const ORDER_KEYS = {
+  symbol: "ft_order_symbol",
+  exchange: "ft_order_exchange",
+  qty: "ft_order_qty",
+  product: "ft_order_product",
+};
+const BAR_VISIBLE_KEY = "ft_button_bar_visible";
 
 // ---------------------------------------------------------------------------
 // DOM references
@@ -29,6 +37,16 @@ const buyBtn = document.getElementById("buy-btn");
 const sellBtn = document.getElementById("sell-btn");
 const orderResult = document.getElementById("order-result");
 const signalsList = document.getElementById("signals-list");
+
+// Order settings for button bar
+const orderSymbolInput = document.getElementById("order-symbol");
+const orderExchangeInput = document.getElementById("order-exchange");
+const orderQtyInput = document.getElementById("order-qty");
+const orderProductInput = document.getElementById("order-product");
+const saveOrderSettingsBtn = document.getElementById("save-order-settings");
+
+// Bar toggle
+const barToggle = document.getElementById("bar-toggle");
 
 // ---------------------------------------------------------------------------
 // Settings persistence (chrome.storage.local)
@@ -52,6 +70,36 @@ async function saveSettings(host, apiKey) {
   return new Promise((resolve) => {
     chrome.storage.local.set(
       { [STORAGE_KEYS.host]: host, [STORAGE_KEYS.apiKey]: apiKey },
+      resolve
+    );
+  });
+}
+
+async function loadOrderSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      [ORDER_KEYS.symbol, ORDER_KEYS.exchange, ORDER_KEYS.qty, ORDER_KEYS.product],
+      (data) => {
+        resolve({
+          symbol: data[ORDER_KEYS.symbol] || "",
+          exchange: data[ORDER_KEYS.exchange] || "NSE",
+          qty: data[ORDER_KEYS.qty] || "1",
+          product: data[ORDER_KEYS.product] || "MIS",
+        });
+      }
+    );
+  });
+}
+
+async function saveOrderSettings(symbol, exchange, qty, product) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(
+      {
+        [ORDER_KEYS.symbol]: symbol,
+        [ORDER_KEYS.exchange]: exchange,
+        [ORDER_KEYS.qty]: qty,
+        [ORDER_KEYS.product]: product,
+      },
       resolve
     );
   });
@@ -91,7 +139,6 @@ async function ftFetch(settings, endpoint, method = "GET", body = null) {
 
 async function checkConnection(settings) {
   try {
-    // Use the OpenAlgo ping endpoint via FlintTrade proxy
     const url = `${settings.host}/api/v1/ping`;
     const resp = await fetch(url, {
       method: "POST",
@@ -135,7 +182,6 @@ async function placeOrder(action, settings) {
   }
 
   try {
-    // Place order via the FlintTrade safety proxy
     const result = await ftFetch(settings, "orders/place", "POST", {
       symbol,
       exchange,
@@ -194,6 +240,20 @@ async function loadSignals(settings) {
 }
 
 // ---------------------------------------------------------------------------
+// Bar toggle
+// ---------------------------------------------------------------------------
+
+function toggleButtonBar(visible) {
+  chrome.storage.local.set({ [BAR_VISIBLE_KEY]: visible });
+  // Send message to content script to show/hide
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (tabs[0]?.id) {
+      chrome.tabs.sendMessage(tabs[0].id, { action: "toggleButtonBar" }).catch(() => {});
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
@@ -201,6 +261,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   const settings = await loadSettings();
   hostInput.value = settings.host;
   apiKeyInput.value = settings.apiKey;
+
+  // Load order settings for button bar
+  const orderSettings = await loadOrderSettings();
+  orderSymbolInput.value = orderSettings.symbol;
+  orderExchangeInput.value = orderSettings.exchange;
+  orderQtyInput.value = orderSettings.qty;
+  orderProductInput.value = orderSettings.product;
+
+  // Load bar visibility
+  chrome.storage.local.get(BAR_VISIBLE_KEY, (data) => {
+    barToggle.checked = data[BAR_VISIBLE_KEY] !== false;
+  });
 
   // Check connection
   const connected = await checkConnection(settings);
@@ -215,7 +287,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         tabs[0].id,
         { action: "getSelectedSymbol" },
         (response) => {
-          if (chrome.runtime.lastError) return; // content script not injected
+          if (chrome.runtime.lastError) return;
           if (response?.symbol) {
             symbolInput.value = response.symbol;
           }
@@ -229,11 +301,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     const isHidden = settingsForm.classList.contains("hidden");
     settingsForm.classList.toggle("hidden");
     settingsToggle.innerHTML = isHidden
-      ? "Settings &#9652;"
-      : "Settings &#9662;";
+      ? "Connection &#9652;"
+      : "Connection &#9662;";
   });
 
-  // Save settings
+  // Save connection settings
   saveSettingsBtn.addEventListener("click", async () => {
     const newHost = hostInput.value.trim() || DEFAULT_HOST;
     const newKey = apiKeyInput.value.trim();
@@ -241,6 +313,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     const newSettings = { host: newHost, apiKey: newKey };
     const conn = await checkConnection(newSettings);
     if (conn) loadSignals(newSettings);
+  });
+
+  // Save order settings for button bar
+  saveOrderSettingsBtn.addEventListener("click", async () => {
+    const sym = orderSymbolInput.value.trim().toUpperCase();
+    const exch = orderExchangeInput.value;
+    const qty = orderQtyInput.value || "1";
+    const prod = orderProductInput.value;
+    await saveOrderSettings(sym, exch, qty, prod);
+    orderSymbolInput.value = sym;
+    showResult("Order settings saved", "success");
+  });
+
+  // Bar toggle
+  barToggle.addEventListener("change", () => {
+    toggleButtonBar(barToggle.checked);
   });
 
   // Order buttons

@@ -120,6 +120,35 @@ class TestBrokerCatalog:
 
         assert BROKER_CATALOG["definedge"].auth_flow == AuthFlowType.otp_sms
 
+    def test_samco_is_otp_multistep(self):
+        """Samco must use otp_multistep — it has a 4-step OTP 2FA flow, not TOTP."""
+        from models import AuthFlowType
+
+        assert "samco" in BROKER_CATALOG
+        entry = BROKER_CATALOG["samco"]
+        assert entry.auth_flow == AuthFlowType.otp_multistep, (
+            f"Expected samco to be otp_multistep, got {entry.auth_flow!r}. "
+            "Samco uses a 4-step OTP flow: request OTP → submit OTP → "
+            "generate access token → login."
+        )
+
+    def test_samco_aux_params_include_secret_api_key_and_ip_fields(self):
+        """Samco catalog entry must declare its broker-specific aux_params."""
+        entry = BROKER_CATALOG["samco"]
+        assert "secret_api_key" in entry.aux_params
+        assert "primary_ip" in entry.aux_params
+        assert "secondary_ip" in entry.aux_params
+
+    def test_samco_not_in_totp_brokers(self):
+        """Samco must NOT be categorised as a totp_form broker."""
+        from models import AuthFlowType
+
+        entry = BROKER_CATALOG["samco"]
+        assert entry.auth_flow != AuthFlowType.totp_form, (
+            "Samco was incorrectly categorised as totp_form. "
+            "It uses a multi-step OTP flow (otp_multistep)."
+        )
+
     def test_known_api_key_direct_brokers(self):
         """Spot-check api_key_direct brokers."""
         from models import AuthFlowType

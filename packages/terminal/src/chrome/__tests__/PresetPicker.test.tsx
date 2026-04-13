@@ -9,9 +9,18 @@ import { render, screen } from "@testing-library/react";
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockLayoutState = {
+  applyPreset: vi.fn(),
+  activeTabId: "tab-1",
+  tabs: [{ id: "tab-1", name: "Workspace" }],
+  renameTab: vi.fn(),
+  removeTab: vi.fn(),
+  addTab: vi.fn(),
+};
+
 vi.mock("@/stores/layoutStore", () => ({
-  useLayoutStore: (selector: (s: { applyPreset: () => void }) => unknown) =>
-    selector({ applyPreset: vi.fn() }),
+  useLayoutStore: (selector: (s: typeof mockLayoutState) => unknown) =>
+    selector(mockLayoutState),
 }));
 
 // ---------------------------------------------------------------------------

@@ -26,9 +26,18 @@ class TestAuthFlowType:
     def test_otp_sms_value(self) -> None:
         assert AuthFlowType.otp_sms == "otp_sms"
 
+    def test_otp_multistep_value(self) -> None:
+        assert AuthFlowType.otp_multistep == "otp_multistep"
+
     def test_all_members_present(self) -> None:
         members = {m.value for m in AuthFlowType}
-        assert members == {"oauth_redirect", "totp_form", "api_key_direct", "otp_sms"}
+        assert members == {
+            "oauth_redirect",
+            "totp_form",
+            "api_key_direct",
+            "otp_sms",
+            "otp_multistep",
+        }
 
     def test_is_str(self) -> None:
         assert isinstance(AuthFlowType.oauth_redirect, str)
@@ -170,6 +179,36 @@ class TestBrokerInfo:
             exchanges=["NSE"],
         )
         assert info.auth_flow == AuthFlowType.totp_form
+
+    def test_default_aux_params_is_empty_list(self) -> None:
+        info = BrokerInfo(
+            name="zerodha",
+            display_name="Zerodha",
+            auth_flow=AuthFlowType.oauth_redirect,
+            exchanges=["NSE"],
+        )
+        assert info.aux_params == []
+
+    def test_aux_params_with_values(self) -> None:
+        info = BrokerInfo(
+            name="samco",
+            display_name="Samco",
+            auth_flow=AuthFlowType.otp_multistep,
+            exchanges=["NSE", "BSE", "NFO", "CDS", "MCX"],
+            aux_params=["secret_api_key", "primary_ip", "secondary_ip"],
+        )
+        assert info.aux_params == ["secret_api_key", "primary_ip", "secondary_ip"]
+
+    def test_aux_params_serialises_in_model_dump(self) -> None:
+        info = BrokerInfo(
+            name="samco",
+            display_name="Samco",
+            auth_flow=AuthFlowType.otp_multistep,
+            exchanges=["NSE"],
+            aux_params=["secret_api_key"],
+        )
+        dumped = info.model_dump()
+        assert dumped["aux_params"] == ["secret_api_key"]
 
 
 # ---------------------------------------------------------------------------
