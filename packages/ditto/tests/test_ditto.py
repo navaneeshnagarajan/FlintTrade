@@ -12,6 +12,13 @@ import pytest
 
 from packages.ditto.src.account_manager import decrypt_value, encrypt_value
 
+
+@pytest.fixture(autouse=True)
+def _set_encryption_key(monkeypatch):
+    """Provide a valid Fernet key for all tests that use AccountManager."""
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("DITTO_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
 # ======================================================================
 # Helpers
 # ======================================================================
@@ -33,11 +40,6 @@ def _make_account(
         api_key=api_key, allocation_weight=weight, group=group,
         enabled=enabled, is_master=is_master,
     )
-
-
-def _make_order(symbol="RELIANCE", action="BUY", qty="10", exchange="NSE"):
-    from packages.core.src.models import Order
-    return Order(symbol=symbol, action=action, quantity=qty, exchange=exchange)
 
 
 # ======================================================================
@@ -406,8 +408,8 @@ class TestTrailingSL:
             highs=highs, lows=lows, closes=closes,
         )
         # Should have moved from 23800 to something higher
-        if new_sl is not None:
-            assert new_sl > 23800
+        assert new_sl is not None, "ATR trailing SL should return a value"
+        assert new_sl > 23800
 
     def test_supertrend_trailing(self):
         from packages.ditto.src.trailing_sl import compute_supertrend
