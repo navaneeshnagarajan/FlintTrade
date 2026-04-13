@@ -86,7 +86,7 @@ describe("PivotPointsWidget", () => {
 
   it("renders the symbol selector with NIFTY as default", () => {
     render(<PivotPointsWidget />);
-    const select = screen.getByLabelText("Select symbol");
-    expect((select as HTMLSelectElement).value).toBe("NIFTY");
+    const trigger = screen.getByLabelText("Select symbol");
+    expect(trigger.textContent).toContain("NIFTY");
   });
 });

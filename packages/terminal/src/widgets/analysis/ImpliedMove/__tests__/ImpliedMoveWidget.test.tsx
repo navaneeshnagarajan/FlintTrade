@@ -77,8 +77,8 @@ describe("ImpliedMoveWidget", () => {
   it("renders symbol select with NIFTY as default", () => {
     mockConnected.mockReturnValue(false);
     render(<ImpliedMoveWidget />);
-    const select = screen.getByLabelText("Select symbol") as HTMLSelectElement;
-    expect(select.value).toBe("NIFTY");
+    const trigger = screen.getByLabelText("Select symbol");
+    expect(trigger.textContent).toContain("NIFTY");
   });
 
   it("renders refresh button", () => {

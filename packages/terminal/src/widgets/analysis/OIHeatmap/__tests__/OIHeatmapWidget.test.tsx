@@ -87,11 +87,10 @@ describe("OIHeatmapWidget — disconnected (sample data)", () => {
   it("renders symbol selector with NIFTY as default option", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<OIHeatmapWidget />);
-    const select = screen.getByTestId("symbol-select") as HTMLSelectElement;
-    expect(select).toBeTruthy();
-    // NIFTY is an option
-    const options = Array.from(select.options).map((o) => o.text);
-    expect(options).toContain("NIFTY");
+    const trigger = screen.getByTestId("symbol-select");
+    expect(trigger).toBeTruthy();
+    // shadcn Select trigger shows current value text
+    expect(trigger.textContent).toContain("NIFTY");
   });
 });
 
