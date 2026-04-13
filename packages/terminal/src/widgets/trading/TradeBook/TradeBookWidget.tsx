@@ -3,6 +3,7 @@
 // Uses TanStack Table v8 + shadcn Table + shadcn Badge for BUY/SELL side badges.
 import { useMemo, useState, memo } from "react";
 import { Clock, RefreshCw, ArrowRightLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   type ColumnDef,
   flexRender,
@@ -230,15 +231,17 @@ function TradeBookWidget(_props: WidgetProps) {
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="text-text-muted hover:text-text-primary disabled:opacity-40"
+            className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
             aria-label="Refresh tradebook"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-          </button>
+          </Button>
         </div>
       </div>
 

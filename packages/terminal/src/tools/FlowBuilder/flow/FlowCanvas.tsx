@@ -1,0 +1,363 @@
+/**
+ * FlowCanvas — React Flow canvas editor for a single flow.
+ */
+
+import "@xyflow/react/dist/style.css";
+
+import React, { useState, useCallback, type DragEvent } from "react";
+import {
+  ReactFlow,
+  Background,
+  BackgroundVariant,
+  Controls,
+  MiniMap,
+  Panel,
+} from "@xyflow/react";
+import {
+  X,
+  Workflow,
+  Terminal,
+  Save,
+  Trash2,
+  ChevronRight,
+  AlertCircle,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+import { useFlowStore } from "@/stores/flowStore";
+import { NodePalette, DRAG_MIME } from "./NodePalette";
+import { ConfigPanel } from "./ConfigPanel";
+import { ExecutionLog } from "./ExecutionLog";
+import { REACT_FLOW_NODE_TYPES } from "./BaseNode";
+import {
+  NODE_TYPE_TO_CATEGORY,
+  NODE_TYPE_TO_COLOR,
+  NODE_TYPE_TO_LABEL,
+} from "./nodeRegistry";
+import type { FlowNodeData } from "@/stores/flowStore";
+import type { Node } from "@xyflow/react";
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+export interface FlowCanvasProps {
+  flowId: string;
+  flowName: string;
+  onBack: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
+  const nodes = useFlowStore((s) => s.nodes);
+  const edges = useFlowStore((s) => s.edges);
+  const selectedNodeId = useFlowStore((s) => s.selectedNodeId);
+  const onNodesChange = useFlowStore((s) => s.onNodesChange);
+  const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
+  const onConnect = useFlowStore((s) => s.onConnect);
+  const addNode = useFlowStore((s) => s.addNode);
+  const selectNode = useFlowStore((s) => s.selectNode);
+  const saveFlowById = useFlowStore((s) => s.saveFlowById);
+  const clearCanvas = useFlowStore((s) => s.clearCanvas);
+  const addLogEntry = useFlowStore((s) => s.addLogEntry);
+
+  const [name, setName] = useState(flowName);
+  const [saved, setSaved] = useState(true);
+  const [showRunNote, setShowRunNote] = useState(false);
+  const [logCollapsed, setLogCollapsed] = useState(false);
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+
+  const handleDrop = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const nodeType = e.dataTransfer.getData(DRAG_MIME);
+      if (!nodeType) return;
+
+      const bounds = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const position = {
+        x: e.clientX - bounds.left,
+        y: e.clientY - bounds.top,
+      };
+
+      const catId = NODE_TYPE_TO_CATEGORY.get(nodeType) ?? "utilities";
+      const color = NODE_TYPE_TO_COLOR.get(nodeType) ?? "#a78bfa";
+      const label = NODE_TYPE_TO_LABEL.get(nodeType) ?? nodeType;
+
+      addNode(nodeType, position, label, catId, color);
+      setSaved(false);
+    },
+    [addNode]
+  );
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleNodeClick = useCallback(
+    (_e: React.MouseEvent, node: Node<FlowNodeData>) => {
+      selectNode(node.id);
+    },
+    [selectNode]
+  );
+
+  const handlePaneClick = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
+
+  const handleNodesChange: typeof onNodesChange = useCallback(
+    (changes) => {
+      onNodesChange(changes);
+      const hasMutation = changes.some((c) => c.type !== "select" && c.type !== "dimensions");
+      if (hasMutation) setSaved(false);
+    },
+    [onNodesChange]
+  );
+
+  const handleEdgesChange: typeof onEdgesChange = useCallback(
+    (changes) => {
+      onEdgesChange(changes);
+      if (changes.length > 0) setSaved(false);
+    },
+    [onEdgesChange]
+  );
+
+  const handleConnect: typeof onConnect = useCallback(
+    (connection) => {
+      onConnect(connection);
+      setSaved(false);
+    },
+    [onConnect]
+  );
+
+  function handleSave(): void {
+    saveFlowById(flowId, nodes, edges, name);
+    setSaved(true);
+    addLogEntry("success", `Workflow "${name}" saved (${nodes.length} nodes, ${edges.length} edges)`);
+  }
+
+  function handleRunClick(): void {
+    setShowRunNote((v) => !v);
+  }
+
+  function handleClear(): void {
+    clearCanvas();
+    setSaved(false);
+  }
+
+  return (
+    <div className="flex flex-col h-full" style={{ background: "var(--color-base)" }}>
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "6px 12px",
+          borderBottom: "1px solid var(--color-border)",
+          background: "var(--color-card)",
+          flexShrink: 0,
+          zIndex: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={onBack}
+            style={{ color: "var(--color-text-muted)", background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}
+            aria-label="Back to flow list"
+          >
+            <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
+          </button>
+          <input
+            value={name}
+            onChange={(e) => { setName(e.target.value); setSaved(false); }}
+            style={{ fontSize: 12, fontWeight: 600, background: "transparent", border: "1px solid transparent", borderRadius: 4, color: "var(--color-text)", padding: "2px 6px", outline: "none" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "var(--color-border)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "transparent"; }}
+          />
+          {!saved && (
+            <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>Unsaved</span>
+          )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>
+            {nodes.length} nodes · {edges.length} edges
+          </span>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs text-text-muted hover:text-red-400 gap-1"
+            onClick={handleClear}
+            title="Clear canvas"
+          >
+            <Trash2 size={11} />
+          </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs text-amber-400 hover:text-amber-300 gap-1"
+            onClick={handleRunClick}
+          >
+            <Terminal size={11} />
+            Run
+          </Button>
+
+          <Button
+            size="sm"
+            className="h-6 px-3 bg-primary hover:bg-primary/90 text-white text-xs gap-1"
+            onClick={handleSave}
+            disabled={saved}
+          >
+            <Save size={11} />
+            Save
+          </Button>
+        </div>
+      </div>
+
+      {/* Run backend note */}
+      {showRunNote && (
+        <div
+          style={{
+            background: "var(--color-card)",
+            borderBottom: "1px solid var(--color-border)",
+            padding: "6px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
+          <AlertCircle size={12} style={{ color: "#f59e0b", flexShrink: 0 }} />
+          <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+            Connect the Python backend to execute flows. Run{" "}
+            <span style={{ fontFamily: "monospace", color: "var(--color-text)" }}>
+              python -m packages.automation.src.flow_runner
+            </span>{" "}
+            and enable execution in Settings.
+          </span>
+          <button
+            onClick={() => setShowRunNote(false)}
+            style={{ marginLeft: "auto", color: "var(--color-text-muted)", background: "none", border: "none", cursor: "pointer" }}
+          >
+            <X size={11} />
+          </button>
+        </div>
+      )}
+
+      {/* Canvas row: palette + React Flow + config panel */}
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        {/* Left: Node palette */}
+        <NodePalette />
+
+        {/* Centre: React Flow */}
+        <div
+          style={{ flex: 1, minWidth: 0 }}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={REACT_FLOW_NODE_TYPES}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={handleEdgesChange}
+            onConnect={handleConnect}
+            onNodeClick={handleNodeClick}
+            onPaneClick={handlePaneClick}
+            fitView
+            style={{ background: "var(--color-base)" }}
+            defaultEdgeOptions={{
+              animated: true,
+              style: { stroke: "#6c8ef0", strokeWidth: 1.5 },
+            }}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={16}
+              size={0.6}
+              color="var(--color-border)"
+            />
+
+            <Controls
+              style={{
+                background: "var(--color-card)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 6,
+              }}
+            />
+
+            {/* Mini-map — bottom right */}
+            <MiniMap
+              style={{
+                background: "var(--color-card)",
+                border: "1px solid var(--color-border)",
+              }}
+              nodeColor={(node: Node<FlowNodeData>) =>
+                (node.data as FlowNodeData).color ?? "#6c8ef0"
+              }
+              maskColor="rgba(0,0,0,0.3)"
+            />
+
+            {/* Empty state hint */}
+            {nodes.length === 0 && (
+              <Panel position="top-center">
+                <div
+                  style={{
+                    marginTop: 80,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 8,
+                    pointerEvents: "none",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: "50%",
+                      background: "var(--color-card)",
+                      border: "1px solid var(--color-border)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Workflow size={20} style={{ color: "var(--color-text-muted)" }} />
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--color-text)" }}>Empty canvas</div>
+                  <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                    Drag nodes from the palette to get started
+                  </div>
+                </div>
+              </Panel>
+            )}
+          </ReactFlow>
+        </div>
+
+        {/* Right: Config panel */}
+        {selectedNode && (
+          <ConfigPanel
+            nodeId={selectedNode.id}
+            data={selectedNode.data as FlowNodeData}
+            onClose={() => selectNode(null)}
+          />
+        )}
+      </div>
+
+      {/* Bottom: Execution log */}
+      <ExecutionLog
+        collapsed={logCollapsed}
+        onToggle={() => setLogCollapsed((v) => !v)}
+      />
+    </div>
+  );
+}

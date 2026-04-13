@@ -12,6 +12,7 @@
 
 import { useState, useCallback, useEffect, memo } from "react";
 import { Activity, Play, Pause, Square, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { cn } from "@/lib/utils";
@@ -177,9 +178,11 @@ function StrategyRow({ strategy, onStart, onPause, onStop }: StrategyRowProps) {
       {/* Main row */}
       <div className="flex items-center gap-2 px-3 py-2.5">
         {/* Expand toggle */}
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => setLogsOpen((o) => !o)}
-          className="text-text-muted hover:text-text-primary transition-colors shrink-0"
+          className="h-auto w-auto p-0 text-text-muted hover:text-text-primary transition-colors shrink-0"
           aria-label={logsOpen ? `Collapse logs for ${name}` : `Expand logs for ${name}`}
           aria-expanded={logsOpen}
         >
@@ -187,7 +190,7 @@ function StrategyRow({ strategy, onStart, onPause, onStop }: StrategyRowProps) {
             ? <ChevronDown size={12} />
             : <ChevronRight size={12} />
           }
-        </button>
+        </Button>
 
         {/* Name + symbol */}
         <div className="flex-1 min-w-0">
@@ -218,33 +221,39 @@ function StrategyRow({ strategy, onStart, onPause, onStop }: StrategyRowProps) {
 
         {/* Action buttons */}
         <div className="flex items-center gap-1 shrink-0" role="group" aria-label={`Actions for ${name}`}>
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onStart(id)}
             disabled={status === "running"}
-            className="p-1 rounded text-text-muted hover:text-profit hover:bg-profit/10 transition-colors disabled:opacity-30"
+            className="h-auto w-auto p-1 text-text-muted hover:text-profit hover:bg-profit/10 transition-colors disabled:opacity-30"
             title="Start"
             aria-label={`Start ${name}`}
           >
             <Play size={11} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onPause(id)}
             disabled={status !== "running"}
-            className="p-1 rounded text-text-muted hover:text-warning hover:bg-warning/10 transition-colors disabled:opacity-30"
+            className="h-auto w-auto p-1 text-text-muted hover:text-warning hover:bg-warning/10 transition-colors disabled:opacity-30"
             title="Pause"
             aria-label={`Pause ${name}`}
           >
             <Pause size={11} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onStop(id)}
             disabled={status === "stopped"}
-            className="p-1 rounded text-text-muted hover:text-loss hover:bg-loss/10 transition-colors disabled:opacity-30"
+            className="h-auto w-auto p-1 text-text-muted hover:text-loss hover:bg-loss/10 transition-colors disabled:opacity-30"
             title="Stop"
             aria-label={`Stop ${name}`}
           >
             <Square size={11} />
-          </button>
+          </Button>
         </div>
       </div>
 

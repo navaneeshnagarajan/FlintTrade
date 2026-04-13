@@ -27,7 +27,15 @@ import {
   memo,
 } from "react";
 import type { MouseEvent } from "react";
-import { SquareStack, ChevronDown } from "lucide-react";
+import { SquareStack } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useModeStore } from "@/stores/modeStore";
 import { usePositions } from "@/hooks/usePositions";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -467,23 +475,18 @@ function PositionHeatMapWidget(_props: WidgetProps) {
             </span>
           )}
           {/* Group mode selector */}
-          <div className="relative">
-            <select
-              value={groupMode}
-              onChange={(e) => setGroupMode(e.target.value as GroupMode)}
-              className="appearance-none bg-surface-hover border border-border-subtle rounded text-xxs text-text-secondary pl-2 pr-6 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-brand-primary/50"
-            >
+          <Select value={groupMode} onValueChange={(v) => setGroupMode(v as GroupMode)}>
+            <SelectTrigger className="h-6 text-xxs bg-surface-hover border-border-subtle text-text-secondary focus:ring-accent/50 w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-surface-card border-border-default">
               {(Object.keys(GROUP_LABELS) as GroupMode[]).map((m) => (
-                <option key={m} value={m}>
+                <SelectItem key={m} value={m} className="text-xxs text-text-primary focus:bg-surface-hover">
                   {GROUP_LABELS[m]}
-                </option>
+                </SelectItem>
               ))}
-            </select>
-            <ChevronDown
-              size={10}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
-            />
-          </div>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -493,13 +496,15 @@ function PositionHeatMapWidget(_props: WidgetProps) {
           <span className="flex-1">
             Failed to load positions{error instanceof Error ? `: ${error.message}` : ""}
           </span>
-          <button
+          <Button
+            variant="link"
+            size="sm"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="shrink-0 text-xs font-medium underline hover:no-underline disabled:opacity-50"
+            className="shrink-0 h-auto p-0 text-xs font-medium text-loss hover:text-loss/80 disabled:opacity-50"
           >
             {isFetching ? "Retrying…" : "Retry"}
-          </button>
+          </Button>
         </div>
       )}
 

@@ -13,6 +13,8 @@
 import { useState, useMemo, useCallback, useEffect, memo } from "react";
 import { ArrowUpDown, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useModeStore } from "@/stores/modeStore";
 import { placeOrder, modifyOrder } from "@/services/api";
@@ -88,11 +90,16 @@ function LevelRow({ level, isCenter, order, maxQty, qty, onBid, onAsk, onCancel 
             <span className={cn("text-xxs font-bold", order.side === "buy" ? "text-profit" : "text-loss")}>
               {order.side === "buy" ? "B" : "S"}{order.qty}
             </span>
-            <button onClick={() => onCancel(order.orderId)} disabled={order.status === "cancelling"}
-              className="text-text-muted hover:text-loss disabled:opacity-40 transition-colors"
-              aria-label={`Cancel ${order.side} order at ${fmtPrice(level.price)}`}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onCancel(order.orderId)}
+              disabled={order.status === "cancelling"}
+              className="h-auto w-auto p-0 text-text-muted hover:text-loss disabled:opacity-40 transition-colors"
+              aria-label={`Cancel ${order.side} order at ${fmtPrice(level.price)}`}
+            >
               {order.status === "cancelling" ? <Loader2 size={9} className="animate-spin" /> : <X size={9} />}
-            </button>
+            </Button>
           </span>
         )}
       </div>
@@ -172,9 +179,9 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
       <div className="flex-none flex items-center gap-3 px-2.5 py-1.5 bg-surface-elevated border-b border-border-subtle">
         <div className="flex items-center gap-1.5">
           <label htmlFor="ol-qty" className="text-xxs text-text-muted uppercase tracking-wide">Qty</label>
-          <input id="ol-qty" type="number" value={qty} min={1}
+          <Input id="ol-qty" type="number" value={qty} min={1}
             onChange={(e) => setQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            className="w-16 px-1.5 py-0.5 text-xs font-mono bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
+            className="w-16 px-1.5 py-0.5 text-xs font-mono bg-surface-hover border border-border-default rounded text-text-primary focus-visible:ring-0 focus-visible:border-accent/50 h-auto"
             aria-label="Order quantity" />
         </div>
         <div className="flex items-center gap-1.5 ml-auto">

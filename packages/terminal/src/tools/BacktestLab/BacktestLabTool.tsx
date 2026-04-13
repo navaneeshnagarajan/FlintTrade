@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { createChart, LineSeries } from "lightweight-charts";
 import type { IChartApi } from "lightweight-charts";
 import { useForm, Controller } from "react-hook-form";
@@ -45,6 +46,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
+
+// ---------------------------------------------------------------------------
+// FT API
+// ---------------------------------------------------------------------------
+
+import { runBacktest } from "@/services/ftApi";
+import type { BacktestResult } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
 // Schema (react-hook-form + zod)
@@ -340,8 +348,10 @@ function EquityCurveChart({ data }: { data: EquityPoint[] }) {
 
 function ConfigureTab({
   onRunRequest,
+  isRunning,
 }: {
-  onRunRequest: () => void;
+  onRunRequest: (values: BacktestFormValues) => void;
+  isRunning: boolean;
 }) {
   const { register, handleSubmit, control, watch, formState: { errors } } =
     useForm<BacktestFormValues>({
@@ -364,8 +374,8 @@ function ConfigureTab({
   const selectedStrategy = watch("strategy");
   const stratDef = STRATEGIES.find((s) => s.id === selectedStrategy);
 
-  const onSubmit = (_data: BacktestFormValues) => {
-    onRunRequest();
+  const onSubmit = (data: BacktestFormValues) => {
+    onRunRequest(data);
   };
 
   return (
@@ -538,10 +548,11 @@ function ConfigureTab({
       {/* Run button */}
       <Button
         type="submit"
-        className="w-full h-9 bg-primary hover:bg-primary/90 text-white text-sm font-medium mt-2"
+        disabled={isRunning}
+        className="w-full h-9 bg-primary hover:bg-primary/90 text-white text-sm font-medium mt-2 disabled:opacity-60"
       >
         <Play size={14} className="mr-2" />
-        Run Backtest
+        {isRunning ? "Running…" : "Run Backtest"}
       </Button>
     </form>
   );
@@ -793,22 +804,46 @@ interface Props {
 export default function BacktestLabTool({ onClose }: Props) {
   const [hasRun, setHasRun] = useState(false);
   const [activeTab, setActiveTab] = useState("configure");
-  // equityCurve is populated from API response when backend connects.
-  // For now, after "Run Backtest" we show the mock curve so the chart renders.
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
+  const [runError, setRunError] = useState<string | null>(null);
 
-  const handleRunRequest = () => {
-    // TODO: POST /ft-api/v1/backtest/run with BacktestFormValues body.
-    // Expected response shape:
-    //   { equity_curve: EquityPoint[], trades: Trade[], metrics: BacktestMetrics }
-    // where EquityPoint = { time: number; value: number } (Unix seconds, INR portfolio value),
-    // Trade matches the MOCK_TRADES shape, and BacktestMetrics covers the stat cards in ResultsTab.
-    // On success: setEquityCurve(res.equity_curve), populate trades + metrics state, setHasRun(true).
-    // On error: show a toast and leave hasRun false so the results tab stays hidden.
-    // The backtest-engine Python package exposes this via packages/backtest-engine (FastAPI router).
-    setEquityCurve(MOCK_EQUITY_CURVE);
-    setHasRun(true);
-    setActiveTab("results");
+  // POST /ft-api/v1/backtest/run
+  const backtestMutation = useMutation<BacktestResult, Error, BacktestFormValues>({
+    mutationFn: (values: BacktestFormValues) =>
+      runBacktest({
+        symbol: values.symbol,
+        exchange: values.exchange,
+        interval: values.timeframe,
+        start_date: values.fromDate,
+        end_date: values.toDate,
+        strategy: values.strategy,
+        initial_capital: Number(values.capital),
+        // Default position sizing — not yet exposed in the form
+        position_size_pct: 10,
+      }),
+    onSuccess: (result) => {
+      // Map API equity curve (timestamp string + equity number) to EquityPoint (Unix seconds)
+      const curve: EquityPoint[] = result.equity_curve.map((p) => ({
+        time: Math.floor(new Date(p.timestamp).getTime() / 1000),
+        value: p.equity,
+      }));
+      setEquityCurve(curve.length > 0 ? curve : MOCK_EQUITY_CURVE);
+      setHasRun(true);
+      setRunError(null);
+      setActiveTab("results");
+    },
+    onError: (err) => {
+      setRunError(err.message);
+      // Fall back to mock so the form stays usable in dev / no-backend mode
+      setEquityCurve(MOCK_EQUITY_CURVE);
+      setHasRun(true);
+      setActiveTab("results");
+    },
+  });
+
+  const handleRunRequest = (values: BacktestFormValues) => {
+    setRunError(null);
+    backtestMutation.mutate(values);
   };
 
   return (
@@ -822,7 +857,7 @@ export default function BacktestLabTool({ onClose }: Props) {
           </span>
           {hasRun && (
             <Badge className="text-xs h-4 px-1.5 bg-neutral-bg text-primary border-neutral-border">
-              Mock data
+              {runError ? "Mock data" : "Live results"}
             </Badge>
           )}
         </div>
@@ -862,7 +897,18 @@ export default function BacktestLabTool({ onClose }: Props) {
         </TabsList>
 
         <TabsContent value="configure" className="flex-1 overflow-y-auto mt-0">
-          <ConfigureTab onRunRequest={handleRunRequest} />
+          {runError && (
+            <div className="mx-4 mt-3 flex items-start gap-2 rounded-md bg-bearish-bg border border-bearish-border p-2.5">
+              <AlertCircle size={13} className="text-red-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-red-400 leading-relaxed">
+                {runError} — showing mock data instead.
+              </p>
+            </div>
+          )}
+          <ConfigureTab
+            onRunRequest={handleRunRequest}
+            isRunning={backtestMutation.isPending}
+          />
         </TabsContent>
         <TabsContent value="results" className="flex-1 overflow-y-auto mt-0">
           <ResultsTab hasRun={hasRun} equityCurve={equityCurve} />

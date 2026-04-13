@@ -9,6 +9,20 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+// Stub lucide-react to avoid heavy icon tree-shaking in JSDOM/CI
+vi.mock("lucide-react", () => {
+  const Stub = ({ children, ...p }: Record<string, unknown>) => <span {...p}>{children as React.ReactNode}</span>;
+  return {
+    Lightbulb: Stub,
+    Plus: Stub,
+    X: Stub,
+    Check: Stub,
+    ChevronDown: Stub,
+    ChevronUp: Stub,
+    Tag: Stub,
+  };
+});
+
 // Stub Button and Input to plain HTML to reduce Radix import overhead in JSDOM
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, onClick, type, disabled, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { children?: React.ReactNode }) => (
@@ -19,6 +33,12 @@ vi.mock("@/components/ui/button", () => ({
 vi.mock("@/components/ui/input", () => ({
   Input: ({ id, value, onChange, placeholder, "aria-label": ariaLabel, ...rest }: React.InputHTMLAttributes<HTMLInputElement>) => (
     <input id={id} value={value} onChange={onChange} placeholder={placeholder} aria-label={ariaLabel} {...rest} />
+  ),
+}));
+
+vi.mock("@/components/ui/textarea", () => ({
+  Textarea: ({ id, value, onChange, placeholder, "aria-label": ariaLabel, ...rest }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => (
+    <textarea id={id} value={value} onChange={onChange} placeholder={placeholder} aria-label={ariaLabel} {...rest} />
   ),
 }));
 

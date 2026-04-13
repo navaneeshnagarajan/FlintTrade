@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useHoldings } from "@/hooks/useHoldings";
 import type { WidgetProps } from "@/types/widgets";
 
@@ -202,15 +203,17 @@ function HoldingsWidget(_props: WidgetProps) {
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="text-text-muted hover:text-text-primary disabled:opacity-40"
+            className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
             aria-label="Refresh holdings"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -233,13 +236,15 @@ function HoldingsWidget(_props: WidgetProps) {
           <span className="flex-1">
             Failed to load holdings{error instanceof Error ? `: ${error.message}` : ""}
           </span>
-          <button
+          <Button
+            variant="link"
+            size="sm"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="shrink-0 text-xs font-medium underline hover:no-underline disabled:opacity-50"
+            className="shrink-0 h-auto p-0 text-xs font-medium text-loss hover:text-loss/80 disabled:opacity-50"
           >
             {isFetching ? "Retrying…" : "Retry"}
-          </button>
+          </Button>
         </div>
       )}
 

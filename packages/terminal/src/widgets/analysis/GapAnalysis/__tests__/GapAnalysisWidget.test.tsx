@@ -100,10 +100,10 @@ describe("GapAnalysisWidget", () => {
   it("symbol selector is present", () => {
     mockConnected.mockReturnValue(false);
     render(<GapAnalysisWidget />);
-    const select = screen.getByLabelText("Select symbol") as HTMLSelectElement;
-    expect(select).toBeTruthy();
-    const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toContain("NIFTY");
+    const trigger = screen.getByLabelText("Select symbol");
+    expect(trigger).toBeTruthy();
+    // shadcn Select renders trigger with current value text
+    expect(trigger.textContent).toContain("NIFTY");
   });
 
   it("refresh button is disabled when disconnected", () => {

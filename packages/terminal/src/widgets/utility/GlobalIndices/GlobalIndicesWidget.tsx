@@ -12,6 +12,7 @@
 import { useEffect, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Globe, RefreshCw, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { getGlobalIndices } from "@/services/ftApi";
 import type { GlobalIndexEntry } from "@/services/ftApi";
 import { SAMPLE_INDICES, SAMPLE_UPDATED_AT } from "./sampleData";
@@ -177,14 +178,16 @@ function GlobalIndicesWidget() {
         <span className="text-xs font-medium text-text-primary">Global Indices</span>
         <div className="flex-1" />
         {isConnected && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
+            className="h-6 w-6 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
             aria-label="Refresh global indices"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} aria-hidden="true" />
-          </button>
+          </Button>
         )}
       </div>
 

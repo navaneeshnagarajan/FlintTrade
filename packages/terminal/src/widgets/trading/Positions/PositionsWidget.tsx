@@ -3,6 +3,7 @@
 // Uses TanStack Table v8 + shadcn Table for sortable positions grid.
 import { useMemo, useState, memo } from "react";
 import { Clock, Layers } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   type ColumnDef,
   flexRender,
@@ -147,13 +148,15 @@ function PositionsWidget(_props: WidgetProps) {
           <span className="flex-1">
             Failed to load positions{error instanceof Error ? `: ${error.message}` : ""}
           </span>
-          <button
+          <Button
+            variant="link"
+            size="sm"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="shrink-0 text-xs font-medium underline hover:no-underline disabled:opacity-50"
+            className="shrink-0 h-auto p-0 text-xs font-medium text-loss hover:text-loss/80 disabled:opacity-50"
           >
             {isFetching ? "Retrying…" : "Retry"}
-          </button>
+          </Button>
         </div>
       )}
 

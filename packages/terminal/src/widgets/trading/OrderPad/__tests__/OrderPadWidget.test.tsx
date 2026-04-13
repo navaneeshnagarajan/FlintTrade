@@ -165,4 +165,67 @@ describe("OrderPadWidget", () => {
 
     expect(screen.getByText(/amount too small/i)).toBeInTheDocument();
   });
+
+  // -------------------------------------------------------------------------
+  // Interaction tests
+  // -------------------------------------------------------------------------
+
+  it("switches from BUY to SELL when SELL radio is clicked", () => {
+    render(<OrderPadWidget {...defaultProps} />);
+
+    // Default is BUY — submit button says "Practice Buy"
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeInTheDocument();
+
+    // Click the SELL radio button in the transaction type radiogroup
+    const radioGroup = screen.getByRole("radiogroup", { name: /transaction type/i });
+    const sellRadio = radioGroup.querySelector('[role="radio"][aria-checked="false"]') as HTMLElement;
+    fireEvent.click(sellRadio);
+
+    // Submit button should now say "Practice Sell"
+    expect(screen.getByRole("button", { name: /practice sell/i })).toBeInTheDocument();
+  });
+
+  it("updates order summary when order type pill is changed to LIMIT", () => {
+    render(<OrderPadWidget {...defaultProps} />);
+
+    // Default order type is MARKET — visible in the order summary preview
+    expect(screen.getAllByText("MARKET").length).toBeGreaterThanOrEqual(1);
+
+    // Click the LIMIT pill (role=radio, name="LIMIT") inside the Order Type radiogroup
+    const limitRadio = screen.getByRole("radio", { name: "LIMIT" });
+    fireEvent.click(limitRadio);
+
+    // Order summary preview should now show LIMIT
+    expect(screen.getAllByText("LIMIT").length).toBeGreaterThanOrEqual(1);
+    // MARKET should be aria-checked=false
+    const marketRadio = screen.getByRole("radio", { name: "MARKET" });
+    expect(marketRadio).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("decreasing quantity below 1 is clamped by the stepper", () => {
+    render(<OrderPadWidget {...defaultProps} />);
+
+    // Default qty is 1; decrease button tries to go below min=1
+    const decreaseBtn = screen.getByLabelText("Decrease Quantity");
+    fireEvent.click(decreaseBtn);
+
+    // The qty input should still be 1 (clamped at min)
+    const qtyInput = decreaseBtn.closest("div")?.querySelector("input") as HTMLInputElement;
+    expect(Number(qtyInput.value)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows success toast after submitting a valid order", async () => {
+    const { placeOrder } = await import("@/services/api");
+    vi.mocked(placeOrder).mockResolvedValue({ orderId: "TEST001" });
+
+    render(<OrderPadWidget {...defaultProps} />);
+
+    // Submit the form — default values are valid (NIFTY, qty=1, MARKET)
+    const submitBtn = screen.getByRole("button", { name: /practice buy/i });
+    fireEvent.click(submitBtn);
+
+    // Toast appears with order ID
+    await screen.findByRole("alert");
+    expect(screen.getByRole("alert")).toHaveTextContent(/TEST001/i);
+  });
 });

@@ -17,6 +17,8 @@
 import { useState, useMemo, useCallback, useEffect, memo } from "react";
 import { FileText, Download, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 
@@ -242,15 +244,17 @@ function TradeLogWidget() {
           </span>
         )}
         <div className="flex-1" />
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={handleExport}
-          className="flex items-center gap-1 px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors"
+          className="flex items-center gap-1 h-auto px-2 py-0.5 text-xs bg-surface-hover border-border-default text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors"
           aria-label="Export CSV"
           title="Export filtered rows as CSV"
         >
           <Download size={10} />
           CSV
-        </button>
+        </Button>
       </div>
 
       {/* Filter bar */}
@@ -280,12 +284,12 @@ function TradeLogWidget() {
         {/* Symbol search */}
         <div className="relative">
           <Search size={10} className="absolute left-1.5 top-1/2 -translate-y-1/2 text-text-disabled pointer-events-none" />
-          <input
+          <Input
             type="text"
             value={symbolSearch}
             onChange={(e) => setSymbolSearch(e.target.value)}
             placeholder="Symbol…"
-            className="pl-5 pr-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 w-28"
+            className="pl-5 pr-2 py-0.5 text-xs bg-surface-hover border-border-default rounded text-text-primary placeholder:text-text-muted focus-visible:ring-0 focus-visible:border-accent/50 w-28 h-auto"
             aria-label="Search symbol"
           />
         </div>

@@ -12,6 +12,13 @@
 import { useState, useMemo, useEffect, useCallback, useRef, memo } from "react";
 import { ArrowUpFromLine, RefreshCw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 
@@ -265,14 +272,16 @@ function GapAnalysisWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-elevated border-b border-border-subtle">
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-          aria-label="Select symbol"
-        >
-          {SYMBOLS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <Select value={symbol} onValueChange={setSymbol}>
+          <SelectTrigger className="h-6 w-32 text-xs bg-surface-hover border-border-default" aria-label="Select symbol">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-surface-card border-border-default">
+            {SYMBOLS.map((s) => (
+              <SelectItem key={s} value={s} className="text-xs text-text-primary focus:bg-surface-hover">{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Filter */}
         <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden" role="group" aria-label="Filter gap type">

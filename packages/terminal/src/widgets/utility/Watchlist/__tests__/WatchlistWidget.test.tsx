@@ -186,4 +186,55 @@ describe("WatchlistWidget", () => {
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
     expect(screen.getByText("TCS")).toBeInTheDocument();
   });
+
+  // ── Interaction tests ────────────────────────────────────────────────────
+
+  it("opens the symbol search dialog when Add symbol button is clicked", async () => {
+    render(<WatchlistWidget />);
+    const addBtn = screen.getByLabelText("Add symbol");
+    await userEvent.click(addBtn);
+    // SearchDialog renders with role="dialog" and aria-label="Search symbols"
+    expect(screen.getByRole("dialog", { name: /search symbols/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search symbol/i)).toBeInTheDocument();
+  });
+
+  it("typing in the symbol search input updates the input value", async () => {
+    render(<WatchlistWidget />);
+    const addBtn = screen.getByLabelText("Add symbol");
+    await userEvent.click(addBtn);
+
+    const searchInput = screen.getByPlaceholderText(/search symbol/i) as HTMLInputElement;
+    await userEvent.type(searchInput, "INFY");
+    expect(searchInput.value).toContain("INFY");
+  });
+
+  it("clicking Close search button dismisses the search dialog", async () => {
+    render(<WatchlistWidget />);
+    await userEvent.click(screen.getByLabelText("Add symbol"));
+    expect(screen.getByRole("dialog", { name: /search symbols/i })).toBeInTheDocument();
+
+    // The X button inside the dialog closes it
+    const closeBtn = screen.getByLabelText("Close search");
+    await userEvent.click(closeBtn);
+
+    expect(screen.queryByRole("dialog", { name: /search symbols/i })).not.toBeInTheDocument();
+  });
+
+  it("right-clicking a symbol row opens the context menu with Remove option", async () => {
+    mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
+      { id: "t1", name: "Watchlist 1", symbols: [
+        { symbol: "NIFTY",    exchange: "NSE_INDEX" },
+        { symbol: "RELIANCE", exchange: "NSE" },
+      ]},
+    ]);
+    render(<WatchlistWidget />);
+
+    // Right-click the NIFTY symbol row button
+    const niftyRow = screen.getByRole("button", { name: "NIFTY" });
+    fireEvent.contextMenu(niftyRow);
+
+    // Symbol context menu should appear with Remove option
+    expect(screen.getByRole("menu", { name: /actions for NIFTY/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /remove/i })).toBeInTheDocument();
+  });
 });

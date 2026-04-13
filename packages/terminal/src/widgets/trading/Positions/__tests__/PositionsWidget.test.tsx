@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -122,5 +122,75 @@ describe("PositionsWidget", () => {
 
     // Total = 1000 + (-300) = 700 => P&L: +₹700
     expect(screen.getByText("P&L: +₹700")).toBeInTheDocument();
+  });
+
+  // ── Interaction tests ────────────────────────────────────────────────────
+
+  it("shows error banner and Retry button when data fetch fails", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: undefined,
+        isError: true,
+        error: new Error("Network timeout"),
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByText(/failed to load positions/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("calls refetch when Retry button is clicked in error state", () => {
+    const mockRefetch = vi.fn();
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: undefined,
+        isError: true,
+        error: new Error("Server error"),
+        refetch: mockRefetch,
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const retryBtn = screen.getByRole("button", { name: /retry/i });
+    fireEvent.click(retryBtn);
+
+    expect(mockRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking the Symbol column header toggles sort direction indicator", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY", pnl: 500, quantity: 50, ltp: 100, average_price: 90 },
+          { symbol: "BANKNIFTY", pnl: 200, quantity: 25, ltp: 200, average_price: 190 },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const symbolHeader = screen.getByRole("columnheader", { name: /symbol/i });
+    // First click — ascending sort indicator
+    fireEvent.click(symbolHeader);
+    expect(symbolHeader.textContent).toMatch(/symbol.*↑/i);
+
+    // Second click — descending
+    fireEvent.click(symbolHeader);
+    expect(symbolHeader.textContent).toMatch(/symbol.*↓/i);
+  });
+
+  it("shows Retry button as disabled while isFetching is true", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: undefined,
+        isError: true,
+        error: new Error("Error"),
+        isFetching: true,
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const retryBtn = screen.getByRole("button", { name: /retrying/i });
+    expect(retryBtn).toBeDisabled();
   });
 });

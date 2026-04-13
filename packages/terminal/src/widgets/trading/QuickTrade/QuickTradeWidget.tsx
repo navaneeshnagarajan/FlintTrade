@@ -123,20 +123,23 @@ function ConfirmOverlay({ symbol, action, lots, onConfirm, onCancel }: ConfirmPr
         <span className="text-warning">Large order (&gt;{LARGE_ORDER_THRESHOLD} lots)</span>
       </div>
       <div className="flex gap-2">
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={onCancel}
-          className="px-3 py-1.5 text-xs border border-border-default rounded hover:bg-surface-hover text-text-secondary transition-colors"
+          className="px-3 py-1.5 text-xs border-border-default text-text-secondary hover:bg-surface-hover"
         >
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
           onClick={onConfirm}
-          className={`px-3 py-1.5 text-xs rounded font-semibold text-white transition-colors ${
+          className={`px-3 py-1.5 text-xs font-semibold text-white transition-colors ${
             action === "BUY" ? "bg-profit hover:bg-profit/80" : "bg-loss hover:bg-loss/80"
           }`}
         >
           Confirm {action}
-        </button>
+        </Button>
       </div>
     </div>
   );

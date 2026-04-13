@@ -13,6 +13,14 @@
 
 import { useState, useMemo, memo } from "react";
 import { RefreshCw, AlertCircle, Loader2, TrendingDown, TrendingUp } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useIVSmile } from "./useIVSmile";
 import { SAMPLE_IV_SMILE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
@@ -177,23 +185,24 @@ function IVSmileWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="px-2 py-1 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-        >
-          {SYMBOLS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <Select value={symbol} onValueChange={setSymbol}>
+          <SelectTrigger className="h-7 w-32 text-xs bg-surface-hover border-border-default">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-surface-card border-border-default">
+            {SYMBOLS.map((s) => (
+              <SelectItem key={s} value={s} className="text-xs text-text-primary focus:bg-surface-hover">{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="px-1.5 py-0.5 text-xs text-text-muted bg-surface-base border border-border-default rounded">
           {exchange}
         </span>
-        <input
+        <Input
           value={expiriesInput}
           onChange={(e) => setExpiriesInput(e.target.value)}
           placeholder="Expiries (comma-sep)"
-          className="flex-1 min-w-36 px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+          className="flex-1 min-w-36 h-7 text-xs"
         />
         {/* Option type toggle */}
         <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">

@@ -17,6 +17,13 @@ import { Activity, RefreshCw } from "lucide-react";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -347,16 +354,16 @@ function IVSkewWidget() {
         <Activity size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">IV Skew</span>
 
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="ml-auto px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary focus:outline-none focus:border-accent/50"
-          aria-label="Select symbol"
-        >
-          {SYMBOLS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <Select value={symbol} onValueChange={setSymbol}>
+          <SelectTrigger className="ml-auto h-6 w-32 text-xs bg-surface-hover border-border-default" aria-label="Select symbol">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-surface-card border-border-default">
+            {SYMBOLS.map((s) => (
+              <SelectItem key={s} value={s} className="text-xs text-text-primary focus:bg-surface-hover">{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* X-axis toggle */}
         <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">

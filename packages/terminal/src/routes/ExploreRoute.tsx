@@ -35,6 +35,8 @@ import { motionConfig } from "@/lib/motion";
 import { useThemeStore } from "@/stores/themeStore";
 import DemoChoice, { hasMadeDemoChoice } from "@/components/demo/DemoChoice";
 import type { DemoChoiceValue } from "@/components/demo/DemoChoice";
+import SpotlightTour, { hasCompletedExploreTour } from "@/components/demo/ExploreTour";
+import type { TourStep } from "@/components/demo/ExploreTour";
 
 // Magic UI
 import { Particles } from "@/components/magicui/particles";
@@ -530,10 +532,53 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
 // Main route
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Explore tour steps — highlights key UI sections for beginners
+// ---------------------------------------------------------------------------
+
+const EXPLORE_TOUR_STEPS: TourStep[] = [
+  {
+    target: null,
+    title: "Welcome to Explore Mode",
+    description:
+      "This is a fully interactive preview of FlintTrade using sample data. No broker connection is needed. Let us walk you through the key sections.",
+    placement: "bottom",
+  },
+  {
+    target: "[aria-label='Explore navigation']",
+    title: "Navigation & Setup",
+    description:
+      "Use Settings to connect your OpenAlgo instance. When you're ready, click Get Started to run the setup wizard and go live.",
+    placement: "bottom",
+  },
+  {
+    target: "#explore-main",
+    title: "Module Cards",
+    description:
+      "Each card represents a full module — Trade, Invest, Learn, Lab, Automate, and AI. Click any card to open the module with sample data.",
+    placement: "bottom",
+  },
+  {
+    target: ".grid.grid-cols-1",
+    title: "Six Modules",
+    description:
+      "FlintTrade serves three personas from one app: Trader (F&O scalping), Investor (MFs, SIPs, net worth), and Beginner (guided learning, paper trading).",
+    placement: "top",
+  },
+  {
+    target: ".rounded-xl.border.border-border-default.bg-surface-card",
+    title: "Ready to Go Live?",
+    description:
+      "Connect an existing OpenAlgo instance in Settings, or run the setup wizard to configure everything from scratch. Takes about 2 minutes.",
+    placement: "top",
+  },
+];
+
 export default function ExploreRoute() {
   const navigate = useNavigate();
   const [toast, setToast] = useState<ToastState>({ visible: false, message: "" });
   const [showDemoChoice, setShowDemoChoice] = useState(() => !hasMadeDemoChoice());
+  const [showTour, setShowTour] = useState(false);
   const theme = useThemeStore((s) => s.activeThemeId);
 
   // Read primary particle color from CSS vars — reactive to theme changes
@@ -573,7 +618,10 @@ export default function ExploreRoute() {
   function handleDemoChoice(choice: DemoChoiceValue) {
     setShowDemoChoice(false);
     if (choice === "tour") {
-      // TODO: Trigger SpotlightTour for explore-beginner tour definition
+      // Start SpotlightTour only if not already completed
+      if (!hasCompletedExploreTour()) {
+        setShowTour(true);
+      }
     }
     // "explore" choice = just dismiss the overlay, user explores freely
   }
@@ -765,6 +813,14 @@ export default function ExploreRoute() {
       {/* Toast — smooth opacity fade, no popup effect */}
       {toast.visible && (
         <Toast message={toast.message} onClose={dismissToast} />
+      )}
+
+      {/* SpotlightTour — only rendered when user chose "tour" in DemoChoice */}
+      {showTour && (
+        <SpotlightTour
+          steps={EXPLORE_TOUR_STEPS}
+          onComplete={() => setShowTour(false)}
+        />
       )}
     </>
   );

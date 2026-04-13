@@ -35,6 +35,7 @@ import {
   Lock,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ping } from "@/services/api";
 import {
   getHealth,
@@ -319,15 +320,16 @@ function HealthWidget() {
               {lastRefresh.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => { void refresh(); }}
             disabled={loading}
-            className="p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors disabled:opacity-40"
-            title="Refresh"
+            className="h-6 w-6 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
             aria-label="Refresh health status"
           >
             <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
-          </button>
+          </Button>
         </div>
       </div>
 

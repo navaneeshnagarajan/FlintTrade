@@ -156,15 +156,17 @@ function StepInput({
     <div className="flex flex-col gap-0.5">
       <label className="text-xxs text-text-muted uppercase tracking-wider">{label}</label>
       <div className="flex items-stretch h-8">
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="icon"
           onClick={dec}
           disabled={disabled}
           aria-label={`Decrease ${label}`}
-          className="w-8 flex items-center justify-center bg-surface-hover border border-r-0 border-border-default rounded-l text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-8 h-8 flex items-center justify-center bg-surface-hover border border-r-0 border-border-default rounded-l rounded-r-none text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Minus size={10} />
-        </button>
+        </Button>
         <Input
           type="number"
           value={value}
@@ -175,15 +177,17 @@ function StepInput({
           placeholder={placeholder}
           className="flex-1 min-w-0 bg-surface-hover border-y border-x-0 border-border-default rounded-none px-2 text-xs font-mono tabular-nums text-text-primary text-center focus-visible:ring-0 focus-visible:border-accent disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-text-muted h-8"
         />
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="icon"
           onClick={inc}
           disabled={disabled}
           aria-label={`Increase ${label}`}
-          className="w-8 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-8 h-8 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r rounded-l-none text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus size={10} />
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -250,13 +254,15 @@ function Toast({ msg, onRetry }: ToastProps) {
       {ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
       <span className="flex-1 leading-tight">{msg.text}</span>
       {showRetry && (
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={onRetry}
-          className="shrink-0 px-2 py-0.5 rounded border border-loss/30 text-loss hover:bg-loss/10 transition-colors text-xxs font-medium"
+          className="shrink-0 h-auto px-2 py-0.5 rounded border border-loss/30 text-loss hover:bg-loss/10 transition-colors text-xxs font-medium"
         >
           Retry
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -542,14 +548,16 @@ function OrderPadWidget(_props: WidgetProps) {
                 <Loader2 size={11} className="text-text-muted animate-spin shrink-0" aria-hidden="true" />
               )}
               {query && !searching && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={handleClearSearch}
-                  className="text-text-muted hover:text-text-primary transition-colors"
+                  className="h-auto w-auto p-0 text-text-muted hover:text-text-primary transition-colors"
                   aria-label="Clear search"
                 >
                   <X size={11} />
-                </button>
+                </Button>
               )}
               <ExchangeBadge exchange={exchange} />
             </div>

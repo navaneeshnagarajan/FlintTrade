@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -120,5 +120,58 @@ describe("ScalperWidget", () => {
 
     expect(screen.getByText("Close All")).toBeInTheDocument();
     expect(screen.getByText("Cancel All")).toBeInTheDocument();
+  });
+
+  // ── Interaction tests ────────────────────────────────────────────────────
+
+  it("clicking 1-CLICK button toggles it to '1-CLICK ON' state", () => {
+    render(<ScalperWidget {...defaultProps} />);
+
+    // Initial state: one-click is OFF
+    const toggleBtn = screen.getByTitle(/one-click off/i);
+    expect(toggleBtn).toHaveTextContent("1-CLICK");
+
+    fireEvent.click(toggleBtn);
+
+    // After click: one-click is ON
+    expect(screen.getByTitle(/one-click on/i)).toHaveTextContent("1-CLICK ON");
+  });
+
+  it("clicking 1-CLICK ON button toggles it back to OFF", () => {
+    render(<ScalperWidget {...defaultProps} />);
+
+    const toggleBtn = screen.getByTitle(/one-click off/i);
+    fireEvent.click(toggleBtn);
+    expect(screen.getByTitle(/one-click on/i)).toBeInTheDocument();
+
+    // Click again to turn off
+    fireEvent.click(screen.getByTitle(/one-click on/i));
+    expect(screen.getByTitle(/one-click off/i)).toBeInTheDocument();
+  });
+
+  it("clicking Increase Lot increments the lot display span", () => {
+    render(<ScalperWidget {...defaultProps} />);
+
+    // The Lot Stepper renders the value as a <span> with text like "1 (50)"
+    const increaseBtn = screen.getByLabelText("Increase Lot");
+    const lotSpan = increaseBtn.closest("div")?.querySelector("span.font-mono") as HTMLElement;
+    // Default lots = 1
+    expect(lotSpan.textContent).toContain("1");
+
+    fireEvent.click(increaseBtn);
+
+    // After one click lots = 2
+    expect(lotSpan.textContent).toContain("2");
+  });
+
+  it("clicking Decrease Lot when at minimum (1) keeps display at 1", () => {
+    render(<ScalperWidget {...defaultProps} />);
+
+    const decreaseBtn = screen.getByLabelText("Decrease Lot");
+    const lotSpan = decreaseBtn.closest("div")?.querySelector("span.font-mono") as HTMLElement;
+
+    // Default is 1; decrease is clamped by Math.max(1, l-1)
+    fireEvent.click(decreaseBtn);
+    expect(lotSpan.textContent).toContain("1");
   });
 });

@@ -8,27 +8,31 @@
 
 ---
 
-## Current State (updated 2026-04-08)
+## Current State (updated 2026-04-13)
 
-- **Version:** v0.5.0-dev — Post-Wave 23 (23-wave session 2026-04-07/08)
-- **Tests:** 1,696 terminal (Vitest, 168 files) + 3,900+ Python (pytest) = 5,600+ total
+- **Version:** v0.5.0-dev — Post-Wave 59 (sessions 2026-04-07/08/09/10/13)
+- **Tests:** ~2,500 terminal (Vitest, 227+ files) + ~6,500 Python (pytest) = ~9,000 total
 - **Packages:** 16 (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri)
-- **Widgets:** 30
-- **Strategies:** 101+
+- **Widgets:** 80
+- **AI Skills:** 30
+- **Strategies:** 101+ (29 backtest templates + 4 MTM straddle + Wheel + engine strategies)
 - **Themes:** 3 (Graphite/Midnight/Ember) x dark/light/system
-- **Terminal:** 30 widgets (TSX) + 7 tools + 13 routes + 6 workspace presets in Dockview v5.1 shell
+- **Terminal:** 80 widgets (TSX) + 7 tools + 13 routes + 12 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
-- **Python:** 12 Python packages + tick-engine (Rust/PyO3) + indicators, 3,900+ tests passing
-- **CI:** GitHub Actions green (python-tests + node-tests + secrets-check)
-- **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement via modeStore
-- **Auth:** argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry, multi-user (admin/trader/viewer)
-- **UI:** v0.3.0 "Structured Calm" base — ContentShell centering, 4-level surface hierarchy, Graphite default theme, react-resizable-panels on /trade
+- **Python:** 12 Python packages + tick-engine (Rust/PyO3) + indicators, ~6,500 tests passing
+- **CI:** 7 parallel GitHub Actions jobs — ALL GREEN (python-tests, node-core-tests, node-widget-tests-1/2a/2b/3, secrets-check)
+- **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement via JWT claims
+- **Auth:** argon2id passwords, Fernet TOTP, JWT with jti revocation blocklist, HMAC-SHA256 webhook auth
+- **UI:** v0.3.0 "Structured Calm" base — ContentShell centering, 4-level surface hierarchy, Graphite default theme, shadcn/ui migration complete
 - **State:** 7 Zustand stores (+ modeStore), Jotai atoms, 15+ TanStack Query hooks, WebSocket service with ping/pong + batch subscribe + ref counting
-- **Shell:** TopBar (+ ModeIndicator), TickerBar (16 instruments), WidgetPicker, PresetPicker, ToolsDropdown
-- **Build:** Clean, vendor-charts 694KB (only chunk > 500KB)
-- **Absorption:** 5 tracks done — AI (TradingAgents, FinMem), strategies (101+), indicators (Numba), chart (replay, drawing), ETF/Screener/IPO
-- **New (Waves 1-9):** ModeIndicator, SandboxControls, DemoChoice overlay, GoalTab, SEBI disclaimer, signals pipeline, MCX support, Pine Script editor, Mutual Fund explorer, IPO tracker, Chrome extension, Desktop (Tauri), multi-user auth, FinRL RL, OpenClaw bridge, WhatsApp alerts, ExpiryTrack
-- **New (Waves 10-20):** Multi-agent AI (MiroFish/TradingAgents), risk debate, ensemble selector, hyperopt optimiser, fundamental screener (Screener.in), FII/DII tracker (NSE), RRG calculator + SectorMap RRG, portfolio backtester (VectorBT), bracket orders + strategy state, order flow inference, alert trigger log, security headers middleware, activity log (SEBI audit), Docker production (multi-stage, uv, tini), WebSocket batch subscribe + ref counting
+- **Shell:** TopBar (+ ModeIndicator), TickerBar (16 instruments), WidgetPicker, PresetPicker, ToolsDropdown, CommandPalette (Ctrl+K)
+- **Build:** Clean in 10s, vendor-charts 694KB (only chunk > 500KB)
+- **Refactoring:** All 9 files >1,000 LOC split into focused modules (largest was MarketIntelligenceTool 2,333→134 LOC)
+- **ftApi:** Barrel re-export + 12 domain modules (analysis, trading, ai, backtest, admin, etc.)
+- **SpotlightTour:** Beginner onboarding tour on /explore route
+- **BacktestLab:** POST /ft-api/v1/backtest/run wired via TanStack Query mutation
+- **Audit:** 24 findings fixed from 15-skill audit (3 critical, 3 high, 18 important)
+- **Absorption:** REPO_FEATURE_MAP §8 100% complete, 233 repos tracked
 - **Submodules:** All 3 synced (openalgo, algomirror, openclaw)
 
 ---

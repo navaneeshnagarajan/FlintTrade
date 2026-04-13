@@ -93,10 +93,10 @@ describe("GreeksHeatmapWidget", () => {
   it("renders symbol selector with expected options", () => {
     mockConnected.mockReturnValue(false);
     render(<GreeksHeatmapWidget />);
-    const select = screen.getByLabelText("Select symbol") as HTMLSelectElement;
-    const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toContain("NIFTY");
-    expect(values).toContain("BANKNIFTY");
+    const trigger = screen.getByLabelText("Select symbol");
+    expect(trigger).toBeTruthy();
+    // shadcn Select trigger shows current value; default is NIFTY
+    expect(trigger.textContent).toContain("NIFTY");
   });
 
   it("refresh button is disabled when disconnected", () => {

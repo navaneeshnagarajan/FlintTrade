@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
@@ -110,5 +110,73 @@ describe("CalculatorWidget", () => {
     // Product select shows current value NRML (may appear in both visible span and hidden option)
     const nrmlEls = screen.getAllByText("NRML");
     expect(nrmlEls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ── Interaction tests ────────────────────────────────────────────────────
+
+  it("applying Conservative template updates Capital and Risk % inputs", async () => {
+    render(<CalculatorWidget {...defaultProps} />);
+
+    // Conservative: capital=500000, riskPercent=1
+    const conservativeBtn = screen.getByRole("button", { name: /conservative/i });
+    await userEvent.click(conservativeBtn);
+
+    // Capital field should now show 500000
+    const capitalInput = screen.getByPlaceholderText("200000") as HTMLInputElement;
+    expect(Number(capitalInput.value)).toBe(500000);
+  });
+
+  it("entering entry and stop loss prices shows calculated results", async () => {
+    render(<CalculatorWidget {...defaultProps} />);
+
+    // Fill Entry Price (500) and Stop Loss (490) — valid BUY trade
+    // Use getAllByText for "Stop Loss" since the prompt text also contains the phrase
+    const entryLabel = screen.getByText("Entry Price");
+    const entryField = entryLabel.closest("div")?.querySelector("input") as HTMLInputElement;
+    fireEvent.change(entryField, { target: { value: "500" } });
+
+    // getByText("Stop Loss") is unambiguous — the Label element uses exact casing
+    const slLabel = screen.getByText("Stop Loss");
+    const slField = slLabel.closest("div")?.querySelector("input") as HTMLInputElement;
+    fireEvent.change(slField, { target: { value: "490" } });
+
+    // Results section should now appear with Quantity row
+    expect(screen.getByText("Quantity")).toBeInTheDocument();
+    expect(screen.getByText(/shares/i)).toBeInTheDocument();
+  });
+
+  it("switching to Brokerage tab and changing price updates Total Cost", async () => {
+    render(<CalculatorWidget {...defaultProps} />);
+
+    const brokerageTab = screen.getByRole("tab", { name: /brokerage/i });
+    await userEvent.click(brokerageTab);
+
+    // Default price is 100; change to 200 — Total Cost row should still be present
+    const priceLabel = screen.getByText(/^price/i);
+    const priceField = priceLabel.closest("div")?.querySelector("input") as HTMLInputElement;
+    fireEvent.change(priceField, { target: { value: "200" } });
+
+    // The Brokerage tab shows Total Cost row
+    expect(screen.getByText(/total cost/i)).toBeInTheDocument();
+  });
+
+  it("applying Aggressive template then calculating shows results for 3% risk", async () => {
+    render(<CalculatorWidget {...defaultProps} />);
+
+    const aggressiveBtn = screen.getByRole("button", { name: /aggressive/i });
+    await userEvent.click(aggressiveBtn);
+
+    // Now enter a valid entry and SL to trigger calculation (BUY: entry > SL)
+    const entryLabel = screen.getByText(/entry price/i);
+    const entryField = entryLabel.closest("div")?.querySelector("input") as HTMLInputElement;
+    fireEvent.change(entryField, { target: { value: "1000" } });
+
+    const slLabel = screen.getByText("Stop Loss");
+    const slField = slLabel.closest("div")?.querySelector("input") as HTMLInputElement;
+    fireEvent.change(slField, { target: { value: "950" } });
+
+    // Results should appear
+    expect(screen.getByText("Risk Amount")).toBeInTheDocument();
+    expect(screen.getByText("Reward Amount")).toBeInTheDocument();
   });
 });

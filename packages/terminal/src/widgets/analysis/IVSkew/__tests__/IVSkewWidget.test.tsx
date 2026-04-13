@@ -73,9 +73,9 @@ describe("IVSkewWidget", () => {
   it("symbol selector includes NIFTY", () => {
     mockConnected.mockReturnValue(false);
     render(<IVSkewWidget />);
-    const select = screen.getByLabelText("Select symbol") as HTMLSelectElement;
-    expect(select).toBeTruthy();
-    expect(select.value).toBe("NIFTY");
+    const trigger = screen.getByLabelText("Select symbol");
+    expect(trigger).toBeTruthy();
+    expect(trigger.textContent).toContain("NIFTY");
   });
 
   it("can switch to Moneyness X-axis", () => {

@@ -14,6 +14,7 @@
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Gauge, Wifi, WifiOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -267,13 +268,15 @@ function TickSpeedWidget() {
               {metrics.reconnectCount}
             </span>
             {metrics.reconnectCount > 0 && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleReset}
-                className="text-xxs text-text-muted hover:text-text-primary transition-colors"
+                className="h-4 px-1 text-xxs text-text-muted hover:text-text-primary"
                 aria-label="Reset reconnection counter"
               >
                 reset
-              </button>
+              </Button>
             )}
           </div>
         </div>

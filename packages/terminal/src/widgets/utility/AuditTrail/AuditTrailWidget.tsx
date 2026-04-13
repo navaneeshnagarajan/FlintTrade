@@ -198,23 +198,27 @@ function AuditTrailWidget() {
           SEBI 5yr
         </span>
         <div className="flex-1" />
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={handleExport}
-          className="flex items-center gap-1 px-2 py-0.5 text-xxs text-text-muted hover:text-text-primary hover:bg-surface-hover rounded border border-border-subtle transition-colors"
+          className="h-5 px-2 text-xxs text-text-muted border-border-subtle hover:text-text-primary"
           aria-label="Export audit log to CSV"
         >
           <Download size={10} aria-hidden="true" />
           CSV
-        </button>
+        </Button>
         {isConnected && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
+            className="h-5 w-5 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
             aria-label="Refresh audit log"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} aria-hidden="true" />
-          </button>
+          </Button>
         )}
       </div>
 

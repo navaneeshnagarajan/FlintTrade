@@ -359,6 +359,61 @@ describe("AlertsWidget", () => {
     expect(screen.getByLabelText("Status: triggered")).toBeInTheDocument();
   });
 
+  // ── Interaction tests ─────────────────────────────────────────────────────
+
+  it("changing alert condition select updates the visible condition value", () => {
+    render(<AlertsWidget />);
+    fireEvent.click(screen.getByRole("button", { name: /create alert/i }));
+
+    const conditionSelect = screen.getByLabelText("Alert condition") as HTMLSelectElement;
+    fireEvent.change(conditionSelect, { target: { value: "below" } });
+
+    expect(conditionSelect.value).toBe("below");
+  });
+
+  it("entering a target price updates the input value", () => {
+    render(<AlertsWidget />);
+    fireEvent.click(screen.getByRole("button", { name: /create alert/i }));
+
+    const priceInput = screen.getByLabelText("Target price") as HTMLInputElement;
+    fireEvent.change(priceInput, { target: { value: "1250.50" } });
+
+    expect(priceInput.value).toBe("1250.50");
+  });
+
+  it("armed alert row shows the condition badge label", () => {
+    localStorageMock.setItem(
+      LS_KEY,
+      JSON.stringify([
+        {
+          id: "badge-1",
+          symbol: "ONGC",
+          exchange: "NSE",
+          condition: "below",
+          targetPrice: 200,
+          createdAt: new Date().toISOString(),
+          status: "armed",
+        },
+      ]),
+    );
+    render(<AlertsWidget />);
+    expect(screen.getByLabelText("Condition: Below")).toBeInTheDocument();
+  });
+
+  it("multiple armed alerts each have their own delete button", () => {
+    localStorageMock.setItem(
+      LS_KEY,
+      JSON.stringify([
+        { id: "m1", symbol: "SBIN", exchange: "NSE", condition: "above", targetPrice: 900, createdAt: new Date().toISOString(), status: "armed" },
+        { id: "m2", symbol: "HDFC", exchange: "NSE", condition: "below", targetPrice: 1400, createdAt: new Date().toISOString(), status: "armed" },
+      ]),
+    );
+    render(<AlertsWidget />);
+
+    expect(screen.getByRole("button", { name: /delete alert for SBIN/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete alert for HDFC/i })).toBeInTheDocument();
+  });
+
   it("deletes a log entry from the Alert Log tab", () => {
     const triggered = {
       id: "log-del",

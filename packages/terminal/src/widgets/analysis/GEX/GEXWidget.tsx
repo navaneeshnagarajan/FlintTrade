@@ -14,6 +14,7 @@
 
 import { useState, useMemo, memo } from "react";
 import { RefreshCw, ChevronDown, AlertCircle, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useGEX } from "./useGEX";
 import { SAMPLE_GEX_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
@@ -286,11 +287,11 @@ function GEXWidget() {
         <span className="px-1.5 py-0.5 text-xs text-text-muted bg-surface-base border border-border-default rounded">
           {exchange}
         </span>
-        <input
+        <Input
           value={expiry}
           onChange={(e) => setExpiry(e.target.value)}
           placeholder="Expiry (YYYY-MM-DD)"
-          className="w-32 px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+          className="w-32 h-7 text-xs"
         />
         <div className="flex-1" />
         <button

@@ -14,6 +14,14 @@
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { RefreshCw, Layers, AlertCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getDepth } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
 
@@ -258,25 +266,28 @@ function DepthWidget() {
 
         {/* Row 2: symbol + exchange inputs */}
         <div className="flex items-center gap-1.5 mt-1.5">
-          <input
+          <Input
             type="text"
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             onBlur={fetchDepth}
             onKeyDown={(e) => e.key === "Enter" && fetchDepth()}
             placeholder="Symbol"
-            className="h-6 flex-1 bg-surface-hover border border-border-default rounded px-2 text-xs font-mono text-text-primary focus:outline-none focus:border-accent placeholder-text-muted"
+            className="h-6 flex-1 text-xs font-mono"
           />
 
-          <select
-            value={exchange}
-            onChange={(e) => setExchange(e.target.value)}
-            className="h-6 bg-surface-hover border border-border-default rounded px-1.5 text-xs font-mono text-text-primary focus:outline-none focus:border-accent"
-          >
-            {KNOWN_EXCHANGES.map((ex) => (
-              <option key={ex} value={ex}>{ex}</option>
-            ))}
-          </select>
+          <Select value={exchange} onValueChange={(v) => setExchange(v)}>
+            <SelectTrigger className="h-6 w-28 text-xs font-mono bg-surface-hover border-border-default">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-surface-card border-border-default">
+              {KNOWN_EXCHANGES.map((ex) => (
+                <SelectItem key={ex} value={ex} className="text-xs font-mono text-text-primary focus:bg-surface-hover">
+                  {ex}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Row 3: spread + last update */}

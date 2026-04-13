@@ -45,6 +45,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import {
@@ -321,14 +322,16 @@ function TradeCopierWidget() {
         <span className="text-sm font-medium text-text-primary">Trade Copier</span>
         <div className="flex-1" />
         {/* Test button for demo */}
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={handleTestCopy}
-          className="px-2 py-0.5 text-xxs bg-accent/15 text-accent rounded border border-accent/30 hover:bg-accent/25 transition-colors"
+          className="h-auto px-2 py-0.5 text-xxs bg-accent/15 text-accent border-accent/30 hover:bg-accent/25 transition-colors"
           title="Simulate a copy event"
           data-testid="test-copy-btn"
         >
           Test Copy
-        </button>
+        </Button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
@@ -430,19 +433,21 @@ function TradeCopierWidget() {
               </div>
 
               {/* Pause / Resume */}
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() =>
                   handleSetStatus(
                     target.id,
                     target.status === "paused" ? "active" : "paused",
                   )
                 }
-                className="p-0.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+                className="h-auto w-auto p-0.5 text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
                 aria-label={target.status === "paused" ? `Resume copying to ${target.name}` : `Pause copying to ${target.name}`}
                 data-testid={`status-toggle-${target.id}`}
               >
                 {target.status === "paused" ? <Play size={11} aria-hidden="true" /> : <Pause size={11} aria-hidden="true" />}
-              </button>
+              </Button>
 
               {/* Enable/Disable switch */}
               <Switch
@@ -453,14 +458,16 @@ function TradeCopierWidget() {
               />
 
               {/* Remove */}
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => handleRemoveTarget(target.id)}
-                className="p-0.5 rounded text-text-muted hover:text-loss hover:bg-loss/10 transition-colors"
+                className="h-auto w-auto p-0.5 text-text-muted hover:text-loss hover:bg-loss/10 transition-colors"
                 aria-label={`Remove ${target.name} from targets`}
                 data-testid={`remove-${target.id}`}
               >
                 <Trash2 size={11} aria-hidden="true" />
-              </button>
+              </Button>
             </div>
           ))}
 
@@ -485,31 +492,35 @@ function TradeCopierWidget() {
                   ))}
                 </SelectContent>
               </Select>
-              <button
+              <Button
+                variant="outline"
+                size="icon"
                 onClick={handleAddTarget}
                 disabled={!newTargetId}
-                className="p-1 rounded bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40"
+                className="h-7 w-7 bg-accent/15 text-accent border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40"
                 aria-label="Add selected account as target"
                 data-testid="add-target-btn"
               >
                 <Plus size={12} aria-hidden="true" />
-              </button>
+              </Button>
             </div>
           )}
         </div>
 
         {/* Risk filter (collapsible) */}
         <div className="px-3 py-1.5 border-t border-border-default">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setShowRisk((v) => !v)}
-            className="flex items-center gap-1.5 w-full text-xs text-text-secondary hover:text-text-primary transition-colors"
+            className="flex items-center gap-1.5 w-full h-auto p-0 text-xs text-text-secondary hover:text-text-primary transition-colors justify-start"
             data-testid="risk-toggle"
           >
             <Settings2 size={11} />
             <span className="font-medium">Risk Filters</span>
             <div className="flex-1" />
             {showRisk ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-          </button>
+          </Button>
 
           {showRisk && (
             <div className="mt-2 flex flex-col gap-2" data-testid="risk-panel">
@@ -582,13 +593,15 @@ function TradeCopierWidget() {
             <span className="text-xs font-medium text-text-primary">Copy Log</span>
             <Badge variant="outline" className="text-xxs px-1 py-0">{log.length}</Badge>
             {log.length > 0 && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setLog([])}
-                className="ml-auto text-xxs text-text-muted hover:text-loss transition-colors"
+                className="ml-auto h-auto p-0 text-xxs text-text-muted hover:text-loss transition-colors"
                 data-testid="clear-log-btn"
               >
                 Clear
-              </button>
+              </Button>
             )}
           </div>
 

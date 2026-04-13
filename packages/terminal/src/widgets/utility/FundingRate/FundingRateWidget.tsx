@@ -15,6 +15,7 @@
 import { useState, useMemo, useCallback, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Loader2, AlertCircle, ArrowUpDown, TrendingUp, TrendingDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { getCryptoFundingRates } from "@/services/ftApi";
 import type { FundingRateEntry } from "@/services/ftApi";
 import { SAMPLE_FUNDING_RATES } from "./sampleData";
@@ -268,24 +269,27 @@ function FundingRateWidget() {
 
         <div className="flex-1" />
 
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={cycleSortMode}
-          className="flex items-center gap-1 px-2 py-0.5 text-xs text-text-muted hover:text-text-primary hover:bg-surface-hover rounded transition-colors border border-border-subtle"
+          className="h-6 px-2 text-xs text-text-muted border-border-subtle hover:text-text-primary"
           aria-label="Cycle sort order"
         >
           <ArrowUpDown size={11} aria-hidden="true" />
           {sortLabel[sortMode]}
-        </button>
+        </Button>
 
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
-          title="Refresh"
+          className="h-6 w-6 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
           aria-label="Refresh funding rates"
         >
           <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-        </button>
+        </Button>
       </div>
 
       {/* Error banner */}

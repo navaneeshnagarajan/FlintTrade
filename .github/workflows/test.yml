@@ -68,8 +68,8 @@ jobs:
         run: |
           cd packages/terminal
           FAIL=0
-          # TradeIdea excluded: OOMs at 6GB on CI (passes locally). Vitest module
-          # resolution for its import tree exceeds runner memory.
+          # TradeIdea excluded: OOMs at 4GB+ heap (vitest module resolution overhead).
+          # Passes locally with --max-old-space-size=8192. CI runner limited to 7GB total.
           for d in StrategyTemplates TickSpeed Ticker Watchlist; do
             echo "::group::Testing $d"
             npx vitest run --pool=forks --poolOptions.forks.singleFork "src/widgets/utility/$d/" || FAIL=1

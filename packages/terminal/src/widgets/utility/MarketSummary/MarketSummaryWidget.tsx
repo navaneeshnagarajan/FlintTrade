@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { LayoutDashboard, RefreshCw, Loader2, TrendingUp, TrendingDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
@@ -289,18 +290,19 @@ function MarketSummaryWidget() {
         <span className="text-xxs text-text-muted font-mono">
           {lastUpdate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
         </span>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={refresh}
           disabled={isFetching}
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
+          className="h-6 w-6 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
           aria-label="Refresh market summary"
-          title="Refresh"
         >
           {isFetching
             ? <Loader2 size={11} className="animate-spin" />
             : <RefreshCw size={11} />
           }
-        </button>
+        </Button>
       </div>
 
       {/* Scrollable body */}

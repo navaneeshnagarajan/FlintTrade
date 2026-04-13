@@ -3,6 +3,7 @@
 // Uses TanStack Table v8 + shadcn Table + shadcn Badge for status.
 import { useMemo, useState, useEffect, memo } from "react";
 import { RefreshCw, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   type ColumnDef,
   flexRender,
@@ -139,15 +140,17 @@ function OrdersWidget(_props: WidgetProps) {
         <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">
           Orders{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="text-text-muted hover:text-text-primary disabled:opacity-40"
+          className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
           aria-label="Refresh orders"
         >
           <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
-        </button>
+        </Button>
       </div>
 
       {/* Error banner */}
@@ -156,13 +159,15 @@ function OrdersWidget(_props: WidgetProps) {
           <span className="flex-1">
             Failed to load orders{error instanceof Error ? `: ${error.message}` : ""}
           </span>
-          <button
+          <Button
+            variant="link"
+            size="sm"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="shrink-0 text-xs font-medium underline hover:no-underline disabled:opacity-50"
+            className="shrink-0 h-auto p-0 text-xs font-medium text-loss hover:text-loss/80 disabled:opacity-50"
           >
             {isFetching ? "Retrying…" : "Retry"}
-          </button>
+          </Button>
         </div>
       )}
 
