@@ -86,10 +86,13 @@ function lastWs(): MockWebSocket {
 describe("WebSocketService — lifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // Fix Math.random to 0.5 so reconnect jitter is always 0ms (deterministic)
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     MockWebSocket._lastInstance = null;
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 

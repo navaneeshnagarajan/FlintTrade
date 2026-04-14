@@ -319,7 +319,7 @@ describe("aiConversationStore — persistence", () => {
     const raw = localStorage.getItem("flinttrade:ai-conversation");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string) as { version: number };
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
   });
 
   it("partializes to only messages and currentRoute (no isStreaming)", () => {

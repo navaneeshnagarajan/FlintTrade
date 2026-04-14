@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -92,9 +93,11 @@ import AIRoute from "../AIRoute";
 function renderAI() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <AIRoute />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <AIRoute />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 

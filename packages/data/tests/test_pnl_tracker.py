@@ -97,9 +97,11 @@ class TestPnLTracker:
     def test_get_series_since_filter(self):
         tracker = self._make_tracker()
         tracker.update([], [], {})
-        now = time.time()
+        # Use the first point's timestamp + small epsilon so only the
+        # second point passes the filter (avoids Windows timer resolution issues).
+        first_ts = tracker.get_series()[-1].timestamp
         tracker.update([], [], {})
-        series = tracker.get_series(since=now)
+        series = tracker.get_series(since=first_ts + 1e-6)
         assert len(series) == 1
 
     def test_get_summary_empty(self):

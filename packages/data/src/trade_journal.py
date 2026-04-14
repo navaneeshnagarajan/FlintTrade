@@ -544,7 +544,7 @@ class TradeJournal:
         sql = f"""
             SELECT * FROM journal_entries
             {where}
-            ORDER BY COALESCE(entry_time, created_at) DESC
+            ORDER BY COALESCE(entry_time, created_at) DESC, id
             LIMIT $limit OFFSET $offset
         """
         conn = self._storage.connection
