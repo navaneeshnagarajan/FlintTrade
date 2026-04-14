@@ -250,4 +250,106 @@ describe("settingsStore", () => {
     expect(migrated).toHaveProperty("fontSize");
     expect(migrated).toHaveProperty("defaultOrderType");
   });
+
+  // ---------------------------------------------------------------------------
+  // v6 — ticker fields
+  // ---------------------------------------------------------------------------
+
+  it("initializes tickerMode to 'marquee'", () => {
+    expect(useSettingsStore.getState().tickerMode).toBe("marquee");
+  });
+
+  it("initializes tickerSpeed to 30", () => {
+    expect(useSettingsStore.getState().tickerSpeed).toBe(30);
+  });
+
+  it("initializes tickerSymbols with 8 default instruments", () => {
+    const { tickerSymbols } = useSettingsStore.getState();
+    expect(tickerSymbols).toHaveLength(8);
+    expect(tickerSymbols).toContain("NSE_INDEX:NIFTY");
+    expect(tickerSymbols).toContain("BSE_INDEX:SENSEX");
+    expect(tickerSymbols).toContain("NSE_INDEX:BANKNIFTY");
+  });
+
+  it("setTickerMode updates tickerMode", () => {
+    useSettingsStore.getState().setTickerMode("pinned");
+    expect(useSettingsStore.getState().tickerMode).toBe("pinned");
+
+    useSettingsStore.getState().setTickerMode("off");
+    expect(useSettingsStore.getState().tickerMode).toBe("off");
+
+    useSettingsStore.getState().setTickerMode("scroll");
+    expect(useSettingsStore.getState().tickerMode).toBe("scroll");
+  });
+
+  it("setTickerSpeed updates tickerSpeed", () => {
+    useSettingsStore.getState().setTickerSpeed(45);
+    expect(useSettingsStore.getState().tickerSpeed).toBe(45);
+  });
+
+  it("setTickerSymbols replaces the symbol list entirely", () => {
+    const custom = ["NSE_INDEX:NIFTY", "MCX:GOLD"];
+    useSettingsStore.getState().setTickerSymbols(custom);
+    expect(useSettingsStore.getState().tickerSymbols).toEqual(custom);
+  });
+
+  it("setTickerSymbols accepts an empty list", () => {
+    useSettingsStore.getState().setTickerSymbols([]);
+    expect(useSettingsStore.getState().tickerSymbols).toHaveLength(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // v5 → v6 migration: ticker fields injected
+  // ---------------------------------------------------------------------------
+
+  it("migration: v5 state gets ticker fields with defaults", () => {
+    const store = useSettingsStore as unknown as {
+      persist: { getOptions: () => { migrate?: (s: unknown, v: number) => unknown } };
+    };
+    const migrate = store.persist.getOptions().migrate;
+    if (!migrate) throw new Error("migrate not configured");
+
+    const v5State = {
+      persona: "trader",
+      density: "compact",
+      fontSize: "normal",
+      defaultOrderType: "MARKET",
+      riskLimits: { maxPositionLots: 10, mtmStoploss: 5000, mtmTarget: 10000, maxOrdersPerMinute: 30 },
+      llm: { provider: "lmstudio", model: "", host: "", apiKey: "" },
+      telegram: { enabled: false, botToken: "", chatId: "" },
+      dataPaths: { fastStoragePath: "", archiveStoragePath: "" },
+      name: "Trader",
+      interests: [],
+      experience: "intermediate",
+      lastOpenTimestamp: 0,
+    };
+
+    const migrated = migrate(v5State, 5) as Record<string, unknown>;
+    expect(migrated.tickerMode).toBe("marquee");
+    expect(migrated.tickerSpeed).toBe(30);
+    expect(Array.isArray(migrated.tickerSymbols)).toBe(true);
+    expect((migrated.tickerSymbols as string[]).length).toBeGreaterThan(0);
+    expect((migrated.tickerSymbols as string[])).toContain("NSE_INDEX:NIFTY");
+  });
+
+  it("migration: v1 cascade reaches v6 with ticker fields", () => {
+    const store = useSettingsStore as unknown as {
+      persist: { getOptions: () => { migrate?: (s: unknown, v: number) => unknown } };
+    };
+    const migrate = store.persist.getOptions().migrate;
+    if (!migrate) throw new Error("migrate not configured");
+
+    const v1State = {
+      persona: "trader",
+      density: "compact",
+      theme: "dark",
+      riskLimits: { maxPositionLots: 5, mtmStoploss: 2000, mtmTarget: 6000, maxOrdersPerMin: 20 },
+      llm: { provider: "google", model: "gemini-pro" },
+    };
+
+    const migrated = migrate(v1State, 1) as Record<string, unknown>;
+    expect(migrated.tickerMode).toBe("marquee");
+    expect(migrated.tickerSpeed).toBe(30);
+    expect(Array.isArray(migrated.tickerSymbols)).toBe(true);
+  });
 });

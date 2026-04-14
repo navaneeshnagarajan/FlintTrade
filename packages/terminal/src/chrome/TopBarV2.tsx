@@ -25,6 +25,7 @@ import { Search, Maximize2, Minimize2, Settings } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useTimings } from "@/hooks/useMarketStatus";
 import { ping } from "@/services/api";
 import type { MarketTiming } from "@/types/api";
@@ -279,12 +280,14 @@ function SearchButton() {
 // ---------------------------------------------------------------------------
 
 export interface TopBarV2Props {
-  /** Initial ticker display mode. Persists via user preference. Default: "marquee". */
+  /** Overrides the persisted ticker mode from the settings store. Useful in tests. */
   tickerMode?: TickerMode;
 }
 
-export default function TopBarV2({ tickerMode = "marquee" }: TopBarV2Props) {
+export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) {
   const setStatus = useConnectionStore((s) => s.setStatus);
+  const storedTickerMode = useSettingsStore((s) => s.tickerMode);
+  const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
   const gearRef = useRef<HTMLButtonElement>(null);
 
@@ -354,10 +357,12 @@ export default function TopBarV2({ tickerMode = "marquee" }: TopBarV2Props) {
 
       {/* ── GROUP 2: Ticker (flex:1) + Gear ───────────────────────────────── */}
       <div className="flex items-center gap-1 flex-1 min-w-0 mx-2">
-        <TickerMarquee
-          mode={tickerMode}
-          className="flex-1 min-w-0 h-9.5"
-        />
+        {tickerMode !== "off" && (
+          <TickerMarquee
+            mode={tickerMode}
+            className="flex-1 min-w-0 h-9.5"
+          />
+        )}
 
         {/* Gear icon: ticker settings */}
         <Button

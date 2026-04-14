@@ -32,8 +32,21 @@ export interface DataPaths {
 }
 
 // ---------------------------------------------------------------------------
-// Store interface (v5 — sandboxMode removed; mode is owned by modeStore)
+// Store interface (v6 — ticker fields added)
 // ---------------------------------------------------------------------------
+
+export type TickerMode = "off" | "pinned" | "scroll" | "marquee";
+
+export const DEFAULT_TICKER_SYMBOLS: string[] = [
+  "NSE_INDEX:NIFTY",
+  "BSE_INDEX:SENSEX",
+  "NSE_INDEX:BANKNIFTY",
+  "NSE_INDEX:INDIAVIX",
+  "MCX:GOLD",
+  "MCX:SILVER",
+  "MCX:CRUDEOIL",
+  "MCX:NATURALGAS",
+];
 
 interface SettingsStore {
   persona: "trader" | "investor" | "beginner";
@@ -52,6 +65,11 @@ interface SettingsStore {
   experience: "beginner" | "intermediate" | "pro" | "custom";
   lastOpenTimestamp: number;
 
+  // Ticker settings (added v6)
+  tickerMode: TickerMode;
+  tickerSymbols: string[];
+  tickerSpeed: number; // marquee animation duration in seconds (default 30)
+
   // Actions
   setPersona: (persona: "trader" | "investor" | "beginner") => void;
   setDensity: (density: "compact" | "comfortable") => void;
@@ -65,6 +83,9 @@ interface SettingsStore {
   setInterests: (interests: string[]) => void;
   setExperience: (exp: "beginner" | "intermediate" | "pro" | "custom") => void;
   setLastOpenTimestamp: (ts: number) => void;
+  setTickerMode: (mode: TickerMode) => void;
+  setTickerSymbols: (symbols: string[]) => void;
+  setTickerSpeed: (speed: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +126,11 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   experience: "intermediate",
   lastOpenTimestamp: 0,
 
+  // Ticker defaults (v6)
+  tickerMode: "marquee",
+  tickerSymbols: DEFAULT_TICKER_SYMBOLS,
+  tickerSpeed: 30,
+
   setPersona: (persona) => set({ persona }),
   setDensity: (density) => set({ density }),
   setFontSize: (fontSize) => set({ fontSize }),
@@ -121,6 +147,9 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   setInterests: (interests) => set({ interests }),
   setExperience: (experience) => set({ experience }),
   setLastOpenTimestamp: (lastOpenTimestamp) => set({ lastOpenTimestamp }),
+  setTickerMode: (tickerMode) => set({ tickerMode }),
+  setTickerSymbols: (tickerSymbols) => set({ tickerSymbols }),
+  setTickerSpeed: (tickerSpeed) => set({ tickerSpeed }),
 });
 
 // ---------------------------------------------------------------------------
@@ -129,7 +158,7 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:settings",
-  version: 5,
+  version: 6,
   partialize: (state) => {
     const { llm, telegram, ...rest } = state;
     return {
@@ -221,6 +250,16 @@ const persistedStore = persist(storeImpl, {
     if (version < 5) {
       const { sandboxMode: _sandboxMode, ...rest } = state as Record<string, unknown> & { sandboxMode?: unknown };
       state = rest;
+    }
+
+    // v5 → v6: add ticker fields
+    if (version < 6) {
+      state = {
+        ...state,
+        tickerMode: "marquee" as TickerMode,
+        tickerSymbols: DEFAULT_TICKER_SYMBOLS,
+        tickerSpeed: 30,
+      };
     }
 
     return state;

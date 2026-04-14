@@ -22,6 +22,7 @@ import {
   Scale,
   FlaskConical,
   LayoutTemplate,
+  Rss,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,6 +33,7 @@ import {
 export type SectionId =
   | "general"
   | "appearance"
+  | "ticker"
   | "api"
   | "trading"
   | "risk"
@@ -60,6 +62,7 @@ export interface SectionDef {
 export const SECTIONS: SectionDef[] = [
   { id: "general",    label: "General",           icon: Monitor      },
   { id: "appearance", label: "Appearance",         icon: Palette      },
+  { id: "ticker",     label: "Ticker Bar",         icon: Rss          },
   { id: "api",        label: "API Connection",     icon: Wifi         },
   { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
   { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },

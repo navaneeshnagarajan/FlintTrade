@@ -80,6 +80,7 @@ export default function SettingsRoute() {
     switch (activeSection) {
       case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
       case "appearance": return <AppearanceSection />;
+      case "ticker":     return <TickerSettings />;
       case "api":        return <ConnectionSection settings={connection} onChange={updateConnection} />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
