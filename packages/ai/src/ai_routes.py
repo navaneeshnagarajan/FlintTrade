@@ -11,7 +11,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from packages.ai.src.llm_client import LLMConfig
+from .llm_client import LLMConfig
 
 logger = logging.getLogger("flinttrade")
 
@@ -38,7 +38,7 @@ def signals_active() -> tuple[Any, int]:
         Returns an empty list if the pipeline has not yet produced signals.
     """
     try:
-        from packages.ai.src.pipeline import SignalPipeline  # noqa: PLC0415
+        from .pipeline import SignalPipeline  # noqa: PLC0415
 
         # Use a module-level singleton if already running, otherwise return empty
         pipeline: SignalPipeline | None = getattr(current_app, "_signal_pipeline", None)
@@ -94,12 +94,12 @@ def sentiment_analyze() -> tuple[Any, int]:
     analyze_text = text or f"{symbol} stock market performance"
 
     try:
-        from packages.ai.src.sentiment import (  # noqa: PLC0415
+        from .sentiment import (  # noqa: PLC0415
             NewsArticle,
             score_article_rule_based,
             score_article_with_llm,
         )
-        from packages.ai.src.llm_client import LLMClient  # noqa: PLC0415
+        from .llm_client import LLMClient  # noqa: PLC0415
 
         article = NewsArticle(title=analyze_text, summary="")
         try:
@@ -165,11 +165,11 @@ def refine_strategy() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "backtest_results is required"}), 400
 
     try:
-        from packages.ai.src.strategy_refiner import StrategyRefiner  # noqa: PLC0415
+        from .strategy_refiner import StrategyRefiner  # noqa: PLC0415
 
         llm_client = None
         if _is_llm_configured():
-            from packages.ai.src.llm_client import LLMClient  # noqa: PLC0415
+            from .llm_client import LLMClient  # noqa: PLC0415
             try:
                 llm_client = LLMClient()
             except Exception as exc:  # noqa: BLE001

@@ -26,7 +26,7 @@ Supported indicators
 
 Usage::
 
-    from packages.screener.src.market_scanner import (
+    from .market_scanner import (
         MarketScanner, ScanConfig, ScanCondition, PREBUILT_SCANS,
     )
 

@@ -22,15 +22,7 @@ import {
 } from "@/components/ui/table";
 import { usePositions } from "@/hooks/usePositions";
 import type { WidgetProps } from "@/types/widgets";
-
-// OpenAlgo REST returns snake_case at runtime
-interface RawPosition {
-  symbol: string;
-  pnl?: string | number;
-  average_price?: string | number;
-  ltp?: string | number;
-  quantity?: string | number;
-}
+import type { RawPosition } from "@/types/rawApi";
 
 interface PositionRow {
   symbol: string;

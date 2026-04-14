@@ -576,7 +576,17 @@ function OptionChainWidget() {
       )}
 
       {/* Chain table — Glide Data Grid */}
-      <div className="flex-1 min-h-0">
+      {/* sr-only summary: screen readers see canvas content via this live region */}
+      <div className="sr-only" role="status" aria-live="polite">
+        Option chain: {strikes.length} strikes loaded for {symDef.label}
+        {atmStrike != null ? `, ATM strike ${atmStrike}` : ""}
+      </div>
+      <div
+        className="flex-1 min-h-0"
+        role="grid"
+        aria-label="Option chain data"
+        aria-rowcount={strikes.length}
+      >
         {!selectedExpiry && !loading ? (
           <div className="h-full flex items-center justify-center text-text-muted text-xs">
             Select an expiry to load chain

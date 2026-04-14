@@ -11,7 +11,7 @@ References:
 
 Usage::
 
-    from packages.backtest_engine.src.tearsheet import (
+    from .tearsheet import (
         generate_tearsheet,
         generate_snapshot,
         compare_strategies,

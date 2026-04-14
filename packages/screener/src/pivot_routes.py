@@ -94,7 +94,7 @@ def calculate_pivots() -> tuple[Any, int]:
         )
 
     # --- Delegate to calculator ---
-    from packages.screener.src.pivot_calculator import PivotCalculator  # noqa: PLC0415
+    from .pivot_calculator import PivotCalculator  # noqa: PLC0415
 
     try:
         all_levels = PivotCalculator.all_methods(

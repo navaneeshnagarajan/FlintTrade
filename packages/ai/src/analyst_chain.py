@@ -28,8 +28,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable
 
-from packages.ai.src.llm_client import LLMClient, LLMMessage
-from packages.ai.src.memory import MemoryLayer, TradedMemory
+from .llm_client import LLMClient, LLMMessage
+from .memory import MemoryLayer, TradedMemory
 
 logger = logging.getLogger("flinttrade.ai.analyst_chain")
 

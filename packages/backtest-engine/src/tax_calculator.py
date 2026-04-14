@@ -13,7 +13,7 @@ All monetary values use ``Decimal`` for precision — never float.
 
 Usage::
 
-    from packages.backtest_engine.src.tax_calculator import (
+    from .tax_calculator import (
         IndianTaxCalculator, TradeType,
     )
     calc = IndianTaxCalculator(instrument_type="fo")

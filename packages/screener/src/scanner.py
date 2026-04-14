@@ -11,7 +11,7 @@ returns a list of matching symbols. Scanners can be:
 
 Usage::
 
-    from packages.screener.src.scanner import ScannerEngine, ScannerDef
+    from .scanner import ScannerEngine, ScannerDef
 
     engine = ScannerEngine()
 

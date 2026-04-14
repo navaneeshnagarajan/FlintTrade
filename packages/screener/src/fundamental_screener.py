@@ -6,7 +6,7 @@ cached for 24 hours via StockCache (DuckDB-backed).
 
 Usage::
 
-    from packages.screener.src.fundamental_screener import FundamentalScreener
+    from .fundamental_screener import FundamentalScreener
 
     screener = FundamentalScreener()
 

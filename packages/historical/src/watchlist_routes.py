@@ -166,7 +166,7 @@ def trigger_download() -> tuple[Any, int]:
         # Attempt actual download if HistoricalDownloader is available
         try:
             from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: PLC0415
-            from packages.historical.src.downloader import HistoricalDownloader  # noqa: PLC0415
+            from .downloader import HistoricalDownloader  # noqa: PLC0415
             from packages.core.src.config import Settings  # noqa: PLC0415
 
             settings = Settings()

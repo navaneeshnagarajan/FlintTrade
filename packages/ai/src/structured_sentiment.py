@@ -371,7 +371,7 @@ def generate_market_summary(
             print(summary.sentiment_score, summary.market_sentiment)
     """
     try:
-        from packages.ai.src.llm_client import LLMMessage
+        from .llm_client import LLMMessage
     except ImportError:
         try:
             from llm_client import LLMMessage  # type: ignore[no-redef]

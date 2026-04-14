@@ -46,7 +46,7 @@ class SignalPipeline:
         """Lazy-load signal generator with trained model."""
         if self._generator is not None:
             return
-        from packages.ai.src.signals import SignalGenerator
+        from .signals import SignalGenerator
 
         self._generator = SignalGenerator()
         model_file = Path(self.model_path)
@@ -125,7 +125,7 @@ class SignalPipeline:
                 # conditions are abnormal (high Mahalanobis distance).
                 turbulence_score: float = 0.0
                 if self._turbulence_enabled and len(closes) >= self._turbulence_window + 1:
-                    from packages.ai.src.signals import compute_turbulence
+                    from .signals import compute_turbulence
 
                     # Compute per-bar returns for the last window+1 bars
                     tail = closes[-(self._turbulence_window + 1):]
@@ -193,7 +193,7 @@ class SignalPipeline:
         ``self.model_path``.
         """
         try:
-            from packages.ai.src.signals import SignalGenerator
+            from .signals import SignalGenerator
 
             gen = SignalGenerator()
 

@@ -7,7 +7,7 @@ optimal blend suggestion based on mean-variance optimisation.
 
 Example::
 
-    from packages.backtest_engine.src.strategy_comparison import (
+    from .strategy_comparison import (
         StrategyComparator,
     )
 
@@ -165,7 +165,7 @@ def _extract_from_dataclass(result: Any) -> dict[str, float]:
     report = getattr(result, "_perf_report", None)
     if report is None:
         try:
-            from packages.backtest_engine.src.metrics import PerformanceMetrics
+            from .metrics import PerformanceMetrics
 
             report = PerformanceMetrics.compute(result)
         except Exception:

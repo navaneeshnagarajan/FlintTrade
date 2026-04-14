@@ -16,7 +16,7 @@ Data sources:
 Usage::
 
     import asyncio
-    from packages.screener.src.shareholding import (
+    from .shareholding import (
         fetch_shareholding,
         fetch_financial_summary,
         fetch_corporate_announcements,

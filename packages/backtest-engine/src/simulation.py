@@ -59,12 +59,12 @@ logger = logging.getLogger("flinttrade.backtest.simulation")
 # ---------------------------------------------------------------------------
 
 try:
-    from packages.backtest_engine.src.engine import (  # type: ignore[import]
+    from .engine import (  # type: ignore[import]
         BacktestEngine,
         EngineConfig,
         EngineResult,
     )
-    from packages.backtest_engine.src.base_strategy import (  # type: ignore[import]
+    from .base_strategy import (  # type: ignore[import]
         BaseBacktestStrategy,
     )
 except ImportError:

@@ -14,8 +14,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from packages.indicators.src.numba_kernels import HAS_NUMBA, _rsi_core
-from packages.indicators.src.utils import validate_ohlcv, validate_series
+from .numba_kernels import HAS_NUMBA, _rsi_core
+from .utils import validate_ohlcv, validate_series
 
 # Threshold: use Numba JIT only when array length exceeds this value.
 _NUMBA_THRESHOLD = 1000
@@ -98,7 +98,7 @@ def macd(
     Returns:
         Tuple of (macd_line, signal_line, histogram), each shape (n,).
     """
-    from packages.indicators.src.trend import ema
+    from .trend import ema
 
     validate_series(close, min_length=slow)
 
@@ -142,8 +142,8 @@ def stochastic(
     Returns:
         Tuple of (%K, %D) arrays, each shape (n,). NaN where insufficient data.
     """
-    from packages.indicators.src.utils import validate_ohlcv
-    from packages.indicators.src.trend import sma
+    from .utils import validate_ohlcv
+    from .trend import sma
 
     validate_ohlcv(high, low, close, min_length=k_period)
     n = len(close)
@@ -184,7 +184,7 @@ def williams_r(
     Returns:
         Williams %R values, shape (n,). NaN for first ``period - 1`` bars.
     """
-    from packages.indicators.src.utils import validate_ohlcv
+    from .utils import validate_ohlcv
 
     validate_ohlcv(high, low, close, min_length=period)
     n = len(close)
@@ -312,7 +312,7 @@ def trix(close: NDArray[np.float64], period: int = 18) -> NDArray[np.float64]:
     Raises:
         ValueError: If any close price is <= 0.
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_series(close, min_length=period)
     if np.any(close <= 0):
@@ -376,7 +376,7 @@ def stoch_rsi(
     Returns:
         Tuple of (%K, %D) arrays, each shape (n,). NaN where insufficient data.
     """
-    from packages.indicators.src.trend import sma as _sma
+    from .trend import sma as _sma
 
     validate_series(close, min_length=rsi_period + 1)
 
@@ -490,8 +490,8 @@ def awesome_oscillator(
     Raises:
         ValueError: If fast >= slow or either period < 1.
     """
-    from packages.indicators.src.utils import validate_ohlcv as _val
-    from packages.indicators.src.trend import sma as _sma
+    from .utils import validate_ohlcv as _val
+    from .trend import sma as _sma
 
     _val(high, low, high, min_length=slow)  # high as close proxy for length check
     if fast < 1:
@@ -545,8 +545,8 @@ def squeeze_momentum(
         - squeeze_on: Boolean array, shape (n,). True = squeeze is active
           (BB inside KC). False = squeeze is released.
     """
-    from packages.indicators.src.volatility import bollinger_bands, keltner_channels
-    from packages.indicators.src.trend import sma as _sma, linreg as _linreg
+    from .volatility import bollinger_bands, keltner_channels
+    from .trend import sma as _sma, linreg as _linreg
 
     validate_ohlcv(high, low, close, min_length=max(bb_period, kc_period, mom_period))
 
@@ -625,7 +625,7 @@ def dpo(close: NDArray[np.float64], period: int = 20) -> NDArray[np.float64]:
     Raises:
         ValueError: If period < 2.
     """
-    from packages.indicators.src.trend import sma as _sma
+    from .trend import sma as _sma
 
     validate_series(close, min_length=period)
     if period < 2:
@@ -797,7 +797,7 @@ def elder_ray(
         Tuple of (bull_power, bear_power) arrays, each shape (n,).
         First ``period - 1`` values are NaN.
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_ohlcv(high, low, close, min_length=period)
 

@@ -14,7 +14,7 @@ Dispatch: routes payloads to handler coroutines based on ``action`` field.
 
 Example::
 
-    from packages.integration.src.webhook_receiver import (
+    from .webhook_receiver import (
         WebhookConfig, WebhookReceiver,
     )
 

@@ -9,7 +9,7 @@ Endpoint (registered via pivot_routes.py):
 
 Usage::
 
-    from packages.screener.src.pivot_calculator import PivotCalculator, PivotMethod
+    from .pivot_calculator import PivotCalculator, PivotMethod
 
     levels = PivotCalculator.calculate(high=18500, low=18200, close=18400)
     all_methods = PivotCalculator.all_methods(high=18500, low=18200, close=18400)

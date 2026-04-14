@@ -13,7 +13,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from packages.ai.src.llm_client import LLMClient, LLMConfig
+from .llm_client import LLMClient, LLMConfig
 
 logger = logging.getLogger("flinttrade.ai.team")
 
@@ -27,7 +27,7 @@ def _get_team():
     """Lazy-initialise the AgentTeam singleton."""
     global _team_instance  # noqa: PLW0603
     if _team_instance is None:
-        from packages.ai.src.multi_agent import AgentTeam  # noqa: PLC0415
+        from .multi_agent import AgentTeam  # noqa: PLC0415
 
         cfg = LLMConfig.from_env()
         if not cfg.provider:
@@ -101,7 +101,7 @@ def team_config_get() -> tuple[Any, int]:
     team = _get_team()
     if team is None:
         # Return default config even if LLM is not configured
-        from packages.ai.src.multi_agent import default_agents  # noqa: PLC0415
+        from .multi_agent import default_agents  # noqa: PLC0415
         return jsonify({
             "status": "success",
             "data": {"agents": [a.to_dict() for a in default_agents()]},

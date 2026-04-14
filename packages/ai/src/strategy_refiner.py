@@ -156,7 +156,7 @@ class StrategyRefiner:
         current_params: dict[str, Any],
     ) -> RefinementSuggestion:
         """Delegate analysis to the LLM and parse its structured response."""
-        from packages.ai.src.llm_client import LLMMessage  # noqa: PLC0415
+        from .llm_client import LLMMessage  # noqa: PLC0415
 
         prompt = self._build_refinement_prompt(
             strategy_name, backtest_results, current_params

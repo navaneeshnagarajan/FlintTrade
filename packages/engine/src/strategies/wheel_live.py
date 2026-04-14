@@ -50,7 +50,7 @@ from typing import Any
 
 from packages.core.src.models import OHLCV, Order, Quote
 from packages.core.src.openalgo_client import OpenAlgoClient
-from packages.engine.src.strategy import BaseStrategy
+from ..strategy import BaseStrategy
 
 logger = logging.getLogger("flinttrade.engine.strategies.wheel_live")
 

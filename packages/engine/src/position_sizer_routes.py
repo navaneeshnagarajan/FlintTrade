@@ -59,7 +59,7 @@ def calculate_size() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "capital must be a number"}), 400
 
     try:
-        from packages.engine.src.position_sizer import PositionSizer  # noqa: PLC0415
+        from .position_sizer import PositionSizer  # noqa: PLC0415
     except ImportError as exc:
         logger.error("Could not import PositionSizer: %s", exc)
         return jsonify({"status": "error", "message": "Position sizer unavailable"}), 503

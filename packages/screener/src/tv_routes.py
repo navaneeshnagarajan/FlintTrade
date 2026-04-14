@@ -38,7 +38,7 @@ def tv_analysis() -> tuple[Any, int]:
     if not symbol:
         return jsonify({"status": "error", "message": "symbol parameter is required."}), 400
 
-    from packages.screener.src.tv_signals import TVSignals  # noqa: PLC0415
+    from .tv_signals import TVSignals  # noqa: PLC0415
 
     tv = TVSignals()
     result = tv.get_analysis(symbol, exchange, interval)
@@ -93,7 +93,7 @@ def tv_bulk_analysis() -> tuple[Any, int]:
     if not pairs:
         return jsonify({"status": "error", "message": "No valid symbols provided."}), 400
 
-    from packages.screener.src.tv_signals import TVSignals  # noqa: PLC0415
+    from .tv_signals import TVSignals  # noqa: PLC0415
 
     tv = TVSignals()
     results = tv.get_bulk_analysis(pairs, interval)
@@ -130,7 +130,7 @@ def tv_recommendation() -> tuple[Any, int]:
     if not symbol:
         return jsonify({"status": "error", "message": "symbol parameter is required."}), 400
 
-    from packages.screener.src.tv_signals import TVSignals  # noqa: PLC0415
+    from .tv_signals import TVSignals  # noqa: PLC0415
 
     tv = TVSignals()
     recs = tv.get_recommendation_summary(symbol, exchange)

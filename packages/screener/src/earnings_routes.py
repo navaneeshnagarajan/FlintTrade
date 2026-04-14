@@ -55,7 +55,7 @@ def _get_calendar() -> Any:
     """
     global _calendar  # noqa: PLW0603
     if _calendar is None:
-        from packages.screener.src.earnings_calendar import EarningsCalendar  # noqa: PLC0415
+        from .earnings_calendar import EarningsCalendar  # noqa: PLC0415
 
         _calendar = EarningsCalendar()
         _calendar.generate_sample_data(months=6)

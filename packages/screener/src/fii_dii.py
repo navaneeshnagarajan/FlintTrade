@@ -13,7 +13,7 @@ Data sources:
 
 Usage::
 
-    from packages.screener.src.fii_dii import FiiDiiTracker
+    from .fii_dii import FiiDiiTracker
 
     tracker = FiiDiiTracker(db_path=":memory:")
     data = tracker.fetch_latest()

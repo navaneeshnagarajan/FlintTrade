@@ -14,8 +14,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from packages.indicators.src.numba_kernels import HAS_NUMBA, _atr_core
-from packages.indicators.src.utils import validate_ohlcv, validate_series
+from .numba_kernels import HAS_NUMBA, _atr_core
+from .utils import validate_ohlcv, validate_series
 
 # Threshold: use Numba JIT only when array length exceeds this value.
 _NUMBA_THRESHOLD = 1000
@@ -101,7 +101,7 @@ def bollinger_bands(
         Tuple of (upper, middle, lower) arrays, each shape (n,).
         First ``period - 1`` values are NaN in all three arrays.
     """
-    from packages.indicators.src.trend import sma  # avoid circular at module level
+    from .trend import sma  # avoid circular at module level
 
     validate_series(close, min_length=period)
     n = len(close)
@@ -137,7 +137,7 @@ def keltner_channels(
     Returns:
         Tuple of (upper, middle, lower) arrays, each shape (n,).
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_ohlcv(high, low, close)
     middle = _ema(close, ema_period)
@@ -329,7 +329,7 @@ def chaikin_volatility(
     Raises:
         ValueError: If high and low lengths differ.
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_series(high, min_length=period)
     validate_series(low, min_length=period)
@@ -556,7 +556,7 @@ def starc_bands(
     Returns:
         Tuple of (upper, middle, lower) arrays, each shape (n,).
     """
-    from packages.indicators.src.trend import sma as _sma
+    from .trend import sma as _sma
 
     validate_ohlcv(high, low, close, min_length=max(sma_period, atr_period))
 

@@ -11,8 +11,8 @@ Upgrades the existing BacktestSimulator with:
 
 Usage::
 
-    from packages.backtest_engine.src.engine import BacktestEngine, EngineConfig
-    from packages.backtest_engine.src.base_strategy import BaseStrategy
+    from .engine import BacktestEngine, EngineConfig
+    from .base_strategy import BaseStrategy
 
     config = EngineConfig(
         symbol="NIFTY",
@@ -348,7 +348,7 @@ class BacktestEngine:
         # Lazy import to avoid circular dependency
         self._tax_calculator: Any | None = None
         if config.tax_enabled:
-            from packages.backtest_engine.src.tax_calculator import IndianTaxCalculator
+            from .tax_calculator import IndianTaxCalculator
             self._tax_calculator = IndianTaxCalculator(instrument_type=config.instrument_type)
 
         logger.info(
@@ -922,7 +922,7 @@ class BacktestEngine:
                 and exit_dt is not None
                 and entry_dt.date() == exit_dt.date()
             )
-            from packages.backtest_engine.src.tax_calculator import TradeType
+            from .tax_calculator import TradeType
             trade_type = TradeType.INTRADAY if is_intraday else TradeType.DELIVERY
             if "fo" in self.config.instrument_type.lower():
                 trade_type = TradeType.FO

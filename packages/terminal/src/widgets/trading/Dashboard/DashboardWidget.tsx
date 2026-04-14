@@ -29,34 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { WsTick } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
-
-// ─── OpenAlgo runtime shapes (snake_case) ────────────────────────────────────
-// The typed api.ts interfaces use camelCase but OpenAlgo REST returns snake_case.
-// These raw interfaces reflect what we actually receive.
-interface RawPosition {
-  symbol: string;
-  pnl?: string | number;
-  average_price?: string | number;
-  ltp?: string | number;
-  quantity?: string | number;
-}
-
-interface RawOrder {
-  symbol: string;
-  orderId?: string;
-  order_id?: string;
-  action?: string;
-  quantity?: string | number;
-  price?: string | number;
-  order_status?: string;
-  status?: string;
-  timestamp?: string;
-}
-
-interface RawFunds {
-  availablecash?: string | number;
-  utiliseddebits?: string | number;
-}
+import type { RawPosition, RawOrder, RawFunds } from "@/types/rawApi";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });

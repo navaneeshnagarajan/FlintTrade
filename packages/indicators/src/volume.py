@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from packages.indicators.src.utils import validate_ohlcv, validate_series
+from .utils import validate_ohlcv, validate_series
 
 
 def obv(
@@ -281,7 +281,7 @@ def efi(
     Raises:
         ValueError: If close and volume lengths differ.
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_series(close, min_length=2)
     validate_series(volume, min_length=2)
@@ -497,7 +497,7 @@ def emv(
     Returns:
         EMV values, shape (n,). NaN until warmed up.
     """
-    from packages.indicators.src.trend import sma as _sma
+    from .trend import sma as _sma
 
     validate_ohlcv(high, low, high, min_length=2)
     validate_series(volume, min_length=2)
@@ -600,7 +600,7 @@ def klinger_volume_oscillator(
     Returns:
         Tuple of (kvo, signal_line) arrays, each shape (n,).
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_ohlcv(high, low, close, min_length=2)
     validate_series(volume, min_length=2)
@@ -655,7 +655,7 @@ def obv_smoothed(
     Returns:
         Smoothed OBV values, shape (n,). First ``period - 1`` values are NaN.
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     obv_raw = obv(close, volume)
     return _ema(obv_raw, period)
@@ -684,7 +684,7 @@ def rvol(
         RVOL values, shape (n,). First ``period`` values are NaN.
         NaN is returned when average volume is zero.
     """
-    from packages.indicators.src.trend import sma as _sma
+    from .trend import sma as _sma
 
     validate_series(volume, min_length=period + 1)
 

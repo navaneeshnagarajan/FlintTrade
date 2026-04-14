@@ -454,7 +454,7 @@ class AutonomousTrader:
 
         try:
             # LLMClient.chat() is synchronous — run in thread to avoid blocking
-            from packages.ai.src.llm_client import LLMMessage  # local import avoids circular
+            from .llm_client import LLMMessage  # local import avoids circular
 
             messages = [
                 LLMMessage(

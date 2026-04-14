@@ -18,7 +18,7 @@ Terminology:
 
 Usage::
 
-    from packages.screener.src.market_breadth import MarketBreadthCalculator
+    from .market_breadth import MarketBreadthCalculator
 
     calc = MarketBreadthCalculator()
     for row in raw_data:

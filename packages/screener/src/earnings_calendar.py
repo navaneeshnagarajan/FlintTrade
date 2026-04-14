@@ -11,7 +11,7 @@ Endpoints (registered via earnings_routes.py):
 
 Usage::
 
-    from packages.screener.src.earnings_calendar import EarningsCalendar
+    from .earnings_calendar import EarningsCalendar
 
     cal = EarningsCalendar()
     upcoming = cal.get_upcoming(days=30)

@@ -307,7 +307,7 @@ class AlertRouter:
             return None
         if self._telegram is None:
             try:
-                from packages.automation.src.telegram_bot import TelegramBot  # noqa: PLC0415
+                from .telegram_bot import TelegramBot  # noqa: PLC0415
 
                 self._telegram = TelegramBot()
             except Exception as exc:

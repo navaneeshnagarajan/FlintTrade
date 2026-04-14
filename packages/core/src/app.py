@@ -36,8 +36,8 @@ from flask_limiter.util import get_remote_address  # noqa: E402
 import sentry_sdk  # noqa: E402
 from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 
-from packages.core.src.config import Settings  # noqa: E402
-from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: E402
+from .config import Settings  # noqa: E402
+from .openalgo_client import OpenAlgoClient  # noqa: E402
 from packages.data.src.audit_logger import AuditLogger  # noqa: E402
 # engine imports are deferred into FlintTradeApp.__init__() to break the
 # core↔engine circular import.  See PLC0415 comments throughout this file.
@@ -312,8 +312,8 @@ def create_flask_app(
     app.register_blueprint(action_center_bp)
 
     # Register Security blueprint and middleware (/api/v1/security/*)
-    from packages.core.src.security import SecurityMonitor  # noqa: PLC0415
-    from packages.core.src.security_routes import register_security_middleware, security_bp  # noqa: PLC0415
+    from .security import SecurityMonitor  # noqa: PLC0415
+    from .security_routes import register_security_middleware, security_bp  # noqa: PLC0415
     security_monitor = SecurityMonitor()
     app.config["SECURITY_MONITOR"] = security_monitor
     app.register_blueprint(security_bp)
@@ -340,7 +340,7 @@ def create_flask_app(
     app.register_blueprint(tv_bp)
 
     # Register monitoring blueprint (/api/v1/health, /api/v1/traffic/*, /api/v1/latency/*)
-    from packages.core.src.monitoring_routes import monitoring_bp  # noqa: PLC0415
+    from .monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
     # Register Strategy Runner blueprint (/api/v1/strategies/*)
@@ -364,7 +364,7 @@ def create_flask_app(
 
     # Register admin blueprint (dev/debug only)
     if app.debug or os.environ.get("FLINTTRADE_DEV"):
-        from packages.core.src.admin_routes import admin_bp  # noqa: PLC0415
+        from .admin_routes import admin_bp  # noqa: PLC0415
         app.register_blueprint(admin_bp)
         logger.info("Admin endpoints registered (dev mode)")
 
@@ -378,7 +378,7 @@ def create_flask_app(
     logger.info("Activity log endpoint registered at /api/v1/admin/activity")
 
     # Register extracted inline-route blueprints
-    from packages.core.src.indicators_routes import indicators_bp  # noqa: PLC0415
+    from .indicators_routes import indicators_bp  # noqa: PLC0415
     app.register_blueprint(indicators_bp)
 
     from packages.ai.src.advisor_routes import advisor_bp  # noqa: PLC0415
@@ -390,17 +390,17 @@ def create_flask_app(
     from packages.ai.src.signal_routes import signal_bp  # noqa: PLC0415
     app.register_blueprint(signal_bp)
 
-    from packages.core.src.backtest_routes import backtest_bp  # noqa: PLC0415
+    from .backtest_routes import backtest_bp  # noqa: PLC0415
     app.register_blueprint(backtest_bp)
 
-    from packages.core.src.operations_routes import operations_bp  # noqa: PLC0415
+    from .operations_routes import operations_bp  # noqa: PLC0415
     app.register_blueprint(operations_bp)
 
     # Register Order proxy blueprint (/v1/orders/*) — CRITICAL SAFETY LAYER.
     # All order requests from the frontend must pass through here so that
     # mode enforcement (explore/practice/live) is applied before any
     # real-money order reaches OpenAlgo.
-    from packages.core.src.order_routes import orders_bp  # noqa: PLC0415
+    from .order_routes import orders_bp  # noqa: PLC0415
     app.register_blueprint(orders_bp)
 
     # Register AI Team blueprint (/api/v1/ai/team/*)
@@ -469,24 +469,24 @@ def create_flask_app(
     app.register_blueprint(excel_bp)
 
     # Register Workspace Preset blueprint (/ft-api/v1/presets/*)
-    from packages.core.src.preset_routes import preset_bp  # noqa: PLC0415
+    from .preset_routes import preset_bp  # noqa: PLC0415
     app.register_blueprint(preset_bp)
 
     # Register Log Stream blueprint (/v1/logs/*) — SSE + REST log streaming
-    from packages.core.src.log_stream import log_stream_bp  # noqa: PLC0415
+    from .log_stream import log_stream_bp  # noqa: PLC0415
     app.register_blueprint(log_stream_bp)
 
     # Register Auth blueprint (/v1/auth/*) — public endpoints, no API key required
-    from packages.core.src.auth_service import AuthService as _AuthService  # noqa: PLC0415
-    from packages.core.src.auth_routes import auth_bp  # noqa: PLC0415
+    from .auth_service import AuthService as _AuthService  # noqa: PLC0415
+    from .auth_routes import auth_bp  # noqa: PLC0415
     _auth_db = Path.home() / ".flinttrade" / "auth.db"
     app.config["AUTH_SERVICE"] = _AuthService(db_path=_auth_db)
     app.register_blueprint(auth_bp)
 
     # Register Multi-user blueprint (/v1/users/*) — opt-in via FLINTTRADE_MULTI_USER=1
     if os.environ.get("FLINTTRADE_MULTI_USER", "").strip() in ("1", "true", "yes"):
-        from packages.core.src.user_manager import UserManager as _UserManager  # noqa: PLC0415
-        from packages.core.src.user_routes import users_bp  # noqa: PLC0415
+        from .user_manager import UserManager as _UserManager  # noqa: PLC0415
+        from .user_routes import users_bp  # noqa: PLC0415
         app.config["USER_MANAGER"] = _UserManager(db_path=_auth_db)
         app.register_blueprint(users_bp)
         logger.info("Multi-user mode enabled — /v1/users/* endpoints registered")
@@ -618,7 +618,7 @@ def create_flask_app(
     def _record_traffic(response: Any) -> Any:
         """Record method, path, status, and duration in TrafficCounter."""
         try:
-            from packages.core.src.monitoring_routes import get_traffic_counter  # noqa: PLC0415
+            from .monitoring_routes import get_traffic_counter  # noqa: PLC0415
 
             start = getattr(_flask_g, "_request_start", None)
             duration_ms = (time.monotonic() - start) * 1000 if start is not None else 0.0
@@ -650,7 +650,7 @@ def create_flask_app(
 
         def _mcp_place_order(**params: Any) -> dict[str, Any]:
             """Route MCP place_order through OpenAlgo (sync wrapper)."""
-            from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: PLC0415
+            from .openalgo_client import OpenAlgoClient  # noqa: PLC0415
             client = OpenAlgoClient(Settings.from_env())
             loop = asyncio.new_event_loop()
             try:
@@ -661,7 +661,7 @@ def create_flask_app(
 
         def _mcp_get_positions(**params: Any) -> dict[str, Any]:
             """Route MCP get_positions through OpenAlgo (sync wrapper)."""
-            from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: PLC0415
+            from .openalgo_client import OpenAlgoClient  # noqa: PLC0415
             client = OpenAlgoClient(Settings.from_env())
             loop = asyncio.new_event_loop()
             try:

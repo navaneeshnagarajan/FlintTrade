@@ -514,7 +514,7 @@ def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
 @operations_bp.route("/health", methods=["GET"])
 def api_health() -> tuple[Any, int]:
     """Proxy health endpoint for frontend compatibility."""
-    from packages.core.src.monitoring_routes import _health_agg  # noqa: PLC0415
+    from .monitoring_routes import _health_agg  # noqa: PLC0415
 
     registry_inst = current_app.config.get("REGISTRY")
     result = _health_agg.get_health(registry=registry_inst)
@@ -525,7 +525,7 @@ def api_health() -> tuple[Any, int]:
 @operations_bp.route("/traffic/stats", methods=["GET"])
 def api_traffic_stats() -> tuple[Any, int]:
     """Proxy traffic stats endpoint for frontend compatibility."""
-    from packages.core.src.monitoring_routes import get_traffic_counter  # noqa: PLC0415
+    from .monitoring_routes import get_traffic_counter  # noqa: PLC0415
 
     minutes_raw = request.args.get("minutes", "5")
     try:
@@ -541,7 +541,7 @@ def api_traffic_stats() -> tuple[Any, int]:
 @operations_bp.route("/latency/stats", methods=["GET"])
 def api_latency_stats() -> tuple[Any, int]:
     """Proxy latency stats endpoint for frontend compatibility."""
-    from packages.core.src.monitoring_routes import get_latency_tracker  # noqa: PLC0415
+    from .monitoring_routes import get_latency_tracker  # noqa: PLC0415
 
     return jsonify({"status": "success", "data": get_latency_tracker().get_stats()}), 200
 
@@ -553,7 +553,7 @@ def api_latency_stats() -> tuple[Any, int]:
 @operations_bp.route("/security/stats", methods=["GET"])
 def api_security_stats() -> tuple[Any, int]:
     """Proxy security stats endpoint for frontend compatibility."""
-    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+    from .security import SecurityMonitor as _SM  # noqa: PLC0415
 
     monitor = current_app.config.get("SECURITY_MONITOR")
     if not isinstance(monitor, _SM):
@@ -564,7 +564,7 @@ def api_security_stats() -> tuple[Any, int]:
 @operations_bp.route("/security/bans", methods=["GET"])
 def api_security_bans() -> tuple[Any, int]:
     """Proxy security bans list for frontend compatibility."""
-    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+    from .security import SecurityMonitor as _SM  # noqa: PLC0415
 
     monitor = current_app.config.get("SECURITY_MONITOR")
     if not isinstance(monitor, _SM):
@@ -576,7 +576,7 @@ def api_security_bans() -> tuple[Any, int]:
 @operations_bp.route("/security/ban", methods=["POST"])
 def api_security_ban() -> tuple[Any, int]:
     """Proxy ban-IP endpoint for frontend compatibility."""
-    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+    from .security import SecurityMonitor as _SM  # noqa: PLC0415
 
     monitor = current_app.config.get("SECURITY_MONITOR")
     if not isinstance(monitor, _SM):
@@ -602,7 +602,7 @@ def api_security_ban() -> tuple[Any, int]:
 @operations_bp.route("/security/unban", methods=["POST"])
 def api_security_unban() -> tuple[Any, int]:
     """Proxy unban-IP endpoint for frontend compatibility."""
-    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+    from .security import SecurityMonitor as _SM  # noqa: PLC0415
 
     monitor = current_app.config.get("SECURITY_MONITOR")
     if not isinstance(monitor, _SM):
@@ -626,7 +626,7 @@ def api_security_settings_get() -> tuple[Any, int]:
             ``notfound_ban_threshold`` (int): 404-flood count before auto-ban triggers.
             ``ban_duration`` (int): Duration in seconds for automatic bans.
     """
-    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+    from .security import SecurityMonitor as _SM  # noqa: PLC0415
 
     monitor = current_app.config.get("SECURITY_MONITOR")
     if not isinstance(monitor, _SM):
@@ -658,7 +658,7 @@ def api_security_settings_update() -> tuple[Any, int]:
     Returns:
         JSON with ``status`` and updated settings in ``data``.
     """
-    from packages.core.src.security import SecurityMonitor as _SM  # noqa: PLC0415
+    from .security import SecurityMonitor as _SM  # noqa: PLC0415
 
     monitor = current_app.config.get("SECURITY_MONITOR")
     if not isinstance(monitor, _SM):

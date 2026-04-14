@@ -949,7 +949,7 @@ class RAGPipeline:
         )
 
         try:
-            from packages.ai.src.llm_client import LLMMessage  # local import — avoids circular dep
+            from .llm_client import LLMMessage  # local import — avoids circular dep
 
             messages = [
                 LLMMessage(role="system", content=system),

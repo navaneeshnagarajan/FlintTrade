@@ -15,10 +15,10 @@ for the main app factory).
 
 Example (in app factory)::
 
-    from packages.integration.src.webhook_receiver import (
+    from .webhook_receiver import (
         WebhookConfig, WebhookReceiver,
     )
-    from packages.integration.src.webhook_routes import (
+    from .webhook_routes import (
         init_webhook_routes, webhook_bp,
     )
 

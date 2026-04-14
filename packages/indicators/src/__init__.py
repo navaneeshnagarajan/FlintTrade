@@ -13,7 +13,7 @@ All functions:
 from __future__ import annotations
 
 # Trend
-from packages.indicators.src.trend import (
+from .trend import (
     adx,
     alma,
     alligator,
@@ -39,7 +39,7 @@ from packages.indicators.src.trend import (
 )
 
 # Momentum
-from packages.indicators.src.momentum import (
+from .momentum import (
     awesome_oscillator,
     bop,
     cci,
@@ -60,7 +60,7 @@ from packages.indicators.src.momentum import (
 )
 
 # Volatility
-from packages.indicators.src.volatility import (
+from .volatility import (
     atr,
     bb_percent,
     bb_width,
@@ -77,7 +77,7 @@ from packages.indicators.src.volatility import (
 )
 
 # Volume
-from packages.indicators.src.volume import (
+from .volume import (
     ad,
     cmf,
     cumulative_delta,
@@ -97,7 +97,7 @@ from packages.indicators.src.volume import (
 )
 
 # Oscillators
-from packages.indicators.src.oscillators import (
+from .oscillators import (
     ac,
     cho,
     chop,
@@ -110,7 +110,7 @@ from packages.indicators.src.oscillators import (
 )
 
 # Statistics
-from packages.indicators.src.statistics import (
+from .statistics import (
     beta,
     correl,
     lrslope,
@@ -122,7 +122,7 @@ from packages.indicators.src.statistics import (
 )
 
 # Signals
-from packages.indicators.src.signals import (
+from .signals import (
     crossover,
     crossunder,
     exrem,
@@ -133,7 +133,7 @@ from packages.indicators.src.signals import (
 )
 
 # Streaming
-from packages.indicators.src.streaming import (
+from .streaming import (
     StreamingATR,
     StreamingBollingerBands,
     StreamingCumulativeDelta,
@@ -146,10 +146,10 @@ from packages.indicators.src.streaming import (
 )
 
 # Pipeline
-from packages.indicators.src.pipeline import IndicatorPipeline
+from .pipeline import IndicatorPipeline
 
 # VWAP bands
-from packages.indicators.src.vwap_bands import VWAPResult, calculate_vwap_bands
+from .vwap_bands import VWAPResult, calculate_vwap_bands
 
 __all__ = [
     # trend

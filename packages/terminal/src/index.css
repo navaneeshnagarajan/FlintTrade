@@ -188,9 +188,9 @@
       --color-text-secondary: #52525b;
       --color-text-muted: #71717a;
       --color-text-disabled: #a1a1aa;
-      /* WCAG AA contrast on white backgrounds (4.5:1 minimum) */
-      --color-profit: #16a34a;
-      --color-loss: #dc2626;
+      /* WCAG AA contrast on white backgrounds — safer contrast margin */
+      --color-profit: #15803d;
+      --color-loss: #b91c1c;
       --color-surface-floating: #ffffff;
       --shadow-raised: 0 1px 3px rgba(0,0,0,0.08);
       --shadow-elevated: 0 4px 12px rgba(0,0,0,0.12);

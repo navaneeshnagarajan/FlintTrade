@@ -32,7 +32,7 @@ def _get_user_manager():
 
 def _get_jwt_secret() -> str:
     """Reuse the JWT secret from auth_routes."""
-    from packages.core.src.auth_routes import _get_jwt_secret as _auth_jwt_secret  # noqa: PLC0415
+    from .auth_routes import _get_jwt_secret as _auth_jwt_secret  # noqa: PLC0415
     return _auth_jwt_secret()
 
 

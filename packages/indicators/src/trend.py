@@ -14,8 +14,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from packages.indicators.src.numba_kernels import HAS_NUMBA, _ema_core
-from packages.indicators.src.utils import validate_ohlcv, validate_series
+from .numba_kernels import HAS_NUMBA, _ema_core
+from .utils import validate_ohlcv, validate_series
 
 # Threshold: use Numba JIT only when array length exceeds this value.
 # Below this, JIT compilation overhead exceeds the loop speedup.
@@ -183,7 +183,7 @@ def supertrend(
         - supertrend_values: shape (n,), NaN for bars before ATR warms up.
         - direction: bool array, shape (n,). True = uptrend, False = downtrend.
     """
-    from packages.indicators.src.volatility import atr as _atr
+    from .volatility import atr as _atr
 
     validate_ohlcv(high, low, close, min_length=2)
     n = len(close)
@@ -554,7 +554,7 @@ def parabolic_sar(
         - sar: SAR values, shape (n,). Index 0 is NaN (no prior bar).
         - uptrend: bool array, shape (n,). True = price is in uptrend.
     """
-    from packages.indicators.src.utils import validate_ohlcv as _val
+    from .utils import validate_ohlcv as _val
 
     _val(high, low, high, min_length=2)  # reuse ohlcv validator with high as close proxy
     n = len(high)
@@ -1164,7 +1164,7 @@ def vidya(
     Raises:
         ValueError: If either period < 1.
     """
-    from packages.indicators.src.momentum import cmo as _cmo
+    from .momentum import cmo as _cmo
 
     validate_series(close, min_length=cmo_period + 1)
     if cmo_period < 1:

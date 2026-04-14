@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from packages.indicators.src.utils import validate_ohlcv, validate_series
+from .utils import validate_ohlcv, validate_series
 
 
 def gator_oscillator(
@@ -51,7 +51,7 @@ def gator_oscillator(
         Tuple of (upper, lower) histogram arrays, each shape (n,).  NaN where
         any Alligator line is NaN.
     """
-    from packages.indicators.src.trend import alligator as _alligator
+    from .trend import alligator as _alligator
 
     validate_ohlcv(high, low, high, min_length=1)
     jaw, teeth, lips = _alligator(
@@ -105,7 +105,7 @@ def stc(
     Returns:
         STC values, shape (n,). Oscillates 0–100. NaN during warm-up.
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_series(close, min_length=slow + cycle)
     n = len(close)
@@ -174,8 +174,8 @@ def coppock_curve(
     Returns:
         Coppock Curve values, shape (n,). NaN during warm-up.
     """
-    from packages.indicators.src.trend import wma as _wma
-    from packages.indicators.src.momentum import roc as _roc
+    from .trend import wma as _wma
+    from .momentum import roc as _roc
 
     validate_series(close, min_length=long_roc_period + wma_period + 1)
     n = len(close)
@@ -224,7 +224,7 @@ def tsi(
         TSI values, shape (n,). Oscillates between -100 and 100.
         NaN during warm-up.
     """
-    from packages.indicators.src.trend import ema as _ema
+    from .trend import ema as _ema
 
     validate_series(close, min_length=long_period + short_period + 1)
     n = len(close)
@@ -285,8 +285,8 @@ def cho(
     Returns:
         CHO values, shape (n,). NaN during warm-up.
     """
-    from packages.indicators.src.trend import ema as _ema
-    from packages.indicators.src.volume import ad as _ad
+    from .trend import ema as _ema
+    from .volume import ad as _ad
 
     validate_ohlcv(high, low, close, min_length=slow)
     validate_series(volume, min_length=slow)
@@ -323,7 +323,7 @@ def chop(
         CHOP values, shape (n,). Values range roughly 38.2–61.8.
         NaN during warm-up.
     """
-    from packages.indicators.src.volatility import atr as _atr
+    from .volatility import atr as _atr
 
     validate_ohlcv(high, low, close, min_length=period + 1)
     n = len(close)
@@ -385,8 +385,8 @@ def kst(
     Returns:
         Tuple of (kst_line, signal_line), each shape (n,).
     """
-    from packages.indicators.src.trend import sma as _sma
-    from packages.indicators.src.momentum import roc as _roc
+    from .trend import sma as _sma
+    from .momentum import roc as _roc
 
     validate_series(close, min_length=r4 + n4)
     n = len(close)
@@ -504,8 +504,8 @@ def ac(
     Raises:
         ValueError: If fast >= slow.
     """
-    from packages.indicators.src.momentum import awesome_oscillator as _ao
-    from packages.indicators.src.trend import sma as _sma
+    from .momentum import awesome_oscillator as _ao
+    from .trend import sma as _sma
 
     validate_ohlcv(high, low, high, min_length=slow + signal)
 

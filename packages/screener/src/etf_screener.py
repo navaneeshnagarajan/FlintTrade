@@ -9,7 +9,7 @@ Provides a curated catalogue of 50+ popular India ETFs with analytics:
 
 Usage::
 
-    from packages.screener.src.etf_screener import (
+    from .etf_screener import (
         ETF_CATALOGUE,
         ETFRecord,
         calculate_momentum_score,

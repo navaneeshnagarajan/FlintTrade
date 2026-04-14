@@ -23,7 +23,7 @@ government bond yield proxy).
 Example::
 
     import pandas as pd
-    from packages.backtest_engine.src.portfolio_optimizer import optimize
+    from .portfolio_optimizer import optimize
 
     returns = pd.DataFrame(...)          # (n_days, n_assets) daily returns
     result = optimize(returns, method="risk_parity")

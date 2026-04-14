@@ -78,7 +78,7 @@ def _get_mode_from_jwt() -> str | None:
         the JWT payload, or ``None`` if the token is absent, expired, or
         invalid.
     """
-    from packages.core.src.auth_routes import decode_token  # noqa: PLC0415
+    from .auth_routes import decode_token  # noqa: PLC0415
 
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.removeprefix("Bearer ").strip()
@@ -106,7 +106,7 @@ def _is_live_mode_unlocked() -> bool:
         ``True`` if the JWT is valid and contains ``live_mode_unlocked: true``.
         ``False`` otherwise (missing token, expired, invalid, or claim absent).
     """
-    from packages.core.src.auth_routes import decode_token  # noqa: PLC0415
+    from .auth_routes import decode_token  # noqa: PLC0415
 
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.removeprefix("Bearer ").strip()

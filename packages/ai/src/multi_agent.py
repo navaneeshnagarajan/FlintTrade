@@ -44,14 +44,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from packages.ai.src.agent_models import (
+from .agent_models import (
     AgentAnalysis,
     AgentRole,
     AgentRoleType,
     TeamAnalysis,
     TradeRecommendation,
 )
-from packages.ai.src.llm_client import LLMClient, LLMMessage
+from .llm_client import LLMClient, LLMMessage
 
 logger = logging.getLogger("flinttrade.ai.multi_agent")
 

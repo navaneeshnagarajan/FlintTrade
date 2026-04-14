@@ -12,7 +12,7 @@ objects from the option chain fetcher.
 
 Typical usage::
 
-    from packages.screener.src.oi_analytics import (
+    from .oi_analytics import (
         OIAnalytics, OISnapshot,
     )
 

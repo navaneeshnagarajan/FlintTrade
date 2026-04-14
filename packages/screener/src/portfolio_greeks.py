@@ -24,7 +24,7 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
-from packages.screener.src.greeks import (
+from .greeks import (
     OptionPosition,
     PortfolioGreeks,
     PortfolioGreeksResult,

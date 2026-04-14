@@ -25,19 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useHoldings } from "@/hooks/useHoldings";
 import type { WidgetProps } from "@/types/widgets";
-
-// OpenAlgo REST returns snake_case at runtime; broker field names vary.
-interface RawHolding {
-  symbol?: string;
-  tradingsymbol?: string;
-  exchange?: string;
-  quantity?: string | number;
-  qty?: string | number;
-  average_price?: string | number;
-  avg_price?: string | number;
-  ltp?: string | number;
-  close_price?: string | number;
-}
+import type { RawHolding } from "@/types/rawApi";
 
 interface HoldingRow {
   symbol: string;

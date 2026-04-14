@@ -12,8 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from packages.ai.src.llm_client import LLMClient, LLMMessage
-from packages.ai.src.memory import MemoryLayer, TradedMemory
+from .llm_client import LLMClient, LLMMessage
+from .memory import MemoryLayer, TradedMemory
 
 logger = logging.getLogger("flinttrade.ai.reflection")
 

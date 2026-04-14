@@ -24,17 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { useOrders } from "@/hooks/useOrders";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import type { WidgetProps } from "@/types/widgets";
-
-// OpenAlgo REST returns snake_case at runtime
-interface RawOrder {
-  symbol: string;
-  action?: string;
-  quantity?: string | number;
-  price?: string | number;
-  order_status?: string;
-  status?: string;
-  timestamp?: string;
-}
+import type { RawOrder } from "@/types/rawApi";
 
 interface OrderRow {
   symbol: string;

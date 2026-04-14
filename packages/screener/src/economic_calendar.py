@@ -10,7 +10,7 @@ Endpoint (registered via economic_routes.py):
 
 Usage::
 
-    from packages.screener.src.economic_calendar import EconomicCalendarProvider
+    from .economic_calendar import EconomicCalendarProvider
 
     provider = EconomicCalendarProvider()
     provider.generate_sample_data(months=2)

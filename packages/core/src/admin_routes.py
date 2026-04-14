@@ -234,7 +234,7 @@ def admin_system() -> tuple[Response, int]:
     When psutil is not installed the response is still HTTP 200 with all
     metric fields set to zero and ``psutil_available: false``.
     """
-    from packages.core.src.system_metrics import get_system_metrics  # noqa: PLC0415
+    from .system_metrics import get_system_metrics  # noqa: PLC0415
 
     metrics = get_system_metrics()
     return jsonify({

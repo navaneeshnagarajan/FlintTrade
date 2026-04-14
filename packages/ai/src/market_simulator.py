@@ -152,7 +152,7 @@ def _build_messages(
     steps: int,
 ) -> list[Any]:
     """Build LLM message list for a single participant decision call."""
-    from packages.ai.src.llm_client import LLMMessage  # local import avoids circular
+    from .llm_client import LLMMessage  # local import avoids circular
 
     return [
         LLMMessage(role="system", content=_SYSTEM_PROMPT),

@@ -23,24 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useTradebook } from "@/hooks/useTradebook";
 import type { WidgetProps } from "@/types/widgets";
-
-// OpenAlgo REST returns snake_case; tradebook field names vary by broker.
-interface RawTrade {
-  symbol?: string;
-  tradingsymbol?: string;
-  action?: string;
-  transaction_type?: string;
-  side?: string;
-  quantity?: string | number;
-  qty?: string | number;
-  filled_quantity?: string | number;
-  average_price?: string | number;
-  price?: string | number;
-  trade_price?: string | number;
-  trade_time?: string;
-  timestamp?: string;
-  order_time?: string;
-}
+import type { RawTrade } from "@/types/rawApi";
 
 interface TradeRow {
   timeDisplay: string;

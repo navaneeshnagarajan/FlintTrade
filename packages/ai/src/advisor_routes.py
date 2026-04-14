@@ -12,7 +12,7 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
 
-from packages.ai.src.llm_client import LLMClient, LLMConfig, LLMMessage
+from .llm_client import LLMClient, LLMConfig, LLMMessage
 
 logger = logging.getLogger("flinttrade")
 

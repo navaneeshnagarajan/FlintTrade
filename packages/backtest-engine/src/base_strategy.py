@@ -12,7 +12,7 @@ Provides:
 
 Usage::
 
-    from packages.backtest_engine.src.base_strategy import BaseBacktestStrategy, Signal
+    from .base_strategy import BaseBacktestStrategy, Signal
 
     class MyCrossover(BaseBacktestStrategy):
         def __init__(self, fast: int = 9, slow: int = 21, **kwargs):

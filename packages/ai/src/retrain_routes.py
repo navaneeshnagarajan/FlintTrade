@@ -23,7 +23,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from packages.ai.src.auto_retrain import AutoRetrainer, RetrainConfig
+from .auto_retrain import AutoRetrainer, RetrainConfig
 
 logger = logging.getLogger("flinttrade.ai.retrain_routes")
 

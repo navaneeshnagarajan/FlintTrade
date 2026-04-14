@@ -44,7 +44,7 @@ def _get_provider() -> Any:
     """
     global _provider  # noqa: PLW0603
     if _provider is None:
-        from packages.screener.src.economic_calendar import EconomicCalendarProvider  # noqa: PLC0415
+        from .economic_calendar import EconomicCalendarProvider  # noqa: PLC0415
 
         _provider = EconomicCalendarProvider()
         _provider.generate_sample_data(months=4)

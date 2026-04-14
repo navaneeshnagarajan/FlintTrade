@@ -18,7 +18,7 @@ Annualisation uses 252 trading days per year.
 
 Usage::
 
-    from packages.screener.src.volatility_cone import VolatilityCone
+    from .volatility_cone import VolatilityCone
 
     cone = VolatilityCone()
     returns = [0.005, -0.003, 0.002, ...]  # daily log-returns

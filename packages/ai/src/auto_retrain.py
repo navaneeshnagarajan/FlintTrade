@@ -52,7 +52,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from packages.ai.src.ml_advisor import FeatureEngineer, MLAdvisor, MLAdvisorConfig, _FEATURE_COLUMNS
+from .ml_advisor import FeatureEngineer, MLAdvisor, MLAdvisorConfig, _FEATURE_COLUMNS
 
 logger = logging.getLogger("flinttrade.ai.auto_retrain")
 

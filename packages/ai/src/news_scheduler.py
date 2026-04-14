@@ -189,7 +189,7 @@ class NewsScheduler:
         intraday_interval_min: int = _INTRADAY_INTERVAL_MIN,
     ) -> None:
         if scraper is None:
-            from packages.ai.src.news_scraper import NewsScraper  # lazy import
+            from .news_scraper import NewsScraper  # lazy import
 
             scraper = NewsScraper()
 
@@ -311,7 +311,7 @@ class NewsScheduler:
             NewsEvent describing the results.
         """
         if sources is None:
-            from packages.ai.src.news_scraper import RSS_SOURCES  # lazy
+            from .news_scraper import RSS_SOURCES  # lazy
 
             sources = list(RSS_SOURCES.keys())
         return await self._run_poll(poll_type, sources)
@@ -346,7 +346,7 @@ class NewsScheduler:
             if job is None or not job.enabled:
                 continue
 
-            from packages.ai.src.news_scraper import RSS_SOURCES  # lazy
+            from .news_scraper import RSS_SOURCES  # lazy
 
             await self._run_poll(poll_type, list(RSS_SOURCES.keys()))
 

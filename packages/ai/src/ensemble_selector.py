@@ -38,7 +38,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from packages.ai.src.signals import (
+from .signals import (
     Signal,
     engineer_features,
     generate_labels,

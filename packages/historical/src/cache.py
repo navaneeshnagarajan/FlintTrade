@@ -133,8 +133,8 @@ class OHLCVCache:
 
     Usage::
 
-        from packages.historical.src.data_provider import ProviderRegistry
-        from packages.historical.src.cache import OHLCVCache
+        from .data_provider import ProviderRegistry
+        from .cache import OHLCVCache
 
         registry = ProviderRegistry(openalgo_client)
         cache = OHLCVCache(registry=registry)

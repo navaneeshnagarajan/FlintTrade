@@ -15,7 +15,7 @@ import logging
 from collections import deque
 from typing import Any
 
-from packages.ai.src.signal_models import Signal, SignalConfig, now_iso
+from .signal_models import Signal, SignalConfig, now_iso
 from packages.indicators.src.streaming import StreamingEMA, StreamingRSI
 
 logger = logging.getLogger("flinttrade.ai.signal_pipeline")

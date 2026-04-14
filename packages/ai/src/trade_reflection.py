@@ -390,7 +390,7 @@ class TradeReflector:
         Returns:
             ReflectionResult or None on unrecoverable failure.
         """
-        from packages.ai.src.llm_client import LLMMessage  # local import to avoid circular deps
+        from .llm_client import LLMMessage  # local import to avoid circular deps
 
         system_prompt = (
             "You are a professional trading retrospection analyst for Indian F&O and equity markets.\n"

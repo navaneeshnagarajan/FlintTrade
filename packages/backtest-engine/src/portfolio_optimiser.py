@@ -19,7 +19,7 @@ Dependencies: numpy, scipy (SLSQP), pandas, pydantic.
 Example::
 
     import pandas as pd
-    from packages.backtest_engine.src.portfolio_optimiser import (
+    from .portfolio_optimiser import (
         OptimiserConfig, PortfolioOptimiser,
     )
 

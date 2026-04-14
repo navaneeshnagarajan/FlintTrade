@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from packages.ai.src.llm_client import LLMClient, LLMMessage
+from .llm_client import LLMClient, LLMMessage
 
 logger = logging.getLogger("flinttrade.ai.risk_debate")
 
