@@ -4,14 +4,14 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-5600%2B%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-9200%2B%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
 ![Status](https://img.shields.io/badge/status-v0.5.0--dev-blue)
 
-> **v0.5.0-dev** — 23-wave feature sprint complete. Multi-agent AI, FinRL, signals pipeline, MCX, Pine Script editor, desktop app, Chrome extension, bracket orders, FII/DII tracker, fundamental screener, RRG, and more.
-> 101 strategies, 30 widgets + 7 tools, 16 packages, 13 routes, 5,600+ tests.
+> **v0.5.0-dev** — 63 build waves + Flint Suite Glass Adaptive redesign complete. 83 widgets, 101 strategies, 16 packages, 13 routes, 9,200+ tests.
+> Glass Adaptive design system, 4-tab Unified Search (Ctrl+K), macOS dock sidebar, Bento Grid dashboard, Crawl4AI integration, full codebase audit.
 
 Open-source modular trading platform for Indian markets with direct broker connections. Built on [OpenAlgo](https://openalgo.in) adapters. Supports 33 brokers, equities, F&O, commodities, currency derivatives, and crypto.
 
