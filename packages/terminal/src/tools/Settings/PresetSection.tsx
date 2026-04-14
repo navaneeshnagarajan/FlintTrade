@@ -20,6 +20,8 @@
  */
 
 import { useState, useRef, useCallback } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -664,21 +666,31 @@ export function PresetSection() {
     if (!file) return;
 
     const reader = new FileReader();
+    const importedPresetSchema = z.object({
+      name: z.string().min(1),
+      description: z.string().optional(),
+      widgets: z.array(z.object({
+        id: z.string(),
+        component: z.string(),
+        title: z.string().default(""),
+        position: z.object({
+          direction: z.enum(["left", "right", "above", "below", "within"]).optional(),
+          referenceComponent: z.string().optional(),
+        }).optional(),
+        initialWidth: z.number().optional(),
+        initialHeight: z.number().optional(),
+      })),
+    });
+
     reader.onload = (ev) => {
       try {
-        const raw: unknown = JSON.parse(ev.target?.result as string);
-        if (
-          raw === null ||
-          typeof raw !== "object" ||
-          !("name" in raw) ||
-          !("widgets" in raw)
-        ) {
+        const parsed = safeParse(ev.target?.result as string, importedPresetSchema);
+        if (!parsed) {
           setImportError(
             "Invalid preset file. Expected an object with `name` and `widgets`.",
           );
           return;
         }
-        const parsed = raw as { name: string; description?: string; widgets: PresetWidgetEntry[] };
         createMutation.mutate({
           name: parsed.name,
           description: parsed.description ?? "",

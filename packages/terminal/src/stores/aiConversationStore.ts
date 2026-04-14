@@ -16,6 +16,8 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +64,22 @@ function generateId(): string {
 
 /** localStorage key prefix for saved conversations. */
 const SAVED_CHAT_PREFIX = "flinttrade:saved-chat:";
+
+// ---------------------------------------------------------------------------
+// Zod schemas for persistence validation
+// ---------------------------------------------------------------------------
+
+const messageSchema = z.object({
+  id: z.string(),
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  timestamp: z.number(),
+  route: z.string().optional(),
+});
+
+const savedChatSchema = z.object({
+  messages: z.array(messageSchema),
+});
 
 const storeImpl: StateCreator<
   AIConversationState,
@@ -112,16 +130,12 @@ const storeImpl: StateCreator<
   },
 
   loadConversation: (id: string) => {
-    try {
-      const raw = localStorage.getItem(`${SAVED_CHAT_PREFIX}${id}`);
-      if (!raw) return false;
-      const parsed = JSON.parse(raw) as { messages: Message[] };
-      if (!Array.isArray(parsed.messages)) return false;
-      set({ messages: parsed.messages, conversationId: id, isStreaming: false });
-      return true;
-    } catch {
-      return false;
-    }
+    const raw = localStorage.getItem(`${SAVED_CHAT_PREFIX}${id}`);
+    if (!raw) return false;
+    const parsed = safeParse(raw, savedChatSchema);
+    if (!parsed) return false;
+    set({ messages: parsed.messages, conversationId: id, isStreaming: false });
+    return true;
   },
 });
 

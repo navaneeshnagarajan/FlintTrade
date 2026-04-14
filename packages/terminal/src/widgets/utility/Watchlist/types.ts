@@ -3,6 +3,8 @@
  */
 
 import type { Quote } from "@/types/api";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,25 +96,29 @@ export function makeDefaultTab(): WatchlistTab {
   return { id: generateId(), name: "Watchlist 1", symbols: DEFAULT_SYMBOLS };
 }
 
+const watchlistItemSchema = z.object({
+  symbol: z.string(),
+  exchange: z.string(),
+}) satisfies z.ZodType<WatchlistItem>;
+
+const watchlistTabSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  symbols: z.array(watchlistItemSchema),
+}) satisfies z.ZodType<WatchlistTab>;
+
 /** Load all watchlist tabs from localStorage. Migrates legacy single-list format. */
 export function loadTabs(): WatchlistTab[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY_MULTI);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed as WatchlistTab[];
-    }
-    // Migrate legacy single-list
-    const legacy = localStorage.getItem(LS_KEY_LEGACY);
-    if (legacy) {
-      const items: unknown = JSON.parse(legacy);
-      if (Array.isArray(items) && items.length > 0) {
-        return [{ id: generateId(), name: "Watchlist 1", symbols: items as WatchlistItem[] }];
-      }
-    }
-  } catch {
-    // ignore parse errors
+  const raw = localStorage.getItem(LS_KEY_MULTI);
+  const tabs = safeParse(raw, z.array(watchlistTabSchema));
+  if (tabs && tabs.length > 0) return tabs;
+
+  // Migrate legacy single-list
+  const legacyItems = safeParse(localStorage.getItem(LS_KEY_LEGACY), z.array(watchlistItemSchema));
+  if (legacyItems && legacyItems.length > 0) {
+    return [{ id: generateId(), name: "Watchlist 1", symbols: legacyItems }];
   }
+
   return [makeDefaultTab()];
 }
 

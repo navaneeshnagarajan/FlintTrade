@@ -33,6 +33,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { searchSymbol, getTicker } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -71,6 +73,17 @@ interface LtpMap {
 // ---------------------------------------------------------------------------
 
 const LS_KEY = "flinttrade:alerts";
+
+const priceAlertSchema = z.object({
+  id: z.string(),
+  symbol: z.string(),
+  exchange: z.string(),
+  condition: z.enum(["above", "below", "crosses_above", "crosses_below"]),
+  targetPrice: z.number(),
+  createdAt: z.string(),
+  triggeredAt: z.string().optional(),
+  status: z.enum(["armed", "triggered", "expired"]),
+}) satisfies z.ZodType<PriceAlert>;
 
 const CONDITION_LABELS: Record<AlertCondition, string> = {
   above: "Above",
@@ -123,16 +136,7 @@ function fmtDate(iso: string): string {
 // ---------------------------------------------------------------------------
 
 function loadAlerts(): PriceAlert[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as PriceAlert[];
-    }
-  } catch {
-    // ignore parse errors
-  }
-  return [];
+  return safeParse(localStorage.getItem(LS_KEY), z.array(priceAlertSchema)) ?? [];
 }
 
 function saveAlerts(alerts: PriceAlert[]): void {

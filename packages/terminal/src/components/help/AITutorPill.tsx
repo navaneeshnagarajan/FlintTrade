@@ -33,6 +33,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
+import { safeParse, sseTokenSchema } from "@/lib/safeParse";
 import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sparkles, X, Send, Bot, Settings } from "lucide-react";
@@ -133,15 +134,12 @@ async function streamAdvisorMessage(
         if (!line.startsWith("data: ")) continue;
         const raw = line.slice(6).trim();
         if (!raw || raw === "[DONE]") continue;
-        try {
-          const data = JSON.parse(raw) as { done?: boolean; token?: string };
-          if (data.done) { streamDone = true; break; }
-          if (data.token) {
-            assistantText += data.token;
-            onToken(data.token, assistantText);
-          }
-        } catch {
-          // Malformed SSE line — skip
+        const data = safeParse(raw, sseTokenSchema);
+        if (!data) continue;
+        if (data.done) { streamDone = true; break; }
+        if (data.token) {
+          assistantText += data.token;
+          onToken(data.token, assistantText);
         }
       }
       if (streamDone) break;

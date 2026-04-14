@@ -16,6 +16,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { safeParse } from "@/lib/safeParse";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -62,14 +63,16 @@ interface SetupProgress {
   completedStep: number;
 }
 
+const setupProgressSchema = z.object({
+  accountCreated: z.boolean(),
+  totpUri: z.string(),
+  backupCodes: z.array(z.string()),
+  completedStep: z.number().int().min(0).max(5),
+}) satisfies z.ZodType<SetupProgress>;
+
 function loadProgress(): SetupProgress | null {
-  try {
-    const raw = sessionStorage.getItem(PROGRESS_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as SetupProgress;
-  } catch {
-    return null;
-  }
+  const raw = sessionStorage.getItem(PROGRESS_KEY);
+  return safeParse(raw, setupProgressSchema) ?? null;
 }
 
 function saveProgress(progress: SetupProgress): void {

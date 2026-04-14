@@ -26,6 +26,7 @@ import type { OhlcvBar } from "./indicators";
 import type { SymbolSearchResult, IntervalOption } from "./types";
 import type { Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { safeParse, ohlcvCacheSchema } from "@/lib/safeParse";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -340,16 +341,11 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
     (async () => {
       const cacheKey = `ft-chart-${symbol}-${exchange}-${interval}`;
       const FIVE_MIN = 5 * 60 * 1000;
-      try {
-        const raw = localStorage.getItem(cacheKey);
-        if (raw) {
-          const { data, timestamp } = JSON.parse(raw) as { data: OhlcvBar[]; timestamp: number };
-          if (Array.isArray(data) && data.length > 0) {
-            applyBars(data);
-            if (Date.now() - timestamp < FIVE_MIN && !isMarketHours()) return;
-          }
-        }
-      } catch { /* corrupt cache */ }
+      const cached = safeParse(localStorage.getItem(cacheKey), ohlcvCacheSchema);
+      if (cached && cached.data.length > 0) {
+        applyBars(cached.data);
+        if (Date.now() - cached.timestamp < FIVE_MIN && !isMarketHours()) return;
+      }
 
       try {
         const endDate = formatDate(new Date());

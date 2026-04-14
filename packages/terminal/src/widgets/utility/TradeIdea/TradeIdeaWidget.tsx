@@ -7,6 +7,8 @@
  */
 
 import { useState, useEffect, useCallback, memo } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { Lightbulb, Plus, X, Check, ChevronDown, ChevronUp, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -41,6 +43,20 @@ export interface TradeIdea {
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "flinttrade:tradeideas";
+
+const tradeIdeaSchema = z.object({
+  id: z.string(),
+  symbol: z.string(),
+  direction: z.enum(["bullish", "bearish", "neutral"]),
+  entryZone: z.string(),
+  stopLoss: z.string(),
+  target: z.string(),
+  timeframe: z.enum(["intraday", "swing", "positional", "investment"]),
+  notes: z.string(),
+  tags: z.array(z.string()),
+  status: z.enum(["planned", "active", "completed", "expired"]),
+  createdAt: z.string(),
+}) satisfies z.ZodType<TradeIdea>;
 const ALL_STATUSES: IdeaStatus[] = ["planned", "active", "completed", "expired"];
 const DIRECTIONS: Direction[] = ["bullish", "bearish", "neutral"];
 const TIMEFRAMES: Timeframe[] = ["intraday", "swing", "positional", "investment"];
@@ -59,8 +75,7 @@ const DIR_COLOUR: Record<Direction, string> = {
 };
 
 function loadIdeas(): TradeIdea[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]") as TradeIdea[]; }
-  catch { return []; }
+  return safeParse(localStorage.getItem(STORAGE_KEY), z.array(tradeIdeaSchema)) ?? [];
 }
 
 function saveIdeas(ideas: TradeIdea[]): void {

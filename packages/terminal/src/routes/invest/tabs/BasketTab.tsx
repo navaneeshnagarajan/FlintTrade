@@ -54,6 +54,8 @@ import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { cn } from "@/lib/utils";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
 import { DemoBanner } from "@/components/ui/DemoBanner";
@@ -130,15 +132,26 @@ const SAMPLE_BASKETS: StockBasket[] = [
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
+const basketConstituentSchema = z.object({
+  symbol: z.string(),
+  exchange: z.string(),
+  weight: z.number(),
+});
+
+const stockBasketSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  constituents: z.array(basketConstituentSchema),
+  investedAmount: z.number(),
+  createdAt: z.string(),
+}) satisfies z.ZodType<StockBasket>;
+
 function loadBaskets(): StockBasket[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [...SAMPLE_BASKETS];
-    const parsed = JSON.parse(raw) as StockBasket[];
-    return parsed.length > 0 ? parsed : [...SAMPLE_BASKETS];
-  } catch {
-    return [...SAMPLE_BASKETS];
-  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const parsed = safeParse(raw, z.array(stockBasketSchema));
+  if (parsed && parsed.length > 0) return parsed;
+  return [...SAMPLE_BASKETS];
 }
 
 function saveBaskets(baskets: StockBasket[]): void {

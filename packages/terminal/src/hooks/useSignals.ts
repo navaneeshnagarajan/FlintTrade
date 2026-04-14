@@ -11,6 +11,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getRecentSignals,
@@ -156,13 +158,21 @@ export function useSignalStream(
       setConnected(false);
       // EventSource auto-reconnects — no manual reconnect needed
     };
+    const liveSignalSchema = z.object({
+      timestamp: z.string(),
+      symbol: z.string(),
+      signal_type: z.enum(["BUY", "SELL", "ALERT"]),
+      indicator: z.string(),
+      value: z.number(),
+      threshold: z.number(),
+      confidence: z.number(),
+      message: z.string(),
+    }) satisfies z.ZodType<LiveSignal>;
+
     es.onmessage = (event) => {
-      try {
-        const signal = JSON.parse(event.data) as LiveSignal;
-        callbackRef.current(signal);
-      } catch {
-        // Ignore parse errors (heartbeat comments, etc.)
-      }
+      const signal = safeParse(event.data as string, liveSignalSchema);
+      if (signal) callbackRef.current(signal);
+      // Malformed frames and heartbeat comments are silently discarded
     };
 
     esRef.current = es;

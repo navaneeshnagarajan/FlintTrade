@@ -1,7 +1,9 @@
 import { create } from "zustand";
-import { createJSONStorage, devtools, persist } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
+import type { PersistStorage, StorageValue } from "zustand/middleware";
 import type { ConnectionStatus } from "@/types/stores";
+import { obfuscate, deobfuscate } from "@/lib/keyVault";
 
 interface ConnectionStore {
   host: string;
@@ -37,14 +39,61 @@ const storeImpl: StateCreator<ConnectionStore, [["zustand/persist", unknown]]> =
   setDemo: (demo) => set({ demo }),
 });
 
+/**
+ * Partial shape that Zustand persist serialises to/from storage.
+ * Defined explicitly so the custom storage adapter is fully type-safe.
+ */
+type PersistedState = {
+  host: string;
+  apiKey: string;
+  wsUrl: string;
+};
+
+/**
+ * Custom sessionStorage adapter that XOR-obfuscates the API key at rest.
+ *
+ * The key is never written to sessionStorage in plaintext — it is passed
+ * through {@link obfuscate} on every write and {@link deobfuscate} on every
+ * read. All other fields (host, wsUrl) are stored as-is since they are not
+ * sensitive credentials.
+ *
+ * sessionStorage scope: the value is cleared automatically when the tab
+ * closes, which limits the window of exposure compared with localStorage.
+ */
+const obfuscatedStorage: PersistStorage<PersistedState> = {
+  getItem(name): StorageValue<PersistedState> | null {
+    const raw = sessionStorage.getItem(name);
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw) as StorageValue<PersistedState>;
+    if (parsed?.state?.apiKey) {
+      parsed.state.apiKey = deobfuscate(parsed.state.apiKey);
+    }
+    return parsed;
+  },
+  setItem(name, value): void {
+    // Deep-clone so we never mutate the live Zustand state object.
+    const clone = JSON.parse(
+      JSON.stringify(value),
+    ) as StorageValue<PersistedState>;
+    if (clone?.state?.apiKey) {
+      clone.state.apiKey = obfuscate(clone.state.apiKey);
+    }
+    sessionStorage.setItem(name, JSON.stringify(clone));
+  },
+  removeItem(name): void {
+    sessionStorage.removeItem(name);
+  },
+};
+
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:connection",
   version: 1,
-  // sessionStorage — API key clears when the tab closes, preventing XSS exfiltration
-  // from persistent storage. User re-enters on next session (or populated from env in dev).
-  storage: createJSONStorage(() => sessionStorage),
-  // Only persist credentials — runtime connection state is always re-derived
-  partialize: (state) => ({
+  // sessionStorage — clears on tab close, limiting XSS exfiltration window.
+  // The API key is additionally XOR-obfuscated (see obfuscatedStorage above)
+  // so it does not appear in plain text in DevTools / storage inspectors.
+  storage: obfuscatedStorage,
+  // Only persist credentials — runtime connection state is always re-derived.
+  partialize: (state): PersistedState => ({
     host: state.host,
     apiKey: state.apiKey,
     wsUrl: state.wsUrl,

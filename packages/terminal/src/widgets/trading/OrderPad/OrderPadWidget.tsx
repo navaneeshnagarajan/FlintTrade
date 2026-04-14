@@ -48,7 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { searchSymbol, placeOrder } from "@/services/api";
+import { searchSymbol, placeOrder, getSymbol } from "@/services/api";
 import { useMargin } from "@/hooks/useMargin";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import type { PlaceOrderParams } from "@/types/api";
@@ -394,9 +394,8 @@ function OrderPadWidget(_props: WidgetProps) {
   const [capitalAmount, setCapitalAmount] = useState("");
 
   // Lot size for the current symbol (0 = no lot constraint, e.g. equities).
-  // TODO: populate from instrument master / option chain metadata when symbol changes.
-  const [lotSize, _setLotSize] = useState(0);
-  void _setLotSize; // suppress unused warning — will be wired to symbol metadata
+  // Populated automatically via getSymbol when the symbol or exchange changes.
+  const [lotSize, setLotSize] = useState(0);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -404,7 +403,7 @@ function OrderPadWidget(_props: WidgetProps) {
   const lastParamsRef = useRef<PlaceOrderParams | null>(null);
 
   const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<OrderFormValues>({
-    // zodResolver v5 + zod v4 inferred type mismatch (coerce vs number): cast required
+    // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
     resolver: zodResolver(orderSchema) as unknown as Resolver<OrderFormValues>,
     defaultValues: {
       symbol: "NIFTY",
@@ -446,6 +445,30 @@ function OrderPadWidget(_props: WidgetProps) {
   const calculatedStrike = isOptionsExchange && ltp > 0
     ? calculateStrike(ltp, strikeOffset, strikeGap, symbol)
     : 0;
+
+  // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
+  // On match, qty is set to the instrument's lotsize so the first order is valid.
+  // On no match (symbol not found) the error is swallowed — lot constraint stays 0.
+  useEffect(() => {
+    if (!symbol || !exchange) return;
+    let cancelled = false;
+    const result = getSymbol(symbol, exchange);
+    if (!result || typeof result.then !== "function") return;
+    result.then((info) => {
+        if (cancelled) return;
+        const ls = info.lotsize ?? 0;
+        setLotSize(ls);
+        if (ls > 0) {
+          setValue("qty", ls, { shouldValidate: true });
+        }
+      })
+      .catch(() => {
+        // Symbol not found or API unavailable — leave lot size unchanged
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, exchange, setValue]);
 
   // When the user types an INR capital amount, auto-calculate quantity.
   // If lotSize > 0 the quantity is rounded down to the nearest lot:

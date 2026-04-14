@@ -17,8 +17,7 @@
  */
 
 import { useMemo, useState, useCallback, memo } from "react";
-import { useForm, Controller } from "react-hook-form";
-import type { Resolver } from "react-hook-form";
+import { useForm, Controller, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Calculator, TrendingUp, Layers } from "lucide-react";
@@ -240,7 +239,8 @@ function RiskCalcTab() {
     setValue,
     formState: { errors },
   } = useForm<RiskFormValues>({
-    resolver: zodResolver(riskSchema) as Resolver<RiskFormValues>,
+    // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
+    resolver: zodResolver(riskSchema) as unknown as Resolver<RiskFormValues>,
     defaultValues: {
       capital: 200_000,
       riskPercent: 2,
@@ -407,7 +407,8 @@ function BrokerageCalcTab() {
     watch,
     formState: { errors },
   } = useForm<BrokerageFormValues>({
-    resolver: zodResolver(brokerageSchema) as Resolver<BrokerageFormValues>,
+    // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
+    resolver: zodResolver(brokerageSchema) as unknown as Resolver<BrokerageFormValues>,
     defaultValues: {
       lotSize: 25,
       lots: 1,
@@ -583,7 +584,8 @@ function MarginCalcTab() {
     watch,
     formState: { errors },
   } = useForm<MarginFormValues>({
-    resolver: zodResolver(marginSchema) as Resolver<MarginFormValues>,
+    // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
+    resolver: zodResolver(marginSchema) as unknown as Resolver<MarginFormValues>,
     defaultValues: {
       symbol:   "NIFTY",
       exchange: "NFO",

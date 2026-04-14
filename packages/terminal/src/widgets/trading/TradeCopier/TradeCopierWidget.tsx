@@ -45,6 +45,8 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -114,19 +116,33 @@ const DEFAULT_TARGETS: TargetAccount[] = [
 
 const STORAGE_KEY = "flinttrade:tradecopier";
 
+const copierConfigSchema = z.object({
+  sourceAccountId: z.string(),
+  copyMode: z.enum(["mirror", "proportional"]),
+  targets: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    status: z.enum(["active", "paused", "disconnected"]),
+    enabled: z.boolean(),
+    multiplier: z.number(),
+  })),
+  riskFilter: z.object({
+    maxPositionSize: z.number().nullable(),
+    maxDailyLoss: z.number().nullable(),
+    symbolWhitelist: z.string(),
+  }),
+}) satisfies z.ZodType<CopierConfig>;
+
+const DEFAULT_COPIER_CONFIG: CopierConfig = {
+  sourceAccountId: SAMPLE_ACCOUNTS[0].id,
+  copyMode: "mirror",
+  targets: DEFAULT_TARGETS,
+  riskFilter: { maxPositionSize: null, maxDailyLoss: null, symbolWhitelist: "" },
+};
+
 function loadConfig(): CopierConfig {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as CopierConfig;
-  } catch {
-    // Ignore parse errors
-  }
-  return {
-    sourceAccountId: SAMPLE_ACCOUNTS[0].id,
-    copyMode: "mirror",
-    targets: DEFAULT_TARGETS,
-    riskFilter: { maxPositionSize: null, maxDailyLoss: null, symbolWhitelist: "" },
-  };
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return safeParse(raw, copierConfigSchema) ?? DEFAULT_COPIER_CONFIG;
 }
 
 function saveConfig(config: CopierConfig): void {

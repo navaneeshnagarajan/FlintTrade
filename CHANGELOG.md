@@ -211,6 +211,48 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - WidgetPicker + ToolsDropdown: filter by skill level via allowedIds props
 - SkillBadge in TopBar showing current level with link to Settings
 
+### Added — Waves 24-63 (2026-04-08 to 2026-04-13)
+- Gap audit: 227 repos x 6 agents — 82 items addressed across 5 waves (59-63)
+- Engine: OvertradingGuard, MTM circuit breaker, position reconciliation, RiskEvent, sandbox executor
+- AI: regime detector, structured sentiment, swarm presets, async agents, DI drift, RAG filter
+- Backtest: pairs trading, walk-forward, robustness testing, portfolio optimisers, tearsheet
+- Terminal: ChartGrid, Footprint, DOM Heatmap, ETF screener, shareholding, sentiment panels
+- Desktop: full Rust backend (keychain, auto-logout, webhook server)
+- tick-engine: RaptorBT absorption (pairs/options/spreads, Monte Carlo, Rayon batch)
+- Infra: Docker multi-arch, Makefile Windows, CI macOS+Windows, bash /tmp fix
+- CI split into 5 parallel jobs (python-tests, node-core-tests, node-widget-tests-1, node-widget-tests-2, secrets-check)
+- Node heap increased to 8 GB, singleFork mode to prevent OOM on CI runners
+- 9 large files split into focused modules, shadcn/ui Select migration across terminal
+- Production-readiness pass: imports, accessibility, types, lint across all packages
+
+### Added — Flint Suite Redesign (2026-04-14)
+- Phase 1: Glass Adaptive design system — 16 CSS vars, 13 Tailwind v4 utilities, 6 Aceternity components (FloatingDock, MovingBorder, FocusCards, InfiniteMovingCards, TextGenerateEffect, AnimatedTabs)
+- Phase 1: TopBarV2 (38 px glass chrome), DockSidebar (macOS dock with drag reorder), BentoGrid engine, HomeRoute (12 bento cards), StatusBar
+- Phase 2: Unified Search — 4-tab Ctrl+K command palette (Symbols with live prices, Commands, Widgets, Ask AI). Prefix routing: / commands, # widgets, @ai ask
+- Phase 4: Ticker system — store persistence (tickerMode, tickerSymbols, tickerSpeed), TickerSettings UI with mode selector, speed slider, symbol editor with autocomplete
+- Phase 5: Glass polish across 6 routes (Lab, AI, Admin, Automate, Settings, Ditto)
+- Phase 6: pyproject.toml for all 12 Python packages with hatchling backend, uv workspace config, wheel source mappings for pip install
+- Phase 7: Crawl4AI integration client — scrape(), extract_css(), extract_llm() with SSRF protection
+
+### Fixed — Full Codebase Audit (2026-04-14)
+- Security: SSRF URL validation in Crawl4AI, sample data VPN IPs replaced with RFC 5737
+- Engine: replaced silent except:pass with logger.exception() in strategy_runner, position_tracker, state_manager
+- Core: deferred engine imports in app.py to break circular dependency
+- API: getMultiQuotes type corrected, normaliseMultiQuotes helper added
+- WebSocket: mode 4 (depth v2) handler, reconnectCount + tickAgeMs diagnostics
+- Accessibility: OrderPad form errors linked via aria-describedby, Settings arrow-key nav, AutomateRoute ARIA roles, TickerMarquee sr-only updates, DockSidebar keyboard access, StatusBar contrast + touch targets, loading state announcements, platform-detect Ctrl+K
+- Logging: structlog bridge for all 250+ modules, 5 missing loggers added, proactive Telegram alert methods
+- SQL: parameterised LIMIT binding, column allowlist in trade_journal
+- Imports: intra-package relative imports across all 12 Python packages, gateway bare imports fixed
+- Types: unified Raw* types (rawApi.ts), ESLint config, light mode contrast darkened
+
+### Fixed — Audit Waves 56-57 (2026-04-12)
+- Wave 56: 14 audit findings fixed — JWT-based mode detection, activity log timestamp handling, webhook behaviour changes
+- Wave 57: timer cleanups, npm audit fixes, security fixes, performance guards
+
+### Removed
+- TopBar.tsx (804 LOC dead code, replaced by TopBarV2)
+
 ### Fixed — Code Review (Wave 24)
 - AlertsWidget: fixed stale ltpMap closure causing poll data races (functional setLtpMap update)
 - LegBuilder: fixed mixed UTC/local date accessors in normaliseExpiry (getUTCDate for consistent expiry symbols)

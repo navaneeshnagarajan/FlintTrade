@@ -4,6 +4,8 @@
 // Group state and favourites persist in localStorage.
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import {
   Crosshair,
   Eraser,
@@ -128,11 +130,14 @@ interface ActionItem {
 const LS_ACTIVE_KEY  = "flinttrade:drawtoolbar:active";
 const LS_FAVS_KEY    = "flinttrade:drawtoolbar:favourites";
 
+// Schema validates shape (string keys → string values); DrawToolType narrowing
+// is enforced at write time, so corrupt entries just fall back to default.
+const activeToolsSchema = z.record(z.string(), z.string()) as z.ZodType<Record<string, DrawToolType>>;
+const favouritesSchema  = z.array(z.string()) as z.ZodType<DrawToolType[]>;
+
 function loadActiveTools(): Record<string, DrawToolType> {
-  try {
-    const raw = localStorage.getItem(LS_ACTIVE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, DrawToolType>) : {};
-  } catch { return {}; }
+  const raw = localStorage.getItem(LS_ACTIVE_KEY);
+  return safeParse(raw, activeToolsSchema) ?? {};
 }
 
 function saveActiveTools(map: Record<string, DrawToolType>) {
@@ -140,10 +145,8 @@ function saveActiveTools(map: Record<string, DrawToolType>) {
 }
 
 function loadFavourites(): DrawToolType[] {
-  try {
-    const raw = localStorage.getItem(LS_FAVS_KEY);
-    return raw ? (JSON.parse(raw) as DrawToolType[]) : [];
-  } catch { return []; }
+  const raw = localStorage.getItem(LS_FAVS_KEY);
+  return safeParse(raw, favouritesSchema) ?? [];
 }
 
 function saveFavourites(favs: DrawToolType[]) {

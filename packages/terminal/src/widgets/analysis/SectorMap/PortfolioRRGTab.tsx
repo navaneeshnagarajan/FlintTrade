@@ -13,6 +13,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, X, RefreshCw, AlertCircle, Target, ArrowLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -563,13 +565,9 @@ const DrillDownPanel = memo(function DrillDownPanel({ sector, onBack }: DrillDow
 
 export const PortfolioRRGTab = memo(function PortfolioRRGTab() {
   // Persisted symbol list
-  const [symbols, setSymbols] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem(LS_KEY);
-      if (stored) return JSON.parse(stored) as string[];
-    } catch { /* ignore */ }
-    return [];
-  });
+  const [symbols, setSymbols] = useState<string[]>(() =>
+    safeParse(localStorage.getItem(LS_KEY), z.array(z.string())) ?? [],
+  );
 
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);

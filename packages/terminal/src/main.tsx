@@ -1,4 +1,6 @@
 import React, { lazy, Suspense } from "react";
+import { z } from "zod";
+import { safeParse } from "./lib/safeParse";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import { Provider as JotaiProvider } from "jotai";
@@ -68,19 +70,20 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
  * First-time users (no settings) go to /welcome.
  * Returning users go to their persona's default route.
  */
+const settingsEnvelopeSchema = z.object({
+  state: z.object({ persona: z.string() }).optional(),
+}).optional();
+
 function getInitialRoute(): string {
   const raw = localStorage.getItem("flinttrade:settings");
   if (!raw) return "/welcome";
-  try {
-    const envelope = JSON.parse(raw) as { state?: { persona?: string } };
-    const persona = envelope?.state?.persona;
-    if (!persona) return "/welcome";
-    if (persona === "investor") return "/home";
-    if (persona === "beginner") return "/home";
-    return "/home";
-  } catch {
-    return "/welcome";
-  }
+  const envelope = safeParse(raw, settingsEnvelopeSchema);
+  const persona = envelope?.state?.persona;
+  if (!persona) return "/welcome";
+  // All personas land on /home; kept as separate branches for future routing
+  if (persona === "investor") return "/home";
+  if (persona === "beginner") return "/home";
+  return "/home";
 }
 
 const router = createBrowserRouter([

@@ -12,6 +12,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import {
   Plus,
   Target,
@@ -171,14 +172,21 @@ export function monthsUntil(targetDate: string): number {
 
 const STORAGE_KEY = "flinttrade:investment-goals";
 
+const storedGoalSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  category: z.enum(["retirement", "home", "education", "vacation", "emergency", "custom"]),
+  targetAmount: z.number(),
+  currentSavings: z.number(),
+  monthlySip: z.number(),
+  expectedReturnPct: z.number(),
+  targetDate: z.string(),
+  createdAt: z.string(),
+}) satisfies z.ZodType<InvestmentGoal>;
+
 function loadGoals(): InvestmentGoal[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as InvestmentGoal[];
-  } catch {
-    return [];
-  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return safeParse(raw, z.array(storedGoalSchema)) ?? [];
 }
 
 function saveGoals(goals: InvestmentGoal[]): void {
@@ -377,7 +385,6 @@ function GoalFormDialog({ open, onOpenChange, onSave, editingGoal }: GoalFormDia
     // ZodEffects output type that doesn't satisfy Resolver<GoalFormValues> directly.
     // The double cast (unknown → Resolver) is intentional and safe — the runtime
     // behaviour is correct; only the inferred type diverges from what RHF expects.
-    // Revisit if @hookform/resolvers adds native zod v4 coerce support.
     resolver: zodResolver(goalSchema) as unknown as Resolver<GoalFormValues>,
     defaultValues: editingGoal
       ? {

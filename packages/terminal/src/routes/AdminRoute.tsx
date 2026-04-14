@@ -7,6 +7,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback, type JSX } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X, Activity } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SystemMetricsPanel } from "./admin/SystemMetricsPanel";
@@ -64,6 +66,13 @@ interface LogEntry {
   message: string;
   request_id?: string;
 }
+
+const logEntrySchema = z.object({
+  timestamp: z.string(),
+  level: z.enum(["ERROR", "WARNING", "INFO", "DEBUG"]),
+  message: z.string(),
+  request_id: z.string().optional(),
+}) satisfies z.ZodType<LogEntry>;
 
 // ---------------------------------------------------------------------------
 // Tab IDs
@@ -569,12 +578,9 @@ function LogsPanel(): JSX.Element {
         };
 
         ws.onmessage = (event: MessageEvent): void => {
-          try {
-            const entry = JSON.parse(event.data as string) as LogEntry;
-            appendEntries([entry]);
-          } catch {
-            // Ignore malformed frames.
-          }
+          const entry = safeParse(event.data as string, logEntrySchema);
+          if (entry) appendEntries([entry]);
+          // Malformed frames silently discarded
         };
 
         ws.onerror = (): void => {

@@ -8,8 +8,24 @@
  *   - ai:     AI signal recommendations
  */
 
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
+
 const LS_KEY = "flinttrade:notifications";
 const MAX_STORED = 200;
+
+// ---------------------------------------------------------------------------
+// Zod schema for persistence validation
+// ---------------------------------------------------------------------------
+
+const notificationSchema = z.object({
+  id: z.string(),
+  category: z.enum(["alert", "order", "system", "ai"]),
+  title: z.string(),
+  body: z.string(),
+  timestamp: z.string(),
+  read: z.boolean(),
+});
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,15 +50,8 @@ export type CreateNotificationPayload = Omit<Notification, "id" | "timestamp" | 
 // ---------------------------------------------------------------------------
 
 function load(): Notification[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as Notification[];
-  } catch {
-    return [];
-  }
+  const raw = localStorage.getItem(LS_KEY);
+  return safeParse(raw, z.array(notificationSchema)) ?? [];
 }
 
 function save(items: Notification[]): void {

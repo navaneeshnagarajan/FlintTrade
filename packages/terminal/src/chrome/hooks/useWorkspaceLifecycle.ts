@@ -22,6 +22,8 @@
  */
 
 import { useCallback } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import type { WorkspacePreset } from "@/layout/workspacePresets";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +40,16 @@ export interface WorkspaceMeta {
 
 type WorkspaceStore = Record<string, WorkspaceMeta>;
 
+const workspaceMetaSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  sourcePresetId: z.string().optional(),
+}) satisfies z.ZodType<WorkspaceMeta>;
+
+const workspaceStoreSchema = z.record(z.string(), workspaceMetaSchema) satisfies z.ZodType<WorkspaceStore>;
+
 const STORAGE_KEY = "flinttrade:workspaces";
 
 // ---------------------------------------------------------------------------
@@ -45,17 +57,7 @@ const STORAGE_KEY = "flinttrade:workspaces";
 // ---------------------------------------------------------------------------
 
 export function readWorkspaceStore(): WorkspaceStore {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as WorkspaceStore;
-    }
-    return {};
-  } catch {
-    return {};
-  }
+  return safeParse(localStorage.getItem(STORAGE_KEY), workspaceStoreSchema) ?? {};
 }
 
 export function writeWorkspaceStore(store: WorkspaceStore): void {

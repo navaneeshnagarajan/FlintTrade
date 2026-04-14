@@ -220,27 +220,32 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.5.0-dev — Post-Wave 53 (build sessions 2026-04-07/08/09/10)
-- **Tests:** ~2,500 terminal (Vitest, 227+ files) + ~6,500 Python (pytest) = ~9,000 total
+- **Version:** 0.5.0-dev — Post-Wave 63 + Flint Suite redesign (7 phases) + full codebase audit (2026-04-14)
+- **Tests:** ~2,935 terminal (Vitest, 254+ files) + ~6,310 Python (pytest) = ~9,245 total
 - **CI:** 5 parallel jobs (python-tests, node-core-tests, node-widget-tests-1, node-widget-tests-2, secrets-check)
-- **Terminal:** 80 widgets (TSX) + 7 tools + 13 routes + 12 workspace presets in Dockview v5.1 shell
+- **Terminal:** 83 widgets (TSX) + 7 tools + 13 routes + 13 workspace presets in Dockview v5.1 shell
 - **AI Skills:** 30 markdown files covering trading, analysis, execution, compliance, options, psychology domains
 - **Strategies:** 29 backtest templates + 4 MTM straddle + Wheel + 101 engine strategies
-- **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor
+- **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor, Crawl4AI client
 - **Analytics:** Options payoff engine, regime detector, correlation matrix, portfolio optimiser, order analytics, strategy comparator, multi-phase simulation
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement
 - **Auth:** argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry
-- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
+- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types, no @ts-ignore.
 - **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 3 cinematic themes (Graphite/Midnight/Ember) with dark/light/system variants, density modes, zero arbitrary values
 - **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
+- **Design System:** Glass Adaptive — 16 CSS vars, 13 Tailwind v4 utilities, rgba surfaces with backdrop-filter blur
+- **Shell Chrome:** TopBarV2 (glass, integrated ticker, Ctrl+K search), DockSidebar (macOS dock, drag reorder, auto-hide), BentoGrid (CSS Grid, 12 cards, persona-adaptive), StatusBar
+- **Command Palette:** 4-tab Unified Search (Symbols with live prices, Commands, Widgets, Ask AI), prefix routing
+- **Ticker System:** Configurable marquee (4 modes), symbol editor, settings integration
 - **Onboarding:** Cinematic /welcome, /explore demo mode, setup wizard with persona × interest matrix
-- **Routes:** 13 total — 8 app modules (Learn/Invest/Trade/Lab/Automate/AI/Ditto/Settings) + /welcome + /explore + /setup + /admin + 404
+- **Routes:** 13 total — all with Glass Adaptive styling
 - **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), 20 FlintTrade backend endpoints
-- **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion
+- **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion, OrderPad form a11y, route focus management
+- **Package structure:** 12 Python packages with pyproject.toml + hatchling, uv workspace, wheel source mappings
 - **OpenAlgo:** Tested with broker sandbox, first trade placed
-- **Shell:** TopBar (route tabs, market status, IST clock, ModeIndicator), TickerBar (16 instruments), WidgetPicker, PresetPicker, ToolsDropdown
-- **State:** 7 Zustand stores (connection, layout, settings, trading, theme, skill, mode — connection persisted), Jotai market atoms, 15 TanStack Query hooks, WebSocket + REST fallback
-- **Infrastructure:** Makefile, Docker Compose, systemd templates, GitHub Actions CI (3 jobs)
+- **State:** 7 Zustand stores, Jotai market atoms, 15 TanStack Query hooks, WebSocket + REST fallback
+- **Infrastructure:** Makefile, Docker Compose, systemd templates, GitHub Actions CI
+- **Security:** SSRF protection, API key obfuscation, SQL allowlists, structured logging via structlog
 - **Workspace:** `~/.flinttrade/workspace.json`, cross-platform
 
 ## Decisions Made — DO NOT REVISIT

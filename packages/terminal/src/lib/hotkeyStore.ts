@@ -5,6 +5,9 @@
  * conflict detection and key normalization are testable independently.
  */
 
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -218,25 +221,24 @@ export function findConflict(
 /** Saved overrides: only customized bindings, keyed by ID. */
 type SavedOverrides = Record<string, string[]>;
 
+const savedOverridesSchema = z.record(z.string(), z.array(z.string()));
+
 /**
  * Loads custom hotkey overrides from localStorage.
  * Returns the merged binding list (defaults + overrides).
  */
 export function loadCustomHotkeys(): HotkeyBinding[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [...DEFAULT_HOTKEYS];
-    const overrides: SavedOverrides = JSON.parse(raw) as SavedOverrides;
-    return DEFAULT_HOTKEYS.map((def) => {
-      const custom = overrides[def.id];
-      if (custom && def.customizable) {
-        return { ...def, keys: custom };
-      }
-      return { ...def };
-    });
-  } catch {
-    return [...DEFAULT_HOTKEYS];
-  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return [...DEFAULT_HOTKEYS];
+  const overrides = safeParse(raw, savedOverridesSchema);
+  if (!overrides) return [...DEFAULT_HOTKEYS];
+  return DEFAULT_HOTKEYS.map((def) => {
+    const custom = overrides[def.id];
+    if (custom && def.customizable) {
+      return { ...def, keys: custom };
+    }
+    return { ...def };
+  });
 }
 
 /**
@@ -245,9 +247,7 @@ export function loadCustomHotkeys(): HotkeyBinding[] {
 export function saveHotkeyOverride(id: string, keys: string[]): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const overrides: SavedOverrides = raw
-      ? (JSON.parse(raw) as SavedOverrides)
-      : {};
+    const overrides: SavedOverrides = (raw ? safeParse(raw, savedOverridesSchema) : undefined) ?? {};
     overrides[id] = keys;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
   } catch {
@@ -265,9 +265,11 @@ export function resetHotkeyToDefault(id: string): string[] | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const overrides: SavedOverrides = JSON.parse(raw) as SavedOverrides;
-      delete overrides[id];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+      const overrides = safeParse(raw, savedOverridesSchema);
+      if (overrides) {
+        delete overrides[id];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+      }
     }
   } catch {
     // noop

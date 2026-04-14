@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { z } from "zod";
+import { safeParse, ohlcvCacheSchema } from "@/lib/safeParse";
 import { isMarketHours } from "@/lib/market";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import type { Time } from "lightweight-charts";
@@ -54,6 +56,16 @@ import type {
 
 const DEFAULT_SYMBOL = "NIFTY";
 const DEFAULT_EXCHANGE = "NSE_INDEX";
+
+// Minimal schema — validates that each drawing has required identity fields.
+// Full shape validation would couple this tightly to every Drawing variant;
+// the goal here is catching corrupt blobs (missing kind/id) not strict shape checking.
+// The double cast through unknown is intentional: the schema validates the structural
+// minimum required at runtime; the Drawing discriminated union is enforced at write time.
+const _drawingArraySchemaRaw = z.array(
+  z.object({ kind: z.string(), id: z.string() }).passthrough(),
+);
+const drawingArraySchema = _drawingArraySchemaRaw as unknown as z.ZodType<Drawing[]>;
 
 const STATIC_INTERVALS: IntervalOption[] = [
   { label: "1m",  value: "1m"  },
@@ -296,10 +308,8 @@ function ChartWidget() {
   // Task B: Drawing persistence — load from localStorage keyed by symbol+exchange
   const drawingsStorageKey = `flinttrade:drawings:${symbol}:${exchange}`;
   const [drawings, setDrawings] = useState<Drawing[]>(() => {
-    try {
-      const saved = localStorage.getItem(`flinttrade:drawings:${DEFAULT_SYMBOL}:${DEFAULT_EXCHANGE}`);
-      return saved ? (JSON.parse(saved) as Drawing[]) : [];
-    } catch { return []; }
+    const saved = localStorage.getItem(`flinttrade:drawings:${DEFAULT_SYMBOL}:${DEFAULT_EXCHANGE}`);
+    return safeParse(saved, drawingArraySchema) ?? [];
   });
   const [pendingPoint, setPendingPoint] = useState<DrawingPoint | null>(null);
   const [awaitingText, setAwaitingText] = useState<DrawingPoint | null>(null);
@@ -316,10 +326,7 @@ function ChartWidget() {
 
   // Task B: Reload drawings from localStorage when symbol/exchange changes
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(drawingsStorageKey);
-      setDrawings(saved ? (JSON.parse(saved) as Drawing[]) : []);
-    } catch { setDrawings([]); }
+    setDrawings(safeParse(localStorage.getItem(drawingsStorageKey), drawingArraySchema) ?? []);
   // drawingsStorageKey encodes symbol+exchange — run only when the key changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawingsStorageKey]);
@@ -464,19 +471,14 @@ function ChartWidget() {
       const FIVE_MIN = 5 * 60 * 1000;
 
       // Show cached data immediately while fetching
-      try {
-        const raw = localStorage.getItem(cacheKey);
-        if (raw) {
-          const { data, timestamp } = JSON.parse(raw) as { data: OhlcvBar[]; timestamp: number };
-          if (Array.isArray(data) && data.length > 0) {
-            applyBars(data);
-            // Skip network request if cache is fresh and market is closed
-            if (Date.now() - timestamp < FIVE_MIN && !isMarketHours()) {
-              return;
-            }
-          }
+      const cached = safeParse(localStorage.getItem(cacheKey), ohlcvCacheSchema);
+      if (cached && cached.data.length > 0) {
+        applyBars(cached.data);
+        // Skip network request if cache is fresh and market is closed
+        if (Date.now() - cached.timestamp < FIVE_MIN && !isMarketHours()) {
+          return;
         }
-      } catch { /* corrupt cache entry — proceed to fetch */ }
+      }
 
       try {
         const endDate = formatDate(new Date());

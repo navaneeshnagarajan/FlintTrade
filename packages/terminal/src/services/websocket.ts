@@ -1,4 +1,5 @@
 import type { WsTick, WsMode, WsInstrument } from "@/types/api";
+import { safeParse, wsMessageSchema } from "@/lib/safeParse";
 
 // ---------------------------------------------------------------------------
 // Public handler types
@@ -350,7 +351,8 @@ export class WebSocketService {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data) as Record<string, unknown>;
+        const msg = safeParse(event.data as string, wsMessageSchema);
+        if (!msg) return; // Non-object frame (plain string, binary, corrupt JSON) — discard
 
         // Auth response: { type: "auth", status: "success", message: "Authentication successful" }
         if (msg["type"] === "auth") {
@@ -452,7 +454,7 @@ export class WebSocketService {
           this.modeHandlers["quote"].forEach((cb) => (cb as TickHandler)(tick));
         }
       } catch {
-        console.warn("[WS] Failed to parse message", event.data);
+        console.warn("[WS] Failed to process message", event.data);
       }
     };
   }

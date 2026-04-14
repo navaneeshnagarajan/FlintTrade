@@ -6,6 +6,8 @@
  */
 
 import { create } from "zustand";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import {
   applyNodeChanges,
   applyEdgeChanges,
@@ -98,19 +100,24 @@ interface FlowState {
 
 const LS_KEY = "flinttrade_flowbuilder_v2";
 
+// Minimal schema — nodes/edges are complex React Flow types; we validate the
+// wrapper shape and trust that the flow canvas handles malformed node data
+// gracefully. The key invariant is that `flows` is an array and each entry has
+// an id and name so the sidebar can render correctly.
+const storedDataSchema = z.object({
+  flows: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      nodes: z.array(z.unknown()),
+      edges: z.array(z.unknown()),
+      updatedAt: z.string(),
+    }).passthrough(),
+  ),
+}) as z.ZodType<StoredData>;
+
 function loadStored(): StoredData {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && Array.isArray((parsed as StoredData).flows)) {
-        return parsed as StoredData;
-      }
-    }
-  } catch {
-    // corrupt localStorage — ignore
-  }
-  return { flows: [] };
+  return safeParse(localStorage.getItem(LS_KEY), storedDataSchema) ?? { flows: [] };
 }
 
 function saveStored(data: StoredData): void {

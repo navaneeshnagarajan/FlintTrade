@@ -1,4 +1,6 @@
 import { useState, useMemo, useRef, useCallback } from "react";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import {
   Search,
   BookOpen,
@@ -43,11 +45,7 @@ const SCREENSHOTS_KEY = "flinttrade_journal_screenshots";
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
 
 function loadScreenshots(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(SCREENSHOTS_KEY);
-    if (raw) return JSON.parse(raw) as Record<string, string>;
-  } catch { /* ignore */ }
-  return {};
+  return safeParse(localStorage.getItem(SCREENSHOTS_KEY), z.record(z.string(), z.string())) ?? {};
 }
 
 function saveScreenshots(map: Record<string, string>): void {

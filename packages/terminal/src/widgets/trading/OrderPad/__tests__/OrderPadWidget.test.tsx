@@ -16,6 +16,7 @@ import "@testing-library/jest-dom";
 vi.mock("@/services/api", () => ({
   searchSymbol: vi.fn().mockResolvedValue([]),
   placeOrder: vi.fn().mockResolvedValue({ orderId: "TEST001" }),
+  getSymbol: vi.fn().mockResolvedValue({ symbol: "NIFTY", exchange: "NSE", lotsize: 50, tick_size: 0.05 }),
 }));
 
 vi.mock("@/hooks/useMargin", () => ({

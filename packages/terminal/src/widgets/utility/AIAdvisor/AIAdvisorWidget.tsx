@@ -14,6 +14,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
+import { safeParse, sseTokenSchema, wsMessageSchema } from "@/lib/safeParse";
 import { Send, Bot, User, Loader2, Settings, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -86,10 +87,9 @@ function parseToolCall(content: string): ToolCall | undefined {
     const parts = match[1].split("|").map((s) => s.trim());
     if (parts.length >= 3) {
       let payload: Record<string, unknown> = {};
-      try {
-        payload = parts[3] ? (JSON.parse(parts[3]) as Record<string, unknown>) : {};
-      } catch {
-        // Invalid JSON in payload — ignore
+      if (parts[3]) {
+        // Payload is arbitrary JSON from the AI — validate it's an object, allow any keys.
+        payload = (safeParse(parts[3], wsMessageSchema) ?? {}) as Record<string, unknown>;
       }
       return {
         description: parts[0],
@@ -101,21 +101,17 @@ function parseToolCall(content: string): ToolCall | undefined {
   }
 
   // Pattern 2: JSON block with type: "tool_call"
-  try {
-    const jsonMatch = /\{[\s\S]*"type"\s*:\s*"tool_call"[\s\S]*\}/.exec(content);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-      if (parsed.type === "tool_call") {
-        return {
-          description: (parsed.description as string) ?? "Execute action",
-          endpoint: (parsed.endpoint as string) ?? "",
-          method: ((parsed.method as string) ?? "POST").toUpperCase(),
-          payload: (parsed.payload as Record<string, unknown>) ?? {},
-        };
-      }
+  const jsonMatch = /\{[\s\S]*"type"\s*:\s*"tool_call"[\s\S]*\}/.exec(content);
+  if (jsonMatch) {
+    const parsed = safeParse(jsonMatch[0], wsMessageSchema);
+    if (parsed && parsed["type"] === "tool_call") {
+      return {
+        description: (parsed["description"] as string) ?? "Execute action",
+        endpoint: (parsed["endpoint"] as string) ?? "",
+        method: ((parsed["method"] as string) ?? "POST").toUpperCase(),
+        payload: (parsed["payload"] as Record<string, unknown>) ?? {},
+      };
     }
-  } catch {
-    // Not valid JSON — ignore
   }
 
   return undefined;
@@ -192,15 +188,12 @@ async function streamAdvisorMessage(
         if (!line.startsWith("data: ")) continue;
         const raw = line.slice(6).trim();
         if (!raw || raw === "[DONE]") continue;
-        try {
-          const data = JSON.parse(raw) as { done?: boolean; token?: string };
-          if (data.done) { streamDone = true; break; }
-          if (data.token) {
-            assistantText += data.token;
-            onToken(data.token, assistantText);
-          }
-        } catch {
-          // Malformed SSE line — skip
+        const data = safeParse(raw, sseTokenSchema);
+        if (!data) continue;
+        if (data.done) { streamDone = true; break; }
+        if (data.token) {
+          assistantText += data.token;
+          onToken(data.token, assistantText);
         }
       }
       if (streamDone) break;

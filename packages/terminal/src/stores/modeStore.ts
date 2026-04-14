@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { devtools, persist, createJSONStorage } from "zustand/middleware";
 import type { StateCreator } from "zustand";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,20 +29,19 @@ interface ModeStore {
 // v1 → v2 migration (sessionStorage → localStorage, renamed modes)
 // ---------------------------------------------------------------------------
 
+const v1ModeSchema = z.object({
+  state: z.object({ mode: z.string() }).optional(),
+}).optional();
+
 function migrateFromV1(): AppMode {
-  try {
-    const raw = sessionStorage.getItem("flinttrade:mode");
-    if (!raw) return "explore";
-    const parsed = JSON.parse(raw) as { state?: { mode?: string } };
-    const old = parsed?.state?.mode;
-    if (old === "live") return "live";
-    if (old === "sandbox") return "practice";
-    // "demo" or anything else → explore
-    return "explore";
-  } catch {
-    // Ignore parse errors or missing sessionStorage in test environments
-    return "explore";
-  }
+  const raw = sessionStorage.getItem("flinttrade:mode");
+  if (!raw) return "explore";
+  const parsed = safeParse(raw, v1ModeSchema);
+  const old = parsed?.state?.mode;
+  if (old === "live") return "live";
+  if (old === "sandbox") return "practice";
+  // "demo", corrupt, or anything else → explore
+  return "explore";
 }
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { z } from "zod";
+import { safeParse } from "@/lib/safeParse";
 import {
   SAMPLE_GAP_SCANS,
   SAMPLE_OI_CHANGES,
@@ -169,8 +171,10 @@ function AddToWatchlistBtn({ symbol, exchange }: { symbol: string; exchange: str
   const handleAdd = useCallback(() => {
     try {
       const LS_KEY = "flinttrade:watchlist";
-      const raw = localStorage.getItem(LS_KEY);
-      const list: Array<{ symbol: string; exchange: string }> = raw ? JSON.parse(raw) : [];
+      const list = safeParse(
+        localStorage.getItem(LS_KEY),
+        z.array(z.object({ symbol: z.string(), exchange: z.string() })),
+      ) ?? [];
       const exists = list.some((w) => w.symbol === symbol && w.exchange === exchange);
       if (!exists) {
         list.push({ symbol, exchange });
