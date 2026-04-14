@@ -1,14 +1,14 @@
 [project]
-name = "flint-gateway"
+name = "flint-integration"
 version = "0.5.0"
-description = "Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge"
+description = "TradingView webhooks, ChartInk, custom webhooks, flow builder, Excel bridge, voice orders"
 requires-python = ">=3.12"
 dependencies = [
     "flint-core",
+    "flint-automation",
+    "flask>=3.0",
     "pydantic>=2.0",
     "httpx>=0.27.0",
-    "websockets>=13.0",
-    "cryptography>=46.0.0",
 ]
 
 [build-system]
@@ -21,4 +21,3 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
-pythonpath = ["src", "../.."]

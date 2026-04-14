@@ -1,14 +1,15 @@
 [project]
-name = "flint-gateway"
+name = "flint-historical"
 version = "0.5.0"
-description = "Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge"
+description = "OHLCV downloader, free data sources (OpenChart/yfinance/jugaad), DuckDB pipeline, expiry manager"
 requires-python = ">=3.12"
 dependencies = [
     "flint-core",
-    "pydantic>=2.0",
-    "httpx>=0.27.0",
-    "websockets>=13.0",
-    "cryptography>=46.0.0",
+    "duckdb>=1.0",
+    "flask>=3.0",
+    "yfinance>=0.2",
+    "jugaad-data>=0.31.0",
+    "openchart>=0.1",
 ]
 
 [build-system]
@@ -21,4 +22,3 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
-pythonpath = ["src", "../.."]

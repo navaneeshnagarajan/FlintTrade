@@ -1,14 +1,25 @@
 [project]
-name = "flint-gateway"
+name = "flint-screener"
 version = "0.5.0"
-description = "Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge"
+description = "Option chain, OI analysis, PCR, max pain, portfolio Greeks, IV surface, market scanner"
 requires-python = ">=3.12"
 dependencies = [
     "flint-core",
+    "flint-indicators",
+    "numpy>=1.26.0",
     "pydantic>=2.0",
     "httpx>=0.27.0",
-    "websockets>=13.0",
-    "cryptography>=46.0.0",
+    "flask>=3.0",
+    "duckdb>=1.0",
+]
+
+[project.optional-dependencies]
+greeks = [
+    "py-vollib-vectorized>=0.1",
+    "mibian>=0.1",
+]
+nse = [
+    "nsepython>=0.1",
 ]
 
 [build-system]
@@ -21,4 +32,3 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
-pythonpath = ["src", "../.."]
