@@ -209,6 +209,9 @@ interface StepInputProps {
   step?: number;
   disabled?: boolean;
   placeholder?: string;
+  id?: string;
+  errorId?: string;
+  invalid?: boolean;
 }
 
 function StepInput({
@@ -219,6 +222,9 @@ function StepInput({
   step = 1,
   disabled = false,
   placeholder = "",
+  id,
+  errorId,
+  invalid = false,
 }: StepInputProps) {
   function dec() {
     const n = parseFloat(String(value)) || 0;
@@ -231,7 +237,7 @@ function StepInput({
 
   return (
     <div className="flex flex-col gap-0.5">
-      <label className="text-xxs text-text-muted uppercase tracking-wider">{label}</label>
+      <label htmlFor={id} className="text-xxs text-text-muted uppercase tracking-wider">{label}</label>
       <div className="flex items-stretch h-8">
         <Button
           type="button"
@@ -245,6 +251,7 @@ function StepInput({
           <Minus size={10} />
         </Button>
         <Input
+          id={id}
           type="number"
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -252,6 +259,8 @@ function StepInput({
           min={min}
           step={step}
           placeholder={placeholder}
+          aria-invalid={invalid || undefined}
+          aria-describedby={errorId}
           className="flex-1 min-w-0 bg-surface-hover border-y border-x-0 border-border-default rounded-none px-2 text-xs font-mono tabular-nums text-text-primary text-center focus-visible:ring-0 focus-visible:border-accent disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-text-muted h-8"
         />
         <Button
@@ -276,18 +285,24 @@ interface NumFieldProps {
   onChange: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  id?: string;
+  errorId?: string;
+  invalid?: boolean;
 }
 
-function NumField({ label, value, onChange, disabled = false, placeholder = "" }: NumFieldProps) {
+function NumField({ label, value, onChange, disabled = false, placeholder = "", id, errorId, invalid = false }: NumFieldProps) {
   return (
     <div className="flex flex-col gap-0.5">
-      <label className="text-xxs text-text-muted uppercase tracking-wider">{label}</label>
+      <label htmlFor={id} className="text-xxs text-text-muted uppercase tracking-wider">{label}</label>
       <Input
+        id={id}
         type="number"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         placeholder={placeholder}
+        aria-invalid={invalid || undefined}
+        aria-describedby={errorId}
         className="h-8 w-full bg-surface-hover border border-border-default rounded px-2 text-xs font-mono tabular-nums text-text-primary focus-visible:ring-0 focus-visible:border-accent disabled:opacity-30 disabled:cursor-not-allowed placeholder:text-text-muted"
       />
     </div>
@@ -388,7 +403,7 @@ function OrderPadWidget(_props: WidgetProps) {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastParamsRef = useRef<PlaceOrderParams | null>(null);
 
-  const { control, handleSubmit, watch, setValue } = useForm<OrderFormValues>({
+  const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<OrderFormValues>({
     // zodResolver v5 + zod v4 inferred type mismatch (coerce vs number): cast required
     resolver: zodResolver(orderSchema) as unknown as Resolver<OrderFormValues>,
     defaultValues: {
@@ -641,11 +656,12 @@ function OrderPadWidget(_props: WidgetProps) {
       >
         {/* Symbol search */}
         <div className="flex flex-col gap-0.5" ref={searchRef}>
-          <label className="text-xxs text-text-muted uppercase tracking-wider">Symbol</label>
+          <label htmlFor="orderpad-symbol" className="text-xxs text-text-muted uppercase tracking-wider">Symbol</label>
           <div className="relative">
             <div className="flex items-center gap-1.5 h-9 bg-surface-hover border border-border-default rounded px-2 focus-within:border-accent transition-colors">
               <Search size={12} className="text-text-muted shrink-0" aria-hidden="true" />
               <input
+                id="orderpad-symbol"
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value.toUpperCase())}
@@ -656,6 +672,8 @@ function OrderPadWidget(_props: WidgetProps) {
                 className="flex-1 bg-transparent text-xs font-mono text-text-primary focus:outline-none placeholder:text-text-muted"
                 autoComplete="off"
                 spellCheck={false}
+                aria-invalid={!!errors.symbol || undefined}
+                aria-describedby={errors.symbol ? "orderpad-symbol-error" : undefined}
               />
               {searching && (
                 <Loader2 size={11} className="text-text-muted animate-spin shrink-0" aria-hidden="true" />
@@ -700,6 +718,11 @@ function OrderPadWidget(_props: WidgetProps) {
               </div>
             )}
           </div>
+          {errors.symbol && (
+            <span id="orderpad-symbol-error" role="alert" className="text-xs text-loss mt-0.5">
+              {errors.symbol.message}
+            </span>
+          )}
         </div>
 
         {/* BUY / SELL toggle */}
@@ -884,13 +907,23 @@ function OrderPadWidget(_props: WidgetProps) {
               control={control}
               name="qty"
               render={({ field }) => (
-                <StepInput
-                  label="Quantity"
-                  value={field.value}
-                  onChange={(v) => handleQtyChange(v, field.onChange)}
-                  min={1}
-                  step={lotSize > 0 ? lotSize : 1}
-                />
+                <>
+                  <StepInput
+                    id="orderpad-qty"
+                    label="Quantity"
+                    value={field.value}
+                    onChange={(v) => handleQtyChange(v, field.onChange)}
+                    min={1}
+                    step={lotSize > 0 ? lotSize : 1}
+                    invalid={!!errors.qty}
+                    errorId={errors.qty ? "orderpad-qty-error" : undefined}
+                  />
+                  {errors.qty && (
+                    <span id="orderpad-qty-error" role="alert" className="text-xs text-loss col-span-2 -mt-2">
+                      {errors.qty.message}
+                    </span>
+                  )}
+                </>
               )}
             />
             <Controller
@@ -898,6 +931,7 @@ function OrderPadWidget(_props: WidgetProps) {
               name="price"
               render={({ field }) => (
                 <NumField
+                  id="orderpad-price"
                   label="Price"
                   value={field.value ?? ""}
                   onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
@@ -995,6 +1029,7 @@ function OrderPadWidget(_props: WidgetProps) {
               name="price"
               render={({ field }) => (
                 <NumField
+                  id="orderpad-price-fund"
                   label="Price"
                   value={field.value ?? ""}
                   onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
@@ -1013,6 +1048,7 @@ function OrderPadWidget(_props: WidgetProps) {
             name="trigPrice"
             render={({ field }) => (
               <NumField
+                id="orderpad-trig-price"
                 label="Trigger Price"
                 value={field.value ?? ""}
                 onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
@@ -1026,6 +1062,7 @@ function OrderPadWidget(_props: WidgetProps) {
             name="discQty"
             render={({ field }) => (
               <NumField
+                id="orderpad-disc-qty"
                 label="Disclosed Qty"
                 value={field.value ?? ""}
                 onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}

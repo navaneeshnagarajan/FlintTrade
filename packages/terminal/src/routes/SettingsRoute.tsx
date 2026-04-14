@@ -7,7 +7,7 @@
  * Layout: slim header + left sidebar nav + scrollable content area.
  */
 
-import { useState, useCallback, useEffect, type JSX } from "react";
+import { useState, useCallback, useEffect, useRef, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
 import { RouteBanner } from "@/components/help/RouteBanner";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
@@ -50,6 +50,29 @@ export default function SettingsRoute() {
   const [activeSection, setActiveSection] = useState<SectionId>(initialSection);
   const [toastMsg, setToastMsg]           = useState<string | null>(null);
   const dismissToast                      = useCallback(() => setToastMsg(null), []);
+
+  const tablistRef = useRef<HTMLElement>(null);
+
+  const handleSidebarKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLElement>) => {
+      const keys = ["ArrowUp", "ArrowDown", "Home", "End"];
+      if (!keys.includes(e.key)) return;
+      e.preventDefault();
+      const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+      if (!tabs || tabs.length === 0) return;
+      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
+      let next: number;
+      if (e.key === "ArrowDown") next = (idx + 1) % tabs.length;
+      else if (e.key === "ArrowUp") next = (idx - 1 + tabs.length) % tabs.length;
+      else if (e.key === "Home") next = 0;
+      else next = tabs.length - 1;
+      const nextTab = tabs[next];
+      nextTab?.focus();
+      const sectionId = SECTIONS[next]?.id;
+      if (sectionId) setActiveSection(sectionId);
+    },
+    [],
+  );
 
   // Update hash when section changes for deep-link support
   useEffect(() => {
@@ -143,15 +166,23 @@ export default function SettingsRoute() {
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar nav */}
         <nav
-          className="w-52 flex-none bg-glass-l1 border-r border-glass-l1 overflow-y-auto py-2 shrink-0"
+          ref={tablistRef}
+          role="tablist"
+          aria-orientation="vertical"
           aria-label="Settings sections"
+          className="w-52 flex-none bg-glass-l1 border-r border-glass-l1 overflow-y-auto py-2 shrink-0"
+          onKeyDown={handleSidebarKeyDown}
         >
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
+              role="tab"
+              id={`settings-tab-${id}`}
+              aria-selected={id === activeSection}
+              aria-controls={`settings-tabpanel-${id}`}
+              tabIndex={id === activeSection ? 0 : -1}
               onClick={() => setActiveSection(id)}
-              aria-current={id === activeSection ? "page" : undefined}
               className={`w-full flex items-center gap-2.5 px-3 py-2 font-sans text-sm transition-colors text-left ${
                 id === activeSection
                   ? "bg-accent/10 text-accent border-r-2 border-accent"
@@ -165,7 +196,12 @@ export default function SettingsRoute() {
         </nav>
 
         {/* Content area */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          role="tabpanel"
+          id={`settings-tabpanel-${activeSection}`}
+          aria-labelledby={`settings-tab-${activeSection}`}
+          className="flex-1 overflow-y-auto"
+        >
           <div className="max-w-2xl px-8 py-6">
             {renderContent()}
           </div>

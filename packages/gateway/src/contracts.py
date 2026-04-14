@@ -15,7 +15,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from exceptions import ContractError  # noqa: E402 — sys.path includes gateway/src/
+from .exceptions import ContractError
 
 logger = logging.getLogger("flinttrade.gateway.contracts")
 

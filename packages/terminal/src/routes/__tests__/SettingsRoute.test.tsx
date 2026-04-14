@@ -125,8 +125,8 @@ describe("SettingsRoute", () => {
   it("shows settings sections sidebar navigation", () => {
     render(<SettingsRoute />);
 
-    const nav = screen.getByRole("navigation", { name: /settings sections/i });
-    expect(nav).toBeInTheDocument();
+    const tablist = screen.getByRole("tablist", { name: /settings sections/i });
+    expect(tablist).toBeInTheDocument();
     // Check a sample of section labels exist in the sidebar
     // Use getAllByText since "General" appears in both sidebar and content panel
     expect(screen.getAllByText("General").length).toBeGreaterThanOrEqual(1);

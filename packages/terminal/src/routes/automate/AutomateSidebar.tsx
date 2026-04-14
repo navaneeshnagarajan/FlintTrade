@@ -5,7 +5,7 @@
  * Status dots reflect live state (kill switch, running strategy count).
  */
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Workflow, Clock, Activity, FileText, Settings2, FileCode2, Webhook } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -59,12 +59,38 @@ export default function AutomateSidebar({
   sections = SECTIONS,
 }: AutomateSidebarProps) {
   const [expanded, setExpanded] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLElement>) => {
+      const keys = ["ArrowUp", "ArrowDown", "Home", "End"];
+      if (!keys.includes(e.key)) return;
+      e.preventDefault();
+      const tabs = navRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+      if (!tabs || tabs.length === 0) return;
+      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
+      let next: number;
+      if (e.key === "ArrowDown") next = (idx + 1) % tabs.length;
+      else if (e.key === "ArrowUp") next = (idx - 1 + tabs.length) % tabs.length;
+      else if (e.key === "Home") next = 0;
+      else next = tabs.length - 1;
+      const nextTab = tabs[next];
+      nextTab?.focus();
+      const sectionId = sections[next]?.id;
+      if (sectionId) onSelect(sectionId);
+    },
+    [sections, onSelect],
+  );
 
   return (
     <motion.nav
-      aria-label="Section navigation"
+      ref={navRef}
+      role="tablist"
+      aria-orientation="vertical"
+      aria-label="Automation sections"
       onHoverStart={() => setExpanded(true)}
       onHoverEnd={() => setExpanded(false)}
+      onKeyDown={handleKeyDown}
       animate={{ width: expanded ? 168 : 48 }}
       transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
       className="relative shrink-0 border-r border-border-default bg-surface-card overflow-hidden py-2 flex flex-col gap-0.5"
@@ -88,10 +114,13 @@ export default function AutomateSidebar({
         return (
           <button
             key={section.id}
+            type="button"
             role="tab"
+            id={`automate-tab-${section.id}`}
             aria-selected={isActive}
+            aria-controls={`automate-tabpanel-${section.id}`}
+            tabIndex={isActive ? 0 : -1}
             onClick={() => onSelect(section.id)}
-            aria-current={isActive ? "true" : undefined}
             title={expanded ? undefined : section.label}
             className={`
               relative flex items-center gap-2.5 h-10 px-3 text-sm font-sans

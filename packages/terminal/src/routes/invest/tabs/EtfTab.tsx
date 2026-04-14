@@ -41,7 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getMultiQuotes } from "@/services/api";
+import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { cn } from "@/lib/utils";
@@ -80,7 +80,7 @@ const ETF_SYMBOLS = ETF_UNIVERSE.map((e) => ({ symbol: e.symbol, exchange: e.exc
 function useEtfQuotes() {
   return useQuery<Quote[]>({
     queryKey: ["etf-quotes"],
-    queryFn: () => getMultiQuotes(ETF_SYMBOLS),
+    queryFn: () => getMultiQuotes(ETF_SYMBOLS).then(normaliseMultiQuotes),
     refetchInterval: 30_000,
     retry: 1,
   });

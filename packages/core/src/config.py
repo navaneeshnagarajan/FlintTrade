@@ -5,6 +5,7 @@ Two-tier config model:
   workspace.json  → user preferences (paths, modules, LLM, Telegram, SEBI)
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, field_validator
 
 from .workspace import Workspace
+
+logger = logging.getLogger("flinttrade.core.config")
 
 # Walk up from packages/core/src/ to find repo root .env
 _repo_root = Path(__file__).resolve().parents[3]

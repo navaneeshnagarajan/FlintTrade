@@ -395,8 +395,9 @@ export default function TerminalRoute() {
         <div className="flex-1 overflow-auto">
           <Suspense
             fallback={
-              <div className="flex items-center justify-center h-full text-text-secondary text-sm">
-                Loading tool...
+              <div role="status" className="flex items-center justify-center h-full text-text-secondary text-sm">
+                <span className="sr-only">Loading tool...</span>
+                <span aria-hidden="true">Loading tool...</span>
               </div>
             }
           >

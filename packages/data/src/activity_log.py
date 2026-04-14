@@ -17,10 +17,13 @@ Actions logged:
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+logger = logging.getLogger("flinttrade.data.activity_log")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -205,12 +208,13 @@ class ActivityLog:
             params.append(source)
 
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(int(limit))
         sql = f"""
             SELECT log_id, timestamp, action, user, ip, details, source
             FROM activity_log
             {where}
             ORDER BY timestamp DESC
-            LIMIT {int(limit)}
+            LIMIT ?
         """
         rows = self._conn.execute(sql, params).fetchall()
         result: list[ActivityEntry] = []

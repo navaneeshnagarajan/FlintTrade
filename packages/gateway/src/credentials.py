@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -32,6 +33,8 @@ from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+logger = logging.getLogger("flinttrade.gateway.credentials")
 
 # ---------------------------------------------------------------------------
 # Error class — always defined here so callers get a stable class identity

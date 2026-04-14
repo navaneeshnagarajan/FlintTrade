@@ -199,6 +199,7 @@ def test_risk_allowed_sell() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_execute_blocked_when_not_allowed() -> None:
     agent = make_agent()
     risk = RiskAssessment(allowed=False, reason="test block")
@@ -207,6 +208,7 @@ async def test_execute_blocked_when_not_allowed() -> None:
     assert result["reason"] == "test block"
 
 
+@pytest.mark.asyncio
 async def test_execute_places_order_on_success() -> None:
     agent = make_agent(order_status="success")
     risk = RiskAssessment(allowed=True, position_qty=1, stop_loss=2450.0, take_profit=2600.0)
@@ -216,6 +218,7 @@ async def test_execute_places_order_on_success() -> None:
     assert agent.state.trade_counts["RELIANCE"] == 1
 
 
+@pytest.mark.asyncio
 async def test_execute_updates_last_signal() -> None:
     agent = make_agent(order_status="success")
     risk = RiskAssessment(allowed=True, position_qty=1)
@@ -228,6 +231,7 @@ async def test_execute_updates_last_signal() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_decide_returns_buy() -> None:
     agent = make_agent(llm_response="BUY")
     md = MarketData(symbol="RELIANCE", ltp=2500.0)
@@ -235,6 +239,7 @@ async def test_decide_returns_buy() -> None:
     assert result == TradeSignal.BUY
 
 
+@pytest.mark.asyncio
 async def test_decide_returns_sell() -> None:
     agent = make_agent(llm_response="SELL")
     md = MarketData(symbol="RELIANCE", ltp=2500.0)
@@ -242,6 +247,7 @@ async def test_decide_returns_sell() -> None:
     assert result == TradeSignal.SELL
 
 
+@pytest.mark.asyncio
 async def test_decide_hold_on_invalid_data() -> None:
     agent = make_agent(llm_response="BUY")
     md = MarketData(symbol="RELIANCE", ltp=0.0)
@@ -249,6 +255,7 @@ async def test_decide_hold_on_invalid_data() -> None:
     assert result == TradeSignal.HOLD
 
 
+@pytest.mark.asyncio
 async def test_decide_hold_on_unexpected_llm_output() -> None:
     agent = make_agent(llm_response="MAYBE")
     md = MarketData(symbol="RELIANCE", ltp=2500.0)
@@ -256,6 +263,7 @@ async def test_decide_hold_on_unexpected_llm_output() -> None:
     assert result == TradeSignal.HOLD
 
 
+@pytest.mark.asyncio
 async def test_decide_hold_on_llm_error() -> None:
     agent = make_agent()
     agent.llm.chat.side_effect = RuntimeError("LLM timeout")
@@ -269,6 +277,7 @@ async def test_decide_hold_on_llm_error() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_analyze_returns_market_data() -> None:
     agent = make_agent()
     result = await agent.analyze("RELIANCE")
@@ -277,12 +286,14 @@ async def test_analyze_returns_market_data() -> None:
     assert result.ltp == 100.0
 
 
+@pytest.mark.asyncio
 async def test_analyze_bid_ask_ratio() -> None:
     agent = make_agent()
     result = await agent.analyze("RELIANCE")
     assert result.bid_ask_ratio == pytest.approx(500 / 400)
 
 
+@pytest.mark.asyncio
 async def test_analyze_all_returns_all_symbols() -> None:
     agent = make_agent(symbols=["RELIANCE", "ICICIBANK"])
     results = await agent.analyze_all()
@@ -295,6 +306,7 @@ async def test_analyze_all_returns_all_symbols() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_monitor_closes_on_stop_loss() -> None:
     agent = make_agent(quotes_ltp=90.0)  # LTP dropped to 90
     agent.state.active_positions["RELIANCE"] = 100.0
@@ -311,6 +323,7 @@ async def test_monitor_closes_on_stop_loss() -> None:
     assert agent.state.daily_pnl == pytest.approx(-10.0)
 
 
+@pytest.mark.asyncio
 async def test_monitor_closes_on_take_profit() -> None:
     agent = make_agent(quotes_ltp=112.0)
     agent.state.active_positions["RELIANCE"] = 100.0
@@ -327,6 +340,7 @@ async def test_monitor_closes_on_take_profit() -> None:
     assert agent.state.daily_pnl == pytest.approx(12.0)
 
 
+@pytest.mark.asyncio
 async def test_monitor_no_close_within_range() -> None:
     agent = make_agent(quotes_ltp=102.0)
     agent.state.active_positions["RELIANCE"] = 100.0

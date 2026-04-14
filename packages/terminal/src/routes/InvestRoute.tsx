@@ -138,8 +138,9 @@ const FULL_HEIGHT_TABS: TabId[] = ["holdings"];
  */
 function TabFallback() {
   return (
-    <div className="flex items-center justify-center py-12">
-      <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+    <div role="status" className="flex items-center justify-center py-12">
+      <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" aria-hidden="true" />
+      <span className="sr-only">Loading...</span>
     </div>
   );
 }

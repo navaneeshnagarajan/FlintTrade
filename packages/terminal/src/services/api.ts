@@ -216,10 +216,55 @@ export const optionsMultiOrder = (params: object) => postOrder<{ orderId: string
 export const splitOrder = (params: object) => postOrder<{ orderId: string }>("splitorder", params);
 
 // --- Data ---
+
+/**
+ * Shape returned by the OpenAlgo /multiquotes endpoint.
+ * Each element is a per-symbol wrapper containing the quote payload under `data`.
+ */
+export interface MultiQuoteResult {
+  symbol: string;
+  exchange: string;
+  data: Quote;
+}
+
 export const getQuotes = (symbol: string, exchange = "NSE") =>
   post<Quote>("quotes", { symbol, exchange });
+
+/**
+ * Fetch quotes for multiple symbols in one request.
+ *
+ * OpenAlgo returns `{ results: MultiQuoteResult[], status }` which the `post<T>`
+ * helper unwraps to `{ results: MultiQuoteResult[] }`.  Some broker adapters may
+ * return a flat `Quote[]` directly — the union type covers both shapes.
+ * Callers should check `Array.isArray(result)` vs `"results" in result`,
+ * or use `normaliseMultiQuotes()` to get a flat `Quote[]` in one step.
+ */
 export const getMultiQuotes = (symbols: Array<{ symbol: string; exchange: string }>) =>
-  post<Quote[]>("multiquotes", { symbols });
+  post<{ results: MultiQuoteResult[] } | MultiQuoteResult[]>("multiquotes", { symbols });
+
+/**
+ * Normalise the `getMultiQuotes` response into a flat `Quote[]`.
+ *
+ * Handles both shapes returned by different OpenAlgo broker adapters:
+ *  - `{ results: [{ symbol, exchange, data: Quote }, ...] }` — standard v2 shape
+ *  - `MultiQuoteResult[]` — flat array of wrapper objects
+ *  - `Quote[]` — some adapters return flat quotes directly (no `data` wrapper)
+ *
+ * The returned quotes always have `symbol` and `exchange` fields set.
+ */
+export function normaliseMultiQuotes(
+  raw: { results: MultiQuoteResult[] } | MultiQuoteResult[],
+): Quote[] {
+  const items: MultiQuoteResult[] = Array.isArray(raw) ? raw : raw.results ?? [];
+  return items.map((item) => {
+    // Standard shape: item.data is the Quote payload
+    if (item.data && typeof item.data === "object") {
+      return { ...item.data, symbol: item.symbol, exchange: item.exchange };
+    }
+    // Flat shape: the item itself is the Quote (broker adapter omits the `data` wrapper)
+    return item as unknown as Quote;
+  });
+}
 export const getDepth = (symbol: string, exchange = "NSE") =>
   post<MarketDepth>("depth", { symbol, exchange });
 export const getHistory = (

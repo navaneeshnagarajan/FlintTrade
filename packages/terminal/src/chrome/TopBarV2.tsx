@@ -237,6 +237,9 @@ function Avatar() {
 // SearchButton
 // ---------------------------------------------------------------------------
 
+const isMac =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
 function SearchButton() {
   const handleClick = useCallback(() => {
     window.dispatchEvent(new CustomEvent("flinttrade:open-command-palette"));
@@ -254,13 +257,15 @@ function SearchButton() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  const shortcutHint = isMac ? "⌘K" : "Ctrl+K";
+
   return (
     <Button
       variant="ghost"
       size="sm"
       className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
       onClick={handleClick}
-      aria-label="Search (Ctrl+K)"
+      aria-label={`Search (${shortcutHint})`}
       data-testid="search-btn"
     >
       <Search className="h-3.5 w-3.5" aria-hidden="true" />
@@ -269,7 +274,7 @@ function SearchButton() {
         className="hidden sm:inline-flex items-center rounded border border-border-default px-1 text-xxs text-text-muted/60 font-mono leading-none"
         aria-hidden="true"
       >
-        ⌘K
+        {shortcutHint}
       </kbd>
     </Button>
   );

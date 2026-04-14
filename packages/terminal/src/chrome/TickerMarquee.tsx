@@ -178,6 +178,14 @@ export default function TickerMarquee({
   const atomSymbols = useAtomValue(indicesSummaryAtom);
   const symbols: TickerSymbol[] = propSymbols ?? atomSymbols;
 
+  // Counter bumped every 30 s to force aria-live re-announcement of current prices
+  const [announceKey, setAnnounceKey] = useState(0);
+  useEffect(() => {
+    if (mode === "off") return;
+    const timer = setInterval(() => setAnnounceKey((k) => k + 1), 30_000);
+    return () => clearInterval(timer);
+  }, [mode]);
+
   if (mode === "off" || symbols.length === 0) return null;
 
   // ── Pinned mode: static row, no scroll ──────────────────────────────────
@@ -267,8 +275,9 @@ export default function TickerMarquee({
         <TickerStrip symbols={symbols} />
       </div>
 
-      {/* Screen-reader accessible summary (one polite region, not per-tick) */}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
+      {/* Screen-reader accessible summary — key change every 30 s triggers re-announcement */}
+      <span key={announceKey} className="sr-only" aria-live="polite" aria-atomic="true">
+        {"Market prices: "}
         {symbols
           .filter((s) => s.data?.ltp != null && (s.data.ltp ?? 0) > 0)
           .map((s) => `${s.name} ${s.data!.ltp}`)

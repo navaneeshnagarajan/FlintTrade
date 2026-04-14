@@ -108,9 +108,15 @@ export default function AutomateRoute() {
         />
 
         <ScrollArea className="flex-1">
-          <TabTransition tabKey={activeSection} className="p-6 max-w-4xl mx-auto">
-            {sectionContent[activeSection]}
-          </TabTransition>
+          <div
+            role="tabpanel"
+            id={`automate-tabpanel-${activeSection}`}
+            aria-labelledby={`automate-tab-${activeSection}`}
+          >
+            <TabTransition tabKey={activeSection} className="p-6 max-w-4xl mx-auto">
+              {sectionContent[activeSection]}
+            </TabTransition>
+          </div>
         </ScrollArea>
       </div>
 

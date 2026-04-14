@@ -559,7 +559,11 @@ class UserStrategyRunner:
             try:
                 entry.log_file.close()
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to close log file handle for strategy %s (id=%s)",
+                    entry.name,
+                    strategy_id,
+                )
 
         # Clean up the per-run temporary directory
         self._cleanup_temp_dir(entry.temp_dir)
@@ -588,7 +592,10 @@ class UserStrategyRunner:
             try:
                 self.stop(strategy_id)
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to stop strategy %s before deletion; proceeding with file removal",
+                    strategy_id,
+                )
 
         # Remove files
         strategy_path.unlink(missing_ok=True)

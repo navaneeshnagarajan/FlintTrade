@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import TopBarV2 from "@/chrome/TopBarV2";
 import DockSidebar from "@/chrome/DockSidebar";
@@ -81,6 +81,15 @@ export default function AppLayout() {
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Route focus management — move keyboard focus to <main> on every route change.
+  // This ensures screen-reader users and keyboard-only users land at the new
+  // content boundary rather than remaining wherever focus was before navigation.
+  // preventScroll avoids a visual jump when the main area is already in view.
+  const mainRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    mainRef.current?.focus({ preventScroll: true });
+  }, [location.pathname]);
   // Practice mode drives the persistent amber indicator bar.
   // Mode is now owned exclusively by modeStore — settingsStore no longer has sandboxMode.
   const mode = useModeStore((s) => s.mode);
@@ -214,7 +223,13 @@ export default function AppLayout() {
       {/* Issue #54: aria-label on main landmark mirrors the route title */}
       <div className="flex flex-1 overflow-hidden">
         <DockSidebar />
-        <main id="main-content" aria-label={routeTitle} className="flex-1 overflow-hidden">
+        <main
+          id="main-content"
+          ref={mainRef}
+          tabIndex={-1}
+          aria-label={routeTitle}
+          className="flex-1 overflow-hidden outline-none"
+        >
           <h1 className="sr-only">{routeTitle}</h1>
           <PageTransition locationKey={location.pathname}>
             <Outlet />

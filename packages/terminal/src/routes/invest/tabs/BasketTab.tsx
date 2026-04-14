@@ -54,7 +54,7 @@ import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { cn } from "@/lib/utils";
-import { getMultiQuotes } from "@/services/api";
+import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { formatINR, formatPercent } from "../formatters";
@@ -168,9 +168,9 @@ function useBasketQuotes(baskets: StockBasket[]) {
     queryKey: ["basket-quotes", allSymbols.map((s) => s.symbol).join(",")],
     queryFn: async () => {
       if (allSymbols.length === 0) return {};
-      const quotes = await getMultiQuotes(allSymbols);
+      const raw = await getMultiQuotes(allSymbols);
       const map: Record<string, Quote> = {};
-      for (const q of quotes) {
+      for (const q of normaliseMultiQuotes(raw)) {
         map[q.symbol] = q;
       }
       return map;

@@ -214,17 +214,30 @@ function DockSeparator({ id }: { id: string }) {
 
 interface AutoHideStripProps {
   onEnter: () => void;
+  onLeave: () => void;
 }
 
-function AutoHideStrip({ onEnter }: AutoHideStripProps) {
+function AutoHideStrip({ onEnter, onLeave }: AutoHideStripProps) {
   return (
     <motion.div
       data-testid="auto-hide-strip"
       className="h-full cursor-pointer"
       style={{ width: WIDTH_STRIP }}
+      tabIndex={0}
+      role="button"
+      aria-label="Expand navigation sidebar"
+      onFocus={onEnter}
+      onBlur={onLeave}
+      onKeyDown={(e: React.KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onEnter();
+        }
+      }}
       onHoverStart={onEnter}
       initial={{ opacity: 0.6 }}
       whileHover={{ opacity: 1 }}
+      whileFocus={{ opacity: 1 }}
       transition={{ duration: 0.2 }}
     >
       <div
@@ -321,7 +334,7 @@ export default function DockSidebar() {
         style={{ width: WIDTH_STRIP }}
         onMouseEnter={handleMouseEnter}
       >
-        <AutoHideStrip onEnter={handleMouseEnter} />
+        <AutoHideStrip onEnter={handleMouseEnter} onLeave={handleMouseLeave} />
       </aside>
     );
   }

@@ -39,9 +39,8 @@ from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 from packages.core.src.config import Settings  # noqa: E402
 from packages.core.src.openalgo_client import OpenAlgoClient  # noqa: E402
 from packages.data.src.audit_logger import AuditLogger  # noqa: E402
-from packages.engine.src.router import OrderRouter  # noqa: E402
-from packages.engine.src.safety import SafetyConfig, SafetySystem  # noqa: E402
-from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler  # noqa: E402
+# engine imports are deferred into FlintTradeApp.__init__() to break the
+# core↔engine circular import.  See PLC0415 comments throughout this file.
 # Heavy optional modules are imported lazily inside FlintTradeApp.__init__()
 # to avoid a 2-5 s startup penalty when ChromaDB / LLM / Telegram deps load.
 # CronManager, TelegramBot, LLMClient, LLMConfig, RAGEngine
@@ -113,8 +112,8 @@ def _read_version() -> str:
 
 
 def create_flask_app(
-    safety: SafetySystem | None = None,
-    scheduler: StrategyScheduler | None = None,
+    safety: Any | None = None,
+    scheduler: Any | None = None,
     cron: Any | None = None,
     audit: AuditLogger | None = None,
     client: OpenAlgoClient | None = None,
@@ -161,6 +160,33 @@ def create_flask_app(
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+    # ------------------------------------------------------------------
+    # Bridge stdlib logging through structlog so that ALL 250+ modules
+    # using logging.getLogger() emit structured output via the same
+    # pipeline as structlog calls.  We attach a ProcessorFormatter to
+    # the root logger exactly once (guarded by a sentinel attribute on
+    # the handler to prevent duplicate handlers across test reruns or
+    # multiple create_flask_app() calls in the same process).
+    # ------------------------------------------------------------------
+    _sentinel_attr = "_flinttrade_structlog_bridge"
+    _root_logger = logging.getLogger()
+    if not any(getattr(h, _sentinel_attr, False) for h in _root_logger.handlers):
+        _bridge_formatter = structlog.stdlib.ProcessorFormatter(
+            processors=[
+                structlog.stdlib.add_log_level,
+                structlog.stdlib.add_logger_name,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.JSONRenderer()
+                if not app.debug
+                else structlog.dev.ConsoleRenderer(),
+            ],
+        )
+        _bridge_handler = logging.StreamHandler()
+        _bridge_handler.setFormatter(_bridge_formatter)
+        setattr(_bridge_handler, _sentinel_attr, True)
+        _root_logger.addHandler(_bridge_handler)
+        _root_logger.setLevel(logging.INFO)
 
     # ------------------------------------------------------------------
     # CORS — allow requests from the Vite dev server and any origins
@@ -705,7 +731,12 @@ class FlintTradeApp:
         self.settings = Settings.from_env()
         self.client = OpenAlgoClient(self.settings)
 
-        # Engine — safety + router + scheduler
+        # Engine — safety + router + scheduler (deferred to avoid circular import
+        # between core↔engine at module level).
+        from packages.engine.src.router import OrderRouter  # noqa: PLC0415
+        from packages.engine.src.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
+        from packages.engine.src.scheduler import StrategyScheduler, TimeScheduler  # noqa: PLC0415
+
         self.safety = SafetySystem(SafetyConfig(check_market_hours=True))
         self.router = OrderRouter(
             client=self.client,

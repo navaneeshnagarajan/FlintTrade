@@ -87,6 +87,37 @@ _IDX_JOURNAL = [
     "CREATE INDEX IF NOT EXISTS idx_journal_entry_time ON journal_entries (entry_time)",
 ]
 
+# ---------------------------------------------------------------------------
+# SQL column allowlist — prevents SQL injection via dynamic SET clauses.
+# Only mutable user-facing columns are listed here.  Computed columns
+# (pnl, pnl_pct, risk_reward_ratio) and immutable columns (id, created_at)
+# are excluded because they are either recomputed by the model validator or
+# must never change after insertion.
+# ---------------------------------------------------------------------------
+
+_ALLOWED_COLUMNS: frozenset[str] = frozenset({
+    "symbol",
+    "exchange",
+    "side",
+    "quantity",
+    "entry_price",
+    "exit_price",
+    "entry_time",
+    "exit_time",
+    "strategy",
+    "tags",
+    "notes",
+    "screenshot_path",
+    "emotion_before",
+    "emotion_after",
+    "setup_quality",
+    "execution_quality",
+    "pnl",
+    "pnl_pct",
+    "risk_reward_ratio",
+    "updated_at",
+})
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -589,8 +620,9 @@ class TradeJournal:
         updated = JournalEntry.model_validate(current_data)
 
         row = _entry_to_row(updated)
-        # Build SET clause excluding id and created_at; pass only those params + id.
-        set_keys = [k for k in row if k not in ("id", "created_at")]
+        # Build SET clause — filter through allowlist to prevent SQL injection,
+        # and exclude immutable columns (id, created_at).
+        set_keys = [k for k in row if k in _ALLOWED_COLUMNS and k not in ("id", "created_at")]
         set_clause = ", ".join(f"{k} = ${k}" for k in set_keys)
         update_params = {k: row[k] for k in set_keys}
         update_params["id"] = row["id"]

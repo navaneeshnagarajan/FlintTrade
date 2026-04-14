@@ -43,43 +43,25 @@ export default function StatusBar({ cardCount, layoutName }: StatusBarProps) {
       data-testid="status-bar"
       role="status"
       aria-label="Dashboard status bar"
+      className="flex items-center justify-between shrink-0 px-3 text-[10px] tracking-[0.02em]"
       style={{
         height: "24px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "0 12px",
         background: "var(--glass-chrome-bg, rgba(12,12,20,0.85))",
         borderTop: "1px solid var(--glass-chrome-border, rgba(255,255,255,0.05))",
         backdropFilter: "var(--glass-blur, blur(16px))",
-        flexShrink: 0,
       }}
     >
       {/* Left */}
-      <p
-        style={{
-          fontSize: "10px",
-          color: "var(--color-text-muted, #505068)",
-          letterSpacing: "0.02em",
-        }}
-      >
+      <p className="text-text-muted">
         <span data-testid="status-bar-card-count">{displayCount}</span>
         {" cards · Drag to rearrange"}
       </p>
 
       {/* Right */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "12px",
-          fontSize: "10px",
-          color: "var(--color-text-muted, #505068)",
-        }}
-      >
+      <div className="flex items-center gap-3 text-text-muted">
         <span>
           Layout:{" "}
-          <span style={{ color: "#9090b0" }} data-testid="status-bar-layout-name">
+          <span className="text-text-secondary" data-testid="status-bar-layout-name">
             {displayLayout}
           </span>
         </span>
@@ -88,15 +70,12 @@ export default function StatusBar({ cardCount, layoutName }: StatusBarProps) {
           type="button"
           onClick={handleSave}
           disabled={isSaving}
-          style={{
-            fontSize: "10px",
-            color: isSaving ? "#22c55e" : "#6b6b8a",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
-            transition: "color 150ms ease",
-          }}
+          className={[
+            "min-h-6 px-2 py-1 rounded text-[10px] bg-transparent border-0 cursor-pointer",
+            "transition-colors duration-150 outline-none",
+            "focus-visible:ring-1 focus-visible:ring-(--color-accent,#6366f1)",
+            isSaving ? "text-profit" : "text-text-muted hover:text-text-primary",
+          ].join(" ")}
           aria-label="Save current layout"
         >
           {isSaving ? "Saved" : "Save"}
@@ -104,14 +83,11 @@ export default function StatusBar({ cardCount, layoutName }: StatusBarProps) {
 
         <button
           type="button"
-          style={{
-            fontSize: "10px",
-            color: "#6b6b8a",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
-          }}
+          className={[
+            "min-h-6 px-2 py-1 rounded text-[10px] bg-transparent border-0 cursor-pointer",
+            "text-text-muted hover:text-text-primary transition-colors duration-150 outline-none",
+            "focus-visible:ring-1 focus-visible:ring-(--color-accent,#6366f1)",
+          ].join(" ")}
           aria-label="View presets"
         >
           Presets
@@ -120,14 +96,11 @@ export default function StatusBar({ cardCount, layoutName }: StatusBarProps) {
         <button
           type="button"
           onClick={resetToDefault}
-          style={{
-            fontSize: "10px",
-            color: "#6b6b8a",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
-          }}
+          className={[
+            "min-h-6 px-2 py-1 rounded text-[10px] bg-transparent border-0 cursor-pointer",
+            "text-text-muted hover:text-text-primary transition-colors duration-150 outline-none",
+            "focus-visible:ring-1 focus-visible:ring-(--color-accent,#6366f1)",
+          ].join(" ")}
           aria-label="Reset layout to default"
         >
           Reset

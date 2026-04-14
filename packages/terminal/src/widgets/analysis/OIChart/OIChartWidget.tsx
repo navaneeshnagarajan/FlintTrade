@@ -582,9 +582,10 @@ function OIChartWidget() {
           </div>
         ) : (
           <Suspense fallback={
-            <div className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
-              <RefreshCw size={13} className="animate-spin" />
-              Loading chart…
+            <div role="status" className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
+              <RefreshCw size={13} className="animate-spin" aria-hidden="true" />
+              <span className="sr-only">Loading chart...</span>
+              <span aria-hidden="true">Loading chart…</span>
             </div>
           }>
             <PlotlyChart

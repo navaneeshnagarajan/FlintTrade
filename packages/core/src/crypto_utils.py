@@ -9,8 +9,11 @@ All amounts are in USD or INR depending on the quote currency of the pair.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Final
+
+logger = logging.getLogger("flinttrade.core.crypto_utils")
 
 
 # ---------------------------------------------------------------------------

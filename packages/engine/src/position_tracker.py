@@ -842,7 +842,7 @@ class PositionTracker:
             try:
                 self._conn.close()
             except Exception:
-                pass
+                logger.exception("Failed to close DuckDB connection in PositionTracker")
             self._conn = None
 
     def __del__(self) -> None:

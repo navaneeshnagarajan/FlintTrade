@@ -44,6 +44,11 @@ export class WebSocketService {
   private connected = false;
   private shouldConnect = false;
 
+  /** Cumulative count of reconnection attempts since the service was created. */
+  private reconnectCount = 0;
+  /** `Date.now()` timestamp of the last tick received (0 = no ticks yet). */
+  private lastTickTimestamp = 0;
+
   // Legacy broadcast callbacks — kept for backward compatibility.
   private tickCallbacks = new Set<TickCallback>();
   private depthCallbacks = new Set<(data: Record<string, unknown>) => void>();
@@ -65,6 +70,21 @@ export class WebSocketService {
   constructor(private url: string, private apiKey: string = "") {}
 
   get isConnected(): boolean { return this.connected; }
+
+  /**
+   * Diagnostic snapshot useful for health panels and debugging.
+   *
+   * - `reconnectCount` — number of reconnection attempts since service creation.
+   * - `lastTickTimestamp` — `Date.now()` value of the last tick received (0 = none yet).
+   * - `tickAgeMs` — milliseconds since the last tick (-1 if no ticks ever received).
+   */
+  get diagnostics(): { reconnectCount: number; lastTickTimestamp: number; tickAgeMs: number } {
+    return {
+      reconnectCount: this.reconnectCount,
+      lastTickTimestamp: this.lastTickTimestamp,
+      tickAgeMs: this.lastTickTimestamp > 0 ? Date.now() - this.lastTickTimestamp : -1,
+    };
+  }
 
   onTick(cb: TickCallback): () => void {
     this.tickCallbacks.add(cb);
@@ -378,6 +398,10 @@ export class WebSocketService {
 
         const exchange = typeof tickData["exchange"] === "string" ? tickData["exchange"] : "";
 
+        // Record the arrival time of every confirmed market-data tick.
+        // Used by diagnostics.tickAgeMs to detect stale/frozen data feeds.
+        this.lastTickTimestamp = Date.now();
+
         // Depth mode (mode 3) sends bids/asks without ltp
         if (Array.isArray(tickData["bids"]) || Array.isArray(tickData["asks"])) {
           // Legacy broadcast
@@ -416,6 +440,12 @@ export class WebSocketService {
           this.modeHandlers["quote"].forEach((cb) => (cb as TickHandler)(tick));
         } else if (wsMode === 1) {
           this.modeHandlers["ltp"].forEach((cb) => (cb as TickHandler)(tick));
+        } else if (wsMode === 4) {
+          // Mode 4 = Depth (OpenAlgo v2 wire format). The bids/asks check above
+          // already handles depth messages that carry explicit bids/asks arrays.
+          // This branch handles depth ticks where the broker adapter also sends
+          // an ltp field alongside the depth payload (tick is already assembled).
+          this.modeHandlers["depth"].forEach((handler) => (handler as DepthTickHandler)(tickData));
         } else {
           // Unknown or missing mode — dispatch to all non-depth mode handlers.
           this.modeHandlers["ltp"].forEach((cb) => (cb as TickHandler)(tick));
@@ -509,6 +539,7 @@ export class WebSocketService {
 
   private scheduleReconnect(): void {
     if (!this.shouldConnect) return;
+    this.reconnectCount++;
     // Exponential backoff with jitter: base 1s, multiplier 2, max 30s, jitter +/-500ms
     const jitter = Math.round((Math.random() - 0.5) * 1000); // -500ms to +500ms
     const delay = Math.max(0, Math.min(this.reconnectDelay + jitter, this.maxDelay));

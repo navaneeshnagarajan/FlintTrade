@@ -197,6 +197,9 @@ class TelegramBot:
         self.audit = audit_logger
         self._handlers: dict[str, Callable[..., Any]] = {}
         self._command_log: list[CommandResult] = []
+        # Populated in start() once python-telegram-bot is available.
+        self._bot: Any | None = None
+        self._chat_id: str = self.config.chat_id
 
     @property
     def command_log(self) -> list[CommandResult]:
@@ -515,6 +518,71 @@ class TelegramBot:
             return False
 
     # ------------------------------------------------------------------
+    # Proactive alert dispatcher
+    # ------------------------------------------------------------------
+
+    async def send_alert(self, message: str, severity: str = "INFO") -> None:
+        """Send a proactive alert to the configured chat ID.
+
+        Args:
+            message: Alert body text (plain string; Markdown is handled here).
+            severity: One of ``"P0"`` (critical), ``"P1"`` (warning),
+                ``"P2"`` (info), or any string (defaults to megaphone prefix).
+                ``"INFO"`` maps to the megaphone prefix for backwards
+                compatibility.
+        """
+        prefix = {"P0": "\U0001f6a8", "P1": "\u26a0\ufe0f", "P2": "\u2139\ufe0f"}.get(severity, "\U0001f4e2")
+        text = f"{prefix} *FlintTrade Alert*\n{message}"
+        try:
+            if self._bot and self._chat_id:
+                await self._bot.send_message(
+                    chat_id=self._chat_id,
+                    text=text,
+                    parse_mode="Markdown",
+                )
+        except Exception:
+            logger.exception("Failed to send Telegram alert: %s", message)
+
+    async def alert_broker_disconnect(self, broker_name: str = "broker") -> None:
+        """Send a P1 alert when a broker connection is lost.
+
+        Args:
+            broker_name: Human-readable broker label for the alert body.
+        """
+        await self.send_alert(
+            f"Broker disconnected: {broker_name}. Reconnecting...",
+            "P1",
+        )
+
+    async def alert_position_mismatch(self, details: str) -> None:
+        """Send a P1 alert when position reconciliation detects a mismatch.
+
+        Args:
+            details: Human-readable description of the discrepancy.
+        """
+        await self.send_alert(
+            f"Position reconciliation mismatch:\n{details}",
+            "P1",
+        )
+
+    async def alert_kill_switch(self, reason: str) -> None:
+        """Send a P0 critical alert when the kill switch is activated.
+
+        Args:
+            reason: Free-text reason explaining why the kill switch fired.
+        """
+        await self.send_alert(f"KILL SWITCH ACTIVATED: {reason}", "P0")
+
+    async def alert_error_rate(self, rate: float, window: str) -> None:
+        """Send a P2 informational alert about elevated error rates.
+
+        Args:
+            rate: Error rate as a fraction (e.g. ``0.15`` for 15 %).
+            window: Human-readable time window (e.g. ``"5 min"``).
+        """
+        await self.send_alert(f"Error rate {rate:.1%} over {window}", "P2")
+
+    # ------------------------------------------------------------------
     # Polling loop (uses python-telegram-bot)
     # ------------------------------------------------------------------
 
@@ -531,6 +599,7 @@ class TelegramBot:
             raise ImportError("python-telegram-bot required — pip install python-telegram-bot")
 
         app = ApplicationBuilder().token(self.config.token).build()
+        self._bot = app.bot
 
         async def _handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not update.message or not update.message.text:

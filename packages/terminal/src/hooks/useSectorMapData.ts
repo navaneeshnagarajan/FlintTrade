@@ -8,7 +8,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { getMultiQuotes } from "@/services/api";
+import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import { useModeStore } from "@/stores/modeStore";
 import { isMarketHours } from "@/lib/market";
 import type { Quote } from "@/types/api";
@@ -138,8 +138,8 @@ export function useSectorMapData(): {
   const query = useQuery<SectorStockData[]>({
     queryKey: ["sectormap-quotes"],
     queryFn: async () => {
-      const quotes = await getMultiQuotes(ALL_SYMBOLS);
-      return quotesToStockData(quotes);
+      const raw = await getMultiQuotes(ALL_SYMBOLS);
+      return quotesToStockData(normaliseMultiQuotes(raw));
     },
     enabled: isLive,
     staleTime: 15_000,

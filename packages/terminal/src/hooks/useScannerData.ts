@@ -14,7 +14,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useModeStore } from "@/stores/modeStore";
-import { getMultiQuotes } from "@/services/api";
+import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
 import {
   SAMPLE_GAP_SCANS,
@@ -228,7 +228,7 @@ export function useScannerData(): UseScannerDataResult {
 
   const query = useQuery({
     queryKey: ["scanner", "multiquotes"],
-    queryFn: () => getMultiQuotes(SYMBOLS_FOR_QUOTES),
+    queryFn: () => getMultiQuotes(SYMBOLS_FOR_QUOTES).then(normaliseMultiQuotes),
     enabled: isLive,
     refetchInterval: 60_000, // auto-refresh every 60s
     staleTime: 30_000,
