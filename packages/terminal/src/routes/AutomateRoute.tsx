@@ -79,7 +79,7 @@ export default function AutomateRoute() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border-default bg-surface-card px-6 py-4 shrink-0">
+      <div className="border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md px-6 py-4 shrink-0">
         <div className="flex items-center gap-3">
           <Workflow className="w-6 h-6 text-accent" />
           <div>

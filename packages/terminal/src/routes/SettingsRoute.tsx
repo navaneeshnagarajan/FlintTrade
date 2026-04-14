@@ -30,6 +30,7 @@ import { SecuritySection }   from "@/tools/Settings/SecuritySection";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 import { SkillSection }      from "@/tools/Settings/SkillSection";
 import { PresetSection }     from "@/tools/Settings/PresetSection";
+import { TickerSettings }    from "@/routes/settings/TickerSettings";
 import { SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
 import { useSettingsState } from "@/hooks/useSettingsState";
 
@@ -108,7 +109,7 @@ export default function SettingsRoute() {
         text="Go to the API section to connect FlintTrade to your OpenAlgo instance and start live trading."
       />
       {/* Slim header */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-border-default bg-surface-card shrink-0">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md shrink-0">
         <button
           type="button"
           onClick={() => navigate(-1)}
@@ -141,7 +142,7 @@ export default function SettingsRoute() {
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar nav */}
         <nav
-          className="w-52 flex-none bg-surface-card border-r border-border-default overflow-y-auto py-2 shrink-0"
+          className="w-52 flex-none bg-glass-l1 border-r border-glass-l1 overflow-y-auto py-2 shrink-0"
           aria-label="Settings sections"
         >
           {SECTIONS.map(({ id, label, icon: Icon }) => (
@@ -171,7 +172,7 @@ export default function SettingsRoute() {
       </div>
 
       {/* Footer status bar */}
-      <div className="flex-none px-4 py-2 bg-surface-card border-t border-border-default flex items-center gap-2">
+      <div className="flex-none px-4 py-2 bg-glass-l1 border-t border-glass-l1 flex items-center gap-2">
         <div className="w-1.5 h-1.5 rounded-full bg-profit" />
         <span className="text-xs text-text-muted">Changes saved automatically</span>
       </div>

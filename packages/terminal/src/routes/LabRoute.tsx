@@ -54,7 +54,7 @@ export default function LabRoute() {
         hintId="lab-import-strategy"
         text="Import a ready-made strategy from the library — open the Backtest tab and click 'Choose Strategy' to get started."
       />
-      <div className="border-b border-border-default bg-surface-card px-6 pt-4 pb-0">
+      <div className="border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md px-6 pt-4 pb-0">
         <div className="flex items-center gap-3 pb-3" data-tour-target="strategy-picker">
           <Zap className="w-6 h-6 text-accent" />
           <div>

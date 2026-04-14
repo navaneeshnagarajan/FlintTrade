@@ -503,7 +503,7 @@ function AbsorptionPanel(): JSX.Element {
 
 function DepsPanel(): JSX.Element {
   return (
-    <pre className="text-xs font-mono text-text-secondary p-4 whitespace-pre overflow-auto bg-surface-card rounded">
+    <pre className="text-xs font-mono text-text-secondary p-4 whitespace-pre overflow-auto glass-surface-l1 rounded-glass-inner">
       {DEPENDENCY_GRAPH}
     </pre>
   );
@@ -720,14 +720,14 @@ function LogsPanel(): JSX.Element {
 
       {/* Log container */}
       {!backendAvailable && entries.length === 0 ? (
-        <div className="rounded-lg border border-border bg-surface-card p-6 text-center text-sm text-text-muted">
+        <div className="rounded-glass-inner border border-glass-l2 bg-glass-l1 p-6 text-center text-sm text-text-muted">
           Backend unavailable. Ensure the FlintTrade backend is running on port 5100.
         </div>
       ) : (
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-130 overflow-y-auto rounded-lg border border-border bg-surface-card font-mono text-xs"
+          className="h-130 overflow-y-auto rounded-glass-inner border border-glass-l2 bg-glass-l1 font-mono text-xs"
           role="log"
           aria-live="polite"
           aria-label="Live log viewer"
@@ -809,7 +809,7 @@ export default function AdminRoute(): JSX.Element {
   return (
     <div className="min-h-screen bg-background text-text-primary">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-surface-base border-b border-border">
+      <header className="sticky top-0 z-10 bg-[rgba(12,12,20,0.85)] backdrop-blur-md border-b border-glass-l1">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
@@ -829,7 +829,7 @@ export default function AdminRoute(): JSX.Element {
       </header>
 
       {/* Tab bar */}
-      <nav className="bg-surface-base border-b border-border" role="tablist" aria-label="Admin sections">
+      <nav className="bg-[rgba(12,12,20,0.78)] backdrop-blur-sm border-b border-glass-l1" role="tablist" aria-label="Admin sections">
         <div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
           {TABS.map((tab) => {
             const Icon = tab.icon;

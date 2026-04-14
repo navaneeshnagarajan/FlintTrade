@@ -296,7 +296,7 @@ function SummaryCard({
   valueClass?: string;
 }) {
   return (
-    <div className="rounded-lg border border-border-default bg-surface-card p-4">
+    <div className="rounded-glass-inner border border-glass-l2 bg-glass-l2 p-4">
       <p className="text-xs text-text-muted mb-1">{label}</p>
       <p className={cn("text-lg font-mono font-semibold", valueClass ?? "text-text-primary")}>
         {value}
@@ -374,7 +374,7 @@ function MirrorTab() {
   return (
     <div className="space-y-6">
       {/* Status indicator */}
-      <div className="rounded-lg border border-border-default bg-surface-card p-4">
+      <div className="rounded-glass-inner border border-glass-l2 bg-glass-l2 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div
@@ -696,7 +696,7 @@ export default function DittoRoute() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm shrink-0">
+      <div className="border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md shrink-0">
         {/* Title row */}
         <div className="flex items-center justify-between px-6 pt-4 pb-3">
           <div className="flex items-center gap-3">

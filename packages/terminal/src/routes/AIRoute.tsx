@@ -770,7 +770,7 @@ function FloatingPillNav({ active, onSelect, sections = SECTIONS }: FloatingPill
       aria-label="AI section navigation"
       className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30"
     >
-      <div className="flex items-center gap-0.5 bg-surface-card/90 backdrop-blur-md border border-border-default rounded-full px-1.5 py-1.5 shadow-lg">
+      <div className="flex items-center gap-0.5 bg-[rgba(12,12,20,0.88)] backdrop-blur-md border border-glass-l2 rounded-full px-1.5 py-1.5 shadow-lg">
         {sections.map((section) => {
           const Icon = section.icon;
           const isActive = active === section.id;
@@ -849,14 +849,14 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
     <motion.div
       role="dialog"
       aria-label={title}
-      className="absolute inset-y-0 right-0 w-full max-w-lg z-20 flex flex-col bg-surface-base border-l border-border-default shadow-2xl"
+      className="absolute inset-y-0 right-0 w-full max-w-lg z-20 flex flex-col bg-[rgba(12,12,20,0.92)] backdrop-blur-md border-l border-glass-l1 shadow-2xl"
       initial={{ x: "100%", opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: "100%", opacity: 0 }}
       transition={{ duration: DURATION.slow, ease: EASE_ENTER }}
     >
       {/* Panel header */}
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-border-default bg-surface-card shrink-0">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-glass-l1 bg-glass-l2 shrink-0">
         <Icon className="w-4 h-4 text-accent" />
         <h2 className="font-heading font-semibold text-sm text-text-primary flex-1">{title}</h2>
         <button
@@ -974,7 +974,7 @@ export default function AIRoute() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Top header bar */}
-      <div className="border-b border-border-default bg-surface-card px-5 py-3 shrink-0">
+      <div className="border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md px-5 py-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <Bot className="w-5 h-5 text-accent" />
             <div className="flex-1">
