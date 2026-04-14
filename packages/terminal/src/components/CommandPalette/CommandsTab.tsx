@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { LayoutGrid, Wrench, Navigation, Zap, Palette } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Command, CommandCategory } from "./useCommandRegistry";
@@ -29,6 +29,13 @@ export function CommandsTab({ commands, query, activeIndex, onSelect, onActiveIn
         cmd.description?.toLowerCase().includes(q),
     );
   }, [commands, query]);
+
+  // Clamp activeIndex to list bounds
+  useEffect(() => {
+    if (filtered.length > 0 && activeIndex >= filtered.length) {
+      onActiveIndexChange(filtered.length - 1);
+    }
+  }, [activeIndex, filtered.length, onActiveIndexChange]);
 
   if (filtered.length === 0) {
     return (

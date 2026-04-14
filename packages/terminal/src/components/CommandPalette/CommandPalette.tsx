@@ -17,7 +17,7 @@ import { WidgetsTab } from "./WidgetsTab";
 import { SymbolSearchTab } from "./SymbolSearchTab";
 import { AITab } from "./AITab";
 import { useCommandRegistry } from "./useCommandRegistry";
-import type { Command, CommandCategory, GroupedCommands } from "./useCommandRegistry";
+import type { Command } from "./useCommandRegistry";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -89,7 +89,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
       }
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setActiveIndex((p) => p + 1);
+        setActiveIndex((p) => p + 1); // tabs clamp via onActiveIndexChange
         return;
       }
       if (e.key === "ArrowUp") {
@@ -133,7 +133,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
         );
       } else if (action === "ai") {
         window.dispatchEvent(
-          new CustomEvent("flinttrade:navigate", { detail: { path: "/ai" } }),
+          new CustomEvent("flinttrade:navigate", { detail: { path: "/ai", context: { symbol, exchange } } }),
         );
       }
     },
@@ -264,4 +264,4 @@ function FooterHint({ keys, label }: { keys: string; label: string }) {
 // ---------------------------------------------------------------------------
 // Re-export types for consumers
 // ---------------------------------------------------------------------------
-export type { Command, CommandCategory, GroupedCommands };
+export type { Command, CommandCategory, GroupedCommands } from "./useCommandRegistry";

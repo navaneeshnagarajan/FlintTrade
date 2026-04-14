@@ -26,8 +26,10 @@ export function useSymbolSearch(query: string) {
     staleTime: 30_000,
   });
 
+  const isPending = query.length >= 2 && debouncedQuery !== query;
+
   return {
     results: data ?? [],
-    isLoading: isLoading && debouncedQuery.length >= 2,
+    isLoading: (isLoading && debouncedQuery.length >= 2) || isPending,
   };
 }

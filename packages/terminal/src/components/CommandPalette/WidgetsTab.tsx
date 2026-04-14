@@ -1,5 +1,5 @@
 // WidgetsTab.tsx
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Command } from "./useCommandRegistry";
@@ -21,6 +21,13 @@ export function WidgetsTab({ widgets, query, activeIndex, onSelect, onActiveInde
       (w) => w.title.toLowerCase().includes(q) || w.description?.toLowerCase().includes(q),
     );
   }, [widgets, query]);
+
+  // Clamp activeIndex to list bounds
+  useEffect(() => {
+    if (filtered.length > 0 && activeIndex >= filtered.length) {
+      onActiveIndexChange(filtered.length - 1);
+    }
+  }, [activeIndex, filtered.length, onActiveIndexChange]);
 
   if (filtered.length === 0) {
     return (
@@ -44,7 +51,7 @@ export function WidgetsTab({ widgets, query, activeIndex, onSelect, onActiveInde
             i === activeIndex ? "bg-glass-l3" : "hover:bg-glass-l2",
           )}
         >
-          <LayoutGrid size={13} className={cn("shrink-0 text-text-muted", i === activeIndex && "text-accent")} />
+          <LayoutGrid size={13} aria-hidden="true" className={cn("shrink-0 text-text-muted", i === activeIndex && "text-accent")} />
           <span className="flex-1 min-w-0">
             <span className="block text-sm text-text-primary leading-snug truncate">{w.title}</span>
             {w.description && (

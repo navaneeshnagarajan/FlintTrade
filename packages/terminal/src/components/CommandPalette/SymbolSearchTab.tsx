@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { Search, BarChart3, ShoppingCart, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,7 +38,7 @@ function SymbolPrice({
       )}
     >
       <span className="block">
-        {tick.ltp.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+        {(tick.ltp ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
       </span>
       <span className="block text-[10px]">
         {isPositive ? "+" : ""}
@@ -54,6 +55,13 @@ export function SymbolSearchTab({
   onActiveIndexChange,
 }: SymbolSearchTabProps) {
   const { results, isLoading } = useSymbolSearch(query);
+
+  // Clamp activeIndex to list bounds
+  useEffect(() => {
+    if (results.length > 0 && activeIndex >= results.length) {
+      onActiveIndexChange(results.length - 1);
+    }
+  }, [activeIndex, results.length, onActiveIndexChange]);
 
   if (!query || query.length < 2) {
     return (

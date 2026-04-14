@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sparkles, Send, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
@@ -19,6 +19,11 @@ export function AITab({ query, onClose }: AITabProps) {
   const addMessage = useAIConversationStore((s) => s.addMessage);
   const strippedQuery = query.replace(/^@ai\s*/i, "").trim();
   const [inputValue, setInputValue] = useState(strippedQuery);
+
+  // Sync with parent query changes
+  useEffect(() => {
+    setInputValue(strippedQuery);
+  }, [strippedQuery]);
 
   function handleSend(text: string) {
     if (!text.trim()) return;
@@ -45,12 +50,14 @@ export function AITab({ query, onClose }: AITabProps) {
               handleSend(inputValue);
             }
           }}
+          aria-label="Ask AI a question"
           placeholder="Ask AI anything about your portfolio, markets, strategies…"
           className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none"
           autoFocus
         />
         <button
           type="button"
+          aria-label="Send message"
           onClick={() => handleSend(inputValue)}
           disabled={!inputValue.trim()}
           className={cn(
