@@ -28,10 +28,32 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# SSRF protection — block private/internal networks
+# ---------------------------------------------------------------------------
+
+_BLOCKED_HOSTS = re.compile(
+    r"^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|"
+    r"169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1\])$"
+)
+
+
+def _validate_url(url: str) -> None:
+    """Validate that a URL is safe to scrape (no SSRF)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+    hostname = parsed.hostname or ""
+    if _BLOCKED_HOSTS.match(hostname):
+        raise ValueError(f"Blocked host (private/internal network): {hostname}")
 
 
 @dataclass
@@ -115,6 +137,11 @@ class Crawl4AIClient:
             :class:`ScrapeResult` with ``markdown`` and ``html`` populated on
             success, or ``success=False`` and an ``error`` message on failure.
         """
+        try:
+            _validate_url(url)
+        except ValueError as exc:
+            return ScrapeResult(url=url, success=False, error=str(exc))
+
         if not self._crawl4ai_available:
             return ScrapeResult(url=url, success=False, error="crawl4ai not installed")
 
@@ -152,6 +179,11 @@ class Crawl4AIClient:
         Returns:
             :class:`ScrapeResult` with ``extracted`` dict populated on success.
         """
+        try:
+            _validate_url(url)
+        except ValueError as exc:
+            return ScrapeResult(url=url, success=False, error=str(exc))
+
         if not self._crawl4ai_available:
             return ScrapeResult(url=url, success=False, error="crawl4ai not installed")
 
@@ -211,6 +243,11 @@ class Crawl4AIClient:
         Returns:
             :class:`ScrapeResult` with ``extracted`` dict populated on success.
         """
+        try:
+            _validate_url(url)
+        except ValueError as exc:
+            return ScrapeResult(url=url, success=False, error=str(exc))
+
         if not self._crawl4ai_available:
             return ScrapeResult(url=url, success=False, error="crawl4ai not installed")
 
