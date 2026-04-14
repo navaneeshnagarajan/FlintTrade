@@ -331,11 +331,18 @@ export function useCommandRegistry() {
     [recentIds],
   );
 
+  const commandsByCategory = useMemo(() => {
+    const widgetCmds = commands.filter((c) => c.category === "widget");
+    const nonWidgetCmds = commands.filter((c) => c.category !== "widget");
+    return { widgetCmds, nonWidgetCmds };
+  }, [commands]);
+
   return {
     commands,
     recentCommands,
     groupedCommands,
     searchCommands,
     executeCommand,
+    commandsByCategory,
   };
 }
