@@ -32,11 +32,18 @@ const createdScripts: HTMLScriptElement[] = [];
 
 beforeEach(() => {
   createdScripts.length = 0;
-  // Spy on document.createElement to intercept script creation
+  // Spy on document.createElement to intercept script creation. The
+  // module-level monkey-patch below stores the real implementation on a
+  // non-standard __originalImpl property so we can re-enter jsdom's
+  // createElement without recursion. Structural cast keeps TS happy
+  // without reaching for `any`.
+  type CreateElementWithOriginal = typeof document.createElement & {
+    __originalImpl?: typeof document.createElement;
+  };
   vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const el = (document.createElement as any).__originalImpl
-      ? (document.createElement as any).__originalImpl(tag)
+    const stamped = document.createElement as CreateElementWithOriginal;
+    const el = stamped.__originalImpl
+      ? stamped.__originalImpl(tag)
       : Object.getPrototypeOf(document).createElement.call(document, tag);
 
     if (tag === "script") {
@@ -50,11 +57,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Restore original createElement before spying (needed for jsdom)
-// We monkey-patch once at module level so jsdom's createElement still works
+// Restore original createElement before spying (needed for jsdom).
+// We monkey-patch once at module level so jsdom's createElement still works.
+// The __originalImpl property is non-standard — declare the extended type
+// locally so we can stamp it without reaching for `any` or @ts-expect-error.
+type CreateElementWithOriginal = typeof document.createElement & {
+  __originalImpl?: typeof document.createElement;
+};
 const _original = document.createElement.bind(document);
-// @ts-expect-error storing on function for cross-test access
-document.createElement.__originalImpl = _original;
+(document.createElement as CreateElementWithOriginal).__originalImpl = _original;
 
 // ---------------------------------------------------------------------------
 // TVTickerTape

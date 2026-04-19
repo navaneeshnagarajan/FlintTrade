@@ -72,8 +72,12 @@ const ctxMock = {
   fillStyle: "",
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(HTMLCanvasElement.prototype as any).getContext = () => ctxMock;
+// JSDOM ships without a canvas backend, so HTMLCanvasElement.prototype.getContext
+// is undefined. The DOM overload makes assigning a stub non-trivial, so we patch
+// the prototype through a structurally-typed alias instead of `any`.
+type CanvasProtoPatch = { getContext: (contextId?: string) => unknown };
+(HTMLCanvasElement.prototype as unknown as CanvasProtoPatch).getContext = () =>
+  ctxMock;
 
 // ---------------------------------------------------------------------------
 // Mock themeStore
