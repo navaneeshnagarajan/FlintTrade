@@ -2,6 +2,9 @@
 
 When enabled, orders are held for manual approval before execution.
 Thread-safe with configurable TTL for pending orders.
+
+Includes a DuckDB-backed PendingOrderQueue with ApprovalRequest persistence
+for a richer approval workflow with reason tracking and audit history.
 """
 
 from __future__ import annotations
@@ -11,8 +14,10 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 logger = logging.getLogger("flinttrade.engine.action_center")
 
@@ -301,3 +306,435 @@ class ActionCenter:
         if po is None:
             raise ActionCenterError(f"Order '{order_id}' not found in Action Center queue")
         return po
+
+
+# ---------------------------------------------------------------------------
+# ApprovalRequest — richer approval workflow with DuckDB persistence
+# ---------------------------------------------------------------------------
+
+ApprovalStatus = Literal["pending", "approved", "rejected", "expired"]
+
+
+@dataclass
+class ApprovalRequest:
+    """An approval request for an order awaiting human confirmation.
+
+    Compared to :class:`PendingOrder`, ``ApprovalRequest`` carries an explicit
+    human-readable *reason* and an *expires_at* deadline.  Instances are
+    persisted to DuckDB so they survive process restarts.
+
+    Attributes:
+        id: UUID string uniquely identifying this request.
+        order_params: The full order payload to be sent on approval.
+        reason: Human-readable explanation of why approval is needed.
+        created_at: UTC ISO-8601 timestamp when the request was created.
+        expires_at: UTC ISO-8601 timestamp after which the request auto-expires.
+        status: One of ``"pending"``, ``"approved"``, ``"rejected"``,
+            ``"expired"``.
+        rejection_reason: Operator-supplied reason when status is
+            ``"rejected"``, or ``None`` otherwise.
+    """
+
+    id: str
+    order_params: dict[str, Any]
+    reason: str
+    created_at: str
+    expires_at: str
+    status: ApprovalStatus = "pending"
+    rejection_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-safe dict.
+
+        Returns:
+            All fields mapped to JSON-compatible Python types.
+        """
+        return {
+            "id": self.id,
+            "order_params": self.order_params,
+            "reason": self.reason,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+            "status": self.status,
+            "rejection_reason": self.rejection_reason,
+        }
+
+    @classmethod
+    def from_row(cls, row: tuple[Any, ...]) -> "ApprovalRequest":
+        """Reconstruct from a DuckDB row (ordered by column definition).
+
+        Args:
+            row: Tuple ``(id, order_params_json, reason, created_at,
+                expires_at, status, rejection_reason)`` as returned by
+                DuckDB queries.
+
+        Returns:
+            Populated :class:`ApprovalRequest` instance.
+        """
+        import json as _json
+
+        return cls(
+            id=row[0],
+            order_params=_json.loads(row[1]),
+            reason=row[2],
+            created_at=row[3],
+            expires_at=row[4],
+            status=row[5],
+            rejection_reason=row[6],
+        )
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _iso_to_ts(iso: str) -> float:
+    """Convert an ISO-8601 UTC string to a POSIX timestamp.
+
+    Args:
+        iso: ISO-8601 formatted datetime string (UTC).
+
+    Returns:
+        Float POSIX timestamp.
+    """
+    return datetime.fromisoformat(iso).timestamp()
+
+
+def _default_db_path() -> Path:
+    """Return the default DuckDB path under ``~/.flinttrade/``.
+
+    Returns:
+        Absolute :class:`~pathlib.Path` to ``action_center.duckdb``.
+    """
+    return Path.home() / ".flinttrade" / "action_center.duckdb"
+
+
+class PendingOrderQueue:
+    """Persistent approval-request queue backed by DuckDB.
+
+    Extends the in-memory :class:`ActionCenter` design with full persistence
+    so that pending approvals survive process restarts.  Each instance opens
+    (or creates) its own DuckDB file; the class is thread-safe.
+
+    Args:
+        db_path: Path to the DuckDB database file.  Defaults to
+            ``~/.flinttrade/action_center.duckdb``.
+
+    Example:
+        >>> queue = PendingOrderQueue()
+        >>> req = queue.enqueue({"symbol": "NIFTY", "qty": 50}, "Manual review")
+        >>> queue.approve(req.id)
+        >>> pending = queue.list_pending()
+        >>> assert len(pending) == 0
+    """
+
+    _DDL = """
+        CREATE TABLE IF NOT EXISTS approval_requests (
+            id               TEXT PRIMARY KEY,
+            order_params     TEXT NOT NULL,
+            reason           TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            expires_at       TEXT NOT NULL,
+            status           TEXT NOT NULL DEFAULT 'pending',
+            rejection_reason TEXT
+        );
+    """
+
+    def __init__(self, db_path: Path | str | None = None) -> None:
+        self._db_path = Path(db_path) if db_path else _default_db_path()
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._conn = self._connect()
+
+    # ------------------------------------------------------------------
+    # Connection
+    # ------------------------------------------------------------------
+
+    def _connect(self):  # type: ignore[return]
+        """Open DuckDB connection and ensure schema exists.
+
+        Returns:
+            Open ``duckdb.DuckDBPyConnection`` instance.
+        """
+        try:
+            import duckdb  # lazy import — optional at module level
+
+            conn = duckdb.connect(str(self._db_path))
+            conn.execute(self._DDL)
+            return conn
+        except ImportError as exc:
+            raise ActionCenterError(
+                "duckdb is required for PendingOrderQueue persistence. "
+                "Install it with: pip install duckdb"
+            ) from exc
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def enqueue(
+        self,
+        order_params: dict[str, Any],
+        reason: str,
+        ttl_minutes: int = 5,
+        request_id: str | None = None,
+    ) -> ApprovalRequest:
+        """Add an order to the persistent approval queue.
+
+        Args:
+            order_params: Full order payload to be forwarded on approval.
+            reason: Human-readable reason why approval is required.
+            ttl_minutes: Minutes until the request auto-expires.  Defaults
+                to 5.
+            request_id: Override the auto-generated UUID if desired.
+
+        Returns:
+            The persisted :class:`ApprovalRequest` with status ``"pending"``.
+        """
+        import json as _json
+        from datetime import timedelta
+
+        req_id = request_id or str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        created_at = now.isoformat()
+        expires_at = (now + timedelta(minutes=ttl_minutes)).isoformat()
+
+        req = ApprovalRequest(
+            id=req_id,
+            order_params=order_params,
+            reason=reason,
+            created_at=created_at,
+            expires_at=expires_at,
+            status="pending",
+        )
+
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO approval_requests
+                    (id, order_params, reason, created_at, expires_at, status)
+                VALUES (?, ?, ?, ?, ?, 'pending')
+                """,
+                [req_id, _json.dumps(order_params), reason, created_at, expires_at],
+            )
+
+        logger.info(
+            "Enqueued approval request %s for symbol=%s (expires %s)",
+            req_id,
+            order_params.get("symbol", "?"),
+            expires_at,
+        )
+        return req
+
+    def approve(self, request_id: str) -> ApprovalRequest:
+        """Approve a pending approval request.
+
+        Args:
+            request_id: UUID of the request to approve.
+
+        Returns:
+            Updated :class:`ApprovalRequest` with status ``"approved"``.
+
+        Raises:
+            ActionCenterError: If the request is not found or is not
+                ``"pending"``.
+        """
+        with self._lock:
+            self._expire_stale()
+            req = self._fetch_or_raise(request_id)
+            if req.status != "pending":
+                raise ActionCenterError(
+                    f"Request '{request_id}' is '{req.status}', not 'pending'"
+                )
+            self._conn.execute(
+                "UPDATE approval_requests SET status = 'approved' WHERE id = ?",
+                [request_id],
+            )
+            req.status = "approved"
+
+        logger.info("Approved approval request %s", request_id)
+        return req
+
+    def reject(self, request_id: str, reason: str = "") -> ApprovalRequest:
+        """Reject a pending approval request.
+
+        Args:
+            request_id: UUID of the request to reject.
+            reason: Optional explanation for the rejection.
+
+        Returns:
+            Updated :class:`ApprovalRequest` with status ``"rejected"``.
+
+        Raises:
+            ActionCenterError: If the request is not found or is not
+                ``"pending"``.
+        """
+        with self._lock:
+            self._expire_stale()
+            req = self._fetch_or_raise(request_id)
+            if req.status != "pending":
+                raise ActionCenterError(
+                    f"Request '{request_id}' is '{req.status}', not 'pending'"
+                )
+            self._conn.execute(
+                """
+                UPDATE approval_requests
+                   SET status = 'rejected', rejection_reason = ?
+                 WHERE id = ?
+                """,
+                [reason, request_id],
+            )
+            req.status = "rejected"
+            req.rejection_reason = reason
+
+        logger.info("Rejected approval request %s (reason: %s)", request_id, reason or "none")
+        return req
+
+    def list_pending(self) -> list[ApprovalRequest]:
+        """Return all requests currently in ``"pending"`` status.
+
+        Stale requests are expired before the list is built.
+
+        Returns:
+            List of :class:`ApprovalRequest` with status ``"pending"``,
+            ordered oldest first.
+        """
+        with self._lock:
+            self._expire_stale()
+            rows = self._conn.execute(
+                "SELECT * FROM approval_requests WHERE status = 'pending' ORDER BY created_at"
+            ).fetchall()
+        return [ApprovalRequest.from_row(r) for r in rows]
+
+    def list_history(
+        self,
+        statuses: list[ApprovalStatus] | None = None,
+        limit: int = 100,
+    ) -> list[ApprovalRequest]:
+        """Return resolved (non-pending) requests for audit purposes.
+
+        Args:
+            statuses: Filter by these status values.  ``None`` returns all
+                non-pending statuses (approved, rejected, expired).
+            limit: Maximum rows returned, ordered newest first.
+
+        Returns:
+            List of :class:`ApprovalRequest` matching the filter.
+        """
+        allowed = statuses or ["approved", "rejected", "expired"]
+        placeholders = ", ".join("?" for _ in allowed)
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT * FROM approval_requests
+                 WHERE status IN ({placeholders})
+                 ORDER BY created_at DESC
+                 LIMIT ?
+                """,
+                [*allowed, limit],
+            ).fetchall()
+        return [ApprovalRequest.from_row(r) for r in rows]
+
+    def expire_stale(self, minutes: int | None = None) -> int:
+        """Manually expire requests that have passed their ``expires_at`` deadline.
+
+        Args:
+            minutes: If provided, expire requests older than *minutes* minutes
+                from now (overrides the ``expires_at`` field).  Otherwise
+                uses each request's own ``expires_at``.
+
+        Returns:
+            Number of requests that were transitioned to ``"expired"``.
+        """
+        with self._lock:
+            return self._expire_stale(minutes)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _expire_stale(self, minutes: int | None = None) -> int:
+        """Expire stale pending requests.  Must be called under ``self._lock``.
+
+        Args:
+            minutes: If set, expire pending requests older than *minutes*
+                from now.  Otherwise uses each request's ``expires_at``.
+
+        Returns:
+            Number of requests marked expired.
+        """
+        now_iso = _utc_now_iso()
+
+        # Count pending requests that match the expiry predicate BEFORE updating.
+        if minutes is not None:
+            from datetime import timedelta
+
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            ).isoformat()
+            pre_count: int = self._conn.execute(
+                """
+                SELECT COUNT(*) FROM approval_requests
+                 WHERE status = 'pending' AND created_at < ?
+                """,
+                [cutoff],
+            ).fetchone()[0]  # type: ignore[index]
+            self._conn.execute(
+                """
+                UPDATE approval_requests
+                   SET status = 'expired'
+                 WHERE status = 'pending'
+                   AND created_at < ?
+                """,
+                [cutoff],
+            )
+        else:
+            pre_count = self._conn.execute(
+                """
+                SELECT COUNT(*) FROM approval_requests
+                 WHERE status = 'pending' AND expires_at < ?
+                """,
+                [now_iso],
+            ).fetchone()[0]  # type: ignore[index]
+            self._conn.execute(
+                """
+                UPDATE approval_requests
+                   SET status = 'expired'
+                 WHERE status = 'pending'
+                   AND expires_at < ?
+                """,
+                [now_iso],
+            )
+
+        count: int = pre_count
+        if count:
+            logger.debug("Expired %d stale approval request(s)", count)
+        return count
+
+    def _fetch_or_raise(self, request_id: str) -> ApprovalRequest:
+        """Fetch a request by ID or raise :class:`ActionCenterError`.
+
+        Must be called while holding ``self._lock``.
+
+        Args:
+            request_id: UUID to look up.
+
+        Returns:
+            The matching :class:`ApprovalRequest`.
+
+        Raises:
+            ActionCenterError: If *request_id* is not found.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM approval_requests WHERE id = ?",
+            [request_id],
+        ).fetchone()
+        if row is None:
+            raise ActionCenterError(f"Approval request '{request_id}' not found")
+        return ApprovalRequest.from_row(row)
+
+    def close(self) -> None:
+        """Close the underlying DuckDB connection."""
+        with self._lock:
+            self._conn.close()

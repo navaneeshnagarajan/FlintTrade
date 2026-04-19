@@ -3,6 +3,9 @@
 Mounts at /api/v1/action-center/ and exposes the pending-order
 approval queue to the React terminal via TanStack Query.
 
+Also registers /admin/action-center/ routes for the PendingOrderQueue
+(DuckDB-backed, richer approval workflow with audit history).
+
 All endpoints require no authentication beyond the standard FlintTrade
 /v1/ namespace in app.py (gateway namespace).  The action center
 is an internal tool — operators use the terminal UI on the same host.
@@ -15,7 +18,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from .action_center import ActionCenter, ActionCenterError
+from .action_center import ActionCenter, ActionCenterError, PendingOrderQueue
 
 logger = logging.getLogger("flinttrade.engine.action_center_routes")
 
@@ -189,4 +192,128 @@ def update_config() -> tuple[Any, int]:
             "enabled": ac.enabled,
             "ttl_seconds": ac.ttl_seconds,
         },
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Admin blueprint — PendingOrderQueue (DuckDB-backed approval workflow)
+# ---------------------------------------------------------------------------
+
+admin_action_center_bp = Blueprint(
+    "admin_action_center",
+    __name__,
+    url_prefix="/admin/action-center",
+)
+
+# Module-level singleton for the persistent queue.
+# The Flask app may inject a custom instance via app.config["PENDING_ORDER_QUEUE"].
+_default_queue: PendingOrderQueue | None = None
+
+
+def _get_queue() -> PendingOrderQueue:
+    """Return the PendingOrderQueue from app config or the module singleton.
+
+    Returns:
+        A ready-to-use :class:`PendingOrderQueue` instance.
+    """
+    global _default_queue  # noqa: PLW0603
+    try:
+        q = current_app.config.get("PENDING_ORDER_QUEUE")
+        if isinstance(q, PendingOrderQueue):
+            return q
+    except RuntimeError:
+        pass
+    if _default_queue is None:
+        _default_queue = PendingOrderQueue()
+    return _default_queue
+
+
+@admin_action_center_bp.route("/pending", methods=["GET"])
+def admin_list_pending() -> tuple[Any, int]:
+    """List all orders currently awaiting approval.
+
+    Returns:
+        JSON with ``status`` and ``data.requests`` (list of
+        :class:`~action_center.ApprovalRequest` dicts).
+    """
+    queue = _get_queue()
+    try:
+        requests = queue.list_pending()
+    except ActionCenterError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+    return jsonify({
+        "status": "success",
+        "data": {"requests": [r.to_dict() for r in requests]},
+    }), 200
+
+
+@admin_action_center_bp.route("/<request_id>/approve", methods=["POST"])
+def admin_approve_request(request_id: str) -> tuple[Any, int]:
+    """Approve a pending approval request.
+
+    Args:
+        request_id: UUID path parameter.
+
+    Returns:
+        JSON with updated request on success, or error details.
+    """
+    queue = _get_queue()
+    try:
+        req = queue.approve(request_id)
+    except ActionCenterError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 409
+    return jsonify({"status": "success", "data": {"request": req.to_dict()}}), 200
+
+
+@admin_action_center_bp.route("/<request_id>/reject", methods=["POST"])
+def admin_reject_request(request_id: str) -> tuple[Any, int]:
+    """Reject a pending approval request.
+
+    Request JSON (optional):
+        reason (str): Human-readable reason for rejection.
+
+    Args:
+        request_id: UUID path parameter.
+
+    Returns:
+        JSON with updated request on success, or error details.
+    """
+    queue = _get_queue()
+    body = request.get_json(silent=True) or {}
+    reason: str = body.get("reason", "")
+    try:
+        req = queue.reject(request_id, reason)
+    except ActionCenterError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 409
+    return jsonify({"status": "success", "data": {"request": req.to_dict()}}), 200
+
+
+@admin_action_center_bp.route("/history", methods=["GET"])
+def admin_history() -> tuple[Any, int]:
+    """Return resolved approval requests for audit purposes.
+
+    Query params:
+        statuses (str, comma-separated): Filter by status values
+            (approved, rejected, expired).  Defaults to all resolved.
+        limit (int): Maximum records to return (default 100).
+
+    Returns:
+        JSON with ``status`` and ``data.requests`` list.
+    """
+    queue = _get_queue()
+    raw_statuses = request.args.get("statuses", "")
+    statuses = [s.strip() for s in raw_statuses.split(",") if s.strip()] or None  # type: ignore[assignment]
+
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "limit must be an integer"}), 400
+
+    try:
+        history = queue.list_history(statuses=statuses, limit=limit)  # type: ignore[arg-type]
+    except ActionCenterError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+    return jsonify({
+        "status": "success",
+        "data": {"requests": [r.to_dict() for r in history]},
     }), 200
