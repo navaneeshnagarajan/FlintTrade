@@ -409,10 +409,93 @@ def create_flask_app(
             pass
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
+    # Initialise TrafficLogger (DuckDB-backed, always active).
+    # @before_request / @after_request hooks record every HTTP request.
+    from .traffic_logger import TrafficLogger as _TrafficLogger, should_skip_path as _skip_path  # noqa: PLC0415
+
+    _traffic_log_path = Path.home() / ".flinttrade" / "traffic_log.duckdb"
+    _traffic_logger = _TrafficLogger(_traffic_log_path)
+    app.config["TRAFFIC_LOGGER"] = _traffic_logger
+
+    @app.before_request
+    def _traffic_start() -> None:
+        """Record the request start time for traffic duration measurement."""
+        import time as _time  # noqa: PLC0415
+        _flask_g._traffic_start = _time.monotonic()
+
+    @app.after_request
+    def _traffic_log(response: Any) -> Any:
+        """Persist request details to TrafficLogger after each response."""
+        try:
+            if not _skip_path(request.path):
+                import time as _time  # noqa: PLC0415
+                start = getattr(_flask_g, "_traffic_start", None)
+                duration_ms = (_time.monotonic() - start) * 1000 if start is not None else 0.0
+                _traffic_logger.log(
+                    ip=request.remote_addr or "unknown",
+                    method=request.method,
+                    path=request.path,
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
+                    user_agent=request.headers.get("User-Agent"),
+                    request_size=request.content_length,
+                    response_size=response.content_length,
+                )
+        except Exception:
+            pass  # Never let traffic logging break the response
+        return response
+
+    # Initialise LatencyMonitor (DuckDB-backed, always active).
+    # The order router wraps this via monitoring_routes.get_latency_tracker()
+    # for in-memory stats; this provides persistent DuckDB-backed storage.
+    from packages.engine.src.latency_monitor import LatencyMonitor as _LatencyMonitor  # noqa: PLC0415
+
+    _latency_log_path = Path.home() / ".flinttrade" / "latency_log.duckdb"
+    _latency_monitor = _LatencyMonitor(_latency_log_path)
+    app.config["LATENCY_MONITOR"] = _latency_monitor
+
+    # Initialise APIAnalyzer (DuckDB-backed, opt-in via ENABLE_ANALYZER=true).
+    _analyzer_enabled = os.environ.get("ENABLE_ANALYZER", "").lower() in ("1", "true", "yes")
+    if _analyzer_enabled:
+        from .api_analyzer import APIAnalyzer as _APIAnalyzer  # noqa: PLC0415
+
+        _analyzer_path = Path.home() / ".flinttrade" / "api_analyzer.duckdb"
+        _api_analyzer = _APIAnalyzer(_analyzer_path)
+        app.config["API_ANALYZER"] = _api_analyzer
+
+        @app.after_request
+        def _analyzer_log(response: Any) -> Any:
+            """Persist full request + response to APIAnalyzer when enabled."""
+            try:
+                import time as _time  # noqa: PLC0415
+                start = getattr(_flask_g, "_traffic_start", None)
+                duration_ms = (_time.monotonic() - start) * 1000 if start is not None else 0.0
+                _api_analyzer.log_call(
+                    route=request.path,
+                    method=request.method,
+                    request_body=request.get_json(silent=True, force=True),
+                    response_status=response.status_code,
+                    response_body=None,  # Not parsing response body to avoid re-reading stream
+                    duration_ms=duration_ms,
+                )
+            except Exception:
+                pass
+            return response
+
+        logger.info("API Analyser enabled — capturing all requests")
+
+    # Initialise module-level EventBus singleton.
+    from .event_bus import bus as _event_bus  # noqa: PLC0415
+    app.config["EVENT_BUS"] = _event_bus
+    logger.info("EventBus initialised")
+
     # Register admin blueprint (dev/debug only)
     if app.debug or os.environ.get("FLINTTRADE_DEV"):
         from .admin_routes import admin_bp  # noqa: PLC0415
         app.register_blueprint(admin_bp)
+        # Register infrastructure admin routes (traffic/latency/analyzer)
+        from .infra_routes import infra_bp  # noqa: PLC0415
+        app.register_blueprint(infra_bp)
         logger.info("Admin endpoints registered (dev mode)")
 
     # Register Activity Log blueprint (/api/v1/admin/activity)
