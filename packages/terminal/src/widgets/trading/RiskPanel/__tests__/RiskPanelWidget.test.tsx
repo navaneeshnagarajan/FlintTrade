@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before component import
@@ -56,7 +57,7 @@ import RiskPanelWidget from "../RiskPanelWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = {} as Parameters<typeof RiskPanelWidget>[0];
+const defaultProps = makeDockviewPanelProps();
 
 function setupDefaultMocks() {
   mockUseFunds.mockReturnValue({

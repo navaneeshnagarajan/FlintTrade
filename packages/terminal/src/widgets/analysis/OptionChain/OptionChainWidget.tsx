@@ -601,31 +601,76 @@ function OptionChainWidget() {
             No strike data
           </div>
         ) : (
-          <DataEditor
-            ref={gridRef}
-            columns={glideColumns}
-            rows={strikes.length}
-            getCellContent={getCellContent}
-            onCellClicked={handleCellClicked}
-            theme={glideTheme}
-            rowHeight={24}
-            headerHeight={26}
-            smoothScrollX
-            smoothScrollY
-            rangeSelect="none"
-            columnSelect="none"
-            rowSelect="none"
-            getCellsForSelection
-            width="100%"
-            height="100%"
-            {...({
-              getRowThemeOverride: (row: number) => {
-                const s = strikes[row];
-                if (!s) return undefined;
-                return s.strike === atmStrike ? ATM_ROW_THEME : undefined;
-              },
-            } as object)}
-          />
+          <>
+            <DataEditor
+              ref={gridRef}
+              columns={glideColumns}
+              rows={strikes.length}
+              getCellContent={getCellContent}
+              onCellClicked={handleCellClicked}
+              theme={glideTheme}
+              rowHeight={24}
+              headerHeight={26}
+              smoothScrollX
+              smoothScrollY
+              rangeSelect="none"
+              columnSelect="none"
+              rowSelect="none"
+              getCellsForSelection
+              width="100%"
+              height="100%"
+              {...({
+                getRowThemeOverride: (row: number) => {
+                  const s = strikes[row];
+                  if (!s) return undefined;
+                  return s.strike === atmStrike ? ATM_ROW_THEME : undefined;
+                },
+              } as object)}
+            />
+            {/* Visually-hidden HTML table mirror of the canvas grid.
+                Canvas-rendered cells are invisible to screen readers, so we
+                duplicate the data as a real <table> with tabular semantics.
+                sr-only keeps it off the visible layout; position: absolute
+                with negative clip means it still receives focus traversal. */}
+            <table className="sr-only" aria-label="Option chain data (accessible view)">
+              <caption>
+                Option chain for {symDef.label}, expiry {selectedExpiry ?? "—"}.
+                {atmStrike != null ? ` ATM strike ${atmStrike}.` : ""}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Call OI</th>
+                  <th scope="col">Call change</th>
+                  <th scope="col">Call volume</th>
+                  <th scope="col">Call IV</th>
+                  <th scope="col">Call LTP</th>
+                  <th scope="col">Strike</th>
+                  <th scope="col">Put LTP</th>
+                  <th scope="col">Put IV</th>
+                  <th scope="col">Put volume</th>
+                  <th scope="col">Put change</th>
+                  <th scope="col">Put OI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {strikes.map((s) => (
+                  <tr key={s.strike} aria-current={s.strike === atmStrike ? "true" : undefined}>
+                    <td>{s.call?.oi ?? s.call?.open_interest ?? 0}</td>
+                    <td>{s.call?.change ?? 0}</td>
+                    <td>{s.call?.volume ?? 0}</td>
+                    <td>{s.call?.iv ?? ""}</td>
+                    <td>{s.call?.ltp ?? s.call?.last_price ?? 0}</td>
+                    <th scope="row">{s.strike}</th>
+                    <td>{s.put?.ltp ?? s.put?.last_price ?? 0}</td>
+                    <td>{s.put?.iv ?? ""}</td>
+                    <td>{s.put?.volume ?? 0}</td>
+                    <td>{s.put?.change ?? 0}</td>
+                    <td>{s.put?.oi ?? s.put?.open_interest ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
 

@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -56,7 +57,7 @@ import * as jotai from "jotai";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = {} as Parameters<typeof OrderPadWidget>[0];
+const defaultProps = makeDockviewPanelProps();
 
 // ---------------------------------------------------------------------------
 // Tests

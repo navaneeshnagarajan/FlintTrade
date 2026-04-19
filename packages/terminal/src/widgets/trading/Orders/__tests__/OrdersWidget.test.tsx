@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -33,7 +34,7 @@ import OrdersWidget from "../OrdersWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = {} as Parameters<typeof OrdersWidget>[0];
+const defaultProps = makeDockviewPanelProps();
 
 function queryResult(overrides = {}) {
   return {

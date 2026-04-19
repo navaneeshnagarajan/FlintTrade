@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before component import
@@ -32,7 +33,7 @@ import ActionCenterWidget from "../ActionCenterWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = {} as Parameters<typeof ActionCenterWidget>[0];
+const defaultProps = makeDockviewPanelProps();
 
 function createWrapper() {
   const queryClient = new QueryClient({

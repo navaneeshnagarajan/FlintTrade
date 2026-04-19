@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before component import
@@ -63,7 +64,7 @@ import DashboardWidget from "../DashboardWidget";
 // ---------------------------------------------------------------------------
 
 /** Minimal props that satisfy WidgetProps (extends IDockviewPanelProps). */
-const defaultProps = {} as Parameters<typeof DashboardWidget>[0];
+const defaultProps = makeDockviewPanelProps();
 
 function queryResult(overrides = {}) {
   return {

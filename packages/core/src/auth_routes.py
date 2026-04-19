@@ -30,34 +30,20 @@ logger = logging.getLogger("flinttrade.auth")
 auth_bp = Blueprint("auth", __name__, url_prefix="/v1/auth")
 
 # ---------------------------------------------------------------------------
-# JWT revocation blocklist
+# JWT revocation blocklist — DuckDB-backed, shared across gunicorn workers.
 # ---------------------------------------------------------------------------
-
-# Maps jti → expiry epoch (UTC seconds).  Checked on every token decode.
-_REVOKED_JTIS: dict[str, float] = {}
 
 
 def _revoke_jti(jti: str, exp: float) -> None:
-    """Add a JTI to the revocation blocklist.
+    """Persist a revoked JTI to the shared AuthState DB.
 
     Args:
         jti: JWT ID claim from the token.
         exp: Token expiry as a UTC epoch float.  Used for cleanup.
     """
-    _REVOKED_JTIS[jti] = exp
-    _cleanup_revoked_jtis()
+    from .auth_state import get_auth_state  # lazy to avoid circular import
 
-
-def _cleanup_revoked_jtis() -> None:
-    """Remove expired entries from the JTI blocklist.
-
-    Expired tokens cannot be replayed anyway (signature check fails), so
-    keeping them in the set wastes memory.  Called on every revocation.
-    """
-    now = datetime.now(timezone.utc).timestamp()
-    expired = [jti for jti, exp in _REVOKED_JTIS.items() if exp <= now]
-    for jti in expired:
-        del _REVOKED_JTIS[jti]
+    get_auth_state().revoke_jti(jti, exp)
 
 
 def _is_jti_revoked(jti: str) -> bool:
@@ -69,14 +55,17 @@ def _is_jti_revoked(jti: str) -> bool:
     Returns:
         ``True`` if the token has been explicitly revoked.
     """
-    return jti in _REVOKED_JTIS
+    from .auth_state import get_auth_state  # lazy import
+
+    return get_auth_state().is_jti_revoked(jti)
 
 
 # ---------------------------------------------------------------------------
-# In-memory rate limiter (fallback when Flask-Limiter is absent)
+# Rate limiter fallback — delegates to the persistent AuthState (DuckDB).
+# The in-memory ``defaultdict`` is retained for legacy callers but writes
+# go through the shared store so multi-worker deployments coordinate.
 # ---------------------------------------------------------------------------
 
-# {(endpoint_name, ip): [epoch_float, ...]}
 _RATE_LIMIT_STORE: dict[tuple[str, str], list[float]] = defaultdict(list)
 
 
@@ -112,19 +101,28 @@ def _check_in_memory_rate_limit(endpoint: str, max_requests: int, window_seconds
         ``True`` if allowed, ``False`` if limit exceeded.
     """
     ip = request.remote_addr or "unknown"
-    key = (endpoint, ip)
-    now = time.monotonic()
-    cutoff = now - window_seconds
+    try:
+        from .auth_state import get_auth_state  # lazy import
 
-    timestamps = _RATE_LIMIT_STORE[key]
-    # Prune expired entries
-    _RATE_LIMIT_STORE[key] = [t for t in timestamps if t > cutoff]
-
-    if len(_RATE_LIMIT_STORE[key]) >= max_requests:
-        return False
-
-    _RATE_LIMIT_STORE[key].append(now)
-    return True
+        return get_auth_state().check_rate_limit(
+            endpoint=endpoint,
+            ip=ip,
+            max_requests=max_requests,
+            window_seconds=window_seconds,
+        )
+    except Exception as exc:
+        # DuckDB unavailable (e.g. during import-time checks); fall back
+        # to the in-process dict so the limiter keeps enforcing locally.
+        logger.debug("Auth state DB unavailable, falling back in-process: %s", exc)
+        key = (endpoint, ip)
+        now = time.monotonic()
+        cutoff = now - window_seconds
+        timestamps = _RATE_LIMIT_STORE[key]
+        _RATE_LIMIT_STORE[key] = [t for t in timestamps if t > cutoff]
+        if len(_RATE_LIMIT_STORE[key]) >= max_requests:
+            return False
+        _RATE_LIMIT_STORE[key].append(now)
+        return True
 
 
 def _get_limiter():
@@ -635,8 +633,10 @@ _OTP_MAX_REQUESTS_PER_HOUR = 3  # per email address
 def _otp_rate_ok(email: str) -> bool:
     """Check whether ``email`` is within the 3-per-hour OTP request limit.
 
-    Prunes stale timestamps before counting.  Mutates ``_OTP_REQUEST_LOG``
-    to record the new request when the limit is not exceeded.
+    Delegates to the persistent :class:`AuthState` store so the cap is
+    enforced across gunicorn workers and survives worker restart. Falls
+    back to the in-process ``_OTP_REQUEST_LOG`` dict if the DB is not
+    available (e.g. during unit tests that run without a writable HOME).
 
     Args:
         email: The requester's email address used as the rate-limit key.
@@ -645,15 +645,26 @@ def _otp_rate_ok(email: str) -> bool:
         ``True`` if the request is permitted; ``False`` if the hourly cap
         has been reached.
     """
-    now = time.monotonic()
-    cutoff = now - 3600
-    log = _OTP_REQUEST_LOG.get(email, [])
-    log = [t for t in log if t > cutoff]
-    if len(log) >= _OTP_MAX_REQUESTS_PER_HOUR:
-        return False
-    log.append(now)
-    _OTP_REQUEST_LOG[email] = log
-    return True
+    try:
+        from .auth_state import get_auth_state  # lazy import
+
+        state = get_auth_state()
+        count = state.count_recent_otp_requests(email, window_seconds=3600)
+        if count >= _OTP_MAX_REQUESTS_PER_HOUR:
+            return False
+        state.record_otp_request(email)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OTP rate-limit DB unavailable, falling back in-process: %s", exc)
+        now = time.monotonic()
+        cutoff = now - 3600
+        log = _OTP_REQUEST_LOG.get(email, [])
+        log = [t for t in log if t > cutoff]
+        if len(log) >= _OTP_MAX_REQUESTS_PER_HOUR:
+            return False
+        log.append(now)
+        _OTP_REQUEST_LOG[email] = log
+        return True
 
 
 def _generate_otp() -> str:

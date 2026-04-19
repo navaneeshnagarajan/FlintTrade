@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 // ---------------------------------------------------------------------------
 // Stubs — must be defined before any component import
@@ -69,7 +70,7 @@ import PositionHeatMapWidget from "../PositionHeatMapWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = {} as Parameters<typeof PositionHeatMapWidget>[0];
+const defaultProps = makeDockviewPanelProps();
 
 function makeQueryResult(overrides: Record<string, unknown> = {}) {
   return {

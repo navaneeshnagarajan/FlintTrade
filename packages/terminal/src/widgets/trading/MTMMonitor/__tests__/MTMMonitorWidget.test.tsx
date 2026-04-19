@@ -1,5 +1,4 @@
 /**
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
  * MTMMonitorWidget.test.tsx
  *
  * Tests for the MTM Monitor widget — displays real-time P&L chart with
@@ -9,6 +8,7 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -79,20 +79,20 @@ describe("MTMMonitorWidget", () => {
 
   it("renders without crashing", () => {
     mockUsePositions.mockReturnValue({ data: undefined });
-    const { container } = render(<MTMMonitorWidget {...{} as any} />, { wrapper });
+    const { container } = render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
     expect(container).toBeTruthy();
   });
 
   it("displays the MTM Monitor header", () => {
     mockUsePositions.mockReturnValue({ data: undefined });
-    render(<MTMMonitorWidget {...{} as any} />, { wrapper });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
 
     expect(screen.getByText("MTM Monitor")).toBeInTheDocument();
   });
 
   it("shows target and stoploss values in header", () => {
     mockUsePositions.mockReturnValue({ data: undefined });
-    render(<MTMMonitorWidget {...{} as any} />, { wrapper });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
 
     // The header shows "Target ₹10,000 / SL ₹5,000"
     // Header shows "Target ₹10,000 / SL ₹5,000" — use getAllByText since
@@ -105,7 +105,7 @@ describe("MTMMonitorWidget", () => {
 
   it("renders stat cards for Current MTM, Max MTM, Min MTM, Max DD", () => {
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<MTMMonitorWidget {...{} as any} />, { wrapper });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
 
     expect(screen.getByText("Current MTM")).toBeInTheDocument();
     expect(screen.getByText("Max MTM")).toBeInTheDocument();
@@ -115,14 +115,14 @@ describe("MTMMonitorWidget", () => {
 
   it("renders the PnLSummary sub-component", () => {
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<MTMMonitorWidget {...{} as any} />, { wrapper });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
 
     expect(screen.getByTestId("pnl-summary")).toBeInTheDocument();
   });
 
   it("shows chart legend items", () => {
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<MTMMonitorWidget {...{} as any} />, { wrapper });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
 
     expect(screen.getByText("MTM PnL")).toBeInTheDocument();
     expect(screen.getByText("Drawdown")).toBeInTheDocument();

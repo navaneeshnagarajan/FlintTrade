@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -37,7 +38,7 @@ import CalculatorWidget from "../CalculatorWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = {} as Parameters<typeof CalculatorWidget>[0];
+const defaultProps = makeDockviewPanelProps();
 
 // ---------------------------------------------------------------------------
 // Tests

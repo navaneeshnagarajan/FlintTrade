@@ -19,7 +19,15 @@ import pytest
 
 @pytest.fixture()
 def client(tmp_path):
-    """Flask test client backed by a real AuthService in a tmp directory."""
+    """Flask test client backed by a real AuthService in a tmp directory.
+
+    Also rebinds the AuthState singleton to a tmp DuckDB so that OTP
+    rate-limit state is not shared across test runs.
+    """
+    from packages.core.src import auth_state as auth_state_mod
+
+    auth_state_mod.reset_singleton_for_tests()
+    auth_state_mod.get_auth_state(db_path=tmp_path / "auth_state.duckdb")
     with patch("packages.core.src.auth_routes._get_auth_service") as mock_svc:
         from packages.core.src.auth_service import AuthService
 
@@ -31,6 +39,7 @@ def client(tmp_path):
         app.config["TESTING"] = True
         with app.test_client() as c:
             yield c, svc
+    auth_state_mod.reset_singleton_for_tests()
 
 
 def _setup_account(c, email="alice@example.com"):

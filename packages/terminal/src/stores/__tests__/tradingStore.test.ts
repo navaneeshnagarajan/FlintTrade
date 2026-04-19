@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTradingStore } from "../tradingStore";
+import type { Position } from "@/types/api";
 
 describe("tradingStore", () => {
   beforeEach(() => {
@@ -14,9 +15,9 @@ describe("tradingStore", () => {
 
   it("updates aggregated P&L from positions", () => {
     useTradingStore.getState().updateFromPositions([
-      { pnl: 1500 },
-      { pnl: -500 },
-    ] as any[]);
+      { symbol: "NIFTY", exchange: "NFO", product: "MIS", quantity: 1, averagePrice: 100, ltp: 115, pnl: 1500, pnlPercent: 15 },
+      { symbol: "BANKNIFTY", exchange: "NFO", product: "MIS", quantity: 1, averagePrice: 200, ltp: 195, pnl: -500, pnlPercent: -2.5 },
+    ] satisfies Position[]);
     const state = useTradingStore.getState();
     expect(state.totalPnl).toBe(1000);
     expect(state.positionCount).toBe(2);

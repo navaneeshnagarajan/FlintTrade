@@ -68,26 +68,53 @@ def _derive_fernet_key(master: str, salt: bytes) -> Fernet:
 
 
 class AuthService:
-    """Single-user authentication service."""
+    """Single-user authentication service.
+
+    Thread-safety: the SQLite connection is opened with
+    ``check_same_thread=False`` and every write goes through a single
+    :class:`threading.Lock` (``self._write_lock``). Reads are safe in
+    WAL mode without the lock; writes must hold it so concurrent Flask
+    request threads do not interleave statements mid-transaction.
+    """
 
     def __init__(self, db_path: Path | str | None = None) -> None:
+        import threading  # local to keep module import surface small
+
         self._db_path = Path(db_path) if db_path else _DEFAULT_DB_PATH
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._hasher = argon2.PasswordHasher(
             time_cost=3, memory_cost=65536, parallelism=4,
         )
         self._conn: sqlite3.Connection | None = None
+        self._write_lock: threading.Lock = threading.Lock()
         self._init_db()
 
     @property
     def _db(self) -> sqlite3.Connection:
         if self._conn is None:
-            # check_same_thread=False is safe — single-user app, no concurrent writes.
-            # Flask serves requests in different threads but AuthService is single-instance.
+            # check_same_thread=False + per-write Lock — reads safe via WAL,
+            # writes serialised so interleaving cannot corrupt transactions.
             self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
         return self._conn
+
+    # ------------------------------------------------------------------
+    # Write helpers — always acquire the write lock so concurrent Flask
+    # request threads don't race and half-apply transactions.
+    # ------------------------------------------------------------------
+    def _execute_locked(self, sql: str, params: Any = ()) -> Any:
+        """Execute a single write under the write lock and commit."""
+        with self._write_lock:
+            cur = self._db.execute(sql, params)
+            self._db.commit()
+            return cur
+
+    def _executescript_locked(self, sql: str) -> None:
+        """Execute a multi-statement script under the write lock and commit."""
+        with self._write_lock:
+            self._db.executescript(sql)
+            self._db.commit()
 
     def _init_db(self) -> None:
         self._db.executescript("""
@@ -163,26 +190,28 @@ class AuthService:
         fernet = _derive_fernet_key(password, totp_salt)
         encrypted = fernet.encrypt(totp_secret.encode("utf-8"))
 
-        # Generate 8 backup codes
+        # Generate 8 backup codes — insert all rows + account under a
+        # single write-lock acquisition so a concurrent reader never sees
+        # a half-populated row set.
         backup_codes: list[str] = []
-        for _ in range(8):
-            code = secrets.token_hex(4).upper()  # 8-char hex
-            backup_codes.append(code)
-            code_hash = self._hasher.hash(code)
+        with self._write_lock:
+            for _ in range(8):
+                code = secrets.token_hex(4).upper()  # 8-char hex
+                backup_codes.append(code)
+                code_hash = self._hasher.hash(code)
+                self._db.execute(
+                    "INSERT INTO backup_codes (code_hash, used) VALUES (?, 0)",
+                    [code_hash],
+                )
+            # Store account in the same transaction.
             self._db.execute(
-                "INSERT INTO backup_codes (code_hash, used) VALUES (?, 0)",
-                [code_hash],
+                """INSERT INTO account (id, username, email, password_hash, pin_hash,
+                   totp_secret_encrypted, totp_salt, created_at)
+                   VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
+                [username, email, password_hash, pin_hash, encrypted, totp_salt,
+                 datetime.now(timezone.utc).isoformat()],
             )
-
-        # Store account
-        self._db.execute(
-            """INSERT INTO account (id, username, email, password_hash, pin_hash,
-               totp_secret_encrypted, totp_salt, created_at)
-               VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
-            [username, email, password_hash, pin_hash, encrypted, totp_salt,
-             datetime.now(timezone.utc).isoformat()],
-        )
-        self._db.commit()
+            self._db.commit()
 
         # Cache the TOTP secret in memory for immediate use
         self._totp_secret_cache = totp_secret
@@ -221,7 +250,11 @@ class AuthService:
 
         Falls back gracefully if the ciphertext uses the legacy XOR format
         (pre-Fernet) — attempts XOR decryption as a migration path, then
-        re-encrypts with Fernet and updates the database.
+        re-encrypts with Fernet and updates the database. The XOR fallback
+        is gated behind the ``FLINTTRADE_ALLOW_LEGACY_TOTP`` environment
+        flag. After an installation has been migrated once (which happens
+        automatically during the very next successful login) the flag can
+        be removed; it will default to off in a future release.
         """
         row = self._db.execute(
             "SELECT totp_secret_encrypted, totp_salt FROM account WHERE id = 1"
@@ -237,7 +270,12 @@ class AuthService:
             plaintext = fernet.decrypt(encrypted).decode("utf-8")
             self._totp_secret_cache = plaintext
         except InvalidToken:
-            # Attempt legacy XOR decryption for backwards compatibility
+            if not self._legacy_totp_fallback_enabled():
+                logger.warning(
+                    "Failed to decrypt TOTP secret and legacy XOR fallback is disabled. "
+                    "Set FLINTTRADE_ALLOW_LEGACY_TOTP=1 once to migrate pre-Fernet installs."
+                )
+                return
             legacy_secret = self._try_legacy_xor_decrypt(password, salt, encrypted)
             if legacy_secret:
                 self._totp_secret_cache = legacy_secret
@@ -246,6 +284,17 @@ class AuthService:
                 logger.info("Migrated TOTP secret from legacy XOR to Fernet encryption")
             else:
                 logger.warning("Failed to decrypt TOTP secret — neither Fernet nor legacy XOR succeeded")
+
+    @staticmethod
+    def _legacy_totp_fallback_enabled() -> bool:
+        """Return True when the one-shot XOR-to-Fernet migration is permitted.
+
+        Controlled by ``FLINTTRADE_ALLOW_LEGACY_TOTP`` — any truthy value
+        (``1``, ``true``, ``yes``) enables the fallback. Defaulting off
+        prevents a stolen DB from being downgraded back to XOR.
+        """
+        val = os.environ.get("FLINTTRADE_ALLOW_LEGACY_TOTP", "").strip().lower()
+        return val in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _try_legacy_xor_decrypt(password: str, salt: bytes, encrypted: bytes) -> str | None:
@@ -319,22 +368,27 @@ class AuthService:
         return totp.verify(code, valid_window=1)
 
     def verify_backup_code(self, code: str) -> bool:
-        """Verify and consume a one-time backup code."""
-        rows = self._db.execute(
-            "SELECT code_hash FROM backup_codes WHERE used = 0"
-        ).fetchall()
-        for row in rows:
-            try:
-                if self._hasher.verify(row["code_hash"], code):
-                    self._db.execute(
-                        "UPDATE backup_codes SET used = 1 WHERE code_hash = ?",
-                        [row["code_hash"]],
-                    )
-                    self._db.commit()
-                    return True
-            except argon2.exceptions.VerifyMismatchError:
-                continue
-        return False
+        """Verify and consume a one-time backup code.
+
+        The read-then-update sequence is serialised with the write lock
+        so a concurrent request cannot double-consume the same code.
+        """
+        with self._write_lock:
+            rows = self._db.execute(
+                "SELECT code_hash FROM backup_codes WHERE used = 0"
+            ).fetchall()
+            for row in rows:
+                try:
+                    if self._hasher.verify(row["code_hash"], code):
+                        self._db.execute(
+                            "UPDATE backup_codes SET used = 1 WHERE code_hash = ?",
+                            [row["code_hash"]],
+                        )
+                        self._db.commit()
+                        return True
+                except argon2.exceptions.VerifyMismatchError:
+                    continue
+            return False
 
     def get_totp_provisioning_uri(self) -> str:
         """Get the TOTP provisioning URI for QR code generation."""
@@ -359,11 +413,12 @@ class AuthService:
         return (row["cnt"] if row else 0) >= _MAX_LOGIN_ATTEMPTS
 
     def _record_attempt(self, *, success: bool) -> None:
-        self._db.execute(
-            "INSERT INTO login_attempts (timestamp, success) VALUES (?, ?)",
-            [time.time(), int(success)],
-        )
-        self._db.commit()
+        with self._write_lock:
+            self._db.execute(
+                "INSERT INTO login_attempts (timestamp, success) VALUES (?, ?)",
+                [time.time(), int(success)],
+            )
+            self._db.commit()
 
     def get_email(self) -> str | None:
         """Return the account email, or None if no account is set up."""
