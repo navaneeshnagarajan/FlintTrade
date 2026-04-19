@@ -7,6 +7,7 @@ import TickerBar from "@/chrome/TickerBar";
 import { useWsBridge } from "@/hooks/useWsBridge";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
+import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
 import DailyWelcome from "@/components/welcome/DailyWelcome";
 import InteractiveTour from "@/components/tour/InteractiveTour";
 import { NoConnectionOverlay } from "@/components/NoConnectionOverlay";
@@ -79,6 +80,7 @@ export default function AppLayout() {
   useWsBridge();         // WebSocket connection (no-ops if no apiKey)
   useTickerFallback();   // REST polling fallback when WS is disconnected
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
+  useTradingStoreSync(); // Mirror funds/positions REST cache → tradingStore scalars (single write point)
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -189,23 +191,31 @@ export default function AppLayout() {
       {mode === "live" && (
         <div className="h-px bg-profit/60 shrink-0" aria-hidden="true" />
       )}
-      {/* Mode disclaimer banners — aria-live so screen readers announce mode changes */}
-      <div aria-live="polite" role="status" className="contents">
-        {mode === "practice" && (
-          <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center">
-            <p className="text-xs text-amber-400">
-              PRACTICE MODE — Virtual trading results are simulated and do not represent actual trading outcomes
-            </p>
-          </div>
-        )}
-        {mode === "explore" && (
-          <div className="bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center">
-            <p className="text-xs text-text-muted">
-              EXPLORE MODE — All data shown is sample only
-            </p>
-          </div>
-        )}
-      </div>
+      {/* Mode disclaimer banners — aria-live so screen readers announce mode changes.
+          Note: a bare wrapper with className="contents" strips role="status" from the
+          AX tree in some browsers, so the live region lives on each banner instead. */}
+      {mode === "practice" && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center"
+        >
+          <p className="text-xs text-amber-400">
+            PRACTICE MODE — Virtual trading results are simulated and do not represent actual trading outcomes
+          </p>
+        </div>
+      )}
+      {mode === "explore" && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center"
+        >
+          <p className="text-xs text-text-muted">
+            EXPLORE MODE — All data shown is sample only
+          </p>
+        </div>
+      )}
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
       <a

@@ -214,10 +214,14 @@ def verify_webhook_signature(
 ) -> bool:
     """Verify TradingView webhook signature (HMAC-SHA256).
 
-    TradingView can send a signature header for verification.
+    When *secret* is configured, a missing or empty *signature* is rejected
+    (fail-closed). Only when no secret was provisioned (explicit opt-out)
+    does this function return ``True`` for unsigned requests.
     """
-    if not secret or not signature:
-        return True  # No signature validation configured
+    if not secret:
+        return True  # Signature verification explicitly disabled
+    if not signature:
+        return False  # Secret configured but no signature header — reject
 
     expected = hmac.new(
         secret.encode("utf-8"),
@@ -255,8 +259,10 @@ class TradingViewWebhook:
         """Parse and validate a TradingView webhook request."""
         raw_bytes = body.encode("utf-8") if isinstance(body, str) else body
 
-        if self.secret and signature:
-            if not verify_webhook_signature(raw_bytes, signature, self.secret):
+        # Fail-closed: when a secret is configured, every request must carry
+        # a valid signature. No secret = signing disabled.
+        if self.secret:
+            if not signature or not verify_webhook_signature(raw_bytes, signature, self.secret):
                 return TradingViewAlert(
                     raw_payload=raw_bytes.decode("utf-8", errors="replace"),
                     error="Invalid webhook signature",

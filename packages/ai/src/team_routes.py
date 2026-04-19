@@ -1,7 +1,7 @@
 """Flask blueprint for multi-agent team endpoints.
 
 Endpoints:
-- POST /api/v1/ai/team/analyze — run team analysis on a symbol
+- POST /api/v1/ai/team/analyse — run team analysis on a symbol
 - GET  /api/v1/ai/team/config  — get current team configuration
 - POST /api/v1/ai/team/config  — update team configuration
 """
@@ -43,7 +43,7 @@ def _reset_team() -> None:
     _team_instance = None
 
 
-@team_bp.route("/analyze", methods=["POST"])
+@team_bp.route("/analyse", methods=["POST"])
 def team_analyze() -> tuple[Any, int]:
     """Run multi-agent team analysis on a symbol.
 
@@ -75,7 +75,7 @@ def team_analyze() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "exchange is required"}), 400
 
     try:
-        result = team.analyze(symbol, exchange, market_data)
+        result = team.analyse(symbol, exchange, market_data)
         recommendation = team.get_recommendation(result)
 
         return jsonify({

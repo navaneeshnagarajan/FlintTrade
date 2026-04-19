@@ -27,7 +27,7 @@ class TestStorageManager:
         from packages.data.src.storage import StorageManager
         # Use in-memory DuckDB for tests
         storage = StorageManager(":memory:")
-        storage.initialize()
+        storage.initialise()
         return storage
 
     def test_initialize_creates_all_tables(self):
@@ -45,7 +45,7 @@ class TestStorageManager:
     def test_initialize_idempotent(self):
         storage = self._make_storage()
         # Second call should not raise
-        storage.initialize()
+        storage.initialise()
         storage.close()
 
     def test_insert_and_query_tick(self):
@@ -182,7 +182,7 @@ class TestStorageManager:
     def test_context_manager(self):
         from packages.data.src.storage import StorageManager
         with StorageManager(":memory:") as storage:
-            storage.initialize()
+            storage.initialise()
             storage.insert_tick(
                 ts=datetime(2026, 3, 16, 10, 0, 0),
                 symbol="INFY", exchange="NSE", mode="ltp", ltp=1500.0,
@@ -382,7 +382,7 @@ class TestTradeLogger:
         from packages.data.src.storage import StorageManager
         from packages.data.src.trade_logger import TradeLogger
         storage = StorageManager(":memory:")
-        storage.initialize()
+        storage.initialise()
         return storage, TradeLogger(storage)
 
     def test_calculate_pnl_buy(self):
@@ -562,7 +562,7 @@ class TestTickRecorder:
         from packages.data.src.storage import StorageManager
         from packages.data.src.tick_recorder import TickRecorder
         storage = StorageManager(":memory:")
-        storage.initialize()
+        storage.initialise()
         return storage, TickRecorder(storage=storage)
 
     def test_add_symbols(self):

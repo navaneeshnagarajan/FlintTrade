@@ -213,7 +213,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
         <Input
           id="sa-username"
           autoFocus
-          placeholder="e.g. navaneesh"
+          placeholder="e.g. alice"
           aria-label="Choose a username"
           {...register("username")}
         />

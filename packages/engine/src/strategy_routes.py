@@ -15,6 +15,10 @@ from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from packages.core.src.rate_limiter import rate_limit
+
+from .mode_guard import require_non_explore
+
 logger = logging.getLogger("flinttrade.engine.strategy_routes")
 
 strategy_bp = Blueprint("strategies", __name__, url_prefix="/api/v1/strategies")
@@ -158,6 +162,8 @@ def list_strategies() -> Response:
 
 
 @strategy_bp.route("/<strategy_id>/start", methods=["POST"])
+@require_non_explore
+@rate_limit("smart_orders", user_rate=2, global_rate=20)
 def start_strategy(strategy_id: str) -> Response:
     """Start a strategy subprocess.
 
@@ -352,6 +358,7 @@ _SUPPORTED_EXCHANGES = frozenset({
 
 
 @strategy_bp.route("/<strategy_id>/schedule", methods=["POST"])
+@require_non_explore
 def create_strategy_schedule(strategy_id: str) -> Response:
     """Attach a cron schedule to an existing strategy.
 

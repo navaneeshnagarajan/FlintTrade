@@ -29,7 +29,7 @@ def _make_storage():
     from packages.data.src.storage import StorageManager
 
     s = StorageManager(":memory:")
-    s.initialize()
+    s.initialise()
     return s
 
 
@@ -39,7 +39,7 @@ def _make_journal():
 
     storage = _make_storage()
     journal = TradeJournal(storage)
-    journal.initialize()
+    journal.initialise()
     return storage, journal
 
 

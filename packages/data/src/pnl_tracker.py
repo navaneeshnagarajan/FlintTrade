@@ -65,7 +65,7 @@ class PnLTracker:
     # ------------------------------------------------------------------
 
     def _init_db(self, db_path: Path) -> None:
-        """Initialize DuckDB connection and create pnl_series table."""
+        """Initialise DuckDB connection and create pnl_series table."""
         try:
             import duckdb  # type: ignore[import]
 
@@ -83,7 +83,7 @@ class PnLTracker:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_pnl_series_ts ON pnl_series (timestamp)"
             )
-            logger.info("PnLTracker: DuckDB initialized at %s", db_path)
+            logger.info("PnLTracker: DuckDB initialised at %s", db_path)
         except Exception as exc:
             logger.warning("PnLTracker: DuckDB init failed (%s); running in-memory only", exc)
             self._conn = None

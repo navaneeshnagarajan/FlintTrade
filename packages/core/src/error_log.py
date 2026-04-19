@@ -19,7 +19,7 @@ Example::
         status_code=500,
         request_body={"symbol": "NIFTY", "password": "secret"},
         error=ValueError("order rejected"),
-        user_id="navaneesh",
+        user_id="alice",
     )
     recent = log.recent(limit=10)
     total  = log.count()

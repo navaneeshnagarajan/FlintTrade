@@ -65,12 +65,12 @@ describe("authStore", () => {
     it("sets token, username, status, and expiresAt", () => {
       useAuthStore
         .getState()
-        .setLoggedIn("jwt-abc-123", "navaneesh", "2026-04-09T02:30:00Z");
+        .setLoggedIn("jwt-abc-123", "alice", "2026-04-09T02:30:00Z");
 
       const state = useAuthStore.getState();
       expect(state.status).toBe("logged-in");
       expect(state.token).toBe("jwt-abc-123");
-      expect(state.username).toBe("navaneesh");
+      expect(state.username).toBe("alice");
       expect(state.expiresAt).toBe("2026-04-09T02:30:00Z");
     });
 

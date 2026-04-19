@@ -129,7 +129,7 @@ class StorageManager:
     Usage::
 
         storage = StorageManager("/data/flinttrade/flint.duckdb")
-        storage.initialize()
+        storage.initialise()
         storage.insert_tick(...)
         ticks = storage.get_ticks("RELIANCE", "NSE", "2026-03-01", "2026-03-16")
         storage.close()
@@ -164,13 +164,13 @@ class StorageManager:
     # Schema management
     # ------------------------------------------------------------------
 
-    def initialize(self) -> None:
+    def initialise(self) -> None:
         """Create all tables and indexes if they don't exist."""
         for ddl in _ALL_SCHEMAS:
             self.connection.execute(ddl)
         for idx in _INDEXES:
             self.connection.execute(idx)
-        logger.info("DuckDB schema initialized (tables + indexes)")
+        logger.info("DuckDB schema initialised (tables + indexes)")
 
     # ------------------------------------------------------------------
     # Tick storage

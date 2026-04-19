@@ -1,6 +1,8 @@
 // Pure utility functions for StrategyBuilder — extracted from StrategyBuilderTool.tsx
 // Absorbed patterns from openalgo-chart/src/services/strategyTemplates.js
 
+import { formatCurrency as formatINRCanonical } from "@/lib/formatters";
+
 import type { Leg, PayoffPoint, EquityPoint, PerfMetrics, Underlying } from "./types";
 
 // Absorbed from strategyTemplates.js — calculateNetPremium
@@ -28,8 +30,7 @@ export function genId(): string {
 }
 
 export function formatINR(v: number): string {
-  if (isNaN(v)) return "₹0.00";
-  return `${v < 0 ? "-" : ""}₹${Math.abs(v).toFixed(2)}`;
+  return formatINRCanonical(v);
 }
 
 export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {

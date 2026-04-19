@@ -502,11 +502,11 @@ class TestKillSwitchErrors:
         from packages.automation.src.telegram_bot import BotConfig, TelegramBot
         mock_audit = MagicMock()
         bot = TelegramBot(config=BotConfig(chat_id="12345"), audit_logger=mock_audit)
-        bot.handle_command("/kill", chat_id="12345", username="navaneesh")
+        bot.handle_command("/kill", chat_id="12345", username="alice")
         mock_audit.log_event.assert_called_once_with(
             "KILL_SWITCH",
             source="telegram",
-            triggered_by="navaneesh",
+            triggered_by="alice",
         )
 
     def test_kill_uses_operator_when_no_username(self):

@@ -1,4 +1,4 @@
-"""AI blueprint — /api/v1/signals/active, /sentiment/analyze, /rag/query endpoints.
+"""AI blueprint — /api/v1/signals/active, /sentiment/analyse, /rag/query endpoints.
 
 Active signal pipeline polling, sentiment analysis via LLM or rule-based
 fallback, and RAG knowledge-base query.
@@ -64,12 +64,12 @@ def signals_active() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@ai_bp.route("/sentiment/analyze", methods=["POST"])
+@ai_bp.route("/sentiment/analyse", methods=["POST"])
 def sentiment_analyze() -> tuple[Any, int]:
-    """Analyze sentiment for a text snippet or symbol.
+    """Analyse sentiment for a text snippet or symbol.
 
     Request JSON:
-        text (str, optional): Raw text to analyze (headline, news).
+        text (str, optional): Raw text to analyse (headline, news).
         symbol (str, optional): Symbol to look up recent sentiment for.
         At least one of ``text`` or ``symbol`` must be provided.
 

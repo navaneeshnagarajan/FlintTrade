@@ -106,7 +106,7 @@ class ActivityLog:
 
         log = ActivityLog("~/.flinttrade/activity.db")
         log_id = log.log("order.place", {"symbol": "NIFTY", "qty": 50},
-                         user="navaneesh", ip="10.10.10.2")
+                         user="alice", ip="192.0.2.1")
         entries = log.query(action="order.place", limit=20)
         count = log.count_actions("order.place", since="2026-04-01T00:00:00")
 
@@ -318,10 +318,10 @@ class LoginActivity:
     Example::
 
         la = LoginActivity("~/.flinttrade/activity.db")
-        la.log_login("nav", "10.10.10.2", "Mozilla/5.0 ...", success=True)
-        la.log_login("nav", "1.2.3.4", "curl/7.64", success=False,
+        la.log_login("alice", "192.0.2.1", "Mozilla/5.0 ...", success=True)
+        la.log_login("alice", "192.0.2.2", "curl/7.64", success=False,
                      failure_reason="bad_password")
-        recent = la.recent_logins(user_id="nav", limit=10)
+        recent = la.recent_logins(user_id="alice", limit=10)
         suspicious = la.suspicious_logins(window_hours=24)
     """
 
@@ -501,10 +501,10 @@ class SessionTracker:
     Example::
 
         st = SessionTracker("~/.flinttrade/activity.db")
-        st.register_session("sess-abc", "nav", "10.10.10.2",
+        st.register_session("sess-abc", "alice", "192.0.2.1",
                             "Mozilla/5.0 ...", device_id="laptop-1")
         st.heartbeat("sess-abc")
-        sessions = st.active_sessions(user_id="nav")
+        sessions = st.active_sessions(user_id="alice")
         expired = st.expire_stale(idle_minutes=60)
         st.end_session("sess-abc")
     """

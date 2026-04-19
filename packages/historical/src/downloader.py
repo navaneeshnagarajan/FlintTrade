@@ -29,7 +29,7 @@ _DEFAULT_CHUNK_DAYS_DAILY = 365
 # All tradeable exchanges
 SUPPORTED_EXCHANGES = {"NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"}
 
-# Canonical interval mapping — normalize user-friendly names to OpenAlgo format
+# Canonical interval mapping — normalise user-friendly names to OpenAlgo format
 _INTERVAL_MAP: dict[str, str] = {
     "1m": "1m", "2m": "2m", "3m": "3m", "5m": "5m", "10m": "10m",
     "15m": "15m", "30m": "30m", "1h": "1h",

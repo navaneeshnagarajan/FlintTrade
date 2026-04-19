@@ -1,13 +1,11 @@
+import { formatNumber } from "@/lib/formatters";
 import { type JournalTrade } from "@/services/ftApi";
 import { type TiltStatus } from "./types";
 
 export const NOTES_KEY = "flinttrade_journal_notes";
 
 export function formatPrice(value: number): string {
-  return value.toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return formatNumber(value, 2);
 }
 
 export function formatDate(ts: string): string {

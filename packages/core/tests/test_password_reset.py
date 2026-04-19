@@ -24,8 +24,8 @@ class TestUpdatePassword:
     def _setup_svc(self, tmp_path: Path) -> AuthService:
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="navaneesh",
-            email="nav@example.com",
+            username="alice",
+            email="alice@example.com",
             password="StrongP@ss123!",
             pin="123456",
         )
@@ -33,7 +33,7 @@ class TestUpdatePassword:
 
     def test_update_password_success(self, tmp_path: Path):
         svc = self._setup_svc(tmp_path)
-        assert svc.update_password("navaneesh", "NewStr0ngP@ss!") is True
+        assert svc.update_password("alice", "NewStr0ngP@ss!") is True
         # Old password no longer works
         assert svc.verify_password("StrongP@ss123!") is False
         # New password works
@@ -48,11 +48,11 @@ class TestUpdatePassword:
     def test_update_password_rejects_weak(self, tmp_path: Path):
         svc = self._setup_svc(tmp_path)
         with pytest.raises(ValueError, match="too weak"):
-            svc.update_password("navaneesh", "short")
+            svc.update_password("alice", "short")
 
     def test_update_password_no_account(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
-        assert svc.update_password("navaneesh", "NewStr0ngP@ss!") is False
+        assert svc.update_password("alice", "NewStr0ngP@ss!") is False
 
 
 class TestGetEmail:
@@ -61,10 +61,10 @@ class TestGetEmail:
     def test_returns_email_after_setup(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
-        assert svc.get_email() == "nav@example.com"
+        assert svc.get_email() == "alice@example.com"
 
     def test_returns_none_before_setup(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
@@ -82,15 +82,15 @@ class TestResetToken:
     def test_roundtrip(self):
         from packages.core.src.auth_routes import _create_reset_token, _verify_reset_token
 
-        token = _create_reset_token("navaneesh")
-        assert _verify_reset_token(token) == "navaneesh"
+        token = _create_reset_token("alice")
+        assert _verify_reset_token(token) == "alice"
 
     def test_expired_token_rejected(self):
         from packages.core.src.auth_routes import _get_jwt_secret, _verify_reset_token
 
         # Manually craft an expired token
         payload = {
-            "sub": "navaneesh",
+            "sub": "alice",
             "iat": time.time() - 7200,
             "exp": time.time() - 3600,  # expired 1 hour ago
             "type": "reset",
@@ -103,7 +103,7 @@ class TestResetToken:
         """A regular session JWT must not be accepted as a reset token."""
         from packages.core.src.auth_routes import _create_token, _verify_reset_token
 
-        session_token = _create_token("navaneesh")
+        session_token = _create_token("alice")
         assert _verify_reset_token(session_token) is None
 
     def test_invalid_token_string(self):
@@ -142,8 +142,8 @@ def app_with_auth(tmp_path: Path):
     auth_db = tmp_path / "auth.db"
     svc = AuthService(db_path=auth_db)
     svc.setup_account(
-        username="navaneesh",
-        email="nav@example.com",
+        username="alice",
+        email="alice@example.com",
         password="StrongP@ss123!",
         pin="123456",
     )
@@ -162,7 +162,7 @@ class TestForgotPasswordEndpoint:
         with app_with_auth.test_client() as client:
             resp = client.post(
                 "/v1/auth/forgot-password",
-                json={"email": "nav@example.com"},
+                json={"email": "alice@example.com"},
             )
             assert resp.status_code == 503
 
@@ -175,7 +175,7 @@ class TestForgotPasswordEndpoint:
             with app_with_auth.test_client() as client:
                 resp = client.post(
                     "/v1/auth/forgot-password",
-                    json={"email": "nav@example.com"},
+                    json={"email": "alice@example.com"},
                 )
                 assert resp.status_code == 200
                 data = resp.get_json()
@@ -214,7 +214,7 @@ class TestResetPasswordEndpoint:
     def test_reset_with_valid_token(self, app_with_auth):
         from packages.core.src.auth_routes import _create_reset_token
 
-        token = _create_reset_token("navaneesh")
+        token = _create_reset_token("alice")
 
         with app_with_auth.test_client() as client:
             resp = client.post(
@@ -233,7 +233,7 @@ class TestResetPasswordEndpoint:
         from packages.core.src.auth_routes import _get_jwt_secret
 
         payload = {
-            "sub": "navaneesh",
+            "sub": "alice",
             "iat": time.time() - 7200,
             "exp": time.time() - 3600,
             "type": "reset",
@@ -260,7 +260,7 @@ class TestResetPasswordEndpoint:
     def test_reset_with_weak_password(self, app_with_auth):
         from packages.core.src.auth_routes import _create_reset_token
 
-        token = _create_reset_token("navaneesh")
+        token = _create_reset_token("alice")
 
         with app_with_auth.test_client() as client:
             resp = client.post(

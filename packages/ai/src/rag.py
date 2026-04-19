@@ -148,7 +148,7 @@ class RAGEngine:
         self._embedding_fn = None
 
     def _get_collection(self) -> Any:
-        """Lazy-initialize ChromaDB collection."""
+        """Lazy-initialise ChromaDB collection."""
         if self._collection is not None:
             return self._collection
 
@@ -175,7 +175,7 @@ class RAGEngine:
             name=self._collection_name,
             embedding_function=self._embedding_fn,
         )
-        logger.info("ChromaDB collection '%s' initialized, %d docs", self._collection_name, self._collection.count())
+        logger.info("ChromaDB collection '%s' initialised, %d docs", self._collection_name, self._collection.count())
         return self._collection
 
     # ------------------------------------------------------------------

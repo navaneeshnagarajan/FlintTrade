@@ -205,7 +205,9 @@ class TestHTTPRequestNode:
 
         captured_url: list[str] = []
 
-        with patch("httpx.Client") as mock_client_cls:
+        with patch(
+            "packages.automation.src.flow_nodes.http_node._validate_public_url"
+        ), patch("httpx.Client") as mock_client_cls:
             mock_client = MagicMock()
             mock_client.__enter__ = lambda s: mock_client
             mock_client.__exit__ = MagicMock(return_value=False)

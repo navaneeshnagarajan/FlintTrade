@@ -405,8 +405,8 @@ class AutonomousTrader:
 
         return data
 
-    async def analyze(self, symbol: str) -> MarketData:
-        """Fetch and analyze one symbol.
+    async def analyse(self, symbol: str) -> MarketData:
+        """Fetch and analyse one symbol.
 
         Args:
             symbol: Instrument symbol.

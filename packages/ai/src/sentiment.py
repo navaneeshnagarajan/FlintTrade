@@ -134,7 +134,7 @@ def extract_symbols(text: str) -> list[str]:
 # LLM-based sentiment scoring
 # ---------------------------------------------------------------------------
 
-_SENTIMENT_PROMPT = """Analyze the following financial news headline and summary for market sentiment.
+_SENTIMENT_PROMPT = """Analyse the following financial news headline and summary for market sentiment.
 Respond with EXACTLY this JSON format (no other text):
 {{"sentiment": "BULLISH" or "BEARISH" or "NEUTRAL", "confidence": 0.0 to 1.0, "reasoning": "brief reason"}}
 

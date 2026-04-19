@@ -75,8 +75,9 @@ const midnight: FlintTradeTheme = {
     border: "#2a2a3a",
     borderHover: "#3a3a4a",
     textPrimary: "#e4e4e7",
-    textSecondary: "#8b8b95",
-    textMuted: "#7e7e8a",
+    // WCAG AA: textSecondary now ~6.4:1 on background; 4.8:1 on cardHover.
+    textSecondary: "#a1a1aa",
+    textMuted: "#9797a2",
     accent: "#3b82f6",
     accentHover: "#2563eb",
     accentMuted: "rgba(59,130,246,0.15)",
@@ -110,8 +111,9 @@ const obsidian: FlintTradeTheme = {
     border: "#222228",
     borderHover: "#38383f",
     textPrimary: "#ebebef",
-    textSecondary: "#9898a0",
-    textMuted: "#6b6b75",
+    // WCAG AA: muted bumped to ~4.8:1 on background.
+    textSecondary: "#a1a1aa",
+    textMuted: "#8b8b95",
     accent: "#818cf8",
     accentHover: "#6366f1",
     accentMuted: "rgba(129,140,248,0.15)",

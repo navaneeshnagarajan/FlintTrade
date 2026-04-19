@@ -183,9 +183,9 @@ class TestErrorLogWrite:
 
     def test_log_user_id_stored(self):
         log = _make_log()
-        log.log("/v1/orders", "POST", 500, user_id="navaneesh")
+        log.log("/v1/orders", "POST", 500, user_id="alice")
         entries = log.recent(limit=1)
-        assert entries[0]["user_id"] == "navaneesh"
+        assert entries[0]["user_id"] == "alice"
         log.close()
 
     def test_log_user_id_none_by_default(self):

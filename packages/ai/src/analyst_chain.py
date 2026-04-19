@@ -17,7 +17,7 @@ Usage::
 
     client = LLMClient(config=LLMConfig.from_env())
     chain = AnalystChain(llm_client=client, analysts=["market", "sentiment"])
-    state = chain.analyze("NIFTY", "NSE_INDEX")
+    state = chain.analyse("NIFTY", "NSE_INDEX")
     print(state.final_decision, state.confidence)
 """
 
@@ -99,7 +99,7 @@ class AnalystChain:
     judge node (optional; falls back to ``quick_llm``).
 
     Supported analyst names: ``"market"``, ``"sentiment"``,
-    ``"fundamentals"``.  Unknown names raise ``ValueError`` at ``analyze``
+    ``"fundamentals"``.  Unknown names raise ``ValueError`` at ``analyse``
     time (captured into ``state.errors``).
 
     Args:
@@ -118,7 +118,7 @@ class AnalystChain:
             deep_llm_client=powerful_client,
             analysts=["market", "sentiment", "fundamentals"],
         )
-        state = chain.analyze("RELIANCE", "NSE")
+        state = chain.analyse("RELIANCE", "NSE")
         print(state.final_decision)  # "BUY" | "SELL" | "HOLD"
     """
 
@@ -138,7 +138,7 @@ class AnalystChain:
     # Public API
     # ------------------------------------------------------------------
 
-    def analyze(
+    def analyse(
         self,
         symbol: str,
         exchange: str,

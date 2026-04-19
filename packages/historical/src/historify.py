@@ -19,7 +19,7 @@ Example::
     async def main():
         async with OpenAlgoClient() as client:
             pipeline = DataPipeline()
-            pipeline.initialize()
+            pipeline.initialise()
             dl = HistorifyDownloader(client, pipeline)
             result = await dl.download_symbols(
                 symbols=[("RELIANCE", "NSE"), ("NIFTY", "NSE_INDEX")],

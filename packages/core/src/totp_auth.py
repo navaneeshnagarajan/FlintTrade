@@ -78,11 +78,36 @@ def _derive_fernet_key(passphrase: str, salt: bytes) -> Fernet:
     return Fernet(key)
 
 
+def _load_or_init_install_secret() -> str:
+    """Return a per-install random secret from ``~/.flinttrade/totp_install_key``.
+
+    Generated once on first call (64 bytes urlsafe). File permissions set to
+    owner-read only on POSIX. Ensures every FlintTrade install uses a unique
+    key for TOTP encryption, even if ``FLINTTRADE_TOTP_KEY`` is unset.
+    """
+    key_path = Path.home() / ".flinttrade" / "totp_install_key"
+    try:
+        return key_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        secret = secrets.token_urlsafe(64)
+        # Atomic create-or-fail: if two workers race, the loser re-reads.
+        try:
+            fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return key_path.read_text(encoding="utf-8").strip()
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(secret)
+        logger.info("Generated per-install TOTP encryption key at %s", key_path)
+        return secret
+
+
 def _app_passphrase(user_id: str) -> str:
     """Build the encryption passphrase for *user_id*.
 
-    Uses ``FLINTTRADE_TOTP_KEY`` env var if set, otherwise falls back to a
-    deterministic string. In production the env var must be set.
+    Prefers ``FLINTTRADE_TOTP_KEY`` env var; otherwise uses a per-install
+    random secret persisted to ``~/.flinttrade/totp_install_key``. The legacy
+    hardcoded default has been removed — each install now has a unique key.
 
     Args:
         user_id: Unique user identifier.
@@ -90,7 +115,7 @@ def _app_passphrase(user_id: str) -> str:
     Returns:
         String used as PBKDF2 input material.
     """
-    app_key = os.environ.get("FLINTTRADE_TOTP_KEY", "flinttrade-totp-default-key-change-in-prod")
+    app_key = os.environ.get("FLINTTRADE_TOTP_KEY") or _load_or_init_install_secret()
     return f"{app_key}:{user_id}"
 
 

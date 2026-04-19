@@ -77,7 +77,7 @@ class NSEData:
             try:
                 from openchart import NSEData as OpenChartNSE
                 self._chart = OpenChartNSE()
-                logger.info("OpenChart NSEData initialized")
+                logger.info("OpenChart NSEData initialised")
             except ImportError:
                 logger.warning("openchart not installed — pip install openchart")
                 raise ImportError(

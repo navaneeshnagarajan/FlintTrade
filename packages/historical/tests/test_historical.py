@@ -173,7 +173,7 @@ class TestDataPipeline:
     def _make_pipeline(self):
         from packages.historical.src.pipeline import DataPipeline
         pipeline = DataPipeline(":memory:")
-        pipeline.initialize()
+        pipeline.initialise()
         return pipeline
 
     def test_initialize_creates_tables(self):
@@ -266,7 +266,7 @@ class TestDataPipeline:
     def test_context_manager(self):
         from packages.historical.src.pipeline import DataPipeline
         with DataPipeline(":memory:") as pipeline:
-            pipeline.initialize()
+            pipeline.initialise()
             pipeline.store_bars("ohlcv_1d", "A", "NSE", [
                 {"timestamp": "2026-03-16", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
             ])
@@ -338,7 +338,7 @@ class TestAggregation:
     def test_pipeline_aggregate_1m_to_5m(self):
         from packages.historical.src.pipeline import DataPipeline
         pipeline = DataPipeline(":memory:")
-        pipeline.initialize()
+        pipeline.initialise()
 
         # Insert 10 x 1m bars
         bars = [

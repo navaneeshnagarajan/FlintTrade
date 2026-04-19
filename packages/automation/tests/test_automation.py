@@ -573,7 +573,7 @@ class TestOpenClawBridge:
     def test_default_skills_exist(self):
         from packages.automation.src.openclaw_bridge import DEFAULT_SKILLS
         assert "trade" in DEFAULT_SKILLS
-        assert "analyze" in DEFAULT_SKILLS
+        assert "analyse" in DEFAULT_SKILLS
         assert "backtest" in DEFAULT_SKILLS
         assert "status" in DEFAULT_SKILLS
 

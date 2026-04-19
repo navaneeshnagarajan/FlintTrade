@@ -218,6 +218,19 @@ def create_flask_app(
     )
     app.config["LIMITER"] = limiter
 
+    # Custom token-bucket rate limiter — finer-grained per-(user, endpoint)
+    # control. Consumed via the ``@rate_limit("endpoint", user_rate, global_rate)``
+    # decorator from ``packages.core.src.rate_limiter``. Applied to order,
+    # bracket, strategy-start, and webhook routes to enforce the documented
+    # caps: orders 10/s per user (100/s global), smart orders 2/s (20/s),
+    # webhooks 5/s (50/s).
+    from .rate_limiter import RateLimiter as _RateLimiter  # noqa: PLC0415
+    _rate_limiter = _RateLimiter(global_rate=100, per_user_rate=10)
+    _rate_limiter.set_limit("orders", user_rate=10, global_rate=100)
+    _rate_limiter.set_limit("smart_orders", user_rate=2, global_rate=20)
+    _rate_limiter.set_limit("webhook", user_rate=5, global_rate=50)
+    app.config["RATE_LIMITER"] = _rate_limiter
+
     # ------------------------------------------------------------------
     # Error tracking — Sentry SDK pointing at a Glitchtip instance (MIT).
     # Only initialised when GLITCHTIP_DSN is set in the environment; safe
@@ -875,7 +888,7 @@ def create_flask_app(
 
         _mcp_bridge.register_handler("place_order", _mcp_place_order)
         _mcp_bridge.register_handler("get_positions", _mcp_get_positions)
-        logger.info("MCP bridge initialized with place_order, get_positions handlers")
+        logger.info("MCP bridge initialised with place_order, get_positions handlers")
     except Exception:
         logger.debug("MCP bridge not available — skipping handler registration")
 
@@ -1031,7 +1044,7 @@ class FlintTradeApp:
 
         self._stop_event = asyncio.Event()
 
-        logger.info("FlintTradeApp initialized — v%s", self.version)
+        logger.info("FlintTradeApp initialised — v%s", self.version)
 
     async def start(self) -> None:
         """Start all services and wait until stopped."""

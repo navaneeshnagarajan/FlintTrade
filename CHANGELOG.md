@@ -6,6 +6,24 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5.0-dev
 
+### Added — OpenAlgo v2.0.0.4 Parity (Waves 1-5, 1,499 tests)
+- Wave 1 — Scanner, cron, error log, seasonality, security/session tooling (253 tests)
+- Wave 2 — Analytics + orders + infra: GEX, IV smile, vol surface, OI profile, straddle P&L, basket/split orders, traffic/latency/event-bus (347 tests)
+- Wave 3 — Security + smart routing: TOTP 2FA for FlintTrade login, smart order router, qty-freeze controls (73 tests)
+- Wave 4 — Action center, WS proxy, historify, plugin/cache layer, IP whitelist, CSP, health monitor (449 tests)
+- Wave 5 — 9 parity endpoints, ops tools, strategy hot-reload, frontend parity, voice + deploy (314 tests)
+
+### Security
+- TOTP encryption passphrase now derives from a per-install random secret at `~/.flinttrade/totp_install_key` when `FLINTTRADE_TOTP_KEY` is unset — eliminates the shared default key
+- TradingView webhook signature verification is fail-closed when a secret is configured (missing header now rejects)
+- Flow builder HTTP node blocks non-public URLs (loopback, RFC1918, link-local, cloud metadata 169.254.169.254) and disables redirects
+- Engine order/bracket/strategy-start routes now enforce JWT mode claim server-side — explore-mode callers receive HTTP 403
+
+### Chores
+- Removed personal identifiers from sample data and test fixtures (replaced with generic placeholders + RFC 5737 IPs)
+- Replaced seven realistic Indian client names + broker names in `operations_routes.py` sample accounts with anonymous demo tokens
+- Bumped `packages/terminal/package.json` to `0.5.0` to match the monorepo version
+
 ### Added — Features (Waves 1-9)
 - Signals pipeline: real-time signal generation, scoring, and routing to order engine (signal_pipeline.py + signal_routes.py + useSignals hook)
 - MCX commodity support: symbol normalisation, market hours, lot sizes (mcxLots.ts + 46 tests)

@@ -206,7 +206,7 @@ class TradedMemory:
         embedding_model: str = _EMBEDDING_MODEL,
         _chroma_client: Any | None = None,
     ) -> None:
-        """Initialize TradedMemory.
+        """Initialise TradedMemory.
 
         Args:
             persist_dir: Directory for ChromaDB persistence. Tilde is expanded.
@@ -221,7 +221,7 @@ class TradedMemory:
         self._embedding_model_name = embedding_model
         self._override_client = _chroma_client
 
-        # Lazy-initialized per layer
+        # Lazy-initialised per layer
         self._chroma_client: Any | None = None
         self._collections: dict[MemoryLayer, Any] = {}
         self._embedding_fn: Any | None = None
@@ -258,7 +258,7 @@ class TradedMemory:
             else:
                 self._chroma_client = chromadb.EphemeralClient()
 
-            logger.debug("ChromaDB client initialized (persist_dir=%s)", self._persist_dir)
+            logger.debug("ChromaDB client initialised (persist_dir=%s)", self._persist_dir)
             return self._chroma_client
 
     def _get_embedding_fn(self) -> Any:

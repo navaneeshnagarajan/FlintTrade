@@ -22,6 +22,7 @@ import { SAMPLE_OI_PROFILE_DATA } from "./sampleData";
 import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import { getHistory } from "@/services/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Data, Layout } from "plotly.js";
@@ -80,6 +81,7 @@ function OIProfileWidget() {
   const [interval, setInterval] = useState("15m");
 
   const isConnected = useBrokerConnected();
+  const mode = useModeStore((s) => s.mode);
   const exchange = SYMBOL_EXCHANGE[symbol] ?? "NFO";
   const spotExchange = SPOT_EXCHANGE[symbol] ?? "NSE_INDEX";
 
@@ -88,10 +90,13 @@ function OIProfileWidget() {
     exchange,
     expiry,
     undefined,
-    isConnected,
+    isConnected && mode !== "explore",
   );
 
-  const data = isConnected ? liveData : SAMPLE_OI_PROFILE_DATA;
+  // Explore mode is the documented boundary for sample data — it must not be
+  // gated on broker connection, since an Explore user with a live broker
+  // connection would otherwise get production data instead of the demo set.
+  const data = mode === "explore" ? SAMPLE_OI_PROFILE_DATA : liveData;
 
   // ---------------------------------------------------------------------------
   // Lightweight Charts — futures candlestick (top pane)

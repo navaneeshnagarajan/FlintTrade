@@ -220,5 +220,5 @@ class TestOpenClawInit:
         assert bridge.is_connected is False
 
     def test_custom_host(self):
-        bridge = OpenClawBridge(host="http://10.10.10.1:18789/")
-        assert bridge.host == "http://10.10.10.1:18789"
+        bridge = OpenClawBridge(host="http://192.0.2.10:18789/")
+        assert bridge.host == "http://192.0.2.10:18789"

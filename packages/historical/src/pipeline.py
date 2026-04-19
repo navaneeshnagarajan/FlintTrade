@@ -154,7 +154,7 @@ class DataPipeline:
     Usage::
 
         pipeline = DataPipeline()
-        pipeline.initialize()
+        pipeline.initialise()
         pipeline.store_download(download_result, "5m")
         pipeline.aggregate("RELIANCE", "NSE", "ohlcv_1m", "ohlcv_5m", 5)
         pipeline.export_parquet("ohlcv_1d", "/data/archive/daily.parquet")
@@ -187,12 +187,12 @@ class DataPipeline:
     # Schema
     # ------------------------------------------------------------------
 
-    def initialize(self) -> None:
+    def initialise(self) -> None:
         """Create all OHLCV interval tables and indexes."""
         for table in set(INTERVAL_TABLES.values()):
             self.connection.execute(_TABLE_DDL.format(table=table))
             self.connection.execute(_INDEX_DDL.format(table=table))
-        logger.info("Historical pipeline schema initialized (tables + indexes)")
+        logger.info("Historical pipeline schema initialised (tables + indexes)")
 
     # ------------------------------------------------------------------
     # Store data

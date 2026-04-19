@@ -13,7 +13,7 @@ Usage::
     from packages.data.src.trade_journal import TradeJournal, JournalEntry
 
     storage = StorageManager()
-    storage.initialize()
+    storage.initialise()
     journal = TradeJournal(storage)
 
     entry_id = journal.add_entry(JournalEntry(
@@ -445,7 +445,7 @@ class TradeJournal:
     """DuckDB-backed trade journal with CRUD, stats, CSV export, and tradebook import.
 
     The journal lives in a ``journal_entries`` table in the same DuckDB file
-    as the rest of FlintTrade's data.  Call :meth:`initialize` once before
+    as the rest of FlintTrade's data.  Call :meth:`initialise` once before
     first use (or rely on :class:`~storage.StorageManager` to call it for you
     after ``add_journal_schema``).
 
@@ -455,7 +455,7 @@ class TradeJournal:
     Example::
 
         journal = TradeJournal(storage)
-        journal.initialize()
+        journal.initialise()
         eid = journal.add_entry(JournalEntry(
             symbol="BANKNIFTY", exchange="NFO", side="BUY",
             quantity=25, entry_price=48000.0, exit_price=48500.0,
@@ -471,7 +471,7 @@ class TradeJournal:
     # Schema initialisation
     # ------------------------------------------------------------------
 
-    def initialize(self) -> None:
+    def initialise(self) -> None:
         """Create the ``journal_entries`` table and indexes if they do not exist.
 
         Safe to call multiple times (CREATE IF NOT EXISTS).

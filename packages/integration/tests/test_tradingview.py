@@ -273,9 +273,10 @@ class TestVerifyWebhookSignature:
         from packages.integration.src.tradingview import verify_webhook_signature
         assert verify_webhook_signature(b"anything", "any_sig", "")
 
-    def test_empty_signature_skips_validation(self):
+    def test_empty_signature_with_secret_rejected(self):
+        """Fail-closed: when a secret is configured, a missing signature rejects."""
         from packages.integration.src.tradingview import verify_webhook_signature
-        assert verify_webhook_signature(b"anything", "", "secret")
+        assert not verify_webhook_signature(b"anything", "", "secret")
 
 
 # ---------------------------------------------------------------------------

@@ -64,7 +64,7 @@ _CHARTINK_SUFFIXES = ["-EQ", "-BE", "-SM", "-ST", "-BZ"]
 
 
 def normalize_chartink_symbol(raw_symbol: str) -> str:
-    """Normalize a ChartInk symbol to OpenAlgo format.
+    """Normalise a ChartInk symbol to OpenAlgo format.
 
     ChartInk may add suffixes like -EQ, -BE. OpenAlgo uses plain symbols.
     """

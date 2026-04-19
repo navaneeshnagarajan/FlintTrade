@@ -280,7 +280,7 @@ async def test_decide_hold_on_llm_error() -> None:
 @pytest.mark.asyncio
 async def test_analyze_returns_market_data() -> None:
     agent = make_agent()
-    result = await agent.analyze("RELIANCE")
+    result = await agent.analyse("RELIANCE")
     assert isinstance(result, MarketData)
     assert result.symbol == "RELIANCE"
     assert result.ltp == 100.0
@@ -289,7 +289,7 @@ async def test_analyze_returns_market_data() -> None:
 @pytest.mark.asyncio
 async def test_analyze_bid_ask_ratio() -> None:
     agent = make_agent()
-    result = await agent.analyze("RELIANCE")
+    result = await agent.analyse("RELIANCE")
     assert result.bid_ask_ratio == pytest.approx(500 / 400)
 
 

@@ -12,6 +12,10 @@ from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from packages.core.src.rate_limiter import rate_limit
+
+from .mode_guard import require_non_explore
+
 logger = logging.getLogger("flinttrade.engine.bracket_routes")
 
 bracket_bp = Blueprint("brackets", __name__, url_prefix="/api/v1/orders")
@@ -44,6 +48,8 @@ def _service_required() -> tuple[Any, Response | None]:
 
 
 @bracket_bp.route("/bracket", methods=["POST"])
+@require_non_explore
+@rate_limit("orders", user_rate=10, global_rate=100)
 def place_bracket() -> Response:
     """Place a bracket order (entry + SL + target).
 

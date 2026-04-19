@@ -148,7 +148,7 @@ def engineer_features(
         "high_low_range", "close_vs_high", "close_vs_low",
         "volume_ratio_5",
         "rsi_14", "macd_hist", "bb_pct",
-        "ema_cross",  # ema9 - ema21 normalized
+        "ema_cross",  # ema9 - ema21 normalised
         "pcr", "max_pain_dist", "iv_percentile",
     ]
 

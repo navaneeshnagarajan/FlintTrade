@@ -253,7 +253,7 @@ class CronManager:
         return self._holidays
 
     def _get_scheduler(self) -> Any:
-        """Lazy-initialize APScheduler."""
+        """Lazy-initialise APScheduler."""
         if self._scheduler is not None:
             return self._scheduler
 

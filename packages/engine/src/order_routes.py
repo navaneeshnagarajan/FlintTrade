@@ -32,6 +32,10 @@ from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from packages.core.src.rate_limiter import rate_limit
+
+from .mode_guard import require_non_explore
+
 logger = logging.getLogger("flinttrade.engine.order_routes")
 
 order_bp = Blueprint("advanced_orders", __name__, url_prefix="/api/v1/orders")
@@ -93,6 +97,8 @@ def _run_async(coro):  # type: ignore[no-untyped-def]
 
 
 @order_bp.route("/basket", methods=["POST"])
+@require_non_explore
+@rate_limit("orders", user_rate=10, global_rate=100)
 def place_basket() -> Response:
     """Execute a basket of multi-leg orders atomically.
 
@@ -202,6 +208,8 @@ def place_basket() -> Response:
 
 
 @order_bp.route("/split", methods=["POST"])
+@require_non_explore
+@rate_limit("orders", user_rate=10, global_rate=100)
 def place_split() -> Response:
     """Break a large order into smaller chunks and place with a delay.
 
@@ -315,6 +323,8 @@ _STRATEGY_MAP = {
 
 
 @order_bp.route("/options-strategy", methods=["POST"])
+@require_non_explore
+@rate_limit("smart_orders", user_rate=2, global_rate=20)
 def place_options_strategy() -> Response:
     """Build and execute a named options strategy.
 

@@ -190,5 +190,5 @@ class TestAlgoMirrorInit:
         assert bridge.is_connected is False
 
     def test_custom_host(self):
-        bridge = AlgoMirrorBridge(host="http://10.10.10.1:5200/")
-        assert bridge.host == "http://10.10.10.1:5200"
+        bridge = AlgoMirrorBridge(host="http://192.0.2.10:5200/")
+        assert bridge.host == "http://192.0.2.10:5200"

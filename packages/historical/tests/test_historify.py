@@ -55,7 +55,7 @@ def pipeline(tmp_path):
 
     db_path = str(tmp_path / "historify_test.duckdb")
     p = DataPipeline(db_path=db_path)
-    p.initialize()
+    p.initialise()
     yield p
     p.close()
 

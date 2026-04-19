@@ -222,12 +222,12 @@ class PostMarketAnalysis:
         return report
 
     def _generate_llm_analysis(self, report: DailyReport) -> str:
-        """Use LLM to analyze today's trading performance."""
+        """Use LLM to analyse today's trading performance."""
         try:
             from packages.ai.src.llm_client import LLMMessage
 
             prompt = (
-                f"Analyze this trading day. Date: {report.report_date}. "
+                f"Analyse this trading day. Date: {report.report_date}. "
                 f"Total trades: {report.total_trades}. Win rate: {report.win_rate:.0f}%. "
                 f"Net P&L: {report.net_pnl:+,.0f}. "
             )

@@ -6,7 +6,7 @@ OpenClaw messages to FlintTrade command handlers.
 
 Skills registered:
   /trade    — place orders via natural language
-  /analyze  — run screener analysis
+  /analyse  — run screener analysis
   /backtest — run backtest on a strategy
   /status   — system status
 """
@@ -81,10 +81,10 @@ DEFAULT_SKILLS: dict[str, dict[str, Any]] = {
             "Close all positions",
         ],
     },
-    "analyze": {
+    "analyse": {
         "description": "Run market analysis: PCR, max pain, OI spurt, support/resistance.",
         "examples": [
-            "Analyze NIFTY option chain",
+            "Analyse NIFTY option chain",
             "What is the PCR for BANKNIFTY?",
             "Show max pain for NIFTY",
         ],

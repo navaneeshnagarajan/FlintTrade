@@ -140,12 +140,12 @@ class TestRunParallel:
 
 
 class TestAnalyzeParallelFlag:
-    """Tests for the parallel= parameter on AgentTeam.analyze()."""
+    """Tests for the parallel= parameter on AgentTeam.analyse()."""
 
     def test_analyze_parallel_false_is_default(self) -> None:
         """analyze() with no parallel flag runs sequentially and returns TeamAnalysis."""
         team = _make_team()
-        result = team.analyze("NIFTY", "NSE_INDEX")
+        result = team.analyse("NIFTY", "NSE_INDEX")
 
         assert result.symbol == "NIFTY"
         assert result.consensus_signal in {"BUY", "SELL", "HOLD"}
@@ -154,7 +154,7 @@ class TestAnalyzeParallelFlag:
     def test_analyze_parallel_true_produces_valid_result(self) -> None:
         """analyze(parallel=True) returns a TeamAnalysis with the same structure."""
         team = _make_team()
-        result = team.analyze("NIFTY", "NSE_INDEX", parallel=True)
+        result = team.analyse("NIFTY", "NSE_INDEX", parallel=True)
 
         assert result.symbol == "NIFTY"
         assert result.exchange == "NSE_INDEX"
@@ -166,7 +166,7 @@ class TestAnalyzeParallelFlag:
         team = _make_team()
         n_agents = len(team.enabled_agents)
 
-        team.analyze("NIFTY", "NSE_INDEX", parallel=True)
+        team.analyse("NIFTY", "NSE_INDEX", parallel=True)
 
         # quick LLM called once per analyst agent; deep called once for aggregator
         assert team._quick.chat.call_count == n_agents
@@ -176,7 +176,7 @@ class TestAnalyzeParallelFlag:
         team = _make_team()
         n_agents = len(team.enabled_agents)
 
-        team.analyze("NIFTY", "NSE_INDEX", parallel=False)
+        team.analyse("NIFTY", "NSE_INDEX", parallel=False)
 
         assert team._quick.chat.call_count == n_agents
 
@@ -185,7 +185,7 @@ class TestAnalyzeParallelFlag:
         quick = _make_mock_llm()
         team = AgentTeam(llm_client=quick, agents=[])
 
-        result = team.analyze("NIFTY", "NSE_INDEX", parallel=True)
+        result = team.analyse("NIFTY", "NSE_INDEX", parallel=True)
 
         assert result.consensus_signal == "HOLD"
 
@@ -193,7 +193,7 @@ class TestAnalyzeParallelFlag:
         """parallel=True forwards market_data to each agent prompt."""
         team = _make_team()
 
-        result = team.analyze(
+        result = team.analyse(
             "RELIANCE",
             "NSE",
             market_data={"rsi": 55, "ema20": 2900},

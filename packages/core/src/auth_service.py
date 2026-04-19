@@ -13,7 +13,7 @@ Credentials stored in ~/.flinttrade/auth.db (SQLite):
 Usage::
 
     svc = AuthService()
-    codes = svc.setup_account("nav", "nav@example.com", "StrongP@ss!", "123456")
+    codes = svc.setup_account("alice", "alice@example.com", "StrongP@ss!", "123456")
     # Daily login:
     if svc.verify_password("StrongP@ss!") and svc.verify_totp("123456"):
         token = svc.create_session()

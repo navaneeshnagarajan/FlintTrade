@@ -13,8 +13,8 @@ class TestAccountSetup:
     def test_setup_creates_auth_db(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="navaneesh",
-            email="nav@example.com",
+            username="alice",
+            email="alice@example.com",
             password="StrongP@ss123!",
             pin="123456",
         )
@@ -23,20 +23,20 @@ class TestAccountSetup:
     def test_setup_stores_username_and_email(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="navaneesh",
-            email="nav@example.com",
+            username="alice",
+            email="alice@example.com",
             password="StrongP@ss123!",
             pin="123456",
         )
         profile = svc.get_profile()
-        assert profile["username"] == "navaneesh"
-        assert profile["email"] == "nav@example.com"
+        assert profile["username"] == "alice"
+        assert profile["email"] == "alice@example.com"
 
     def test_setup_rejects_weak_password(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         with pytest.raises(ValueError, match="too weak"):
             svc.setup_account(
-                username="nav", email="nav@example.com",
+                username="alice", email="alice@example.com",
                 password="123", pin="123456",
             )
 
@@ -44,7 +44,7 @@ class TestAccountSetup:
         svc = AuthService(db_path=tmp_path / "auth.db")
         with pytest.raises(ValueError, match="6 digits"):
             svc.setup_account(
-                username="nav", email="nav@example.com",
+                username="alice", email="alice@example.com",
                 password="StrongP@ss123!", pin="12345",
             )
 
@@ -55,7 +55,7 @@ class TestAccountSetup:
     def test_is_setup_returns_true_after_setup(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.is_setup() is True
@@ -67,7 +67,7 @@ class TestPasswordVerification:
     def test_verify_correct_password(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.verify_password("StrongP@ss123!") is True
@@ -75,7 +75,7 @@ class TestPasswordVerification:
     def test_verify_wrong_password(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.verify_password("wrong") is False
@@ -87,7 +87,7 @@ class TestPinVerification:
     def test_verify_correct_pin(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.verify_pin("123456") is True
@@ -95,7 +95,7 @@ class TestPinVerification:
     def test_verify_wrong_pin(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.verify_pin("000000") is False
@@ -107,7 +107,7 @@ class TestTOTP:
     def test_setup_generates_totp_secret(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         secret = svc.get_totp_secret()
@@ -118,7 +118,7 @@ class TestTOTP:
         import pyotp
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         secret = svc.get_totp_secret()
@@ -128,7 +128,7 @@ class TestTOTP:
     def test_verify_totp_with_invalid_code(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.verify_totp("000000") is False
@@ -140,7 +140,7 @@ class TestBackupCodes:
     def test_setup_generates_8_backup_codes(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         codes = svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert len(codes) == 8
@@ -149,7 +149,7 @@ class TestBackupCodes:
     def test_backup_code_works_once(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         codes = svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.verify_backup_code(codes[0]) is True
@@ -162,7 +162,7 @@ class TestLoginAttempts:
     def test_lockout_after_5_failures(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         for _ in range(5):
@@ -172,7 +172,7 @@ class TestLoginAttempts:
     def test_locked_rejects_even_correct_password(self, tmp_path: Path):
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(
-            username="nav", email="nav@example.com",
+            username="alice", email="alice@example.com",
             password="StrongP@ss123!", pin="123456",
         )
         for _ in range(5):

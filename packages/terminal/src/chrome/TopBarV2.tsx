@@ -342,7 +342,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     <div
       className="sticky top-0 z-100 flex items-center h-9.5 px-3 shrink-0 select-none animate-fade-in"
       style={barStyle}
-      role="banner"
       data-testid="topbar-v2"
     >
       {/* ── GROUP 1: Logo ─────────────────────────────────────────────────── */}

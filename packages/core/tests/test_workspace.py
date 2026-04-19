@@ -45,7 +45,7 @@ class TestWorkspaceInit:
         monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path / "ws"))
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize()
+        ws.initialise()
         assert ws.is_initialized
         assert ws.config_path.exists()
         assert ws.fast_data_dir.exists()
@@ -55,7 +55,7 @@ class TestWorkspaceInit:
     def test_initialize_writes_workspace_json(self, tmp_path):
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize()
+        ws.initialise()
         with open(ws.config_path) as f:
             config = json.load(f)
         assert config["initialized"] is True
@@ -75,27 +75,27 @@ class TestWorkspaceLoadSave:
     def test_save_and_load(self, tmp_path):
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize({"version": "test", "initialized": True, "data": "hello"})
+        ws.initialise({"version": "test", "initialized": True, "data": "hello"})
         ws2 = Workspace(home_dir=tmp_path / "ws")
         assert ws2.load()["data"] == "hello"
 
     def test_get_dot_notation(self, tmp_path):
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize()
+        ws.initialise()
         assert ws.get("ui.theme") == "dark"
         assert ws.get("sebi.max_ops_per_second") == 10
 
     def test_get_missing_key_returns_default(self, tmp_path):
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize()
+        ws.initialise()
         assert ws.get("nonexistent.key", "fallback") == "fallback"
 
     def test_set_and_persist(self, tmp_path):
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize()
+        ws.initialise()
         ws.set("ui.theme", "light")
         # Reload from disk
         ws2 = Workspace(home_dir=tmp_path / "ws")
@@ -104,7 +104,7 @@ class TestWorkspaceLoadSave:
     def test_path_expansion(self, tmp_path):
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize()
+        ws.initialise()
         # fast_data_dir should be an absolute path (~ expanded)
         assert ws.fast_data_dir.is_absolute()
         assert "~" not in str(ws.fast_data_dir)
@@ -120,7 +120,7 @@ class TestWorkspaceLoadSave:
     def test_as_dict_returns_copy(self, tmp_path):
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialize()
+        ws.initialise()
         d = ws.as_dict()
         d["version"] = "modified"
         assert ws.get("version") != "modified"

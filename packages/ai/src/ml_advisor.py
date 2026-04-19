@@ -382,7 +382,7 @@ class MLAdvisor:
     # ------------------------------------------------------------------
 
     def save(self, path: str | Path | None = None) -> Path:
-        """Serialize the trained model to a pickle file.
+        """Serialise the trained model to a pickle file.
 
         Args:
             path: Override save path.  Falls back to ``config.model_path``,

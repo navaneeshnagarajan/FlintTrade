@@ -62,7 +62,7 @@ _SEED_STOCKS: list[dict[str, Any]] = [
 # Unique sectors from seed data for filter dropdown
 _SECTORS: list[str] = sorted({s["sector"] for s in _SEED_STOCKS})
 
-# Module-level cache instance (lazy-initialized)
+# Module-level cache instance (lazy-initialised)
 _cache: StockCache | None = None
 
 

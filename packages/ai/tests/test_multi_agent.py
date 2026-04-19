@@ -228,21 +228,21 @@ class TestAgentTeamAnalyze:
         from packages.ai.src.agent_models import TeamAnalysis
 
         team, _, _ = _make_team()
-        result = team.analyze("NIFTY", "NSE_INDEX")
+        result = team.analyse("NIFTY", "NSE_INDEX")
         assert isinstance(result, TeamAnalysis)
         assert result.symbol == "NIFTY"
         assert result.exchange == "NSE_INDEX"
 
     def test_analyze_produces_agent_analyses(self) -> None:
         team, _, _ = _make_team()
-        result = team.analyze("RELIANCE", "NSE")
+        result = team.analyse("RELIANCE", "NSE")
         # 4 default agents should each produce an analysis
         assert len(result.agent_analyses) == 4
 
     def test_analyze_consensus_set(self) -> None:
         agg_response = "DECISION: BUY\nCONFIDENCE: 0.85\nREASONING: Strong technical and sentiment alignment."
         team, _, _ = _make_team(deep_response_text=agg_response)
-        result = team.analyze("NIFTY", "NSE_INDEX")
+        result = team.analyse("NIFTY", "NSE_INDEX")
         assert result.consensus_signal == "BUY"
         assert result.consensus_confidence == 0.85
         assert "Strong technical" in result.consensus_reasoning
@@ -251,7 +251,7 @@ class TestAgentTeamAnalyze:
         team, _, _ = _make_team()
         for agent in team.agents:
             agent.enabled = False
-        result = team.analyze("NIFTY", "NSE_INDEX")
+        result = team.analyse("NIFTY", "NSE_INDEX")
         assert result.consensus_signal == "HOLD"
         assert "No enabled agents" in result.errors[0]
 
@@ -270,7 +270,7 @@ class TestAgentTeamAnalyze:
 
         from packages.ai.src.multi_agent import AgentTeam
         team = AgentTeam(llm_client=quick, deep_llm_client=deep)
-        result = team.analyze("NIFTY", "NSE_INDEX")
+        result = team.analyse("NIFTY", "NSE_INDEX")
 
         # One error from the failed agent
         assert len(result.errors) >= 1
@@ -281,7 +281,7 @@ class TestAgentTeamAnalyze:
     def test_get_recommendation_from_analysis(self) -> None:
         agg_response = "DECISION: SELL\nCONFIDENCE: 0.6\nREASONING: Bearish across the board."
         team, _, _ = _make_team(deep_response_text=agg_response)
-        result = team.analyze("BANKNIFTY", "NSE_INDEX")
+        result = team.analyse("BANKNIFTY", "NSE_INDEX")
         rec = team.get_recommendation(result)
         assert rec.action == "SELL"
         assert rec.confidence == 0.6

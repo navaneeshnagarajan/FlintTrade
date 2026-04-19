@@ -1,7 +1,7 @@
 """FlintTrade workspace CLI.
 
 Usage:
-    python -m packages.core.src.cli init      # Initialize ~/.flinttrade/
+    python -m packages.core.src.cli init      # Initialise ~/.flinttrade/
     python -m packages.core.src.cli status    # Show workspace info
 """
 
@@ -14,13 +14,13 @@ from .workspace import Workspace
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    """Initialize the workspace with default config."""
+    """Initialise the workspace with default config."""
     ws = Workspace()
     if ws.is_initialized:
-        print(f"Workspace already initialized: {ws.workspace_dir}")
+        print(f"Workspace already initialised: {ws.workspace_dir}")
         return
-    ws.initialize()
-    print(f"Workspace initialized: {ws.workspace_dir}")
+    ws.initialise()
+    print(f"Workspace initialised: {ws.workspace_dir}")
     print(f"  Config:  {ws.config_path}")
     print(f"  Data:    {ws.fast_data_dir}")
     print(f"  Archive: {ws.archive_dir}")
@@ -31,7 +31,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     """Show current workspace info."""
     ws = Workspace()
     print(f"Workspace: {ws.workspace_dir}")
-    print(f"Initialized: {ws.is_initialized}")
+    print(f"Initialised: {ws.is_initialized}")
     if ws.is_initialized:
         print(f"Config:  {ws.config_path}")
         print(f"Data:    {ws.fast_data_dir}")
@@ -54,7 +54,7 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("init", help="Initialize workspace with defaults")
+    sub.add_parser("init", help="Initialise workspace with defaults")
     sub.add_parser("status", help="Show workspace info")
 
     args = parser.parse_args()

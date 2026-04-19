@@ -193,7 +193,7 @@ def trades_journal() -> tuple[Any, int]:
         limit: int = min(int(request.args.get("limit", 100)), 1000)
 
         storage = StorageManager()
-        storage.initialize()
+        storage.initialise()
 
         # Use available query methods on StorageManager
         if strategy_filter and start_date and end_date:
@@ -445,7 +445,7 @@ def webhooks_create() -> tuple[Any, int]:
         if server is None:
             return jsonify({
                 "status": "error",
-                "message": "Webhook server not started — initialize WebhookServer first",
+                "message": "Webhook server not started — initialise WebhookServer first",
             }), 503
 
         body = request.get_json(silent=True) or {}
@@ -847,15 +847,17 @@ def ditto_accounts() -> tuple[Any, int]:
         if not (current_app.debug or os.environ.get("FLINTTRADE_DEV")):
             return jsonify({"status": "error", "message": "Account service unavailable"}), 503
 
-    # Fallback: sample data for UI development (dev mode only)
+    # Fallback: sample data for UI development (dev mode only).
+    # Uses generic placeholder names + broker_01..07 tokens to avoid leaking
+    # real client identities or preferring any specific broker.
     sample_accounts = [
-        {"id": "acc_1", "name": "Client: Rajesh Mehta", "broker": "Zerodha", "capital": 5000000, "pnl_today": 12500, "status": "active", "positions": 8, "group": "HNI", "allocation_weight": 1.0, "is_master": True},
-        {"id": "acc_2", "name": "Client: Priya Sharma", "broker": "Dhan", "capital": 3000000, "pnl_today": -8200, "status": "active", "positions": 5, "group": "HNI", "allocation_weight": 0.6, "is_master": False},
-        {"id": "acc_3", "name": "Client: Amit Patel", "broker": "Fyers", "capital": 8000000, "pnl_today": 34100, "status": "active", "positions": 12, "group": "HNI", "allocation_weight": 1.6, "is_master": False},
-        {"id": "acc_4", "name": "Client: Neha Gupta", "broker": "Angel One", "capital": 2000000, "pnl_today": -3500, "status": "active", "positions": 3, "group": "Family", "allocation_weight": 0.4, "is_master": False},
-        {"id": "acc_5", "name": "Client: Vikram Singh", "broker": "ICICI Direct", "capital": 10000000, "pnl_today": 56200, "status": "active", "positions": 15, "group": "HNI", "allocation_weight": 2.0, "is_master": False},
-        {"id": "acc_6", "name": "Client: Sunita Reddy", "broker": "Kotak Neo", "capital": 4000000, "pnl_today": 0, "status": "disabled", "positions": 0, "group": "Family", "allocation_weight": 0.8, "is_master": False},
-        {"id": "acc_7", "name": "Client: Karan Joshi", "broker": "Upstox", "capital": 6000000, "pnl_today": -12800, "status": "active", "positions": 9, "group": "Personal", "allocation_weight": 1.2, "is_master": False},
+        {"id": "acc_1", "name": "Demo Account 1", "broker": "broker_01", "capital": 5000000, "pnl_today": 12500, "status": "active", "positions": 8, "group": "GroupA", "allocation_weight": 1.0, "is_master": True},
+        {"id": "acc_2", "name": "Demo Account 2", "broker": "broker_02", "capital": 3000000, "pnl_today": -8200, "status": "active", "positions": 5, "group": "GroupA", "allocation_weight": 0.6, "is_master": False},
+        {"id": "acc_3", "name": "Demo Account 3", "broker": "broker_03", "capital": 8000000, "pnl_today": 34100, "status": "active", "positions": 12, "group": "GroupA", "allocation_weight": 1.6, "is_master": False},
+        {"id": "acc_4", "name": "Demo Account 4", "broker": "broker_04", "capital": 2000000, "pnl_today": -3500, "status": "active", "positions": 3, "group": "GroupB", "allocation_weight": 0.4, "is_master": False},
+        {"id": "acc_5", "name": "Demo Account 5", "broker": "broker_05", "capital": 10000000, "pnl_today": 56200, "status": "active", "positions": 15, "group": "GroupA", "allocation_weight": 2.0, "is_master": False},
+        {"id": "acc_6", "name": "Demo Account 6", "broker": "broker_06", "capital": 4000000, "pnl_today": 0, "status": "disabled", "positions": 0, "group": "GroupB", "allocation_weight": 0.8, "is_master": False},
+        {"id": "acc_7", "name": "Demo Account 7", "broker": "broker_07", "capital": 6000000, "pnl_today": -12800, "status": "active", "positions": 9, "group": "GroupC", "allocation_weight": 1.2, "is_master": False},
     ]
     return jsonify({"status": "success", "data": {"accounts": sample_accounts}}), 200
 

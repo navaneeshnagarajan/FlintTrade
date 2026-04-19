@@ -149,13 +149,13 @@ class Workspace:
         with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump(self._config, f, indent=2, sort_keys=True)
 
-    def initialize(self, config: dict[str, Any] | None = None) -> None:
+    def initialise(self, config: dict[str, Any] | None = None) -> None:
         """First-time setup — create dirs, write default config."""
         self._config = config or dict(_DEFAULT_CONFIG)
         self._config["initialized"] = True
         self.ensure_directories()
         self.save()
-        logger.info("Workspace initialized at %s", self._home)
+        logger.info("Workspace initialised at %s", self._home)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a config value using dot notation (e.g. 'storage.fast')."""

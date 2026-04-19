@@ -1,23 +1,20 @@
-import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getFunds } from "@/services/api";
-import { useTradingStore } from "@/stores/tradingStore";
 import type { Funds } from "@/types/api";
 import { queryKeys } from "@/services/queryKeys";
 
+/**
+ * Pure TanStack Query hook for the Funds REST endpoint.
+ *
+ * Does not write into any Zustand store — that mirror is maintained by
+ * `useTradingStoreSync` at the app root so there is exactly one write
+ * point.
+ */
 export function useFunds() {
-  const query = useQuery<Funds>({
+  return useQuery<Funds>({
     queryKey: queryKeys.funds.all,
     queryFn: getFunds,
     staleTime: 15_000,
     refetchInterval: 30_000,
   });
-
-  useEffect(() => {
-    if (query.data) {
-      useTradingStore.getState().updateFromFunds(query.data);
-    }
-  }, [query.data]);
-
-  return query;
 }

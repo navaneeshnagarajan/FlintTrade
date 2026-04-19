@@ -185,7 +185,7 @@ class OHLCVCache:
 
     def initialise(self) -> None:
         """Create OHLCV tables, indexes, and the _cache_meta table."""
-        self.pipeline.initialize()
+        self.pipeline.initialise()
         self.pipeline.connection.execute(_CACHE_META_DDL)
         logger.info("OHLCV cache schema initialised at %s", self._db_path)
 

@@ -46,7 +46,7 @@ class MaxPainResult:
 
     max_pain_strike: float = 0.0
     total_loss_at_max_pain: float = 0.0
-    # Loss at each strike for visualization
+    # Loss at each strike for visualisation
     strike_losses: list[dict[str, float]] = field(default_factory=list)
 
 

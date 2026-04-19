@@ -33,12 +33,12 @@ def client(tmp_path):
             yield c, svc
 
 
-def _setup_account(c, email="nav@example.com"):
+def _setup_account(c, email="alice@example.com"):
     """Register an account and return the client + svc."""
     c.post(
         "/v1/auth/setup",
         json={
-            "username": "nav",
+            "username": "alice",
             "email": email,
             "password": "StrongP@ss123!",
             "pin": "123456",
@@ -142,7 +142,7 @@ class TestEmailTransportSmtp:
             mock_smtp_cls.return_value.__enter__ = lambda s: mock_server
             mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            result = transport.send_otp("nav@example.com", "123456")
+            result = transport.send_otp("alice@example.com", "123456")
 
         assert result is True
 
@@ -158,7 +158,7 @@ class TestEmailTransportSmtp:
         transport._ses_region = ""
 
         with patch("smtplib.SMTP", side_effect=OSError("connection refused")):
-            result = transport.send_otp("nav@example.com", "000000")
+            result = transport.send_otp("alice@example.com", "000000")
 
         assert result is False
 
@@ -196,7 +196,7 @@ class TestEmailTransportSes:
         mock_boto.client.return_value = mock_client
 
         with patch.dict("sys.modules", {"boto3": mock_boto}):
-            result = transport.send_otp("nav@example.com", "654321")
+            result = transport.send_otp("alice@example.com", "654321")
 
         assert result is True
         mock_client.send_email.assert_called_once()
@@ -252,14 +252,14 @@ class TestForgotPasswordOtpEndpoint:
 
         resp = c.post(
             "/v1/auth/forgot-password-otp",
-            json={"email": "nav@example.com"},
+            json={"email": "alice@example.com"},
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "success"
         mock_transport.send_otp.assert_called_once()
         call_email, call_otp = mock_transport.send_otp.call_args[0]
-        assert call_email == "nav@example.com"
+        assert call_email == "alice@example.com"
         assert len(call_otp) == 6 and call_otp.isdigit()
 
     def test_returns_200_for_unknown_email(self, client):
@@ -294,14 +294,14 @@ class TestForgotPasswordOtpEndpoint:
         for _ in range(3):
             r = c.post(
                 "/v1/auth/forgot-password-otp",
-                json={"email": "nav@example.com"},
+                json={"email": "alice@example.com"},
                 headers={"Content-Type": "application/json"},
             )
             assert r.status_code == 200
 
         r4 = c.post(
             "/v1/auth/forgot-password-otp",
-            json={"email": "nav@example.com"},
+            json={"email": "alice@example.com"},
             headers={"Content-Type": "application/json"},
         )
         assert r4.status_code == 429
@@ -326,12 +326,12 @@ class TestResetPasswordOtpEndpoint:
         import packages.core.src.auth_routes as ar
 
         otp = "424242"
-        ar._store_otp("nav@example.com", otp)
+        ar._store_otp("alice@example.com", otp)
 
         resp = c.post(
             "/v1/auth/reset-password-otp",
             json={
-                "email": "nav@example.com",
+                "email": "alice@example.com",
                 "otp": otp,
                 "new_password": "NewStr0ng!Pass",
             },
@@ -347,12 +347,12 @@ class TestResetPasswordOtpEndpoint:
 
         import packages.core.src.auth_routes as ar
 
-        ar._store_otp("nav@example.com", "111111")
+        ar._store_otp("alice@example.com", "111111")
 
         resp = c.post(
             "/v1/auth/reset-password-otp",
             json={
-                "email": "nav@example.com",
+                "email": "alice@example.com",
                 "otp": "999999",
                 "new_password": "NewStr0ng!Pass",
             },
@@ -365,7 +365,7 @@ class TestResetPasswordOtpEndpoint:
         c, _ = client
         import packages.core.src.auth_routes as ar
 
-        ar._OTP_STORE["nav@example.com"] = {
+        ar._OTP_STORE["alice@example.com"] = {
             "otp": "777777",
             "expiry": time.monotonic() - 1,
         }
@@ -373,7 +373,7 @@ class TestResetPasswordOtpEndpoint:
         resp = c.post(
             "/v1/auth/reset-password-otp",
             json={
-                "email": "nav@example.com",
+                "email": "alice@example.com",
                 "otp": "777777",
                 "new_password": "NewStr0ng!Pass",
             },
@@ -406,7 +406,7 @@ class TestResetPasswordOtpEndpoint:
         c, _ = client
         resp = c.post(
             "/v1/auth/reset-password-otp",
-            json={"email": "nav@example.com"},
+            json={"email": "alice@example.com"},
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 400
@@ -418,12 +418,12 @@ class TestResetPasswordOtpEndpoint:
         import packages.core.src.auth_routes as ar
 
         otp = "555555"
-        ar._store_otp("nav@example.com", otp)
+        ar._store_otp("alice@example.com", otp)
 
         c.post(
             "/v1/auth/reset-password-otp",
             json={
-                "email": "nav@example.com",
+                "email": "alice@example.com",
                 "otp": otp,
                 "new_password": "NewStr0ng!Pass",
             },
@@ -434,7 +434,7 @@ class TestResetPasswordOtpEndpoint:
         resp2 = c.post(
             "/v1/auth/reset-password-otp",
             json={
-                "email": "nav@example.com",
+                "email": "alice@example.com",
                 "otp": otp,
                 "new_password": "AnotherPass!1",
             },

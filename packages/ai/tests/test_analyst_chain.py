@@ -100,7 +100,7 @@ class TestAnalyzeReturnState:
             analysts=["market"],
         )
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert
         from packages.ai.src.analyst_chain import AnalysisState
 
@@ -113,7 +113,7 @@ class TestAnalyzeReturnState:
         # Arrange
         chain, _, _ = _make_chain(analysts=["market"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert
         assert state.trade_date == date.today()
 
@@ -122,7 +122,7 @@ class TestAnalyzeReturnState:
         target_date = date(2026, 1, 15)
         chain, _, _ = _make_chain(analysts=["market"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX", trade_date=target_date)
+        state = chain.analyse("NIFTY", "NSE_INDEX", trade_date=target_date)
         # Assert
         assert state.trade_date == target_date
 
@@ -136,7 +136,7 @@ class TestAnalyzeReturnState:
         quick.chat.return_value = LLMResponse(content=fundamentals_response)
         chain = AnalystChain(llm_client=quick, analysts=["fundamentals"])
         # Act
-        state = chain.analyze("TCS", "NSE")
+        state = chain.analyse("TCS", "NSE")
         # Assert
         assert state.bull_thesis != "" or state.bear_thesis != ""
         assert state.market_report == ""
@@ -159,7 +159,7 @@ class TestMarketAnalyst:
             analysts=["market"],
         )
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert
         assert state.market_report == expected_report
 
@@ -171,7 +171,7 @@ class TestMarketAnalyst:
             analysts=["market"],
         )
         # Act
-        chain.analyze("NIFTY", "NSE_INDEX")
+        chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — quick called once for market node, deep called once for judge
         assert quick.chat.call_count == 1
         assert deep.chat.call_count == 1
@@ -193,7 +193,7 @@ class TestSentimentAnalyst:
             analysts=["sentiment"],
         )
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert
         assert state.sentiment_report == expected
 
@@ -229,7 +229,7 @@ class TestSentimentAnalyst:
             analysts=["sentiment"],
         )
         # Act
-        chain.analyze("NIFTY", "NSE_INDEX")
+        chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — prompt sent to LLM for the sentiment node (first call) includes
         # the past memory text.  The second call is the judge node.
         all_calls = quick.chat.call_args_list
@@ -248,7 +248,7 @@ class TestSentimentAnalyst:
         quick.chat.return_value = LLMResponse(content="Sentiment fallback.")
         chain = AnalystChain(llm_client=quick, memory=mock_memory, analysts=["sentiment"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — error is swallowed inside the node; no top-level error for this
         assert state.sentiment_report == "Sentiment fallback."
 
@@ -365,7 +365,7 @@ class TestJudgeViaAnalyze:
             analysts=["market"],
         )
         # Act
-        state = chain.analyze("BANKNIFTY", "NSE_INDEX")
+        state = chain.analyse("BANKNIFTY", "NSE_INDEX")
         # Assert
         assert state.final_decision == "SELL"
         assert state.confidence == 0.65
@@ -386,7 +386,7 @@ class TestJudgeViaAnalyze:
 
         chain = AnalystChain(llm_client=quick, deep_llm_client=deep, analysts=["market"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — judge used the deep client
         assert deep.chat.called
         assert state.final_decision == "BUY"
@@ -403,7 +403,7 @@ class TestJudgeViaAnalyze:
         ]
         chain = AnalystChain(llm_client=quick, deep_llm_client=None, analysts=["market"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — quick was called twice (once per node + once for judge)
         assert quick.chat.call_count == 2
         assert state.final_decision == "HOLD"
@@ -429,7 +429,7 @@ class TestErrorHandling:
         ]
         chain = AnalystChain(llm_client=quick, analysts=["market"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — error recorded, pipeline did not crash
         assert len(state.errors) == 1
         assert "market" in state.errors[0]
@@ -439,7 +439,7 @@ class TestErrorHandling:
         # Arrange — analyst list includes a name that doesn't exist
         chain, quick, _ = _make_chain(analysts=["market", "nonexistent"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — nonexistent node error is captured
         error_names = [e.split(":")[0] for e in state.errors]
         assert "nonexistent" in error_names
@@ -457,7 +457,7 @@ class TestErrorHandling:
         ]
         chain = AnalystChain(llm_client=quick, analysts=["market", "sentiment"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert — two errors recorded
         assert len(state.errors) == 2
 
@@ -473,7 +473,7 @@ class TestErrorHandling:
         ]
         chain = AnalystChain(llm_client=quick, analysts=["market"])
         # Act
-        state = chain.analyze("NIFTY", "NSE_INDEX")
+        state = chain.analyse("NIFTY", "NSE_INDEX")
         # Assert
         assert state.final_decision == "HOLD"
         assert len(state.errors) == 1  # only the market error, judge succeeded

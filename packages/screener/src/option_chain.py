@@ -166,7 +166,7 @@ def find_atm_strike(spot: float, strikes: list[float]) -> float:
 
 
 class OptionChainAnalyzer:
-    """Fetch and analyze option chains across all F&O exchanges.
+    """Fetch and analyse option chains across all F&O exchanges.
 
     Usage::
 

@@ -1,6 +1,6 @@
 """Data connectors for backtesting — DuckDB, CSV, JSON, yfinance.
 
-All sources normalize to a common bar format:
+All sources normalise to a common bar format:
   [{"timestamp": "...", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ..., "oi": ...}]
 """
 
@@ -52,7 +52,7 @@ class DataResult:
 
 
 def normalize_bar(raw: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a raw bar dict to the standard format."""
+    """Normalise a raw bar dict to the standard format."""
     return {
         "timestamp": str(raw.get("timestamp", raw.get("datetime", raw.get("date", "")))),
         "open": float(raw.get("open", raw.get("Open", 0))),

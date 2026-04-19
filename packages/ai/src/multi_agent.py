@@ -32,7 +32,7 @@ Usage::
 
     client = LLMClient()
     team = AgentTeam(llm_client=client)
-    result = team.analyze("NIFTY", "NSE_INDEX")
+    result = team.analyse("NIFTY", "NSE_INDEX")
     rec = team.get_recommendation(result)
     print(rec.action, rec.confidence)
 """
@@ -175,7 +175,7 @@ class AgentTeam:
     Example::
 
         team = AgentTeam(llm_client=LLMClient())
-        result = team.analyze("RELIANCE", "NSE")
+        result = team.analyse("RELIANCE", "NSE")
         rec = team.get_recommendation(result)
         print(rec.action, rec.confidence, rec.reasoning)
     """
@@ -244,7 +244,7 @@ class AgentTeam:
     # Analysis
     # ------------------------------------------------------------------
 
-    def analyze(
+    def analyse(
         self,
         symbol: str,
         exchange: str,
@@ -751,7 +751,7 @@ class AutonomousResearchLoop:
                 )
 
                 try:
-                    result = self._team.analyze(symbol, exchange, market_data)
+                    result = self._team.analyse(symbol, exchange, market_data)
                     rec = self._team.get_recommendation(result)
                     record.signal = rec.action
                     record.confidence = rec.confidence
