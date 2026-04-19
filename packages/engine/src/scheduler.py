@@ -2,6 +2,7 @@
 
 Query utilities: market hours, auto square-off, deploy freeze, holidays.
 Execution: StrategyRunner (single strategy tick loop), StrategyScheduler (multi).
+Cron scheduling: CronStrategyScheduler (APScheduler-based, IST-aware, market-gated).
 
 All times are in IST (Asia/Kolkata, UTC+5:30).
 """
@@ -10,9 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from packages.core.src.models import Quote
 from packages.core.src.openalgo_client import OpenAlgoClient
@@ -482,3 +483,403 @@ class StrategyScheduler:
                 "tick_count": runner.tick_count,
             }
         return result
+
+
+# ---------------------------------------------------------------------------
+# CronScheduleConfig — per-job metadata
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CronScheduleConfig:
+    """Metadata for a cron-scheduled strategy callback.
+
+    Attributes:
+        strategy_id: Unique identifier for the strategy.
+        cron_expr: Standard 5-field cron expression (minute hour dom month dow).
+            E.g. ``"30 9 * * 1-5"`` = 09:30 IST on weekdays.
+        exchange: Exchange code used for market-hours and holiday gating.
+        job_id: APScheduler job ID (set after scheduling).
+        last_skipped_reason: Human-readable reason the last fire was skipped,
+            or empty string if the last fire executed successfully.
+    """
+
+    strategy_id: str
+    cron_expr: str
+    exchange: str = "NSE"
+    job_id: str = ""
+    last_skipped_reason: str = field(default="")
+
+
+# ---------------------------------------------------------------------------
+# CronStrategyScheduler
+# ---------------------------------------------------------------------------
+
+# Pytz IST constant used by APScheduler (it requires a pytz timezone object
+# when passed to BackgroundScheduler, unlike stdlib timezone).
+_IST_PYTZ_NAME = "Asia/Kolkata"
+
+
+class CronStrategyScheduler:
+    """Schedule strategy callbacks using cron expressions with market-hours awareness.
+
+    Each registered callback is wrapped so that it is silently skipped when:
+
+    * The current day is a weekend (Saturday / Sunday).
+    * The current date is a market holiday (as reported by the loaded holiday
+      list from :class:`TimeScheduler`).
+    * The current IST time is outside the exchange's trading window (using
+      effective hours from :mod:`packages.engine.src.market_hours`, which
+      respects special sessions such as Muhurat Trading).
+
+    The underlying APScheduler ``BackgroundScheduler`` is initialised with the
+    ``Asia/Kolkata`` timezone so that all ``CronTrigger`` expressions are
+    evaluated in IST automatically.
+
+    Usage::
+
+        cron_sched = CronStrategyScheduler()
+        cron_sched.start()
+
+        job_id = cron_sched.schedule(
+            strategy_id="my-strat",
+            cron_expr="30 9 * * 1-5",
+            callback=my_callback,
+            exchange="NSE",
+        )
+        ...
+        cron_sched.unschedule("my-strat")
+        cron_sched.stop()
+    """
+
+    def __init__(
+        self,
+        time_scheduler: TimeScheduler | None = None,
+        market_hours_check: bool = True,
+    ) -> None:
+        """Initialise the scheduler.
+
+        Args:
+            time_scheduler: An existing :class:`TimeScheduler` instance used for
+                holiday and market-hours queries.  A new one is created if not
+                provided.
+            market_hours_check: When ``True`` (default), each cron fire is
+                gated behind the market-hours / holiday check.  Set to ``False``
+                only in unit tests that do not need the gate.
+        """
+        self._time_scheduler: TimeScheduler = time_scheduler or TimeScheduler()
+        self._check_market = market_hours_check
+        # strategy_id -> CronScheduleConfig
+        self._schedules: dict[str, CronScheduleConfig] = {}
+        self._scheduler: Any = None  # APScheduler BackgroundScheduler
+        self._running = False
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Start the underlying APScheduler background thread."""
+        if self._running:
+            return
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            import pytz as _pytz  # pytz required by APScheduler for named TZ
+            self._scheduler = BackgroundScheduler(
+                timezone=_pytz.timezone(_IST_PYTZ_NAME),
+                daemon=True,
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "apscheduler and pytz are required — pip install apscheduler pytz"
+            ) from exc
+
+        self._scheduler.start()
+        self._running = True
+        logger.info("CronStrategyScheduler started (IST)")
+
+    def stop(self) -> None:
+        """Shut down the background scheduler gracefully."""
+        if self._scheduler and self._running:
+            self._scheduler.shutdown(wait=False)
+            self._running = False
+            logger.info("CronStrategyScheduler stopped")
+
+    @property
+    def running(self) -> bool:
+        """True if the background scheduler thread is active."""
+        return self._running
+
+    # ------------------------------------------------------------------
+    # Schedule / unschedule
+    # ------------------------------------------------------------------
+
+    def schedule(
+        self,
+        strategy_id: str,
+        cron_expr: str,
+        callback: Callable[[], None],
+        exchange: str = "NSE",
+    ) -> str:
+        """Register a strategy callback on a cron expression.
+
+        The callback is wrapped with a market-hours gate that silently skips
+        execution on weekends, market holidays, and outside trading hours.
+
+        Args:
+            strategy_id: Unique identifier for the strategy.  Used as the
+                APScheduler job ID prefix, so it must be a valid non-empty string.
+            cron_expr: Standard 5-field cron expression evaluated in IST.
+                Example: ``"30 9 * * 1-5"`` → 09:30 every weekday.
+            callback: Zero-argument callable to invoke when the cron fires.
+            exchange: Exchange code (``"NSE"``, ``"MCX"``, etc.) used to look
+                up trading hours and holidays for gating.
+
+        Returns:
+            The APScheduler job ID string.
+
+        Raises:
+            ValueError: If the cron expression cannot be parsed or the
+                scheduler has not been started.
+            RuntimeError: If the scheduler is not running — call :meth:`start`
+                first, or use :meth:`schedule_lazy` to defer the APScheduler
+                registration until :meth:`start` is called.
+        """
+        if not strategy_id:
+            raise ValueError("strategy_id must be a non-empty string")
+
+        _parts = self._parse_cron_expr(cron_expr)  # raises ValueError on bad expr
+
+        config = CronScheduleConfig(
+            strategy_id=strategy_id,
+            cron_expr=cron_expr,
+            exchange=exchange.upper(),
+        )
+        self._schedules[strategy_id] = config
+
+        wrapped = self._make_gated_callback(strategy_id, callback, config)
+
+        if self._running and self._scheduler is not None:
+            job_id = self._add_apscheduler_job(strategy_id, _parts, wrapped)
+            config.job_id = job_id
+        else:
+            # Scheduler not started yet — store for deferred registration.
+            # job_id will be assigned once start() is called.
+            config.job_id = f"pending:{strategy_id}"
+
+        logger.info(
+            "Scheduled strategy '%s' with cron '%s' on %s (job_id=%s)",
+            strategy_id,
+            cron_expr,
+            exchange,
+            config.job_id,
+        )
+        return config.job_id
+
+    def unschedule(self, strategy_id: str) -> bool:
+        """Remove the cron schedule for a strategy.
+
+        Args:
+            strategy_id: The strategy to unschedule.
+
+        Returns:
+            ``True`` if the schedule existed and was removed, ``False``
+            if no schedule was found for this strategy.
+        """
+        config = self._schedules.pop(strategy_id, None)
+        if config is None:
+            return False
+
+        if self._running and self._scheduler is not None and config.job_id:
+            try:
+                self._scheduler.remove_job(config.job_id)
+            except Exception:
+                logger.debug("APScheduler job '%s' not found during removal", config.job_id)
+
+        logger.info("Unscheduled strategy '%s'", strategy_id)
+        return True
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        """Return a list of all scheduled jobs with metadata.
+
+        Returns:
+            List of dicts with keys: ``strategy_id``, ``cron_expr``,
+            ``exchange``, ``job_id``, ``last_skipped_reason``,
+            ``next_fire_time`` (ISO string or empty).
+        """
+        result: list[dict[str, Any]] = []
+        for sid, cfg in self._schedules.items():
+            next_fire = ""
+            if self._running and self._scheduler is not None and cfg.job_id:
+                try:
+                    job = self._scheduler.get_job(cfg.job_id)
+                    if job and job.next_run_time:
+                        next_fire = job.next_run_time.isoformat()
+                except Exception:
+                    pass
+            result.append(
+                {
+                    "strategy_id": sid,
+                    "cron_expr": cfg.cron_expr,
+                    "exchange": cfg.exchange,
+                    "job_id": cfg.job_id,
+                    "last_skipped_reason": cfg.last_skipped_reason,
+                    "next_fire_time": next_fire,
+                }
+            )
+        return result
+
+    def get_schedule(self, strategy_id: str) -> CronScheduleConfig | None:
+        """Return the schedule config for a strategy, or None."""
+        return self._schedules.get(strategy_id)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_cron_expr(cron_expr: str) -> dict[str, str]:
+        """Parse a 5-field cron expression into APScheduler CronTrigger kwargs.
+
+        Args:
+            cron_expr: Space-separated string with fields:
+                ``minute hour day_of_month month day_of_week``.
+
+        Returns:
+            Dict with keys ``minute``, ``hour``, ``day``, ``month``,
+            ``day_of_week`` suitable for ``CronTrigger(**parts)``.
+
+        Raises:
+            ValueError: If the expression does not have exactly 5 fields.
+        """
+        parts = cron_expr.strip().split()
+        if len(parts) != 5:
+            raise ValueError(
+                f"Invalid cron expression {cron_expr!r}: expected 5 fields "
+                f"(minute hour dom month dow), got {len(parts)}"
+            )
+        minute, hour, dom, month, dow = parts
+        return {
+            "minute": minute,
+            "hour": hour,
+            "day": dom,
+            "month": month,
+            "day_of_week": dow,
+        }
+
+    def _make_gated_callback(
+        self,
+        strategy_id: str,
+        callback: Callable[[], None],
+        config: CronScheduleConfig,
+    ) -> Callable[[], None]:
+        """Wrap ``callback`` with market-hours / holiday gate logic.
+
+        The gate logic (in order):
+
+        1. If :attr:`_check_market` is ``False`` — always execute (test bypass).
+        2. Skip on weekends (Saturday / Sunday) unless the exchange is 24×7.
+        3. Skip if today is in the loaded holiday list.
+        4. Skip if the current IST time is outside the exchange's effective
+           trading window (per :func:`~packages.engine.src.market_hours.get_market_hours`,
+           which accounts for special sessions such as Muhurat Trading).
+        """
+        time_scheduler = self._time_scheduler
+
+        def gated() -> None:
+            if not self._check_market:
+                callback()
+                return
+
+            now_ist = datetime.now(IST)
+            today = now_ist.date()
+            exchange = config.exchange
+
+            # --- Weekend check ---
+            sched = EXCHANGE_SCHEDULES.get(exchange)
+            is_24x7 = sched.is_24x7 if sched is not None else False
+            if not is_24x7 and today.weekday() >= 5:
+                reason = f"weekend ({today.strftime('%A')})"
+                config.last_skipped_reason = reason
+                logger.debug("Cron skip [%s]: %s", strategy_id, reason)
+                return
+
+            # --- Holiday check ---
+            if not time_scheduler.is_trading_day(exchange, on=today):
+                reason = f"market holiday on {today.isoformat()}"
+                config.last_skipped_reason = reason
+                logger.debug("Cron skip [%s]: %s", strategy_id, reason)
+                return
+
+            # --- Market hours check (uses effective hours for special sessions) ---
+            from .market_hours import get_market_hours as _get_market_hours
+
+            try:
+                open_t, close_t = _get_market_hours(exchange, today)
+            except ValueError:
+                # Unknown exchange — fall back to scheduler's built-in data
+                if sched is not None:
+                    open_t = sched.market_open
+                    close_t = sched.market_close
+                else:
+                    # Cannot determine hours — skip to be safe
+                    reason = f"unknown exchange {exchange!r}"
+                    config.last_skipped_reason = reason
+                    logger.warning("Cron skip [%s]: %s", strategy_id, reason)
+                    return
+
+            now_t = now_ist.time().replace(tzinfo=None)
+            if not is_24x7 and not (open_t <= now_t <= close_t):
+                reason = (
+                    f"outside market hours for {exchange} "
+                    f"({open_t.strftime('%H:%M')}-{close_t.strftime('%H:%M')} IST), "
+                    f"current={now_t.strftime('%H:%M')}"
+                )
+                config.last_skipped_reason = reason
+                logger.debug("Cron skip [%s]: %s", strategy_id, reason)
+                return
+
+            # All checks passed — execute
+            config.last_skipped_reason = ""
+            logger.info("Cron fire [%s] at %s IST", strategy_id, now_ist.strftime("%H:%M:%S"))
+            try:
+                callback()
+            except Exception as exc:
+                logger.error("Cron callback error [%s]: %s", strategy_id, exc)
+
+        return gated
+
+    def _add_apscheduler_job(
+        self,
+        strategy_id: str,
+        cron_parts: dict[str, str],
+        wrapped_callback: Callable[[], None],
+    ) -> str:
+        """Register the wrapped callback with APScheduler.
+
+        Args:
+            strategy_id: Used as the job ID.
+            cron_parts: Parsed fields from :meth:`_parse_cron_expr`.
+            wrapped_callback: The market-gated callable.
+
+        Returns:
+            The job ID string used by APScheduler.
+        """
+        from apscheduler.triggers.cron import CronTrigger
+        import pytz as _pytz
+
+        trigger = CronTrigger(
+            timezone=_pytz.timezone(_IST_PYTZ_NAME),
+            **cron_parts,
+        )
+        job = self._scheduler.add_job(
+            func=wrapped_callback,
+            trigger=trigger,
+            id=strategy_id,
+            replace_existing=True,
+        )
+        return job.id

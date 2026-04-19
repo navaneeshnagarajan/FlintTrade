@@ -319,6 +319,18 @@ def create_flask_app(
     app.register_blueprint(security_bp)
     register_security_middleware(app, security_monitor)
 
+    # Register persistent SecurityTracker (DuckDB-backed 404/IP-ban log)
+    from packages.data.src.security_tracker import SecurityTracker as _SecurityTracker  # noqa: PLC0415
+    _security_db = Path.home() / ".flinttrade" / "security.db"
+    app.config["SECURITY_TRACKER"] = _SecurityTracker(str(_security_db))
+
+    # Register LoginActivity + SessionTracker (DuckDB-backed)
+    from packages.data.src.activity_log import LoginActivity as _LoginActivity  # noqa: PLC0415
+    from packages.data.src.activity_log import SessionTracker as _SessionTracker  # noqa: PLC0415
+    _login_db = Path.home() / ".flinttrade" / "activity.db"
+    app.config["LOGIN_ACTIVITY"] = _LoginActivity(str(_login_db))
+    app.config["SESSION_TRACKER"] = _SessionTracker(str(_login_db))
+
     # Register P&L tracker blueprint (/api/v1/pnl-tracker/*)
     from packages.data.src.pnl_routes import pnl_bp  # noqa: PLC0415
     app.register_blueprint(pnl_bp)
@@ -361,6 +373,41 @@ def create_flask_app(
     from packages.data.src.sandbox_engine import SandboxEngine as _DataSandboxEngine  # noqa: PLC0415
     app.config["DATA_SANDBOX_ENGINE"] = _DataSandboxEngine()
     app.register_blueprint(data_sandbox_bp)
+
+    # Initialise persistent error log (always active — not gated by dev mode).
+    # Stored on app.config so admin_routes and the error handler can access it.
+    from .error_log import ErrorLog  # noqa: PLC0415
+
+    _error_log_path = Path.home() / ".flinttrade" / "error_log.duckdb"
+    _error_log = ErrorLog(_error_log_path)
+    app.config["ERROR_LOG"] = _error_log
+
+    # ------------------------------------------------------------------
+    # Global unhandled-exception handler — persists errors to DuckDB
+    # before re-raising so Flask's default 500 handler takes over.
+    # ------------------------------------------------------------------
+    @app.errorhandler(Exception)
+    def _log_unhandled_exception(exc: Exception) -> Any:
+        """Persist every unhandled exception to the structured error log.
+
+        The error is logged first (preserving the active exception context
+        so traceback.format_exc() captures a full stack trace), then
+        re-raised as a plain HTTP 500 JSON response to avoid leaking
+        internal tracebacks to clients.
+        """
+        try:
+            _error_log.log(
+                route=request.path,
+                method=request.method,
+                status_code=500,
+                request_body=request.get_json(silent=True, force=True),
+                error=exc,
+                user_id=None,  # user context not available at this layer
+            )
+        except Exception:
+            # Never let the error logger itself crash the request.
+            pass
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
 
     # Register admin blueprint (dev/debug only)
     if app.debug or os.environ.get("FLINTTRADE_DEV"):
@@ -631,6 +678,42 @@ def create_flask_app(
         except Exception:
             pass  # Never let monitoring break the response
         return response
+
+    @app.after_request
+    def _track_404s(response: Any) -> Any:
+        """Persist 404 events in SecurityTracker for flood detection.
+
+        Runs after the response is built so we know the real status code.
+        Best-effort — never disrupts the response pipeline.
+        """
+        if response.status_code == 404:
+            try:
+                skt = app.config.get("SECURITY_TRACKER")
+                if skt is not None:
+                    skt.track_404(request.remote_addr or "unknown", request.path)
+            except Exception:
+                pass
+        return response
+
+    @app.before_request
+    def _session_heartbeat() -> None:
+        """Update last_active for the session carried in the Authorization header.
+
+        Only fires when a valid Bearer token is present AND a SessionTracker
+        has been registered.  Best-effort — never blocks the request.
+        """
+        try:
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return
+            token = auth_header.removeprefix("Bearer ").strip()
+            if not token:
+                return
+            st = app.config.get("SESSION_TRACKER")
+            if st is not None:
+                st.heartbeat(token)
+        except Exception:
+            pass
 
     # --- inline route handlers extracted to blueprints ---
     # indicators_bp  → packages/core/src/indicators_routes.py

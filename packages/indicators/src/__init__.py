@@ -151,6 +151,16 @@ from .pipeline import IndicatorPipeline
 # VWAP bands
 from .vwap_bands import VWAPResult, calculate_vwap_bands
 
+# Seasonality
+from .seasonality import (
+    MonthlyStats,
+    WeekdayStats,
+    build_seasonality_matrix,
+    compute_day_of_month_seasonality,
+    compute_monthly_seasonality,
+    compute_weekday_seasonality,
+)
+
 __all__ = [
     # trend
     "adx",
@@ -266,4 +276,11 @@ __all__ = [
     # vwap bands
     "VWAPResult",
     "calculate_vwap_bands",
+    # seasonality
+    "MonthlyStats",
+    "WeekdayStats",
+    "compute_monthly_seasonality",
+    "compute_weekday_seasonality",
+    "compute_day_of_month_seasonality",
+    "build_seasonality_matrix",
 ]

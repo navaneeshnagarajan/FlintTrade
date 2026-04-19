@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify
+from flask import Blueprint, Response, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.admin")
 
@@ -243,6 +243,55 @@ def admin_system() -> tuple[Response, int]:
     }), 200
 
 
+@admin_bp.route("/errors", methods=["GET"])
+def admin_errors() -> tuple[Response, int]:
+    """Return recent error log entries for the /admin dashboard.
+
+    Reads the ``ERROR_LOG`` instance from ``current_app.config``.
+    Supports ``limit`` (default 100, max 500) and ``offset`` (default 0)
+    query parameters for pagination.
+
+    Returns:
+        JSON response with ``status``, ``data.errors``, and ``data.total``.
+    """
+    error_log = current_app.config.get("ERROR_LOG")
+    if error_log is None:
+        return jsonify({"status": "error", "message": "Error log not initialised"}), 503
+
+    try:
+        limit = int(request.args.get("limit", 100))
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        return jsonify({"status": "error", "message": "limit and offset must be integers"}), 400
+
+    errors = error_log.recent(limit=limit, offset=offset)
+    total = error_log.count()
+    return jsonify({
+        "status": "success",
+        "data": {
+            "errors": errors,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        },
+    }), 200
+
+
+@admin_bp.route("/errors/count", methods=["GET"])
+def admin_errors_count() -> tuple[Response, int]:
+    """Return the total number of persisted error entries.
+
+    Returns:
+        JSON response with ``status`` and ``data.count``.
+    """
+    error_log = current_app.config.get("ERROR_LOG")
+    if error_log is None:
+        return jsonify({"status": "error", "message": "Error log not initialised"}), 503
+
+    count = error_log.count()
+    return jsonify({"status": "success", "data": {"count": count}}), 200
+
+
 @admin_bp.route("/features", methods=["GET"])
 def admin_features() -> tuple[Response, int]:
     """Return feature flag status."""
@@ -258,4 +307,226 @@ def admin_features() -> tuple[Response, int]:
             "total": len(_FEATURE_FLAGS),
             "by_status": by_status,
         },
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Security dashboard routes
+# ---------------------------------------------------------------------------
+
+
+def _get_login_activity():  # type: ignore[return]
+    """Return the LoginActivity instance from app config."""
+    from packages.data.src.activity_log import LoginActivity  # noqa: PLC0415
+
+    la = current_app.config.get("LOGIN_ACTIVITY")
+    if la is None:
+        # Lazy-initialise a persistent instance on first use.
+        from pathlib import Path  # noqa: PLC0415
+
+        db_path = Path.home() / ".flinttrade" / "activity.db"
+        la = LoginActivity(str(db_path))
+        current_app.config["LOGIN_ACTIVITY"] = la
+    return la
+
+
+def _get_session_tracker():  # type: ignore[return]
+    """Return the SessionTracker instance from app config."""
+    from packages.data.src.activity_log import SessionTracker  # noqa: PLC0415
+
+    st = current_app.config.get("SESSION_TRACKER")
+    if st is None:
+        from pathlib import Path  # noqa: PLC0415
+
+        db_path = Path.home() / ".flinttrade" / "activity.db"
+        st = SessionTracker(str(db_path))
+        current_app.config["SESSION_TRACKER"] = st
+    return st
+
+
+def _get_security_tracker():  # type: ignore[return]
+    """Return the SecurityTracker instance from app config."""
+    from packages.data.src.security_tracker import SecurityTracker  # noqa: PLC0415
+
+    skt = current_app.config.get("SECURITY_TRACKER")
+    if skt is None:
+        from pathlib import Path  # noqa: PLC0415
+
+        db_path = Path.home() / ".flinttrade" / "security.db"
+        skt = SecurityTracker(str(db_path))
+        current_app.config["SECURITY_TRACKER"] = skt
+    return skt
+
+
+@admin_bp.route("/security/logins", methods=["GET"])
+def recent_logins() -> tuple[Response, int]:
+    """Return recent login events.
+
+    Query params:
+        user_id (str, optional): Filter to a specific user.
+        limit (int, optional): Max rows, default 100.
+
+    Returns:
+        JSON with ``status`` and ``data.logins`` list.
+    """
+    user_id: str | None = request.args.get("user_id") or None
+    try:
+        limit = int(request.args.get("limit", 100))
+    except ValueError:
+        return jsonify({"status": "error", "message": "limit must be an integer"}), 400
+
+    la = _get_login_activity()
+    logins = la.recent_logins(user_id=user_id, limit=limit)
+    return jsonify({
+        "status": "success",
+        "data": {"logins": logins, "count": len(logins)},
+    }), 200
+
+
+@admin_bp.route("/security/sessions", methods=["GET"])
+def active_sessions() -> tuple[Response, int]:
+    """Return currently active sessions.
+
+    Query params:
+        user_id (str, optional): Filter to a specific user.
+
+    Returns:
+        JSON with ``status`` and ``data.sessions`` list.
+    """
+    user_id: str | None = request.args.get("user_id") or None
+    st = _get_session_tracker()
+    sessions = st.active_sessions(user_id=user_id)
+    return jsonify({
+        "status": "success",
+        "data": {"sessions": sessions, "count": len(sessions)},
+    }), 200
+
+
+@admin_bp.route("/security/suspicious", methods=["GET"])
+def suspicious_activity() -> tuple[Response, int]:
+    """Return IPs with suspicious activity (failed logins + 404 floods).
+
+    Query params:
+        window_hours (int, optional): Lookback window for login failures,
+            default 24.
+        threshold (int, optional): Min failed request count for IP bans
+            analysis, default 10.
+
+    Returns:
+        JSON with ``status`` and ``data`` containing ``suspicious_logins``
+        and ``suspicious_ips``.
+    """
+    try:
+        window_hours = int(request.args.get("window_hours", 24))
+        threshold = int(request.args.get("threshold", 10))
+    except ValueError:
+        return jsonify({"status": "error", "message": "window_hours and threshold must be integers"}), 400
+
+    la = _get_login_activity()
+    skt = _get_security_tracker()
+    return jsonify({
+        "status": "success",
+        "data": {
+            "suspicious_logins": la.suspicious_logins(window_hours=window_hours),
+            "suspicious_ips": skt.suspicious_ips(threshold=threshold),
+        },
+    }), 200
+
+
+@admin_bp.route("/security/bans", methods=["GET"])
+def banned_ips() -> tuple[Response, int]:
+    """Return recent IP ban records.
+
+    Query params:
+        limit (int, optional): Max rows, default 50.
+
+    Returns:
+        JSON with ``status`` and ``data.bans`` list.
+    """
+    try:
+        limit = int(request.args.get("limit", 50))
+    except ValueError:
+        return jsonify({"status": "error", "message": "limit must be an integer"}), 400
+
+    skt = _get_security_tracker()
+    bans = skt.recent_bans(limit=limit)
+    return jsonify({
+        "status": "success",
+        "data": {"bans": bans, "count": len(bans)},
+    }), 200
+
+
+@admin_bp.route("/security/bans", methods=["POST"])
+def ban_ip_route() -> tuple[Response, int]:
+    """Manually ban an IP address (persisted in DuckDB).
+
+    Request JSON:
+        ip (str): IP address to ban.
+        reason (str): Human-readable justification.
+        duration_hours (int, optional): How long to ban; 0 = permanent.
+            Defaults to 24.
+
+    Returns:
+        JSON with ``status`` and ``data.ban_id`` on success.
+    """
+    body = request.get_json(silent=True) or {}
+    ip: str = (body.get("ip") or "").strip()
+    reason: str = (body.get("reason") or "").strip()
+
+    if not ip:
+        return jsonify({"status": "error", "message": "ip is required"}), 400
+    if not reason:
+        return jsonify({"status": "error", "message": "reason is required"}), 400
+
+    try:
+        duration_hours = int(body.get("duration_hours", 24))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "duration_hours must be an integer"}), 400
+
+    skt = _get_security_tracker()
+    ban_id = skt.ban_ip(ip, reason, duration_hours=duration_hours)
+
+    # Also apply the in-memory ban so requests are blocked immediately.
+    try:
+        mon = current_app.config.get("SECURITY_MONITOR")
+        if mon is not None:
+            duration_seconds = duration_hours * 3600 if duration_hours > 0 else None
+            mon.ban_ip(ip, reason, duration_seconds)
+    except Exception:
+        pass  # Best-effort — persistent ban is already recorded
+
+    return jsonify({
+        "status": "success",
+        "data": {"ban_id": ban_id, "ip": ip, "reason": reason, "duration_hours": duration_hours},
+    }), 200
+
+
+@admin_bp.route("/security/bans/<path:ip>", methods=["DELETE"])
+def unban_ip_route(ip: str) -> tuple[Response, int]:
+    """Lift persistent and in-memory bans on an IP address.
+
+    Args:
+        ip: IP address to unban (URL path segment).
+
+    Returns:
+        JSON with ``status`` and ``data.lifted`` (bool).
+    """
+    ip = ip.strip()
+    if not ip:
+        return jsonify({"status": "error", "message": "ip is required"}), 400
+
+    skt = _get_security_tracker()
+    lifted = skt.unban_ip(ip)
+
+    # Also lift the in-memory ban.
+    try:
+        mon = current_app.config.get("SECURITY_MONITOR")
+        if mon is not None:
+            mon.unban_ip(ip)
+    except Exception:
+        pass
+
+    return jsonify({
+        "status": "success",
+        "data": {"ip": ip, "lifted": lifted},
     }), 200

@@ -21,6 +21,8 @@ from .safety import (
 )
 from .scheduler import (
     EXCHANGE_SCHEDULES,
+    CronScheduleConfig,
+    CronStrategyScheduler,
     ExchangeSchedule,
     StrategyRunner,
     StrategyScheduler,
@@ -68,6 +70,8 @@ __all__ = [
     "EXCHANGE_SCHEDULES",
     "StrategyRunner",
     "StrategyScheduler",
+    "CronStrategyScheduler",
+    "CronScheduleConfig",
     # Strategy
     "BaseStrategy",
     "StrategyState",

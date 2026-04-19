@@ -3,6 +3,9 @@
 All endpoints are under the ``/api/v1/strategies/`` prefix.  The
 :class:`~packages.engine.src.strategy_runner.UserStrategyRunner` instance is
 stored on ``app.config["STRATEGY_RUNNER"]`` and injected at app creation.
+
+The :class:`~packages.engine.src.scheduler.CronStrategyScheduler` instance is
+stored on ``app.config["CRON_SCHEDULER"]`` and injected at app creation.
 """
 
 from __future__ import annotations
@@ -36,6 +39,22 @@ def _runner_required() -> tuple[Any, Response | None]:
             503,
         )
     return runner, None
+
+
+def _get_cron_scheduler() -> Any:
+    """Retrieve the CronStrategyScheduler from the Flask app config."""
+    return current_app.config.get("CRON_SCHEDULER")
+
+
+def _cron_scheduler_required() -> tuple[Any, Response | None]:
+    """Return (scheduler, None) or (None, error_response)."""
+    scheduler = _get_cron_scheduler()
+    if scheduler is None:
+        return None, (
+            jsonify({"status": "error", "message": "Cron scheduler not configured"}),
+            503,
+        )
+    return scheduler, None
 
 
 # ---------------------------------------------------------------------------
@@ -319,3 +338,170 @@ def get_strategy_logs(strategy_id: str) -> Response:
         return jsonify({"status": "error", "message": str(exc)}), 404
 
     return jsonify({"status": "success", "data": {"strategy_id": strategy_id, "lines": log_lines}})
+
+
+# ---------------------------------------------------------------------------
+# Cron scheduling
+# ---------------------------------------------------------------------------
+
+# Supported exchanges for cron scheduling — mirrors EXCHANGE_SCHEDULES in scheduler.py.
+_SUPPORTED_EXCHANGES = frozenset({
+    "NSE", "BSE", "NFO", "BFO", "CDS", "BCD",
+    "MCX", "NCDEX", "NSE_INDEX", "BSE_INDEX", "DELTA",
+})
+
+
+@strategy_bp.route("/<strategy_id>/schedule", methods=["POST"])
+def create_strategy_schedule(strategy_id: str) -> Response:
+    """Attach a cron schedule to an existing strategy.
+
+    The scheduler fires the strategy's start endpoint at the specified cron
+    time if market is open and the day is not a holiday.
+
+    Request body (JSON):
+
+    .. code-block:: json
+
+        {
+            "cron": "30 9 * * 1-5",
+            "exchange": "NSE"
+        }
+
+    ``cron`` must be a valid 5-field expression (minute hour dom month dow)
+    that will be evaluated in IST (Asia/Kolkata).
+
+    ``exchange`` is optional and defaults to ``"NSE"``.
+
+    Args:
+        strategy_id: UUID of the strategy to schedule.
+
+    Returns:
+        JSON with ``job_id`` and echo of the schedule parameters on success.
+    """
+    # Validate strategy exists
+    runner, err = _runner_required()
+    if err:
+        return err
+
+    try:
+        runner.get_status(strategy_id)
+    except FileNotFoundError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+
+    # Validate cron scheduler availability
+    cron_scheduler, err = _cron_scheduler_required()
+    if err:
+        return err
+
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    cron_expr: str = (body.get("cron") or "").strip()
+    exchange: str = (body.get("exchange") or "NSE").strip().upper()
+
+    if not cron_expr:
+        return jsonify({"status": "error", "message": "cron expression is required"}), 400
+
+    if exchange not in _SUPPORTED_EXCHANGES:
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Unsupported exchange {exchange!r}. Supported: {sorted(_SUPPORTED_EXCHANGES)}",
+            }
+        ), 400
+
+    # Validate cron expression before registering
+    try:
+        from .scheduler import CronStrategyScheduler
+        CronStrategyScheduler._parse_cron_expr(cron_expr)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    # Build the callback — fires strategy start
+    def _strategy_start_callback() -> None:
+        logger.info("Cron-triggered start for strategy %s", strategy_id)
+        try:
+            runner.start(strategy_id)
+        except RuntimeError:
+            # Already running — that is fine for a cron trigger
+            pass
+        except Exception as exc:
+            logger.error("Cron start failed for strategy %s: %s", strategy_id, exc)
+
+    try:
+        job_id = cron_scheduler.schedule(
+            strategy_id=strategy_id,
+            cron_expr=cron_expr,
+            callback=_strategy_start_callback,
+            exchange=exchange,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception:
+        logger.exception("Failed to schedule strategy %s", strategy_id)
+        return jsonify({"status": "error", "message": "Scheduling failed. Check server logs."}), 500
+
+    return (
+        jsonify(
+            {
+                "status": "success",
+                "message": f"Strategy '{strategy_id}' scheduled",
+                "data": {
+                    "strategy_id": strategy_id,
+                    "cron": cron_expr,
+                    "exchange": exchange,
+                    "job_id": job_id,
+                },
+            }
+        ),
+        201,
+    )
+
+
+@strategy_bp.route("/<strategy_id>/schedule", methods=["DELETE"])
+def delete_strategy_schedule(strategy_id: str) -> Response:
+    """Remove the cron schedule for a strategy.
+
+    Args:
+        strategy_id: UUID of the strategy.
+
+    Returns:
+        JSON confirmation.  Returns 404 if no schedule exists.
+    """
+    cron_scheduler, err = _cron_scheduler_required()
+    if err:
+        return err
+
+    removed = cron_scheduler.unschedule(strategy_id)
+    if not removed:
+        return jsonify({"status": "error", "message": f"No schedule found for strategy '{strategy_id}'"}), 404
+
+    return jsonify({"status": "success", "message": f"Schedule removed for strategy '{strategy_id}'"})
+
+
+@strategy_bp.route("/scheduled", methods=["GET"])
+def list_scheduled_strategies() -> Response:
+    """List all strategies that have an active cron schedule.
+
+    Returns:
+        JSON with a ``schedules`` list.  Each entry contains:
+        ``strategy_id``, ``cron``, ``exchange``, ``job_id``,
+        ``last_skipped_reason``, ``next_fire_time``.
+    """
+    cron_scheduler, err = _cron_scheduler_required()
+    if err:
+        return err
+
+    jobs = cron_scheduler.list_jobs()
+    # Normalise key name: expose ``cron`` (not ``cron_expr``) to match the
+    # POST request body shape so clients can round-trip the value.
+    normalised = [
+        {
+            "strategy_id": j["strategy_id"],
+            "cron": j["cron_expr"],
+            "exchange": j["exchange"],
+            "job_id": j["job_id"],
+            "last_skipped_reason": j["last_skipped_reason"],
+            "next_fire_time": j["next_fire_time"],
+        }
+        for j in jobs
+    ]
+    return jsonify({"status": "success", "data": {"schedules": normalised}})

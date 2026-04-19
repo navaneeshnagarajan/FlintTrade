@@ -2,8 +2,9 @@
 
 __version__ = "0.1.0-alpha"
 
-from .activity_log import ActivityEntry, ActivityLog
+from .activity_log import ActivityEntry, ActivityLog, LoginActivity, SessionTracker
 from .audit_logger import AuditLogger
+from .security_tracker import SecurityTracker
 from .orderflow import FootprintBucket, FootprintCell, OrderFlowAggregator
 from .orderflow_aggregator import (
     FootprintBucket as FootprintBucketV2,
@@ -27,6 +28,9 @@ __all__ = [
     "FootprintCell",
     "ActivityLog",
     "ActivityEntry",
+    "LoginActivity",
+    "SessionTracker",
+    "SecurityTracker",
     # Trade Journal
     "TradeJournal",
     "JournalEntry",
