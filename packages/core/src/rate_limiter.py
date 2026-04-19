@@ -34,6 +34,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from functools import wraps
+from pathlib import Path
 from typing import Any, Callable, TypeVar
 
 from flask import jsonify, request
@@ -105,8 +106,21 @@ class _EndpointConfig:
     global_rate: int
 
 
+_OVERRIDES_CREATE_SQL = """
+CREATE TABLE IF NOT EXISTS rate_limit_overrides (
+    user_id   TEXT NOT NULL,
+    endpoint  TEXT NOT NULL,
+    user_rate INTEGER NOT NULL,
+    PRIMARY KEY (user_id, endpoint)
+)
+"""
+
+
 class RateLimiter:
     """Token-bucket rate limiter with per-user and global limits.
+
+    Supports per-user rate overrides that are optionally persisted to
+    DuckDB so they survive process restarts.
 
     Args:
         global_rate: Default global token refill rate (requests/second).
@@ -114,6 +128,9 @@ class RateLimiter:
         window_seconds: Bucket capacity expressed as the number of seconds
             worth of tokens.  E.g. ``window_seconds=1`` means a burst equal
             to one second of traffic.
+        overrides_db: Path to a DuckDB file used to persist per-user
+            overrides.  Pass ``None`` (default) to disable persistence
+            (overrides live in memory only).
 
     Example::
 
@@ -122,6 +139,9 @@ class RateLimiter:
         if not allowed:
             # Wait retry_ms before retrying
             ...
+
+        # Grant a trusted user a higher limit:
+        limiter.set_user_override("alice", "orders", 50)
     """
 
     def __init__(
@@ -129,6 +149,7 @@ class RateLimiter:
         global_rate: int = 100,
         per_user_rate: int = 10,
         window_seconds: int = 1,
+        overrides_db: Path | str | None = None,
     ) -> None:
         self._default_global_rate = global_rate
         self._default_user_rate = per_user_rate
@@ -141,9 +162,147 @@ class RateLimiter:
         self._global_buckets: dict[str, _Bucket] = {}
         self._lock = threading.Lock()
 
+        # Per-user overrides: (user_id, endpoint) → rate
+        self._user_overrides: dict[tuple[str, str], int] = {}
+        self._overrides_conn: Any = None
+        if overrides_db is not None:
+            self._init_overrides_db(overrides_db)
+
+    def _init_overrides_db(self, db_path: Path | str) -> None:
+        """Open (or create) the overrides DuckDB and load existing rows.
+
+        Args:
+            db_path: Path to the DuckDB file or ``":memory:"``.
+        """
+        try:
+            import duckdb  # noqa: PLC0415
+
+            if isinstance(db_path, Path):
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                conn = duckdb.connect(str(db_path))
+            else:
+                conn = duckdb.connect(str(db_path))
+
+            conn.execute(_OVERRIDES_CREATE_SQL)
+
+            rows = conn.execute(
+                "SELECT user_id, endpoint, user_rate FROM rate_limit_overrides"
+            ).fetchall()
+            for row in rows:
+                self._user_overrides[(row[0], row[1])] = row[2]
+
+            self._overrides_conn = conn
+            logger.debug(
+                "Loaded %d rate-limit overrides from %s", len(rows), db_path
+            )
+        except Exception as exc:
+            logger.warning(
+                "Cannot initialise overrides DB (%s): %s — overrides will be in-memory only",
+                db_path,
+                exc,
+            )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def set_user_override(
+        self, user_id: str, endpoint: str, user_rate: int
+    ) -> None:
+        """Override the per-user rate for a specific user and endpoint.
+
+        Useful for granting trusted users a higher limit than the default.
+        The override is persisted to DuckDB (if *overrides_db* was provided
+        at construction time) so it survives process restarts.
+
+        Args:
+            user_id: User identifier to override.
+            endpoint: Logical endpoint name.
+            user_rate: New per-user token refill rate (requests/second).
+                Must be a positive integer.
+
+        Raises:
+            ValueError: If *user_rate* is not positive.
+        """
+        if user_rate <= 0:
+            raise ValueError(f"user_rate must be positive, got {user_rate}")
+
+        with self._lock:
+            self._user_overrides[(user_id, endpoint)] = user_rate
+            # Invalidate the existing bucket so the new rate takes effect
+            # on the next check().
+            self._user_buckets.pop((user_id, endpoint), None)
+
+            if self._overrides_conn is not None:
+                try:
+                    self._overrides_conn.execute(
+                        """
+                        INSERT INTO rate_limit_overrides (user_id, endpoint, user_rate)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(user_id, endpoint) DO UPDATE SET user_rate = excluded.user_rate
+                        """,
+                        [user_id, endpoint, user_rate],
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to persist override: %s", exc)
+
+        logger.info(
+            "Rate-limit override set: user=%s endpoint=%s rate=%d/s",
+            user_id,
+            endpoint,
+            user_rate,
+        )
+
+    def remove_user_override(self, user_id: str, endpoint: str) -> bool:
+        """Remove a previously set per-user rate override.
+
+        Args:
+            user_id: User identifier.
+            endpoint: Logical endpoint name.
+
+        Returns:
+            ``True`` if an override existed and was removed, ``False`` if
+            no override was registered for this combination.
+        """
+        with self._lock:
+            existed = (user_id, endpoint) in self._user_overrides
+            if existed:
+                del self._user_overrides[(user_id, endpoint)]
+                self._user_buckets.pop((user_id, endpoint), None)
+
+                if self._overrides_conn is not None:
+                    try:
+                        self._overrides_conn.execute(
+                            "DELETE FROM rate_limit_overrides "
+                            "WHERE user_id = ? AND endpoint = ?",
+                            [user_id, endpoint],
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to delete override: %s", exc)
+
+        if existed:
+            logger.info(
+                "Rate-limit override removed: user=%s endpoint=%s",
+                user_id,
+                endpoint,
+            )
+        return existed
+
+    def list_overrides(self) -> list[dict[str, Any]]:
+        """Return all active per-user rate overrides.
+
+        Returns:
+            List of dicts with ``user_id``, ``endpoint``, and ``user_rate``
+            fields, sorted by ``user_id`` then ``endpoint``.
+        """
+        with self._lock:
+            return [
+                {"user_id": uid, "endpoint": ep, "user_rate": rate}
+                for (uid, ep), rate in sorted(
+                    self._user_overrides.items(),
+                    key=lambda kv: (kv[0][0], kv[0][1]),
+                )
+            ]
 
     def check(self, user_id: str, endpoint: str) -> tuple[bool, int]:
         """Check whether a request is within rate limits.
@@ -163,6 +322,9 @@ class RateLimiter:
         cfg = self._endpoint_configs.get(endpoint)
         user_rate = cfg.user_rate if cfg else self._default_user_rate
         global_rate = cfg.global_rate if cfg else self._default_global_rate
+
+        # Apply per-user override if one is registered.
+        user_rate = self._user_overrides.get((user_id, endpoint), user_rate)
 
         with self._lock:
             user_bucket = self._get_user_bucket(user_id, endpoint, user_rate)

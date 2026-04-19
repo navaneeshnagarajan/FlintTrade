@@ -164,6 +164,56 @@ class TestRateLimiterStats:
 
 
 # ---------------------------------------------------------------------------
+# RateLimiter — per-user overrides
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiterUserOverrides:
+    def test_set_user_override_increases_effective_rate(self) -> None:
+        """User with override gets higher rate than default."""
+        rl = RateLimiter(global_rate=100, per_user_rate=2)
+        # Without override, alice is limited to 2/s.
+        rl.set_user_override("alice", "orders", 20)
+        # Alice should still be allowed on the 3rd call (override = 20/s bucket).
+        rl.check("alice", "orders")
+        rl.check("alice", "orders")
+        allowed, _ = rl.check("alice", "orders")
+        assert allowed is True  # default would have denied
+
+    def test_set_user_override_does_not_affect_other_users(self) -> None:
+        """Override for alice does not change bob's effective rate."""
+        rl = RateLimiter(global_rate=100, per_user_rate=1)
+        rl.set_user_override("alice", "orders", 20)
+        rl.check("bob", "orders")
+        allowed, _ = rl.check("bob", "orders")
+        assert allowed is False  # bob still limited at 1/s
+
+    def test_remove_user_override_returns_true_when_existed(self) -> None:
+        rl = RateLimiter(global_rate=100, per_user_rate=10)
+        rl.set_user_override("alice", "orders", 50)
+        assert rl.remove_user_override("alice", "orders") is True
+
+    def test_remove_user_override_returns_false_when_absent(self) -> None:
+        rl = RateLimiter(global_rate=100, per_user_rate=10)
+        assert rl.remove_user_override("nobody", "orders") is False
+
+    def test_list_overrides_returns_all_entries(self) -> None:
+        rl = RateLimiter(global_rate=100, per_user_rate=10)
+        rl.set_user_override("alice", "orders", 20)
+        rl.set_user_override("bob", "history", 30)
+        overrides = rl.list_overrides()
+        assert len(overrides) == 2
+        keys = {(o["user_id"], o["endpoint"]) for o in overrides}
+        assert ("alice", "orders") in keys
+        assert ("bob", "history") in keys
+
+    def test_set_user_override_invalid_rate_raises(self) -> None:
+        rl = RateLimiter()
+        with pytest.raises(ValueError):
+            rl.set_user_override("alice", "orders", 0)
+
+
+# ---------------------------------------------------------------------------
 # rate_limit decorator
 # ---------------------------------------------------------------------------
 

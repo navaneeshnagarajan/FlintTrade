@@ -232,3 +232,59 @@ def test_context_manager() -> None:
     with APIAnalyzer(":memory:") as az:
         az.log_call("/v1/health", "GET", None, 200, None, 1.0)
         assert az.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# enable / disable / is_enabled
+# ---------------------------------------------------------------------------
+
+
+def test_enable_disable_toggle(az: APIAnalyzer) -> None:
+    """enable() / disable() toggle the _enabled flag."""
+    az.disable()
+    assert az.is_enabled() is False
+    az.enable()
+    assert az.is_enabled() is True
+
+
+def test_disabled_analyzer_does_not_persist_call(az: APIAnalyzer) -> None:
+    """When disabled, log_call() returns a call_id but writes no row."""
+    az.disable()
+    call_id = az.log_call("/v1/health", "GET", None, 200, None, 1.0)
+    assert isinstance(call_id, str)
+    assert az.count() == 0  # no row written
+
+
+def test_reenabled_analyzer_resumes_logging(az: APIAnalyzer) -> None:
+    """After re-enabling, log_call() persists normally again."""
+    az.disable()
+    az.log_call("/v1/a", "GET", None, 200, None, 1.0)  # not stored
+    az.enable()
+    az.log_call("/v1/b", "GET", None, 200, None, 1.0)  # stored
+    assert az.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# clear_logs
+# ---------------------------------------------------------------------------
+
+
+def test_clear_logs_deletes_all_rows(az: APIAnalyzer) -> None:
+    """clear_logs() with no arguments removes every row."""
+    for _ in range(5):
+        az.log_call("/v1/health", "GET", None, 200, None, 1.0)
+    deleted = az.clear_logs()
+    assert deleted == 5
+    assert az.count() == 0
+
+
+def test_clear_logs_older_than_keeps_recent(az: APIAnalyzer) -> None:
+    """clear_logs(older_than_days=0) deletes only rows older than cutoff."""
+    # All rows are inserted now; with older_than_days=0 they are NOT older
+    # than 0 days (cutoff = now), so nothing should be deleted.
+    az.log_call("/v1/health", "GET", None, 200, None, 1.0)
+    az.log_call("/v1/health", "GET", None, 200, None, 1.0)
+    # Rows are current — older_than_days=1 should keep them all.
+    deleted = az.clear_logs(older_than_days=1)
+    assert deleted == 0
+    assert az.count() == 2

@@ -228,6 +228,24 @@ export function useCommandRegistry() {
           window.dispatchEvent(new CustomEvent("flinttrade:reset-layout"));
         },
       },
+      {
+        id:          "action:show-changelog",
+        title:       "Show Changelog",
+        description: "View what's new in this version of FlintTrade",
+        category:    "action",
+        action:      () => {
+          window.dispatchEvent(new CustomEvent("flinttrade:show-changelog"));
+        },
+      },
+      {
+        id:          "action:search-docs",
+        title:       "Search Docs",
+        description: "Search FlintTrade documentation (or use ? prefix)",
+        category:    "action",
+        action:      () => {
+          window.dispatchEvent(new CustomEvent("flinttrade:search-docs"));
+        },
+      },
     ];
 
     // ----- Theme commands -----

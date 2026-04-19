@@ -1,11 +1,12 @@
 """Health check Flask endpoints.
 
-Provides a Blueprint with four routes:
+Provides a Blueprint with five routes:
 
 - ``GET /health``         — simple status JSON (one-liner)
 - ``GET /health/detail``  — full :class:`HealthReport` JSON
 - ``GET /healthz``        — Kubernetes liveness probe
 - ``GET /readyz``         — Kubernetes readiness probe
+- ``GET /api/v1/ping``    — simple liveness check with IST timestamp
 
 Register in ``create_flask_app()``::
 
@@ -16,6 +17,7 @@ Register in ``create_flask_app()``::
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from flask import Blueprint, jsonify
@@ -25,6 +27,9 @@ from .health_monitor import HealthMonitor
 logger = logging.getLogger("flinttrade.health_routes")
 
 health_bp = Blueprint("health_detail", __name__)
+
+# IST timezone offset
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 # Module-level singleton — shared across all requests
 _monitor = HealthMonitor()
@@ -119,3 +124,24 @@ def readyz() -> tuple[Any, int]:
     if mem_check.status == "unhealthy" or disk_check.status == "unhealthy":
         return jsonify({"status": "not_ready"}), 503
     return jsonify({"status": "ready"}), 200
+
+
+@health_bp.route("/api/v1/ping", methods=["GET"])
+def ping() -> tuple[Any, int]:
+    """Simple liveness check.
+
+    Does not run subsystem checks — just confirms the process is alive
+    and responding.  Exempt from API key authentication.
+
+    Returns:
+        JSON ``{"status": "ok", "timestamp": "<ISO8601 IST>"}``.
+    """
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "timestamp": datetime.now(_IST).isoformat(),
+            }
+        ),
+        200,
+    )

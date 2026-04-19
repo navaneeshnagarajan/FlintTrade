@@ -8,6 +8,7 @@ Tick generation strategy:
 - LTP ticks: random walk around a base price per symbol
 - QUOTE ticks: LTP + open/high/low/close synthesised from the random walk
 - DEPTH ticks: QUOTE + 5-level synthetic order book on each side
+- DEPTH20 ticks: QUOTE + 20-level synthetic order book (OpenAlgo v2 mode 4)
 """
 
 from __future__ import annotations
@@ -19,8 +20,12 @@ import time
 from typing import Callable
 
 from .broker_adapter import AbstractBrokerAdapter, Mode, TickCallback
+from .depth_20 import Depth20Tick, DepthLevel, parse_depth_20_payload
 
 logger = logging.getLogger("flinttrade.gateway.ws_proxy.mock_adapter")
+
+# Mode 4 string constant (OpenAlgo v2 depth with 20 levels)
+_MODE_DEPTH20 = "DEPTH20"
 
 # Default base prices for well-known Indian indices and stocks
 _DEFAULT_PRICES: dict[str, float] = {
@@ -196,7 +201,7 @@ class MockBrokerAdapter(AbstractBrokerAdapter):
             "timestamp": time.time(),
         }
 
-        if mode in ("QUOTE", "DEPTH"):
+        if mode in ("QUOTE", "DEPTH", _MODE_DEPTH20):
             spread = price * 0.002
             tick.update(
                 {
@@ -227,6 +232,28 @@ class MockBrokerAdapter(AbstractBrokerAdapter):
                 for i in range(5)
             ]
 
+        if mode == _MODE_DEPTH20:
+            # OpenAlgo v2 mode 4 — 20 levels, list-of-lists format
+            tick["mode"] = _MODE_DEPTH20
+            tick["bids"] = [
+                [
+                    round(price - spread * (i + 1), 2),
+                    random.randint(50, 2_000),
+                    random.randint(1, 30),
+                ]
+                for i in range(20)
+            ]
+            tick["asks"] = [
+                [
+                    round(price + spread * (i + 1), 2),
+                    random.randint(50, 2_000),
+                    random.randint(1, 30),
+                ]
+                for i in range(20)
+            ]
+            tick["total_buy_qty"] = sum(lvl[1] for lvl in tick["bids"])
+            tick["total_sell_qty"] = sum(lvl[1] for lvl in tick["asks"])
+
         return tick
 
     # ------------------------------------------------------------------
@@ -242,6 +269,25 @@ class MockBrokerAdapter(AbstractBrokerAdapter):
             tick: Tick dict to dispatch to all registered callbacks.
         """
         self._dispatch_tick(tick)
+
+    def build_depth20_tick(self, symbol: str, exchange: str) -> Depth20Tick:
+        """Build a realistic synthetic :class:`~ws_proxy.depth_20.Depth20Tick`.
+
+        Generates a 20-level depth snapshot by calling :meth:`_build_tick`
+        with mode ``"DEPTH20"`` and parsing the resulting raw dict.
+
+        Args:
+            symbol: Instrument symbol (e.g. ``"NIFTY"``).
+            exchange: Exchange code (e.g. ``"NSE_INDEX"``).
+
+        Returns:
+            A fully populated :class:`~ws_proxy.depth_20.Depth20Tick`.
+        """
+        key = (symbol.upper(), exchange.upper())
+        if key not in self._prices:
+            self._prices[key] = _DEFAULT_PRICES.get(symbol.upper(), _DEFAULT_BASE_PRICE)
+        raw = self._build_tick(symbol.upper(), exchange.upper(), _MODE_DEPTH20)  # type: ignore[arg-type]
+        return parse_depth_20_payload(raw)
 
     @property
     def subscribed_symbols(self) -> list[tuple[str, str]]:

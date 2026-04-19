@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.0",
     "flask>=3.0",
     "duckdb>=1.0.0",
+    "watchdog>=4.0.0",
 ]
 
 [build-system]

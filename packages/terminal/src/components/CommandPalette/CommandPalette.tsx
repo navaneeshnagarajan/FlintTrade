@@ -16,6 +16,7 @@ import { CommandsTab } from "./CommandsTab";
 import { WidgetsTab } from "./WidgetsTab";
 import { SymbolSearchTab } from "./SymbolSearchTab";
 import { AITab } from "./AITab";
+import { DocsTab } from "./DocsTab";
 import { useCommandRegistry } from "./useCommandRegistry";
 import type { Command } from "./useCommandRegistry";
 
@@ -32,12 +33,13 @@ interface CommandPaletteProps {
 // Tab type + prefix detection
 // ---------------------------------------------------------------------------
 
-type PaletteTab = "symbols" | "commands" | "widgets" | "ai";
+type PaletteTab = "symbols" | "commands" | "widgets" | "ai" | "docs";
 
 function detectTab(query: string): PaletteTab | null {
   if (query.startsWith("/")) return "commands";
   if (query.startsWith("#")) return "widgets";
   if (query.toLowerCase().startsWith("@ai")) return "ai";
+  if (query.startsWith("?")) return "docs";
   return null;
 }
 
@@ -45,6 +47,7 @@ function stripPrefix(query: string, tab: PaletteTab): string {
   if (tab === "commands" && query.startsWith("/")) return query.slice(1).trim();
   if (tab === "widgets" && query.startsWith("#")) return query.slice(1).trim();
   if (tab === "ai" && query.toLowerCase().startsWith("@ai")) return query.slice(3).trim();
+  if (tab === "docs" && query.startsWith("?")) return query.slice(1).trim();
   return query;
 }
 
@@ -99,7 +102,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
       }
       if (e.key === "Tab") {
         e.preventDefault();
-        const tabs: PaletteTab[] = ["symbols", "commands", "widgets", "ai"];
+        const tabs: PaletteTab[] = ["symbols", "commands", "widgets", "ai", "docs"];
         const idx = tabs.indexOf(activeTab);
         setActiveTab(tabs[(idx + (e.shiftKey ? -1 + tabs.length : 1)) % tabs.length]);
         setActiveIndex(0);
@@ -191,6 +194,18 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
         />
       ),
     },
+    {
+      id: "docs",
+      label: "Docs",
+      content: (
+        <DocsTab
+          query={activeTab === "docs" ? tabQuery : ""}
+          activeIndex={activeIndex}
+          onClose={onClose}
+          onActiveIndexChange={setActiveIndex}
+        />
+      ),
+    },
   ];
 
   return (
@@ -204,7 +219,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           role="combobox"
           aria-expanded="true"
           aria-label="Search symbols, commands, widgets, or ask AI"
-          placeholder="Search symbols, / commands, # widgets, @ai ask…"
+          placeholder="Search symbols, / commands, # widgets, @ai ask, ? docs…"
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}
           onKeyDown={handleKeyDown}

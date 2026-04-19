@@ -574,6 +574,34 @@ def create_flask_app(
     from packages.historical.src.expiry_tracker_routes import expiry_tracker_bp  # noqa: PLC0415
     app.register_blueprint(expiry_tracker_bp)
 
+    # Register Holidays + Market Timings blueprint (/api/v1/holidays, /api/v1/market/timings)
+    from packages.historical.src.holidays_routes import holidays_bp  # noqa: PLC0415
+    app.register_blueprint(holidays_bp)
+
+    # Register Intervals blueprint (/api/v1/intervals)
+    from packages.historical.src.intervals_routes import intervals_bp  # noqa: PLC0415
+    app.register_blueprint(intervals_bp)
+
+    # Register Instruments blueprint (/api/v1/instruments)
+    from packages.historical.src.instruments_routes import instruments_bp  # noqa: PLC0415
+    app.register_blueprint(instruments_bp)
+
+    # Register Symbol Search blueprint (/api/v1/search)
+    from packages.historical.src.search_routes import search_bp  # noqa: PLC0415
+    app.register_blueprint(search_bp)
+
+    # Register Broker Capabilities blueprint (/api/v1/broker/capabilities)
+    from packages.gateway.src.capabilities_routes import capabilities_bp  # noqa: PLC0415
+    app.register_blueprint(capabilities_bp)
+
+    # Register Leverage / Margin blueprint (/api/v1/leverage/margin/current)
+    from packages.engine.src.leverage_routes import leverage_bp  # noqa: PLC0415
+    app.register_blueprint(leverage_bp)
+
+    # Register PNL by Symbols blueprint (/api/v1/pnl/symbols)
+    from packages.data.src.pnl_symbols_routes import pnl_symbols_bp  # noqa: PLC0415
+    app.register_blueprint(pnl_symbols_bp)
+
     # Register Bracket Order blueprint (/api/v1/orders/bracket*)
     from packages.engine.src.bracket_routes import bracket_bp  # noqa: PLC0415
     app.register_blueprint(bracket_bp)
@@ -605,6 +633,14 @@ def create_flask_app(
     # Register Log Stream blueprint (/v1/logs/*) — SSE + REST log streaming
     from .log_stream import log_stream_bp  # noqa: PLC0415
     app.register_blueprint(log_stream_bp)
+
+    # Register Keyboard Shortcuts blueprint (/v1/shortcuts/*) — per-user DuckDB persistence
+    from .shortcuts_routes import shortcuts_bp  # noqa: PLC0415
+    app.register_blueprint(shortcuts_bp)
+
+    # Register Docs Search blueprint (/v1/docs/*) — full-text search + changelog
+    from .docs_search_routes import docs_search_bp  # noqa: PLC0415
+    app.register_blueprint(docs_search_bp)
 
     # Register Auth blueprint (/v1/auth/*) — public endpoints, no API key required
     from .auth_service import AuthService as _AuthService  # noqa: PLC0415
@@ -638,6 +674,7 @@ def create_flask_app(
         "/v1/auth/",          # Auth endpoints are public (login, setup, status)
         "/v1/auth/callback",
         "/api/v1/errors",     # Frontend error reporting — public, rate-limited
+        "/api/v1/ping",       # Liveness probe — no auth required
     )
 
     @app.before_request

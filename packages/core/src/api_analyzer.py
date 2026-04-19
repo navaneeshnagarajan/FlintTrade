@@ -110,7 +110,12 @@ class APIAnalyzer:
         assert az.count() == 1
     """
 
-    def __init__(self, db_path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | str | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        import os  # noqa: PLC0415
         import duckdb  # lazy import
 
         if db_path is None:
@@ -127,6 +132,13 @@ class APIAnalyzer:
 
         self._conn = duckdb.connect(self._db_path)
         self._init_schema()
+
+        # Enabled state: explicit parameter > env var > default True.
+        if enabled is not None:
+            self._enabled: bool = enabled
+        else:
+            env_val = os.getenv("ENABLE_ANALYZER", "true").lower()
+            self._enabled = env_val in ("1", "true", "yes")
 
     # ------------------------------------------------------------------
     # Schema
@@ -181,6 +193,10 @@ class APIAnalyzer:
             if response_body is not None
             else None
         )
+
+        if not self._enabled:
+            logger.debug("APIAnalyzer disabled — call not logged: %s %s", method, route)
+            return call_id
 
         self._conn.execute(
             """
@@ -349,6 +365,71 @@ class APIAnalyzer:
             "duration_ms": row[7],
             "user_id": row[8],
         }
+
+    # ------------------------------------------------------------------
+    # Enable / disable / clear
+    # ------------------------------------------------------------------
+
+    def enable(self) -> None:
+        """Enable call logging.
+
+        When enabled (the default), every :meth:`log_call` invocation
+        persists a row to DuckDB.  This can be toggled at runtime without
+        restarting the process.
+        """
+        self._enabled = True
+        logger.info("APIAnalyzer enabled")
+
+    def disable(self) -> None:
+        """Disable call logging while retaining existing log rows.
+
+        When disabled, :meth:`log_call` returns a ``call_id`` immediately
+        without writing to the database.  Existing rows are preserved.
+        """
+        self._enabled = False
+        logger.info("APIAnalyzer disabled")
+
+    def is_enabled(self) -> bool:
+        """Return whether call logging is currently active.
+
+        Returns:
+            ``True`` when :meth:`log_call` will persist records.
+        """
+        return self._enabled
+
+    def clear_logs(self, older_than_days: int | None = None) -> int:
+        """Delete API call log rows.
+
+        Args:
+            older_than_days: When provided, only rows whose ``timestamp``
+                is more than this many days old are deleted.  When
+                ``None`` (default), **all** rows are deleted.
+
+        Returns:
+            Number of rows deleted.
+
+        Example::
+
+            # Purge logs older than 30 days:
+            deleted = az.clear_logs(older_than_days=30)
+        """
+        if older_than_days is not None:
+            from datetime import timedelta  # noqa: PLC0415
+
+            cutoff = datetime.now(IST) - timedelta(days=older_than_days)
+            before = self.count()
+            self._conn.execute(
+                "DELETE FROM api_calls WHERE timestamp < ?", [cutoff]
+            )
+            after = self.count()
+            deleted = before - after
+        else:
+            before = self.count()
+            self._conn.execute("DELETE FROM api_calls")
+            deleted = before
+
+        logger.info("APIAnalyzer: cleared %d log rows", deleted)
+        return deleted
 
     # ------------------------------------------------------------------
     # Lifecycle
