@@ -45,6 +45,8 @@ import {
   type RAGResult,
 } from "@/services/ftApi";
 import { motionConfig, EASE_ENTER, DURATION } from "@/lib/motion";
+import { AdvisorStatusResponseSchema } from "@/lib/schemas/ftApi";
+import type { AdvisorStatusData } from "@/lib/schemas/ftApi";
 
 // ---------------------------------------------------------------------------
 // Section registry
@@ -607,26 +609,20 @@ function KnowledgeSection() {
 // Section: AI Settings (live status)
 // ---------------------------------------------------------------------------
 
-interface AdvisorStatusData {
-  configured: boolean;
-  provider: string;
-  model: string;
-}
-
-interface AdvisorStatusResponse {
-  status: "success" | "error";
-  data?: AdvisorStatusData;
-}
-
 async function fetchAdvisorStatus(): Promise<AdvisorStatusData> {
   const base = import.meta.env.DEV ? "/ft-api" : "";
   const resp = await fetch(`${base}/api/v1/advisor/status`);
   if (!resp.ok) throw new Error(`advisor/status: HTTP ${resp.status}`);
-  const json = (await resp.json()) as AdvisorStatusResponse;
-  if (json.status === "error" || !json.data) {
+  const raw: unknown = await resp.json();
+  const result = AdvisorStatusResponseSchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[AIRoute] /advisor/status shape mismatch:", result.error.issues);
+    throw new Error("Advisor status response did not match expected shape");
+  }
+  if (result.data.status === "error" || !result.data.data) {
     throw new Error("Advisor status unavailable");
   }
-  return json.data;
+  return result.data.data;
 }
 
 function AISettingsSection() {

@@ -14,6 +14,7 @@ import { useState, useMemo, useEffect, memo } from "react";
 import { BarChart4, RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { BreadthResponseSchema } from "@/lib/schemas/ftApi";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -166,8 +167,25 @@ function MarketBreadthWidget() {
       try {
         const res = await fetch("/ft-api/v1/breadth");
         if (!res.ok) throw new Error("Failed to fetch breadth data");
-        const json = (await res.json()) as BreadthData;
-        setData(json);
+        const raw: unknown = await res.json();
+        const parsed = BreadthResponseSchema.safeParse(raw);
+        if (!parsed.success) {
+          console.error("[MarketBreadthWidget] /breadth shape mismatch:", parsed.error.issues);
+          // Keep previous data on parse failure
+        } else {
+          // Map snake_case backend fields → camelCase widget fields
+          const d = parsed.data.data;
+          setData((prev) => ({
+            series: prev.series,
+            newHighs: d.new_highs ?? 0,
+            newLows: d.new_lows ?? 0,
+            mcclellanOscillator: d.mcclellan_oscillator ?? 0,
+            breadthThrust: d.breadth_thrust ?? 0,
+            totalAdvances: d.advances,
+            totalDeclines: d.declines,
+            totalUnchanged: d.unchanged,
+          }));
+        }
         setLastUpdated(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
         track("trade", "market_breadth_refresh");
       } catch {

@@ -18,6 +18,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Download, Upload, RotateCcw, IndianRupee, TrendingUp, TrendingDown } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { SandboxStatusSchema } from "@/lib/schemas/ftApi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -59,8 +60,14 @@ const BASE = "/ft-api/v1/sandbox";
 async function fetchSandboxStatus(): Promise<SandboxStatus> {
   const resp = await fetch(`${BASE}/status`);
   if (!resp.ok) throw new Error("Failed to fetch sandbox status.");
-  const json = await resp.json() as { data: SandboxStatus };
-  return json.data;
+  const raw: unknown = await resp.json();
+  const result = SandboxStatusSchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[SandboxControls] /sandbox/status shape mismatch:", result.error.issues);
+    // Return safe fallback so UI does not crash
+    return { capital: 0, initial_capital: 0, pnl: 0, trades_count: 0 };
+  }
+  return result.data.data as SandboxStatus;
 }
 
 async function adjustCapital(delta: number): Promise<SandboxStatus> {

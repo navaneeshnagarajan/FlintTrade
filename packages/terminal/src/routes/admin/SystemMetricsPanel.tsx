@@ -12,6 +12,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Cpu, HardDrive, MemoryStick, Clock, Network, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SystemMetricsResponseSchema } from "@/lib/schemas/ftApi";
 
 // ---------------------------------------------------------------------------
 // Types (matches the backend schema from core/monitoring.py)
@@ -55,8 +56,35 @@ const REFETCH_INTERVAL_MS = 30_000;
 async function fetchSystemMetrics(): Promise<SystemMetrics> {
   const res = await fetch("/ft-api/v1/admin/system");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = (await res.json()) as SystemMetricsResponse;
-  return json.data;
+  const raw: unknown = await res.json();
+  const result = SystemMetricsResponseSchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[SystemMetricsPanel] /admin/system shape mismatch:", result.error.issues);
+    throw new Error("System metrics response did not match expected shape");
+  }
+  // Backend returns flat network_bytes_sent/recv; map to nested network_io expected by the UI.
+  const d = result.data.data;
+  return {
+    cpu_percent: d.cpu_percent,
+    memory_percent: d.memory_percent,
+    memory_used_gb: d.memory_used_gb,
+    memory_total_gb: d.memory_total_gb,
+    disk_percent: d.disk_percent,
+    disk_used_gb: d.disk_used_gb,
+    disk_total_gb: d.disk_total_gb,
+    uptime_seconds: d.uptime_seconds,
+    network_io: {
+      bytes_sent: d.network_bytes_sent ?? 0,
+      bytes_recv: d.network_bytes_recv ?? 0,
+      packets_sent: 0,
+      packets_recv: 0,
+    },
+    process_count: d.process_count,
+    load_avg_1m: 0,
+    load_avg_5m: 0,
+    load_avg_15m: 0,
+    collected_at: new Date().toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -368,6 +368,19 @@ def create_flask_app(
     from .monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
+    # Register frontend error ingestion + changelog reader (/ft-api/v1/errors,
+    # /ft-api/v1/changelog). Previously referenced by the terminal but not
+    # wired, causing 404s on fire-and-forget error reports.
+    from .error_log import ErrorLog as _ErrorLog  # noqa: PLC0415
+    from .frontend_error_routes import frontend_errors_bp  # noqa: PLC0415
+    _error_db = Path.home() / ".flinttrade" / "error_log.duckdb"
+    try:
+        app.config["ERROR_LOG"] = _ErrorLog(db_path=str(_error_db))
+    except Exception as exc:
+        logger.warning("ErrorLog initialisation failed (%s); /ft-api/v1/errors will log warnings only", exc)
+        app.config["ERROR_LOG"] = None
+    app.register_blueprint(frontend_errors_bp)
+
     # Register Strategy Runner blueprint (/api/v1/strategies/*)
     from packages.engine.src.strategy_routes import strategy_bp  # noqa: PLC0415
     app.register_blueprint(strategy_bp)
@@ -454,8 +467,8 @@ def create_flask_app(
                     request_size=request.content_length,
                     response_size=response.content_length,
                 )
-        except Exception:
-            pass  # Never let traffic logging break the response
+        except Exception as _exc:
+            logger.debug("suppressed: %s", _exc)  # Never let traffic logging break the response
         return response
 
     # Initialise LatencyMonitor (DuckDB-backed, always active).
@@ -491,8 +504,8 @@ def create_flask_app(
                     response_body=None,  # Not parsing response body to avoid re-reading stream
                     duration_ms=duration_ms,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("suppressed: %s", _exc)
             return response
 
         logger.info("API Analyser enabled — capturing all requests")
@@ -771,8 +784,8 @@ def create_flask_app(
                 sec = app.config.get("SECURITY_MONITOR")
                 if sec:
                     sec.record_auth_failure(request.remote_addr or "unknown")
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("suppressed: %s", _exc)
             return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
         return None
@@ -808,8 +821,8 @@ def create_flask_app(
                 status=response.status_code,
                 duration_ms=duration_ms,
             )
-        except Exception:
-            pass  # Never let monitoring break the response
+        except Exception as _exc:
+            logger.debug("suppressed: %s", _exc)  # Never let monitoring break the response
         return response
 
     @app.after_request
@@ -824,8 +837,8 @@ def create_flask_app(
                 skt = app.config.get("SECURITY_TRACKER")
                 if skt is not None:
                     skt.track_404(request.remote_addr or "unknown", request.path)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("suppressed: %s", _exc)
         return response
 
     @app.before_request
@@ -845,8 +858,8 @@ def create_flask_app(
             st = app.config.get("SESSION_TRACKER")
             if st is not None:
                 st.heartbeat(token)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("suppressed: %s", _exc)
 
     # --- inline route handlers extracted to blueprints ---
     # indicators_bp  → packages/core/src/indicators_routes.py

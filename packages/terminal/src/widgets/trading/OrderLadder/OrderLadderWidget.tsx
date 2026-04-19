@@ -73,14 +73,14 @@ function LevelRow({ level, isCenter, order, maxQty, qty, onBid, onAsk, onCancel 
     <div className={cn("flex items-center h-6 border-b border-border-subtle last:border-0",
       isCenter && "bg-accent/8", order && "bg-warning/5")}
       aria-label={`Price level ${fmtPrice(level.price)}`}>
-      <button onClick={() => onBid(level.price)}
-        className={cn("relative flex items-center justify-end h-full flex-1 px-1.5 text-xxs font-mono hover:bg-loss/15 transition-colors select-none",
+      <Button variant="ghost" onClick={() => onBid(level.price)}
+        className={cn("relative flex items-center justify-end h-full flex-1 px-1.5 text-xxs font-mono hover:bg-loss/15 transition-colors select-none rounded-none",
           level.bidQty ? "text-profit" : "text-transparent")}
         title={`SELL ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.bidQty ? `Sell ${qty} at ${fmtPrice(level.price)}: ${level.bidQty} bids` : `Place sell at ${fmtPrice(level.price)}`}>
         {!!level.bidQty && <div className="absolute right-0 inset-y-0 bg-profit/15" style={{ width: barW(level.bidQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.bidQty)}</span>
-      </button>
+      </Button>
 
       <div className={cn("w-24 shrink-0 flex items-center justify-center gap-1 text-xxs font-mono font-semibold tabular-nums",
         isCenter ? "text-warning" : "text-text-primary")}>
@@ -104,14 +104,14 @@ function LevelRow({ level, isCenter, order, maxQty, qty, onBid, onAsk, onCancel 
         )}
       </div>
 
-      <button onClick={() => onAsk(level.price)}
-        className={cn("relative flex items-center h-full flex-1 px-1.5 text-xxs font-mono hover:bg-profit/15 transition-colors select-none",
+      <Button variant="ghost" onClick={() => onAsk(level.price)}
+        className={cn("relative flex items-center h-full flex-1 px-1.5 text-xxs font-mono hover:bg-profit/15 transition-colors select-none rounded-none",
           level.askQty ? "text-loss" : "text-transparent")}
         title={`BUY ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.askQty ? `Buy ${qty} at ${fmtPrice(level.price)}: ${level.askQty} asks` : `Place buy at ${fmtPrice(level.price)}`}>
         {!!level.askQty && <div className="absolute left-0 inset-y-0 bg-loss/15" style={{ width: barW(level.askQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.askQty)}</span>
-      </button>
+      </Button>
     </div>
   );
 }
@@ -188,11 +188,11 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
           <span className="text-xxs text-text-muted uppercase tracking-wide">Tick</span>
           <div className="flex gap-0.5" role="group" aria-label="Tick size">
             {TICK_OPTIONS.map((t) => (
-              <button key={t} onClick={() => setTickSize(t)} aria-pressed={tickSize === t}
-                className={cn("px-1.5 py-0.5 text-xxs rounded border transition-colors",
+              <Button key={t} variant="ghost" onClick={() => setTickSize(t)} aria-pressed={tickSize === t}
+                className={cn("px-1.5 py-0.5 h-auto text-xxs rounded border transition-colors",
                   tickSize === t ? "bg-accent/15 text-accent border-accent/30" : "text-text-muted border-border-default hover:bg-surface-hover")}>
                 {t}
-              </button>
+              </Button>
             ))}
           </div>
         </div>

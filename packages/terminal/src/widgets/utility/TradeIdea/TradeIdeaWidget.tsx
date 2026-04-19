@@ -101,14 +101,14 @@ function IdeaCard({ idea, onStatus, onDelete }: {
         <span className="text-xxs text-text-muted">{idea.timeframe}</span>
         <div className="flex-1" />
         <span className={cn("text-xxs capitalize px-1.5 py-0.5 rounded border border-border-subtle", STATUS_COLOUR[idea.status])}>{idea.status}</span>
-        <button onClick={() => setOpen((e) => !e)} className="p-0.5 rounded text-text-muted hover:text-text-primary"
+        <Button variant="ghost" size="icon" onClick={() => setOpen((e) => !e)} className="h-auto w-auto p-0.5 rounded text-text-muted hover:text-text-primary"
           aria-label={open ? "Collapse" : "Expand"}>
           {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </button>
-        <button onClick={() => onDelete(idea.id)} className="p-0.5 rounded text-text-muted hover:text-loss"
+        </Button>
+        <Button variant="ghost" size="icon" onClick={() => onDelete(idea.id)} className="h-auto w-auto p-0.5 rounded text-text-muted hover:text-loss"
           aria-label={`Delete idea for ${idea.symbol}`}>
           <X size={12} />
-        </button>
+        </Button>
       </div>
       <div className="flex gap-3 px-2.5 pb-2 text-xxs font-mono">
         <span className="text-text-muted">Entry <span className="text-text-primary">{idea.entryZone || "—"}</span></span>
@@ -129,10 +129,10 @@ function IdeaCard({ idea, onStatus, onDelete }: {
           )}
           <div className="flex gap-1 flex-wrap" role="group" aria-label="Change status">
             {ALL_STATUSES.filter((s) => s !== idea.status).map((s) => (
-              <button key={s} onClick={() => onStatus(idea.id, s)}
-                className="px-2 py-0.5 text-xxs border border-border-default rounded hover:bg-surface-hover text-text-muted capitalize transition-colors">
+              <Button key={s} variant="outline" onClick={() => onStatus(idea.id, s)}
+                className="px-2 py-0.5 h-auto text-xxs border border-border-default rounded hover:bg-surface-hover text-text-muted capitalize transition-colors">
                 Mark {s}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -177,7 +177,7 @@ function AddForm({ onAdd, onCancel }: { onAdd: (idea: TradeIdea) => void; onCanc
         <Input id="ti-symbol" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())}
           placeholder="NIFTY" className="flex-1 h-7 text-xs font-mono bg-surface-hover border-border-default text-text-primary" aria-label="Symbol" />
         <div className="flex gap-1" role="group" aria-label="Direction">
-          {DIRECTIONS.map((d) => <button key={d} type="button" onClick={() => setDir(d)} className={pillCls(dir === d)}>{d}</button>)}
+          {DIRECTIONS.map((d) => <Button key={d} type="button" variant="ghost" onClick={() => setDir(d)} className={pillCls(dir === d)}>{d}</Button>)}
         </div>
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -186,7 +186,7 @@ function AddForm({ onAdd, onCancel }: { onAdd: (idea: TradeIdea) => void; onCanc
         <Input value={tgt} onChange={(e) => setTgt(e.target.value)} placeholder="Target" className="h-7 text-xs font-mono bg-surface-hover border-border-default text-text-primary" aria-label="Target" />
       </div>
       <div className="flex gap-1" role="group" aria-label="Timeframe">
-        {TIMEFRAMES.map((t) => <button key={t} type="button" onClick={() => setTf(t)} className={pillCls(tf === t)}>{t}</button>)}
+        {TIMEFRAMES.map((t) => <Button key={t} type="button" variant="ghost" onClick={() => setTf(t)} className={pillCls(tf === t)}>{t}</Button>)}
       </div>
       <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes…" rows={2}
         className="text-xs bg-surface-hover border-border-default text-text-primary resize-none"
@@ -254,11 +254,11 @@ function TradeIdeaWidget() {
       <div className="flex-none flex items-center gap-px px-2.5 py-1.5 border-b border-border-subtle overflow-x-auto"
         role="tablist" aria-label="Filter by status">
         {(["all", ...ALL_STATUSES] as const).map((s) => (
-          <button key={s} role="tab" aria-selected={filter === s} onClick={() => setFilter(s)}
-            className={cn("px-2 py-0.5 text-xxs font-medium rounded capitalize transition-colors whitespace-nowrap",
+          <Button key={s} variant="ghost" role="tab" aria-selected={filter === s} onClick={() => setFilter(s)}
+            className={cn("px-2 py-0.5 h-auto text-xxs font-medium rounded capitalize transition-colors whitespace-nowrap",
               filter === s ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-primary hover:bg-surface-hover")}>
             {s === "all" ? `All (${ideas.length})` : `${s} (${ideas.filter((i) => i.status === s).length})`}
-          </button>
+          </Button>
         ))}
       </div>
 

@@ -6,61 +6,36 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { TaxSummarySchema, TaxReportSchema } from "@/lib/schemas/ftApi";
+import type { TaxSummary, TaxReport } from "@/lib/schemas/ftApi";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-export interface TaxSummary {
-  fy: string;
-  equity_ltcg: number;
-  equity_stcg: number;
-  intraday_pnl: number;
-  fno_pnl: number;
-  commodity_pnl: number;
-  stt_paid: number;
-  turnover: number;
-  tax_liability_estimated: number;
-  ltcg_exemption_used: number;
-  needs_audit: boolean;
-  trade_count: number;
-}
-
-export interface TaxSegmentTrade {
-  date: string;
-  symbol: string;
-  exchange: string;
-  action: string;
-  quantity: number;
-  price: number;
-  buy_price: number;
-  pnl: number;
-  holding_period_days: number;
-}
-
-export interface TaxSegment {
-  trade_count: number;
-  pnl: number;
-  trades: TaxSegmentTrade[];
-}
-
-export interface TaxReport {
-  summary: TaxSummary;
-  segments: Record<string, TaxSegment>;
-}
+// Re-export inferred types for consumers that previously imported from this file.
+export type { TaxSummary, TaxReport };
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 
 async function fetchTaxSummary(fy: string): Promise<TaxSummary> {
   const res = await fetch(`/ft-api/v1/tax/summary?fy=${encodeURIComponent(fy)}`);
   if (!res.ok) throw new Error(`Tax summary request failed: ${res.status}`);
-  const json = (await res.json()) as { status: string; data: TaxSummary };
-  return json.data;
+  const raw: unknown = await res.json();
+  const result = TaxSummarySchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[useTaxReport] /tax/summary shape mismatch:", result.error.issues);
+    throw new Error("Tax summary response did not match expected shape");
+  }
+  return result.data.data;
 }
 
 async function fetchTaxReport(fy: string): Promise<TaxReport> {
   const res = await fetch(`/ft-api/v1/tax/report?fy=${encodeURIComponent(fy)}`);
   if (!res.ok) throw new Error(`Tax report request failed: ${res.status}`);
-  const json = (await res.json()) as { status: string; data: TaxReport };
-  return json.data;
+  const raw: unknown = await res.json();
+  const result = TaxReportSchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[useTaxReport] /tax/report shape mismatch:", result.error.issues);
+    throw new Error("Tax report response did not match expected shape");
+  }
+  return result.data.data;
 }
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────

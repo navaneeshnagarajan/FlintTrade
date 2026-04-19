@@ -189,30 +189,31 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
     <div className="relative flex items-center">
       <div className="flex items-center gap-1 h-8 bg-surface-card border border-border-default rounded-md px-2 py-1 w-52 focus-within:border-accent transition-colors">
         <Search size={12} className="text-text-muted shrink-0" />
-        <input
+        <Input
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setOpen(true)}
           placeholder="Search symbol..."
-          className="bg-transparent text-sm text-text-primary placeholder-text-muted outline-none w-full font-sans"
+          className="bg-transparent text-sm text-text-primary placeholder-text-muted border-0 shadow-none p-0 h-auto w-full font-sans focus-visible:ring-0"
           spellCheck={false}
         />
         {loading && <span className="text-text-muted text-xs shrink-0 animate-pulse">...</span>}
         {query && !loading && (
-          <button onClick={clear} className="text-text-muted hover:text-text-primary transition-colors">
+          <Button variant="ghost" size="icon" onClick={clear} className="h-auto w-auto p-0 text-text-muted hover:text-text-primary transition-colors">
             <X size={11} />
-          </button>
+          </Button>
         )}
       </div>
       {open && results.length > 0 && (
         <div ref={dropRef} className="absolute top-full left-0 mt-1 z-50 w-72 bg-surface-card border border-border-default rounded shadow-2xl overflow-hidden">
           {results.map((item, idx) => (
-            <button
+            <Button
               key={`${item.symbol}-${item.exchange}-${idx}`}
+              variant="ghost"
               onClick={() => pick(item)}
-              className={`w-full flex items-center justify-between px-3 py-2 text-left transition-colors ${idx === activeIdx ? "bg-border-default text-text-primary" : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`}
+              className={`w-full flex items-center justify-between px-3 py-2 h-auto text-left transition-colors rounded-none ${idx === activeIdx ? "bg-border-default text-text-primary" : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`}
             >
               <span className="flex flex-col gap-0.5">
                 <span className="text-xs font-mono font-semibold text-text-primary">{item.symbol}</span>
@@ -222,7 +223,7 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
                 <span className="text-xs font-mono text-accent">{item.exchange}</span>
                 {item.instrument_type && <span className="text-xxs text-text-muted uppercase">{item.instrument_type}</span>}
               </span>
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -236,13 +237,14 @@ function IntervalPills({ intervals, active, onSelect }: IntervalPillsProps) {
   return (
     <div className="flex items-center gap-0.5">
       {intervals.map((iv) => (
-        <button
+        <Button
           key={iv.value}
+          variant="ghost"
           onClick={() => onSelect(iv.value)}
-          className={`px-2 py-1 text-xs font-mono rounded transition-colors ${active === iv.value ? "bg-accent/15 text-accent border border-accent/40" : "text-text-muted hover:text-text-primary hover:bg-surface-hover"}`}
+          className={`px-2 py-1 h-auto text-xs font-mono rounded transition-colors ${active === iv.value ? "bg-accent/15 text-accent border border-accent/40" : "text-text-muted hover:text-text-primary hover:bg-surface-hover"}`}
         >
           {iv.label}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -256,7 +258,7 @@ function TextInputOverlay({ onConfirm, onCancel }: TextInputOverlayProps) {
   useEffect(() => { ref.current?.focus(); }, []);
   return (
     <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface-card border border-border-default rounded px-3 py-2 shadow-2xl">
-      <input
+      <Input
         ref={ref}
         value={val}
         onChange={(e) => setVal(e.target.value)}
@@ -265,10 +267,10 @@ function TextInputOverlay({ onConfirm, onCancel }: TextInputOverlayProps) {
           if (e.key === "Escape") onCancel();
         }}
         placeholder="Enter annotation text..."
-        className="bg-transparent text-xs font-mono text-text-primary outline-none w-48 placeholder-text-muted"
+        className="bg-transparent text-xs font-mono text-text-primary border-0 shadow-none p-0 h-auto w-48 placeholder-text-muted focus-visible:ring-0"
       />
-      <button onClick={() => val.trim() && onConfirm(val.trim())} className="text-xs bg-accent text-white px-2 py-0.5 rounded">Place</button>
-      <button onClick={onCancel} className="text-xs text-text-muted hover:text-loss px-1"><X size={11} /></button>
+      <Button onClick={() => val.trim() && onConfirm(val.trim())} size="sm" className="text-xs bg-accent text-white px-2 py-0.5 h-auto rounded">Place</Button>
+      <Button variant="ghost" size="icon" onClick={onCancel} className="h-auto w-auto text-xs text-text-muted hover:text-loss px-1"><X size={11} /></Button>
     </div>
   );
 }
@@ -704,21 +706,24 @@ function ChartWidget() {
         </DropdownMenu>
 
         {/* Indicator settings modal trigger */}
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => setIndicatorModalOpen(true)}
           title="Indicator settings"
           className="flex items-center justify-center w-6 h-6 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
           aria-label="Open indicator settings"
         >
           <Settings2 size={12} />
-        </button>
+        </Button>
 
         {/* Task A: Replay toggle */}
-        <button
+        <Button
+          variant="ghost"
           onClick={isReplaying ? exitReplay : enterReplay}
           title={isReplaying ? "Exit replay mode" : "Enter replay mode"}
           disabled={barsRef.current.length === 0}
-          className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+          className={`flex items-center gap-1 px-2 py-1 h-auto rounded text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             isReplaying
               ? "bg-accent/15 text-accent border border-accent/40"
               : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
@@ -726,20 +731,20 @@ function ChartWidget() {
         >
           <History size={11} />
           <span>Replay</span>
-        </button>
+        </Button>
 
         <div className="w-px h-4 bg-border-default mx-0.5" />
 
         {/* Drawing count + undo/clear in the header */}
         {drawingCount > 0 && (
           <>
-            <button onClick={undoLastDrawing} title="Undo last drawing" className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
+            <Button variant="ghost" onClick={undoLastDrawing} title="Undo last drawing" className="flex items-center gap-1 px-2 py-1 h-auto rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
               <X size={10} /><span>Undo</span>
-            </button>
+            </Button>
             {drawingCount > 1 && (
-              <button onClick={clearAllDrawings} title="Clear all drawings" className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
+              <Button variant="ghost" onClick={clearAllDrawings} title="Clear all drawings" className="flex items-center gap-1 px-2 py-1 h-auto rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
                 <Trash2 size={10} /><span>Clear</span>
-              </button>
+              </Button>
             )}
             <span className="text-xxs text-text-muted">{drawingCount} drawing{drawingCount !== 1 ? "s" : ""}</span>
           </>

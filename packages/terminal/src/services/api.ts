@@ -15,6 +15,14 @@ import type {
   OHLCVBar,
   OptionChainData,
   PlaceOrderParams,
+  ModifyOrderParams,
+  OrderStatusParams,
+  OpenPositionParams,
+  BasketOrderParams,
+  SplitOrderParams,
+  OptionsOrderParams,
+  OptionsMultiOrderParams,
+  OptionGreeksParams,
   Greeks,
   GexEntry,
   IVSmileEntry,
@@ -207,13 +215,20 @@ export const cancelAllOrders = (strategy = "Flint") =>
   postOrder<void>("cancel-all", { strategy });
 export const closePosition = (strategy = "Flint") =>
   postOrder<void>("close-position", { strategy });
-export const modifyOrder = (params: object) => post<{ orderId: string }>("modifyorder", params);
-export const orderStatus = (params: object) => post<{ status: string }>("orderstatus", params);
-export const openPosition = (params: object) => postOrder<{ orderId: string }>("openposition", params);
-export const basketOrder = (params: object) => postOrder<{ orderId: string }>("basketorder", params);
-export const optionsOrder = (params: object) => postOrder<{ orderId: string }>("optionsorder", params);
-export const optionsMultiOrder = (params: object) => postOrder<{ orderId: string }>("optionsmultiorder", params);
-export const splitOrder = (params: object) => postOrder<{ orderId: string }>("splitorder", params);
+export const modifyOrder = (params: ModifyOrderParams) =>
+  post<{ orderId: string }>("modifyorder", params);
+export const orderStatus = (params: OrderStatusParams) =>
+  post<{ status: string }>("orderstatus", params);
+export const openPosition = (params: OpenPositionParams) =>
+  postOrder<{ orderId: string }>("openposition", params);
+export const basketOrder = (params: BasketOrderParams) =>
+  postOrder<{ orderId: string }>("basketorder", params);
+export const optionsOrder = (params: OptionsOrderParams) =>
+  postOrder<{ orderId: string }>("optionsorder", params);
+export const optionsMultiOrder = (params: OptionsMultiOrderParams) =>
+  postOrder<{ orderId: string }>("optionsmultiorder", params);
+export const splitOrder = (params: SplitOrderParams) =>
+  postOrder<{ orderId: string }>("splitorder", params);
 
 // --- Data ---
 
@@ -374,7 +389,7 @@ export const getChartPreferences = () => get<object>("chart");
 export const updateChartPreferences = (prefs: object) => post<object>("chart", prefs);
 
 // --- Analytics ---
-export const getOptionGreeks = (params: object) => post<Greeks>("optiongreeks", params);
+export const getOptionGreeks = (params: OptionGreeksParams) => post<Greeks>("optiongreeks", params);
 export const getAnalyzerStatus = () => post<{ enabled: boolean }>("analyzer", {});
 export const toggleAnalyzer = (enable: boolean) => post<{ enabled: boolean }>("analyzer/toggle", { enable });
 export const getPnlSymbols = () => post<Array<{ symbol: string; exchange: string }>>("pnl/symbols", {});

@@ -1,4 +1,5 @@
 /**
+import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
  * MTMMonitorWidget.test.tsx
  *
  * Tests for the MTM Monitor widget — displays real-time P&L chart with

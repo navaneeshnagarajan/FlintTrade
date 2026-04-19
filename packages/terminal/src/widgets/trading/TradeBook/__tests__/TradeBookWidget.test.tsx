@@ -64,19 +64,19 @@ describe("TradeBookWidget", () => {
 
   it("renders without crashing", () => {
     mockUseTradebook.mockReturnValue(queryResult({ data: [] }));
-    const { container } = render(<TradeBookWidget {...({} as any)} />);
+    const { container } = render(<TradeBookWidget {...makeDockviewPanelProps()} />);
     expect(container).toBeTruthy();
   });
 
   it("shows 'No trades today' when data is empty", () => {
     mockUseTradebook.mockReturnValue(queryResult({ data: [] }));
-    render(<TradeBookWidget {...({} as any)} />);
+    render(<TradeBookWidget {...makeDockviewPanelProps()} />);
     expect(screen.getByText("No trades today")).toBeInTheDocument();
   });
 
   it("displays trade rows with symbol and side badges", () => {
     mockUseTradebook.mockReturnValue(queryResult({ data: SAMPLE_TRADES }));
-    render(<TradeBookWidget {...({} as any)} />);
+    render(<TradeBookWidget {...makeDockviewPanelProps()} />);
 
     // Symbols should appear (uppercase)
     expect(screen.getByText("NIFTY24APR23000CE")).toBeInTheDocument();
@@ -90,14 +90,14 @@ describe("TradeBookWidget", () => {
 
   it("shows total trade count in the header", () => {
     mockUseTradebook.mockReturnValue(queryResult({ data: SAMPLE_TRADES }));
-    render(<TradeBookWidget {...({} as any)} />);
+    render(<TradeBookWidget {...makeDockviewPanelProps()} />);
 
     expect(screen.getByText("(3)")).toBeInTheDocument();
   });
 
   it("filters trades by BUY/SELL pills", () => {
     mockUseTradebook.mockReturnValue(queryResult({ data: SAMPLE_TRADES }));
-    render(<TradeBookWidget {...({} as any)} />);
+    render(<TradeBookWidget {...makeDockviewPanelProps()} />);
 
     // Click "Sell" filter pill
     const sellPill = screen.getByText(/^Sell/);

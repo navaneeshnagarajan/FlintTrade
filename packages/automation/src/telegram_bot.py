@@ -52,8 +52,8 @@ class BotConfig:
                 chat_id = chat_id or ws.get("notifications.telegram_chat_id", "")
                 if not enabled:
                     enabled = "true" if ws.get("notifications.telegram_enabled", False) else "false"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception("suppressed: %s", exc)
 
         return cls(
             token=token,
@@ -382,8 +382,8 @@ class TelegramBot:
             try:
                 funds = self._run_async(self.router.client.funds())
                 lines.append(f"\n*Funds:* ₹{funds.available_balance} available")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception("suppressed: %s", exc)
 
         elif self._handlers.get("get_positions"):
             # Legacy callback mode

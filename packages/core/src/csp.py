@@ -20,11 +20,22 @@ removal should happen in a later hardening pass.
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
 logger = logging.getLogger("flinttrade.csp")
+
+
+def generate_nonce() -> str:
+    """Generate a fresh 128-bit random nonce for a single response.
+
+    Attach to ``flask.g`` at request start so templates / inline script
+    attributes can read it, and :func:`apply_security_headers` will
+    weave it into the ``Content-Security-Policy`` header.
+    """
+    return secrets.token_urlsafe(16)
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +48,15 @@ logger = logging.getLogger("flinttrade.csp")
 #: The policy is serialised by :func:`_format_csp`.
 CSP_POLICY: dict[str, list[str]] = {
     "default-src": ["'self'"],
-    # TODO: remove 'unsafe-inline' once Vite build uses nonce-based CSP
-    "script-src": ["'self'", "'unsafe-inline'"],
+    # Scripts: self + strict-dynamic; nonces are injected per-response via
+    # `apply_security_headers` so dynamically-inserted scripts carry a valid
+    # nonce. 'unsafe-inline' is intentionally omitted from script-src —
+    # removing it was the point of this hardening. 'strict-dynamic' allows
+    # nonce-approved scripts to load further scripts without re-nonce.
+    "script-src": ["'self'", "'strict-dynamic'"],
+    # Styles still allow inline: Tailwind utility classes compile to static
+    # CSS but a small number of runtime style props (framer-motion, Radix)
+    # emit inline <style> elements. Migrating those is tracked separately.
     "style-src": ["'self'", "'unsafe-inline'"],
     "img-src": ["'self'", "data:", "https:"],
     # Allow WebSocket connections from the local OpenAlgo instance
@@ -115,8 +133,15 @@ def apply_security_headers(response: Response) -> Response:
     Returns:
         The same response object with headers added.
     """
+    # Build a per-response policy that splices in the nonce (if any) so
+    # inline <script nonce="..."> elements are permitted. We do not store
+    # the mutation back into ``CSP_POLICY``.
+    _policy = {k: list(v) for k, v in CSP_POLICY.items()}
+    nonce = getattr(g, "csp_nonce", None) if g else None
+    if nonce:
+        _policy["script-src"] = _policy.get("script-src", []) + [f"'nonce-{nonce}'"]
     response.headers.setdefault(
-        "Content-Security-Policy", _format_csp(CSP_POLICY)
+        "Content-Security-Policy", _format_csp(_policy)
     )
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")

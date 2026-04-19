@@ -18,6 +18,8 @@ import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { LayoutGrid, Columns2, Rows2, Square } from "lucide-react";
 import { isMarketHours } from "@/lib/market";
 import { searchSymbol, getHistory, getIntervals } from "@/services/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Search, X } from "lucide-react";
 import { useChartInit } from "./useChartInit";
 import { useChartReplay } from "./useChartReplay";
@@ -149,22 +151,22 @@ function CellSymbolSearch({ onSelect }: CellSymbolSearchProps) {
     <div className="relative flex items-center">
       <div className="flex items-center gap-1 h-6 bg-surface-card border border-border-default rounded px-1.5 w-36 focus-within:border-accent transition-colors">
         <Search size={10} className="text-text-muted shrink-0" />
-        <input
+        <Input
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => results.length > 0 && setOpen(true)}
           placeholder="Search…"
-          className="bg-transparent text-xs text-text-primary placeholder-text-muted outline-none w-full font-sans"
+          className="bg-transparent text-xs text-text-primary placeholder-text-muted outline-none w-full font-sans border-0 shadow-none p-0 h-auto focus-visible:ring-0"
           spellCheck={false}
           aria-label="Search symbol for this chart cell"
         />
         {loading && <span className="text-text-muted text-xxs shrink-0 animate-pulse">…</span>}
         {query && !loading && (
-          <button onClick={() => { setQuery(""); setOpen(false); setResults([]); }} className="text-text-muted hover:text-text-primary transition-colors" aria-label="Clear search">
+          <Button variant="ghost" size="icon" onClick={() => { setQuery(""); setOpen(false); setResults([]); }} className="h-auto w-auto p-0 text-text-muted hover:text-text-primary transition-colors" aria-label="Clear search">
             <X size={9} />
-          </button>
+          </Button>
         )}
       </div>
       {open && results.length > 0 && (
@@ -173,10 +175,11 @@ function CellSymbolSearch({ onSelect }: CellSymbolSearchProps) {
           className="absolute top-full left-0 mt-0.5 z-50 w-56 bg-surface-card border border-border-default rounded shadow-2xl overflow-hidden"
         >
           {results.map((item, idx) => (
-            <button
+            <Button
               key={`${item.symbol}-${item.exchange}-${idx}`}
+              variant="ghost"
               onClick={() => pick(item)}
-              className={`w-full flex items-center justify-between px-2 py-1.5 text-left transition-colors ${
+              className={`w-full flex items-center justify-between px-2 py-1.5 h-auto text-left transition-colors rounded-none ${
                 idx === activeIdx
                   ? "bg-border-default text-text-primary"
                   : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
@@ -187,7 +190,7 @@ function CellSymbolSearch({ onSelect }: CellSymbolSearchProps) {
                 {item.name && <span className="text-xxs text-text-muted truncate max-w-32">{item.name}</span>}
               </span>
               <span className="text-xxs font-mono text-accent">{item.exchange}</span>
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -209,17 +212,18 @@ function CellIntervalPills({ intervals, active, onSelect }: CellIntervalPillsPro
   return (
     <div className="flex items-center gap-0.5">
       {intervals.slice(0, 6).map((iv) => (
-        <button
+        <Button
           key={iv.value}
+          variant="ghost"
           onClick={() => onSelect(iv.value)}
-          className={`px-1.5 py-0.5 text-xxs font-mono rounded transition-colors ${
+          className={`px-1.5 py-0.5 h-auto text-xxs font-mono rounded transition-colors ${
             active === iv.value
               ? "bg-accent/15 text-accent border border-accent/40"
               : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
           }`}
         >
           {iv.label}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -420,10 +424,11 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
 
       {/* Replay toggle button */}
       <div className="flex items-center px-2 py-0.5 bg-surface-base border-t border-border-default shrink-0">
-        <button
+        <Button
+          variant="ghost"
           onClick={isReplaying ? exitReplay : enterReplay}
           disabled={barsRef.current.length === 0}
-          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xxs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+          className={`flex items-center gap-1 px-1.5 py-0.5 h-auto rounded text-xxs transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             isReplaying
               ? "bg-accent/15 text-accent border border-accent/40"
               : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -431,7 +436,7 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
           title={isReplaying ? "Exit replay" : "Replay mode"}
         >
           <span>{isReplaying ? "Exit Replay" : "Replay"}</span>
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -503,12 +508,13 @@ function ChartGrid() {
         {/* Layout buttons */}
         <div className="flex items-center gap-0.5" role="group" aria-label="Grid layout">
           {LAYOUT_OPTIONS.map((opt) => (
-            <button
+            <Button
               key={opt.id}
+              variant="ghost"
               onClick={() => setLayout(opt.id)}
               aria-pressed={layout === opt.id}
               title={opt.title}
-              className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+              className={`flex items-center gap-1 px-2 py-1 h-auto text-xs rounded transition-colors ${
                 layout === opt.id
                   ? "bg-accent/15 text-accent border border-accent/40"
                   : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
@@ -516,7 +522,7 @@ function ChartGrid() {
             >
               <LayoutIcon id={opt.id} />
               <span className="font-mono">{opt.label}</span>
-            </button>
+            </Button>
           ))}
         </div>
 

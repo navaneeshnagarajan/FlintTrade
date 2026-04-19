@@ -476,7 +476,8 @@ class TradedMemory:
 
             try:
                 results = collection.get(ids=memory_ids)
-            except Exception:
+            except Exception as exc:
+                logger.exception("suppressed: %s", exc)
                 continue
 
             retrieved_ids: list[str] = results.get("ids", [])

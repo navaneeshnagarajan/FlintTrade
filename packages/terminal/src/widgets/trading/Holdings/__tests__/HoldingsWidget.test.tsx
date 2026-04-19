@@ -57,19 +57,19 @@ describe("HoldingsWidget", () => {
 
   it("renders without crashing", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
-    const { container } = render(<HoldingsWidget {...({} as any)} />);
+    const { container } = render(<HoldingsWidget {...makeDockviewPanelProps()} />);
     expect(container).toBeTruthy();
   });
 
   it("shows 'No holdings' when data is empty", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
-    render(<HoldingsWidget {...({} as any)} />);
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
     expect(screen.getByText("No holdings")).toBeInTheDocument();
   });
 
   it("displays holding rows with symbol, qty, and P&L", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
-    render(<HoldingsWidget {...({} as any)} />);
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
 
     // Symbols should be displayed
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe("HoldingsWidget", () => {
 
   it("shows the holdings count in the header", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
-    render(<HoldingsWidget {...({} as any)} />);
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
 
     expect(screen.getByText("(2)")).toBeInTheDocument();
   });
@@ -95,14 +95,14 @@ describe("HoldingsWidget", () => {
         error: new Error("Network error"),
       }),
     );
-    render(<HoldingsWidget {...({} as any)} />);
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
 
     expect(screen.getByText(/failed to load holdings/i)).toBeInTheDocument();
   });
 
   it("filters holdings by symbol search", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
-    render(<HoldingsWidget {...({} as any)} />);
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
 
     const searchInput = screen.getByPlaceholderText(/filter symbol/i);
     fireEvent.change(searchInput, { target: { value: "REL" } });

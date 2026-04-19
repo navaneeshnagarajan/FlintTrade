@@ -7,11 +7,14 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { StockScanResponseSchema } from "@/lib/schemas/ftApi";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+// StockFundamentals is inferred from the schema — keep local interface for
+// backward-compat with existing consumers of this hook.
 export interface StockFundamentals {
   symbol: string;
   name: string;
@@ -31,15 +34,6 @@ export interface StockScanParams {
   max_pe?: number;
   sort_by?: string;
   limit?: number;
-}
-
-interface StockScanResponse {
-  status: string;
-  data: {
-    stocks: StockFundamentals[];
-    sectors: string[];
-    count: number;
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -73,12 +67,20 @@ async function fetchStockScan(
     throw new Error(`Stock scan failed: HTTP ${resp.status}`);
   }
 
-  const json = (await resp.json()) as StockScanResponse;
-  if (json.status === "error") {
+  const raw: unknown = await resp.json();
+  const result = StockScanResponseSchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[useStockScan] /stocks/scan shape mismatch:", result.error.issues);
+    throw new Error("Stock scan response did not match expected shape");
+  }
+  if (result.data.status === "error") {
     throw new Error("Stock scan returned an error");
   }
 
-  return { stocks: json.data.stocks, sectors: json.data.sectors };
+  return {
+    stocks: result.data.data.stocks as StockFundamentals[],
+    sectors: result.data.data.sectors,
+  };
 }
 
 // ---------------------------------------------------------------------------

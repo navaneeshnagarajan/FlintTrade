@@ -17,6 +17,7 @@ import {
   useCallback,
   useRef,
 } from "react";
+import { DocsSearchResponseSchema } from "@/lib/schemas/ftApi";
 import {
   Book,
   FileText,
@@ -70,8 +71,13 @@ export async function searchDocs(
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) return [];
-    const data = (await res.json()) as DocsSearchResponse;
-    return data.results ?? [];
+    const raw: unknown = await res.json();
+    const result = DocsSearchResponseSchema.safeParse(raw);
+    if (!result.success) {
+      console.error("[DocsSearch] /docs/search shape mismatch:", result.error.issues);
+      return [];
+    }
+    return result.data.results as DocSearchResult[];
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return [];
     return [];

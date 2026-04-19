@@ -173,6 +173,112 @@ export interface SmartOrderParams extends PlaceOrderParams {
   positionSize: number;
 }
 
+// --- Order modification / status / position control ---
+
+export interface ModifyOrderParams {
+  orderId: string;
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  orderType: "MARKET" | "LIMIT" | "SL" | "SL-M";
+  product: "MIS" | "CNC" | "NRML";
+  price?: number;
+  triggerPrice?: number;
+  strategy?: string;
+}
+
+export interface OrderStatusParams {
+  orderId: string;
+  strategy?: string;
+}
+
+export interface OpenPositionParams {
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  product: "MIS" | "CNC" | "NRML";
+  strategy?: string;
+}
+
+// --- Basket / multi-leg / split / options orders ---
+
+export interface BasketOrderLeg {
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  orderType: "MARKET" | "LIMIT" | "SL" | "SL-M";
+  product: "MIS" | "CNC" | "NRML";
+  price?: number;
+  triggerPrice?: number;
+}
+
+export interface BasketOrderParams {
+  strategy?: string;
+  orders: BasketOrderLeg[];
+}
+
+export interface SplitOrderParams {
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  totalQuantity: number;
+  chunkSize: number;
+  orderType: "MARKET" | "LIMIT" | "SL" | "SL-M";
+  product: "MIS" | "CNC" | "NRML";
+  price?: number;
+  triggerPrice?: number;
+  delaySeconds?: number;
+  strategy?: string;
+}
+
+export interface OptionsOrderParams {
+  underlying: string;
+  exchange: string;
+  expiry: string;
+  strike: number;
+  optionType: "CE" | "PE";
+  action: "BUY" | "SELL";
+  quantity: number;
+  orderType: "MARKET" | "LIMIT" | "SL" | "SL-M";
+  product: "MIS" | "CNC" | "NRML";
+  price?: number;
+  triggerPrice?: number;
+  strategy?: string;
+}
+
+export interface OptionsMultiOrderLeg {
+  expiry: string;
+  strike: number;
+  optionType: "CE" | "PE";
+  action: "BUY" | "SELL";
+  quantity: number;
+  orderType: "MARKET" | "LIMIT" | "SL" | "SL-M";
+  product: "MIS" | "CNC" | "NRML";
+  price?: number;
+  triggerPrice?: number;
+}
+
+export interface OptionsMultiOrderParams {
+  underlying: string;
+  exchange: string;
+  legs: OptionsMultiOrderLeg[];
+  strategy?: string;
+}
+
+// --- Greeks query ---
+
+export interface OptionGreeksParams {
+  symbol: string;
+  exchange: string;
+  /** Optional — derivable from symbol in most cases. */
+  expiry?: string;
+  strike?: number;
+  optionType?: "CE" | "PE";
+}
+
 // --- GEX (Gamma Exposure) ---
 export interface GexEntry {
   strike: number;

@@ -15,6 +15,7 @@
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
 import { safeParse, sseTokenSchema, wsMessageSchema } from "@/lib/safeParse";
+import { AdvisorStatusResponseSchema, AdvisorResponseSchema } from "@/lib/schemas/ftApi";
 import { Send, Bot, User, Loader2, Settings, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -49,16 +50,17 @@ export interface ChatMessage {
   toolStatus?: "pending" | "approved" | "rejected";
 }
 
-interface AdvisorResponse {
+// AdvisorResponse and AdvisorStatusResponse are validated via ftApi schemas;
+// keep local type aliases for the inferred shapes used below.
+type AdvisorResponse = {
   status: "success" | "error";
   data?: { response: string };
   message?: string;
-}
-
-interface AdvisorStatusResponse {
+};
+type AdvisorStatusResponse = {
   status: "success" | "error";
   data?: { configured: boolean; provider: string; model: string };
-}
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,7 +134,13 @@ async function fetchAdvisorStatus(): Promise<void> {
     const base = getAdvisorBase();
     const resp = await fetch(`${base}/api/v1/advisor/status`);
     if (!resp.ok) return;
-    const json = (await resp.json()) as AdvisorStatusResponse;
+    const raw: unknown = await resp.json();
+    const result = AdvisorStatusResponseSchema.safeParse(raw);
+    if (!result.success) {
+      console.error("[AIAdvisorWidget] /advisor/status shape mismatch:", result.error.issues);
+      return;
+    }
+    const json = result.data as AdvisorStatusResponse;
     if (json.status === "success" && json.data) {
       useSettingsStore.getState().setLLM({
         provider: json.data.provider,
@@ -230,7 +238,13 @@ async function postAdvisorMessage(
     throw new Error(`Advisor API: HTTP ${resp.status}`);
   }
 
-  const json = (await resp.json()) as AdvisorResponse;
+  const raw: unknown = await resp.json();
+  const result = AdvisorResponseSchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[AIAdvisorWidget] /advisor response shape mismatch:", result.error.issues);
+    return "Unexpected response format from advisor.";
+  }
+  const json = result.data as AdvisorResponse;
 
   if (json.status === "error") {
     return json.message ?? "Unknown error from advisor.";

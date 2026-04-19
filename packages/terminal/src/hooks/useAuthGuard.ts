@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
+import { AuthStatusSchema } from "@/lib/schemas/ftApi";
 
 export function useAuthGuard(): { isAuthenticated: boolean; isLoading: boolean } {
   const navigate = useNavigate();
@@ -22,8 +23,13 @@ export function useAuthGuard(): { isAuthenticated: boolean; isLoading: boolean }
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
         })
-        .then((data) => {
-          if (!data.data?.is_setup) {
+        .then((raw: unknown) => {
+          const result = AuthStatusSchema.safeParse(raw);
+          if (!result.success) {
+            console.error("[AuthGuard] Unexpected /auth/status shape:", result.error.issues);
+          }
+          const data = result.success ? result.data : undefined;
+          if (!data?.data?.is_setup) {
             useAuthStore.getState().setSetupRequired();
           } else {
             useAuthStore.getState().setLoggedOut();
