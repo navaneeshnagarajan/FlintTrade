@@ -10,12 +10,28 @@ Usage:
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# UTF-8 stdout/stderr reconfigure — must happen BEFORE any import that may
+# emit to the console (structlog, Flask, etc.).  On Windows the default
+# console encoding is cp1252, which crashes when log records contain emojis
+# or ANSI colour codes.  We flip stdout/stderr to UTF-8 early; if the
+# attribute is not available (Python <3.7 / non-stream stdout) we fall back
+# silently so this never breaks startup.
+# ---------------------------------------------------------------------------
+import sys
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 import asyncio
 import logging
 import os
 import secrets
 import signal
-import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -107,6 +123,210 @@ def _read_version() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Master password — cached module-level so all call-sites share a single
+# value within a process.  File-backed so it survives restarts.
+# ---------------------------------------------------------------------------
+
+_MASTER_PASSWORD: str | None = None
+
+
+def _get_master_password() -> str:
+    """Get or generate the credential-store master password.
+
+    Priority (mirrors ``_get_jwt_secret`` in auth_routes.py):
+      1. ``MASTER_PASSWORD`` environment variable.
+      2. Persisted secret at ``~/.flinttrade/master_password``.
+      3. Generate a fresh ``secrets.token_urlsafe(64)`` and persist it.
+
+    If the file cannot be written (read-only filesystem, permission error)
+    we still return the generated value so the current session can continue.
+    Subsequent calls within the same process return the cached value.
+    """
+    global _MASTER_PASSWORD
+    if _MASTER_PASSWORD:
+        return _MASTER_PASSWORD
+
+    # 1. Environment variable override
+    env_password = os.environ.get("MASTER_PASSWORD", "")
+    if env_password:
+        _MASTER_PASSWORD = env_password
+        return _MASTER_PASSWORD
+
+    # 2. Read from persisted file
+    password_file = Path.home() / ".flinttrade" / "master_password"
+    try:
+        if password_file.exists():
+            stored = password_file.read_text().strip()
+            if stored:
+                _MASTER_PASSWORD = stored
+                return _MASTER_PASSWORD
+    except OSError:
+        pass
+
+    # 3. Generate a new password and persist it (best-effort)
+    new_password = secrets.token_urlsafe(64)
+    try:
+        password_file.parent.mkdir(parents=True, exist_ok=True)
+        password_file.write_text(new_password)
+        password_file.chmod(0o600)
+        logger.info(
+            "Generated new credential-store master password at %s", password_file
+        )
+    except OSError as exc:
+        logger.warning(
+            "Could not persist MASTER_PASSWORD to %s: %s — using ephemeral value "
+            "(credentials saved this session will not be decryptable after restart)",
+            password_file,
+            exc,
+        )
+
+    _MASTER_PASSWORD = new_password
+    return _MASTER_PASSWORD
+
+
+# ---------------------------------------------------------------------------
+# workspace.json reader — OpenAlgo overrides from user config
+# ---------------------------------------------------------------------------
+
+
+def _read_openalgo_from_workspace() -> dict[str, Any]:
+    """Read OpenAlgo overrides from ``~/.flinttrade/workspace.json``.
+
+    Returns a dict with any of ``api_key``, ``host``, ``ws_port`` keys that
+    are present and non-empty.  Returns an empty dict if the file is
+    missing, unreadable, or doesn't contain an ``openalgo`` section.
+
+    workspace.json wins over .env because it's user-edited through the UI
+    (Setup wizard, Settings page) while .env is the dev-machine fallback.
+    """
+    import json  # noqa: PLC0415
+
+    try:
+        from .workspace import Workspace  # noqa: PLC0415
+        ws = Workspace()
+        path = ws.config_path
+    except Exception:
+        # Fallback: direct ~/.flinttrade/workspace.json path
+        path = Path.home() / ".flinttrade" / "workspace.json"
+
+    if not path.exists():
+        return {}
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Could not read workspace.json at %s: %s", path, exc)
+        return {}
+
+    openalgo = data.get("openalgo") or {}
+    if not isinstance(openalgo, dict):
+        return {}
+
+    result: dict[str, Any] = {}
+    for key in ("api_key", "host", "ws_port"):
+        val = openalgo.get(key)
+        if val:
+            result[key] = val
+    return result
+
+
+def _apply_workspace_openalgo_overrides() -> None:
+    """Apply workspace.json OpenAlgo overrides to process environment.
+
+    Called once during ``create_flask_app()`` — writes values into
+    ``os.environ`` so that subsequent ``Settings.from_env()`` calls pick
+    them up.  workspace.json takes precedence over .env.
+    """
+    overrides = _read_openalgo_from_workspace()
+    if not overrides:
+        return
+
+    if "api_key" in overrides:
+        os.environ["OPENALGO_API_KEY"] = str(overrides["api_key"])
+    if "host" in overrides:
+        os.environ["OPENALGO_HOST"] = str(overrides["host"])
+    if "ws_port" in overrides:
+        os.environ["OPENALGO_WS_PORT"] = str(overrides["ws_port"])
+
+    logger.info(
+        "Applied OpenAlgo overrides from workspace.json (%s)",
+        ", ".join(sorted(overrides.keys())),
+    )
+
+
+# ---------------------------------------------------------------------------
+# DuckDB stale .wal cleanup — remove orphan write-ahead-log files on boot
+# ---------------------------------------------------------------------------
+
+
+def _cleanup_stale_duckdb_wals() -> None:
+    """Remove ``*.wal`` lock files whose ``.db`` is not actively locked.
+
+    When the backend crashes ungracefully DuckDB's write-ahead-log files
+    can linger and block the next startup with ``IOException: The process
+    cannot access the file because it is being used by another process``.
+
+    For every ``*.wal`` in ``~/.flinttrade/`` we probe the sibling ``.db``
+    by opening it read-only.  If that succeeds the lock is stale and we
+    delete the ``.wal``; if it fails another process holds the lock and
+    we leave it alone.
+    """
+    flinttrade_dir = Path.home() / ".flinttrade"
+    if not flinttrade_dir.exists():
+        return
+
+    try:
+        wal_files = list(flinttrade_dir.glob("*.wal"))
+    except OSError:
+        return
+
+    if not wal_files:
+        return
+
+    try:
+        import duckdb  # noqa: PLC0415
+    except ImportError:
+        # DuckDB not installed — nothing to validate against
+        return
+
+    cleaned = 0
+    for wal in wal_files:
+        db_file = wal.with_suffix("")  # strip .wal → leaves .db / .duckdb etc.
+        # If the .wal pairs with a file that doesn't exist, just clear it.
+        if not db_file.exists():
+            try:
+                wal.unlink()
+                cleaned += 1
+            except OSError:
+                pass
+            continue
+
+        # Probe: can we open the DB read-only?  If yes → no live process
+        # holds the write lock → the .wal is stale.
+        try:
+            conn = duckdb.connect(str(db_file), read_only=True)
+            conn.close()
+        except Exception as exc:
+            # Another process holds the lock, or the DB is corrupt — skip.
+            logger.warning(
+                "Skipping stale-WAL cleanup for %s (DB appears locked or broken): %s",
+                db_file.name,
+                exc,
+            )
+            continue
+
+        try:
+            wal.unlink()
+            cleaned += 1
+        except OSError as exc:
+            logger.warning("Could not delete stale WAL %s: %s", wal, exc)
+
+    if cleaned:
+        logger.info("Cleaned %d stale DuckDB write-ahead-log file(s)", cleaned)
+
+
+# ---------------------------------------------------------------------------
 # Flask API server — FlintTrade-specific endpoints (port 5100)
 # ---------------------------------------------------------------------------
 
@@ -138,7 +358,53 @@ def create_flask_app(
     Returns:
         Flask application with all FlintTrade API endpoints registered.
     """
-    app = Flask(__name__)
+    # ------------------------------------------------------------------
+    # Pre-init hygiene:
+    #   * Clear stale DuckDB .wal files from a previous crashed process.
+    #   * Apply workspace.json overrides for OpenAlgo (host/api_key/ws_port)
+    #     so Settings.from_env() reads the fresh UI-written values.
+    # Both are best-effort — failures here must never prevent startup.
+    # ------------------------------------------------------------------
+    try:
+        _cleanup_stale_duckdb_wals()
+    except Exception as exc:
+        logger.warning("DuckDB WAL cleanup failed: %s", exc)
+
+    try:
+        _apply_workspace_openalgo_overrides()
+    except Exception as exc:
+        logger.warning("workspace.json override failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Static frontend — serve the built React bundle from
+    # packages/terminal/dist/ with SPA fallback for client-side routes.
+    # If the build output is missing we fall back to API-only mode and
+    # log a clear warning.
+    # ------------------------------------------------------------------
+    _dist_path = Path(_REPO_ROOT) / "packages" / "terminal" / "dist"
+    _dist_index = _dist_path / "index.html"
+    _frontend_available = _dist_index.exists()
+
+    if _frontend_available:
+        # Point Flask's built-in static_folder at the React build.  We use
+        # a dedicated static_url_path (``/_static_flask``) so Flask's
+        # default catch-all route does not pre-empt the SPA fallback
+        # registered later — we serve all of the root-level dist files
+        # (assets/, favicon.svg, index.html) through our fallback so
+        # the NotFound → index.html redirect can work cleanly.
+        app = Flask(
+            __name__,
+            static_folder=str(_dist_path),
+            static_url_path="/_static_flask",
+        )
+    else:
+        app = Flask(__name__)
+        logger.warning(
+            "Frontend not built — run `npm run build` in packages/terminal. "
+            "Backend will serve API only."
+        )
+    app.config["_FRONTEND_AVAILABLE"] = _frontend_available
+    app.config["_DIST_PATH"] = _dist_path
 
     # ------------------------------------------------------------------
     # Structured logging — structlog with JSON output in production,
@@ -187,6 +453,28 @@ def create_flask_app(
         setattr(_bridge_handler, _sentinel_attr, True)
         _root_logger.addHandler(_bridge_handler)
         _root_logger.setLevel(logging.INFO)
+
+    # ------------------------------------------------------------------
+    # Production-mode path rewrite (WSGI-level, runs before URL dispatch).
+    # In dev, Vite strips the `/ft-api` prefix before requests reach us
+    # (see packages/terminal/vite.config.ts server.proxy). When the
+    # backend serves the built frontend directly, no such proxy exists,
+    # so the backend receives the full `/ft-api/v1/...` path while all
+    # blueprints are registered under `/v1/...` or `/api/v1/...`.
+    # A before_request handler runs AFTER Flask's URL match, so we wrap
+    # wsgi_app instead to mutate the environ before routing.
+    # ------------------------------------------------------------------
+    _inner_wsgi = app.wsgi_app
+
+    def _ft_api_prefix_stripper(environ: dict, start_response: Any) -> Any:
+        raw_path = environ.get("PATH_INFO", "") or ""
+        if raw_path.startswith("/ft-api/"):
+            environ["PATH_INFO"] = raw_path[len("/ft-api"):]
+        elif raw_path == "/ft-api":
+            environ["PATH_INFO"] = "/"
+        return _inner_wsgi(environ, start_response)
+
+    app.wsgi_app = _ft_api_prefix_stripper  # type: ignore[assignment]
 
     # ------------------------------------------------------------------
     # CORS — allow requests from the Vite dev server and any origins
@@ -260,19 +548,7 @@ def create_flask_app(
     if credential_store is None:
         flinttrade_dir = Path.home() / ".flinttrade"
         flinttrade_dir.mkdir(exist_ok=True)
-        master_password = os.environ.get("MASTER_PASSWORD", "")
-        if not master_password:
-            if os.environ.get("FLINTTRADE_DEV") or app.debug or "pytest" in sys.modules:
-                master_password = secrets.token_urlsafe(32)
-                logger.warning(
-                    "MASTER_PASSWORD not set — generated random password for this session. "
-                    "Set MASTER_PASSWORD env var for persistent credential storage across restarts."
-                )
-            else:
-                raise ValueError(
-                    "MASTER_PASSWORD environment variable must be set. "
-                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
-                )
+        master_password = _get_master_password()
         credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
 
     if contract_manager is None:
@@ -416,11 +692,18 @@ def create_flask_app(
     def _log_unhandled_exception(exc: Exception) -> Any:
         """Persist every unhandled exception to the structured error log.
 
-        The error is logged first (preserving the active exception context
-        so traceback.format_exc() captures a full stack trace), then
-        re-raised as a plain HTTP 500 JSON response to avoid leaking
-        internal tracebacks to clients.
+        Werkzeug ``HTTPException`` instances (404, 405, 415, …) are not
+        real errors — they represent deliberately returned HTTP status
+        codes and must be passed straight through with their own payload,
+        otherwise a simple 404 bubbles up as a misleading 500.  Real
+        exceptions are logged and converted to a plain HTTP 500 JSON
+        response so we never leak internal tracebacks to clients.
         """
+        from werkzeug.exceptions import HTTPException  # noqa: PLC0415
+
+        if isinstance(exc, HTTPException):
+            return exc  # Flask will render the HTTPException normally.
+
         try:
             _error_log.log(
                 route=request.path,
@@ -701,6 +984,7 @@ def create_flask_app(
         "/v1/auth/callback",
         "/api/v1/errors",     # Frontend error reporting — public, rate-limited
         "/api/v1/ping",       # Liveness probe — no auth required
+        "/ft-api/v1/config/openalgo",  # Setup wizard — public, localhost-only
     )
 
     @app.before_request
@@ -756,10 +1040,11 @@ def create_flask_app(
         Only specific public paths are exempted:
         - Health check and admin introspect (dev-gated)
         - OAuth callback (browser redirect, no API key in URL)
+        - Static files and SPA HTML fallback (React bundle)
         All other /v1/ endpoints require the same API key auth.
         """
-        # Allow health check without auth
-        if request.endpoint in ("monitoring.health", "static"):
+        # Allow health check, static files, and SPA fallback without auth
+        if request.endpoint in ("monitoring.health", "static", "_spa_fallback"):
             return None
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
@@ -905,6 +1190,145 @@ def create_flask_app(
     except Exception:
         logger.debug("MCP bridge not available — skipping handler registration")
 
+    # ------------------------------------------------------------------
+    # Config persistence endpoint — /ft-api/v1/config/openalgo
+    # Accepts {api_key, host, ws_port} from the Setup wizard, persists
+    # them to workspace.json, and hot-reloads app.config["CLIENT"] so no
+    # process restart is needed.
+    # ------------------------------------------------------------------
+    @app.route("/ft-api/v1/config/openalgo", methods=["POST"])
+    @limiter.limit("10 per minute")
+    def _set_openalgo_config() -> Any:
+        """Persist OpenAlgo connection settings from the UI.
+
+        Security: only accept requests from loopback (127.0.0.1) since the
+        payload includes the OpenAlgo API key. The default require_auth
+        layer still applies unless the caller is already authenticated —
+        however the Setup wizard runs *before* the user has an API key,
+        so we also permit requests that originate from localhost without
+        an API-key header.
+
+        Request JSON: ``{"api_key": "...", "host": "...", "ws_port": 8765}``
+        """
+        remote = request.remote_addr or ""
+        if remote not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify({
+                "status": "error",
+                "message": "This endpoint is only reachable from localhost",
+            }), 403
+
+        payload = request.get_json(silent=True) or {}
+        api_key = str(payload.get("api_key", "")).strip()
+        host = str(payload.get("host", "")).strip()
+        ws_port = payload.get("ws_port")
+
+        if not api_key and not host and ws_port is None:
+            return jsonify({
+                "status": "error",
+                "message": "At least one of api_key, host, ws_port is required",
+            }), 400
+
+        # Persist to workspace.json
+        try:
+            from .workspace import Workspace  # noqa: PLC0415
+            ws = Workspace()
+            if not ws.config_path.exists():
+                ws.initialize()
+            if api_key:
+                ws.set("openalgo.api_key", api_key)
+            if host:
+                ws.set("openalgo.host", host)
+            if ws_port is not None:
+                ws.set("openalgo.ws_port", int(ws_port))
+        except Exception as exc:
+            logger.error("Failed to persist OpenAlgo config to workspace.json: %s", exc)
+            return jsonify({
+                "status": "error",
+                "message": f"Could not persist config: {exc}",
+            }), 500
+
+        # Re-apply overrides into process env so any code reading .env picks
+        # up the new values immediately.
+        try:
+            _apply_workspace_openalgo_overrides()
+        except Exception:
+            pass
+
+        # Hot-reload OpenAlgoClient so subsequent backend→OpenAlgo calls
+        # use the fresh credentials without requiring a restart.
+        try:
+            new_settings = Settings.from_env()
+            new_client = OpenAlgoClient(new_settings)
+            old_client = app.config.get("CLIENT")
+            app.config["CLIENT"] = new_client
+            # Best-effort close of the previous client's HTTP pool.
+            if old_client is not None:
+                try:
+                    loop = asyncio.new_event_loop()
+                    try:
+                        loop.run_until_complete(old_client.close())
+                    finally:
+                        loop.close()
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning(
+                "OpenAlgo config saved but client reinitialisation failed: %s", exc
+            )
+            return jsonify({
+                "status": "partial",
+                "message": f"Config saved but client not reloaded: {exc}",
+            }), 200
+
+        return jsonify({
+            "status": "ok",
+            "message": "OpenAlgo config saved and client reloaded",
+        }), 200
+
+    # ------------------------------------------------------------------
+    # SPA fallback — registered LAST so it only matches unclaimed routes.
+    # Returns 404 for API paths (so unknown /api/ or /v1/ endpoints still
+    # look like 404s to clients) and serves the React bundle for every
+    # other path.  Matches at most one path segment so deep React-router
+    # paths like `/trade/scalper` all fall through to index.html.
+    # ------------------------------------------------------------------
+    if _frontend_available:
+        from flask import send_from_directory  # noqa: PLC0415
+
+        _API_PREFIXES = ("/api/", "/ft-api/", "/v1/")
+
+        @app.route("/", defaults={"path": ""}, endpoint="_spa_fallback")
+        @app.route("/<path:path>", endpoint="_spa_fallback")
+        def _spa_fallback(path: str) -> Any:
+            """Serve the React SPA for any non-API path."""
+            # API paths must never be intercepted — let Flask 404 them.
+            req_path = request.path
+            if any(req_path.startswith(p) for p in _API_PREFIXES):
+                return jsonify({
+                    "status": "error",
+                    "message": "Not found",
+                }), 404
+
+            # If the exact file exists under dist/, serve it (favicon, assets/*).
+            if path:
+                candidate = _dist_path / path
+                try:
+                    # Guard against path traversal: resolved path must be
+                    # inside _dist_path.
+                    resolved = candidate.resolve()
+                    if (
+                        resolved.is_file()
+                        and _dist_path.resolve() in resolved.parents
+                    ):
+                        return send_from_directory(
+                            str(_dist_path), path
+                        )
+                except Exception:
+                    pass
+
+            # Otherwise serve index.html (SPA client-side routing).
+            return send_from_directory(str(_dist_path), "index.html")
+
     return app
 
 
@@ -1004,19 +1428,7 @@ class FlintTradeApp:
         # Gateway — broker registry + credential store + contract manager
         flinttrade_dir = Path.home() / ".flinttrade"
         flinttrade_dir.mkdir(exist_ok=True)
-        master_password = os.environ.get("MASTER_PASSWORD", "")
-        if not master_password:
-            if os.environ.get("FLINTTRADE_DEV") or "pytest" in sys.modules:
-                master_password = secrets.token_urlsafe(32)
-                logger.warning(
-                    "MASTER_PASSWORD not set — generated random password for this session. "
-                    "Set MASTER_PASSWORD env var for persistent credential storage across restarts."
-                )
-            else:
-                raise ValueError(
-                    "MASTER_PASSWORD environment variable must be set. "
-                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
-                )
+        master_password = _get_master_password()
         self.credential_store = CredentialStore(
             flinttrade_dir / "credentials.db", master_password
         )
@@ -1155,6 +1567,37 @@ class FlintTradeApp:
 if __name__ == "__main__":
     FlintTradeApp().run()
 
-# Module-level app instance for gunicorn/WSGI servers.
-# Usage: gunicorn 'packages.core.src.app:app'
-app = create_flask_app()
+
+# ---------------------------------------------------------------------------
+# Module-level ``app`` for gunicorn / WSGI servers.
+#   Usage: ``gunicorn 'packages.core.src.app:app'``
+#
+# The Flask app is created LAZILY the first time ``app`` is imported from
+# this module.  We avoid eagerly building it at module import because
+# running ``python -m packages.core.src.app`` would create one instance
+# here and another inside ``FlintTradeApp.start()``, printing every
+# startup log line twice and tripping the CPython "RuntimeWarning: ...
+# found in sys.modules after import of package ..." warning.
+#
+# Python 3.7+ supports module-level ``__getattr__`` (PEP 562) which gives
+# us lazy attribute access with no change to the consumer API — WSGI
+# servers do ``from packages.core.src.app import app`` and still get a
+# real Flask instance on first use.
+# ---------------------------------------------------------------------------
+
+_APP_CACHE: Flask | None = None
+
+
+def _get_wsgi_app() -> Flask:
+    """Lazily construct (and cache) the WSGI Flask app."""
+    global _APP_CACHE
+    if _APP_CACHE is None:
+        _APP_CACHE = create_flask_app()
+    return _APP_CACHE
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562 module __getattr__ — produce ``app`` on first access only."""
+    if name == "app":
+        return _get_wsgi_app()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

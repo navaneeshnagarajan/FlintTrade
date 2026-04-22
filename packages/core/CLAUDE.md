@@ -32,6 +32,10 @@
 - `Workspace` class resolves paths cross-platform (Linux/macOS/Windows)
 - `FlintTradeConfig` combines Settings (from .env) + Workspace (from workspace.json)
 - Packages read config through FlintTradeConfig, never os.environ for paths
+- `~/.flinttrade/jwt_secret` is auto-generated on first startup (JWT signing key)
+- `~/.flinttrade/master_password` is auto-generated on first startup (credential-store key)
+- workspace.json `openalgo.api_key` / `openalgo.host` / `openalgo.ws_port` override `.env` at boot
+- `POST /ft-api/v1/config/openalgo` persists UI-written OpenAlgo settings and hot-reloads `app.config["CLIENT"]`
 
 ## Sandbox/Analyzer mode
 - OpenAlgo has built-in Analyzer mode (sandbox): /api/v1/analyzer/toggle and /api/v1/analyzer/status

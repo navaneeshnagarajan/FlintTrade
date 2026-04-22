@@ -128,7 +128,7 @@ Each route lazy-loads its own module. No cross-route code in the initial bundle.
 | Broker Gateway | OpenAlgo (git submodule at `infra/openalgo`) |
 | Real-time | WebSocket port 8765 (LTP/Quote/Depth modes) |
 | Config | `.env` (4 vars) + in-app Settings (`workspace.json`) |
-| Deployment | systemd (Ubuntu), local dev (Nitro/Mac) |
+| Deployment | systemd (Ubuntu), local dev (Windows / macOS) |
 
 ## State Architecture
 
@@ -181,7 +181,7 @@ Two-tier config. No exceptions.
 | `data` | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
 | `historical` | OHLCV downloader, free data (OpenChart/yfinance), DuckDB pipeline, expiry manager |
 | `screener` | Option chain, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, IV |
-| `backtest-engine` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 101 strategies |
+| `backtest-engine` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 96 strategy templates |
 | `ai` | LLM client (multi-provider), RAG (ChromaDB), signals, sentiment, MCP bridge, advisor |
 | `integration` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
 | `automation` | Cron manager, Telegram bot with kill switch, OpenClaw bridge, post-market analysis |
@@ -225,7 +225,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 - **CI:** 5 parallel jobs (python-tests, node-core-tests, node-widget-tests-1, node-widget-tests-2, secrets-check)
 - **Terminal:** 83 widgets (TSX) + 7 tools + 13 routes + 13 workspace presets in Dockview v5.1 shell
 - **AI Skills:** 30 markdown files covering trading, analysis, execution, compliance, options, psychology domains
-- **Strategies:** 29 backtest templates + 4 MTM straddle + Wheel + 101 engine strategies
+- **Strategies:** 96 backtest templates in `backtest-engine/` (across 16 categories) + 2 live-engine strategies in `engine/src/strategies/` (`ema_crossover`, `wheel_live`)
 - **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor, Crawl4AI client
 - **Analytics:** Options payoff engine, regime detector, correlation matrix, portfolio optimiser, order analytics, strategy comparator, multi-phase simulation
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement
@@ -254,6 +254,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 - Storage paths configurable via workspace.json, not hardcoded
 - `.env` has only 4 vars
 - Port: Terminal 5173 (single app, no other React ports)
+- Port: FlintTrade backend 5100 (locked — avoids OpenAlgo multi-instance range 5000-5009). Do not propose consolidating with OpenAlgo's port.
 - `.env.example` values ALL BLANK
 - No personal hostnames, IPs, or provider names in committed code
 - FlintTrade (capital T) in display text, `flinttrade` lowercase in paths/packages
@@ -366,7 +367,7 @@ Workflow: `READ → PLAN → APPROVE → BUILD → VERIFY → TEST → UPDATE �
 
 ## Machine Setup
 
-Every machine (Nitro, Mac, Ubuntu, or new contributor) can:
+Every machine (Windows, macOS, Ubuntu, or new contributor) can:
 - Run OpenAlgo locally for development and testing
 - Write, create, delete, refactor ANY code
 - Run all tests and build all packages

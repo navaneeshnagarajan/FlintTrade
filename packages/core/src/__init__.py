@@ -1,5 +1,9 @@
 """FlintTrade core package — config, client, models, exceptions."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 __version__ = "0.1.0-alpha"
 
 from .config import FlintTradeConfig, Settings
@@ -42,8 +46,21 @@ from .models import (
     Trade,
 )
 from .openalgo_client import OpenAlgoClient
-from .app import FlintTradeApp
 from .system_metrics import SystemMetrics, get_system_metrics
+
+# Lazy import for FlintTradeApp so that `python -m packages.core.src.app`
+# does not import .app through this __init__ before it has finished
+# executing (which triggered a "RuntimeWarning: ... found in sys.modules
+# after import of package ..." + duplicate initialisation log lines).
+if TYPE_CHECKING:
+    from .app import FlintTradeApp
+
+
+def __getattr__(name: str) -> Any:
+    if name == "FlintTradeApp":
+        from .app import FlintTradeApp as _FlintTradeApp  # noqa: PLC0415
+        return _FlintTradeApp
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     # App

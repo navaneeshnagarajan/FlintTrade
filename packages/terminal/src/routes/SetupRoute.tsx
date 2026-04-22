@@ -141,6 +141,21 @@ export default function SetupRoute() {
         apiKey: w.connection.apiKey,
         wsUrl,
       });
+
+      // Persist to backend so server-side calls (scheduler, RAG, admin)
+      // use the same key without requiring an .env edit + restart.
+      // Fire-and-forget — UI flow must not block on network.
+      void fetch("/ft-api/v1/config/openalgo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: w.connection.apiKey,
+          host: w.connection.host,
+          ws_port: w.connection.wsPort,
+        }),
+      }).catch((err) => {
+        console.warn("[setup] failed to persist connection to backend:", err);
+      });
     }
 
     useSettingsStore.getState().setPersona(persona);

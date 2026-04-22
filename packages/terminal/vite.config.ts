@@ -26,6 +26,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      // react-plotly.js imports "plotly.js/dist/plotly" but we only ship
+      // plotly.js-dist-min (smaller, same API). Redirect both specifiers so
+      // the bare import does not leak into the built bundle.
+      "plotly.js/dist/plotly": "plotly.js-dist-min",
+      "plotly.js": "plotly.js-dist-min",
     },
   },
   server: {

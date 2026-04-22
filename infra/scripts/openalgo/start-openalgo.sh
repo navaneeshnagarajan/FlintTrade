@@ -26,7 +26,24 @@ fi
 # Source OpenAlgo's own .env if present
 # OpenAlgo reads its own .env via Python dotenv — do not source in bash
 
+# Bootstrap OpenAlgo .env from .sample.env on first run
+if [ ! -f "$OPENALGO_DIR/.env" ] && [ -f "$OPENALGO_DIR/.sample.env" ]; then
+    echo "Bootstrapping OpenAlgo .env from .sample.env ..."
+    cp "$OPENALGO_DIR/.sample.env" "$OPENALGO_DIR/.env"
+fi
+
+# Auto-fix the REDIRECT_URL template placeholder that blocks startup on fresh installs.
+# OpenAlgo refuses to start with <broker> in REDIRECT_URL — replace with a safe sandbox default.
+if [ -f "$OPENALGO_DIR/.env" ] && grep -q '<broker>/callback' "$OPENALGO_DIR/.env"; then
+    echo "Replacing <broker> placeholder in OpenAlgo REDIRECT_URL with dhan_sandbox ..."
+    sed -i.bak 's|<broker>/callback|dhan_sandbox/callback|g' "$OPENALGO_DIR/.env" && rm -f "$OPENALGO_DIR/.env.bak"
+fi
+
 cd "$OPENALGO_DIR"
+
+# Force UTF-8 so OpenAlgo's banner/emoji prints don't crash on Windows cp1252.
+export PYTHONIOENCODING=utf-8
+export PYTHONUTF8=1
 
 echo "Starting OpenAlgo on port $OPENALGO_PORT..."
 

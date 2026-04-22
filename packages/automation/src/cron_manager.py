@@ -195,7 +195,16 @@ def make_eod_logout_job(
 
 
 async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
-    """Load market holidays from OpenAlgo API. Must be awaited."""
+    """Load market holidays from OpenAlgo API. Must be awaited.
+
+    OpenAlgo's /holidays endpoint can return an HTTP 200 with an empty body
+    before a broker has authenticated.  That would trigger a
+    ``json.JSONDecodeError`` inside the client's ``resp.json()`` call.  We
+    treat that case separately so the log stays quiet and does not look
+    like a real error.
+    """
+    import json as _json  # noqa: PLC0415
+
     try:
         data = await openalgo_client.holidays()
         holidays_list = data.get("holidays", []) if isinstance(data, dict) else []
@@ -203,6 +212,17 @@ async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
             result = set(holidays_list)
             logger.info("Loaded %d market holidays", len(result))
             return result
+    except (_json.JSONDecodeError, ValueError) as exc:
+        # Empty body from OpenAlgo means "no broker yet authenticated".
+        # Log once at INFO so it's traceable but not alarming.
+        msg = str(exc)
+        if "Expecting value" in msg or "line 1 column 1" in msg or not msg:
+            logger.info(
+                "Holidays endpoint returned no data (broker not yet "
+                "authenticated) — continuing with empty list"
+            )
+        else:
+            logger.warning("Failed to load holidays: %s", exc)
     except Exception as exc:
         logger.warning("Failed to load holidays: %s", exc)
     return set()
