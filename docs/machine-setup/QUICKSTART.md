@@ -1,6 +1,6 @@
 # Machine Setup Guide
 
-> Works for any machine: Nitro (Windows), Mac, Ubuntu, or new contributor.
+> Works on any Windows, macOS, or Ubuntu machine — including a new contributor's box.
 
 ## 1. Clone and Install
 

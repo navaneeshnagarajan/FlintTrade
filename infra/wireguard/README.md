@@ -4,7 +4,7 @@ WireGuard VPN tunnel configuration for secure dev-to-server communication.
 
 ## Purpose
 
-All development machines (Nitro, Mac) connect to the Ubuntu deployment server via a WireGuard tunnel. This directory holds the config templates and key management notes.
+Development machines connect to the Ubuntu deployment server via a WireGuard tunnel. This directory holds the config templates and key management notes.
 
 ## What goes here
 
@@ -12,11 +12,11 @@ All development machines (Nitro, Mac) connect to the Ubuntu deployment server vi
 - **Key generation** instructions (never commit actual private keys)
 - **Peer configs** for each development machine
 
-## Network
+## Network (example — set your own values in a private `.env`)
 
-- Server (Ubuntu): 10.10.10.1/24
-- Nitro (Windows): 10.10.10.2/24
-- Endpoint: kalamiq.ddns.net:51820
+- Server (Ubuntu): `<VPN_SERVER_IP>/24`
+- Client (dev): `<VPN_CLIENT_IP>/24`
+- Endpoint: `<YOUR_DDNS_HOSTNAME>:51820`
 
 ## References
 

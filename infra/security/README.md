@@ -4,7 +4,7 @@ Server hardening configurations for the Ubuntu deployment target.
 
 ## Purpose
 
-This directory holds production security configs that are applied on the Ubuntu server (10.10.10.1) to protect the FlintTrade + OpenAlgo stack.
+This directory holds production security configs that are applied on the Ubuntu deployment server to protect the FlintTrade + OpenAlgo stack.
 
 ## What goes here
 

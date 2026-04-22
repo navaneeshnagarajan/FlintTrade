@@ -1,7 +1,7 @@
 # FlintTrade Status Report
 
 **Generated:** 2026-04-19
-**Machine:** `NitroANV155253D` (MINGW64_NT-10.0-26200, x86_64 Msys)
+**Machine:** Windows 11 dev (MINGW64_NT-10.0-26200, x86_64 Msys)
 **Branch:** `docs/status-report-2026-04-17`
 **Commit at report time:** `93bbaa0059685c2739f54786c4b97f9cee8f3cb6` (tip of `main`)
 **VERSION file:** `0.5.0-dev`

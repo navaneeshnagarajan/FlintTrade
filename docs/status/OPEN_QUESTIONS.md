@@ -19,7 +19,7 @@ Last reviewed: _YYYY-MM-DD_
 ## Infrastructure Decisions Pending
 
 - [ ] R9700 purchase timing (before or after v1.0)
-- [ ] Fedora dual-boot on Nitro: yes/no
+- [ ] Fedora dual-boot on primary dev machine: yes/no
 - [ ] Fine-tuning base model: Gemma 4 26B vs Qwen3.5-35B
 
 ## Release Decisions Pending

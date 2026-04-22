@@ -451,7 +451,7 @@ Every component is verifiably open source:
 
 | Deployment | Min RAM | Min Disk | CPU |
 |-----------|---------|----------|-----|
-| Dev (Nitro/Mac) | 4GB | 2GB | 4 cores |
+| Dev (Windows / macOS) | 4GB | 2GB | 4 cores |
 | Production (minimal) | 2GB | 5GB | 2 cores |
 | Production (with monitoring) | 4GB | 10GB | 2 cores |
 | Raspberry Pi 4 | 4GB | 16GB SD | 4 cores (ARM) |
