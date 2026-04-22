@@ -16,10 +16,10 @@ npx vitest run -t "test name"                  # single test by name
 ```
 
 ## Architecture
-- Single React app serving 3 personas via 13 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /ditto, /admin, 404
+- Single React app serving 3 personas via 17 route files (12 public addressable paths + DEV-only `/admin` + 404): /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /ditto, /home
 - Dockview v5 for widget-composable workspace on /trade (drag, resize, tabs, serialize)
-- 30 widgets (all TSX) + 7 tools: canvas overlays (P&L Dashboard, Market Intelligence, Trade Journal) + full-page tools (Backtest Lab, Flow Builder, Strategy Builder)
-- 6 workspace presets: Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View
+- 82 widgets (all TSX, under `src/widgets/{analysis,trading,utility}/`) + 7 tools: canvas overlays (P&L Dashboard, Market Intelligence, Trade Journal) + full-page tools (Backtest Lab, Flow Builder, Strategy Builder)
+- 13 workspace presets (Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View, + 7 others — see `src/layout/workspacePresets.ts`)
 - UI libraries: shadcn/ui + Tremor (dashboards) + Magic UI (animations) + Aceternity UI (effects)
 - 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
 - Path alias: `@` → `src/`
@@ -41,7 +41,7 @@ Boundary rule: data enters through ONE path only, never duplicated across stores
 - `api.ts` uses empty base in dev (relative paths hit proxy), full host in production
 
 ## Key Files
-- `src/layout/widgetFactory.tsx` — widget registry (all 30 widgets + 7 tools)
+- `src/layout/widgetFactory.tsx` — widget registry (all 82 widgets + 7 tools)
 - `src/services/api.ts` — OpenAlgo REST client with rate limiting
 - `src/services/websocket.ts` — WebSocket client (authenticate → subscribe → parse nested data)
 - `src/stores/connectionStore.ts` — host/apiKey/wsUrl (reads env vars on init)
