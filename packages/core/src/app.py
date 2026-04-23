@@ -407,52 +407,70 @@ def create_flask_app(
     app.config["_DIST_PATH"] = _dist_path
 
     # ------------------------------------------------------------------
-    # Structured logging — structlog with JSON output in production,
-    # coloured console output in debug/dev mode.
+    # Structured logging — ONE pipeline for both structlog calls and
+    # stdlib logging calls.  Dual-emit bug (same event logged twice,
+    # once pretty + once JSON) was caused by PrintLoggerFactory writing
+    # to stdout *and* a bridge handler on root *also* writing to stdout.
+    # Fix: route structlog through stdlib (LoggerFactory), then format
+    # at the stdlib handler using ProcessorFormatter.  One event → one
+    # line.
+    #
+    # Also disable click's ANSI colouring so Werkzeug's request log
+    # doesn't embed escape codes in the log file.  Must be set BEFORE
+    # werkzeug's first import triggers click initialisation.
     # ------------------------------------------------------------------
+    os.environ.setdefault("ANSI_COLORS_DISABLED", "1")
+    os.environ.setdefault("NO_COLOR", "1")
+
+    _render_processor = (
+        structlog.dev.ConsoleRenderer(colors=False)
+        if app.debug
+        else structlog.processors.JSONRenderer()
+    )
+
+    # Shared pre-chain applied to every event from either source.
+    _shared_processors = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.set_exc_info,
+    ]
+
     structlog.configure(
         processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.StackInfoRenderer(),
-            structlog.dev.set_exc_info,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer()
-            if not app.debug
-            else structlog.dev.ConsoleRenderer(),
+            *_shared_processors,
+            # Hand off to stdlib's ProcessorFormatter for the final render.
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
-    # ------------------------------------------------------------------
-    # Bridge stdlib logging through structlog so that ALL 250+ modules
-    # using logging.getLogger() emit structured output via the same
-    # pipeline as structlog calls.  We attach a ProcessorFormatter to
-    # the root logger exactly once (guarded by a sentinel attribute on
-    # the handler to prevent duplicate handlers across test reruns or
-    # multiple create_flask_app() calls in the same process).
-    # ------------------------------------------------------------------
     _sentinel_attr = "_flinttrade_structlog_bridge"
     _root_logger = logging.getLogger()
-    if not any(getattr(h, _sentinel_attr, False) for h in _root_logger.handlers):
-        _bridge_formatter = structlog.stdlib.ProcessorFormatter(
-            processors=[
-                structlog.stdlib.add_log_level,
-                structlog.stdlib.add_logger_name,
-                structlog.processors.TimeStamper(fmt="iso"),
-                structlog.processors.JSONRenderer()
-                if not app.debug
-                else structlog.dev.ConsoleRenderer(),
-            ],
-        )
-        _bridge_handler = logging.StreamHandler()
-        _bridge_handler.setFormatter(_bridge_formatter)
-        setattr(_bridge_handler, _sentinel_attr, True)
-        _root_logger.addHandler(_bridge_handler)
-        _root_logger.setLevel(logging.INFO)
+    # Kill any pre-existing handler (e.g. from an earlier basicConfig call
+    # or a previous create_flask_app() invocation) so we can't double-emit.
+    for _h in list(_root_logger.handlers):
+        _root_logger.removeHandler(_h)
+
+    _formatter = structlog.stdlib.ProcessorFormatter(
+        processors=[
+            # Drop the raw LogRecord and _from_structlog meta keys before
+            # rendering, otherwise JSON output leaks the absolute install
+            # path (C:\Users\...\app.py, line numbers) into every event.
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            _render_processor,
+        ],
+        foreign_pre_chain=_shared_processors,
+    )
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_formatter)
+    setattr(_handler, _sentinel_attr, True)
+    _root_logger.addHandler(_handler)
+    _root_logger.setLevel(logging.INFO)
 
     # ------------------------------------------------------------------
     # Production-mode path rewrite (WSGI-level, runs before URL dispatch).
@@ -1335,20 +1353,44 @@ def create_flask_app(
 def _run_flask_server(app: Flask, port: int = 5100) -> None:
     """Run the Flask API server in a daemon thread.
 
+    Uses Waitress — a pure-Python, cross-platform production WSGI server
+    (works identically on Windows, macOS, Linux).  Replaces Flask's
+    built-in Werkzeug dev server, which emits a loud "this is a
+    development server" warning and is not production-safe.
+
     Args:
         app: Flask application instance.
         port: Port to bind (default 5100).
     """
-    thread = threading.Thread(
-        target=lambda: app.run(
-            host="127.0.0.1",
-            port=port,
-            debug=False,
-            use_reloader=False,
-        ),
-        name="flinttrade-api",
-        daemon=True,
-    )
+    try:
+        from waitress import serve as _waitress_serve  # noqa: PLC0415
+    except ImportError:
+        # Graceful fallback if waitress isn't installed — still works
+        # for local dev, just prints the dev-server warning.
+        logger.warning(
+            "Waitress not installed; falling back to Werkzeug dev server. "
+            "Install with: pip install waitress"
+        )
+
+        def _run() -> None:
+            app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    else:
+        # Quiet Waitress's per-request access log — our structlog middleware
+        # already logs requests via the traffic logger at a structured level.
+        logging.getLogger("waitress").setLevel(logging.WARNING)
+
+        def _run() -> None:
+            # ident="FlintTrade" sets the Server: header instead of "waitress".
+            # threads=8 is enough for a single-user dev/desktop setup.
+            _waitress_serve(
+                app,
+                host="127.0.0.1",
+                port=port,
+                ident="FlintTrade",
+                threads=8,
+            )
+
+    thread = threading.Thread(target=_run, name="flinttrade-api", daemon=True)
     thread.start()
     logger.info("FlintTrade API server started on http://127.0.0.1:%d", port)
 
@@ -1496,19 +1538,53 @@ class FlintTradeApp:
         # Register built-in cron jobs
         self.cron.register_builtin_jobs()
 
-        # Verify OpenAlgo connectivity (non-fatal)
+        # Verify OpenAlgo connectivity (non-fatal). Distinguish three
+        # cases so the boot log is not misleading: REACHABLE_AUTHENTICATED,
+        # REACHABLE_AUTH_FAILED, UNREACHABLE.
         try:
-            result = await self.client.ping()
-            broker = result.get("data", {}).get("broker", "unknown") if isinstance(result, dict) else "unknown"
-            logger.info(
-                "FlintTrade v%s started — OpenAlgo: %s (broker: %s)",
-                self.version, self.settings.openalgo_host, broker,
-            )
+            import httpx  # noqa: PLC0415
+            from .exceptions import AuthError  # noqa: PLC0415
+
+            try:
+                result = await self.client.ping()
+                broker = (
+                    result.get("data", {}).get("broker", "unknown")
+                    if isinstance(result, dict)
+                    else "unknown"
+                )
+                logger.info(
+                    "FlintTrade v%s started — OpenAlgo %s REACHABLE, authenticated (broker: %s)",
+                    self.version, self.settings.openalgo_host, broker,
+                )
+            except AuthError as exc:
+                # Server responded but rejected the API key — reachable,
+                # auth failed.  Don't confuse users with "UNREACHABLE".
+                logger.warning(
+                    "FlintTrade v%s started — OpenAlgo %s REACHABLE but AUTH FAILED "
+                    "(status %d): %s. Configure the API key in /setup or ~/.flinttrade/workspace.json.",
+                    self.version,
+                    self.settings.openalgo_host,
+                    exc.status_code,
+                    exc.message,
+                )
+            except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
+                logger.warning(
+                    "FlintTrade v%s started — OpenAlgo %s UNREACHABLE (%s: %s). "
+                    "Start OpenAlgo on that host/port and FlintTrade will reconnect on next call.",
+                    self.version,
+                    self.settings.openalgo_host,
+                    type(exc).__name__,
+                    exc,
+                )
         except Exception as exc:
+            # Any other unexpected error — log full class + message so we
+            # don't pretend we know what happened.
             logger.warning(
-                "FlintTrade v%s started — OpenAlgo at %s is UNREACHABLE: %s. "
-                "Will retry when orders are placed.",
-                self.version, self.settings.openalgo_host, exc,
+                "FlintTrade v%s started — OpenAlgo %s verification failed (%s: %s).",
+                self.version,
+                self.settings.openalgo_host,
+                type(exc).__name__,
+                exc,
             )
 
         # Wait for shutdown signal
@@ -1539,12 +1615,10 @@ class FlintTradeApp:
 
     def run(self) -> None:
         """Run the application (blocking). Handles Ctrl+C gracefully."""
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-
+        # NOTE: stdlib logging is already configured by create_flask_app()
+        # with a structlog-backed formatter. Calling basicConfig() here
+        # would add a second root handler and re-introduce the dual-emit
+        # bug. Don't do it.
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 

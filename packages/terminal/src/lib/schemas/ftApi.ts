@@ -107,6 +107,8 @@ export const TaxReportSchema = z.object({
     .passthrough(),
 });
 export type TaxReport = z.infer<typeof TaxReportSchema>["data"];
+export type TaxSegment = z.infer<typeof TaxSegmentSchema>;
+export type TaxSegmentTrade = z.infer<typeof TaxSegmentTradeSchema>;
 
 // ---------------------------------------------------------------------------
 // GET /ft-api/v1/stocks/scan

@@ -42,11 +42,6 @@ interface SystemMetrics {
   collected_at: string;
 }
 
-interface SystemMetricsResponse {
-  status: string;
-  data: SystemMetrics;
-}
-
 // ---------------------------------------------------------------------------
 // Data fetching
 // ---------------------------------------------------------------------------

@@ -45,6 +45,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSkillStore } from "@/stores/skillStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useAuthStore } from "@/stores/authStore";
 import { motionConfig, EASE_ENTER, EASE_EXIT, DURATION } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { getAdvisorBase } from "@/services/advisorApi";
@@ -652,10 +653,17 @@ export function AITutorPill() {
     setCurrentRoute(location.pathname);
   }, [location.pathname, setCurrentRoute]);
 
-  // Sync LLM config from backend once on mount
+  // Sync LLM config from backend — only fire once the user is authenticated.
+  // Guards against the first-run noise where /welcome, /login, /setup, /explore
+  // (or the bare /) would otherwise hit an auth-protected endpoint and print a
+  // red 401 in the browser console. We listen to the auth store rather than
+  // pathname because the first render happens at "/" *before* the redirect,
+  // and any path-based gate misses that frame.
+  const authStatus = useAuthStore((s) => s.status);
   useEffect(() => {
+    if (authStatus !== "logged-in") return;
     void fetchAdvisorStatus();
-  }, []);
+  }, [authStatus]);
 
   const handleClose = useCallback(() => setIsOpen(false), []);
   const handleOpen = useCallback(() => setIsOpen(true), []);

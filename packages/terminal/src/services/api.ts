@@ -213,6 +213,8 @@ export const placeSmartOrder = (params: PlaceOrderParams & { position_size: numb
   postOrder<{ orderId: string }>("place-smart", params);
 export const cancelAllOrders = (strategy = "Flint") =>
   postOrder<void>("cancel-all", { strategy });
+export const cancelOrder = (orderId: string, strategy = "Flint") =>
+  postOrder<void>("cancelorder", { orderId, strategy });
 export const closePosition = (strategy = "Flint") =>
   postOrder<void>("close-position", { strategy });
 export const modifyOrder = (params: ModifyOrderParams) =>

@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useModeStore } from "@/stores/modeStore";
-import { placeOrder, modifyOrder } from "@/services/api";
+import { placeOrder, cancelOrder } from "@/services/api";
 
 // ---------------------------------------------------------------------------
 // Types & constants
@@ -156,7 +156,7 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
   const cancelPending = useCallback(async (orderId: string) => {
     setPendingOrders((p) => p.map((o) => o.orderId === orderId ? { ...o, status: "cancelling" } : o));
     try {
-      await modifyOrder({ orderId, action: "cancel", strategy: "orderladder" });
+      await cancelOrder(orderId, "orderladder");
       setPendingOrders((p) => p.filter((o) => o.orderId !== orderId));
       showMsg("Order cancelled");
     } catch (err) {

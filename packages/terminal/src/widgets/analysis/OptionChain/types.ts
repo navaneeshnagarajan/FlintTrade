@@ -33,8 +33,10 @@ export interface RawOptionRow {
   strike?: number;
   ltp?: number;
   last_price?: number;
+  change?: number;
   change_percent?: number;
   change_pct?: number;
+  volume?: number;
   oi?: number;
   open_interest?: number;
   oi_change?: number;

@@ -30,5 +30,10 @@ class RateLimitError(APIError):
 class AuthError(APIError):
     """Authentication failed (HTTP 401/403)."""
 
-    def __init__(self, endpoint: str, message: str = "Authentication failed") -> None:
-        super().__init__(401, message, endpoint)
+    def __init__(
+        self,
+        endpoint: str,
+        message: str = "Authentication failed",
+        status_code: int = 401,
+    ) -> None:
+        super().__init__(status_code, message, endpoint)

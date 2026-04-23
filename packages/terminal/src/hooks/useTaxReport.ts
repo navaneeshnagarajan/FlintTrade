@@ -7,10 +7,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { TaxSummarySchema, TaxReportSchema } from "@/lib/schemas/ftApi";
-import type { TaxSummary, TaxReport } from "@/lib/schemas/ftApi";
+import type { TaxSummary, TaxReport, TaxSegment, TaxSegmentTrade } from "@/lib/schemas/ftApi";
 
 // Re-export inferred types for consumers that previously imported from this file.
-export type { TaxSummary, TaxReport };
+export type { TaxSummary, TaxReport, TaxSegment, TaxSegmentTrade };
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
 

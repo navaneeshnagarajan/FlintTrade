@@ -146,7 +146,11 @@ class OpenAlgoClient:
                     raise RateLimitError(endpoint, retry_after)
                 if resp.status_code in (401, 403):
                     data = resp.json() if resp.content else {}
-                    raise AuthError(endpoint, data.get("message", "Authentication failed"))
+                    raise AuthError(
+                        endpoint,
+                        data.get("message", "Authentication failed"),
+                        status_code=resp.status_code,
+                    )
                 if resp.status_code >= 400:
                     data = resp.json() if resp.content else {}
                     raise APIError(resp.status_code, data.get("message", resp.text), endpoint)

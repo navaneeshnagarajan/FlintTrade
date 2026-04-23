@@ -584,10 +584,10 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
         exchange,
         action:        leg.side,
         quantity:      leg.lots * lotSize,
-        orderType:     "MARKET",
-        product:       "MIS",
-        price:         "0",
-        trigger_price: "0",
+        orderType:     "MARKET" as const,
+        product:       "MIS" as const,
+        price:         0,
+        trigger_price: 0,
         strategy:      "FlintLegBuilder",
       }));
 
