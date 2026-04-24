@@ -50,7 +50,7 @@
 ## Crypto screening
 - BTC/ETH options Greeks via Delta Exchange
 - Funding rate arbitrage detection (perpetuals vs futures)
-- Cross-exchange price comparison (requires ccxt)
+- Cross-exchange price comparison (optional — `pip install ccxt` if needed)
 
 ## Free data sources (no broker API needed)
 - nsepython — NSE option chain, FII/DII data, PCR, advance/decline

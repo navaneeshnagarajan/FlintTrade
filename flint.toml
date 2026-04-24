@@ -21,7 +21,7 @@ ai = { path = "packages/ai", lang = "python", description = "LLM chat, RAG, ML s
 data = { path = "packages/data", lang = "python", description = "Real-time tick capture, WebSocket storage, audit logs" }
 historical = { path = "packages/historical", lang = "python", description = "Historical data download, merge, DuckDB/Parquet, free NSE data" }
 screener = { path = "packages/screener", lang = "python", description = "Market scanner, OI spurt, PCR, max pain, portfolio Greeks" }
-backtest-engine = { path = "packages/backtest-engine", lang = "python", description = "Event-driven simulation, vectorbt strategies, metrics" }
+backtest-engine = { path = "packages/backtest-engine", lang = "python", description = "Event-driven simulation, vectorbt/raptorbt strategies, metrics" }
 integration = { path = "packages/integration", lang = "python", description = "TradingView, ChartInk, webhooks, Chrome extension, Excel, Amibroker" }
 automation = { path = "packages/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, post-market analysis" }
 ditto = { path = "packages/ditto", lang = "python", description = "Multi-broker, multi-account orchestration (AlgoMirror patterns)" }

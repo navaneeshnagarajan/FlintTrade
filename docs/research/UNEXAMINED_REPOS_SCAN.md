@@ -4,6 +4,11 @@
 > **Scope:** ~120 repos not referenced in `REPO_FEATURE_MAP.md` out of 222 total
 > **Method:** README scan, directory structure analysis, source code sampling
 
+> **Status update — 2026-04-24:** The following LOW-priority entries listed below have been **removed from the local reference tree** (`.local/reference/repos/`) as part of a redundancy audit. All of them were "REFERENCE ONLY — don't absorb" when this scan ran, and their source code is either pip-installable on demand or no longer relevant:
+> - `FinRL`, `StockSharp`, `freqtrade`, `backtrader`, `ccxt`, `py_vollib`, `zipline-reloaded`, `vectorbt`, `OpenSpace`, `nanobot`, `nanochat`, `n8n`, `uv`, `openalgo-desktop`, `EquiCharts`
+>
+> The scan verdicts below remain historically accurate; treat those rows as archival context, not as instructions to clone anything.
+
 ---
 
 ## HIGH Priority (absorb now)

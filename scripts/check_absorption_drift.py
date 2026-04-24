@@ -84,21 +84,10 @@ ABSORBED_REPOS: list[dict] = [
         "last_absorbed_commit": "2026-03-31",
         "missing_since": [],
     },
-    {
-        "name": "openalgo-chart",
-        "github": "aspect-build/equicharts",
-        "local_path": ".local/reference/repos/tier2-ecosystem/EquiCharts",
-        "type": "reference",
-        "absorbed": [
-            "Chart component patterns -> packages/terminal/src/components/Chart.tsx",
-            "Drawing tools -> Chart widget",
-            "Replay mode -> useChartReplay hook",
-        ],
-        "last_absorbed_commit": "unknown",
-        "missing_since": [
-            "80+ components only pattern-absorbed, not component-level",
-        ],
-    },
+    # EquiCharts entry removed 2026-04-24: reference repo deleted
+    # (chart patterns were absorbed into packages/terminal/src/components/Chart.tsx;
+    #  further drift checking against the upstream is no longer relevant since
+    #  we standardised on Lightweight Charts v5 for the Chart widget).
     {
         "name": "TradingAgents",
         "github": "TradingAgents-AI/TradingAgents",

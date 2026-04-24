@@ -25,5 +25,5 @@
 ## Crypto historical data
 - Delta Exchange historical via OpenAlgo API
 - Supplementary: yfinance for BTC/ETH/commodity prices (free)
-- Supplementary: ccxt for exchange-specific historical (free)
+- Supplementary: `pip install ccxt` for exchange-specific historical (optional, not currently integrated)
 - MCX commodity data: yfinance provides GOLD, SILVER, CRUDE in INR

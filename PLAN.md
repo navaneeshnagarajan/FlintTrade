@@ -340,7 +340,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 | 19 | Pine Script Indicator Editor | PineTS | ✅ Done (Wave 1-9) — PineEditor.tsx + compile endpoint |
 | 20 | Multi-user Auth | openalgo-multiuser | ✅ Done (Wave 1-9) — user_manager.py + user_routes.py |
 | 21 | Blue-green Deployment | — | v0.6.0 |
-| 22 | Crypto (Delta Exchange) | ccxt | v0.6.0 |
+| 22 | Crypto (Delta Exchange) | OpenAlgo native (ccxt optional via `pip install ccxt`) | v0.6.0 |
 | 23 | Voice Orders | openalgo-voice-based-orders | v0.6.0 |
 | 24 | Mobile App | openalgo-mobile | v0.7.0 |
 | 25 | FinRL Reinforcement Learning | FinRL | ✅ Done (Wave 1-9) — rl_environment.py + rl_trainer.py |
