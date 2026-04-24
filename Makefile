@@ -40,7 +40,7 @@ else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore
+.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore logs-clear
 
 # ======================================================================
 # Setup
@@ -176,6 +176,18 @@ sync-check: ## Check submodule upstream changes
 	@cd infra/openalgo && git fetch origin --quiet 2>/dev/null && echo "openalgo: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openalgo: not available"
 	@cd infra/algomirror && git fetch origin --quiet 2>/dev/null && echo "algomirror: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "algomirror: not available"
 	@cd infra/openclaw && git fetch origin --quiet 2>/dev/null && echo "openclaw: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openclaw: not available"
+
+logs-clear: ## Truncate runtime .log files under .local/dev-logs/
+	@echo -e "$(CYAN)=== Clearing runtime logs ===$(RESET)"
+	@mkdir -p .local/dev-logs
+	@for f in .local/dev-logs/*.log; do \
+	  [ -e "$$f" ] || continue; \
+	  size=$$(du -h "$$f" 2>/dev/null | cut -f1); \
+	  : > "$$f"; \
+	  echo "  truncated $$f ($$size -> 0)"; \
+	done
+	@touch .local/dev-logs/.gitkeep
+	@echo -e "$(GREEN)=== Logs cleared ===$(RESET)"
 
 # ======================================================================
 # Installation and backup

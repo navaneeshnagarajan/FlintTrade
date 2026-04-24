@@ -551,6 +551,19 @@ Feature-complete alpha release. 13 packages, 1,021 tests, 7 routes, 21 widgets, 
 - TypeScript: 0 errors (strict mode)
 - Build: clean
 
+### Added — Retroactive Backfill (2026-04-24, from DEVLOG)
+These entries were shipped during the 0.1.0-alpha window (2026-03-19 / 2026-03-20) but missed on the DEVLOG-to-CHANGELOG handoff. Sourced from `.local/archive/DEVLOG.md` and `.local/journey/TIMELINE.md`.
+
+- **Rust/PyO3 `tick-engine` package** — new monorepo package with TickSimulator + streaming EMA-crossover + 25 PyO3 tests; first Rust component in the stack (2026-03-20)
+- **Python indicators endpoint** — `/api/v1/indicators/compute` plus 8 additional chart indicators (TA-Lib-backed) wired into ChartWidget (2026-03-20)
+- **Analysis absorption** — 31 TA-Lib / Numba indicators plus 28 backtest-engine strategy templates absorbed from reference repos (2026-03-19)
+- **OptionChainWidget canvas rewrite** — re-implemented on Glide Data Grid, removing ~320 lines of DOM markup and moving to a canvas renderer (2026-03-20)
+- **NewsWidget v1** — RSS feed ingestion with rule-based sentiment keyword scoring (2026-03-19)
+- **FlexLayout → Dockview v5 migration** — layout engine replaced across the terminal; removed `flexlayout-react` + `recharts`; full JSX → TSX conversion completed in the same window (2026-03-19)
+
+### Fixed — Retroactive Backfill (2026-04-24)
+- **TerminalRoute bundle size** — 1,251 KB → 19 KB via `manualChunks` configuration and lucide-react tree-shake fix; route-level code splitting enabled (2026-03-20)
+
 ## [0.0.1-dev] — 2026-03-14
 
 ### Added — Core
@@ -607,3 +620,10 @@ Feature-complete alpha release. 13 packages, 1,021 tests, 7 routes, 21 widgets, 
 - Infrastructure — nginx, systemd, WireGuard, fail2ban, deploy scripts
 - Git-native bug tracking system
 - Documentation — OpenAlgo API reference, tools guide, machine configs
+
+### Added — Retroactive Backfill (2026-04-24, from DEVLOG)
+These entries correspond to material milestones reached during the 0.0.1-dev window (2026-03-16) but missed on the DEVLOG-to-CHANGELOG handoff. Sourced from `.local/archive/DEVLOG.md` and `.local/journey/TIMELINE.md`.
+
+- **First end-to-end order** — first real order routed through FlintTrade -> OpenAlgo -> broker sandbox, confirming the full engine pipeline (OrderRouter + SafetySystem + AuditLogger + OpenAlgoClient) works against a live broker (2026-03-16)
+- **First production deployment** — FlintTrade first run on bare-metal Ubuntu with systemd unit files and the production deploy script (2026-03-16)
+- **OpenAlgo v2.0.0.1 submodule sync** — absorbed native Delta Exchange support, Nubra broker adapter, 5 new API endpoints, upstream CVE fixes (2026-03-16)
