@@ -3,6 +3,12 @@
  *
  * Tests for the useTestConnection hook.
  *
+ * The hook posts `{host, api_key}` to `/ft-api/v1/test-connection` on the
+ * FlintTrade backend. The backend performs the real OpenAlgo ping server-
+ * to-server and returns a JSON envelope of the form
+ *     { status: "ok" | "error", message: string, ... }
+ * wrapped in an HTTP 200 (so we always get structured info — even failures).
+ *
  * Strategy:
  *   - vi.stubGlobal("fetch", ...) replaces the global fetch with a spy so we
  *     control every network response without making real HTTP calls.
@@ -40,13 +46,30 @@ if (!("timeout" in AbortSignal)) {
 
 const HOST = "http://localhost:5000";
 const API_KEY = "test-api-key-12345";
+const BACKEND_URL = "/ft-api/v1/test-connection";
 
-/** Build a minimal Response-like object accepted by the fetch mock. */
+/**
+ * Build a Response-like object that the hook's `await response.json()` call
+ * can consume. HTTP status always 200 here by default because the backend
+ * wraps failures in structured JSON — pass a different `status` only when
+ * testing the HTTP-level error path (500 etc.).
+ */
 function makeResponse(
-  status: number,
-  ok = status >= 200 && status < 300,
+  body: Record<string, unknown>,
+  opts: { status?: number; ok?: boolean } = {},
 ): Response {
-  return { ok, status } as unknown as Response;
+  const status = opts.status ?? 200;
+  const ok = opts.ok ?? (status >= 200 && status < 300);
+  return {
+    ok,
+    status,
+    json: async () => body,
+  } as unknown as Response;
+}
+
+/** Build a response that looks like the backend's "auth failed" 200 envelope. */
+function makeErrorEnvelope(message: string, httpStatus = 200): Response {
+  return makeResponse({ status: "error", message }, { status: httpStatus });
 }
 
 // ---------------------------------------------------------------------------
@@ -88,13 +111,18 @@ describe("useTestConnection — initial state", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Successful connection (HTTP 200)
+// Successful connection (backend returns {status: "ok"})
 // ---------------------------------------------------------------------------
 
 describe("useTestConnection — successful connection", () => {
-  it("sets status to 'ok' when the API responds with 200", async () => {
+  it("sets status to 'ok' when the backend responds with status=ok", async () => {
     // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(200)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        makeResponse({ status: "ok", message: "Connected — broker: dhan" }),
+      ),
+    );
     const { result } = renderHook(() => useTestConnection());
 
     // Act
@@ -106,9 +134,31 @@ describe("useTestConnection — successful connection", () => {
     expect(result.current.status).toBe<TestConnectionStatus>("ok");
   });
 
-  it("sets message to 'Connected successfully' on 200", async () => {
+  it("uses the backend's message verbatim when available", async () => {
     // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(200)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        makeResponse({ status: "ok", message: "Connected — broker: dhan" }),
+      ),
+    );
+    const { result } = renderHook(() => useTestConnection());
+
+    // Act
+    await act(async () => {
+      await result.current.testConnection(HOST, API_KEY);
+    });
+
+    // Assert
+    expect(result.current.message).toBe("Connected — broker: dhan");
+  });
+
+  it("falls back to 'Connected successfully' when backend omits the message", async () => {
+    // Arrange — status=ok but no message field
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(makeResponse({ status: "ok" })),
+    );
     const { result } = renderHook(() => useTestConnection());
 
     // Act
@@ -120,9 +170,9 @@ describe("useTestConnection — successful connection", () => {
     expect(result.current.message).toBe("Connected successfully");
   });
 
-  it("calls fetch with the correct URL and POST method", async () => {
+  it("POSTs to the FlintTrade backend endpoint (not OpenAlgo directly)", async () => {
     // Arrange
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(200));
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse({ status: "ok" }));
     vi.stubGlobal("fetch", mockFetch);
     const { result } = renderHook(() => useTestConnection());
 
@@ -131,45 +181,47 @@ describe("useTestConnection — successful connection", () => {
       await result.current.testConnection(HOST, API_KEY);
     });
 
-    // Assert
+    // Assert — the browser cannot hit OpenAlgo directly (CORS), so the hook
+    // must route through the backend proxy.
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://localhost:5000/api/v1/ping");
+    expect(url).toBe(BACKEND_URL);
     expect(options.method).toBe("POST");
   });
 
-  it("sends the apiKey in the request body as 'apikey'", async () => {
+  it("sends host and api_key in the request body", async () => {
     // Arrange
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(200));
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse({ status: "ok" }));
     vi.stubGlobal("fetch", mockFetch);
     const { result } = renderHook(() => useTestConnection());
 
     // Act
     await act(async () => {
       await result.current.testConnection(HOST, API_KEY);
+    });
+
+    // Assert — the backend expects `{host, api_key}`, NOT `{apikey}`.
+    const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string) as Record<string, string>;
+    expect(body.host).toBe(HOST);
+    expect(body.api_key).toBe(API_KEY);
+  });
+
+  it("strips trailing slashes from the host before sending", async () => {
+    // Arrange
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", mockFetch);
+    const { result } = renderHook(() => useTestConnection());
+
+    // Act — host with one or more trailing slashes should be normalised.
+    await act(async () => {
+      await result.current.testConnection("http://localhost:5000//", API_KEY);
     });
 
     // Assert
     const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(options.body as string) as Record<string, string>;
-    expect(body.apikey).toBe(API_KEY);
-  });
-
-  it("strips a trailing slash from the host before constructing the URL", async () => {
-    // Arrange
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(200));
-    vi.stubGlobal("fetch", mockFetch);
-    const { result } = renderHook(() => useTestConnection());
-
-    // Act
-    await act(async () => {
-      await result.current.testConnection("http://localhost:5000/", API_KEY);
-    });
-
-    // Assert — no double slash
-    const [url] = mockFetch.mock.calls[0] as [string];
-    expect(url).toBe("http://localhost:5000/api/v1/ping");
-    expect(url).not.toContain("//api");
+    expect(body.host).toBe("http://localhost:5000");
   });
 });
 
@@ -197,7 +249,7 @@ describe("useTestConnection — loading state", () => {
 
     // Cleanup — resolve so React doesn't leave pending state warnings
     await act(async () => {
-      resolveRequest(makeResponse(200));
+      resolveRequest(makeResponse({ status: "ok" }));
       await pendingRequest;
     });
   });
@@ -206,8 +258,8 @@ describe("useTestConnection — loading state", () => {
     // Arrange — first call fails, second call succeeds
     const mockFetch = vi
       .fn()
-      .mockResolvedValueOnce(makeResponse(401))
-      .mockResolvedValueOnce(makeResponse(200));
+      .mockResolvedValueOnce(makeErrorEnvelope("Invalid API key"))
+      .mockResolvedValueOnce(makeResponse({ status: "ok" }));
     vi.stubGlobal("fetch", mockFetch);
     const { result } = renderHook(() => useTestConnection());
 
@@ -232,48 +284,74 @@ describe("useTestConnection — loading state", () => {
 
     // Cleanup
     await act(async () => {
-      resolveSecond(makeResponse(200));
+      resolveSecond(makeResponse({ status: "ok" }));
       await secondRequest;
     });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Error cases — server-side HTTP errors
+// Backend-reported errors (HTTP 200 + status=error envelope)
+// ---------------------------------------------------------------------------
+
+describe("useTestConnection — backend error envelope", () => {
+  it("sets status to 'error' when the backend reports an auth failure", async () => {
+    // Arrange — HTTP 200 but structured auth-failed body (our standard shape)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        makeErrorEnvelope("Reachable but auth failed (HTTP 401): Invalid API key"),
+      ),
+    );
+    const { result } = renderHook(() => useTestConnection());
+
+    // Act
+    await act(async () => {
+      await result.current.testConnection(HOST, "bad-key");
+    });
+
+    // Assert
+    expect(result.current.status).toBe<TestConnectionStatus>("error");
+    expect(result.current.message).toContain("auth failed");
+  });
+
+  it("surfaces the backend's message when unreachable", async () => {
+    // Arrange
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        makeErrorEnvelope("Cannot reach OpenAlgo at http://localhost:5000"),
+      ),
+    );
+    const { result } = renderHook(() => useTestConnection());
+
+    // Act
+    await act(async () => {
+      await result.current.testConnection(HOST, API_KEY);
+    });
+
+    // Assert
+    expect(result.current.status).toBe<TestConnectionStatus>("error");
+    expect(result.current.message).toContain("Cannot reach OpenAlgo");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error cases — HTTP-level (backend itself misbehaves)
 // ---------------------------------------------------------------------------
 
 describe("useTestConnection — HTTP error responses", () => {
-  it("sets status to 'error' when the server returns 401 (invalid API key)", async () => {
-    // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(401, false)));
-    const { result } = renderHook(() => useTestConnection());
-
-    // Act
-    await act(async () => {
-      await result.current.testConnection(HOST, "bad-key");
-    });
-
-    // Assert
-    expect(result.current.status).toBe<TestConnectionStatus>("error");
-  });
-
-  it("includes the HTTP status code in the error message for 401", async () => {
-    // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(401, false)));
-    const { result } = renderHook(() => useTestConnection());
-
-    // Act
-    await act(async () => {
-      await result.current.testConnection(HOST, "bad-key");
-    });
-
-    // Assert — "Server returned 401"
-    expect(result.current.message).toContain("401");
-  });
-
-  it("sets status to 'error' when the server returns 500", async () => {
-    // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(500, false)));
+  it("sets status to 'error' when the backend returns 500", async () => {
+    // Arrange — backend itself is broken (not an OpenAlgo error)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        makeResponse(
+          { status: "error", message: "Internal server error" },
+          { status: 500, ok: false },
+        ),
+      ),
+    );
     const { result } = renderHook(() => useTestConnection());
 
     // Act
@@ -283,12 +361,17 @@ describe("useTestConnection — HTTP error responses", () => {
 
     // Assert
     expect(result.current.status).toBe<TestConnectionStatus>("error");
-    expect(result.current.message).toContain("500");
+    expect(result.current.message).toContain("Internal server error");
   });
 
-  it("sets status to 'error' for a 403 Forbidden response", async () => {
-    // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(403, false)));
+  it("includes the HTTP status in the message when the backend returns 400 with no body message", async () => {
+    // Arrange — backend returned non-2xx but no structured message
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        makeResponse({}, { status: 400, ok: false }),
+      ),
+    );
     const { result } = renderHook(() => useTestConnection());
 
     // Act
@@ -296,9 +379,31 @@ describe("useTestConnection — HTTP error responses", () => {
       await result.current.testConnection(HOST, API_KEY);
     });
 
-    // Assert
+    // Assert — hook falls back to "Server returned 400"
     expect(result.current.status).toBe<TestConnectionStatus>("error");
-    expect(result.current.message).toContain("403");
+    expect(result.current.message).toContain("400");
+  });
+
+  it("handles an invalid-JSON body gracefully", async () => {
+    // Arrange — response.json() throws (backend returned HTML, for example)
+    const bad = {
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error("Unexpected token < in JSON at position 0");
+      },
+    } as unknown as Response;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(bad));
+    const { result } = renderHook(() => useTestConnection());
+
+    // Act
+    await act(async () => {
+      await result.current.testConnection(HOST, API_KEY);
+    });
+
+    // Assert — hook catches the parse failure and reports the fallback
+    expect(result.current.status).toBe<TestConnectionStatus>("error");
+    expect(result.current.message).toContain("Invalid JSON");
   });
 });
 
@@ -410,7 +515,10 @@ describe("useTestConnection — timeout", () => {
 describe("useTestConnection — reset", () => {
   it("resets status to 'idle' after a successful connection", async () => {
     // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(200)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(makeResponse({ status: "ok" })),
+    );
     const { result } = renderHook(() => useTestConnection());
     await act(async () => {
       await result.current.testConnection(HOST, API_KEY);
@@ -449,7 +557,10 @@ describe("useTestConnection — reset", () => {
 
   it("clears the message on reset", async () => {
     // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(200)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(makeResponse({ status: "ok" })),
+    );
     const { result } = renderHook(() => useTestConnection());
     await act(async () => {
       await result.current.testConnection(HOST, API_KEY);
@@ -486,7 +597,10 @@ describe("useTestConnection — reset", () => {
 describe("useTestConnection — stable function references", () => {
   it("testConnection reference is stable across re-renders", async () => {
     // Arrange
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeResponse(200)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(makeResponse({ status: "ok" })),
+    );
     const { result, rerender } = renderHook(() => useTestConnection());
     const firstRef = result.current.testConnection;
 
