@@ -1,18 +1,25 @@
 /**
- * SetupAccountRoute — one-time account setup wizard (6 steps).
+ * SetupAccountRoute — one-time account setup wizard (7 steps, 0-indexed).
  *
- * Step 1: Account Security  — username, email, password (strength meter), PIN, 2FA TOTP
+ * Step 0: Account Security  — username, email, password, optional PIN (POSTs /v1/auth/setup)
+ * Step 1: Two-Factor Auth   — warning → QR + backup codes (forward-only once account exists)
  * Step 2: Persona           — Trader / Investor / Beginner
- * Step 3: Broker Connection — OpenAlgo host + API key
+ * Step 3: Broker Connection — OpenAlgo host + API key (or Direct Connect)
  * Step 4: Trading Defaults  — exchange, product, quantity
- * Step 5: Risk Limits       — max daily loss, position size
- * Step 6: Mode Selection    — Explore / Practice / Live
+ * Step 5: Risk Limits       — MTM caps, position size, order rate
+ * Step 6: Choose Mode       — Explore / Practice / Live (selecting a mode FINISHES setup)
  *
- * Session-storage key `flinttrade:setup-progress` persists partial progress so
- * that interrupting after account creation (step 1) and returning does not trigger
- * a duplicate-account error from the backend.
+ * Progress — `accountCreated`, TOTP URI, backup codes, persona, connection/trading/risk
+ * form values, and `currentStep` — is persisted to **localStorage** under the key
+ * `flinttrade:setup-progress` so it survives refresh, tab close, and browser restart.
  *
- * On completion navigates to /trade (last used route default).
+ * Progress is cleared ONLY by explicit user action:
+ *   (a) selecting a mode on step 6 (Finish setup)
+ *   (b) clicking "Start over" in the header
+ *   (c) hitting HTTP 409 on account creation (account already exists → sign in)
+ *
+ * On completion navigates to /welcome (which shows the sign-in form since an
+ * account now exists).
  */
 
 import { useState, useEffect } from "react";
@@ -47,6 +54,7 @@ import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
 import ModeSelectRoute from "@/routes/ModeSelectRoute";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { useAuthStore } from "@/stores/authStore";
 import type { ColorMode } from "@/lib/cinematicThemes";
 
 // ---------------------------------------------------------------------------
@@ -55,36 +63,106 @@ import type { ColorMode } from "@/lib/cinematicThemes";
 
 const PROGRESS_KEY = "flinttrade:setup-progress";
 
+/**
+ * 7 linear steps. TOTP is step 1 (not an invisible sub-phase of step 0).
+ *   0: Account Security  (one-way — submitting creates the account)
+ *   1: Two-Factor Auth   (one-way — confirmation cannot be undone)
+ *   2: Persona
+ *   3: Broker Connection
+ *   4: Trading Defaults
+ *   5: Risk Limits
+ *   6: Choose Mode       ("Finish setup" lives on this step)
+ *
+ * All form values from steps 2–5 are persisted so Back/Next preserve entries.
+ */
 interface SetupProgress {
   accountCreated: boolean;
   totpUri: string;
   backupCodes: string[];
-  /** 0 = account security, 1 = persona, 2 = broker, 3 = trading, 4 = risk, 5 = mode */
-  completedStep: number;
+  persona: Persona | null;
+  connection: Partial<ConnectionFormValues> | null;
+  trading: Partial<TradingDefaultsFormValues> | null;
+  risk: Partial<RiskFormValues> | null;
+  mode: AppMode | null;
+  /** 0..6 — the step index the user is currently viewing. */
+  currentStep: number;
 }
+
+const personaEnum = z.enum(["trader", "investor", "beginner"]);
+const appModeEnum = z.enum(["explore", "practice", "live"]);
 
 const setupProgressSchema = z.object({
   accountCreated: z.boolean(),
   totpUri: z.string(),
   backupCodes: z.array(z.string()),
-  completedStep: z.number().int().min(0).max(5),
+  persona: personaEnum.nullable(),
+  connection: z
+    .object({
+      host: z.string().optional(),
+      apiKey: z.string().optional(),
+      wsPort: z.string().optional(),
+    })
+    .nullable(),
+  trading: z
+    .object({
+      defaultExchange: z.string().optional(),
+      defaultProduct: z.string().optional(),
+      defaultQty: z.number().optional(),
+    })
+    .nullable(),
+  risk: z
+    .object({
+      maxPositionLots: z.number().optional(),
+      mtmStoploss: z.number().optional(),
+      mtmTarget: z.number().optional(),
+      maxOrdersPerMinute: z.number().optional(),
+    })
+    .nullable(),
+  mode: appModeEnum.nullable(),
+  currentStep: z.number().int().min(0).max(6),
 }) satisfies z.ZodType<SetupProgress>;
 
+const EMPTY_PROGRESS: SetupProgress = {
+  accountCreated: false,
+  totpUri: "",
+  backupCodes: [],
+  persona: null,
+  connection: null,
+  trading: null,
+  risk: null,
+  mode: null,
+  currentStep: 0,
+};
+
+// Persisted in `localStorage` (not sessionStorage) so progress survives
+// tab close, browser restart, and accidental refreshes. The only auto-clear
+// paths are: (a) user clicks "Finish setup" on the final step, or (b)
+// explicit user opt-out via the "Start over" button on the account form.
+// We deliberately do NOT auto-wipe based on auth-store heuristics —
+// stale client state must never erase a user's in-progress setup.
 function loadProgress(): SetupProgress | null {
-  const raw = sessionStorage.getItem(PROGRESS_KEY);
-  return safeParse(raw, setupProgressSchema) ?? null;
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    return safeParse(raw, setupProgressSchema) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function saveProgress(progress: SetupProgress): void {
   try {
-    sessionStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
   } catch {
-    // Non-critical — ignore storage errors
+    // Storage quota or privacy mode — non-critical, continue in-memory.
   }
 }
 
 function clearProgress(): void {
-  sessionStorage.removeItem(PROGRESS_KEY);
+  try {
+    localStorage.removeItem(PROGRESS_KEY);
+  } catch {
+    // Non-critical.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,9 +227,12 @@ interface AccountSecurityStepProps {
 }
 
 function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
+  const navigate = useNavigate();
+  const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
+  const [accountExists, setAccountExists] = useState(false);
 
   const {
     register,
@@ -167,6 +248,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
   async function onSubmit(values: AccountFormValues) {
     setIsLoading(true);
     setServerError("");
+    setAccountExists(false);
     try {
       const resp = await fetch("/ft-api/v1/auth/setup", {
         method: "POST",
@@ -180,9 +262,23 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
       });
       const data = await resp.json();
       if (resp.ok && data.data) {
+        // Server now has an account but no session yet. Reflect this in the
+        // store so any subsequent route decisions (e.g. /welcome redirect,
+        // the setup-required reconcile in this component) see truth, not
+        // the stale "setup-required" value from before the POST.
+        setLoggedOut();
         onComplete(values, data.data.totp_uri ?? "", data.data.backup_codes ?? []);
+      } else if (resp.status === 409) {
+        // Account already exists — don't wedge. Route the user to login,
+        // which is the only sensible next step. Clear any stale progress
+        // so the next /setup-account entry won't try to re-submit.
+        clearProgress();
+        setAccountExists(true);
+        setServerError(
+          data.message || "An account already exists on this machine. Sign in to continue.",
+        );
       } else {
-        setServerError(data.message || "Setup failed. Please try again.");
+        setServerError(data.message || `Setup failed (HTTP ${resp.status}). Please try again.`);
       }
     } catch {
       setServerError("Cannot reach server. Is the FlintTrade backend running?");
@@ -199,9 +295,27 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
       </div>
 
       {serverError && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/30 text-sm text-loss">
-          <AlertTriangle className="size-4 shrink-0" />
-          {serverError}
+        <div
+          className={`flex items-start gap-3 p-3 rounded-lg border text-sm ${
+            accountExists
+              ? "bg-accent/10 border-accent/30 text-text-primary"
+              : "bg-loss/10 border-loss/30 text-loss"
+          }`}
+          role="alert"
+        >
+          <AlertTriangle className={`size-4 shrink-0 mt-0.5 ${accountExists ? "text-accent" : ""}`} />
+          <div className="flex-1 space-y-2">
+            <div>{serverError}</div>
+            {accountExists && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => navigate("/welcome", { replace: true })}
+              >
+                Go to sign-in
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -359,13 +473,79 @@ interface TotpDisplayProps {
   totpUri: string;
   backupCodes: string[];
   onConfirmed: () => void;
-  onBack: () => void;
+  /** Replaces the current TOTP URI + backup codes after a "Reset 2FA" action. */
+  onTotpRegenerated: (uri: string, codes: string[]) => void;
+  /** Called after a successful "Delete account" reset. */
+  onAccountDeleted: () => void;
 }
 
-function TotpDisplay({ totpUri, backupCodes, onConfirmed, onBack }: TotpDisplayProps) {
+/** "reset-2fa" regenerates the TOTP; "delete-account" wipes the user entirely. */
+type EscapeAction = "reset-2fa" | "delete-account" | null;
+
+function TotpDisplay({
+  totpUri,
+  backupCodes,
+  onConfirmed,
+  onTotpRegenerated,
+  onAccountDeleted,
+}: TotpDisplayProps) {
   const [phase, setPhase] = useState<"warning" | "qr">("warning");
   const [downloaded, setDownloaded] = useState(false);
   const [qrVisible, setQrVisible] = useState(false);
+
+  // Escape-hatch state: when the user clicks "Reset 2FA" or "Delete account"
+  // we reveal an inline password-confirm form (instead of a modal) so the
+  // flow stays within the card.
+  const [escapeAction, setEscapeAction] = useState<EscapeAction>(null);
+  const [escapePassword, setEscapePassword] = useState("");
+  const [escapeLoading, setEscapeLoading] = useState(false);
+  const [escapeError, setEscapeError] = useState("");
+
+  // 2FA is a forward-only gate. The in-step back only toggles qr → warning
+  // so the user can re-read the warning before scanning.
+  function handleInternalBack() {
+    if (phase === "qr") setPhase("warning");
+  }
+
+  function cancelEscape() {
+    setEscapeAction(null);
+    setEscapePassword("");
+    setEscapeError("");
+    setEscapeLoading(false);
+  }
+
+  async function submitEscape() {
+    if (!escapeAction || !escapePassword) return;
+    setEscapeLoading(true);
+    setEscapeError("");
+    const endpoint =
+      escapeAction === "reset-2fa"
+        ? "/ft-api/v1/auth/setup/regenerate-2fa"
+        : "/ft-api/v1/auth/setup/reset";
+    try {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: escapePassword }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setEscapeError(data?.message ?? `Request failed (HTTP ${resp.status}).`);
+        return;
+      }
+      if (escapeAction === "reset-2fa") {
+        onTotpRegenerated(data?.data?.totp_uri ?? "", data?.data?.backup_codes ?? []);
+        cancelEscape();
+        setPhase("qr"); // jump straight to the fresh QR
+      } else {
+        onAccountDeleted();
+      }
+    } catch {
+      setEscapeError("Cannot reach server. Is the backend running?");
+    } finally {
+      setEscapeLoading(false);
+    }
+  }
 
   function downloadCodes() {
     const content = backupCodes.join("\n");
@@ -379,7 +559,83 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed, onBack }: TotpDisplayP
     setDownloaded(true);
   }
 
-  // Phase 1: Warning — explain what 2FA is and prompt to get an authenticator app
+  // Shared escape-hatch block (rendered on both warning and qr phases).
+  // Gives the user two explicit exits: "Reset 2FA" (keep account, new QR)
+  // and "Delete account & start over" (wipe and re-run step 0).
+  function EscapeHatches() {
+    if (escapeAction) {
+      const title =
+        escapeAction === "reset-2fa"
+          ? "Reset 2FA — confirm with your password"
+          : "Delete account — confirm with your password";
+      const confirmLabel =
+        escapeAction === "reset-2fa" ? "Reset 2FA" : "Delete account";
+      return (
+        <div className="mt-4 rounded-lg border border-loss/30 bg-loss/5 p-3 space-y-2">
+          <p className="text-xs text-text-primary font-medium">{title}</p>
+          <p className="text-[11px] text-text-muted">
+            {escapeAction === "reset-2fa"
+              ? "Your old QR and backup codes will be invalidated. You'll scan a fresh QR on the next screen."
+              : "The account will be wiped from this machine. You can re-create it with a different username or email."}
+          </p>
+          <Input
+            type="password"
+            autoFocus
+            placeholder="Your password"
+            value={escapePassword}
+            onChange={(e) => setEscapePassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void submitEscape(); }}
+            aria-label="Confirm password"
+          />
+          {escapeError && (
+            <p role="alert" className="text-xs text-loss">{escapeError}</p>
+          )}
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={cancelEscape}
+              disabled={escapeLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void submitEscape()}
+              disabled={escapeLoading || !escapePassword}
+              className={escapeAction === "delete-account" ? "bg-loss hover:bg-loss/90" : ""}
+            >
+              {escapeLoading ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+              {confirmLabel}
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="mt-4 pt-3 border-t border-border-default flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted/80">
+        <span className="text-text-muted/60">Need to change something?</span>
+        <button
+          type="button"
+          onClick={() => setEscapeAction("reset-2fa")}
+          className="underline decoration-dotted underline-offset-4 hover:text-text-primary"
+        >
+          Reset 2FA
+        </button>
+        <button
+          type="button"
+          onClick={() => setEscapeAction("delete-account")}
+          className="underline decoration-dotted underline-offset-4 hover:text-loss"
+        >
+          Delete account &amp; start over
+        </button>
+      </div>
+    );
+  }
+
+  // Phase 1: Warning — explain what 2FA is, what's locked in, and the exits.
   if (phase === "warning") {
     return (
       <div className="space-y-5">
@@ -408,14 +664,28 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed, onBack }: TotpDisplayP
           </ul>
         </div>
 
-        <div className="flex justify-between items-center mt-6">
-          <Button variant="ghost" onClick={onBack} type="button">
-            ← Back
-          </Button>
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-1.5">
+          <p className="text-xs text-amber-400 font-medium flex items-center gap-1.5">
+            <AlertTriangle className="size-3.5" />
+            Heads up — 2FA is a one-way step
+          </p>
+          <p className="text-[11px] text-text-secondary leading-relaxed">
+            Your account is already created on this machine. Once you continue
+            and scan the QR, you cannot come back to change your username,
+            email, or password without signing in first. If you need to change
+            any of those, use <strong>Delete account &amp; start over</strong>{" "}
+            below. If you only need a new QR (wrong device scanned, lost
+            phone), use <strong>Reset 2FA</strong>.
+          </p>
+        </div>
+
+        <div className="flex justify-end items-center mt-6">
           <Button onClick={() => setPhase("qr")}>
             I&apos;m ready — show QR code
           </Button>
         </div>
+
+        <EscapeHatches />
       </div>
     );
   }
@@ -500,13 +770,15 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed, onBack }: TotpDisplayP
       )}
 
       <div className="flex justify-between items-center mt-6">
-        <Button variant="ghost" onClick={onBack} type="button">
+        <Button variant="ghost" onClick={handleInternalBack} type="button">
           ← Back
         </Button>
         <Button onClick={onConfirmed}>
           I have saved my codes — Continue
         </Button>
       </div>
+
+      <EscapeHatches />
     </div>
   );
 }
@@ -516,12 +788,13 @@ function TotpDisplay({ totpUri, backupCodes, onConfirmed, onBack }: TotpDisplayP
 // ---------------------------------------------------------------------------
 
 interface PersonaStepWrapperProps {
+  initialSelected?: Persona | null;
   onComplete: (persona: Persona) => void;
   onBack: () => void;
 }
 
-function PersonaStepWrapper({ onComplete, onBack }: PersonaStepWrapperProps) {
-  const [selected, setSelected] = useState<Persona | null>(null);
+function PersonaStepWrapper({ initialSelected, onComplete, onBack }: PersonaStepWrapperProps) {
+  const [selected, setSelected] = useState<Persona | null>(initialSelected ?? null);
 
   return (
     <div className="space-y-6">
@@ -547,12 +820,15 @@ function PersonaStepWrapper({ onComplete, onBack }: PersonaStepWrapperProps) {
 
 const STEP_LABELS = [
   "Account Security",
+  "Two-Factor Auth",
   "Persona",
   "Broker Connection",
   "Trading Defaults",
   "Risk Limits",
   "Choose Mode",
-];
+] as const;
+
+const TOTAL_STEPS = STEP_LABELS.length; // 7
 
 export default function SetupAccountRoute() {
   const navigate = useNavigate();
@@ -561,116 +837,157 @@ export default function SetupAccountRoute() {
   const setColorMode = useThemeStore((s) => s.setMode);
 
   // ---------------------------------------------------------------------------
-  // Restore progress from sessionStorage on mount
+  // Load persisted progress. We trust localStorage as the source of truth for
+  // "where was the user" and only invalidate it on explicit user action
+  // (finish setup, or "Start over" button). Auto-wiping based on client
+  // auth-store heuristics was the source of multiple state-loss bugs.
   // ---------------------------------------------------------------------------
-  const [currentStep, setCurrentStep] = useState(() => {
-    const saved = loadProgress();
-    if (!saved) return 0;
-    // If account was created, start at persona step (or the next incomplete step)
-    if (saved.accountCreated) {
-      return Math.min(saved.completedStep + 1, STEP_LABELS.length - 1);
-    }
-    return 0;
-  });
+  const initialProgress: SetupProgress = loadProgress() ?? EMPTY_PROGRESS;
 
-  // Saved from Step 1 API response (restored from sessionStorage if available)
-  const [totpUri, setTotpUri] = useState(() => loadProgress()?.totpUri ?? "");
-  const [backupCodes, setBackupCodes] = useState<string[]>(() => loadProgress()?.backupCodes ?? []);
+  const [currentStep, setCurrentStep] = useState(() =>
+    Math.min(initialProgress.currentStep, TOTAL_STEPS - 1),
+  );
+  const [accountCreated, setAccountCreated] = useState(initialProgress.accountCreated);
+  const [totpUri, setTotpUri] = useState(initialProgress.totpUri);
+  const [backupCodes, setBackupCodes] = useState<string[]>(initialProgress.backupCodes);
+  const [persona, setPersona] = useState<Persona | null>(initialProgress.persona);
+  const [connection, setConnection] = useState<Partial<ConnectionFormValues> | null>(
+    initialProgress.connection,
+  );
+  const [trading, setTrading] = useState<Partial<TradingDefaultsFormValues> | null>(
+    initialProgress.trading,
+  );
+  const [risk, setRisk] = useState<Partial<RiskFormValues> | null>(initialProgress.risk);
 
-  // Whether we are showing the TOTP/backup-codes screen (between step 1 and step 2).
-  // Restored automatically when accountCreated is true and completedStep is still 0
-  // (i.e. the user created the account but hadn't confirmed TOTP yet).
-  const [showTotp, setShowTotp] = useState(() => {
-    const saved = loadProgress();
-    return !!(saved?.accountCreated && saved.completedStep === 0);
-  });
-
-  // Keep progress in sync whenever key state changes
+  // Persist on every state change so reloads / navigations never lose entries.
+  // Keyed off explicit `accountCreated` — never derived from secondary fields
+  // (an empty TOTP URI from the server must NOT disable persistence).
   useEffect(() => {
-    const saved = loadProgress();
-    if (!saved?.accountCreated) return; // nothing to persist yet
-
+    if (!accountCreated) return;
     saveProgress({
       accountCreated: true,
       totpUri,
       backupCodes,
-      completedStep: currentStep > 0 ? currentStep - 1 : 0,
+      persona,
+      connection,
+      trading,
+      risk,
+      mode: null,
+      currentStep,
     });
-  }, [currentStep, totpUri, backupCodes]);
+  }, [currentStep, totpUri, backupCodes, persona, connection, trading, risk, accountCreated]);
 
-  // ---------------------------------------------------------------------------
-  // Step handlers
-  // ---------------------------------------------------------------------------
-
-  function handleAccountComplete(
-    _values: AccountFormValues,
-    uri: string,
-    codes: string[],
-  ) {
-    setTotpUri(uri);
-    setBackupCodes(codes);
-    // Persist immediately so a page reload after account creation goes to TOTP
-    saveProgress({ accountCreated: true, totpUri: uri, backupCodes: codes, completedStep: 0 });
-    setShowTotp(true);
+  // No auto-wipe based on authStatus. Progress is cleared only by an explicit
+  // user action: "Finish setup" on the final step or the "Start over" button
+  // on the account form. The 409 branch in AccountSecurityStep also clears
+  // because at that point the user has confirmed the account already exists
+  // server-side and wants to sign in instead.
+  function handleStartOver() {
+    clearProgress();
+    setAccountCreated(false);
+    setCurrentStep(0);
+    setTotpUri("");
+    setBackupCodes([]);
+    setPersona(null);
+    setConnection(null);
+    setTrading(null);
+    setRisk(null);
   }
 
-  function handleTotpConfirmed() {
-    setShowTotp(false);
-    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 1 });
+  // ---------------------------------------------------------------------------
+  // Step handlers — each advances currentStep; the effect above persists.
+  // ---------------------------------------------------------------------------
+
+  function handleAccountComplete(_values: AccountFormValues, uri: string, codes: string[]) {
+    // Persist synchronously so a reload before the effect fires still lands on step 1.
+    saveProgress({
+      accountCreated: true,
+      totpUri: uri,
+      backupCodes: codes,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      currentStep: 1,
+    });
+    setAccountCreated(true);
+    setTotpUri(uri);
+    setBackupCodes(codes);
     setCurrentStep(1);
   }
 
-  function handlePersonaComplete(_persona: Persona) {
-    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 2 });
-    setCurrentStep(2);
+  function handleTotpConfirmed() { setCurrentStep(2); }
+
+  function handleTotpRegenerated(uri: string, codes: string[]) {
+    setTotpUri(uri);
+    setBackupCodes(codes);
+    // The persist effect picks this up automatically; no need to save inline.
   }
 
-  function handleConnectionComplete(_values: ConnectionFormValues) {
-    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 3 });
+  function handleAccountDeleted() {
+    // Server wiped the account. Authoritatively reset everything: clear
+    // localStorage, flip the auth store back to setup-required, bounce to
+    // /welcome which will render the "Get Started" CTA again.
+    clearProgress();
+    setAccountCreated(false);
+    setTotpUri("");
+    setBackupCodes([]);
+    setPersona(null);
+    setConnection(null);
+    setTrading(null);
+    setRisk(null);
+    setCurrentStep(0);
+    useAuthStore.getState().setSetupRequired();
+    navigate("/welcome", { replace: true });
+  }
+
+  function handlePersonaComplete(p: Persona) {
+    setPersona(p);
     setCurrentStep(3);
   }
 
-  function handleTradingComplete(_values: TradingDefaultsFormValues) {
-    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 4 });
+  function handleConnectionComplete(values: ConnectionFormValues) {
+    setConnection(values);
     setCurrentStep(4);
   }
 
-  function handleRiskComplete(_values: RiskFormValues) {
-    saveProgress({ accountCreated: true, totpUri, backupCodes, completedStep: 5 });
+  function handleTradingComplete(values: TradingDefaultsFormValues) {
+    setTrading(values);
     setCurrentStep(5);
+  }
+
+  function handleRiskComplete(values: RiskFormValues) {
+    setRisk(values);
+    setCurrentStep(6);
   }
 
   function handleModeSelect(mode: AppMode) {
     setMode(mode);
-    // Clear sessionStorage progress on successful completion
+    // Setup finished — clear persisted progress and route to sign-in.
     clearProgress();
-    // Account is set up. Navigate to /welcome which will detect
-    // the account exists (status = "logged-out") and immediately
-    // show the login form — skipping the cinematic + "Get Started" CTA.
-    // The user logs in with the credentials they just created.
     navigate("/welcome", { replace: true });
   }
 
   // ---------------------------------------------------------------------------
   // Back navigation
+  //   Steps 0–2 are "sealed" once submitted (account creation + 2FA
+  //   confirmation cannot be undone). Back from any of these returns to
+  //   /welcome so the user can sign in. Steps 3–6 freely decrement and
+  //   the previously entered values are preserved via saveProgress.
   // ---------------------------------------------------------------------------
 
   function handleBack() {
-    if (showTotp) {
-      // Back from TOTP warning/QR screen returns to the account form view.
-      // The account IS already created on the backend — we just return to
-      // the TOTP display so the user doesn't re-submit the form.
-      setShowTotp(false);
-      return;
-    }
-    if (currentStep === 0) {
-      navigate("/welcome");
+    if (currentStep <= 2) {
+      navigate("/welcome", { replace: true });
       return;
     }
     setCurrentStep((s) => s - 1);
   }
 
-  const totalSteps = STEP_LABELS.length;
+  // completedCount = steps the user has fully submitted to reach currentStep.
+  const completedCount = currentStep;
+  const remaining = TOTAL_STEPS - currentStep - 1;
 
   return (
     <main aria-label="Account setup" className="min-h-screen bg-surface-base flex flex-col items-center justify-center p-6 relative">
@@ -699,77 +1016,105 @@ export default function SetupAccountRoute() {
         {/* Header */}
         <div className="flex flex-col items-center gap-3 text-center">
           <LogoIcon size={36} />
-          <div>
+          <div className="space-y-1">
             <h1 className="font-heading font-bold text-xl text-text-primary">
               Set up FlintTrade
             </h1>
-            <p className="text-xs text-text-muted mt-0.5">
-              Step {currentStep + 1} of {totalSteps} — {STEP_LABELS[currentStep]}
+            <p className="text-xs text-text-muted">
+              Step {currentStep + 1} of {TOTAL_STEPS} — {STEP_LABELS[currentStep]}
             </p>
+            <p className="text-[11px] text-text-muted/80">
+              {completedCount} of {TOTAL_STEPS} completed
+              {remaining > 0 ? ` · ${remaining} remaining` : " · last step"}
+            </p>
+            {currentStep > 0 && currentStep < 6 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Start over from the beginning? Your in-progress entries (persona, broker, trading, risk) will be cleared. The account itself is kept on the server — you'll need to sign in to delete it.",
+                    )
+                  ) {
+                    handleStartOver();
+                  }
+                }}
+                className="text-[11px] text-text-muted/60 underline decoration-dotted underline-offset-4 hover:text-text-primary"
+              >
+                Start over
+              </button>
+            )}
           </div>
         </div>
 
         {/* Step indicator */}
         <StepIndicator
-          total={totalSteps}
+          total={TOTAL_STEPS}
           current={currentStep}
           onStepClick={(i) => {
-            // Allow navigating back to completed steps only
-            if (i < currentStep) setCurrentStep(i);
+            // Only allow jumping to already-completed reversible steps (3+).
+            // Steps 0–2 are sealed (account + 2FA submitted on server).
+            if (i >= 3 && i < currentStep) setCurrentStep(i);
           }}
         />
 
-        {/* Step content — step 5 (ModeSelect) renders its own full layout */}
-        {currentStep === 5 ? (
+        {/* Step body — Mode step renders its own full layout */}
+        {currentStep === 6 ? (
           <ModeSelectRoute onSelect={handleModeSelect} />
         ) : (
           <div className="rounded-xl border border-border-default bg-surface-card p-6">
-            {currentStep === 0 && !showTotp && (
+            {currentStep === 0 && (
               <AccountSecurityStep
                 onComplete={handleAccountComplete}
                 onBack={handleBack}
               />
             )}
 
-            {currentStep === 0 && showTotp && (
+            {currentStep === 1 && (
               <TotpDisplay
                 totpUri={totpUri}
                 backupCodes={backupCodes}
                 onConfirmed={handleTotpConfirmed}
-                onBack={handleBack}
+                onTotpRegenerated={handleTotpRegenerated}
+                onAccountDeleted={handleAccountDeleted}
               />
             )}
 
-            {currentStep === 1 && (
+            {currentStep === 2 && (
               <PersonaStepWrapper
+                initialSelected={persona}
                 onComplete={handlePersonaComplete}
                 onBack={handleBack}
               />
             )}
 
-            {currentStep === 2 && (
+            {currentStep === 3 && (
               <ConnectionStep
+                defaultValues={connection ?? undefined}
                 onComplete={handleConnectionComplete}
               />
             )}
 
-            {currentStep === 3 && (
+            {currentStep === 4 && (
               <TradingStep
+                defaultValues={trading ?? undefined}
                 onComplete={handleTradingComplete}
               />
             )}
 
-            {currentStep === 4 && (
+            {currentStep === 5 && (
               <RiskStep
+                defaultValues={risk ?? undefined}
                 onComplete={handleRiskComplete}
               />
             )}
           </div>
         )}
 
-        {/* Back button for steps 2–4 that use their own sub-components
-            (ConnectionStep, TradingStep, RiskStep render their own submit buttons) */}
-        {currentStep >= 2 && currentStep <= 4 && (
+        {/* Back button for steps 3–5 (ConnectionStep, TradingStep, RiskStep
+            render their own Continue buttons). Step 6 (Mode) and 0–2 each
+            own their own Back button. */}
+        {currentStep >= 3 && currentStep <= 5 && (
           <div className="flex justify-start">
             <Button variant="ghost" onClick={handleBack} type="button">
               ← Back

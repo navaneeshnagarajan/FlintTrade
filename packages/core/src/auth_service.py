@@ -457,6 +457,89 @@ class AuthService:
         self._db.commit()
         return True
 
+    def reset_account(self, password: str) -> bool:
+        """Delete the single-user account entirely. Requires password confirmation.
+
+        Intended for pre-login "start over" flows in the setup wizard: a user
+        who has just created an account but wants to change username or email
+        (either typed wrong, or changed their mind) can wipe the account and
+        re-run setup from scratch.
+
+        Wipes:
+          * the ``account`` row (credentials, TOTP secret, salts)
+          * all backup codes
+          * all login attempts (so the fresh setup starts clean)
+
+        Also clears the in-memory TOTP cache and resets any related state.
+
+        Returns:
+            True on successful reset; False if the password did not verify
+            (so the caller can return 401 without exposing which field failed).
+        """
+        if not self.verify_password(password):
+            return False
+
+        with self._write_lock:
+            self._db.execute("DELETE FROM account WHERE id = 1")
+            self._db.execute("DELETE FROM backup_codes")
+            self._db.execute("DELETE FROM login_attempts")
+            self._db.commit()
+
+        if hasattr(self, "_totp_secret_cache"):
+            delattr(self, "_totp_secret_cache")
+
+        logger.info("Account fully reset via setup-wizard escape hatch")
+        return True
+
+    def regenerate_totp(self, password: str) -> tuple[str, list[str]] | None:
+        """Issue a fresh TOTP secret + backup codes for the existing account.
+
+        Intended for pre-login "reset 2FA" flows in the setup wizard: a user
+        who scanned the QR into the wrong device, lost their phone, or wants
+        to start the 2FA step over before ever signing in. Requires password
+        confirmation so a shoulder-surfer cannot invalidate 2FA.
+
+        The encrypted TOTP secret is derived from the verified password +
+        a fresh 16-byte salt, matching the format used by ``setup_account``.
+        Old backup codes are invalidated and 8 new ones are generated.
+
+        Returns:
+            ``(provisioning_uri, backup_codes)`` on success, or ``None`` if
+            the password did not verify or no account exists.
+        """
+        if not self.verify_password(password):
+            return None
+        row = self._db.execute(
+            "SELECT 1 FROM account WHERE id = 1"
+        ).fetchone()
+        if not row:
+            return None
+
+        totp_secret = pyotp.random_base32()
+        totp_salt = os.urandom(16)
+        fernet = _derive_fernet_key(password, totp_salt)
+        encrypted = fernet.encrypt(totp_secret.encode("utf-8"))
+
+        backup_codes: list[str] = []
+        with self._write_lock:
+            self._db.execute(
+                "UPDATE account SET totp_secret_encrypted = ?, totp_salt = ? WHERE id = 1",
+                [encrypted, totp_salt],
+            )
+            self._db.execute("DELETE FROM backup_codes")
+            for _ in range(8):
+                code = secrets.token_hex(4).upper()
+                backup_codes.append(code)
+                code_hash = self._hasher.hash(code)
+                self._db.execute(
+                    "INSERT INTO backup_codes (code_hash, used) VALUES (?, 0)",
+                    [code_hash],
+                )
+            self._db.commit()
+
+        self._totp_secret_cache = totp_secret
+        return (self.get_totp_provisioning_uri(), backup_codes)
+
     def close(self) -> None:
         if self._conn:
             self._conn.close()

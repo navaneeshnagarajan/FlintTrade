@@ -260,6 +260,25 @@ export default function WelcomeRoute() {
     }
   }, [authStatus, navigate]);
 
+  // Resume-in-progress setup detection: if the backend says the account
+  // exists but localStorage shows the setup wizard was never finished
+  // (accountCreated=true but currentStep < final), route the user back to
+  // /setup-account to complete it rather than dumping them on a sign-in
+  // form that leads to a half-configured /trade.
+  useEffect(() => {
+    if (authStatus !== "logged-out") return;
+    try {
+      const raw = localStorage.getItem("flinttrade:setup-progress");
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { accountCreated?: boolean; currentStep?: number };
+      if (saved?.accountCreated && typeof saved.currentStep === "number" && saved.currentStep < 6) {
+        navigate("/setup-account", { replace: true });
+      }
+    } catch {
+      // Corrupt localStorage entry — ignore and let normal login flow run.
+    }
+  }, [authStatus, navigate]);
+
   // Returning user (logged-out / pin-required): auto-redirect to login
   // after a brief cinematic (1.5 s). When reduced-motion: immediate.
   // For logged-out users on their first login of the day, show a greeting screen first.

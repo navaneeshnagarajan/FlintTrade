@@ -22,18 +22,29 @@ export function useTestConnection(): UseTestConnectionResult {
     setStatus("testing");
     setMessage("");
     try {
-      const response = await fetch(`${host.replace(/\/$/, "")}/api/v1/ping`, {
+      // Route the test through our backend (same-origin) — browser → OpenAlgo
+      // direct is blocked by CORS because OpenAlgo does not send
+      // Access-Control-Allow-Origin for our origin. The backend pings
+      // server-to-server and returns a structured result.
+      const response = await fetch("/ft-api/v1/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apikey: apiKey }),
-        signal: AbortSignal.timeout(5000),
+        body: JSON.stringify({
+          host: host.replace(/\/+$/, ""),   // strip one or more trailing slashes
+          api_key: apiKey,
+        }),
+        signal: AbortSignal.timeout(10_000),
       });
-      if (response.ok) {
+      const data: { status?: string; message?: string } = await response
+        .json()
+        .catch(() => ({ status: "error", message: "Invalid JSON from backend" }));
+
+      if (response.ok && data.status === "ok") {
         setStatus("ok");
-        setMessage("Connected successfully");
+        setMessage(data.message || "Connected successfully");
       } else {
         setStatus("error");
-        setMessage(`Server returned ${response.status}`);
+        setMessage(data.message || `Server returned ${response.status}`);
       }
     } catch (err) {
       setStatus("error");

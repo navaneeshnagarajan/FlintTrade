@@ -1002,7 +1002,8 @@ def create_flask_app(
         "/v1/auth/callback",
         "/api/v1/errors",     # Frontend error reporting — public, rate-limited
         "/api/v1/ping",       # Liveness probe — no auth required
-        "/ft-api/v1/config/openalgo",  # Setup wizard — public, localhost-only
+        "/v1/config/openalgo",          # Setup wizard — public, localhost-only
+        "/v1/test-connection",          # Setup wizard — public, localhost-only
     )
 
     @app.before_request
@@ -1214,7 +1215,11 @@ def create_flask_app(
     # them to workspace.json, and hot-reloads app.config["CLIENT"] so no
     # process restart is needed.
     # ------------------------------------------------------------------
-    @app.route("/ft-api/v1/config/openalgo", methods=["POST"])
+    # Registered at /v1/... (not /ft-api/v1/...) because the WSGI prefix
+    # stripper normalises /ft-api/v1/X → /v1/X before URL dispatch, and the
+    # Vite dev proxy does the same rewrite. So a single /v1/... registration
+    # is reachable from both environments.
+    @app.route("/v1/config/openalgo", methods=["POST"])
     @limiter.limit("10 per minute")
     def _set_openalgo_config() -> Any:
         """Persist OpenAlgo connection settings from the UI.
@@ -1301,6 +1306,111 @@ def create_flask_app(
         return jsonify({
             "status": "ok",
             "message": "OpenAlgo config saved and client reloaded",
+        }), 200
+
+    # ------------------------------------------------------------------
+    # Connection-test endpoint — /ft-api/v1/test-connection
+    # Used by the Setup wizard + Settings › Connection. The browser cannot
+    # call OpenAlgo's /api/v1/ping directly because OpenAlgo does not send
+    # CORS headers for our origin (and we will not modify OpenAlgo). We
+    # proxy the test through our backend so it runs server-to-server with
+    # no CORS involvement.
+    # ------------------------------------------------------------------
+    @app.route("/v1/test-connection", methods=["POST"])
+    @limiter.limit("10 per minute")
+    def _test_openalgo_connection() -> Any:
+        """Server-side OpenAlgo connectivity + auth test.
+
+        Accepts the exact ``{host, api_key}`` the user typed in the wizard,
+        pings OpenAlgo, and returns a structured result. HTTP status is
+        always 200 — the real outcome lives in the JSON body so the
+        frontend can distinguish reachable/unreachable/auth-failed without
+        tripping on HTTP error handling.
+        """
+        remote = request.remote_addr or ""
+        if remote not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify({
+                "status": "error",
+                "message": "This endpoint is only reachable from localhost",
+            }), 403
+
+        payload = request.get_json(silent=True) or {}
+        # Strip one or more trailing slashes; setup wizard sometimes posts
+        # the host with "/" or "//".
+        host = str(payload.get("host", "")).strip().rstrip("/")
+        api_key = str(payload.get("api_key", "")).strip()
+
+        if not host or not api_key:
+            return jsonify({
+                "status": "error",
+                "message": "host and api_key are required",
+            }), 400
+
+        import httpx as _httpx  # noqa: PLC0415
+
+        try:
+            resp = _httpx.post(
+                f"{host}/api/v1/ping",
+                json={"apikey": api_key},
+                timeout=5.0,
+            )
+        except (_httpx.ConnectError, _httpx.ConnectTimeout) as exc:
+            return jsonify({
+                "status": "error",
+                "reachable": False,
+                "message": f"Cannot reach OpenAlgo at {host}: {exc}",
+            }), 200
+        except _httpx.TimeoutException:
+            return jsonify({
+                "status": "error",
+                "reachable": False,
+                "message": f"OpenAlgo at {host} did not respond within 5s",
+            }), 200
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({
+                "status": "error",
+                "reachable": False,
+                "message": f"Connection test failed ({type(exc).__name__}): {exc}",
+            }), 200
+
+        if resp.status_code == 200:
+            broker = "unknown"
+            try:
+                data = resp.json()
+                if isinstance(data, dict):
+                    broker = data.get("data", {}).get("broker") or data.get("broker") or "unknown"
+            except Exception:  # noqa: BLE001
+                pass
+            return jsonify({
+                "status": "ok",
+                "reachable": True,
+                "authenticated": True,
+                "broker": broker,
+                "message": f"Connected — broker: {broker}",
+            }), 200
+
+        if resp.status_code in (401, 403):
+            msg = "Invalid API key"
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    msg = body.get("message", msg)
+            except Exception:  # noqa: BLE001
+                pass
+            return jsonify({
+                "status": "error",
+                "reachable": True,
+                "authenticated": False,
+                "http_status": resp.status_code,
+                "message": f"Reachable but auth failed (HTTP {resp.status_code}): {msg}",
+            }), 200
+
+        return jsonify({
+            "status": "error",
+            "reachable": True,
+            "authenticated": False,
+            "http_status": resp.status_code,
+            "message": f"OpenAlgo returned unexpected HTTP {resp.status_code}",
         }), 200
 
     # ------------------------------------------------------------------

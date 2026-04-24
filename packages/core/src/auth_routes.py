@@ -362,6 +362,53 @@ def auth_setup() -> tuple[Any, int]:
     }), 201
 
 
+@auth_bp.route("/setup/reset", methods=["POST"])
+@_rate_limit("3 per hour")
+def auth_setup_reset() -> tuple[Any, int]:
+    """Wipe the account during the setup wizard.
+
+    Body: ``{"password": "…"}``. Requires the password the user just set so
+    a casual shoulder-surfer cannot destroy an account. Used by the "Delete
+    account & start over" escape hatch on the 2FA screen.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    body = request.get_json(silent=True) or {}
+    password = str(body.get("password", ""))
+    if not password:
+        return jsonify({"status": "error", "message": "Password required to confirm reset."}), 400
+    if not svc.reset_account(password):
+        return jsonify({"status": "error", "message": "Invalid password."}), 401
+    return jsonify({"status": "success", "data": {}}), 200
+
+
+@auth_bp.route("/setup/regenerate-2fa", methods=["POST"])
+@_rate_limit("3 per hour")
+def auth_setup_regenerate_2fa() -> tuple[Any, int]:
+    """Issue a fresh TOTP URI + backup codes for the existing account.
+
+    Body: ``{"password": "…"}``. Used by the "Reset 2FA" escape hatch on the
+    setup wizard 2FA screen — useful when the user scanned the QR into the
+    wrong device or wants a clean second attempt before first login.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    body = request.get_json(silent=True) or {}
+    password = str(body.get("password", ""))
+    if not password:
+        return jsonify({"status": "error", "message": "Password required to reset 2FA."}), 400
+    result = svc.regenerate_totp(password)
+    if result is None:
+        return jsonify({"status": "error", "message": "Invalid password."}), 401
+    totp_uri, backup_codes = result
+    return jsonify({
+        "status": "success",
+        "data": {"totp_uri": totp_uri, "backup_codes": backup_codes},
+    }), 200
+
+
 @auth_bp.route("/login", methods=["POST"])
 @_rate_limit("5 per minute")
 def auth_login() -> tuple[Any, int]:

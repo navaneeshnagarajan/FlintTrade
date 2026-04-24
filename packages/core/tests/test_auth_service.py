@@ -178,3 +178,68 @@ class TestLoginAttempts:
         for _ in range(5):
             svc.verify_password("wrong")
         assert svc.verify_password("StrongP@ss123!") is False
+
+
+class TestSetupEscapeHatches:
+    """Reset/regenerate paths exposed to the setup wizard."""
+
+    def _fresh(self, tmp_path: Path) -> AuthService:
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="",
+        )
+        return svc
+
+    def test_reset_account_wipes_user(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        assert svc.is_setup() is True
+        assert svc.reset_account("StrongP@ss123!") is True
+        assert svc.is_setup() is False
+
+    def test_reset_account_rejects_wrong_password(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        assert svc.reset_account("WrongPassword") is False
+        assert svc.is_setup() is True
+
+    def test_reset_account_allows_fresh_setup_after(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        svc.reset_account("StrongP@ss123!")
+        # Account was wiped — a fresh setup_account should succeed, not 409.
+        svc.setup_account(
+            username="bob", email="bob@example.com",
+            password="AnotherP@ss123!", pin="",
+        )
+        assert svc.get_profile()["username"] == "bob"
+
+    def test_regenerate_totp_issues_fresh_secret(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        svc.verify_password("StrongP@ss123!")  # prime the TOTP cache
+        original_uri = svc.get_totp_provisioning_uri()
+        result = svc.regenerate_totp("StrongP@ss123!")
+        assert result is not None
+        new_uri, codes = result
+        assert new_uri != original_uri  # different secret encoded in URI
+        assert new_uri.startswith("otpauth://totp/")
+        assert len(codes) == 8
+        assert all(len(c) == 8 for c in codes)
+
+    def test_regenerate_totp_invalidates_old_backup_codes(self, tmp_path: Path):
+        # Fresh service so the first 8 codes are the ones we capture.
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        old_codes = svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="",
+        )
+        result = svc.regenerate_totp("StrongP@ss123!")
+        assert result is not None
+        _, new_codes = result
+        # None of the old codes should still verify — they were deleted.
+        for code in old_codes:
+            assert svc.verify_backup_code(code) is False
+        # The newly issued codes DO verify.
+        assert svc.verify_backup_code(new_codes[0]) is True
+
+    def test_regenerate_totp_rejects_wrong_password(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        assert svc.regenerate_totp("WrongPassword") is None
