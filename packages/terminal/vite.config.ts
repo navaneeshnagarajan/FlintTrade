@@ -180,5 +180,23 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // Vitest defaults to a worker pool sized to CPU count, which OOMs on the
+    // 16 GB dev box and 7 GB CI runner because each jsdom worker holds a full
+    // DOM + the entire app's module graph. Cap workers + isolate per-file so
+    // memory does not balloon across the ~260 test files.
+    pool: "threads",
+    poolOptions: {
+      threads: {
+        // Tuned for 16 GB local + 7 GB CI runner. Override with VITEST_MAX_THREADS.
+        maxThreads: Number(process.env.VITEST_MAX_THREADS ?? 4),
+        minThreads: 1,
+        isolate: true,
+      },
+    },
+    // Per-test wall-clock cap. Most tests finish in <100 ms; 10 s catches
+    // hangs (e.g. a stub fetch that never resolves) before the whole suite
+    // times out.
+    testTimeout: 10_000,
+    hookTimeout: 10_000,
   },
 });

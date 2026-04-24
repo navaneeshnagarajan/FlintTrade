@@ -1,10 +1,35 @@
 [tool.uv.workspace]
 members = ["packages/*"]
 
+# ----------------------------------------------------------------------------
+# Pytest configuration
+# ----------------------------------------------------------------------------
+# Three custom markers are registered for the staged-test-execution model
+# (unit on every commit, integration on PR, slow nightly). --strict-markers
+# fails CI if any test uses an unregistered marker -- catches typos before
+# they go unnoticed.
+#
+# Existing tests are NOT yet marked. Default behaviour is unchanged: an
+# untagged test simply runs in every job. As tests get touched, prefer to
+# tag them; CI selection clauses can then be tightened over time.
+#
+# pytest-xdist + pytest-randomly are picked up automatically when installed
+# (they add their own opts via entry points). Local devs can run without
+# them; CI installs them and uses -n auto for parallelism.
+# ----------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--import-mode=importlib"
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "unit: fast, isolated unit test (default; runs on every commit)",
+    "integration: touches DB or mocked external services (PR gate)",
+    "slow: long-running test >1s (nightly or via --run-slow)",
+]
 
 [tool.ruff]
 target-version = "py312"

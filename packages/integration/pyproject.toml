@@ -23,4 +23,14 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--import-mode=importlib"
+asyncio_mode = "auto"
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "unit: fast, isolated unit test (default; runs on every commit)",
+    "integration: touches DB or mocked external services (PR gate)",
+    "slow: long-running test >1s (nightly or via --run-slow)",
+]

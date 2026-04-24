@@ -13,3 +13,17 @@ license = { text = "AGPL-3.0" }
 features = ["pyo3/abi3-py312"]
 python-source = "python"
 module-name = "tick_engine"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "unit: fast, isolated unit test (default; runs on every commit)",
+    "integration: touches DB or mocked external services (PR gate)",
+    "slow: long-running test >1s (nightly or via --run-slow)",
+]

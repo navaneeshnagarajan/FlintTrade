@@ -52,6 +52,19 @@ for _name in _GATEWAY_MODULES:
         importlib.import_module(_fq)
     sys.modules.setdefault(_name, sys.modules[_fq])
 
+# ws_proxy/ submodules — same shim, package one level deeper. Tests import
+# them as ``from ws_proxy.depth_20 import ...`` instead of the fully
+# qualified path.
+_WS_PROXY_PKG_FQ = "packages.gateway.src.ws_proxy"
+if _WS_PROXY_PKG_FQ not in sys.modules:
+    importlib.import_module(_WS_PROXY_PKG_FQ)
+sys.modules.setdefault("ws_proxy", sys.modules[_WS_PROXY_PKG_FQ])
+for _name in ("depth_20",):
+    _fq = f"{_WS_PROXY_PKG_FQ}.{_name}"
+    if _fq not in sys.modules:
+        importlib.import_module(_fq)
+    sys.modules.setdefault(f"ws_proxy.{_name}", sys.modules[_fq])
+
 
 @pytest.fixture
 def tmp_db(tmp_path: Path) -> Path:
