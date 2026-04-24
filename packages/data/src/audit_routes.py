@@ -1,15 +1,12 @@
 """Flask blueprint for SEBI-compliant audit trail endpoints.
 
-Provides 3 endpoints under /ft-api/v1/audit/:
+External URLs (frontend / Vite proxy calls these):
+    GET /ft-api/v1/audit/log     — Paginated, filterable audit trail.
+    GET /ft-api/v1/audit/export  — CSV export of the audit log.
+    GET /ft-api/v1/audit/stats   — Action-type counts for the admin dashboard.
 
-    GET /ft-api/v1/audit/log
-        Paginated, filterable audit trail.
-
-    GET /ft-api/v1/audit/export
-        CSV export of the audit log (date-range bounded).
-
-    GET /ft-api/v1/audit/stats
-        Action-type counts for the admin dashboard.
+The WSGI prefix stripper in app.py translates /ft-api/v1/* → /v1/* before
+Flask dispatch, so the blueprint is registered at /v1/audit (not /ft-api/v1/audit).
 
 The :class:`~packages.data.src.activity_log.ActivityLog` instance is read from
 ``current_app.config["ACTIVITY_LOG"]``, which is populated at startup by
@@ -33,7 +30,7 @@ from flask import Blueprint, Response, current_app, jsonify, make_response, requ
 
 logger = logging.getLogger("flinttrade.data.audit_routes")
 
-audit_bp = Blueprint("audit", __name__, url_prefix="/ft-api/v1/audit")
+audit_bp = Blueprint("audit", __name__, url_prefix="/v1/audit")
 
 # ---------------------------------------------------------------------------
 # Helper

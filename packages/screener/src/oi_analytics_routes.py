@@ -1,10 +1,13 @@
 """Flask blueprint for enhanced OI analytics endpoints.
 
-Provides three routes under /ft-api/v1/oi/:
+External URLs (frontend calls these via /ft-api/v1/oi/*; the WSGI prefix
+stripper in app.py rewrites to /v1/oi/* before Flask dispatch):
 
     POST /ft-api/v1/oi/heatmap  — OI heatmap data (normalised per-strike OI)
     POST /ft-api/v1/oi/analysis — OI change analysis (LB/SC/SB/LU signals)
     POST /ft-api/v1/oi/unusual  — Unusual OI activity (z-score based)
+
+Blueprint registered at ``/v1/oi`` (post-strip form).
 
 All endpoints fall back to synthetic sample data when no broker is connected
 so the OI widgets work in Explore mode.
@@ -25,7 +28,7 @@ from .option_chain import LOT_SIZES  # noqa: F401 — imported for symmetry with
 
 logger = logging.getLogger("flinttrade.screener.oi_analytics_routes")
 
-oi_analytics_bp = Blueprint("oi_analytics", __name__, url_prefix="/ft-api/v1/oi")
+oi_analytics_bp = Blueprint("oi_analytics", __name__, url_prefix="/v1/oi")
 
 _analytics = OIAnalytics()
 

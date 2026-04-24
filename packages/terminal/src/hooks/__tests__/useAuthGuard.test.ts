@@ -89,11 +89,13 @@ describe("useAuthGuard", () => {
   it("returns isLoading true when status is unknown", async () => {
     mockStatus = "unknown";
     // Mock the fetch call that the hook makes when status is unknown
+    // AuthStatusSchema (src/lib/schemas/ftApi.ts) requires `status` (string)
+    // and `data: { is_setup: boolean, is_locked: boolean }`.
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ data: { is_setup: true } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({ status: "success", data: { is_setup: true, is_locked: false } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
     );
 
     const { result } = renderHook(() => useAuthGuard());

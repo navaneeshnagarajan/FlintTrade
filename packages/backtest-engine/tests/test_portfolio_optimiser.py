@@ -452,7 +452,7 @@ class TestOptimiserRoutes:
             "config": {"method": "markowitz"},
         }
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -464,7 +464,7 @@ class TestOptimiserRoutes:
 
     def test_optimise_missing_returns(self, flask_client):
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps({"config": {}}),
             content_type="application/json",
         )
@@ -473,7 +473,7 @@ class TestOptimiserRoutes:
     def test_optimise_single_asset_rejected(self, flask_client):
         payload = {"returns": {"A": [0.01, 0.02, -0.01]}}
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -485,7 +485,7 @@ class TestOptimiserRoutes:
             "config": {"method": "nonexistent"},
         }
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -497,7 +497,7 @@ class TestOptimiserRoutes:
             "config": {"method": "equal_weight"},
         }
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -512,7 +512,7 @@ class TestOptimiserRoutes:
             "n_points": 5,
         }
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/frontier",
+            "/v1/portfolio/frontier",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -524,7 +524,7 @@ class TestOptimiserRoutes:
 
     def test_frontier_missing_returns(self, flask_client):
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/frontier",
+            "/v1/portfolio/frontier",
             data=json.dumps({"n_points": 5}),
             content_type="application/json",
         )
@@ -533,7 +533,7 @@ class TestOptimiserRoutes:
     def test_frontier_invalid_n_points(self, flask_client):
         payload = {"returns": _returns_payload(), "n_points": -5}
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/frontier",
+            "/v1/portfolio/frontier",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -542,7 +542,7 @@ class TestOptimiserRoutes:
     def test_frontier_n_points_too_large(self, flask_client):
         payload = {"returns": _returns_payload(), "n_points": 9999}
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/frontier",
+            "/v1/portfolio/frontier",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -554,7 +554,7 @@ class TestOptimiserRoutes:
             "config": {"method": "min_variance"},
         }
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -566,7 +566,7 @@ class TestOptimiserRoutes:
             "config": {"method": "risk_parity"},
         }
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -578,7 +578,7 @@ class TestOptimiserRoutes:
             "config": {"method": "markowitz", "max_weight": 0.35},
         }
         resp = flask_client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             data=json.dumps(payload),
             content_type="application/json",
         )

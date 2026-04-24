@@ -73,7 +73,7 @@ def test_permutation_ok(client):
         MockTester.return_value = instance
 
         resp = client.post(
-            "/ft-api/v1/backtest/permutation",
+            "/v1/backtest/permutation",
             json={"returns": _RETURNS},
         )
 
@@ -85,14 +85,14 @@ def test_permutation_ok(client):
 
 def test_permutation_missing_returns(client):
     """400 when returns is absent in returns mode."""
-    resp = client.post("/ft-api/v1/backtest/permutation", json={"mode": "returns"})
+    resp = client.post("/v1/backtest/permutation", json={"mode": "returns"})
     assert resp.status_code == 400
 
 
 def test_permutation_invalid_config(client):
     """400 for unparseable config."""
     resp = client.post(
-        "/ft-api/v1/backtest/permutation",
+        "/v1/backtest/permutation",
         json={"returns": _RETURNS, "config": "not-a-dict"},
     )
     assert resp.status_code == 400
@@ -101,7 +101,7 @@ def test_permutation_invalid_config(client):
 def test_permutation_trades_mode_missing_trades(client):
     """400 when trades mode but trades field absent."""
     resp = client.post(
-        "/ft-api/v1/backtest/permutation",
+        "/v1/backtest/permutation",
         json={"mode": "trades", "returns": _RETURNS},
     )
     assert resp.status_code == 400
@@ -124,7 +124,7 @@ def test_walkforward_ok(client):
         MockWF.return_value = instance
 
         resp = client.post(
-            "/ft-api/v1/backtest/walkforward",
+            "/v1/backtest/walkforward",
             json={"bars": _BARS},
         )
 
@@ -136,11 +136,11 @@ def test_walkforward_ok(client):
 
 def test_walkforward_missing_bars(client):
     """400 when bars field absent."""
-    resp = client.post("/ft-api/v1/backtest/walkforward", json={})
+    resp = client.post("/v1/backtest/walkforward", json={})
     assert resp.status_code == 400
 
 
 def test_walkforward_empty_bars(client):
     """400 for empty bars list."""
-    resp = client.post("/ft-api/v1/backtest/walkforward", json={"bars": []})
+    resp = client.post("/v1/backtest/walkforward", json={"bars": []})
     assert resp.status_code == 400

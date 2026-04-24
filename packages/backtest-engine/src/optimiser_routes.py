@@ -1,10 +1,13 @@
 """Flask Blueprint for portfolio optimisation endpoints.
 
-Registers under ``/ft-api/v1/portfolio/``:
+External URLs (frontend calls these via /ft-api/v1/portfolio/*; the WSGI prefix
+stripper in app.py rewrites to /v1/portfolio/* before Flask dispatch):
 
 - ``POST /ft-api/v1/portfolio/optimise`` — return optimal weights for a given
   set of historical returns and an :class:`OptimiserConfig`.
 - ``POST /ft-api/v1/portfolio/frontier`` — return efficient frontier points.
+
+Blueprint registered at ``/v1/portfolio`` (post-strip form).
 
 Request format (both endpoints)::
 
@@ -62,7 +65,7 @@ logger = logging.getLogger("flinttrade.backtest.optimiser_routes")
 optimiser_bp = Blueprint(
     "portfolio_optimiser",
     __name__,
-    url_prefix="/ft-api/v1/portfolio",
+    url_prefix="/v1/portfolio",
 )
 
 

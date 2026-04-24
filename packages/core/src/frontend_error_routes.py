@@ -1,13 +1,15 @@
 """Frontend error reporting + changelog Blueprint.
 
-Handles the two terminal-only endpoints that audit flagged as
-"route not registered":
+External URLs (frontend calls these via /ft-api/v1/*; the WSGI prefix stripper
+in app.py rewrites to /v1/* before Flask dispatch):
 
 - ``POST /ft-api/v1/errors``    — ingest frontend runtime errors into
   ``ErrorLog`` for post-mortem debugging. Fire-and-forget from the client.
 - ``GET  /ft-api/v1/changelog`` — serve the repo CHANGELOG.md as plain
   markdown so the in-app Changelog viewer renders the same source of
   truth as GitHub.
+
+Blueprint registered at ``/v1`` (post-strip form).
 
 Both endpoints log failures via structlog rather than raising, so the
 UI never receives a 5xx for these auxiliary calls.
@@ -24,7 +26,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 logger = logging.getLogger("flinttrade.core.frontend_error_routes")
 
 frontend_errors_bp = Blueprint(
-    "frontend_errors", __name__, url_prefix="/ft-api/v1"
+    "frontend_errors", __name__, url_prefix="/v1"
 )
 
 # Repo root — four parents up from this file (packages/core/src/<file>.py).

@@ -8,6 +8,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -69,6 +71,20 @@ vi.mock("@/hooks/usePrevClose", () => ({
   usePrevClose: vi.fn(),
 }));
 
+vi.mock("@/hooks/useGlobalKeys", () => ({
+  default: vi.fn(),
+}));
+
+vi.mock("@/components/KeyboardShortcuts/KeyboardShortcutsDialog", () => ({
+  default: () => null,
+}));
+
+// useTradingStoreSync calls useFunds + usePositions internally; stub it so
+// those hooks don't need a real QueryClient when the outer test does supply one.
+vi.mock("@/hooks/useTradingStoreSync", () => ({
+  useTradingStoreSync: vi.fn(),
+}));
+
 // Default: live mode (no banner). vi.hoisted so the variable is available in the
 // hoisted vi.mock factory.
 const { mockModeStore } = vi.hoisted(() => ({
@@ -97,6 +113,27 @@ vi.mock("@/stores/authStore", () => ({
 import AppLayout from "../AppLayout";
 
 // ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+}
+
+function renderApp() {
+  const queryClient = createTestQueryClient();
+  return render(
+    React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(AppLayout),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -112,7 +149,7 @@ describe("AppLayout", () => {
   });
 
   it("renders header with TopBar and TickerBar, and a main landmark", () => {
-    render(<AppLayout />);
+    renderApp();
 
     expect(screen.getByTestId("topbar")).toBeInTheDocument();
     expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
@@ -121,7 +158,7 @@ describe("AppLayout", () => {
   });
 
   it("renders child route content via Outlet", () => {
-    render(<AppLayout />);
+    renderApp();
 
     expect(screen.getByTestId("outlet-content")).toBeInTheDocument();
     expect(screen.getByText("Page Content")).toBeInTheDocument();
@@ -132,7 +169,7 @@ describe("AppLayout", () => {
       selector({ mode: "practice" }),
     );
 
-    render(<AppLayout />);
+    renderApp();
 
     expect(screen.getByText(/practice mode/i)).toBeInTheDocument();
     expect(screen.getByText(/simulated/i)).toBeInTheDocument();
@@ -144,7 +181,7 @@ describe("AppLayout", () => {
 
   it("shows InteractiveTour on /trade when tour has not been completed", () => {
     // localStorage is already clear from beforeEach — tour has not been seen
-    render(<AppLayout />);
+    renderApp();
 
     expect(screen.getByTestId("interactive-tour")).toBeInTheDocument();
   });
@@ -152,13 +189,13 @@ describe("AppLayout", () => {
   it("does not show InteractiveTour when tour has already been completed", () => {
     localStorage.setItem("flinttrade:tourComplete", "true");
 
-    render(<AppLayout />);
+    renderApp();
 
     expect(screen.queryByTestId("interactive-tour")).not.toBeInTheDocument();
   });
 
   it("hides InteractiveTour after onComplete is called", () => {
-    render(<AppLayout />);
+    renderApp();
 
     expect(screen.getByTestId("interactive-tour")).toBeInTheDocument();
 

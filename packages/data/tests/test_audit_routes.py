@@ -62,7 +62,7 @@ def client(app):
 
 def test_audit_log_ok(client):
     """200 with entries and pagination metadata."""
-    resp = client.get("/ft-api/v1/audit/log")
+    resp = client.get("/v1/audit/log")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"
@@ -74,19 +74,19 @@ def test_audit_log_ok(client):
 def test_audit_log_no_log(app_no_log):
     """503 when ACTIVITY_LOG not configured."""
     with app_no_log.test_client() as c:
-        resp = c.get("/ft-api/v1/audit/log")
+        resp = c.get("/v1/audit/log")
     assert resp.status_code == 503
 
 
 def test_audit_log_bad_page(client):
     """400 for non-integer page."""
-    resp = client.get("/ft-api/v1/audit/log?page=abc")
+    resp = client.get("/v1/audit/log?page=abc")
     assert resp.status_code == 400
 
 
 def test_audit_log_action_filter(client):
     """200 with action filter applied."""
-    resp = client.get("/ft-api/v1/audit/log?action=order.place")
+    resp = client.get("/v1/audit/log?action=order.place")
     assert resp.status_code == 200
 
 
@@ -97,7 +97,7 @@ def test_audit_log_action_filter(client):
 
 def test_audit_export_ok(client):
     """200 CSV attachment."""
-    resp = client.get("/ft-api/v1/audit/export")
+    resp = client.get("/v1/audit/export")
     assert resp.status_code == 200
     assert "text/csv" in resp.content_type
 
@@ -105,7 +105,7 @@ def test_audit_export_ok(client):
 def test_audit_export_no_log(app_no_log):
     """503 when ACTIVITY_LOG not configured."""
     with app_no_log.test_client() as c:
-        resp = c.get("/ft-api/v1/audit/export")
+        resp = c.get("/v1/audit/export")
     assert resp.status_code == 503
 
 
@@ -116,7 +116,7 @@ def test_audit_export_no_log(app_no_log):
 
 def test_audit_stats_ok(client):
     """200 with by_action counts."""
-    resp = client.get("/ft-api/v1/audit/stats")
+    resp = client.get("/v1/audit/stats")
     assert resp.status_code == 200
     body = resp.get_json()
     assert "by_action" in body["data"]
@@ -126,5 +126,5 @@ def test_audit_stats_ok(client):
 def test_audit_stats_no_log(app_no_log):
     """503 when ACTIVITY_LOG not configured."""
     with app_no_log.test_client() as c:
-        resp = c.get("/ft-api/v1/audit/stats")
+        resp = c.get("/v1/audit/stats")
     assert resp.status_code == 503

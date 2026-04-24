@@ -14,6 +14,8 @@ import "@testing-library/jest-dom";
 
 vi.mock("@/lib/formatters", () => ({
   formatCurrencyCompact: (v: number) => `₹${v}`,
+  // utils.ts (imported by TradeLogTab) calls formatNumber — must be in the mock
+  formatNumber: (v: number, d = 2) => v.toFixed(d),
 }));
 
 vi.mock("@/components/ui/badge", () => ({

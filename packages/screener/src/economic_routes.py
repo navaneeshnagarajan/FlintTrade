@@ -1,8 +1,11 @@
 """Flask blueprint for economic calendar endpoint.
 
-Provides one GET endpoint under /ft-api/v1/economic/:
+External URL (frontend calls this via /ft-api/v1/economic/*; the WSGI prefix
+stripper in app.py rewrites to /v1/economic/* before Flask dispatch):
 
     GET /ft-api/v1/economic/calendar?days=14&country=IN,US&impact=high
+
+Blueprint registered at ``/v1/economic`` (post-strip form).
 
 Response shape::
 
@@ -27,7 +30,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger("flinttrade.screener.economic_routes")
 
-economic_bp = Blueprint("economic", __name__, url_prefix="/ft-api/v1/economic")
+economic_bp = Blueprint("economic", __name__, url_prefix="/v1/economic")
 
 # ---------------------------------------------------------------------------
 # Lazy singleton

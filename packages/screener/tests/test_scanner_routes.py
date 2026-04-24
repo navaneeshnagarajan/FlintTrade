@@ -110,7 +110,7 @@ class TestScannerRun:
             from packages.screener.src.scanner_routes import PREBUILT_SCANS
             first_key = next(iter(PREBUILT_SCANS))
             resp = client.post(
-                "/ft-api/v1/scanner/run",
+                "/v1/scanner/run",
                 json={"prebuilt": first_key},
             )
 
@@ -127,7 +127,7 @@ class TestScannerRun:
         Args:
             client: Flask test client.
         """
-        resp = client.post("/ft-api/v1/scanner/run", json={"prebuilt": "no_such_scan"})
+        resp = client.post("/v1/scanner/run", json={"prebuilt": "no_such_scan"})
         assert resp.status_code == 400
         data = resp.get_json()
         assert data["status"] == "error"
@@ -145,7 +145,7 @@ class TestScannerRun:
             return_value=mock_results,
         ):
             resp = client.post(
-                "/ft-api/v1/scanner/run",
+                "/v1/scanner/run",
                 json={"config": _VALID_CONFIG},
             )
 
@@ -161,7 +161,7 @@ class TestScannerRun:
             client: Flask test client.
         """
         resp = client.post(
-            "/ft-api/v1/scanner/run",
+            "/v1/scanner/run",
             json={"config": {"name": "broken", "conditions": "not-a-list"}},
         )
         assert resp.status_code == 400
@@ -172,7 +172,7 @@ class TestScannerRun:
         Args:
             client: Flask test client.
         """
-        resp = client.post("/ft-api/v1/scanner/run", json={})
+        resp = client.post("/v1/scanner/run", json={})
         assert resp.status_code == 400
         assert "'prebuilt'" in resp.get_json()["message"] or "config" in resp.get_json()["message"]
 
@@ -189,7 +189,7 @@ class TestScannerRun:
             from packages.screener.src.scanner_routes import PREBUILT_SCANS
             first_key = next(iter(PREBUILT_SCANS))
             resp = client.post(
-                "/ft-api/v1/scanner/run",
+                "/v1/scanner/run",
                 json={"prebuilt": first_key},
             )
 
@@ -208,7 +208,7 @@ class TestScannerPrebuilt:
         Args:
             client: Flask test client.
         """
-        resp = client.get("/ft-api/v1/scanner/prebuilt")
+        resp = client.get("/v1/scanner/prebuilt")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -224,7 +224,7 @@ class TestScannerPrebuilt:
         Args:
             client: Flask test client.
         """
-        resp = client.get("/ft-api/v1/scanner/prebuilt")
+        resp = client.get("/v1/scanner/prebuilt")
         data = resp.get_json()
         assert data["count"] == len(data["data"]["scans"])
 
@@ -241,7 +241,7 @@ class TestScannerCustom:
         Args:
             client: Flask test client.
         """
-        resp = client.post("/ft-api/v1/scanner/custom", json=_VALID_CONFIG)
+        resp = client.post("/v1/scanner/custom", json=_VALID_CONFIG)
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -256,7 +256,7 @@ class TestScannerCustom:
             client: Flask test client.
         """
         resp = client.post(
-            "/ft-api/v1/scanner/custom",
+            "/v1/scanner/custom",
             data="",
             content_type="application/json",
         )
@@ -269,7 +269,7 @@ class TestScannerCustom:
             client: Flask test client.
         """
         resp = client.post(
-            "/ft-api/v1/scanner/custom",
+            "/v1/scanner/custom",
             json={"name": "bad", "conditions": "not-a-list"},
         )
         assert resp.status_code == 400

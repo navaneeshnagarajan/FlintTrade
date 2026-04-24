@@ -1,6 +1,7 @@
 """Flask blueprint for earnings calendar endpoints.
 
-Provides 3 GET endpoints under /ft-api/v1/earnings/:
+External URLs (frontend calls these via /ft-api/v1/earnings/*; the WSGI prefix
+stripper in app.py rewrites to /v1/earnings/* before Flask dispatch):
 
     GET /ft-api/v1/earnings/calendar?days=30
         Upcoming earnings within the next N days.
@@ -10,6 +11,8 @@ Provides 3 GET endpoints under /ft-api/v1/earnings/:
 
     GET /ft-api/v1/earnings/by-symbol?symbol=RELIANCE
         Full earnings history for a single NSE symbol.
+
+Blueprint registered at ``/v1/earnings`` (post-strip form).
 
 All endpoints return sample / synthetic data when no live source is connected.
 The :class:`~packages.screener.src.earnings_calendar.EarningsCalendar` instance
@@ -35,7 +38,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger("flinttrade.screener.earnings_routes")
 
-earnings_bp = Blueprint("earnings", __name__, url_prefix="/ft-api/v1/earnings")
+earnings_bp = Blueprint("earnings", __name__, url_prefix="/v1/earnings")
 
 # ---------------------------------------------------------------------------
 # Lazy calendar singleton

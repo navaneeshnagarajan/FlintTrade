@@ -84,6 +84,35 @@ def _default_home() -> Path:
     return Path.home() / ".flinttrade"
 
 
+def workspace_dir() -> Path:
+    """Resolve the active FlintTrade workspace directory and ensure it exists.
+
+    Priority order:
+
+    1. ``FLINTTRADE_WORKSPACE_DIR`` env var — used by pytest workers to give
+       each test process its own isolated directory so that DuckDB's exclusive
+       write locks do not collide across parallel runs.
+    2. ``FLINTTRADE_HOME`` env var (handled by :func:`_default_home`) — manual
+       override for non-standard installations.
+    3. Platform default (``~/.flinttrade`` on Linux, ``%APPDATA%/flinttrade``
+       on Windows, ``~/Library/Application Support/flinttrade`` on macOS).
+
+    The returned directory is always created (``parents=True, exist_ok=True``)
+    so callers can immediately open files inside it.
+
+    Returns:
+        An absolute :class:`~pathlib.Path` pointing to the workspace root.
+    """
+    override = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
+    if override:
+        p = Path(override).expanduser().resolve()
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    p = _default_home()
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 class Workspace:
     """Central configuration for a FlintTrade installation.
 

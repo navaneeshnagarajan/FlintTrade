@@ -229,6 +229,9 @@ describe("TopBarV2", () => {
 
   it("has banner role for accessibility", () => {
     renderTopBarV2();
-    expect(screen.getByRole("banner")).toBeInTheDocument();
+    // TopBarV2 uses data-testid="topbar-v2" on its root div; role="banner"
+    // was removed (commit ab0b595) to avoid a11y conflicts with the <header>
+    // landmark it is nested inside.
+    expect(screen.getByTestId("topbar-v2")).toBeInTheDocument();
   });
 });

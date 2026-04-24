@@ -54,6 +54,7 @@ from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 
 from .config import Settings  # noqa: E402
 from .openalgo_client import OpenAlgoClient  # noqa: E402
+from .workspace import workspace_dir as _workspace_dir  # noqa: E402
 from packages.data.src.audit_logger import AuditLogger  # noqa: E402
 # engine imports are deferred into FlintTradeApp.__init__() to break the
 # core↔engine circular import.  See PLC0415 comments throughout this file.
@@ -153,7 +154,7 @@ def _get_master_password() -> str:
         return _MASTER_PASSWORD
 
     # 2. Read from persisted file
-    password_file = Path.home() / ".flinttrade" / "master_password"
+    password_file = _workspace_dir() / "master_password"
     try:
         if password_file.exists():
             stored = password_file.read_text().strip()
@@ -206,8 +207,8 @@ def _read_openalgo_from_workspace() -> dict[str, Any]:
         ws = Workspace()
         path = ws.config_path
     except Exception:
-        # Fallback: direct ~/.flinttrade/workspace.json path
-        path = Path.home() / ".flinttrade" / "workspace.json"
+        # Fallback: direct workspace.json path (respects FLINTTRADE_WORKSPACE_DIR)
+        path = _workspace_dir() / "workspace.json"
 
     if not path.exists():
         return {}
@@ -272,7 +273,7 @@ def _cleanup_stale_duckdb_wals() -> None:
     delete the ``.wal``; if it fails another process holds the lock and
     we leave it alone.
     """
-    flinttrade_dir = Path.home() / ".flinttrade"
+    flinttrade_dir = _workspace_dir()
     if not flinttrade_dir.exists():
         return
 
@@ -564,14 +565,12 @@ def create_flask_app(
         registry = BrokerRegistry()
 
     if credential_store is None:
-        flinttrade_dir = Path.home() / ".flinttrade"
-        flinttrade_dir.mkdir(exist_ok=True)
+        flinttrade_dir = _workspace_dir()
         master_password = _get_master_password()
         credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
 
     if contract_manager is None:
-        flinttrade_dir = Path.home() / ".flinttrade"
-        flinttrade_dir.mkdir(exist_ok=True)
+        flinttrade_dir = _workspace_dir()
         contracts_dir = flinttrade_dir / "contracts"
         contracts_dir.mkdir(exist_ok=True)
         contract_manager = ContractManager(contracts_dir)
@@ -595,11 +594,11 @@ def create_flask_app(
     from packages.screener.src.stock_routes import stock_bp  # noqa: PLC0415
     app.register_blueprint(stock_bp)
 
-    # Register market scanner blueprint (/ft-api/v1/scanner/*)
+    # Register market scanner blueprint (/v1/scanner/* — external: /ft-api/v1/scanner/*)
     from packages.screener.src.scanner_routes import scanner_bp  # noqa: PLC0415
     app.register_blueprint(scanner_bp)
 
-    # Register OI analytics blueprint (/ft-api/v1/oi/*)
+    # Register OI analytics blueprint (/v1/oi/* — external: /ft-api/v1/oi/*)
     from packages.screener.src.oi_analytics_routes import oi_analytics_bp  # noqa: PLC0415
     app.register_blueprint(oi_analytics_bp)
 
@@ -607,7 +606,7 @@ def create_flask_app(
     from packages.screener.src.mf_routes import mf_bp  # noqa: PLC0415
     app.register_blueprint(mf_bp)
 
-    # Register breadth + volatility cone blueprints (/ft-api/v1/breadth/*, /ft-api/v1/analytics/volcone)
+    # Register breadth + volatility cone blueprints (/v1/breadth/*, /v1/analytics/volcone — external: /ft-api/v1/*)
     from packages.screener.src.breadth_routes import breadth_bp  # noqa: PLC0415
     app.register_blueprint(breadth_bp)
 
@@ -628,13 +627,13 @@ def create_flask_app(
 
     # Register persistent SecurityTracker (DuckDB-backed 404/IP-ban log)
     from packages.data.src.security_tracker import SecurityTracker as _SecurityTracker  # noqa: PLC0415
-    _security_db = Path.home() / ".flinttrade" / "security.db"
+    _security_db = _workspace_dir() / "security.db"
     app.config["SECURITY_TRACKER"] = _SecurityTracker(str(_security_db))
 
     # Register LoginActivity + SessionTracker (DuckDB-backed)
     from packages.data.src.activity_log import LoginActivity as _LoginActivity  # noqa: PLC0415
     from packages.data.src.activity_log import SessionTracker as _SessionTracker  # noqa: PLC0415
-    _login_db = Path.home() / ".flinttrade" / "activity.db"
+    _login_db = _workspace_dir() / "activity.db"
     app.config["LOGIN_ACTIVITY"] = _LoginActivity(str(_login_db))
     app.config["SESSION_TRACKER"] = _SessionTracker(str(_login_db))
 
@@ -662,16 +661,16 @@ def create_flask_app(
     from .monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
-    # Register frontend error ingestion + changelog reader (/ft-api/v1/errors,
-    # /ft-api/v1/changelog). Previously referenced by the terminal but not
-    # wired, causing 404s on fire-and-forget error reports.
+    # Register frontend error ingestion + changelog reader (/v1/errors, /v1/changelog
+    # — external URLs: /ft-api/v1/errors, /ft-api/v1/changelog). Previously referenced
+    # by the terminal but not wired, causing 404s on fire-and-forget error reports.
     from .error_log import ErrorLog as _ErrorLog  # noqa: PLC0415
     from .frontend_error_routes import frontend_errors_bp  # noqa: PLC0415
-    _error_db = Path.home() / ".flinttrade" / "error_log.duckdb"
+    _error_db = _workspace_dir() / "error_log.duckdb"
     try:
         app.config["ERROR_LOG"] = _ErrorLog(db_path=str(_error_db))
     except Exception as exc:
-        logger.warning("ErrorLog initialisation failed (%s); /ft-api/v1/errors will log warnings only", exc)
+        logger.warning("ErrorLog initialisation failed (%s); /v1/errors will log warnings only", exc)
         app.config["ERROR_LOG"] = None
     app.register_blueprint(frontend_errors_bp)
 
@@ -698,7 +697,7 @@ def create_flask_app(
     # Stored on app.config so admin_routes and the error handler can access it.
     from .error_log import ErrorLog  # noqa: PLC0415
 
-    _error_log_path = Path.home() / ".flinttrade" / "error_log.duckdb"
+    _error_log_path = _workspace_dir() / "error_log.duckdb"
     _error_log = ErrorLog(_error_log_path)
     app.config["ERROR_LOG"] = _error_log
 
@@ -740,7 +739,7 @@ def create_flask_app(
     # @before_request / @after_request hooks record every HTTP request.
     from .traffic_logger import TrafficLogger as _TrafficLogger, should_skip_path as _skip_path  # noqa: PLC0415
 
-    _traffic_log_path = Path.home() / ".flinttrade" / "traffic_log.duckdb"
+    _traffic_log_path = _workspace_dir() / "traffic_log.duckdb"
     _traffic_logger = _TrafficLogger(_traffic_log_path)
     app.config["TRAFFIC_LOGGER"] = _traffic_logger
 
@@ -777,7 +776,7 @@ def create_flask_app(
     # for in-memory stats; this provides persistent DuckDB-backed storage.
     from packages.engine.src.latency_monitor import LatencyMonitor as _LatencyMonitor  # noqa: PLC0415
 
-    _latency_log_path = Path.home() / ".flinttrade" / "latency_log.duckdb"
+    _latency_log_path = _workspace_dir() / "latency_log.duckdb"
     _latency_monitor = _LatencyMonitor(_latency_log_path)
     app.config["LATENCY_MONITOR"] = _latency_monitor
 
@@ -786,7 +785,7 @@ def create_flask_app(
     if _analyzer_enabled:
         from .api_analyzer import APIAnalyzer as _APIAnalyzer  # noqa: PLC0415
 
-        _analyzer_path = Path.home() / ".flinttrade" / "api_analyzer.duckdb"
+        _analyzer_path = _workspace_dir() / "api_analyzer.duckdb"
         _api_analyzer = _APIAnalyzer(_analyzer_path)
         app.config["API_ANALYZER"] = _api_analyzer
 
@@ -828,7 +827,7 @@ def create_flask_app(
     # Register Activity Log blueprint (/api/v1/admin/activity)
     # Always registered — SEBI audit access is not restricted to dev mode.
     from packages.data.src.activity_routes import activity_bp  # noqa: PLC0415
-    _activity_db = Path.home() / ".flinttrade" / "activity.db"
+    _activity_db = _workspace_dir() / "activity.db"
     from packages.data.src.activity_log import ActivityLog as _ActivityLog  # noqa: PLC0415
     app.config["ACTIVITY_LOG"] = _ActivityLog(str(_activity_db))
     app.register_blueprint(activity_bp)
@@ -872,24 +871,24 @@ def create_flask_app(
     from packages.screener.src.ipo_routes import ipo_bp  # noqa: PLC0415
     app.register_blueprint(ipo_bp)
 
-    # Register Earnings Calendar blueprint (/ft-api/v1/earnings/*)
+    # Register Earnings Calendar blueprint (/v1/earnings/* — external: /ft-api/v1/earnings/*)
     from packages.screener.src.earnings_routes import earnings_bp  # noqa: PLC0415
     app.register_blueprint(earnings_bp)
 
-    # Register Pivot Calculator blueprint (/ft-api/v1/pivots/*)
+    # Register Pivot Calculator blueprint (/v1/pivots/* — external: /ft-api/v1/pivots/*)
     from packages.screener.src.pivot_routes import pivot_bp  # noqa: PLC0415
     app.register_blueprint(pivot_bp)
 
-    # Register Economic Calendar blueprint (/ft-api/v1/economic/*)
+    # Register Economic Calendar blueprint (/v1/economic/* — external: /ft-api/v1/economic/*)
     from packages.screener.src.economic_routes import economic_bp  # noqa: PLC0415
     app.register_blueprint(economic_bp)
 
-    # Register Audit Trail blueprint (/ft-api/v1/audit/*)
+    # Register Audit Trail blueprint (/v1/audit/* — external: /ft-api/v1/audit/*)
     from packages.data.src.audit_routes import audit_bp  # noqa: PLC0415
     app.register_blueprint(audit_bp)
 
-    # Register Analytics extensions blueprint (/ft-api/v1/indicators/vwap,
-    # /ft-api/v1/analytics/pairs, /ft-api/v1/analytics/mtf)
+    # Register Analytics extensions blueprint (/v1/indicators/vwap, /v1/analytics/pairs,
+    # /v1/analytics/mtf — external: /ft-api/v1/indicators/*, /ft-api/v1/analytics/*)
     from packages.screener.src.analytics_routes import analytics_bp  # noqa: PLC0415
     app.register_blueprint(analytics_bp)
 
@@ -953,7 +952,7 @@ def create_flask_app(
     from packages.integration.src.excel_routes import excel_bp  # noqa: PLC0415
     app.register_blueprint(excel_bp)
 
-    # Register Workspace Preset blueprint (/ft-api/v1/presets/*)
+    # Register Workspace Preset blueprint (/v1/presets/* — external: /ft-api/v1/presets/*)
     from .preset_routes import preset_bp  # noqa: PLC0415
     app.register_blueprint(preset_bp)
 
@@ -972,7 +971,7 @@ def create_flask_app(
     # Register Auth blueprint (/v1/auth/*) — public endpoints, no API key required
     from .auth_service import AuthService as _AuthService  # noqa: PLC0415
     from .auth_routes import auth_bp  # noqa: PLC0415
-    _auth_db = Path.home() / ".flinttrade" / "auth.db"
+    _auth_db = _workspace_dir() / "auth.db"
     app.config["AUTH_SERVICE"] = _AuthService(db_path=_auth_db)
     app.register_blueprint(auth_bp)
 
@@ -1578,8 +1577,7 @@ class FlintTradeApp:
         self.cron.telegram_bot = self.telegram
 
         # Gateway — broker registry + credential store + contract manager
-        flinttrade_dir = Path.home() / ".flinttrade"
-        flinttrade_dir.mkdir(exist_ok=True)
+        flinttrade_dir = _workspace_dir()
         master_password = _get_master_password()
         self.credential_store = CredentialStore(
             flinttrade_dir / "credentials.db", master_password

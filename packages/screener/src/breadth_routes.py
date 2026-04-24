@@ -1,9 +1,12 @@
 """Flask blueprint for market breadth and volatility cone endpoints.
 
-Endpoints:
+External URLs (frontend calls these via /ft-api/v1/*; the WSGI prefix stripper
+in app.py rewrites to /v1/* before Flask dispatch):
     GET  /ft-api/v1/breadth/current        — Latest breadth snapshot
     GET  /ft-api/v1/breadth/history        — Historical breadth (query: days=30)
     POST /ft-api/v1/analytics/volcone      — Volatility cone from return series
+
+Blueprint registered at ``/v1`` (post-strip form).
 
 All endpoints fall back to sample/synthetic data when no live data is
 available, so the terminal works in Explore mode without a broker connection.
@@ -21,7 +24,7 @@ from .volatility_cone import VolatilityCone
 
 logger = logging.getLogger("flinttrade.screener.breadth_routes")
 
-breadth_bp = Blueprint("breadth", __name__, url_prefix="/ft-api/v1")
+breadth_bp = Blueprint("breadth", __name__, url_prefix="/v1")
 
 # Module-level calculator instance — shared across requests.
 # For production multi-process deployments this would be replaced by a

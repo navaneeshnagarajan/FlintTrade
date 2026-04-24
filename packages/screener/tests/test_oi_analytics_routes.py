@@ -59,7 +59,7 @@ def client(app):
 def test_heatmap_ok(client):
     """200 with heatmap data."""
     resp = client.post(
-        "/ft-api/v1/oi/heatmap",
+        "/v1/oi/heatmap",
         json={"symbol": "NIFTY", "chain": _CHAIN},
     )
     assert resp.status_code == 200
@@ -69,7 +69,7 @@ def test_heatmap_ok(client):
 
 def test_heatmap_sample_data(client):
     """200 with synthetic sample data when chain absent."""
-    resp = client.post("/ft-api/v1/oi/heatmap", json={"symbol": "NIFTY"})
+    resp = client.post("/v1/oi/heatmap", json={"symbol": "NIFTY"})
     assert resp.status_code == 200
 
 
@@ -81,7 +81,7 @@ def test_heatmap_sample_data(client):
 def test_oi_analysis_ok(client):
     """200 with LB/SC/SB/LU signal analysis."""
     resp = client.post(
-        "/ft-api/v1/oi/analysis",
+        "/v1/oi/analysis",
         json={"symbol": "NIFTY", "chain": _CHAIN, "spot": 22050.0},
     )
     assert resp.status_code == 200
@@ -91,7 +91,7 @@ def test_oi_analysis_ok(client):
 
 def test_oi_analysis_sample(client):
     """200 with sample data when chain absent."""
-    resp = client.post("/ft-api/v1/oi/analysis", json={})
+    resp = client.post("/v1/oi/analysis", json={})
     assert resp.status_code == 200
 
 
@@ -103,7 +103,7 @@ def test_oi_analysis_sample(client):
 def test_unusual_ok(client):
     """200 with unusual OI activity report."""
     resp = client.post(
-        "/ft-api/v1/oi/unusual",
+        "/v1/oi/unusual",
         json={"symbol": "NIFTY", "chain": _CHAIN},
     )
     assert resp.status_code == 200
@@ -113,5 +113,5 @@ def test_unusual_ok(client):
 
 def test_unusual_sample(client):
     """200 with sample data when chain absent."""
-    resp = client.post("/ft-api/v1/oi/unusual", json={})
+    resp = client.post("/v1/oi/unusual", json={})
     assert resp.status_code == 200

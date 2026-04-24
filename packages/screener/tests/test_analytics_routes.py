@@ -57,7 +57,7 @@ def test_vwap_ok(client):
         "packages.indicators.src.vwap_bands.calculate_vwap_bands",
         return_value=vwap_result,
     ):
-        resp = client.post("/ft-api/v1/indicators/vwap", json={"bars": _BARS})
+        resp = client.post("/v1/indicators/vwap", json={"bars": _BARS})
     assert resp.status_code == 200
     assert resp.get_json()["status"] == "success"
 
@@ -70,7 +70,7 @@ def test_vwap_no_bars_uses_sample(client):
         "packages.indicators.src.vwap_bands.calculate_vwap_bands",
         return_value=vwap_result,
     ):
-        resp = client.post("/ft-api/v1/indicators/vwap", json={})
+        resp = client.post("/v1/indicators/vwap", json={})
     assert resp.status_code == 200
 
 
@@ -89,7 +89,7 @@ def test_pairs_ok(client):
     }
     with patch.object(mod._pair_engine, "analyse_pair", return_value=pair_result):
         resp = client.post(
-            "/ft-api/v1/analytics/pairs",
+            "/v1/analytics/pairs",
             json={
                 "pairs": [
                     {
@@ -109,7 +109,7 @@ def test_pairs_ok(client):
 
 def test_pairs_sample_data(client):
     """200 with sample data when pairs absent."""
-    resp = client.post("/ft-api/v1/analytics/pairs", json={})
+    resp = client.post("/v1/analytics/pairs", json={})
     # Should return 200 with sample data or 400 — not 5xx
     assert resp.status_code in {200, 400}
 
@@ -128,7 +128,7 @@ def test_mtf_ok(client):
     }
     with patch.object(mod._mtf_analyser, "analyse", return_value=mtf_result):
         resp = client.post(
-            "/ft-api/v1/analytics/mtf",
+            "/v1/analytics/mtf",
             json={
                 "symbol": "NIFTY",
                 "data": {"1h": _BARS, "4h": _BARS},
@@ -139,5 +139,5 @@ def test_mtf_ok(client):
 
 def test_mtf_sample_data(client):
     """200 or 400 when no data provided."""
-    resp = client.post("/ft-api/v1/analytics/mtf", json={})
+    resp = client.post("/v1/analytics/mtf", json={})
     assert resp.status_code in {200, 400}

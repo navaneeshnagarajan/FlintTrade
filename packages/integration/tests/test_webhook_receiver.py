@@ -491,7 +491,7 @@ class TestWebhookRoutes:
         headers = {"Content-Type": "application/json"}
         if secret:
             headers["X-Signature"] = _sign(raw, secret)
-        return client.post(f"/ft-api/v1/webhook/{source}", data=raw, headers=headers)
+        return client.post(f"/v1/webhook/{source}", data=raw, headers=headers)
 
     # Happy paths
 
@@ -529,7 +529,7 @@ class TestWebhookRoutes:
     def test_invalid_signature_rejected(self, flask_client):
         raw = json.dumps({"action": "BUY", "symbol": "NIFTY"}).encode()
         resp = flask_client.post(
-            "/ft-api/v1/webhook/tradingview",
+            "/v1/webhook/tradingview",
             data=raw,
             headers={"Content-Type": "application/json", "X-Signature": "sha256=wrongsig"},
         )
@@ -538,7 +538,7 @@ class TestWebhookRoutes:
     def test_no_signature_rejected_when_secret_set(self, flask_client):
         raw = json.dumps({"action": "BUY"}).encode()
         resp = flask_client.post(
-            "/ft-api/v1/webhook/tradingview",
+            "/v1/webhook/tradingview",
             data=raw,
             headers={"Content-Type": "application/json"},
         )
@@ -547,7 +547,7 @@ class TestWebhookRoutes:
     def test_no_secret_no_sig_ok(self, no_sig_client):
         raw = json.dumps({"action": "alert"}).encode()
         resp = no_sig_client.post(
-            "/ft-api/v1/webhook/custom",
+            "/v1/webhook/custom",
             data=raw,
             headers={"Content-Type": "application/json"},
         )
@@ -561,7 +561,7 @@ class TestWebhookRoutes:
 
     def test_invalid_json_body(self, flask_client):
         resp = flask_client.post(
-            "/ft-api/v1/webhook/custom",
+            "/v1/webhook/custom",
             data=b"not-json",
             headers={"Content-Type": "application/json"},
         )
@@ -571,7 +571,7 @@ class TestWebhookRoutes:
         raw = json.dumps([1, 2, 3]).encode()
         sig = _sign(raw, "testsecret")
         resp = flask_client.post(
-            "/ft-api/v1/webhook/custom",
+            "/v1/webhook/custom",
             data=raw,
             headers={"Content-Type": "application/json", "X-Signature": sig},
         )
@@ -597,12 +597,12 @@ class TestWebhookRoutes:
         body = json.dumps({"action": "signal"}).encode()
         for _ in range(2):
             client.post(
-                "/ft-api/v1/webhook/custom",
+                "/v1/webhook/custom",
                 data=body,
                 headers={"Content-Type": "application/json"},
             )
         resp = client.post(
-            "/ft-api/v1/webhook/custom",
+            "/v1/webhook/custom",
             data=body,
             headers={"Content-Type": "application/json"},
         )
@@ -611,7 +611,7 @@ class TestWebhookRoutes:
     # Log endpoint
 
     def test_log_endpoint_empty(self, flask_client):
-        resp = flask_client.get("/ft-api/v1/webhook/log")
+        resp = flask_client.get("/v1/webhook/log")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -624,7 +624,7 @@ class TestWebhookRoutes:
             {"action": "BUY", "symbol": "NIFTY"},
             secret="testsecret",
         )
-        resp = flask_client.get("/ft-api/v1/webhook/log")
+        resp = flask_client.get("/v1/webhook/log")
         data = resp.get_json()
         assert data["data"]["count"] >= 1
 
@@ -637,10 +637,10 @@ class TestWebhookRoutes:
                 {"action": "BUY", "symbol": "NIFTY"},
                 secret="testsecret",
             )
-        resp = flask_client.get("/ft-api/v1/webhook/log?limit=2")
+        resp = flask_client.get("/v1/webhook/log?limit=2")
         data = resp.get_json()
         assert data["data"]["count"] <= 2
 
     def test_log_includes_rate_limit_remaining(self, flask_client):
-        resp = flask_client.get("/ft-api/v1/webhook/log")
+        resp = flask_client.get("/v1/webhook/log")
         assert "rate_limit_remaining" in resp.get_json()["data"]

@@ -35,7 +35,7 @@ def client(app):
 
 def test_breadth_current_ok(client):
     """200 with breadth snapshot."""
-    resp = client.get("/ft-api/v1/breadth/current")
+    resp = client.get("/v1/breadth/current")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"
@@ -50,7 +50,7 @@ def test_breadth_current_ok(client):
 
 def test_breadth_history_ok(client):
     """200 with list of historical breadth data."""
-    resp = client.get("/ft-api/v1/breadth/history?days=10")
+    resp = client.get("/v1/breadth/history?days=10")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"
@@ -59,7 +59,7 @@ def test_breadth_history_ok(client):
 
 def test_breadth_history_default_days(client):
     """200 with default days parameter."""
-    resp = client.get("/ft-api/v1/breadth/history")
+    resp = client.get("/v1/breadth/history")
     assert resp.status_code == 200
 
 
@@ -72,7 +72,7 @@ def test_volcone_ok(client):
     """200 with vol cone data for a valid return series."""
     returns = [0.01, -0.005, 0.008, 0.003, -0.002] * 20
     resp = client.post(
-        "/ft-api/v1/analytics/volcone",
+        "/v1/analytics/volcone",
         json={"returns": returns},
     )
     assert resp.status_code == 200
@@ -82,6 +82,6 @@ def test_volcone_ok(client):
 
 def test_volcone_missing_returns(client):
     """400 or sample data when returns absent (depends on implementation)."""
-    resp = client.post("/ft-api/v1/analytics/volcone", json={})
+    resp = client.post("/v1/analytics/volcone", json={})
     # Either 400 validation or 200 with sample data
     assert resp.status_code in {200, 400}

@@ -383,11 +383,11 @@ class TestEarningsCalendarRoute:
     """Test GET /ft-api/v1/earnings/calendar."""
 
     def test_returns_200(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar")
+        resp = _get(route_client, "/v1/earnings/calendar")
         assert resp.status_code == 200
 
     def test_response_shape(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar")
+        resp = _get(route_client, "/v1/earnings/calendar")
         data = resp.get_json()
         assert data["status"] == "success"
         assert "events" in data["data"]
@@ -395,26 +395,26 @@ class TestEarningsCalendarRoute:
         assert "days" in data["data"]
 
     def test_default_days_is_30(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar")
+        resp = _get(route_client, "/v1/earnings/calendar")
         data = resp.get_json()
         assert data["data"]["days"] == 30
 
     def test_custom_days_param(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar", days=60)
+        resp = _get(route_client, "/v1/earnings/calendar", days=60)
         data = resp.get_json()
         assert data["data"]["days"] == 60
 
     def test_invalid_days_returns_400(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar", days="abc")
+        resp = _get(route_client, "/v1/earnings/calendar", days="abc")
         assert resp.status_code == 400
 
     def test_count_matches_events_length(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar", days=90)
+        resp = _get(route_client, "/v1/earnings/calendar", days=90)
         data = resp.get_json()
         assert data["data"]["count"] == len(data["data"]["events"])
 
     def test_event_fields_present(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar", days=90)
+        resp = _get(route_client, "/v1/earnings/calendar", days=90)
         events = resp.get_json()["data"]["events"]
         if events:
             e = events[0]
@@ -432,7 +432,7 @@ class TestEarningsCalendarRoute:
                 assert field in e, f"Missing field: {field}"
 
     def test_is_sample_data_flag(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/calendar")
+        resp = _get(route_client, "/v1/earnings/calendar")
         data = resp.get_json()
         assert data["is_sample_data"] is True
 
@@ -443,25 +443,25 @@ class TestEarningsByDateRoute:
     def test_returns_200_for_valid_date(self, route_client):
         # Use a date that will have events in the generated sample (±3 months)
         target = (date.today() + timedelta(days=15)).isoformat()
-        resp = _get(route_client, "/ft-api/v1/earnings/by-date", date=target)
+        resp = _get(route_client, "/v1/earnings/by-date", date=target)
         assert resp.status_code == 200
 
     def test_missing_date_returns_400(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-date")
+        resp = _get(route_client, "/v1/earnings/by-date")
         assert resp.status_code == 400
 
     def test_invalid_date_format_returns_400(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-date", date="not-a-date")
+        resp = _get(route_client, "/v1/earnings/by-date", date="not-a-date")
         assert resp.status_code == 400
 
     def test_response_contains_date_field(self, route_client):
         target = (date.today() + timedelta(days=15)).isoformat()
-        resp = _get(route_client, "/ft-api/v1/earnings/by-date", date=target)
+        resp = _get(route_client, "/v1/earnings/by-date", date=target)
         data = resp.get_json()
         assert data["data"]["date"] == target
 
     def test_empty_list_for_date_with_no_events(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-date", date="2099-01-01")
+        resp = _get(route_client, "/v1/earnings/by-date", date="2099-01-01")
         data = resp.get_json()
         assert data["status"] == "success"
         assert data["data"]["count"] == 0
@@ -472,37 +472,37 @@ class TestEarningsBySymbolRoute:
     """Test GET /ft-api/v1/earnings/by-symbol."""
 
     def test_returns_200_for_valid_symbol(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-symbol", symbol="RELIANCE")
+        resp = _get(route_client, "/v1/earnings/by-symbol", symbol="RELIANCE")
         assert resp.status_code == 200
 
     def test_missing_symbol_returns_400(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-symbol")
+        resp = _get(route_client, "/v1/earnings/by-symbol")
         assert resp.status_code == 400
 
     def test_response_contains_symbol_field(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-symbol", symbol="TCS")
+        resp = _get(route_client, "/v1/earnings/by-symbol", symbol="TCS")
         data = resp.get_json()
         assert data["data"]["symbol"] == "TCS"
 
     def test_case_insensitive_symbol(self, route_client):
-        upper = _get(route_client, "/ft-api/v1/earnings/by-symbol", symbol="INFY")
-        lower = _get(route_client, "/ft-api/v1/earnings/by-symbol", symbol="infy")
+        upper = _get(route_client, "/v1/earnings/by-symbol", symbol="INFY")
+        lower = _get(route_client, "/v1/earnings/by-symbol", symbol="infy")
         assert upper.get_json()["data"]["count"] == lower.get_json()["data"]["count"]
 
     def test_unknown_symbol_returns_empty_events(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-symbol", symbol="XYZABCFAKE")
+        resp = _get(route_client, "/v1/earnings/by-symbol", symbol="XYZABCFAKE")
         data = resp.get_json()
         assert data["status"] == "success"
         assert data["data"]["count"] == 0
         assert data["data"]["events"] == []
 
     def test_count_matches_events_length(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-symbol", symbol="TCS")
+        resp = _get(route_client, "/v1/earnings/by-symbol", symbol="TCS")
         data = resp.get_json()
         assert data["data"]["count"] == len(data["data"]["events"])
 
     def test_events_sorted_by_date(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/earnings/by-symbol", symbol="RELIANCE")
+        resp = _get(route_client, "/v1/earnings/by-symbol", symbol="RELIANCE")
         events = resp.get_json()["data"]["events"]
         dates = [e["date"] for e in events]
         assert dates == sorted(dates)

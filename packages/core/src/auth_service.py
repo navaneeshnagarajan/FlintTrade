@@ -38,9 +38,14 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from .workspace import workspace_dir as _workspace_dir
+
 logger = logging.getLogger("flinttrade.auth")
 
-_DEFAULT_DB_PATH = Path.home() / ".flinttrade" / "auth.db"
+# Evaluated at import time — set FLINTTRADE_WORKSPACE_DIR *before* importing
+# this module (pytest fixtures that use monkeypatch.setenv should scope at
+# session level, or pass db_path explicitly to AuthService).
+_DEFAULT_DB_PATH = _workspace_dir() / "auth.db"
 _MAX_LOGIN_ATTEMPTS = 5
 _LOCKOUT_DURATION_SECONDS = 900  # 15 minutes
 

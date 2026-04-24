@@ -418,11 +418,11 @@ class TestEconomicCalendarRoute:
     """Test GET /ft-api/v1/economic/calendar."""
 
     def test_returns_200(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar")
+        resp = _get(route_client, "/v1/economic/calendar")
         assert resp.status_code == 200
 
     def test_response_shape(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar")
+        resp = _get(route_client, "/v1/economic/calendar")
         data = resp.get_json()
         assert data["status"] == "success"
         assert "events" in data["data"]
@@ -431,58 +431,58 @@ class TestEconomicCalendarRoute:
         assert "filters" in data["data"]
 
     def test_default_days_is_14(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar")
+        resp = _get(route_client, "/v1/economic/calendar")
         data = resp.get_json()
         assert data["data"]["days"] == 14
 
     def test_custom_days_param(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days=30)
+        resp = _get(route_client, "/v1/economic/calendar", days=30)
         data = resp.get_json()
         assert data["data"]["days"] == 30
 
     def test_invalid_days_returns_400(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days="abc")
+        resp = _get(route_client, "/v1/economic/calendar", days="abc")
         assert resp.status_code == 400
 
     def test_invalid_impact_returns_400(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", impact="critical")
+        resp = _get(route_client, "/v1/economic/calendar", impact="critical")
         assert resp.status_code == 400
 
     def test_count_matches_events_length(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days=60)
+        resp = _get(route_client, "/v1/economic/calendar", days=60)
         data = resp.get_json()
         assert data["data"]["count"] == len(data["data"]["events"])
 
     def test_is_sample_data_flag(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar")
+        resp = _get(route_client, "/v1/economic/calendar")
         data = resp.get_json()
         assert data["is_sample_data"] is True
 
     def test_country_filter_single(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days=60, country="IN")
+        resp = _get(route_client, "/v1/economic/calendar", days=60, country="IN")
         events = resp.get_json()["data"]["events"]
         for ev in events:
             assert ev["country"] == "IN"
 
     def test_country_filter_multiple(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days=60, country="IN,US")
+        resp = _get(route_client, "/v1/economic/calendar", days=60, country="IN,US")
         events = resp.get_json()["data"]["events"]
         for ev in events:
             assert ev["country"] in ("IN", "US")
 
     def test_impact_filter_high_only(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days=60, impact="high")
+        resp = _get(route_client, "/v1/economic/calendar", days=60, impact="high")
         events = resp.get_json()["data"]["events"]
         for ev in events:
             assert ev["impact"] == "high"
 
     def test_impact_filter_medium_includes_high(self, route_client):
-        med = _get(route_client, "/ft-api/v1/economic/calendar", days=60, impact="medium")
-        high = _get(route_client, "/ft-api/v1/economic/calendar", days=60, impact="high")
+        med = _get(route_client, "/v1/economic/calendar", days=60, impact="medium")
+        high = _get(route_client, "/v1/economic/calendar", days=60, impact="high")
         assert med.get_json()["data"]["count"] >= high.get_json()["data"]["count"]
 
     def test_event_fields_present(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days=90)
+        resp = _get(route_client, "/v1/economic/calendar", days=90)
         events = resp.get_json()["data"]["events"]
         if events:
             ev = events[0]
@@ -493,13 +493,13 @@ class TestEconomicCalendarRoute:
                 assert field in ev, f"Missing field: {field}"
 
     def test_filters_object_in_response(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", country="IN", impact="high")
+        resp = _get(route_client, "/v1/economic/calendar", country="IN", impact="high")
         filters = resp.get_json()["data"]["filters"]
         assert filters["min_impact"] == "high"
         assert "IN" in filters["countries"]
 
     def test_no_filter_includes_multiple_countries(self, route_client):
-        resp = _get(route_client, "/ft-api/v1/economic/calendar", days=90)
+        resp = _get(route_client, "/v1/economic/calendar", days=90)
         events = resp.get_json()["data"]["events"]
         countries = {ev["country"] for ev in events}
         assert len(countries) >= 2

@@ -1,10 +1,13 @@
 """Flask blueprint for the declarative Market Scanner endpoints.
 
-Provides three routes under /ft-api/v1/scanner/:
+External URLs (frontend calls these via /ft-api/v1/scanner/*; the WSGI prefix
+stripper in app.py rewrites to /v1/scanner/* before Flask dispatch):
 
     POST /ft-api/v1/scanner/run      — Run a scan (prebuilt or ad-hoc config)
     GET  /ft-api/v1/scanner/prebuilt — List all prebuilt scan configurations
     POST /ft-api/v1/scanner/custom   — Validate and echo a custom ScanConfig
+
+Blueprint registered at ``/v1/scanner`` (post-strip form).
 
 All scan runs use synthetic sample OHLCV data when no broker is connected,
 so the frontend scanner widget works in Explore mode without live data.
@@ -27,7 +30,7 @@ from .market_scanner import (
 
 logger = logging.getLogger("flinttrade.screener.scanner_routes")
 
-scanner_bp = Blueprint("scanner", __name__, url_prefix="/ft-api/v1/scanner")
+scanner_bp = Blueprint("scanner", __name__, url_prefix="/v1/scanner")
 
 # Module-level scanner instance (stateless — safe to share across requests)
 _scanner = MarketScanner()

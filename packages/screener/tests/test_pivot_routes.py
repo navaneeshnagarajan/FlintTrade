@@ -64,7 +64,7 @@ def test_calculate_pivots_ok(client):
         "packages.screener.src.pivot_calculator.PivotCalculator.all_methods",
         return_value=all_levels,
     ):
-        resp = client.post("/ft-api/v1/pivots/calculate", json=_OHLC_VALID)
+        resp = client.post("/v1/pivots/calculate", json=_OHLC_VALID)
 
     assert resp.status_code == 200
     body = resp.get_json()
@@ -86,7 +86,7 @@ def test_calculate_pivots_with_open(client):
         return_value=all_levels,
     ):
         resp = client.post(
-            "/ft-api/v1/pivots/calculate",
+            "/v1/pivots/calculate",
             json={**_OHLC_VALID, "open": 18250.0},
         )
     assert resp.status_code == 200
@@ -101,7 +101,7 @@ def test_calculate_pivots_echo_input(client):
         "packages.screener.src.pivot_calculator.PivotCalculator.all_methods",
         return_value=all_levels,
     ):
-        resp = client.post("/ft-api/v1/pivots/calculate", json=_OHLC_VALID)
+        resp = client.post("/v1/pivots/calculate", json=_OHLC_VALID)
     body = resp.get_json()
     assert body["data"]["input"]["high"] == 18500.0
     assert body["data"]["input"]["low"] == 18200.0
@@ -112,7 +112,7 @@ def test_calculate_pivots_echo_input(client):
 def test_calculate_pivots_missing_high(client):
     """400 when 'high' is absent."""
     resp = client.post(
-        "/ft-api/v1/pivots/calculate",
+        "/v1/pivots/calculate",
         json={"low": 18200.0, "close": 18400.0},
     )
     assert resp.status_code == 400
@@ -123,7 +123,7 @@ def test_calculate_pivots_missing_high(client):
 
 def test_calculate_pivots_missing_all_required(client):
     """400 when all required fields are absent."""
-    resp = client.post("/ft-api/v1/pivots/calculate", json={})
+    resp = client.post("/v1/pivots/calculate", json={})
     assert resp.status_code == 400
     body = resp.get_json()
     assert body["status"] == "error"
@@ -132,7 +132,7 @@ def test_calculate_pivots_missing_all_required(client):
 def test_calculate_pivots_invalid_numeric(client):
     """400 when a field value cannot be coerced to float."""
     resp = client.post(
-        "/ft-api/v1/pivots/calculate",
+        "/v1/pivots/calculate",
         json={"high": "eighteen-thousand", "low": 18200.0, "close": 18400.0},
     )
     assert resp.status_code == 400
@@ -147,7 +147,7 @@ def test_calculate_pivots_calculator_raises(client):
         side_effect=ValueError("high must be >= low"),
     ):
         resp = client.post(
-            "/ft-api/v1/pivots/calculate",
+            "/v1/pivots/calculate",
             json={"high": 18000.0, "low": 18500.0, "close": 18200.0},
         )
     assert resp.status_code == 400
@@ -157,5 +157,5 @@ def test_calculate_pivots_calculator_raises(client):
 
 def test_calculate_pivots_no_body(client):
     """400 when request body is absent entirely."""
-    resp = client.post("/ft-api/v1/pivots/calculate")
+    resp = client.post("/v1/pivots/calculate")
     assert resp.status_code == 400

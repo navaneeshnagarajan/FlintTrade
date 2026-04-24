@@ -1,10 +1,13 @@
 """Flask blueprint for VWAP bands, pair correlation, and multi-timeframe endpoints.
 
-Routes registered under ``/ft-api/v1``:
+External URLs (frontend calls these via /ft-api/v1/*; the WSGI prefix stripper
+in app.py rewrites to /v1/* before Flask dispatch):
 
     POST /ft-api/v1/indicators/vwap    — VWAP with ±1σ/2σ/3σ bands
     POST /ft-api/v1/analytics/pairs   — Pair correlation and z-score signals
     POST /ft-api/v1/analytics/mtf     — Multi-timeframe signal confluence
+
+Blueprint registered at ``/v1`` (post-strip form).
 
 All endpoints:
 1. Extract parameters from the JSON request body.
@@ -28,7 +31,7 @@ from .pair_correlation import PairCorrelationEngine, make_sample_pair_data
 
 logger = logging.getLogger("flinttrade.screener.analytics_routes")
 
-analytics_bp = Blueprint("analytics_ext", __name__, url_prefix="/ft-api/v1")
+analytics_bp = Blueprint("analytics_ext", __name__, url_prefix="/v1")
 
 # Engine singletons (created once per process)
 _pair_engine = PairCorrelationEngine()

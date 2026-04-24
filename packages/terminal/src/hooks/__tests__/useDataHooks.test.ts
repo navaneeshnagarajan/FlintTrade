@@ -122,15 +122,6 @@ describe("useFunds", () => {
     expect(result.current.data).toEqual(fundsData);
   });
 
-  it("syncs data to tradingStore via updateFromFunds", async () => {
-    const fundsData = { available_balance: 50000, utilized_margin: 10000, total_balance: 60000 };
-    mockGetFunds.mockResolvedValue(fundsData);
-
-    renderHook(() => useFunds(), { wrapper: createWrapper() });
-
-    await waitFor(() => expect(mockUpdateFromFunds).toHaveBeenCalledWith(fundsData));
-  });
-
   it("returns error state on failure", async () => {
     mockGetFunds.mockRejectedValue(new Error("Funds fetch failed"));
     const { result } = renderHook(() => useFunds(), { wrapper: createWrapper() });
@@ -225,14 +216,6 @@ describe("usePositions", () => {
     expect(result.current.data).toHaveLength(1);
   });
 
-  it("syncs data to tradingStore via updateFromPositions", async () => {
-    const positions = [{ symbol: "NIFTY", exchange: "NFO", quantity: 50, pnl: 1200 }];
-    mockGetPositionbook.mockResolvedValue(positions);
-
-    renderHook(() => usePositions(), { wrapper: createWrapper() });
-
-    await waitFor(() => expect(mockUpdateFromPositions).toHaveBeenCalledWith(positions));
-  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,13 @@
 """Flask blueprint for payoff analysis, regime detection, and correlation endpoints.
 
-Routes registered:
-    POST /ft-api/v1/payoff/analyse    — Full options payoff analysis
-    POST /ft-api/v1/payoff/curve      — P&L curve only (lightweight)
-    GET  /ft-api/v1/regime/current    — Current market regime signal
+External URLs (frontend calls these via /ft-api/v1/*; the WSGI prefix stripper
+in app.py rewrites to /v1/* before Flask dispatch):
+    POST /ft-api/v1/payoff/analyse        — Full options payoff analysis
+    POST /ft-api/v1/payoff/curve          — P&L curve only (lightweight)
+    GET  /ft-api/v1/regime/current        — Current market regime signal
     POST /ft-api/v1/analytics/correlation — Correlation matrix + regime
+
+Blueprint registered at ``/v1`` (post-strip form).
 
 All endpoints:
 1. Extract parameters from JSON body or query string.
@@ -29,7 +32,7 @@ from .regime_detector import RegimeDetector
 
 logger = logging.getLogger("flinttrade.screener.payoff_routes")
 
-payoff_bp = Blueprint("payoff", __name__, url_prefix="/ft-api/v1")
+payoff_bp = Blueprint("payoff", __name__, url_prefix="/v1")
 
 # Engine singletons (created once per process)
 _payoff_engine = OptionsPayoffEngine()

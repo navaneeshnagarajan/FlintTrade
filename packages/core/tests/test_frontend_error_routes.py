@@ -44,7 +44,7 @@ def test_report_error_ok(app_with_log):
     """200 status:ok when valid error is submitted."""
     with app_with_log.test_client() as c:
         resp = c.post(
-            "/ft-api/v1/errors",
+            "/v1/errors",
             json={
                 "message": "TypeError: Cannot read property",
                 "stack": "at Component (bundle.js:1)",
@@ -58,7 +58,7 @@ def test_report_error_ok(app_with_log):
 def test_report_error_no_message(app_with_log):
     """400 when message field is missing."""
     with app_with_log.test_client() as c:
-        resp = c.post("/ft-api/v1/errors", json={"stack": "at bundle.js:1"})
+        resp = c.post("/v1/errors", json={"stack": "at bundle.js:1"})
     assert resp.status_code == 400
 
 
@@ -66,7 +66,7 @@ def test_report_error_no_log_configured(app_no_log):
     """200 status:error (fire-and-forget) when ERROR_LOG not configured."""
     with app_no_log.test_client() as c:
         resp = c.post(
-            "/ft-api/v1/errors",
+            "/v1/errors",
             json={"message": "Something broke"},
         )
     # Fire-and-forget: should not 5xx
@@ -86,7 +86,7 @@ def test_changelog_ok(app_no_log, tmp_path):
 
     with patch.object(mod, "_CHANGELOG_PATH", changelog):
         with app_no_log.test_client() as c:
-            resp = c.get("/ft-api/v1/changelog")
+            resp = c.get("/v1/changelog")
 
     assert resp.status_code == 200
     assert b"v0.5.0" in resp.data
@@ -98,6 +98,6 @@ def test_changelog_missing(app_no_log, tmp_path):
 
     with patch.object(mod, "_CHANGELOG_PATH", missing):
         with app_no_log.test_client() as c:
-            resp = c.get("/ft-api/v1/changelog")
+            resp = c.get("/v1/changelog")
 
     assert resp.status_code == 404

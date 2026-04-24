@@ -494,25 +494,25 @@ class TestExecutionAnalyticsEndpoint:
         from order_analytics import order_analytics_bp
 
         app = Flask(__name__)
-        app.register_blueprint(order_analytics_bp, url_prefix="/ft-api/v1")
+        app.register_blueprint(order_analytics_bp, url_prefix="/v1")
         app.config["TESTING"] = True
         with app.test_client() as c:
             yield c
 
     def test_missing_body(self, client):
-        resp = client.post("/ft-api/v1/analytics/execution")
+        resp = client.post("/v1/analytics/execution")
         assert resp.status_code == 400
 
     def test_missing_orders_key(self, client):
         resp = client.post(
-            "/ft-api/v1/analytics/execution",
+            "/v1/analytics/execution",
             json={"foo": "bar"},
         )
         assert resp.status_code == 400
 
     def test_orders_not_list(self, client):
         resp = client.post(
-            "/ft-api/v1/analytics/execution",
+            "/v1/analytics/execution",
             json={"orders": "not-a-list"},
         )
         assert resp.status_code == 400
@@ -520,7 +520,7 @@ class TestExecutionAnalyticsEndpoint:
     def test_valid_request(self, client):
         orders = [_order() for _ in range(5)]
         resp = client.post(
-            "/ft-api/v1/analytics/execution",
+            "/v1/analytics/execution",
             json={"orders": orders},
         )
         assert resp.status_code == 200
@@ -532,7 +532,7 @@ class TestExecutionAnalyticsEndpoint:
 
     def test_empty_orders(self, client):
         resp = client.post(
-            "/ft-api/v1/analytics/execution",
+            "/v1/analytics/execution",
             json={"orders": []},
         )
         assert resp.status_code == 200

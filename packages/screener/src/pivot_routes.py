@@ -1,10 +1,13 @@
 """Flask blueprint for pivot point calculation endpoint.
 
-Provides one POST endpoint under /ft-api/v1/pivots/:
+External URL (frontend calls this via /ft-api/v1/pivots/*; the WSGI prefix
+stripper in app.py rewrites to /v1/pivots/* before Flask dispatch):
 
     POST /ft-api/v1/pivots/calculate
         Body: { "high": float, "low": float, "close": float, "open": float? }
         Returns pivot levels for all five methods.
+
+Blueprint registered at ``/v1/pivots`` (post-strip form).
 
 Response shape::
 
@@ -32,7 +35,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger("flinttrade.screener.pivot_routes")
 
-pivot_bp = Blueprint("pivots", __name__, url_prefix="/ft-api/v1/pivots")
+pivot_bp = Blueprint("pivots", __name__, url_prefix="/v1/pivots")
 
 
 @pivot_bp.route("/calculate", methods=["POST"])

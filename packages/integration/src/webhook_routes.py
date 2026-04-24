@@ -1,10 +1,13 @@
 """Flask Blueprint for webhook receiver endpoints.
 
-Registers under ``/ft-api/v1/webhook/``:
+External URLs (frontend/TradingView/ChartInk call these via /ft-api/v1/webhook/*;
+the WSGI prefix stripper in app.py rewrites to /v1/webhook/* before Flask dispatch):
 
 - ``POST /ft-api/v1/webhook/<source>`` — receive, verify, parse, and
   dispatch a webhook from ``tradingview``, ``chartink``, or ``custom``.
 - ``GET  /ft-api/v1/webhook/log`` — return recent webhook history.
+
+Blueprint registered at ``/v1/webhook`` (post-strip form).
 
 Authentication: HMAC-SHA256 via ``X-Signature: sha256=<hex>`` header.
 Rate limiting: 60 requests/minute per :class:`WebhookConfig` default.
@@ -46,7 +49,7 @@ logger = logging.getLogger("flinttrade.integration.webhook_routes")
 webhook_bp = Blueprint(
     "webhook_receiver",
     __name__,
-    url_prefix="/ft-api/v1/webhook",
+    url_prefix="/v1/webhook",
 )
 
 # Module-level receiver singleton (injected via init_webhook_routes or lazily created)

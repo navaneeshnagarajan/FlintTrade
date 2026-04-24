@@ -1,9 +1,12 @@
 """Flask Blueprint for permutation testing and walk-forward analysis.
 
-Registers under ``/ft-api/v1/backtest/``:
+External URLs (frontend calls these via /ft-api/v1/backtest/*; the WSGI prefix
+stripper in app.py rewrites to /v1/backtest/* before Flask dispatch):
 
 - ``POST /ft-api/v1/backtest/permutation`` — test strategy significance
 - ``POST /ft-api/v1/backtest/walkforward`` — run walk-forward analysis
+
+Blueprint registered at ``/v1/backtest`` (post-strip form).
 
 ---
 
@@ -100,7 +103,7 @@ logger = logging.getLogger("flinttrade.backtest.permutation_routes")
 permutation_bp = Blueprint(
     "backtest_permutation",
     __name__,
-    url_prefix="/ft-api/v1/backtest",
+    url_prefix="/v1/backtest",
 )
 
 

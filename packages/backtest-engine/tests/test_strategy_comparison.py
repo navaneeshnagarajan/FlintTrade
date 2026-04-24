@@ -437,25 +437,25 @@ class TestBacktestCompareEndpoint:
         from strategy_comparison import strategy_comparison_bp
 
         app = Flask(__name__)
-        app.register_blueprint(strategy_comparison_bp, url_prefix="/ft-api/v1")
+        app.register_blueprint(strategy_comparison_bp, url_prefix="/v1")
         app.config["TESTING"] = True
         with app.test_client() as c:
             yield c
 
     def test_missing_body(self, client):
-        resp = client.post("/ft-api/v1/backtest/compare")
+        resp = client.post("/v1/backtest/compare")
         assert resp.status_code == 400
 
     def test_missing_results_key(self, client):
-        resp = client.post("/ft-api/v1/backtest/compare", json={"foo": "bar"})
+        resp = client.post("/v1/backtest/compare", json={"foo": "bar"})
         assert resp.status_code == 400
 
     def test_results_not_dict(self, client):
-        resp = client.post("/ft-api/v1/backtest/compare", json={"results": [1, 2]})
+        resp = client.post("/v1/backtest/compare", json={"results": [1, 2]})
         assert resp.status_code == 400
 
     def test_empty_results_dict(self, client):
-        resp = client.post("/ft-api/v1/backtest/compare", json={"results": {}})
+        resp = client.post("/v1/backtest/compare", json={"results": {}})
         assert resp.status_code == 400
 
     def test_valid_request(self, client):
@@ -465,7 +465,7 @@ class TestBacktestCompareEndpoint:
                 "MeanRev": _make_result(sharpe=1.2, cagr=14.0),
             }
         }
-        resp = client.post("/ft-api/v1/backtest/compare", json=payload)
+        resp = client.post("/v1/backtest/compare", json=payload)
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["status"] == "success"
@@ -484,14 +484,14 @@ class TestBacktestCompareEndpoint:
             },
             "metric_weights": {"sharpe": 1.0},
         }
-        resp = client.post("/ft-api/v1/backtest/compare", json=payload)
+        resp = client.post("/v1/backtest/compare", json=payload)
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["data"]["best_overall"] == "S1"
 
     def test_single_strategy(self, client):
         payload = {"results": {"OnlyOne": _make_result()}}
-        resp = client.post("/ft-api/v1/backtest/compare", json=payload)
+        resp = client.post("/v1/backtest/compare", json=payload)
         assert resp.status_code == 200
 
     def test_response_includes_optimal_blend(self, client):
@@ -501,7 +501,7 @@ class TestBacktestCompareEndpoint:
                 "Beta": _make_result(equity_curve=_drawdown_curve()),
             }
         }
-        resp = client.post("/ft-api/v1/backtest/compare", json=payload)
+        resp = client.post("/v1/backtest/compare", json=payload)
         body = resp.get_json()
         blend = body["data"]["optimal_blend"]
         assert set(blend.keys()) == {"Alpha", "Beta"}

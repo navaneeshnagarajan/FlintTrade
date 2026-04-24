@@ -81,7 +81,7 @@ def test_receive_tradingview_ok(client):
         return_value={"status": "executed", "order_id": "OID123"},
     ):
         resp = client.post(
-            "/ft-api/v1/webhook/tradingview",
+            "/v1/webhook/tradingview",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -93,7 +93,7 @@ def test_receive_tradingview_ok(client):
 def test_receive_invalid_source(client):
     """404 for unknown webhook source."""
     resp = client.post(
-        "/ft-api/v1/webhook/unknownsource",
+        "/v1/webhook/unknownsource",
         data=json.dumps({"symbol": "NIFTY"}),
         content_type="application/json",
     )
@@ -108,7 +108,7 @@ def test_receive_rate_limited():
     flask_app.register_blueprint(mod.webhook_bp)
     with flask_app.test_client() as c:
         resp = c.post(
-            "/ft-api/v1/webhook/tradingview",
+            "/v1/webhook/tradingview",
             data=json.dumps({"symbol": "NIFTY"}),
             content_type="application/json",
         )
@@ -118,7 +118,7 @@ def test_receive_rate_limited():
 def test_receive_invalid_json(client):
     """400 for non-JSON body."""
     resp = client.post(
-        "/ft-api/v1/webhook/tradingview",
+        "/v1/webhook/tradingview",
         data=b"not-json",
         content_type="text/plain",
     )
@@ -132,7 +132,7 @@ def test_receive_invalid_json(client):
 
 def test_log_ok(client):
     """200 with webhook history list."""
-    resp = client.get("/ft-api/v1/webhook/log")
+    resp = client.get("/v1/webhook/log")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"

@@ -557,7 +557,7 @@ def pivot_client(tmp_path_factory):
 
 def _post(client, payload: dict):
     return client.post(
-        "/ft-api/v1/pivots/calculate",
+        "/v1/pivots/calculate",
         json=payload,
         headers={"X-API-Key": _TEST_API_KEY, "Content-Type": "application/json"},
     )

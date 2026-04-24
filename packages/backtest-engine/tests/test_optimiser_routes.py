@@ -66,7 +66,7 @@ def test_optimise_ok(client):
         return_value=_mock_optimiser(),
     ):
         resp = client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             json={"returns": _RETURNS_PAYLOAD},
         )
     assert resp.status_code == 200
@@ -77,14 +77,14 @@ def test_optimise_ok(client):
 
 def test_optimise_missing_returns(client):
     """400 when returns field absent."""
-    resp = client.post("/ft-api/v1/portfolio/optimise", json={})
+    resp = client.post("/v1/portfolio/optimise", json={})
     assert resp.status_code == 400
 
 
 def test_optimise_single_asset(client):
     """400 when returns has fewer than 2 assets."""
     resp = client.post(
-        "/ft-api/v1/portfolio/optimise",
+        "/v1/portfolio/optimise",
         json={"returns": {"NIFTY": [0.01, 0.02]}},
     )
     assert resp.status_code == 400
@@ -97,7 +97,7 @@ def test_optimise_invalid_config(client):
         return_value=_mock_optimiser(),
     ):
         resp = client.post(
-            "/ft-api/v1/portfolio/optimise",
+            "/v1/portfolio/optimise",
             json={
                 "returns": _RETURNS_PAYLOAD,
                 "config": {"method": "invalid_method", "bad_field": "x"},
@@ -119,7 +119,7 @@ def test_frontier_ok(client):
         return_value=_mock_optimiser(),
     ):
         resp = client.post(
-            "/ft-api/v1/portfolio/frontier",
+            "/v1/portfolio/frontier",
             json={"returns": _RETURNS_PAYLOAD, "n_points": 5},
         )
     assert resp.status_code == 200
@@ -130,7 +130,7 @@ def test_frontier_ok(client):
 
 def test_frontier_missing_returns(client):
     """400 when returns is absent."""
-    resp = client.post("/ft-api/v1/portfolio/frontier", json={})
+    resp = client.post("/v1/portfolio/frontier", json={})
     assert resp.status_code == 400
 
 
@@ -141,7 +141,7 @@ def test_frontier_bad_n_points(client):
         return_value=_mock_optimiser(),
     ):
         resp = client.post(
-            "/ft-api/v1/portfolio/frontier",
+            "/v1/portfolio/frontier",
             json={"returns": _RETURNS_PAYLOAD, "n_points": 1},
         )
     assert resp.status_code == 400
