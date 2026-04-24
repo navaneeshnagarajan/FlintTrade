@@ -322,7 +322,7 @@ Claude Code on every machine has these installed globally:
 
 **MCP Servers:** context7 (live library docs), playwright (browser testing), sequential-thinking, github, firecrawl
 
-For the complete list of all 222 repositories, libraries, skills, and tools, see `docs/REFERENCES.md`
+For the complete list of upstream projects and libraries, see `docs/REFERENCES.md`. For the ~230 cloned reference repositories absorbed into FlintTrade (broker gateway, strategy templates, UI patterns, AI agents), see `.local/reference/REPO_FEATURE_MAP.md`.
 
 ### USE THESE ACTIVELY
 - `/brainstorm` before starting any major feature
