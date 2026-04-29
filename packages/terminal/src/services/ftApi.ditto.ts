@@ -46,16 +46,6 @@ export interface DittoRiskData {
   accounts: DittoRiskAccount[];
 }
 
-export interface AlgoMirrorStatusData {
-  connected: boolean;
-  active: boolean;
-  source: string;
-  targets: string[];
-  multiplier: number;
-  mirrored_positions: number;
-  errors: string[];
-}
-
 export const getDittoAccounts = () =>
   get<{ accounts: DittoAccount[] }>("ditto/accounts");
 
@@ -80,6 +70,3 @@ export const getDittoRisk = () => get<DittoRiskData>("ditto/risk");
 
 export const dittoKillAll = () =>
   post<{ message: string; accounts_affected: number }>("ditto/kill-all");
-
-export const getAlgoMirrorStatus = () =>
-  get<AlgoMirrorStatusData>("ditto/algomirror/status");

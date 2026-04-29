@@ -178,11 +178,6 @@ sync-check: ## Check upstream drift on external test-deps under .local/external/
 	else \
 	  echo -e "$(YELLOW)openalgo: not present at .local/external/openalgo (run scripts/setup-test-deps.sh)$(RESET)"; \
 	fi
-	@if [ -d .local/external/algomirror/.git ]; then \
-	  (cd .local/external/algomirror && git fetch origin --quiet 2>/dev/null && echo "algomirror: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind"); \
-	else \
-	  echo -e "$(YELLOW)algomirror: not present at .local/external/algomirror (run scripts/setup-test-deps.sh)$(RESET)"; \
-	fi
 	@if [ -d .local/external/openclaw/.git ]; then \
 	  (cd .local/external/openclaw && git fetch origin --quiet 2>/dev/null && echo "openclaw: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind"); \
 	else \

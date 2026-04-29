@@ -30,15 +30,18 @@ mkdir -p "$EXTERNAL_DIR"
 
 # ---------------------------------------------------------------------------
 # Pinned commits — keep in sync with docs/COMPATIBILITY.md
+#
+# AlgoMirror is intentionally NOT in this list. Its mirroring patterns are
+# fully absorbed into packages/ditto/ (PositionMirror, TrailingSLManager,
+# MarginCalculator, RiskManager) and run in-process. There is nothing to
+# clone for testing.
 # ---------------------------------------------------------------------------
 declare -A PINS=(
     [openalgo]="08c2a55313f66dc54e01d4881f657676ed9e6c72"
-    [algomirror]="fa063e284ae8da5e3361b17f683f8a8ab8c3ed3c"
     [openclaw]="8c4ecf42dfcf8f0265081e2801d221a70dc96886"
 )
 declare -A REPOS=(
     [openalgo]="https://github.com/marketcalls/openalgo.git"
-    [algomirror]="https://github.com/marketcalls/algomirror.git"
     [openclaw]="https://github.com/openclaw/openclaw.git"
 )
 
@@ -89,13 +92,13 @@ update_existing() {
 case "$MODE" in
     pinned|latest)
         echo "==> Setup-test-deps: $MODE mode"
-        for name in openalgo algomirror openclaw; do
+        for name in openalgo openclaw; do
             clone_pinned "$name" "${REPOS[$name]}" "${PINS[$name]}"
         done
         ;;
     update)
         echo "==> Setup-test-deps: --update mode"
-        for name in openalgo algomirror openclaw; do
+        for name in openalgo openclaw; do
             update_existing "$name"
         done
         ;;
@@ -103,7 +106,7 @@ esac
 
 echo ""
 echo "Done. Test deps are at:"
-for name in openalgo algomirror openclaw; do
+for name in openalgo openclaw; do
     dst="$EXTERNAL_DIR/$name"
     if [ -d "$dst/.git" ]; then
         echo "  $dst ($(cd "$dst" && git rev-parse --short HEAD))"

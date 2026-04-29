@@ -127,7 +127,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 - Security headers middleware (CSP, HSTS, X-Frame-Options)
 - REST ticker fallback when WebSocket disconnects
 - Error Boundary, 404 catch-all, mobile warning overlay
-- Git submodules synced: OpenAlgo, OpenClaw, AlgoMirror
+- External test-deps: OpenAlgo and OpenClaw (cloned via `scripts/setup-test-deps.sh`). AlgoMirror patterns absorbed in-process by `packages/ditto/` — no live integration.
 - Live WebSocket data feed with ping/pong heartbeat
 - Indicators package (31 indicators, 150+ tests)
 - CI: GitHub Actions (python-tests, node-tests, secrets-check)
@@ -213,8 +213,8 @@ Built on [OpenAlgo](https://openalgo.in) by [Rajandran R](https://github.com/mar
 
 ### Upstream Projects
 - [OpenAlgo](https://github.com/marketcalls/openalgo) — Broker gateway (AGPL-3.0)
-- [AlgoMirror](https://github.com/marketcalls/algomirror) — Multi-account mirroring
 - [OpenClaw](https://github.com/openclaw/openclaw) — AI agent framework
+- [AlgoMirror](https://github.com/marketcalls/algomirror) — Multi-account mirroring (patterns absorbed in-process; no live integration)
 - [FastScalper](https://github.com/marketcalls/fastscalper-tauri) — Scalper UI patterns
 - [OpenTerminal](https://github.com/marketcalls/OpenTerminal) — Terminal reference
 - [OpenEngine](https://github.com/marketcalls/openengine) — Strategy engine

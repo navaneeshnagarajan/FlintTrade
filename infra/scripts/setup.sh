@@ -91,11 +91,14 @@ TICK_DATA_DIR="${TICK_DATA_DIR:-$DATA_DIR/ticks}"
 # ------------------------------------------------------------------
 header "External test-deps"
 
-# OpenAlgo (and AlgoMirror, OpenClaw) are no longer git submodules of
-# FlintTrade. They are EXTERNAL prerequisites. Install them yourself, OR
-# run scripts/setup-test-deps.sh to clone local-dev copies into
+# OpenAlgo and OpenClaw are no longer git submodules of FlintTrade. They
+# are EXTERNAL prerequisites. Install them yourself, OR run
+# scripts/setup-test-deps.sh to clone local-dev copies into
 # .local/external/. This installer continues if the local-dev clones
 # already exist, otherwise it tells the user how to get them.
+#
+# AlgoMirror is intentionally absent: its mirroring patterns are
+# absorbed into packages/ditto/ — nothing external to install.
 
 # ------------------------------------------------------------------
 # 5. OpenAlgo dependencies (only if local-dev clone exists)

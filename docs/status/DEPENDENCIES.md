@@ -160,13 +160,12 @@ thiserror        = "1.0"
 
 ## External test-dependencies (no longer git submodules)
 
-OpenAlgo, OpenClaw, and AlgoMirror used to ship as git submodules under `infra/`. They are now external services — users install them separately, or contributors run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/` (gitignored, not part of the published repo).
+OpenAlgo and OpenClaw used to ship as git submodules under `infra/`. They are now external services — users install them separately, or contributors run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/` (gitignored, not part of the published repo). AlgoMirror is intentionally absent: its mirroring patterns are absorbed in-process by `packages/ditto/` and the upstream repo is no longer tracked.
 
 | Repo | Local-dev path | Ref last absorbed |
 |---|---|---|
 | OpenAlgo | `.local/external/openalgo/` | `openalgo-stability-fix-21-g0f1ee545` |
 | OpenClaw | `.local/external/openclaw/` | `v2026.4.19-beta.2-6-g8c4ecf42df` |
-| AlgoMirror | `.local/external/algomirror/` | `algomirror-postgres-10-gfa063e2` |
 
 ## External Services
 

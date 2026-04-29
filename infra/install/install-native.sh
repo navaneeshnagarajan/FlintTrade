@@ -5,12 +5,16 @@
 # and configures systemd services.
 # Idempotent — safe to run multiple times.
 #
-# IMPORTANT: This installer no longer bundles OpenAlgo, AlgoMirror, or
-# OpenClaw. Those are external prerequisites — install them yourself, OR
-# run scripts/setup-test-deps.sh to clone local-dev copies into
+# IMPORTANT: This installer no longer bundles OpenAlgo or OpenClaw.
+# Those are external prerequisites — install them yourself, OR run
+# scripts/setup-test-deps.sh to clone local-dev copies into
 # .local/external/ for testing. The systemd unit emitted below assumes
 # the local-dev OpenAlgo path; adjust WorkingDirectory + ExecStart for
 # your actual install location.
+#
+# AlgoMirror is intentionally not in scope: its mirroring patterns are
+# absorbed into packages/ditto/ and run in-process — nothing external
+# to install or run.
 #
 # Usage:
 #   sudo ./install-native.sh

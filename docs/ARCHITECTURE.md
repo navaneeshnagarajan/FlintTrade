@@ -130,13 +130,12 @@ make update     # Update submodules + deps
 
 ### External Test Dependencies
 
-OpenAlgo, OpenClaw, and AlgoMirror are external services that FlintTrade communicates with over HTTP/WebSocket. They are NOT bundled with FlintTrade and are NOT git submodules. End users install them separately as prerequisites; contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/` (gitignored).
+OpenAlgo and OpenClaw are external services that FlintTrade communicates with over HTTP/WebSocket. They are NOT bundled with FlintTrade and are NOT git submodules. End users install them separately as prerequisites; contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/` (gitignored). AlgoMirror is intentionally absent — its mirroring patterns are absorbed in-process by `packages/ditto/` and the upstream repo is no longer tracked.
 
 | Service | Local-dev clone path | Source | Role |
 |---------|----------------------|--------|------|
 | OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | broker gateway |
 | OpenClaw | `.local/external/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | AI agent gateway |
-| AlgoMirror | `.local/external/algomirror/` | [marketcalls/algomirror](https://github.com/marketcalls/algomirror) | multi-account mirror |
 
 ### Scripts
 

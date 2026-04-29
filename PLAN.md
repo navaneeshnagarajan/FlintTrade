@@ -33,7 +33,7 @@
 - **BacktestLab:** POST /ft-api/v1/backtest/run wired via TanStack Query mutation
 - **Audit:** 24 findings fixed from 15-skill audit (3 critical, 3 high, 18 important)
 - **Absorption:** REPO_FEATURE_MAP §8 100% complete, 233 repos tracked
-- **External test-deps:** openalgo, algomirror, openclaw — no longer git submodules; cloned locally under `.local/external/` via `scripts/setup-test-deps.sh` for development only
+- **External test-deps:** openalgo, openclaw — no longer git submodules; cloned locally under `.local/external/` via `scripts/setup-test-deps.sh` for development only. AlgoMirror's patterns are absorbed in-process by `packages/ditto/`; upstream no longer tracked.
 
 ---
 
@@ -377,7 +377,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 - [x] Automation: cron scheduler, Telegram bot, OpenClaw bridge, post-market
 - [x] Ditto: account manager, position mirroring, margin calc, trailing SL
 - [x] Infrastructure: Makefile, setup.sh, systemd templates, health-check.sh
-- [x] External test-deps registry: openalgo, algomirror, openclaw (cloned to `.local/external/` via `scripts/setup-test-deps.sh`; previously git submodules under `infra/`)
+- [x] External test-deps registry: openalgo, openclaw (cloned to `.local/external/` via `scripts/setup-test-deps.sh`; previously git submodules under `infra/`). AlgoMirror dropped from registry — its patterns are absorbed in-process by `packages/ditto/`.
 - [x] First sandbox trade placed successfully
 - [x] CI: GitHub Actions (python-tests, node-tests, secrets-check, claude-review)
 - [x] .env.example: 4 blank vars only (root), 3 VITE_ vars (terminal)

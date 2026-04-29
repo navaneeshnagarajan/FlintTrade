@@ -19,12 +19,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # ─── Absorption registry ─────────────────────────────────────────────────
-# Each entry tracks: repo name, local path (.local/external/ for the three
+# Each entry tracks: repo name, local path (.local/external/ for the
 # external test-deps, or .local/reference/ for pattern-absorbed repos), what
-# we absorbed, and what commit/date we last checked. The three external
-# repos (openalgo, algomirror, openclaw) used to be git submodules under
-# infra/; they are now plain reference clones under .local/external/ and
-# only present locally if the user ran scripts/setup-test-deps.sh.
+# we absorbed, and what commit/date we last checked. The external repos
+# (openalgo, openclaw) used to be git submodules under infra/; they are
+# now plain reference clones under .local/external/ and only present
+# locally if the user ran scripts/setup-test-deps.sh. AlgoMirror is
+# absent: its mirroring patterns are fully absorbed into packages/ditto/
+# and the repo is no longer pulled or tracked.
 
 ABSORBED_REPOS: list[dict] = [
     {
@@ -45,18 +47,6 @@ ABSORBED_REPOS: list[dict] = [
             "Flattrade V2 API endpoint migration",
             "Telegram alert service refactor (sync HTTP, no asyncio)",
         ],
-    },
-    {
-        "name": "algomirror",
-        "github": "marketcalls/algomirror",
-        "local_path": ".local/external/algomirror",
-        "type": "reference",
-        "absorbed": [
-            "Multi-account mirror patterns -> packages/ditto/",
-            "Trailing SL logic -> packages/engine/",
-        ],
-        "last_absorbed_commit": "d2c3cfda",
-        "missing_since": [],
     },
     {
         "name": "openclaw",
@@ -183,8 +173,8 @@ def check_repo(repo: dict) -> dict:
         result["notes"] = "Directory not found"
         return result
 
-    # External test-deps under .local/external/ (openalgo, algomirror, openclaw)
-    # are tracked specially: if a .git directory is present, we can compute
+    # External test-deps under .local/external/ (openalgo, openclaw) are
+    # tracked specially: if a .git directory is present, we can compute
     # drift against origin/main. They no longer exist for end users — only
     # for contributors who ran scripts/setup-test-deps.sh.
     is_external_test_dep = repo["local_path"].startswith(".local/external/")

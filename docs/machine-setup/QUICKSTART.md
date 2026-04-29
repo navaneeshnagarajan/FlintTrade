@@ -12,7 +12,7 @@ make setup
 
 `make setup` installs: Python deps, Node deps, workspace init.
 
-OpenAlgo (and AlgoMirror, OpenClaw) are no longer bundled as git submodules. They are external services FlintTrade talks to over HTTP/WebSocket. Install OpenAlgo separately, OR run the helper to clone a local-dev copy:
+OpenAlgo (and OpenClaw) are no longer bundled as git submodules. They are external services FlintTrade talks to over HTTP/WebSocket. Install OpenAlgo separately, OR run the helper to clone a local-dev copy. AlgoMirror is intentionally absent — its mirroring logic is absorbed in-process by `packages/ditto/`, nothing external to install.
 
 ```bash
 bash scripts/setup-test-deps.sh

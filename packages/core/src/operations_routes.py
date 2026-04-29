@@ -945,41 +945,10 @@ def ditto_kill_all() -> tuple[Any, int]:
 # ------------------------------------------------------------------
 
 
-@operations_bp.route("/ditto/algomirror/status", methods=["GET"])
-def ditto_algomirror_status() -> tuple[Any, int]:
-    """Check AlgoMirror health and mirror status.
-
-    Returns AlgoMirror connection status and active mirror details.
-    If AlgoMirror is not running, returns ``connected: false``.
-    """
-    try:
-        from packages.ditto.src.algomirror_bridge import AlgoMirrorBridge  # noqa: PLC0415
-
-        bridge = AlgoMirrorBridge()
-        healthy = bridge.check_health()
-
-        if not healthy:
-            return jsonify({
-                "status": "success",
-                "data": {"connected": False, "active": False},
-            }), 200
-
-        mirror_status = bridge.get_status()
-        return jsonify({
-            "status": "success",
-            "data": {
-                "connected": True,
-                "active": mirror_status.get("active", False),
-                "source": mirror_status.get("source", ""),
-                "targets": mirror_status.get("targets", []),
-                "multiplier": mirror_status.get("multiplier", 1.0),
-                "mirrored_positions": mirror_status.get("mirrored_positions", 0),
-                "errors": mirror_status.get("errors", []),
-            },
-        }), 200
-    except Exception:
-        logger.exception("ditto_algomirror_status error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+# NOTE: The /ditto/algomirror/status route was removed 2026-04-30.
+# AlgoMirror's mirroring logic is fully absorbed into packages/ditto/
+# (PositionMirror, TrailingSLManager, MarginCalculator, RiskManager) and
+# runs in-process — no separately-deployed AlgoMirror to query.
 
 
 # ------------------------------------------------------------------

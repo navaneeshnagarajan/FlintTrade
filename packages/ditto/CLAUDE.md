@@ -3,7 +3,7 @@
 > Multi-broker, multi-account trade orchestration, position mirroring, margin-aware allocation
 
 ## Absorbs
-- algomirror → Multi-account handler (301 commits), trailing SL, Supertrend exits, margin calculator, trade quality grading, ThreadPoolExecutor parallel execution, risk manager
+- algomirror → Multi-account handler (301 commits), trailing SL, Supertrend exits, margin calculator, trade quality grading, ThreadPoolExecutor parallel execution, risk manager — fully in-process; no live integration with the upstream AlgoMirror service
 
 ## Depends on: core, engine
 

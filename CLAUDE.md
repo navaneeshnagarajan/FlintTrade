@@ -55,7 +55,7 @@ FlintTrade sits ON TOP of OpenAlgo. Never modifies it.
 
 - **OpenAlgo:** Broker connections (33 brokers), REST API port 5000, WebSocket port 8765
 - **FlintTrade:** Single React app (Dockview workspace) + Python backend (strategy engine, backtesting, AI, data pipelines, screener, multi-account orchestration)
-- **External test-deps (not bundled, not submodules):** OpenAlgo, AlgoMirror, and OpenClaw are external services FlintTrade talks to over HTTP/WS. Users install them separately as a prerequisite. Contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/{openalgo,algomirror,openclaw}/` (gitignored, not shipped).
+- **External test-deps (not bundled, not submodules):** OpenAlgo and OpenClaw are external services FlintTrade talks to over HTTP/WS. Users install them separately as a prerequisite. Contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/{openalgo,openclaw}/` (gitignored, not shipped). AlgoMirror is intentionally absent — its mirroring patterns are absorbed into `packages/ditto/` and run in-process; the upstream repo is no longer tracked.
 - Every machine runs its own OpenAlgo instance for development and testing. You CANNOT write correct code without testing against a live OpenAlgo.
 
 ```
@@ -388,7 +388,7 @@ See `docs/machine-setup/QUICKSTART.md` for detailed instructions.
 
 ## Do NOT
 
-- Modify files inside `.local/external/openalgo/`, `.local/external/openclaw/`, `.local/external/algomirror/` (external test-deps; not part of FlintTrade)
+- Modify files inside `.local/external/openalgo/` or `.local/external/openclaw/` (external test-deps; not part of FlintTrade)
 - Hardcode API keys, hostnames, IPs, provider names, or personal values
 - Use mock/placeholder/fake data in terminal or any UI
 - Commit `.env` files (only `.env.example` with blank values)

@@ -24,17 +24,21 @@ screener = { path = "packages/screener", lang = "python", description = "Market 
 backtest-engine = { path = "packages/backtest-engine", lang = "python", description = "Event-driven simulation, vectorbt/raptorbt strategies, metrics" }
 integration = { path = "packages/integration", lang = "python", description = "TradingView, ChartInk, webhooks, Chrome extension, Excel, Amibroker" }
 automation = { path = "packages/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, post-market analysis" }
-ditto = { path = "packages/ditto", lang = "python", description = "Multi-broker, multi-account orchestration (AlgoMirror patterns)" }
+ditto = { path = "packages/ditto", lang = "python", description = "Multi-broker, multi-account orchestration — in-process mirroring, trailing SL, margin calculator, risk manager (AlgoMirror patterns absorbed)" }
 
 # [infra] — external test-only dependencies, not bundled with FlintTrade.
-# OpenAlgo, AlgoMirror, and OpenClaw used to be git submodules under infra/.
-# They are now external services that users install separately. Contributors
-# who want a local copy for testing can clone them under .local/external/
+# OpenAlgo and OpenClaw used to be git submodules under infra/. They are
+# now external services that users install separately. Contributors who
+# want a local copy for testing can clone them under .local/external/
 # via scripts/setup-test-deps.sh; the directory is gitignored.
+#
+# AlgoMirror is intentionally absent: its multi-account mirroring patterns
+# are fully absorbed into packages/ditto/ (PositionMirror, TrailingSLManager,
+# MarginCalculator, RiskManager) and run in-process. There is no live
+# integration; the upstream repo is no longer tracked.
 [infra]
 openalgo = { path = ".local/external/openalgo", type = "external-test-dep", upstream = "https://github.com/marketcalls/openalgo.git" }
 openclaw = { path = ".local/external/openclaw", type = "external-test-dep", upstream = "https://github.com/openclaw/openclaw.git" }
-algomirror = { path = ".local/external/algomirror", type = "external-test-dep", upstream = "https://github.com/marketcalls/algomirror.git" }
 
 [openalgo]
 api_version = "v1"
