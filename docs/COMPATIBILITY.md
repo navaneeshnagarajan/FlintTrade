@@ -1,98 +1,74 @@
-# FlintTrade — External Dependency Compatibility
+# FlintTrade — Supported Versions
 
-> Tracks the upstream versions of independent projects that FlintTrade
-> integrates with at runtime (broker gateway, multi-account mirror, AI
-> agent gateway). These are NOT bundled with FlintTrade. End users
-> install / run them as separate services; FlintTrade speaks to them
-> over their public APIs.
+> What FlintTrade is known to work with at runtime. These projects are
+> NOT bundled with FlintTrade — you install them separately. This page
+> tells you which versions are safe to install.
 
-## Tested-against versions
+## External services
 
-The matrix below records the upstream commit FlintTrade was last
-end-to-end-tested against. New FlintTrade releases must be re-verified
-when an upstream pin is bumped.
+| Service | Role | Minimum | Latest tested | Upstream |
+|---|---|---|---|---|
+| **OpenAlgo** | Broker gateway (33 brokers, REST + WebSocket) | v2.0.0 | `08c2a553` (2026-04-23) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
+| **OpenClaw** | Optional AI agent gateway (Telegram / WhatsApp) | (any) | `8c4ecf42` (2026-04-19) | [openclaw/openclaw](https://github.com/openclaw/openclaw) |
+| **AlgoMirror** | Multi-account mirroring patterns (reference only) | (n/a) | `fa063e2` (2026-04-19) | [marketcalls/algomirror](https://github.com/marketcalls/algomirror) |
 
-| External project | Role in FlintTrade | Upstream | Last-tested commit | Last-tested date | FlintTrade version |
-|---|---|---|---|---|---|
-| **OpenAlgo** | Broker gateway (33 brokers, REST + WebSocket) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | `08c2a553` (`openalgo-strategy-builder` + 3 commits) | 2026-04-23 | v0.5.0-dev |
-| **AlgoMirror** | Multi-account mirroring patterns (reference only — patterns absorbed into `packages/ditto/`) | [marketcalls/algomirror](https://github.com/marketcalls/algomirror) | `fa063e2` (`algomirror-postgres` + 10 commits) | 2026-04-19 | v0.5.0-dev |
-| **OpenClaw** | Optional AI agent gateway (Telegram / WhatsApp transport, exec approval) | [openclaw/openclaw](https://github.com/openclaw/openclaw) | `8c4ecf42df` (`v2026.4.19-beta.2` + 6 commits) | 2026-04-19 | v0.5.0-dev |
+**OpenAlgo minimum (v2.0.0):** required for the v2 API surface FlintTrade
+relies on — depth mode 4 (50-level book), structured `closeposition` with
+strategy id, `optionchain` greeks endpoint, and the rate-limit headers
+(`X-RateLimit-Remaining`). v1 deployments will fail FlintTrade's startup
+sanity check.
 
-## How FlintTrade talks to each
+**AlgoMirror — reference only:** FlintTrade does not call AlgoMirror at
+runtime. Patterns from upstream were absorbed into `packages/ditto/`.
+The "latest tested" column is the version those patterns were ported
+from; bumping it has no end-user impact.
 
-| External | Wire format | Default endpoint | Required? |
+**OpenClaw — optional:** only needed when AI-agent features are enabled
+in `~/.flinttrade/workspace.json`. Default install does not require it.
+
+## Runtime stack
+
+| Component | Minimum | Tested | Notes |
 |---|---|---|---|
-| OpenAlgo | REST (`/api/v1/...`) + WebSocket | `127.0.0.1:5000` REST, `127.0.0.1:8765` WS | **Yes** for live trading; explore + practice modes work without it |
-| AlgoMirror | (no live integration — patterns absorbed) | n/a | **No** — historical reference only |
-| OpenClaw | REST + Telegram/WhatsApp transports | `127.0.0.1:18789` (default) | **No** — only used when AI agent features are enabled |
+| Python | 3.11 | 3.12.x | 3.13/3.14 partially supported (sklearn / lightgbm import issues on Windows 3.14) |
+| Node | 20 | 22.x | required for the terminal package + Playwright |
+| Operating system | Windows 11, macOS 14, Ubuntu 22.04 | same | tested matrix in CI |
 
-## Minimum supported
+## Brokers
 
-FlintTrade does NOT enforce a hard minimum at runtime today. The matrix
-above documents the pinned commits that have been verified
-end-to-end. Older versions may work but are unsupported; newer
-versions are expected to work but require re-test.
+FlintTrade itself does not connect to brokers — OpenAlgo does. Whatever
+broker version OpenAlgo supports, FlintTrade supports. The 33-broker
+list lives in [`flint.toml`](../flint.toml) under `[brokers]`.
 
-If you hit an integration mismatch, file the issue with both versions
-listed (FlintTrade `git rev-parse HEAD` + the upstream `git rev-parse HEAD`).
+## Bumping these
 
-## Where the test deps live
+The "Latest tested" column is what we last verified end-to-end. There is
+**no automated drift check** in CI — bumping a pin is a manual action:
 
-Cloned to `.local/external/` (gitignored). They are NOT shipped with
-FlintTrade and are NOT required to use FlintTrade — they exist only
-so FlintTrade contributors can run the integration test paths
-locally.
+1. Pull the new upstream version locally (`cd .local/external/<svc> && git pull`).
+2. Run FlintTrade's integration test paths against it.
+3. If green, update the commit hash + date in this file.
+4. If anything broke, either patch FlintTrade or roll back and file an
+   issue.
+
+The defaults in `scripts/setup-test-deps.sh` should match the "Latest
+tested" column.
+
+## Where the local clones live
+
+Cloned to `.local/external/` (gitignored). Not shipped, not required —
+they exist for contributors who want to run the integration test paths.
 
 ```
-.local/external/openalgo/      # marketcalls/openalgo
-.local/external/algomirror/    # marketcalls/algomirror
-.local/external/openclaw/      # openclaw/openclaw
+.local/external/openalgo/
+.local/external/algomirror/
+.local/external/openclaw/
 ```
 
-To install them, run:
+Install / refresh:
 
 ```bash
-bash scripts/setup-test-deps.sh
+bash scripts/setup-test-deps.sh           # clone at "Latest tested" pins
+bash scripts/setup-test-deps.sh --latest  # clone at HEAD of upstream main
+bash scripts/setup-test-deps.sh --update  # git pull existing clones
 ```
-
-The script clones each repo at the commit pinned in the matrix above.
-Pass `--latest` to clone HEAD of each (useful when bumping the pin).
-
-## Process for bumping a pin
-
-1. `cd .local/external/<project>` and `git pull`.
-2. Note the new commit hash + tag (`git rev-parse --short HEAD`,
-   `git describe --tags --always`).
-3. Run the FlintTrade integration tests against the new pin:
-   ```bash
-   make test
-   ```
-4. If anything regresses, either patch FlintTrade or roll back:
-   ```bash
-   git checkout <old-commit>
-   ```
-5. When green, update the matrix in this file (commit hash, date,
-   tested-with FlintTrade version), and update `scripts/setup-test-deps.sh`
-   so fresh clones land on the new pin by default.
-6. Commit the matrix change as part of the FlintTrade change that
-   relies on the upstream bump.
-
-## Why these are NOT FlintTrade submodules anymore
-
-Pre-2026-04-30 these were git submodules of FlintTrade under
-`infra/openalgo`, `infra/algomirror`, `infra/openclaw`. That meant
-every `git clone --recursive` of FlintTrade pulled ~312 MB of
-unrelated upstream code. They were also load-bearing for `infra/`
-scripts in ways that confused the boundary between "FlintTrade ships
-this" and "FlintTrade depends on this".
-
-The refactor:
-- Removed the three submodule entries from `.gitmodules` (file deleted).
-- Moved the working trees to `.local/external/` so existing local
-  contributors keep them without re-cloning.
-- Replaced bundled-install assumptions in `infra/install/`, `infra/systemd/`,
-  `infra/nginx/`, etc. with prerequisite-style guidance.
-
-End result: a fresh `git clone` of FlintTrade is ~312 MB lighter, and
-the boundary between "ours" and "we integrate with this" is
-unambiguous.
