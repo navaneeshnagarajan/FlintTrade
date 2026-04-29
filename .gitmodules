@@ -1,9 +1,0 @@
-[submodule "infra/algomirror"]
-	path = infra/algomirror
-	url = https://github.com/marketcalls/algomirror.git
-[submodule "infra/openalgo"]
-	path = infra/openalgo
-	url = https://github.com/marketcalls/openalgo.git
-[submodule "infra/openclaw"]
-	path = infra/openclaw
-	url = https://github.com/openclaw/openclaw.git

@@ -1,8 +1,10 @@
 """Bridge to AlgoMirror for advanced multi-account position mirroring.
 
-AlgoMirror is a position mirroring tool deployed as a git submodule at
-``infra/algomirror/``.  This bridge makes HTTP calls to a running AlgoMirror
-instance — it never imports or modifies the submodule code.
+AlgoMirror is an external service — it is NOT bundled with FlintTrade. This
+bridge makes HTTP calls to a running AlgoMirror instance and never imports
+its code. For local development, contributors can clone AlgoMirror to
+``.local/external/algomirror/`` via ``scripts/setup-test-deps.sh``; production
+deployments install AlgoMirror separately.
 
 Usage::
 

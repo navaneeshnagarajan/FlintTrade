@@ -1,15 +1,27 @@
 # =============================================================================
-# OpenAlgo Service — systemd unit
+# OpenAlgo Service — systemd unit (TEMPLATE)
 # =============================================================================
+#
+# *** THIS IS A TEMPLATE ***
+# OpenAlgo is an EXTERNAL dependency, not bundled with FlintTrade. Adapt the
+# WorkingDirectory, EnvironmentFile, ExecStart, and ReadWritePaths below for
+# your own OpenAlgo install location before deploying.
+#
+# The paths shown reference the local-dev clone produced by
+# scripts/setup-test-deps.sh — i.e. .local/external/openalgo/ — at
+# /opt/flinttrade/.local/external/openalgo/. In production you almost
+# certainly want OpenAlgo installed under its own /opt/openalgo/ tree
+# (or wherever you prefer), with its own venv and .env.
 #
 # Broker gateway (31 brokers), REST API on port 5000, WebSocket on port 8765.
 # Both processes run under a single service using a wrapper script.
 #
 # INSTALL:
-#   1. sudo cp openalgo.service /etc/systemd/system/
-#   2. sudo systemctl daemon-reload
-#   3. sudo systemctl enable openalgo
-#   4. sudo systemctl start openalgo
+#   1. Edit paths below to match your OpenAlgo install
+#   2. sudo cp openalgo.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable openalgo
+#   5. sudo systemctl start openalgo
 #
 # LOGS:    journalctl -u openalgo -f
 # STATUS:  sudo systemctl status openalgo
@@ -26,14 +38,14 @@ Wants=network-online.target
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/opt/flinttrade/infra/openalgo
+WorkingDirectory=/opt/flinttrade/.local/external/openalgo
 
 # Load OpenAlgo-specific environment (broker credentials, database config)
-EnvironmentFile=/opt/flinttrade/infra/openalgo/.env
+EnvironmentFile=/opt/flinttrade/.local/external/openalgo/.env
 
 # Gunicorn with eventlet — single worker, binds to localhost only
 # The WebSocket server (port 8765) is started by OpenAlgo's app internally.
-ExecStart=/opt/flinttrade/infra/openalgo/.venv/bin/gunicorn \
+ExecStart=/opt/flinttrade/.local/external/openalgo/.venv/bin/gunicorn \
     --worker-class eventlet \
     -w 1 \
     --bind 127.0.0.1:5000 \
@@ -53,7 +65,7 @@ StartLimitBurst=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/flinttrade/infra/openalgo/db
+ReadWritePaths=/opt/flinttrade/.local/external/openalgo/db
 PrivateTmp=true
 
 # Logging

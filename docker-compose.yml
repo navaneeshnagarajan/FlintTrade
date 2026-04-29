@@ -27,39 +27,46 @@ services:
   # ---------------------------------------------------------------------------
   # OpenAlgo — Broker gateway (31 brokers), REST API + WebSocket
   # ---------------------------------------------------------------------------
-  openalgo:
-    image: python:3.12-slim
-    platform: linux/amd64
-    container_name: flinttrade-openalgo
-    working_dir: /app
-    volumes:
-      - ./infra/openalgo:/app:ro
-      - openalgo_data:/app/db
-    command: >
-      bash -c "pip install -r requirements.txt --quiet &&
-               gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app &
-               python websocket_server.py &
-               wait"
-    ports:
-      - "127.0.0.1:5000:5000"
-      - "127.0.0.1:8765:8765"
-    env_file:
-      - .env
-      - ./infra/openalgo/.env
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5000/api/v1/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "5"
-    networks:
-      - flinttrade
+  # NOTE: OpenAlgo is no longer bundled with FlintTrade. It is an external
+  # service that users deploy separately. The block below is kept commented
+  # as a reference for contributors who want to spin up a local-dev OpenAlgo
+  # alongside FlintTrade — uncomment after running scripts/setup-test-deps.sh
+  # to populate .local/external/openalgo/. Production deployments should
+  # point FlintTrade at a separately-managed OpenAlgo via OPENALGO_HOST.
+  #
+  # openalgo:
+  #   image: python:3.12-slim
+  #   platform: linux/amd64
+  #   container_name: flinttrade-openalgo
+  #   working_dir: /app
+  #   volumes:
+  #     - ./.local/external/openalgo:/app:ro
+  #     - openalgo_data:/app/db
+  #   command: >
+  #     bash -c "pip install -r requirements.txt --quiet &&
+  #              gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:5000 app:app &
+  #              python websocket_server.py &
+  #              wait"
+  #   ports:
+  #     - "127.0.0.1:5000:5000"
+  #     - "127.0.0.1:8765:8765"
+  #   env_file:
+  #     - .env
+  #     - ./.local/external/openalgo/.env
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-sf", "http://localhost:5000/api/v1/ping"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "5"
+  #   networks:
+  #     - flinttrade
 
   # ---------------------------------------------------------------------------
   # FlintTrade — Platform backend (strategy engine, screener, AI, data)
@@ -83,7 +90,9 @@ services:
     environment:
       - FLINTTRADE_DEV=0
       - FLINTTRADE_PORT=5100
-      - OPENALGO_HOST=http://openalgo
+      # OpenAlgo is external — set this to your OpenAlgo host. If you
+      # uncomment the local-dev openalgo service above, use http://openalgo.
+      - OPENALGO_HOST=${OPENALGO_HOST:-http://host.docker.internal}
       - OPENALGO_PORT=5000
       - OPENALGO_WS_PORT=8765
       - OPENBLAS_NUM_THREADS=2
@@ -91,9 +100,8 @@ services:
       - GUNICORN_WORKERS=1
       - GUNICORN_TIMEOUT=120
       - LOG_LEVEL=info
-    depends_on:
-      openalgo:
-        condition: service_healthy
+    # depends_on: openalgo — disabled because OpenAlgo is now an external
+    # service. Re-enable if you uncomment the local-dev openalgo block above.
     restart: unless-stopped
     read_only: true
     tmpfs:

@@ -1,5 +1,11 @@
 name: Upstream Drift Check
 
+# Tracks drift between FlintTrade's pinned versions of external test
+# dependencies (openalgo, algomirror, openclaw — see docs/COMPATIBILITY.md)
+# and their upstream main branch. These are no longer git submodules of
+# FlintTrade; CI clones them on demand into .local/external/ via the
+# setup-test-deps.sh helper.
+
 on:
   schedule:
     - cron: '0 6 * * 1'   # Every Monday at 06:00 UTC
@@ -11,7 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          submodules: recursive
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -21,6 +26,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Clone external test-deps at HEAD of main
+        # Pulls latest of each upstream so check_upstream.py can compare
+        # the FlintTrade-pinned commit (in docs/COMPATIBILITY.md) against
+        # the upstream tip.
+        run: bash scripts/setup-test-deps.sh --latest
 
       - name: Check upstream versions
         run: python scripts/check_upstream.py > upstream-report.md
@@ -33,7 +44,7 @@ jobs:
 
       - name: Check for critical drift
         run: |
-          # Fail if any submodule is more than 50 commits behind
+          # Warn if any external test-dep is more than 50 commits behind
           BEHIND=$(python -c "
           import json, subprocess, sys
           result = subprocess.run(
@@ -41,10 +52,10 @@ jobs:
               capture_output=True, text=True
           )
           data = json.loads(result.stdout)
-          max_behind = max((r['commits_behind'] for r in data if r['category'] == 'submodule'), default=0)
+          max_behind = max((r['commits_behind'] for r in data if r['category'] == 'external-test-dep'), default=0)
           print(max_behind)
           ")
-          echo "Max submodule drift: $BEHIND commits"
+          echo "Max external test-dep drift: $BEHIND commits"
           if [ "$BEHIND" -gt 50 ]; then
-            echo "::warning::Submodule drift detected: $BEHIND commits behind upstream"
+            echo "::warning::External test-dep drift: $BEHIND commits behind upstream — consider bumping the pin in docs/COMPATIBILITY.md"
           fi

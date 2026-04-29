@@ -158,21 +158,21 @@ chrono-tz        = "0.10"
 thiserror        = "1.0"
 ```
 
-## Git submodules
+## External test-dependencies (no longer git submodules)
 
-All three are present in `infra/` and updated through Wave 5.
+OpenAlgo, OpenClaw, and AlgoMirror used to ship as git submodules under `infra/`. They are now external services — users install them separately, or contributors run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/` (gitignored, not part of the published repo).
 
-| Submodule | Path | Ref (git describe) |
+| Repo | Local-dev path | Ref last absorbed |
 |---|---|---|
-| OpenAlgo | `infra/openalgo/` | `openalgo-stability-fix-21-g0f1ee545` |
-| OpenClaw | `infra/openclaw/` | `v2026.4.19-beta.2-6-g8c4ecf42df` |
-| AlgoMirror | `infra/algomirror/` | `algomirror-postgres-10-gfa063e2` |
+| OpenAlgo | `.local/external/openalgo/` | `openalgo-stability-fix-21-g0f1ee545` |
+| OpenClaw | `.local/external/openclaw/` | `v2026.4.19-beta.2-6-g8c4ecf42df` |
+| AlgoMirror | `.local/external/algomirror/` | `algomirror-postgres-10-gfa063e2` |
 
 ## External Services
 
 | Service | Detail |
 |---|---|
-| Broker | **UNKNOWN — needs manual verification.** No broker is declared in repo-tracked files. CLAUDE.md implies "Dhan/other" and OpenAlgo holds the credentials in `infra/openalgo/.env` (not committed). |
+| Broker | **UNKNOWN — needs manual verification.** No broker is declared in repo-tracked files. CLAUDE.md implies "Dhan/other" and OpenAlgo holds the credentials in its own `.env` (managed by your OpenAlgo install — for the local-dev clone that's `.local/external/openalgo/.env`; not committed). |
 | LLM | **UNKNOWN — needs manual verification.** `~/.flinttrade/workspace.json` is absent on this host, so no provider is configured in the workspace. CLAUDE.md references LM Studio + Qwen 3.5 9B Q4_K_M, but that is an environmental observation rather than a committed value. |
 | Database (workspace) | `~/.flinttrade/` contains: `activity.db`, `auth.db`, `credentials.db`, `error_log.duckdb`, `latency_log.duckdb`, `security.db`, `traffic_log.duckdb`, plus `contracts/`, `data/`, `sandbox/`, `archive/`, and `jwt_secret`. |
 | DuckDB files | `error_log.duckdb`, `latency_log.duckdb`, `traffic_log.duckdb` (DuckDB 1.4.4) + `security.db` (also DuckDB, held open by PID 26840 at report time — caused pytest to fail). |

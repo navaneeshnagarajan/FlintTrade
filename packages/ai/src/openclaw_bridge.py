@@ -1,8 +1,10 @@
 """Bridge to OpenClaw AI agent gateway for autonomous trading agents.
 
-OpenClaw is deployed as a git submodule at ``infra/openclaw/``.  This bridge
-makes HTTP calls to a running OpenClaw instance — it never imports or modifies
-the submodule code.
+OpenClaw is an external service — it is NOT bundled with FlintTrade. This
+bridge makes HTTP calls to a running OpenClaw instance and never imports
+its code. For local development, contributors can clone OpenClaw to
+``.local/external/openclaw/`` via ``scripts/setup-test-deps.sh``; production
+deployments install OpenClaw separately.
 
 Usage::
 

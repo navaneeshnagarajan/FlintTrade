@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Start OpenAlgo as a background process
+# Start OpenAlgo as a background process.
+#
+# OpenAlgo is an EXTERNAL service — it is not bundled with FlintTrade. This
+# script expects a local-dev clone at .local/external/openalgo/ (created by
+# scripts/setup-test-deps.sh). For production, run OpenAlgo from wherever
+# you installed it and override OPENALGO_DIR via the environment.
 set -euo pipefail
 
-FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
-OPENALGO_DIR="$FLINTTRADE_DIR/infra/openalgo"
+FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+OPENALGO_DIR="${OPENALGO_DIR:-$FLINTTRADE_DIR/.local/external/openalgo}"
 PID_FILE="${TMPDIR:-/tmp}/flinttrade-openalgo.pid"
 
 # Source .env
@@ -18,8 +23,14 @@ fi
 
 # Check OpenAlgo directory
 if [ ! -f "$OPENALGO_DIR/app.py" ]; then
-    echo "ERROR: $OPENALGO_DIR/app.py not found"
-    echo "Run: git submodule update --init"
+    echo "ERROR: OpenAlgo not found at $OPENALGO_DIR"
+    echo ""
+    echo "OpenAlgo is an external dependency — FlintTrade does not bundle it."
+    echo "To get a local-dev copy for testing, run:"
+    echo "    bash scripts/setup-test-deps.sh"
+    echo ""
+    echo "Or, if you've installed OpenAlgo elsewhere, point this script at it:"
+    echo "    OPENALGO_DIR=/path/to/openalgo bash infra/scripts/openalgo/start-openalgo.sh"
     exit 1
 fi
 

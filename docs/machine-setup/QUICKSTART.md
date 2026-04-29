@@ -5,12 +5,20 @@
 ## 1. Clone and Install
 
 ```bash
-git clone --recursive https://github.com/navaneeshnagarajan/FlintTrade.git
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 make setup
 ```
 
-`make setup` installs: Python deps, Node deps, OpenAlgo deps, gunicorn, workspace init.
+`make setup` installs: Python deps, Node deps, workspace init.
+
+OpenAlgo (and AlgoMirror, OpenClaw) are no longer bundled as git submodules. They are external services FlintTrade talks to over HTTP/WebSocket. Install OpenAlgo separately, OR run the helper to clone a local-dev copy:
+
+```bash
+bash scripts/setup-test-deps.sh
+```
+
+This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo clone you can run via `make start`.
 
 ## 2. Configure Environment
 
@@ -22,7 +30,7 @@ Edit `.env` — set `OPENALGO_API_KEY` (get from OpenAlgo web UI after broker lo
 
 ## 3. Configure OpenAlgo Broker
 
-Edit `infra/openalgo/.env` (copy from `.sample.env` if needed):
+Edit OpenAlgo's own `.env` — for the local-dev clone, that's `.local/external/openalgo/.env` (copy from `.sample.env` if needed):
 - Set broker name (e.g., your broker or its sandbox variant for testing)
 - Set broker credentials (client ID, API key/secret)
 

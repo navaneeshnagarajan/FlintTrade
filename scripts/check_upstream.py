@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Check upstream version drift for all tracked dependencies.
 
-Compares local submodule commits and absorbed repo snapshots against
-their upstream remotes. Outputs a markdown table showing what's behind.
+Compares local clones (external test-deps and absorbed repo snapshots)
+against their upstream remotes. Outputs a markdown table showing what's
+behind.
+
+The three external test-deps (openalgo, algomirror, openclaw) used to be
+git submodules under ``infra/``. They are now plain clones under
+``.local/external/`` produced by ``scripts/setup-test-deps.sh``.
 
 Usage:
     python scripts/check_upstream.py
@@ -24,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 @dataclass
 class RepoStatus:
     name: str
-    category: str  # "submodule" | "reference" | "npm" | "pip"
+    category: str  # "external-test-dep" | "reference" | "npm" | "pip"
     local_version: str = ""
     remote_version: str = ""
     commits_behind: int = 0
@@ -44,21 +49,21 @@ def _run(cmd: list[str], cwd: Path | None = None) -> str:
 
 
 def check_submodules() -> list[RepoStatus]:
-    """Check git submodules for upstream drift."""
+    """Check the external test-deps under .local/external/ for upstream drift."""
     results: list[RepoStatus] = []
 
-    submodules = [
-        ("infra/openalgo", "marketcalls/openalgo", "main"),
-        ("infra/algomirror", "marketcalls/algomirror", "main"),
-        ("infra/openclaw", "openclaw/openclaw", "main"),
+    external_test_deps = [
+        (".local/external/openalgo", "marketcalls/openalgo", "main"),
+        (".local/external/algomirror", "marketcalls/algomirror", "main"),
+        (".local/external/openclaw", "openclaw/openclaw", "main"),
     ]
 
-    for path, repo, branch in submodules:
+    for path, repo, branch in external_test_deps:
         sub_path = ROOT / path
         if not sub_path.exists():
             results.append(RepoStatus(
-                name=path, category="submodule",
-                notes="Directory not found",
+                name=path, category="external-test-dep",
+                notes="Not present (run scripts/setup-test-deps.sh)",
                 url=f"https://github.com/{repo}",
             ))
             continue
@@ -90,7 +95,7 @@ def check_submodules() -> list[RepoStatus]:
 
         results.append(RepoStatus(
             name=path,
-            category="submodule",
+            category="external-test-dep",
             local_version=local,
             remote_version=f"{remote} ({latest_tag})" if latest_tag else remote,
             commits_behind=behind,
@@ -232,7 +237,7 @@ def main() -> None:
 
     results: list[RepoStatus] = []
 
-    print("Checking submodules...", file=sys.stderr)
+    print("Checking external test-deps under .local/external/...", file=sys.stderr)
     results.extend(check_submodules())
 
     if not args.skip_npm:

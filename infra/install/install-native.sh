@@ -5,6 +5,13 @@
 # and configures systemd services.
 # Idempotent — safe to run multiple times.
 #
+# IMPORTANT: This installer no longer bundles OpenAlgo, AlgoMirror, or
+# OpenClaw. Those are external prerequisites — install them yourself, OR
+# run scripts/setup-test-deps.sh to clone local-dev copies into
+# .local/external/ for testing. The systemd unit emitted below assumes
+# the local-dev OpenAlgo path; adjust WorkingDirectory + ExecStart for
+# your actual install location.
+#
 # Usage:
 #   sudo ./install-native.sh
 #   sudo DOMAIN=trade.example.com ./install-native.sh
@@ -96,10 +103,10 @@ mkdir -p "$INSTALL_DIR"
 if [ -d "$INSTALL_DIR/.git" ]; then
     log "Existing installation found. Updating..."
     cd "$INSTALL_DIR"
-    git pull --recurse-submodules origin "$BRANCH"
+    git pull origin "$BRANCH"
 else
     log "Cloning FlintTrade..."
-    git clone --recursive -b "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    git clone -b "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
 fi
 
 cd "$INSTALL_DIR"
@@ -238,16 +245,24 @@ ok "Nginx configured"
 log "Installing systemd services..."
 
 # OpenAlgo service
+#
+# OpenAlgo is an external prerequisite. The unit below assumes the
+# local-dev clone at $INSTALL_DIR/.local/external/openalgo created by
+# scripts/setup-test-deps.sh. For production, install OpenAlgo to its
+# own directory and adjust WorkingDirectory + ExecStart + ReadWritePaths
+# accordingly (or do not install this unit at all and run OpenAlgo via
+# its own systemd unit / process manager).
+OPENALGO_DIR="${OPENALGO_DIR:-$INSTALL_DIR/.local/external/openalgo}"
 tee /etc/systemd/system/flinttrade-openalgo.service >/dev/null <<UNIT_EOF
 [Unit]
-Description=FlintTrade OpenAlgo Gateway
+Description=FlintTrade OpenAlgo Gateway (external dependency)
 After=network.target
 
 [Service]
 Type=simple
 User=$FLINTTRADE_USER
 Group=$FLINTTRADE_USER
-WorkingDirectory=$INSTALL_DIR/infra/openalgo
+WorkingDirectory=$OPENALGO_DIR
 ExecStart=$VENV_DIR/bin/python app.py
 Restart=on-failure
 RestartSec=5
@@ -257,7 +272,7 @@ EnvironmentFile=$INSTALL_DIR/.env
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$INSTALL_DIR/infra/openalgo/db
+ReadWritePaths=$OPENALGO_DIR/db
 PrivateTmp=true
 
 [Install]

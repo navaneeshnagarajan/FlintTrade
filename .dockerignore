@@ -5,17 +5,11 @@
 
 # Git
 .git
-.gitmodules
 
 # Environment and secrets
 .env
 *.env
 !.env.example
-
-# Infrastructure submodules (not needed in FlintTrade image)
-infra/openalgo
-infra/algomirror
-infra/openclaw
 
 # Node / Terminal (built separately by terminal service)
 packages/terminal/node_modules

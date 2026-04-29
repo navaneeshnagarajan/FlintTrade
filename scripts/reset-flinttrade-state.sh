@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reset FlintTrade user state for a fresh-install test.
 #
-# Does NOT touch OpenAlgo state (infra/openalgo/db/). Only wipes
+# Does NOT touch OpenAlgo state (.local/external/openalgo/db/). Only wipes
 # ~/.flinttrade/ (auth.db, credentials.db, activity, security,
 # traffic/error logs, jwt_secret, master_password, workspace.json,
 # contracts cache, rag store).
@@ -65,10 +65,10 @@ echo "→ Wiped ~/.flinttrade/"
 # ---------------------------------------------------------------------------
 # 4. Verify OpenAlgo state is intact.
 # ---------------------------------------------------------------------------
-if [ -f "infra/openalgo/db/openalgo.db" ]; then
-    echo "→ OpenAlgo state intact: infra/openalgo/db/openalgo.db ($(du -h infra/openalgo/db/openalgo.db | cut -f1))"
+if [ -f ".local/external/openalgo/db/openalgo.db" ]; then
+    echo "→ OpenAlgo state intact: .local/external/openalgo/db/openalgo.db ($(du -h .local/external/openalgo/db/openalgo.db | cut -f1))"
 else
-    echo "→ Note: infra/openalgo/db/openalgo.db missing — OpenAlgo will first-run on next start"
+    echo "→ Note: .local/external/openalgo/db/openalgo.db missing — OpenAlgo will first-run on next start (or you have no local-dev OpenAlgo clone; that's fine if you run OpenAlgo from another location)"
 fi
 
 # ---------------------------------------------------------------------------

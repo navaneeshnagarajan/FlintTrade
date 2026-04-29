@@ -19,15 +19,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # ─── Absorption registry ─────────────────────────────────────────────────
-# Each entry tracks: repo name, local path (submodule or .local/reference/),
-# what we absorbed, and what commit/date we last checked.
+# Each entry tracks: repo name, local path (.local/external/ for the three
+# external test-deps, or .local/reference/ for pattern-absorbed repos), what
+# we absorbed, and what commit/date we last checked. The three external
+# repos (openalgo, algomirror, openclaw) used to be git submodules under
+# infra/; they are now plain reference clones under .local/external/ and
+# only present locally if the user ran scripts/setup-test-deps.sh.
 
 ABSORBED_REPOS: list[dict] = [
     {
         "name": "openalgo",
         "github": "marketcalls/openalgo",
-        "local_path": "infra/openalgo",
-        "type": "submodule",
+        "local_path": ".local/external/openalgo",
+        "type": "reference",
         "absorbed": [
             "REST API client (45+ endpoints) -> packages/core/src/openalgo_client.py",
             "WebSocket protocol -> packages/terminal/src/services/websocket.ts",
@@ -45,8 +49,8 @@ ABSORBED_REPOS: list[dict] = [
     {
         "name": "algomirror",
         "github": "marketcalls/algomirror",
-        "local_path": "infra/algomirror",
-        "type": "submodule",
+        "local_path": ".local/external/algomirror",
+        "type": "reference",
         "absorbed": [
             "Multi-account mirror patterns -> packages/ditto/",
             "Trailing SL logic -> packages/engine/",
@@ -57,8 +61,8 @@ ABSORBED_REPOS: list[dict] = [
     {
         "name": "openclaw",
         "github": "openclaw/openclaw",
-        "local_path": "infra/openclaw",
-        "type": "submodule",
+        "local_path": ".local/external/openclaw",
+        "type": "reference",
         "absorbed": [
             "Agent gateway pattern -> packages/automation/src/openclaw_bridge.py",
             "Telegram/WhatsApp transport -> packages/automation/src/telegram_bot.py",
@@ -179,7 +183,12 @@ def check_repo(repo: dict) -> dict:
         result["notes"] = "Directory not found"
         return result
 
-    if repo["type"] == "submodule":
+    # External test-deps under .local/external/ (openalgo, algomirror, openclaw)
+    # are tracked specially: if a .git directory is present, we can compute
+    # drift against origin/main. They no longer exist for end users — only
+    # for contributors who ran scripts/setup-test-deps.sh.
+    is_external_test_dep = repo["local_path"].startswith(".local/external/")
+    if is_external_test_dep and (local_path / ".git").exists():
         result["current_commit"] = _run(["git", "rev-parse", "--short", "HEAD"], cwd=local_path)
         _run(["git", "fetch", "origin", "--quiet"], cwd=local_path)
         result["upstream_commit"] = _run(["git", "rev-parse", "--short", "origin/main"], cwd=local_path)
@@ -195,14 +204,14 @@ def format_report(repos: list[dict]) -> str:
         "",
         f"> Generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
-        "## Submodules",
+        "## External test-deps (.local/external/)",
         "",
         "| Repo | Local | Upstream | Behind | Missing Features |",
         "|------|-------|----------|--------|------------------|",
     ]
 
     for r in repos:
-        if r["type"] != "submodule":
+        if not r["local_path"].startswith(".local/external/"):
             continue
         missing_count = len(r.get("missing_since", []))
         missing_text = f"{missing_count} items" if missing_count else "Up to date"
@@ -218,6 +227,10 @@ def format_report(repos: list[dict]) -> str:
 
     for r in repos:
         if r["type"] != "reference":
+            continue
+        # Skip .local/external/* entries — they're already covered in the
+        # "External test-deps" section above.
+        if r["local_path"].startswith(".local/external/"):
             continue
         absorbed = "; ".join(r.get("absorbed", [])[:2])
         missing = "; ".join(r.get("missing_since", [])[:2]) or "Complete"

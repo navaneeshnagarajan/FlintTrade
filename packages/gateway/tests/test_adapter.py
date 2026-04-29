@@ -11,18 +11,20 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # tests/ -> gateway/ -> packages/ -> repo
-_OPENALGO_BROKER_DIR = _REPO_ROOT / "infra" / "openalgo" / "broker"
+# OpenAlgo is now an external test-dep cloned to .local/external/openalgo
+# by scripts/setup-test-deps.sh — no longer a git submodule under infra/.
+_OPENALGO_BROKER_DIR = _REPO_ROOT / ".local" / "external" / "openalgo" / "broker"
 
-_SUBMODULE_AVAILABLE = _OPENALGO_BROKER_DIR.is_dir() and any(
+_OPENALGO_AVAILABLE = _OPENALGO_BROKER_DIR.is_dir() and any(
     _OPENALGO_BROKER_DIR.iterdir()
 )
 
 
 def _submodule_required(func):
-    """Skip decorator when the openalgo submodule is not checked out."""
+    """Skip decorator when the openalgo external test-dep is not present."""
     return pytest.mark.skipif(
-        not _SUBMODULE_AVAILABLE,
-        reason="infra/openalgo submodule not checked out",
+        not _OPENALGO_AVAILABLE,
+        reason=".local/external/openalgo not present (run scripts/setup-test-deps.sh)",
     )(func)
 
 
@@ -188,7 +190,7 @@ class TestBootstrap:
             assert key in sys.modules, f"Shim '{key}' not in sys.modules after bootstrap"
 
     def test_bootstrap_adds_openalgo_to_sys_path(self):
-        """After bootstrap, infra/openalgo must appear in sys.path."""
+        """After bootstrap, the openalgo root path must appear in sys.path."""
         from adapter import _OPENALGO_ROOT_STR
 
         _bootstrap_openalgo_imports()
@@ -207,14 +209,17 @@ class TestOpenAlgoRootPath:
     """Verify the module-level path constants are correct."""
 
     def test_openalgo_root_path(self):
-        """_OPENALGO_ROOT must point to infra/openalgo, existing if submodule checked out."""
+        """_OPENALGO_ROOT must point to the openalgo external test-dep root."""
         from adapter import _OPENALGO_ROOT
 
         assert _OPENALGO_ROOT.name == "openalgo"
-        assert _OPENALGO_ROOT.parent.name == "infra"
+        # openalgo lives under .local/external/openalgo; previously it was a
+        # submodule at infra/openalgo. Adapter must resolve to whichever path
+        # exists.
+        assert _OPENALGO_ROOT.parent.name in {"external", "infra"}
 
-        if not _SUBMODULE_AVAILABLE:
-            pytest.skip("Submodule not available; skipping existence check")
+        if not _OPENALGO_AVAILABLE:
+            pytest.skip("openalgo external test-dep not available; skipping existence check")
 
         assert _OPENALGO_ROOT.is_dir(), f"Expected directory at {_OPENALGO_ROOT}"
 
@@ -275,9 +280,9 @@ def _all_broker_names() -> list[str]:
 
 @pytest.mark.parametrize("broker_name", _all_broker_names())
 def test_broker_directory_exists(broker_name: str):
-    """Each catalog entry must have a corresponding directory in the submodule."""
-    if not _SUBMODULE_AVAILABLE:
-        pytest.skip("infra/openalgo submodule not checked out")
+    """Each catalog entry must have a corresponding directory in OpenAlgo."""
+    if not _OPENALGO_AVAILABLE:
+        pytest.skip(".local/external/openalgo not present (run scripts/setup-test-deps.sh)")
 
     broker_dir = _OPENALGO_BROKER_DIR / broker_name
     assert broker_dir.is_dir(), (

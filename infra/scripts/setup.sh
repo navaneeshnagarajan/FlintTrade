@@ -87,21 +87,26 @@ AUDIT_LOG_DIR="${AUDIT_LOG_DIR:-$DATA_DIR/audit}"
 TICK_DATA_DIR="${TICK_DATA_DIR:-$DATA_DIR/ticks}"
 
 # ------------------------------------------------------------------
-# 4. Git submodules
+# 4. External test-deps
 # ------------------------------------------------------------------
-header "Git submodules"
+header "External test-deps"
 
-git submodule update --init --recursive 2>/dev/null && ok "Submodules initialized" || warn "Some submodules may not be available"
+# OpenAlgo (and AlgoMirror, OpenClaw) are no longer git submodules of
+# FlintTrade. They are EXTERNAL prerequisites. Install them yourself, OR
+# run scripts/setup-test-deps.sh to clone local-dev copies into
+# .local/external/. This installer continues if the local-dev clones
+# already exist, otherwise it tells the user how to get them.
 
 # ------------------------------------------------------------------
-# 5. OpenAlgo dependencies
+# 5. OpenAlgo dependencies (only if local-dev clone exists)
 # ------------------------------------------------------------------
 header "OpenAlgo setup"
 
+OPENALGO_DIR="$FLINTTRADE_DIR/.local/external/openalgo"
 OPENALGO_ENV_CREATED=false
-if [ -d "$FLINTTRADE_DIR/infra/openalgo" ] && [ -f "$FLINTTRADE_DIR/infra/openalgo/requirements.txt" ]; then
-    pip3 install -r "$FLINTTRADE_DIR/infra/openalgo/requirements.txt" --break-system-packages -q 2>/dev/null || \
-        pip3 install -r "$FLINTTRADE_DIR/infra/openalgo/requirements.txt" -q 2>/dev/null || \
+if [ -d "$OPENALGO_DIR" ] && [ -f "$OPENALGO_DIR/requirements.txt" ]; then
+    pip3 install -r "$OPENALGO_DIR/requirements.txt" --break-system-packages -q 2>/dev/null || \
+        pip3 install -r "$OPENALGO_DIR/requirements.txt" -q 2>/dev/null || \
         warn "OpenAlgo deps install failed — may need manual install"
     ok "OpenAlgo dependencies installed"
 
@@ -112,31 +117,33 @@ if [ -d "$FLINTTRADE_DIR/infra/openalgo" ] && [ -f "$FLINTTRADE_DIR/infra/openal
     ok "gunicorn + eventlet installed"
 
     # Copy .sample.env → .env if missing (OpenAlgo uses .sample.env, not .env.sample)
-    if [ ! -f "$FLINTTRADE_DIR/infra/openalgo/.env" ] && [ -f "$FLINTTRADE_DIR/infra/openalgo/.sample.env" ]; then
-        cp "$FLINTTRADE_DIR/infra/openalgo/.sample.env" "$FLINTTRADE_DIR/infra/openalgo/.env"
+    if [ ! -f "$OPENALGO_DIR/.env" ] && [ -f "$OPENALGO_DIR/.sample.env" ]; then
+        cp "$OPENALGO_DIR/.sample.env" "$OPENALGO_DIR/.env"
         OPENALGO_ENV_CREATED=true
-        ok "Copied infra/openalgo/.sample.env → infra/openalgo/.env"
+        ok "Copied $OPENALGO_DIR/.sample.env → $OPENALGO_DIR/.env"
 
         # Generate fresh security keys (replace defaults from sample)
         SAMPLE_APP_KEY='3daa0403ce2501ee7432b75bf100048e3cf510d63d2754f952e93d88bf07ea84'
         SAMPLE_PEPPER='a25d94718479b170c16278e321ea6c989358bf499a658fd20c90033cef8ce772'
-        CURRENT_APP_KEY=$(grep "^APP_KEY" "$FLINTTRADE_DIR/infra/openalgo/.env" | sed "s/.*= *'\(.*\)'/\1/")
-        CURRENT_PEPPER=$(grep "^API_KEY_PEPPER" "$FLINTTRADE_DIR/infra/openalgo/.env" | sed "s/.*= *'\(.*\)'/\1/")
+        CURRENT_APP_KEY=$(grep "^APP_KEY" "$OPENALGO_DIR/.env" | sed "s/.*= *'\(.*\)'/\1/")
+        CURRENT_PEPPER=$(grep "^API_KEY_PEPPER" "$OPENALGO_DIR/.env" | sed "s/.*= *'\(.*\)'/\1/")
 
         if [ "$CURRENT_APP_KEY" = "$SAMPLE_APP_KEY" ] || [ "$CURRENT_PEPPER" = "$SAMPLE_PEPPER" ]; then
             NEW_APP_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
             NEW_PEPPER=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-            sed -i "s/$SAMPLE_APP_KEY/$NEW_APP_KEY/" "$FLINTTRADE_DIR/infra/openalgo/.env"
-            sed -i "s/$SAMPLE_PEPPER/$NEW_PEPPER/" "$FLINTTRADE_DIR/infra/openalgo/.env"
-            ok "Generated fresh security keys in infra/openalgo/.env"
+            sed -i "s/$SAMPLE_APP_KEY/$NEW_APP_KEY/" "$OPENALGO_DIR/.env"
+            sed -i "s/$SAMPLE_PEPPER/$NEW_PEPPER/" "$OPENALGO_DIR/.env"
+            ok "Generated fresh security keys in $OPENALGO_DIR/.env"
         fi
 
-        warn "Configure broker credentials in infra/openalgo/.env"
-    elif [ -f "$FLINTTRADE_DIR/infra/openalgo/.env" ]; then
-        ok "infra/openalgo/.env exists"
+        warn "Configure broker credentials in $OPENALGO_DIR/.env"
+    elif [ -f "$OPENALGO_DIR/.env" ]; then
+        ok "$OPENALGO_DIR/.env exists"
     fi
 else
-    warn "infra/openalgo/ not populated — run: git submodule update --init"
+    warn "OpenAlgo is an external prerequisite. To get a local-dev copy for testing, run:"
+    warn "    bash scripts/setup-test-deps.sh"
+    warn "Or install OpenAlgo separately and point FlintTrade at it via OPENALGO_HOST in .env."
 fi
 
 # ------------------------------------------------------------------
@@ -206,10 +213,11 @@ ok "gunicorn + eventlet installed"
 ok "Workspace initialized"
 echo ""
 if [ "$OPENALGO_ENV_CREATED" = true ]; then
-    warn "Configure broker credentials in infra/openalgo/.env before trading"
+    warn "Configure broker credentials in .local/external/openalgo/.env before trading"
 fi
 echo "Next steps:"
 echo "  1. Edit .env with your OPENALGO_API_KEY"
-echo "  2. Edit infra/openalgo/.env with broker credentials"
-echo "  3. Run: make start"
-echo "  4. Run: make status"
+echo "  2. If you don't have OpenAlgo yet: bash scripts/setup-test-deps.sh"
+echo "  3. Edit OpenAlgo's .env with broker credentials (.local/external/openalgo/.env for the local-dev clone)"
+echo "  4. Run: make start"
+echo "  5. Run: make status"

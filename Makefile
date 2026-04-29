@@ -124,13 +124,13 @@ endif
 # Maintenance
 # ======================================================================
 
-update: ## Update submodules and dependencies
-	@echo "Updating submodules..."
-	@git submodule update --remote --merge 2>/dev/null || true
+update: ## Update Python dependencies (external test-deps live in .local/external/, update them yourself)
 	@echo "Updating Python dependencies..."
 	@$(PYTHON) -m pip install -r requirements.txt --upgrade --break-system-packages -q 2>/dev/null || \
 	 $(PYTHON) -m pip install -r requirements.txt --upgrade -q
 	@echo -e "$(GREEN)✓ Updated$(RESET)"
+	@echo -e "$(YELLOW)Note: external test-deps under .local/external/ are not git submodules anymore.$(RESET)"
+	@echo -e "$(YELLOW)Pull updates manually: cd .local/external/openalgo && git pull (etc.)$(RESET)"
 
 clean: ## Remove build artifacts (with confirmation)
 	@echo "This will remove __pycache__, .pytest_cache, and node_modules."
@@ -171,11 +171,23 @@ full-check: ## Run full health check (tests + lint + typecheck)
 audit: ## Check repo absorption status
 	@$(PYTHON) scripts/audit_repos.py
 
-sync-check: ## Check submodule upstream changes
-	@echo -e "$(CYAN)=== Submodule Sync Check ===$(RESET)"
-	@cd infra/openalgo && git fetch origin --quiet 2>/dev/null && echo "openalgo: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openalgo: not available"
-	@cd infra/algomirror && git fetch origin --quiet 2>/dev/null && echo "algomirror: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "algomirror: not available"
-	@cd infra/openclaw && git fetch origin --quiet 2>/dev/null && echo "openclaw: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind" || echo "openclaw: not available"
+sync-check: ## Check upstream drift on external test-deps under .local/external/
+	@echo -e "$(CYAN)=== External Test-Deps Sync Check ===$(RESET)"
+	@if [ -d .local/external/openalgo/.git ]; then \
+	  (cd .local/external/openalgo && git fetch origin --quiet 2>/dev/null && echo "openalgo: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind"); \
+	else \
+	  echo -e "$(YELLOW)openalgo: not present at .local/external/openalgo (run scripts/setup-test-deps.sh)$(RESET)"; \
+	fi
+	@if [ -d .local/external/algomirror/.git ]; then \
+	  (cd .local/external/algomirror && git fetch origin --quiet 2>/dev/null && echo "algomirror: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind"); \
+	else \
+	  echo -e "$(YELLOW)algomirror: not present at .local/external/algomirror (run scripts/setup-test-deps.sh)$(RESET)"; \
+	fi
+	@if [ -d .local/external/openclaw/.git ]; then \
+	  (cd .local/external/openclaw && git fetch origin --quiet 2>/dev/null && echo "openclaw: $$(git rev-list HEAD..origin/main --count 2>/dev/null || echo '?') commits behind"); \
+	else \
+	  echo -e "$(YELLOW)openclaw: not present at .local/external/openclaw (run scripts/setup-test-deps.sh)$(RESET)"; \
+	fi
 
 logs-clear: ## Truncate runtime .log files under .local/dev-logs/
 	@echo -e "$(CYAN)=== Clearing runtime logs ===$(RESET)"

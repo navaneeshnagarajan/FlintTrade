@@ -55,10 +55,6 @@ audit_logs/
 backtest_results/
 tick_data/
 
-# === Infra submodule secrets ===
-infra/openalgo/.env
-infra/openclaw/.env
-
 # === Tools (local caches and state) ===
 .lmstudio/
 .openclaw/

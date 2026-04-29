@@ -55,7 +55,7 @@ FlintTrade sits ON TOP of OpenAlgo. Never modifies it.
 
 - **OpenAlgo:** Broker connections (33 brokers), REST API port 5000, WebSocket port 8765
 - **FlintTrade:** Single React app (Dockview workspace) + Python backend (strategy engine, backtesting, AI, data pipelines, screener, multi-account orchestration)
-- **Git submodules:** `infra/openalgo`, `infra/algomirror`, `infra/openclaw`
+- **External test-deps (not bundled, not submodules):** OpenAlgo, AlgoMirror, and OpenClaw are external services FlintTrade talks to over HTTP/WS. Users install them separately as a prerequisite. Contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/{openalgo,algomirror,openclaw}/` (gitignored, not shipped).
 - Every machine runs its own OpenAlgo instance for development and testing. You CANNOT write correct code without testing against a live OpenAlgo.
 
 ```
@@ -125,7 +125,7 @@ Each route lazy-loads its own module. No cross-route code in the initial bundle.
 
 | Category | Choice |
 |----------|--------|
-| Broker Gateway | OpenAlgo (git submodule at `infra/openalgo`) |
+| Broker Gateway | OpenAlgo (external service; local dev clone at `.local/external/openalgo` via `scripts/setup-test-deps.sh`) |
 | Real-time | WebSocket port 8765 (LTP/Quote/Depth modes) |
 | Config | `.env` (4 vars) + in-app Settings (`workspace.json`) |
 | Deployment | systemd (Ubuntu), local dev (Windows / macOS) |
@@ -162,7 +162,7 @@ Two-tier config. No exceptions.
 | User preferences | `~/.flinttrade/workspace.json` | Storage paths, enabled modules, LLM config, Telegram, theme, SEBI settings |
 
 - `.env.example` has ALL values blank (open-source rule)
-- Broker credentials are in OpenAlgo's own `.env` (`infra/openalgo/.env`), never in FlintTrade
+- Broker credentials are in OpenAlgo's own `.env` (managed by your OpenAlgo install — for the local-dev clone that's `.local/external/openalgo/.env`), never in FlintTrade
 - TOTP auto-login NOT implemented. OpenAlgo handles broker auth.
 - API keys as env vars or workspace.json `_ref` fields, never hardcoded
 - Cross-platform workspace: `~/.flinttrade/` (Linux), `~/Library/Application Support/flinttrade/` (macOS), `%APPDATA%/flinttrade/` (Windows)
@@ -375,11 +375,11 @@ Every machine (Windows, macOS, Ubuntu, or new contributor) can:
 - Use all skills, plugins, MCP servers, and agents
 
 To set up a new machine:
-1. `git clone --recursive https://github.com/navaneeshnagarajan/FlintTrade.git`
+1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
 2. `make setup`
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
-4. Configure `infra/openalgo/.env` with broker credentials
-5. `make start` (starts OpenAlgo)
+4. Install OpenAlgo separately (see its docs), OR run `scripts/setup-test-deps.sh` to clone a local-dev copy into `.local/external/openalgo/` and configure its `.env` with broker credentials
+5. `make start` (starts OpenAlgo from the local-dev copy if present)
 6. `make test` (verify 3,900+ pass)
 7. `cd packages/terminal && npm install && npm run build` (verify clean build, 1,696+ vitest pass)
 8. Read PLAN.md, pick a task, start building
@@ -388,7 +388,7 @@ See `docs/machine-setup/QUICKSTART.md` for detailed instructions.
 
 ## Do NOT
 
-- Modify files inside `infra/openalgo/`, `infra/openclaw/`, `infra/algomirror/` (submodules)
+- Modify files inside `.local/external/openalgo/`, `.local/external/openclaw/`, `.local/external/algomirror/` (external test-deps; not part of FlintTrade)
 - Hardcode API keys, hostnames, IPs, provider names, or personal values
 - Use mock/placeholder/fake data in terminal or any UI
 - Commit `.env` files (only `.env.example` with blank values)

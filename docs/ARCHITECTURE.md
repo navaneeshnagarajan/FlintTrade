@@ -17,8 +17,8 @@
 └────────────────────┼───────────────────────────────────────┘
                      │ REST API + WebSocket
               ┌──────┴───────┐
-              │   OpenAlgo   │ infra/openalgo/ (git submodule)
-              │  33 brokers  │
+              │   OpenAlgo   │ external service (separately installed)
+              │  33 brokers  │ — local-dev clone: .local/external/openalgo/
               └──────────────┘
 ```
 
@@ -128,13 +128,15 @@ make clean      # Remove build artifacts
 make update     # Update submodules + deps
 ```
 
-### Upstream Dependencies
+### External Test Dependencies
 
-| Directory | Source | Type |
-|-----------|--------|------|
-| `infra/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | git submodule |
-| `infra/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | git submodule |
-| `infra/algomirror/` | [marketcalls/algomirror](https://github.com/marketcalls/algomirror) | git submodule |
+OpenAlgo, OpenClaw, and AlgoMirror are external services that FlintTrade communicates with over HTTP/WebSocket. They are NOT bundled with FlintTrade and are NOT git submodules. End users install them separately as prerequisites; contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/` (gitignored).
+
+| Service | Local-dev clone path | Source | Role |
+|---------|----------------------|--------|------|
+| OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | broker gateway |
+| OpenClaw | `.local/external/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | AI agent gateway |
+| AlgoMirror | `.local/external/algomirror/` | [marketcalls/algomirror](https://github.com/marketcalls/algomirror) | multi-account mirror |
 
 ### Scripts
 

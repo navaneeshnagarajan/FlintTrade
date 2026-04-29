@@ -15,7 +15,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.5.0-dev
 - FlintTrade sits ON TOP of OpenAlgo (never modifies it)
 - OpenAlgo: broker connections (33 brokers), REST port 5000, WS port 8765
 - FlintTrade: terminal, strategies, backtest, AI, data, screener, multi-account
-- Submodules: `infra/openalgo`, `infra/algomirror`, `infra/openclaw`
+- External test-deps (not submodules, not bundled): OpenAlgo, AlgoMirror, OpenClaw — installed separately, or cloned to `.local/external/` via `scripts/setup-test-deps.sh` for local development
 
 ## Configuration
 
@@ -72,7 +72,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.5.0-dev
 
 ## Do NOT
 
-- Modify submodules (`infra/openalgo/`, `infra/algomirror/`, `infra/openclaw/`)
+- Modify external test-deps (`.local/external/openalgo/`, `.local/external/algomirror/`, `.local/external/openclaw/`)
 - Hardcode credentials, IPs, hostnames
 - Use mock data in terminal
 - Commit `.env` files

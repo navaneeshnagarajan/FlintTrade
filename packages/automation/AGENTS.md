@@ -3,7 +3,7 @@
 > Cron scheduler, Telegram bot, OpenClaw agent bridge, post-market analysis
 
 ## Absorbs
-- OpenClaw (infra/openclaw/) → AI agent gateway, Telegram/WhatsApp/Discord, heartbeats, skills
+- OpenClaw (external service; local-dev clone at `.local/external/openclaw/` via `scripts/setup-test-deps.sh`) → AI agent gateway, Telegram/WhatsApp/Discord, heartbeats, skills
 
 ## Depends on: core, engine, ai, data
 

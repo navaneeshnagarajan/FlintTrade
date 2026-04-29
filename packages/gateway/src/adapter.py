@@ -1,12 +1,17 @@
-"""Adapter layer: the ONLY file that imports from infra.openalgo.broker.*.
+"""Adapter layer: the ONLY file that imports OpenAlgo's broker.* modules.
 
 This module translates between FlintTrade's BrokerSession interface and
 OpenAlgo's broker-specific modules. All OpenAlgo coupling is confined here.
 
 Design contract:
-- No other file in packages/gateway/ may import from infra.openalgo directly.
+- No other file in packages/gateway/ may import OpenAlgo modules directly.
 - Shims are installed into sys.modules before any broker module is touched.
 - The adapter is lazily loaded; import-time cost is zero until first use.
+
+Path resolution: OpenAlgo is an external test-dep, not bundled with FlintTrade.
+For local development it is cloned to ``.local/external/openalgo/`` via
+``scripts/setup-test-deps.sh``. The legacy submodule path ``infra/openalgo/``
+is kept as a fallback so older checkouts still work during the transition.
 """
 
 from __future__ import annotations
@@ -21,13 +26,33 @@ from .exceptions import BrokerNotFoundError
 from .models import AuthFlowType, BrokerInfo
 
 # ---------------------------------------------------------------------------
-# Path setup — locate OpenAlgo submodule root
+# Path setup — locate OpenAlgo external test-dep root
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger("flinttrade.gateway.adapter")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_OPENALGO_ROOT = _REPO_ROOT / "infra" / "openalgo"
+
+
+def _resolve_openalgo_root() -> Path:
+    """Return the OpenAlgo source tree path, preferring the new location.
+
+    OpenAlgo used to be a git submodule under ``infra/openalgo/``; it now
+    lives under ``.local/external/openalgo/`` (cloned by
+    ``scripts/setup-test-deps.sh``). We check the new location first, fall
+    back to the legacy submodule path if present, and finally return the
+    new location even when nothing exists so error messages stay accurate.
+    """
+    new = _REPO_ROOT / ".local" / "external" / "openalgo"
+    if (new / "app.py").is_file() or (new / "broker").is_dir():
+        return new
+    legacy = _REPO_ROOT / "infra" / "openalgo"
+    if (legacy / "app.py").is_file() or (legacy / "broker").is_dir():
+        return legacy
+    return new
+
+
+_OPENALGO_ROOT = _resolve_openalgo_root()
 _OPENALGO_ROOT_STR = str(_OPENALGO_ROOT)
 
 # ---------------------------------------------------------------------------
