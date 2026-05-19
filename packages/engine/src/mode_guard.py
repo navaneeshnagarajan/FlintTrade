@@ -229,5 +229,12 @@ def require_live_unlocked(view: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def current_mode() -> str | None:
-    """Public accessor — returns the current JWT mode or ``None``."""
+    """Public accessor — returns the current JWT mode or ``None``.
+
+    Returns ``None`` for missing or invalid JWTs (auth-failed), not
+    ``"explore"`` — callers using this for routing decisions must
+    distinguish these cases themselves. (``require_non_explore`` and
+    ``require_live_unlocked`` both treat ``None`` as failure, but with
+    different HTTP status codes — 403 vs 401.)
+    """
     return _extract_mode()

@@ -199,4 +199,45 @@ describe("buildHeaders — auth attachment", () => {
     expect(headers["Authorization"]).toBeUndefined();
     expect(headers["Content-Type"]).toBe("application/json");
   });
+
+  it("attaches X-API-Key independently when only apiKey is set", async () => {
+    // Locks the contract that the two headers attach independently —
+    // a regression where buildHeaders required *both* to be present to
+    // attach *either* would be caught here.
+    (useConnectionStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      apiKey: "only-key",
+    }));
+    (useAuthStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      token: "",
+    }));
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ data: null }),
+    );
+
+    await post("safety/config", {});
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-API-Key"]).toBe("only-key");
+    expect(headers["Authorization"]).toBeUndefined();
+  });
+
+  it("attaches Authorization independently when only token is set", async () => {
+    (useConnectionStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      apiKey: "",
+    }));
+    (useAuthStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      token: "only-jwt",
+    }));
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ data: null }),
+    );
+
+    await post("safety/config", {});
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-API-Key"]).toBeUndefined();
+    expect(headers["Authorization"]).toBe("Bearer only-jwt");
+  });
 });
