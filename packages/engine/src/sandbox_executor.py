@@ -30,6 +30,7 @@ Usage::
 
 from __future__ import annotations
 
+import ast
 import builtins as _builtins_module
 import logging
 import math
@@ -42,6 +43,124 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.sandbox_executor")
+
+# ---------------------------------------------------------------------------
+# AST-level pre-check — block sandbox escape primitives BEFORE `exec()` runs
+# ---------------------------------------------------------------------------
+#
+# Mirrors the validator in ``strategy_runner.py``. Even with a builtin
+# allowlist, an attacker who has direct ``exec(code, namespace)`` access can
+# reach the full Python object graph via dunders:
+#
+#     ().__class__.__bases__[0].__subclasses__()[N].__init__.__globals__
+#         ['__builtins__']['__import__']('os').system('rm -rf /')
+#
+# Allowlists alone cannot stop this — AST inspection that rejects the
+# escape vectors at parse time can.
+#
+# Block list:
+# - ``__class__``, ``__bases__``, ``__subclasses__``, ``__mro__`` — climb the
+#   type hierarchy.
+# - ``__globals__``, ``__builtins__``, ``__code__`` — reach the host
+#   process's builtins and bytecode.
+# - ``__import__``, ``__reduce__``, ``__reduce_ex__`` — pickle-style payload
+#   delivery + late binding.
+# - ``__init_subclass__``, ``__class_getitem__`` — type creation hooks.
+#
+# Plus dangerous call names that may slip in via ``namespace`` injection or
+# stdlib re-exports (``eval``, ``exec``, ``compile``, ``open``, ``globals``,
+# ``locals``, ``vars``, ``dir``, ``getattr``, ``setattr``, ``delattr``,
+# ``breakpoint``, ``__import__``).
+_SANDBOX_FORBIDDEN_ATTRS: frozenset[str] = frozenset(
+    {
+        "__class__",
+        "__bases__",
+        "__subclasses__",
+        "__mro__",
+        "__globals__",
+        "__builtins__",
+        "__code__",
+        "__import__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__init_subclass__",
+        "__class_getitem__",
+        "__getattribute__",
+    }
+)
+
+_SANDBOX_BLOCKED_CALLS: frozenset[str] = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "getattr",
+        "setattr",
+        "delattr",
+        "open",
+        "breakpoint",
+        "input",
+    }
+)
+
+
+def _validate_sandbox_source(source_code: str) -> list[str]:
+    """Walk the AST of ``source_code`` and return a list of policy violations.
+
+    An empty list means the code is acceptable for ``exec()``. Any non-empty
+    return value should be treated as a hard rejection — DO NOT let the
+    string reach ``exec()`` even if ``builtins`` are stripped, because a
+    single missed dunder access reverses the entire sandbox.
+
+    Args:
+        source_code: Untrusted Python source text.
+
+    Returns:
+        A list of human-readable violation messages. Empty when safe.
+    """
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError as exc:
+        return [f"SyntaxError: {exc}"]
+
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        # 1. Forbid `obj.__class__`, `obj.__subclasses__`, etc. on ANY object.
+        if isinstance(node, ast.Attribute) and node.attr in _SANDBOX_FORBIDDEN_ATTRS:
+            violations.append(
+                f"Blocked attribute: '.{node.attr}' — sandbox-escape vector"
+            )
+        # 2. Forbid direct calls to dangerous builtins (`eval()`, `exec()`,
+        #    `__import__()`, `getattr(obj, '__class__')`, etc.).
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in _SANDBOX_BLOCKED_CALLS:
+                violations.append(
+                    f"Blocked call: '{func.id}()' — not allowed in sandbox"
+                )
+        # 3. Forbid `import os` / `from os import ...` and similar stdlib
+        #    escape hatches. The runtime namespace already excludes
+        #    `__import__`, but a static check rejects the syntax up front.
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".", 1)[0]
+                violations.append(
+                    f"Blocked import: '{alias.name}' — module '{root}' is not "
+                    "available in the sandbox"
+                )
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".", 1)[0]
+            violations.append(
+                f"Blocked import: 'from {node.module or '?'} import …' — "
+                f"module '{root}' is not available in the sandbox"
+            )
+
+    return violations
 
 # ---------------------------------------------------------------------------
 # Platform-level resource limiting (soft-fail on Windows)
@@ -81,15 +200,22 @@ _ALLOWED_MODULES: dict[str, Any] = {
 # Python environments (module-level vs exec context on Windows vs Linux).
 # ---------------------------------------------------------------------------
 
+#
+# DO NOT add `getattr`, `setattr`, `delattr`, `type`, `object`, `super`,
+# `globals`, `locals`, `vars`, `dir`, `compile`, `eval`, `exec`,
+# `__import__`, `open`, `breakpoint`, or `input` to this list. They are
+# either direct sandbox-escape primitives or enable reflection paths that
+# can reach the full Python object graph. The AST validator above also
+# rejects them statically, but the runtime allowlist is the second wall.
 _SAFE_BUILTIN_NAMES: tuple[str, ...] = (
     "abs", "all", "any", "bin", "bool", "bytearray", "bytes",
     "callable", "chr", "complex", "dict", "divmod", "enumerate",
-    "filter", "float", "format", "frozenset", "getattr", "hasattr",
+    "filter", "float", "format", "frozenset", "hasattr",
     "hash", "hex", "id", "int", "isinstance", "issubclass", "iter",
-    "len", "list", "map", "max", "min", "next", "object", "oct",
+    "len", "list", "map", "max", "min", "next", "oct",
     "ord", "pow", "print", "property", "range", "repr", "reversed",
-    "round", "set", "setattr", "slice", "sorted", "staticmethod",
-    "str", "sum", "super", "tuple", "type", "zip",
+    "round", "set", "slice", "sorted", "staticmethod",
+    "str", "sum", "tuple", "zip",
     # Exception hierarchy
     "Exception", "BaseException",
     "ValueError", "TypeError", "KeyError", "IndexError",
@@ -237,10 +363,24 @@ class SandboxExecutor:
 
         Returns:
             An ``ExecutionResult`` with signals, stdout, and error info.
+            If the source code fails static validation, no ``exec()`` is
+            performed and the result carries a ``SecurityError``.
         """
         result = ExecutionResult()
         captured_signals: list[SignalEvent] = []
         captured_output: list[str] = []
+
+        # Static AST pre-check — reject sandbox-escape vectors BEFORE exec().
+        # See _validate_sandbox_source above for the policy.
+        violations = _validate_sandbox_source(source_code)
+        if violations:
+            result.error = "Sandbox policy violation:\n - " + "\n - ".join(violations)
+            result.error_type = "SecurityError"
+            logger.warning(
+                "SandboxExecutor: rejected source with %d violation(s)",
+                len(violations),
+            )
+            return result
 
         namespace = self._build_namespace(
             captured_signals=captured_signals,
