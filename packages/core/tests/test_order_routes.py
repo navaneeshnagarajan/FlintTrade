@@ -42,13 +42,13 @@ def _create_live_token() -> str:
 
 # All order endpoints and their FlintTrade route suffixes
 _ORDER_ENDPOINTS = [
-    "/v1/orders/place",
-    "/v1/orders/place-smart",
-    "/v1/orders/modify",
-    "/v1/orders/cancel",
-    "/v1/orders/cancel-all",
-    "/v1/orders/close-position",
-    "/v1/orders/open-position",
+    "/api/v1/orders/place",
+    "/api/v1/orders/place-smart",
+    "/api/v1/orders/modify",
+    "/api/v1/orders/cancel",
+    "/api/v1/orders/cancel-all",
+    "/api/v1/orders/close-position",
+    "/api/v1/orders/open-position",
 ]
 
 _SAMPLE_ORDER_BODY = {
@@ -183,7 +183,7 @@ class TestExploreModeBlocked:
             "order_type": "LIMIT",
         }
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=body,
             headers=_auth_headers(mode="explore"),
         )
@@ -214,7 +214,7 @@ class TestMissingOrInvalidMode:
     def test_empty_mode_omits_jwt_returns_401(self, client):
         """Empty mode string → no JWT attached → 401."""
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode=""),
         )
@@ -239,7 +239,7 @@ class TestMissingOrInvalidMode:
         token = _jwt.encode(payload, _get_jwt_secret(), algorithm="HS256")
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers={
                 "X-API-Key": _TEST_API_KEY,
@@ -254,7 +254,7 @@ class TestMissingOrInvalidMode:
     def test_whitespace_only_mode_omits_jwt_returns_401(self, client):
         """Whitespace-only mode → no JWT attached → 401."""
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="   "),
         )
@@ -279,7 +279,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
@@ -306,7 +306,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/place-smart",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
@@ -319,7 +319,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/cancel",
+            "/api/v1/orders/cancel",
             json={"order_id": "SB-001"},
             headers=_auth_headers(mode="practice"),
         )
@@ -333,7 +333,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/cancel-all",
+            "/api/v1/orders/cancel-all",
             json={},
             headers=_auth_headers(mode="practice"),
         )
@@ -346,7 +346,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/modify",
+            "/api/v1/orders/modify",
             json={"order_id": "SB-001", "quantity": 100},
             headers=_auth_headers(mode="practice"),
         )
@@ -367,7 +367,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/close-position",
+            "/api/v1/orders/close-position",
             json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS"},
             headers=_auth_headers(mode="practice"),
         )
@@ -391,7 +391,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/close-position",
+            "/api/v1/orders/close-position",
             json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS"},
             headers=_auth_headers(mode="practice"),
         )
@@ -409,7 +409,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/open-position",
+            "/api/v1/orders/open-position",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
@@ -421,7 +421,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = None
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
@@ -436,7 +436,7 @@ class TestPracticeMode:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
@@ -468,7 +468,7 @@ class TestLiveModeForwarding:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -495,13 +495,13 @@ class TestLiveModeForwarding:
         mock_client_cls.return_value = mock_http
 
         endpoint_map = {
-            "/v1/orders/place": "placeorder",
-            "/v1/orders/place-smart": "placesmartorder",
-            "/v1/orders/modify": "modifyorder",
-            "/v1/orders/cancel": "cancelorder",
-            "/v1/orders/cancel-all": "cancelallorder",
-            "/v1/orders/close-position": "closeposition",
-            "/v1/orders/open-position": "openposition",
+            "/api/v1/orders/place": "placeorder",
+            "/api/v1/orders/place-smart": "placesmartorder",
+            "/api/v1/orders/modify": "modifyorder",
+            "/api/v1/orders/cancel": "cancelorder",
+            "/api/v1/orders/cancel-all": "cancelallorder",
+            "/api/v1/orders/close-position": "closeposition",
+            "/api/v1/orders/open-position": "openposition",
         }
 
         for ft_route, oa_endpoint in endpoint_map.items():
@@ -533,7 +533,7 @@ class TestLiveModeForwarding:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -544,7 +544,7 @@ class TestLiveModeForwarding:
     def test_live_without_pin_token_returns_403(self, client):
         """Live orders without a PIN-unlocked JWT must be rejected with 403."""
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live"),
         )
@@ -571,7 +571,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -589,7 +589,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -607,7 +607,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -622,7 +622,7 @@ class TestLiveModeErrors:
         patched helper and returns 503.
         """
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -643,7 +643,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -663,7 +663,7 @@ class TestRequestBodyEdgeCases:
     def test_empty_body_in_explore_still_blocked(self, client):
         """Even with no body, explore mode must block."""
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json={},
             headers=_auth_headers(mode="explore"),
         )
@@ -680,7 +680,7 @@ class TestRequestBodyEdgeCases:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json={},
             headers=_auth_headers(mode="practice"),
         )
@@ -705,7 +705,7 @@ class TestRequestBodyEdgeCases:
         body["quantity"] = "not-a-number"
 
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=body,
             headers=_auth_headers(mode="practice"),
         )
@@ -729,7 +729,7 @@ class TestAuthRequired:
 
     def test_no_api_key_rejected(self, client):
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers={
                 "Content-Type": "application/json",
@@ -741,7 +741,7 @@ class TestAuthRequired:
 
     def test_wrong_api_key_rejected(self, client):
         resp = client.post(
-            "/v1/orders/place",
+            "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers={
                 "X-API-Key": "wrong-key",

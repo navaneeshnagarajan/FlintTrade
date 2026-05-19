@@ -952,6 +952,64 @@ def create_flask_app(
     from packages.integration.src.excel_routes import excel_bp  # noqa: PLC0415
     app.register_blueprint(excel_bp)
 
+    # ------------------------------------------------------------------
+    # Blueprints discovered as defined-but-not-registered during the
+    # 2026-05-19 multi-agent audit (Python audit, API contract audit).
+    # Registering them activates their routes:
+    #
+    #   webhook_bp                — /v1/webhook/<source>, /v1/webhook/log
+    #                               (TradingView + ChartInk webhook receivers)
+    #   payoff_bp                 — /v1/payoff/{analyse,curve}, /v1/regime/current,
+    #                               /v1/analytics/correlation
+    #   health_bp                 — /health, /health/detail, /healthz, /readyz,
+    #                               /api/v1/ping (K8s + LB probes; /api/v1/ping
+    #                               is already in `_PUBLIC_V1_PREFIXES`)
+    #   optimiser_bp              — /v1/portfolio/{optimise,frontier}
+    #   permutation_bp            — /v1/backtest/{permutation,walkforward}
+    #   admin_action_center_bp    — /admin/action-center/{pending,approve,reject,history}
+    #                               (separate from `action_center_bp` which lives
+    #                               under /api/v1/action-center for normal users)
+    #   engine order_bp           — /api/v1/orders/{basket,split,options-strategy}
+    #                               (advanced orders; distinct from core's safety
+    #                               proxy `orders_bp` which currently lives at
+    #                               /v1/orders/* — frontend uses the /api/v1/
+    #                               form, so these route additions reduce the
+    #                               apparent 404 surface today.)
+    # ------------------------------------------------------------------
+    from packages.integration.src.webhook_routes import webhook_bp  # noqa: PLC0415
+    app.register_blueprint(webhook_bp)
+
+    from packages.screener.src.payoff_routes import payoff_bp  # noqa: PLC0415
+    app.register_blueprint(payoff_bp)
+
+    from .health_routes import health_bp  # noqa: PLC0415
+    app.register_blueprint(health_bp)
+
+    # backtest-engine has a hyphen in its directory name which prevents standard
+    # `from packages.backtest_engine.src.X` imports — inject src/ onto sys.path
+    # the same way backtest_routes.py:_load_backtest_engine does, then import
+    # the route modules by bare name.
+    import importlib  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+    _be_src = str(_Path(__file__).resolve().parents[3] / "packages" / "backtest-engine" / "src")
+    _be_src_added = _be_src not in sys.path
+    if _be_src_added:
+        sys.path.insert(0, _be_src)
+    try:
+        _opt_mod = importlib.import_module("optimiser_routes")
+        app.register_blueprint(_opt_mod.optimiser_bp)
+        _perm_mod = importlib.import_module("permutation_routes")
+        app.register_blueprint(_perm_mod.permutation_bp)
+    finally:
+        if _be_src_added and _be_src in sys.path:
+            sys.path.remove(_be_src)
+
+    from packages.engine.src.action_center_routes import admin_action_center_bp  # noqa: PLC0415
+    app.register_blueprint(admin_action_center_bp)
+
+    from packages.engine.src.order_routes import order_bp as engine_order_bp  # noqa: PLC0415
+    app.register_blueprint(engine_order_bp)
+
     # Register Workspace Preset blueprint (/v1/presets/* — external: /ft-api/v1/presets/*)
     from .preset_routes import preset_bp  # noqa: PLC0415
     app.register_blueprint(preset_bp)

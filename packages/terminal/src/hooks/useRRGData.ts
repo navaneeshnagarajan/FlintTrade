@@ -13,7 +13,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getRRGData } from "@/services/ftApi";
 import type { RRGResponse } from "@/services/ftApi";
-import { useModeStore } from "@/stores/modeStore";
 
 export function useRRGData(tailLength: number = 12): {
   data: RRGResponse | null;
@@ -21,15 +20,14 @@ export function useRRGData(tailLength: number = 12): {
   isError: boolean;
   refetch: () => void;
 } {
-  const mode = useModeStore((s) => s.mode);
-  // RRG is useful even in explore mode (backend returns sample data).
-  // Enable always so the widget has something to render out-of-the-box.
-  const enabled = mode !== undefined;
+  // RRG is useful even in explore mode — the backend returns sample data
+  // there — so the query is always enabled. (Previously gated on
+  // `mode !== undefined`, which was always true since `mode` is a non-nullable
+  // union literal type — that conditional was dead logic.)
 
   const query = useQuery<RRGResponse>({
     queryKey: ["rrg-sectors", tailLength],
     queryFn: () => getRRGData(tailLength),
-    enabled,
     staleTime: 5 * 60_000,        // 5 minutes — weekly bars don't change fast
     refetchInterval: 5 * 60_000,
     retry: 2,

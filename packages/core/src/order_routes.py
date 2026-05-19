@@ -39,7 +39,14 @@ from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.order_routes")
 
-orders_bp = Blueprint("orders", __name__, url_prefix="/v1/orders")
+# Frontend `api.ts` posts to `/ft-api/api/v1/orders/<X>` (→ `/api/v1/orders/<X>`
+# after the WSGI prefix strip). The blueprint must therefore live under
+# `/api/v1/orders`, not the project's general `/v1/X` convention. (Previously
+# registered at `/v1/orders/*`, which silently 404'd every order placement
+# until the 2026-05-19 multi-agent audit surfaced it.) The engine's
+# `order_bp` (advanced orders: basket/split/options-strategy) sits alongside
+# this blueprint at the same prefix with non-overlapping routes.
+orders_bp = Blueprint("orders", __name__, url_prefix="/api/v1/orders")
 
 # ---------------------------------------------------------------------------
 # Valid trading modes
