@@ -216,6 +216,33 @@ def _tail_bytes(data: bytes, max_bytes: int) -> bytes:
         return data
     return data[-max_bytes:]
 
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a sandbox child plus any descendants it managed to spawn.
+
+    POSIX: the child was started with ``start_new_session=True`` so it's
+    the leader of its own session/process group. ``killpg`` sends SIGKILL
+    to every process in that group atomically — covers grandchildren a
+    missed sandbox escape might have spawned.
+
+    Windows: no session/process-group primitive available without
+    ``pywin32`` Job Objects (follow-up). Fall back to ``proc.kill()``
+    which calls TerminateProcess on the immediate child only.
+    """
+    if sys.platform != "win32":
+        try:
+            import signal as _signal
+            os.killpg(os.getpgid(proc.pid), _signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            # Process already gone or we can't signal it — fall through
+            # to proc.kill() which is idempotent.
+            pass
+    try:
+        proc.kill()
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
 # ---------------------------------------------------------------------------
 # Allowed modules injected into the sandbox namespace
 # ---------------------------------------------------------------------------
@@ -612,42 +639,53 @@ class SandboxExecutor:
                 error_type="ContextSerialisationError",
             )
 
-        # Spawn the child. ``-I`` (isolated mode) was tempting for extra
-        # isolation but it implies ``-E`` which ignores PYTHONPATH —
-        # which we need to set so the child can import the
-        # ``packages.engine.src._sandbox_child`` module. The env we pass
-        # below already filters every ``PYTHON*`` variable except our
-        # explicitly-set PYTHONPATH, so the practical isolation level is
-        # the same.
-        cmd = [
-            sys.executable,
-            "-m", "packages.engine.src._sandbox_child",
-        ]
+        # Spawn the child by absolute file path so the executor works
+        # both in the source checkout (where ``packages.engine.src`` is
+        # importable from the repo root) AND when ``flint-engine`` is
+        # installed from its package (where ``src/`` maps to the
+        # ``flint_engine`` import name and the legacy
+        # ``packages.engine.src._sandbox_child`` dotted spec doesn't
+        # exist). Passing the script as a positional path bypasses the
+        # import-by-dotted-name lookup entirely.
+        child_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "_sandbox_child.py",
+        )
+        cmd = [sys.executable, child_path]
+
         env = {
             k: v for k, v in os.environ.items()
             if not k.startswith("PYTHON")
         }
-        # PYTHONPATH must be preserved so the child can import
-        # ``packages.engine.src._sandbox_child``. ``-I -S`` strips
-        # sys.path[0] and skips site.py, so without this the child
-        # cannot locate the ``packages`` namespace package at all.
-        # Compute the repo root from this module's file location
-        # (``packages/engine/src/sandbox_executor.py``) so the path is
-        # correct regardless of how the parent was launched.
+        # PYTHONPATH still must include the repo root so the child's
+        # ``from packages.engine.src import sandbox_executor as se``
+        # import resolves the same way it does in the parent. In an
+        # installed layout this is harmless — the import lookup just
+        # falls through to the installed package.
         repo_root = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "..")
         )
         path_entries = [repo_root] + [p for p in sys.path if p]
         env["PYTHONPATH"] = os.pathsep.join(path_entries)
 
+        # On POSIX, put the child in its own process group so a missed
+        # escape that spawns grandchildren is still bounded by the
+        # group-kill at timeout. ``start_new_session=True`` calls
+        # ``setsid()`` in the child so it becomes the leader of a new
+        # session AND a new process group. Windows has no equivalent
+        # primitive here; ``proc.kill()`` (TerminateProcess) only kills
+        # the immediate child on Windows — Job Object support is a
+        # follow-up to bound grandchildren on Windows.
+        popen_kwargs: dict[str, Any] = {
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "env": env,
+        }
+        if sys.platform != "win32":
+            popen_kwargs["start_new_session"] = True
+
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-            )
+            proc = subprocess.Popen(cmd, **popen_kwargs)
         except OSError as exc:
             logger.error("sandbox: could not spawn child: %s", exc)
             return ExecutionResult(
@@ -661,11 +699,13 @@ class SandboxExecutor:
                 input=payload, timeout=self._timeout,
             )
         except subprocess.TimeoutExpired:
-            # Hard-kill the child. ``Popen.kill()`` sends SIGKILL on POSIX
-            # and calls TerminateProcess on Windows — neither can be
-            # caught or blocked by the child, so the timeout is enforced
-            # even against an adversarial strategy.
-            proc.kill()
+            # Hard-kill on timeout. On POSIX we kill the WHOLE PROCESS
+            # GROUP so any grandchildren a missed escape might have
+            # spawned die with the parent — ``proc.kill()`` alone only
+            # signals the immediate child. On Windows we fall back to
+            # ``proc.kill()`` (TerminateProcess); Job Object follow-up
+            # will close that gap.
+            _kill_process_tree(proc)
             try:
                 stdout, stderr = proc.communicate(timeout=2)
             except subprocess.TimeoutExpired:

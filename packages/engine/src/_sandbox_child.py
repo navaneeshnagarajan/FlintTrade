@@ -52,12 +52,12 @@ import traceback
 # Memory + CPU limits as soft signals — exceeding triggers MemoryError
 # inside the child's exec() rather than a SIGKILL with no diagnostic.
 _DEFAULT_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024  # 256 MiB
-_DEFAULT_CPU_SECONDS = 60  # 2x the wall-clock cap as a safety net
+_DEFAULT_CPU_HEADROOM_SECONDS = 30  # added to the caller's timeout
 _DEFAULT_NOFILE = 64
 _STDOUT_CAP_BYTES = 1 * 1024 * 1024  # 1 MiB cap on captured stdout
 
 
-def _apply_rlimits(memory_limit_bytes: int) -> None:
+def _apply_rlimits(memory_limit_bytes: int, timeout_seconds: int) -> None:
     """Apply POSIX rlimits. Silent no-op on Windows (no resource module).
 
     Sets AS (address space), CPU, NOFILE, and FSIZE so the strategy
@@ -65,6 +65,13 @@ def _apply_rlimits(memory_limit_bytes: int) -> None:
     file descriptors, or fill the filesystem. Each ``setrlimit`` is
     independently best-effort; if one fails (kernel restriction, etc.)
     we log to stderr and continue with whatever limits did stick.
+
+    The CPU limit is derived from the caller's wall-clock timeout plus
+    a headroom of ``_DEFAULT_CPU_HEADROOM_SECONDS`` so that legitimate
+    long-running strategies (e.g. a 120 s walk-forward backtest cell)
+    don't get killed by the kernel before the parent's wall-clock kill
+    has a chance to fire and surface a clean ``TimeoutError`` instead
+    of a ``SandboxCrash``.
     """
     try:
         import resource  # type: ignore[import]
@@ -72,9 +79,11 @@ def _apply_rlimits(memory_limit_bytes: int) -> None:
         # Windows path — the parent applies Job Object limits.
         return
 
+    cpu_limit = max(int(timeout_seconds) + _DEFAULT_CPU_HEADROOM_SECONDS, 10)
+
     for which, soft, hard, label in (
         (resource.RLIMIT_AS, memory_limit_bytes, memory_limit_bytes, "AS"),
-        (resource.RLIMIT_CPU, _DEFAULT_CPU_SECONDS, _DEFAULT_CPU_SECONDS, "CPU"),
+        (resource.RLIMIT_CPU, cpu_limit, cpu_limit, "CPU"),
         (resource.RLIMIT_NOFILE, _DEFAULT_NOFILE, _DEFAULT_NOFILE, "NOFILE"),
         # FSIZE=0 → strategy cannot create or extend any file on disk.
         (resource.RLIMIT_FSIZE, 0, 0, "FSIZE"),
@@ -86,6 +95,48 @@ def _apply_rlimits(memory_limit_bytes: int) -> None:
                 f"[_sandbox_child] could not apply RLIMIT_{label}: {exc}",
                 file=sys.stderr,
             )
+
+
+def _json_safe(obj):
+    """Recursively coerce a value into a JSON-serialisable shape.
+
+    The strategy namespace includes ``datetime``, ``date``, ``timedelta``,
+    ``timezone`` (see ``_ALLOWED_MODULES``), so a perfectly legitimate
+    strategy can attach a datetime to signal metadata via e.g.
+    ``long_entry(price=1.0, at=datetime.now())``. Without coercion,
+    ``json.dumps(result_dict)`` raises ``TypeError`` and the child
+    exits without a result frame, so the parent reports ``SandboxCrash``
+    even though the strategy was well-formed and produced a valid
+    signal. Coerce to a JSON-safe shape instead.
+
+    Handled conversions (best-effort):
+    - ``datetime``, ``date``, ``time`` → ``isoformat()``
+    - ``timedelta`` → total seconds (float)
+    - ``set``, ``frozenset``, ``tuple`` → list
+    - bytes → ``decode("utf-8", errors="replace")``
+    - anything else → ``str(obj)`` as a last-resort fallback so the
+      JSON encoder never raises.
+    """
+    import datetime as _dt
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (_dt.datetime, _dt.date, _dt.time)):
+        return obj.isoformat()
+    if isinstance(obj, _dt.timedelta):
+        return obj.total_seconds()
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    # Last resort — repr keeps the value visible in the result without
+    # raising. Strategy authors who want structured metadata should
+    # use plain dicts/lists/primitives.
+    try:
+        return str(obj)
+    except Exception:
+        return f"<unserialisable {type(obj).__name__}>"
 
 
 def main() -> None:
@@ -110,8 +161,9 @@ def main() -> None:
     source: str = str(payload.get("source", ""))
     context: dict = dict(payload.get("context") or {})
     memory_limit: int = int(payload.get("memory_limit", _DEFAULT_MEMORY_LIMIT_BYTES))
+    timeout_seconds: int = int(payload.get("timeout", 30))
 
-    _apply_rlimits(memory_limit)
+    _apply_rlimits(memory_limit, timeout_seconds)
 
     # Import the executor module AFTER applying rlimits so allocation
     # for the import itself counts against the limit.
@@ -145,8 +197,15 @@ def main() -> None:
 
 
 def _emit_result(result_dict: dict) -> None:
-    """Write the result as JSON with an 8-byte big-endian length prefix."""
-    body = json.dumps(result_dict).encode("utf-8")
+    """Write the result as JSON with an 8-byte big-endian length prefix.
+
+    Coerces the dict through ``_json_safe`` first so a strategy that
+    attaches a datetime / set / bytes to signal metadata still produces
+    a valid result frame instead of crashing the child on
+    ``json.dumps`` raising ``TypeError``.
+    """
+    safe = _json_safe(result_dict)
+    body = json.dumps(safe).encode("utf-8")
     sys.stdout.buffer.write(struct.pack(">Q", len(body)))
     sys.stdout.buffer.write(body)
     sys.stdout.buffer.flush()

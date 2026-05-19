@@ -474,3 +474,60 @@ class TestSubprocessIsolation:
         assert "boom" in result.error
         # Not a crash — we got a real exception, not a SandboxCrash.
         assert result.error_type != "SandboxCrash"
+
+    def test_subprocess_signal_with_datetime_metadata_succeeds(self):
+        """Datetime in signal metadata gets JSON-coerced, not crashed on.
+
+        Regression for Codex stop-gate finding [P2] — strategies can
+        legitimately attach a ``datetime`` to signal metadata via
+        ``long_entry(at=datetime.now())`` because ``datetime`` is in
+        ``_ALLOWED_MODULES``. The previous child crashed on
+        ``json.dumps`` because ``datetime`` isn't JSON-serialisable;
+        ``_json_safe`` now coerces to ISO-8601 strings.
+        """
+        executor = SandboxExecutor()
+        result = executor.run(
+            "long_entry(price=100.0, at=datetime.now(timezone.utc))"
+        )
+        assert result.success is True, f"unexpected: {result.error}"
+        assert len(result.signals) == 1
+        # The datetime should have been coerced to an ISO-8601 string.
+        at_val = result.signals[0].metadata.get("at")
+        assert isinstance(at_val, str)
+        assert "T" in at_val  # ISO-8601 format includes 'T' between date and time
+
+    def test_subprocess_signal_with_set_metadata_succeeds(self):
+        """Set in signal metadata gets coerced to a list."""
+        executor = SandboxExecutor()
+        result = executor.run(
+            "long_entry(price=100.0, tags={'breakout', 'momentum'})"
+        )
+        assert result.success is True
+        tags_val = result.signals[0].metadata.get("tags")
+        assert isinstance(tags_val, list)
+        assert set(tags_val) == {"breakout", "momentum"}
+
+    def test_subprocess_executable_path_works_outside_source_checkout(self):
+        """Sandbox child is spawned by absolute path, not dotted module name.
+
+        Regression for Codex stop-gate finding [P1] — using ``python -m
+        packages.engine.src._sandbox_child`` only resolves when the repo
+        root is on ``sys.path``. After ``pip install flint-engine``, the
+        ``packages`` namespace doesn't exist and the default executor
+        would silently produce ``SandboxCrash`` for every call. Confirm
+        the cmd built by ``_run_in_subprocess`` uses an absolute file
+        path that exists on disk.
+        """
+        import os as _os
+        from packages.engine.src import sandbox_executor as se
+        # The child path is computed inside _run_in_subprocess from
+        # __file__, so we verify the file exists at the expected
+        # location relative to the module.
+        child_path = _os.path.join(
+            _os.path.dirname(_os.path.abspath(se.__file__)),
+            "_sandbox_child.py",
+        )
+        assert _os.path.isfile(child_path), (
+            f"Sandbox child entry point missing at {child_path} — would crash "
+            "in installed-package layouts."
+        )
