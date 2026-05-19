@@ -462,7 +462,6 @@ class TestElderRay:
 
     def test_bull_positive_when_high_above_ema(self):
         from packages.indicators.src.momentum import elder_ray
-        from packages.indicators.src.trend import ema
 
         close = _arange(40)
         high = close + 5.0

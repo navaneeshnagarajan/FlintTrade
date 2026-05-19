@@ -9,16 +9,10 @@ Run with: python -m pytest packages/integration/tests/test_flow_graph_validation
 
 from __future__ import annotations
 
-import pytest
 
 from packages.integration.src.flow_builder import (
-    ActionType,
-    ConditionType,
-    ExitType,
     FlowBuilder,
     FlowValidationError,
-    NodeType,
-    SignalSource,
     validate_flow_graph,
 )
 

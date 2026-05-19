@@ -297,8 +297,10 @@ class TestThreadSafety:
 
         t1 = threading.Thread(target=_try_approve)
         t2 = threading.Thread(target=_try_approve)
-        t1.start(); t2.start()
-        t1.join(); t2.join()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
         assert len(successes) == 1
         assert len(failures) == 1

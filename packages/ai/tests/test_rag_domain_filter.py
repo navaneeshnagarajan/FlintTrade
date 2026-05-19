@@ -17,9 +17,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
-from packages.ai.src.rag_pipeline import DomainFilter, PipelineConfig, RAGPipeline
+from packages.ai.src.rag_pipeline import DomainFilter, RAGPipeline
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +137,7 @@ class TestDomainFilterSemanticFallback:
 
         f = DomainFilter(embedding_provider=mock_provider, semantic_threshold=0.9)
         # Query has no trading keywords but embedding returns high similarity
-        result = f.is_on_topic("This has no finance keywords at all — just a sentence.")
+        f.is_on_topic("This has no finance keywords at all — just a sentence.")
 
         # embed called at least once (for seed and/or query)
         assert mock_provider.embed.called

@@ -33,14 +33,14 @@ def _make_bars(
         price = max(1.0, price + trend + noise)
         o = price
         h = price + abs(noise)
-        l = price - abs(noise)
+        lo = price - abs(noise)
         c = price + random.uniform(-volatility / 2, volatility / 2)
-        c = max(l, min(h, c))
+        c = max(lo, min(h, c))
         bars.append({
             "timestamp": f"2025-{(i // 30) + 1:02d}-{(i % 30) + 1:02d} 09:15:00",
             "open": round(o, 2),
             "high": round(h, 2),
-            "low": round(l, 2),
+            "low": round(lo, 2),
             "close": round(c, 2),
             "volume": 10000 + i * 100,
             "oi": 0,

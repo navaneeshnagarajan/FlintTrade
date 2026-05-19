@@ -137,7 +137,7 @@ def test_direct_close_from_in_position_allowed() -> None:
 
 
 def test_any_state_can_transition_to_error() -> None:
-    sm = _sm()
+    _sm()
     for state in (
         StrategyState.IDLE,
         StrategyState.ARMED,

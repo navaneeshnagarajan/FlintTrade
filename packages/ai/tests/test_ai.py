@@ -239,7 +239,7 @@ class TestSignals:
         labels = generate_labels(closes, lookahead=5, threshold_pct=0.5, offset=20)
         assert len(labels) == 80  # 100 - offset=20
         # In a steady uptrend, most labels should be BUY (2)
-        buy_count = sum(1 for l in labels if l == 2)
+        buy_count = sum(1 for label in labels if label == 2)
         assert buy_count > 0
 
     def test_compute_rsi(self):

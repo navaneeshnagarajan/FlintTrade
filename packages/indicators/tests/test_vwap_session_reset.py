@@ -29,10 +29,10 @@ def _make_uniform_bars(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return (high, low, close, volume) arrays with uniform values."""
     h = np.full(n, price + 1.0, dtype=np.float64)
-    l = np.full(n, price - 1.0, dtype=np.float64)
+    lo = np.full(n, price - 1.0, dtype=np.float64)
     c = np.full(n, price, dtype=np.float64)
     v = np.full(n, volume, dtype=np.float64)
-    return h, l, c, v
+    return h, lo, c, v
 
 
 # ---------------------------------------------------------------------------
@@ -43,8 +43,8 @@ def _make_uniform_bars(
 class TestVwapBackwardCompatibility:
     def test_no_timestamps_returns_cumulative_vwap(self):
         """Without timestamps, VWAP must behave exactly as before."""
-        h, l, c, v = _make_uniform_bars(5, price=100.0, volume=1000.0)
-        result = vwap(h, l, c, v)
+        h, lo, c, v = _make_uniform_bars(5, price=100.0, volume=1000.0)
+        result = vwap(h, lo, c, v)
 
         assert result.shape == (5,)
         assert not np.any(np.isnan(result))
@@ -52,24 +52,24 @@ class TestVwapBackwardCompatibility:
         np.testing.assert_allclose(result, 100.0)
 
     def test_no_timestamps_shape_matches_input(self):
-        h, l, c, v = _make_uniform_bars(20)
-        result = vwap(h, l, c, v)
+        h, lo, c, v = _make_uniform_bars(20)
+        result = vwap(h, lo, c, v)
         assert result.shape == (20,)
 
     def test_no_timestamps_zero_volume_gives_nan(self):
-        h, l, c, v = _make_uniform_bars(3, volume=0.0)
-        result = vwap(h, l, c, v)
+        h, lo, c, v = _make_uniform_bars(3, volume=0.0)
+        result = vwap(h, lo, c, v)
         assert np.all(np.isnan(result))
 
     def test_no_timestamps_known_numeric(self):
         """Manual two-bar VWAP calculation."""
         h = np.array([110.0, 120.0], dtype=np.float64)
-        l = np.array([90.0, 80.0], dtype=np.float64)
+        lo = np.array([90.0, 80.0], dtype=np.float64)
         c = np.array([100.0, 100.0], dtype=np.float64)
         v = np.array([1000.0, 2000.0], dtype=np.float64)
         # TP: [100, 100], cum_tp_vol: [100000, 300000], cum_vol: [1000, 3000]
         # VWAP: [100, 100]
-        result = vwap(h, l, c, v)
+        result = vwap(h, lo, c, v)
         np.testing.assert_allclose(result, [100.0, 100.0])
 
 
@@ -83,12 +83,12 @@ class TestVwapSessionResetSingleBoundary:
         """VWAP must restart accumulation when bar timestamp matches 09:15."""
         # 4 bars: 09:00, 09:05, 09:10, 09:15 (session start on last bar)
         h = np.array([105.0, 105.0, 105.0, 200.0], dtype=np.float64)
-        l = np.array([95.0, 95.0, 95.0, 190.0], dtype=np.float64)
+        lo = np.array([95.0, 95.0, 95.0, 190.0], dtype=np.float64)
         c = np.array([100.0, 100.0, 100.0, 195.0], dtype=np.float64)
         v = np.array([1000.0, 1000.0, 1000.0, 1000.0], dtype=np.float64)
         timestamps = ["09:00", "09:05", "09:10", "09:15"]
 
-        result = vwap(h, l, c, v, timestamps=timestamps, session_reset_times=["09:15"])
+        result = vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=["09:15"])
 
         # Bars 0-2: cumulative VWAP at price 100
         np.testing.assert_allclose(result[:3], 100.0)
@@ -99,7 +99,7 @@ class TestVwapSessionResetSingleBoundary:
     def test_reset_on_clock_rollback(self):
         """Clock going backwards (new calendar day) must reset accumulator."""
         h = np.array([105.0, 105.0, 105.0, 105.0], dtype=np.float64)
-        l = np.array([95.0, 95.0, 95.0, 95.0], dtype=np.float64)
+        lo = np.array([95.0, 95.0, 95.0, 95.0], dtype=np.float64)
         c = np.array([100.0, 100.0, 100.0, 100.0], dtype=np.float64)
         v = np.array([1000.0, 2000.0, 3000.0, 500.0], dtype=np.float64)
         # Last bar is 09:15 on the next day (clock goes back from 15:30)
@@ -109,7 +109,7 @@ class TestVwapSessionResetSingleBoundary:
             "2025-01-10 15:30",
             "2025-01-11 09:15",  # new day — should reset
         ]
-        result = vwap(h, l, c, v, timestamps=timestamps, session_reset_times=["09:15"])
+        result = vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=["09:15"])
 
         # Bar 3 is on a new day AND matches 09:15 — full reset
         tp = 100.0  # (105 + 95 + 100) / 3
@@ -119,12 +119,12 @@ class TestVwapSessionResetSingleBoundary:
     def test_no_reset_between_boundaries(self):
         """Bars between resets must use the running cumulative average."""
         h = np.full(3, 105.0)
-        l = np.full(3, 95.0)
+        lo = np.full(3, 95.0)
         c = np.full(3, 100.0)
         v = np.array([1000.0, 1000.0, 1000.0], dtype=np.float64)
         timestamps = ["09:20", "09:25", "09:30"]
 
-        result = vwap(h, l, c, v, timestamps=timestamps, session_reset_times=["09:15"])
+        result = vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=["09:15"])
         # No reset in this range — cumulative VWAP at uniform price = 100
         np.testing.assert_allclose(result, 100.0)
 
@@ -140,12 +140,12 @@ class TestVwapMultipleSessions:
         # Session 1: bars at 09:15, 09:30 with price=100
         # Session 2: bars at 09:15, 09:30 (next day) with price=200
         h = np.array([105.0, 105.0, 205.0, 205.0], dtype=np.float64)
-        l = np.array([95.0, 95.0, 195.0, 195.0], dtype=np.float64)
+        lo = np.array([95.0, 95.0, 195.0, 195.0], dtype=np.float64)
         c = np.array([100.0, 100.0, 200.0, 200.0], dtype=np.float64)
         v = np.array([1000.0, 1000.0, 1000.0, 1000.0], dtype=np.float64)
         timestamps = ["09:15", "09:30", "09:15", "09:30"]
 
-        result = vwap(h, l, c, v, timestamps=timestamps, session_reset_times=["09:15"])
+        result = vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=["09:15"])
 
         # Session 1
         np.testing.assert_allclose(result[0], 100.0)
@@ -157,13 +157,13 @@ class TestVwapMultipleSessions:
     def test_custom_reset_time(self):
         """Custom session_reset_times parameter must be respected."""
         h = np.array([105.0, 105.0, 205.0, 205.0], dtype=np.float64)
-        l = np.array([95.0, 95.0, 195.0, 195.0], dtype=np.float64)
+        lo = np.array([95.0, 95.0, 195.0, 195.0], dtype=np.float64)
         c = np.array([100.0, 100.0, 200.0, 200.0], dtype=np.float64)
         v = np.full(4, 1000.0, dtype=np.float64)
         # Commodity session starts at 09:00
         timestamps = ["09:00", "09:05", "09:00", "09:05"]
 
-        result = vwap(h, l, c, v, timestamps=timestamps, session_reset_times=["09:00"])
+        result = vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=["09:00"])
 
         np.testing.assert_allclose(result[0], 100.0)
         np.testing.assert_allclose(result[2], 200.0)
@@ -171,12 +171,12 @@ class TestVwapMultipleSessions:
     def test_multiple_reset_times(self):
         """Multiple reset times (e.g. morning + afternoon sessions)."""
         h = np.full(6, 105.0)
-        l = np.full(6, 95.0)
+        lo = np.full(6, 95.0)
         c = np.full(6, 100.0)
         v = np.full(6, 1000.0)
         timestamps = ["09:15", "10:00", "12:00", "13:00", "14:00", "09:15"]
 
-        result = vwap(h, l, c, v, timestamps=timestamps, session_reset_times=["09:15", "13:00"])
+        result = vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=["09:15", "13:00"])
 
         # Bar 3 (13:00) resets → single-bar VWAP = TP = 100
         np.testing.assert_allclose(result[3], 100.0)
@@ -192,10 +192,10 @@ class TestVwapMultipleSessions:
 class TestVwapTimestampFormats:
     def _run_single_reset(self, timestamps: list[str]) -> np.ndarray:
         h = np.array([105.0, 205.0], dtype=np.float64)
-        l = np.array([95.0, 195.0], dtype=np.float64)
+        lo = np.array([95.0, 195.0], dtype=np.float64)
         c = np.array([100.0, 200.0], dtype=np.float64)
         v = np.array([1000.0, 1000.0], dtype=np.float64)
-        return vwap(h, l, c, v, timestamps=timestamps, session_reset_times=["09:15"])
+        return vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=["09:15"])
 
     def test_hhmm_format(self):
         result = self._run_single_reset(["09:00", "09:15"])
@@ -221,17 +221,17 @@ class TestVwapTimestampFormats:
 
 class TestVwapErrorHandling:
     def test_timestamps_length_mismatch_raises(self):
-        h, l, c, v = _make_uniform_bars(3)
+        h, lo, c, v = _make_uniform_bars(3)
         with pytest.raises(ValueError, match="timestamps length"):
-            vwap(h, l, c, v, timestamps=["09:15", "09:30"])  # only 2, need 3
+            vwap(h, lo, c, v, timestamps=["09:15", "09:30"])  # only 2, need 3
 
     def test_empty_session_reset_times_no_resets(self):
         """Empty session_reset_times list means no explicit resets — only clock rollback."""
         h = np.full(3, 105.0)
-        l = np.full(3, 95.0)
+        lo = np.full(3, 95.0)
         c = np.full(3, 100.0)
         v = np.full(3, 1000.0)
         # All on the same day, nothing matches empty list → no reset
         timestamps = ["09:15", "09:30", "09:45"]
-        result = vwap(h, l, c, v, timestamps=timestamps, session_reset_times=[])
+        result = vwap(h, lo, c, v, timestamps=timestamps, session_reset_times=[])
         np.testing.assert_allclose(result, 100.0)

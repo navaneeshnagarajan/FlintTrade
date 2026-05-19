@@ -80,8 +80,8 @@ class TestNodeTypeEnum:
     def test_logic_types(self):
         from packages.integration.src.flow_builder import NodeType
         logic = {"andGate", "orGate", "notGate"}
-        for l in logic:
-            assert NodeType(l) is not None
+        for logic_type in logic:
+            assert NodeType(logic_type) is not None
 
     def test_data_types(self):
         from packages.integration.src.flow_builder import NodeType

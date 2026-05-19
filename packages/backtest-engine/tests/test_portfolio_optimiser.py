@@ -158,7 +158,6 @@ class TestValidation:
 
     def test_all_nan_raises(self):
         import pandas as pd
-        import numpy as np
         from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         df = pd.DataFrame({"A": [float("nan")] * 10, "B": [float("nan")] * 10})
         optimiser = PortfolioOptimiser(OptimiserConfig())
@@ -264,7 +263,7 @@ class TestRiskParity:
         from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
 
         result = PortfolioOptimiser(OptimiserConfig(method="risk_parity")).optimise(returns4)
-        mu = returns4.mean().values * 252
+        returns4.mean().values * 252
         cov = returns4.cov().values * 252
 
         weights = np.array([result.weights[a] for a in returns4.columns])
@@ -377,7 +376,6 @@ class TestEfficientFrontier:
 
 class TestInternalHelpers:
     def test_annual_stats_shape(self, returns4):
-        import numpy as np
         from portfolio_optimiser import _annual_stats
         mu, cov = _annual_stats(returns4)
         n = returns4.shape[1]

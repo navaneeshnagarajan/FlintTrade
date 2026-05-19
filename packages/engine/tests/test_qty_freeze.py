@@ -263,6 +263,6 @@ def test_all_limits_returns_list(mgr: QuantityFreezeManager) -> None:
     mgr.set_limit("B", "BSE", 200)
     limits = mgr.all_limits()
     assert isinstance(limits, list)
-    symbols = [l["symbol"] for l in limits]
+    symbols = [limit["symbol"] for limit in limits]
     assert "A" in symbols
     assert "B" in symbols

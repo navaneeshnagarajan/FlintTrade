@@ -53,7 +53,7 @@ def _random_walk(n: int, seed: int = 1) -> list[float]:
 
 def _cointegrated_pair(n: int, beta: float = 1.5, seed: int = 42) -> tuple[list[float], list[float]]:
     """Generate a cointegrated pair: y = beta * x + stationary_spread."""
-    rng = random.Random(seed)
+    random.Random(seed)
     x = _random_walk(n, seed=seed)
     spread = _ar1_series(n, phi=0.7, seed=seed + 1)
     y = [beta * x[i] + spread[i] for i in range(n)]
@@ -230,7 +230,7 @@ class TestZScore:
         # Build a series where the last value equals the rolling window mean exactly
         window = [1.0, 2.0, 3.0, 4.0, 5.0]
         mean_val = sum(window) / len(window)  # = 3.0
-        series = [10.0, 20.0] + window[:-1] + [mean_val]  # last value is the mean
+        [10.0, 20.0] + window[:-1] + [mean_val]  # last value is the mean
         # The window is the last 5 elements: [2.0, 3.0, 4.0, 5.0, 3.0] — mean ≠ 3.0
         # Better: construct series where last 5 = [1,2,3,4,3], last = mean([1,2,3,4,3])=2.6
         # Simplest: series of constant value → std=0 → zscore=0
@@ -380,7 +380,7 @@ class TestStatPairsTrading:
         for i, bar in enumerate(bars_a):
             s.add_leg_b_close(x[i])
             s.on_bar(bar)
-        orders_first = s.generate_orders()
+        s.generate_orders()
         orders_second = s.generate_orders()
         assert orders_second == []
 

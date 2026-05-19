@@ -136,7 +136,7 @@ class TestMultiplierAllocation:
 
         with patch.object(PositionMirror, "_place_on_account", side_effect=_fake_place):
             order = _make_order(qty="4")
-            result = mirror.execute(order)
+            mirror.execute(order)
 
         qty_map = dict(captured)
         assert qty_map.get("slave1") == 4   # 4 × 1.0

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from packages.screener.src.tv_signals import TVAnalysisResult, TVSignals
 
@@ -62,7 +61,7 @@ class TestTVSignals:
         with patch("packages.screener.src.tv_signals.TA_Handler", mock_handler_cls, create=True):
             # We need to mock the import inside the function
             import packages.screener.src.tv_signals as mod
-            original = getattr(mod, "_ta_handler_available", True)
+            getattr(mod, "_ta_handler_available", True)
             with patch.dict("sys.modules", {"tradingview_ta": MagicMock(TA_Handler=mock_handler_cls)}):
                 tv = TVSignals()
                 result = tv.get_analysis("RELIANCE", "NSE", "1d")

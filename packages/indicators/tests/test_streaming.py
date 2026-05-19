@@ -253,7 +253,7 @@ class TestStreamingATR:
 
         period = 14
         streaming = StreamingATR(period)
-        stream_results = [streaming.update(float(h), float(l), float(c)) for h, l, c in zip(high, low, close)]
+        stream_results = [streaming.update(float(hi), float(lo), float(cl)) for hi, lo, cl in zip(high, low, close)]
         batch = batch_atr(high, low, close, period)
 
         for i, r in enumerate(stream_results):

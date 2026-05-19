@@ -6,7 +6,6 @@ StreamingMetrics implementations.
 
 from __future__ import annotations
 
-import math
 
 import pytest
 
@@ -333,7 +332,7 @@ class TestCalmarRatio:
     """Calmar ratio = CAGR / max drawdown."""
 
     def test_calmar_positive_for_good_strategy(self):
-        from metrics import PerformanceMetrics, BacktestResult
+        from metrics import PerformanceMetrics
         from simulator import BacktestConfig
 
         try:

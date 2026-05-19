@@ -19,18 +19,15 @@ from packages.core.src.ip_whitelist import IPWhitelist, _parse_network
 class TestParseNetwork:
     def test_single_ipv4(self):
         net = _parse_network("10.0.0.1")
-        import ipaddress
         assert str(net) == "10.0.0.1/32"
 
     def test_cidr_ipv4(self):
         net = _parse_network("192.168.0.0/24")
-        import ipaddress
         assert net.prefixlen == 24
 
     def test_host_in_cidr_normalised(self):
         # strict=False — 192.168.0.5/24 normalises to 192.168.0.0/24
         net = _parse_network("192.168.0.5/24")
-        import ipaddress
         assert str(net) == "192.168.0.0/24"
 
     def test_ipv6_address(self):
@@ -43,7 +40,6 @@ class TestParseNetwork:
 
     def test_whitespace_stripped(self):
         net = _parse_network("  10.0.0.1  ")
-        import ipaddress
         assert str(net) == "10.0.0.1/32"
 
 

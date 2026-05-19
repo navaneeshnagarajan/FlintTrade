@@ -6,7 +6,6 @@ httpx is patched via unittest.mock.AsyncMock.
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

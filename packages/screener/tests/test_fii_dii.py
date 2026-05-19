@@ -5,7 +5,6 @@ All tests use synthetic data or in-memory DuckDB — no NSE API calls.
 
 from __future__ import annotations
 
-import pytest
 
 from packages.screener.src.fii_dii import (
     FiiDiiSnapshot,

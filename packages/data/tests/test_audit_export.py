@@ -10,8 +10,7 @@ Run with:
 from __future__ import annotations
 
 import csv
-import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

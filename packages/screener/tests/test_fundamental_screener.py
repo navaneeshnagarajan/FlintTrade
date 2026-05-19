@@ -6,9 +6,7 @@ Tests use fixture HTML and in-memory DuckDB (no network, no disk).
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------

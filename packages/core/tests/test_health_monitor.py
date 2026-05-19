@@ -7,12 +7,9 @@ Run with:
 from __future__ import annotations
 
 import socket
-import threading
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from packages.core.src.health_monitor import (
     HealthCheck,
@@ -241,7 +238,7 @@ class TestCheckThreadCount:
 
     def test_baseline_set_on_first_call(self):
         m = _monitor()
-        result = m.check_thread_count()
+        m.check_thread_count()
         assert m._thread_baseline is not None
 
     def test_no_growth_is_healthy(self):

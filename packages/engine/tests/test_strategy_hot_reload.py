@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -24,7 +24,6 @@ import packages.engine.src.strategy_hot_reload as mod
 from packages.engine.src.strategy_hot_reload import (
     StrategyHotReloader,
     _has_strategy_class,
-    _check_open_mode,
 )
 
 

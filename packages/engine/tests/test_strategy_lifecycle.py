@@ -333,7 +333,7 @@ def test_list_all_instances(manager: StrategyLifecycleManager) -> None:
 def test_list_filter_running(manager: StrategyLifecycleManager) -> None:
     i1 = make_instance(manager, name="R1")
     i2 = make_instance(manager, name="R2")
-    i3 = make_instance(manager, name="C1")
+    make_instance(manager, name="C1")
     manager.deploy(i1.strategy_id)
     manager.deploy(i2.strategy_id)
     running = manager.list_instances(status_filter=InstanceStatus.RUNNING)
@@ -385,7 +385,7 @@ def test_remove_nonexistent_raises(manager: StrategyLifecycleManager) -> None:
 def test_stop_all_stops_running_and_paused(manager: StrategyLifecycleManager) -> None:
     i1 = make_instance(manager, name="A")
     i2 = make_instance(manager, name="B")
-    i3 = make_instance(manager, name="C")  # created, not running
+    make_instance(manager, name="C")  # created, not running
     manager.deploy(i1.strategy_id)
     manager.deploy(i2.strategy_id)
     manager.pause(i2.strategy_id)

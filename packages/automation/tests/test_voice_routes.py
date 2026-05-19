@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 def app():
     """Create a minimal Flask app with the voice blueprint registered."""
     from flask import Flask
-    from packages.automation.src.voice_routes import voice_bp, init_voice_routes
+    from packages.automation.src.voice_routes import voice_bp
 
     application = Flask("test_voice")
     application.config["TESTING"] = True
@@ -173,7 +173,6 @@ class TestVoiceExecute:
     def test_execute_pending_approval_returns_202(self, client, mock_bridge):
         from packages.automation.src.voice_order_bridge import (
             PendingApprovalError,
-            VoiceOrderIntent,
         )
 
         bridge, intent = mock_bridge

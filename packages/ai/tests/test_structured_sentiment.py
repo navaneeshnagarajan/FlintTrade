@@ -6,7 +6,7 @@ No network access, no real LLM responses required.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -65,7 +65,7 @@ class TestSentimentLabel:
     def test_all_labels_defined(self):
         from packages.ai.src.structured_sentiment import SentimentLabel
 
-        labels = {l.value for l in SentimentLabel}
+        labels = {label.value for label in SentimentLabel}
         assert "STRONGLY_BULLISH" in labels
         assert "STRONGLY_BEARISH" in labels
         assert "NEUTRAL" in labels

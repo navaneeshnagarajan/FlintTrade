@@ -7,8 +7,6 @@ Covers: subscribe, publish, unsubscribe, history, thread safety,
 from __future__ import annotations
 
 import threading
-import time
-from typing import Any
 
 import pytest
 

@@ -6,9 +6,8 @@ The mock strategy ensures tests pass whether quantstats is installed or not.
 
 from __future__ import annotations
 
-import os
-import textwrap
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +18,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _make_returns(n: int = 252, seed: int = 42) -> "Any":
+def _make_returns(n: int = 252, seed: int = 42) -> Any:
     """Build a synthetic daily-returns Series for testing."""
     import random
     from datetime import date, timedelta
@@ -262,7 +261,6 @@ class TestGenerateSnapshotWithQS:
     @patch("tearsheet._QS_AVAILABLE", True)
     @patch("tearsheet.qs")
     def test_calls_qs_plots_snapshot(self, mock_qs):
-        import io
 
         import matplotlib
         matplotlib.use("Agg")
@@ -273,7 +271,7 @@ class TestGenerateSnapshotWithQS:
 
         from tearsheet import generate_snapshot
 
-        html = generate_snapshot(_make_returns(), title="Snap")
+        generate_snapshot(_make_returns(), title="Snap")
         mock_qs.plots.snapshot.assert_called_once()
         plt.close("all")
 

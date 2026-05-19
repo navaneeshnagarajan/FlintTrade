@@ -8,8 +8,6 @@ import pytest
 
 from packages.core.src.crypto_utils import (
     CRYPTO_PAIRS,
-    DELTA_EXCHANGE_NAMES,
-    CryptoPairInfo,
     CryptoUtils,
 )
 

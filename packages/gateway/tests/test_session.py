@@ -297,7 +297,7 @@ class TestPlaceOrderDelegation:
         order_data = {"order_id": "ORD001"}
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.cancel_order(order_data)
+            session.cancel_order(order_data)
         mock_adapter.cancel_order.assert_called_once_with(order_data, _TOKEN)
 
     def test_cancel_all_orders_delegates_to_adapter(self) -> None:
@@ -321,7 +321,7 @@ class TestPlaceOrderDelegation:
         pos_data = {"symbol": "NIFTY", "exchange": "NSE"}
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.close_position(pos_data)
+            session.close_position(pos_data)
         mock_adapter.close_position.assert_called_once_with(pos_data, _TOKEN)
 
     def test_place_options_order_delegates_to_adapter(self) -> None:
@@ -333,7 +333,7 @@ class TestPlaceOrderDelegation:
         order_data = {"symbol": "NIFTY25JUN21000CE", "qty": 50}
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.place_options_order(order_data)
+            session.place_options_order(order_data)
         mock_adapter.place_options_order.assert_called_once_with(order_data, _TOKEN)
 
 
@@ -448,7 +448,7 @@ class TestGetPositionsDelegation:
         session = _make_session()
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.get_orders()
+            session.get_orders()
         mock_adapter.get_orders.assert_called_once_with(_TOKEN)
 
     def test_get_trades_delegates(self) -> None:
@@ -459,7 +459,7 @@ class TestGetPositionsDelegation:
         session = _make_session()
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.get_trades()
+            session.get_trades()
         mock_adapter.get_trades.assert_called_once_with(_TOKEN)
 
     def test_get_holdings_delegates(self) -> None:
@@ -470,7 +470,7 @@ class TestGetPositionsDelegation:
         session = _make_session()
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.get_holdings()
+            session.get_holdings()
         mock_adapter.get_holdings.assert_called_once_with(_TOKEN)
 
     def test_get_funds_delegates(self) -> None:
@@ -494,7 +494,7 @@ class TestGetPositionsDelegation:
         order_data = {"symbol": "NIFTY", "qty": 50}
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.get_margin(order_data)
+            session.get_margin(order_data)
         mock_adapter.get_margin.assert_called_once_with(order_data, _TOKEN)
 
 
@@ -529,7 +529,7 @@ class TestGetQuotesDelegation:
         session = _make_session()
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.get_depth("NIFTY")
+            session.get_depth("NIFTY")
         mock_adapter.get_depth.assert_called_once_with("NIFTY", _TOKEN)
 
     def test_get_history_delegates(self) -> None:
@@ -541,7 +541,7 @@ class TestGetQuotesDelegation:
         params = {"symbol": "NIFTY", "interval": "5m", "from": "2026-03-01", "to": "2026-03-24"}
         with patch(_PATCH_TARGET, return_value=mock_adapter):
             session.authenticate({"api_key": "key"})
-            result = session.get_history(params)
+            session.get_history(params)
         mock_adapter.get_history.assert_called_once_with(params, _TOKEN)
 
     def test_search_symbols_delegates(self) -> None:

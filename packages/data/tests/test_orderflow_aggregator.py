@@ -92,7 +92,7 @@ class TestAddTick:
         agg = _make_agg()
         before = int(_time.time())
         agg.add_tick("NIFTY", 24500.0, 100, "BUY")
-        after = int(_time.time())
+        int(_time.time())
         bins = agg.get_footprint("NIFTY")
         assert len(bins) > 0
         assert bins[0].timestamp_bin >= before - 300  # within same bin window

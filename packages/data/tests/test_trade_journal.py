@@ -10,9 +10,7 @@ Run with::
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
-from typing import Generator
 
 import pytest
 
@@ -399,7 +397,7 @@ class TestExportImport:
         """Exporting an empty journal returns just the header row."""
         _, journal = _make_journal()
         csv_str = journal.export_csv()
-        lines = [l for l in csv_str.strip().splitlines() if l]
+        lines = [line for line in csv_str.strip().splitlines() if line]
         assert len(lines) == 1  # header only
 
     def test_import_from_tradebook_creates_entries(self):

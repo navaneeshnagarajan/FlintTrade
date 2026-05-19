@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,7 +9,7 @@ import pytest
 from flask import Flask
 
 import packages.integration.src.webhook_routes as mod
-from packages.integration.src.webhook_receiver import WebhookConfig, WebhookPayload
+from packages.integration.src.webhook_receiver import WebhookConfig
 
 
 # ---------------------------------------------------------------------------

@@ -14,11 +14,9 @@ import pytest
 
 from robustness import (
     CrossSymbolResult,
-    DelayTestEntry,
     DelayTestResult,
     MCShuffleResult,
     NoiseInjectionResult,
-    ParamSensitivityEntry,
     ParamSensitivityResult,
     RobustnessConfig,
     RobustnessReport,
@@ -124,7 +122,6 @@ def test_std_single() -> None:
 
 
 def test_std_known() -> None:
-    import math
     vals = [2, 4, 4, 4, 5, 5, 7, 9]
     m = sum(vals) / len(vals)
     expected = math.sqrt(sum((v - m) ** 2 for v in vals) / (len(vals) - 1))

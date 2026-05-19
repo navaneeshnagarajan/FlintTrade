@@ -5,7 +5,6 @@ All tests use synthetic data — no API calls or broker connections required.
 
 from __future__ import annotations
 
-import pytest
 
 from packages.screener.src.oi_profile_analytics import (
     oi_profile_by_strike,

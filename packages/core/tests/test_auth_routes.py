@@ -2,7 +2,6 @@
 """Tests for auth REST endpoints."""
 
 from __future__ import annotations
-import json
 import pytest
 from unittest.mock import patch
 from packages.core.src.app import create_flask_app

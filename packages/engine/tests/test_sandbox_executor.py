@@ -16,7 +16,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 import packages.engine.src.sandbox_executor as mod
 from packages.engine.src.sandbox_executor import (
@@ -418,7 +417,6 @@ class TestSubprocessIsolation:
         consuming resources past the deadline.
         """
         executor = SandboxExecutor(timeout_seconds=1)
-        import time
         t0 = time.time()
         result = executor.run("while True: pass")
         elapsed = time.time() - t0

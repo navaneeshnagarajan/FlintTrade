@@ -11,7 +11,6 @@ Covers:
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +22,6 @@ from packages.ai.src.rag_pipeline import (
     LoadedDocument,
     PipelineConfig,
     RAGPipeline,
-    RAGResult,
     RetrievedChunk,
     TextChunk,
     TextChunker,

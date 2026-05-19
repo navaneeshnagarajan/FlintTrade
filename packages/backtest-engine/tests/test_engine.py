@@ -8,7 +8,6 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -31,13 +30,13 @@ def _make_bars(
         noise = random.uniform(-vol, vol)
         price = max(1.0, price + trend + noise)
         h = price + abs(noise) + 0.1
-        l = price - abs(noise) - 0.1
-        c = max(l, min(h, price + random.uniform(-0.2, 0.2)))
+        lo = price - abs(noise) - 0.1
+        c = max(lo, min(h, price + random.uniform(-0.2, 0.2)))
         bars.append({
             "timestamp": f"2025-01-{(i % 28) + 1:02d} 09:15:00",
             "open": round(price, 2),
             "high": round(h, 2),
-            "low": round(l, 2),
+            "low": round(lo, 2),
             "close": round(c, 2),
             "volume": 10000 + i * 50,
             "oi": 0,
@@ -358,7 +357,9 @@ class TestOrderFills:
                         order_type=OrderType.MARKET, quantity=1000000,
                     ))
             def generate_orders(self):
-                o = list(self._orders); self._orders.clear(); return o
+                o = list(self._orders)
+                self._orders.clear()
+                return o
             def set_engine(self, e): ...
 
         engine.set_strategy(BigBuyStrategy())
@@ -425,7 +426,9 @@ class TestPositionTracking:
                 if self.bar == 4 and self.engine_ref:
                     self.position_after_buy = self.engine_ref.get_position("TEST")
             def generate_orders(self):
-                o = list(self._orders); self._orders.clear(); return o
+                o = list(self._orders)
+                self._orders.clear()
+                return o
 
         strategy = TrackingStrategy()
         engine.set_strategy(strategy)
@@ -498,7 +501,9 @@ class TestPositionTracking:
                         ))
                         self._in_position = False
             def generate_orders(self):
-                o = list(self._orders); self._orders.clear(); return o
+                o = list(self._orders)
+                self._orders.clear()
+                return o
 
         config = EngineConfig(
             symbol="TEST", initial_capital=Decimal("500000"),

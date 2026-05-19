@@ -5,7 +5,6 @@ All tests use synthetic data — no API calls or broker connections required.
 
 from __future__ import annotations
 
-import pytest
 
 from packages.screener.src.gex_analytics import (
     compute_gex_by_strike,

@@ -6,9 +6,7 @@ Run with:
 
 from __future__ import annotations
 
-import threading
 import time
-import uuid
 from pathlib import Path
 
 import pytest
@@ -80,7 +78,7 @@ class TestEnqueue:
         assert before <= req.created_at <= after
 
     def test_enqueue_sets_expires_at(self, tmp_path: Path):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime
         q = _make_queue(tmp_path)
         req = q.enqueue(_make_order(), reason="Test", ttl_minutes=10)
         created = datetime.fromisoformat(req.created_at)
@@ -104,7 +102,7 @@ class TestEnqueue:
     def test_enqueue_order_params_preserved(self, tmp_path: Path):
         q = _make_queue(tmp_path)
         params = _make_order("BANKNIFTY")
-        req = q.enqueue(params, reason="Test")
+        q.enqueue(params, reason="Test")
         pending = q.list_pending()
         assert pending[0].order_params["symbol"] == "BANKNIFTY"
 

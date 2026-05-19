@@ -21,7 +21,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[4])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from packages.screener.src.rrg import (
+from packages.screener.src.rrg import (  # noqa: E402 — must follow sys.path.insert above
     NIFTY_SECTORS,
     _Series,
     _ewm_smooth,
@@ -336,7 +336,7 @@ class TestRRGEndpoint:
         assert resp.status_code == 200
 
     def test_status_ok(self, client):
-        data = resp = client.get("/api/v1/rrg/sectors")
+        resp = client.get("/api/v1/rrg/sectors")
         import json
         parsed = json.loads(resp.data)
         assert parsed["status"] == "success"

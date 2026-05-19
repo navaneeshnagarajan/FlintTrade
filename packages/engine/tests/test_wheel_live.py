@@ -7,9 +7,8 @@ The OpenAlgo client is replaced with an AsyncMock throughout.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 IST_OFFSET = 5.5 * 3600  # seconds — used for offset-aware datetimes if needed
 

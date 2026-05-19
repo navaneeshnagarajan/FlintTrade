@@ -5,7 +5,6 @@ All tests are pure in-memory; no broker connections or DuckDB required.
 
 from __future__ import annotations
 
-import math
 import os
 import sys
 

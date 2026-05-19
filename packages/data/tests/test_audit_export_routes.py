@@ -6,8 +6,6 @@ PDF export, summary, and validation (date order, bad format) paths.
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

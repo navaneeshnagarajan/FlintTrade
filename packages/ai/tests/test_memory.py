@@ -15,7 +15,7 @@ import pytest
 
 chromadb = pytest.importorskip("chromadb", reason="chromadb not installed")
 
-from packages.ai.src.memory import (
+from packages.ai.src.memory import (  # noqa: E402 — must follow chromadb importorskip
     MemoryLayer,
     MemoryQueryResult,
     TradedMemory,

@@ -365,7 +365,7 @@ def test_test_trades_empty_returns_raises() -> None:
 
 
 def test_test_trades_missing_key_raises() -> None:
-    tester = PermutationTester()
+    PermutationTester()
     with pytest.raises(ValueError, match="return_pct.*net_pnl"):
         _extract_trade_returns([{"other_key": 1.0}])
 

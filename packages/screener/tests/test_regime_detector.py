@@ -10,7 +10,6 @@ import pytest
 
 from packages.screener.src.regime_detector import (
     RegimeDetector,
-    RegimeSignal,
     RegimeType,
     _build_rationale,
     _compute_vix_percentile,

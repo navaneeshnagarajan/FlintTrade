@@ -210,11 +210,10 @@ def test_swing_low_vwap_frozen_at_detection_time() -> None:
 
 def test_swing_high_detected_after_low() -> None:
     d = _detector()
-    high_swing: SwingPoint | None = None
     for bar in _CANONICAL_BARS[:9]:  # bars 0–8
         result = d.add_bar(bar)
         if result is not None and result.swing_type == "HIGH":
-            high_swing = result
+            pass
 
     # After bar 8, swing HIGH should have been detected internally
     assert d.last_swing is not None
@@ -379,7 +378,7 @@ def test_lower_low_updates_swing_with_watch_confirmation() -> None:
     assert initial_low == pytest.approx(242.0)
 
     # Now construct a lower low that will accumulate 2 HH+HC watch events
-    t = _CANONICAL_BARS[4].timestamp
+    _CANONICAL_BARS[4].timestamp
     lower_bars = [
         # Continue from bar 4
         _bar(5,  251, 253, 248, 252),  # bar 5: above bar 2's low
@@ -397,7 +396,7 @@ def test_lower_low_updates_swing_with_watch_confirmation() -> None:
         ))
 
     for bar in adjusted:
-        result = d.add_bar(bar)
+        d.add_bar(bar)
 
     # The swing low should have updated to 238 or the updated extreme
     # (may or may not trigger based on exact watch logic; at minimum no error)

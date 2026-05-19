@@ -455,7 +455,7 @@ def test_oauth_start_expires_old_states(app, client) -> None:
             "account_id": "",
             "timestamp": time.time() - 660,  # 11 minutes ago
         }
-        count_before = len(app.config["OAUTH_STATES"])
+        len(app.config["OAUTH_STATES"])
 
     # A new OAuth start should purge the expired entry
     client.post(

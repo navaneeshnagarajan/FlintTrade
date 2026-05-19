@@ -32,15 +32,15 @@ def _submodule_required(func):
 # Imports under test
 # ---------------------------------------------------------------------------
 
-from adapter import (
+from adapter import (  # noqa: E402 — kept below skip-helper definitions for readability
     BROKER_CATALOG,
     BrokerAdapter,
     _WrappedBrokerAdapter,
     _bootstrap_openalgo_imports,
     load_broker_adapter,
 )
-from exceptions import BrokerNotFoundError
-from models import BrokerInfo
+from exceptions import BrokerNotFoundError  # noqa: E402 — see comment above
+from models import BrokerInfo  # noqa: E402 — see comment above
 
 
 # ---------------------------------------------------------------------------

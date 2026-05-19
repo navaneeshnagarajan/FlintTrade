@@ -211,7 +211,6 @@ class TestEmailTransportSes:
         mock_client.send_email.assert_called_once()
 
     def test_ses_returns_false_when_boto3_missing(self):
-        import sys
         from packages.core.src.auth_routes import EmailTransport
 
         transport = EmailTransport()

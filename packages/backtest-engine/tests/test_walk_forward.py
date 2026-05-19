@@ -13,7 +13,6 @@ from walk_forward import (
     WalkForwardConfig,
     WalkForwardResult,
     WalkForwardAnalyser,
-    SplitDetail,
     _bars_to_returns,
     _compute_metric,
     _degradation,

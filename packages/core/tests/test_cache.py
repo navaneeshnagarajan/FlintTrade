@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from packages.core.src.cache import Cache, CacheEntry, CacheRestoration, wire_to_event_bus
+from packages.core.src.cache import Cache, CacheRestoration, wire_to_event_bus
 from packages.core.src.event_bus import EventBus
 
 

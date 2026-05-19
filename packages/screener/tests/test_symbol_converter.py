@@ -12,7 +12,6 @@ import pytest
 from packages.screener.src.symbol_converter import (
     InstrumentType,
     Segment,
-    SymbolParts,
     build_openalgo_symbol,
     detect_segment,
     format_expiry_date,

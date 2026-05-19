@@ -81,6 +81,12 @@ class TestWatchlistRoutes:
         assert data["data"]["symbol"] == "RELIANCE"
 
     def test_list_after_add(self, app_client):
+        # Self-contained: add RELIANCE here too, don't rely on test_add_item
+        # having executed first. Under pytest-randomly, test ordering inside
+        # the class is shuffled and this test was running BEFORE test_add_item
+        # in CI, leaving an empty watchlist and `assert 'RELIANCE' in []`.
+        _post(app_client, "/v1/historify/watchlist",
+              {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
         resp = _get(app_client, "/v1/historify/watchlist")
         data = json.loads(resp.data)
         symbols = [item["symbol"] for item in data["data"]]

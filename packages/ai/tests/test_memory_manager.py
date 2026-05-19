@@ -5,8 +5,6 @@ All tests are purely in-process (no ChromaDB, no I/O).
 
 from __future__ import annotations
 
-import math
-import time
 from datetime import datetime, timezone, timedelta
 
 import pytest

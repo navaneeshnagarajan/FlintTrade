@@ -7,7 +7,11 @@ All HTTP calls are mocked. No real wabridge instance is required.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:  # forward-ref for `-> "WhatsAppAlerter"` annotations below
+    from packages.automation.src.whatsapp_alerter import WhatsAppAlerter
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +75,7 @@ class TestSendText:
             result = a.send_text("919876543210", "Test alert")
 
         assert result is True
-        call_url, call_kwargs = mock_post.call_args[0][0], mock_post.call_args[1]
+        call_url, _call_kwargs = mock_post.call_args[0][0], mock_post.call_args[1]
         assert call_url.endswith("/send")
         payload = mock_post.call_args[1]["json"]
         assert payload["phone"] == "919876543210"

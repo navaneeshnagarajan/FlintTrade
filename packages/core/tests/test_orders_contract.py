@@ -106,7 +106,11 @@ class TestOrderContract:
         backend = _backend_order_route_leaves()
         missing = frontend - backend
         assert not missing, (
-            f"Frontend calls postOrder(\"{leaf}\", …) for leaves with no "
+            # Plain string (not f-string) — the {leaf} placeholder is filled in by
+            # the .replace() chained below. Previously this was an f-string which
+            # caused F821 (undefined `leaf`) under ruff because Python evaluates
+            # f-strings eagerly even inside the assert-message expression.
+            "Frontend calls postOrder(\"{leaf}\", …) for leaves with no "
             f"matching backend route under /api/v1/orders/: {sorted(missing)}.\n"
             "Either add the backend handler (mirror an existing route in "
             "packages/core/src/order_routes.py or packages/engine/src/order_routes.py) "

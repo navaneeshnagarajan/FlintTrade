@@ -5,7 +5,7 @@ All tests use in-process data — no network or DB access required.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +147,8 @@ class TestNormaliseColumns:
 class TestOHLCVNormaliserNormalise:
     """Test the main normalise() method."""
 
-    def _make_bar(self, ts="2026-03-16 09:15:00", o=100, h=101, l=99, c=100.5, v=1000):
-        return {"timestamp": ts, "open": o, "high": h, "low": l, "close": c, "volume": v, "oi": 0}
+    def _make_bar(self, ts="2026-03-16 09:15:00", o=100, h=101, lo=99, c=100.5, v=1000):
+        return {"timestamp": ts, "open": o, "high": h, "low": lo, "close": c, "volume": v, "oi": 0}
 
     def test_basic_normalise(self):
         from packages.historical.src.normaliser import OHLCVNormaliser
@@ -242,8 +242,8 @@ class TestOHLCVNormaliserNormalise:
 class TestIntradayCutoff:
     """Test the 15:29:59 intraday cutoff absorbed from openchart."""
 
-    def _make_bar(self, ts, o=100, h=101, l=99, c=100.5, v=1000):
-        return {"timestamp": ts, "open": o, "high": h, "low": l, "close": c, "volume": v}
+    def _make_bar(self, ts, o=100, h=101, lo=99, c=100.5, v=1000):
+        return {"timestamp": ts, "open": o, "high": h, "low": lo, "close": c, "volume": v}
 
     def test_bars_before_cutoff_kept(self):
         from packages.historical.src.normaliser import OHLCVNormaliser

@@ -249,7 +249,7 @@ class TestExportCsv:
             ),
         )
 
-        csv_path = collector.export_csv("BANKNIFTY", "260327")
+        collector.export_csv("BANKNIFTY", "260327")
         assert (tmp_path / "BANKNIFTY").is_dir()
 
 

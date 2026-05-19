@@ -5,7 +5,6 @@ All tests are purely in-process; no broker/network calls.
 
 from __future__ import annotations
 
-import pytest
 
 
 # ---------------------------------------------------------------------------

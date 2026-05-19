@@ -360,7 +360,6 @@ class TestProviderRegistry:
             bars=[ProviderBar(timestamp="2026-03-16 09:15:00", open=100, high=101, low=99, close=100, volume=500)],
         )
 
-        from packages.historical.src.data_provider import ProviderRegistry
         registry = ProviderRegistry()
         registry._providers = [failing, succeeding]
 

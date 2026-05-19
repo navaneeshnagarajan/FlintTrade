@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +13,6 @@ from packages.ai.src.ensemble_selector import (
     compute_dissimilarity_index,
     _compute_validation_sharpe,
 )
-from packages.ai.src.signals import Signal
 
 
 # ---------------------------------------------------------------------------

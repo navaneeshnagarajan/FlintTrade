@@ -468,7 +468,7 @@ class TestDelegatedPlaceOrder:
         mock_session.get_orders.return_value = {"orders": []}
         registry, _ = _registry_with_account("AB1234", mock_session=mock_session)
 
-        result = registry.get_orders("AB1234")
+        registry.get_orders("AB1234")
         mock_session.get_orders.assert_called_once()
 
     def test_delegated_get_quotes_calls_session(self) -> None:

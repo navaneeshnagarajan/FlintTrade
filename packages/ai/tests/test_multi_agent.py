@@ -341,7 +341,6 @@ class TestMajorityVoteFallback:
 
     def test_majority_vote_picks_winner(self) -> None:
         from packages.ai.src.agent_models import AgentAnalysis, TeamAnalysis
-        from packages.ai.src.multi_agent import AgentTeam
 
         result = TeamAnalysis(
             symbol="NIFTY",
@@ -360,7 +359,6 @@ class TestMajorityVoteFallback:
 
     def test_majority_vote_no_successful_analyses(self) -> None:
         from packages.ai.src.agent_models import AgentAnalysis, TeamAnalysis
-        from packages.ai.src.multi_agent import AgentTeam
 
         result = TeamAnalysis(
             symbol="NIFTY",

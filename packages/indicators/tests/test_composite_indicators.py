@@ -273,7 +273,7 @@ class TestDPO:
 
         n = 100
         period = 10
-        shift = period // 2 + 1  # 6
+        period // 2 + 1  # 6
         # close[i] = i (0-indexed float)
         close = np.arange(n, dtype=np.float64)
         result = dpo(close, period=period)

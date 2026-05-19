@@ -6,7 +6,7 @@ All tests use in-memory DuckDB and mock providers — no network or disk I/O.
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ class TestCacheEntry:
 
     def test_upsert_then_get_entry(self):
         cache = _make_cache()
-        now = datetime(2026, 3, 16, 9, 15, 0, tzinfo=timezone.utc)
+        datetime(2026, 3, 16, 9, 15, 0, tzinfo=timezone.utc)
         head = datetime(2026, 3, 16, 15, 29, 0)
         cache._upsert_entry("RELIANCE", "NSE", "5m", head_bar_ts=head, provider="mock")
 

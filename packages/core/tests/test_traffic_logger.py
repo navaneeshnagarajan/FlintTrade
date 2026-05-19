@@ -200,7 +200,7 @@ def test_export_csv_row_count(tl: TrafficLogger) -> None:
     for i in range(3):
         tl.log("1.1.1.1", "GET", f"/r{i}", 200, 1.0)
     csv_str = tl.export_csv()
-    lines = [l for l in csv_str.strip().splitlines() if l]
+    lines = [line for line in csv_str.strip().splitlines() if line]
     # 1 header + 3 data rows
     assert len(lines) == 4
 

@@ -8,7 +8,6 @@ import pytest
 from flask import Flask
 
 import packages.data.src.questdb_routes as mod
-from packages.data.src.questdb_bridge import QuestDBBridgeError
 
 
 # ---------------------------------------------------------------------------

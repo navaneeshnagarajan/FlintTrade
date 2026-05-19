@@ -20,7 +20,6 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 
 from packages.indicators.src.pine_converter import (
     ConversionResult,

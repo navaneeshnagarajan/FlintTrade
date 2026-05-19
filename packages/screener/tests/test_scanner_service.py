@@ -14,7 +14,6 @@ No API calls are made — all data is synthetic.
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -102,7 +101,7 @@ class TestCandleBuilderOneMintue:
 
         # Ticks in minute 0
         for price in [100.0, 102.0, 99.0, 101.0]:
-            ts = base + timedelta(seconds=len([]) * 10)
+            base + timedelta(seconds=len([]) * 10)
             builder.update(_make_tick(ltp=price, volume=1000.0, ts=base + timedelta(seconds=price - 99)))
 
         # Trigger close: first tick of minute 1

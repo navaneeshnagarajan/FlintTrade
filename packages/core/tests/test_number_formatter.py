@@ -6,9 +6,7 @@ Covers: format_indian, format_lakhs, format_currency, format_percentage,
 
 from __future__ import annotations
 
-import math
 
-import pytest
 
 from packages.core.src.number_formatter import (
     format_currency,

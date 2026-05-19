@@ -5,7 +5,6 @@ All tests use synthetic data — no API calls or broker connections required.
 
 from __future__ import annotations
 
-import pytest
 import numpy as np
 
 from packages.screener.src.straddle_simulator import (

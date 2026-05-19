@@ -195,7 +195,7 @@ class TestDojiReversal:
 
         for b in bars:
             s.on_bar(OHLCV(**b))
-        first = s.generate_orders()
+        s.generate_orders()
         second = s.generate_orders()
         assert second == []
 
@@ -204,7 +204,7 @@ class TestDojiReversal:
         s = self._strat(sma_period=5, body_threshold=0.50, hold_bars=3, seed=0)
         # Manually force a position and tick through hold_bars
         bars = _make_bars(n=80, seed=7)
-        orders = _run_strategy(s, bars)
+        _run_strategy(s, bars)
         # Position should be flat at the end (either never entered, or exited)
         assert s._position in (0, 1, -1)  # just structural check
 

@@ -9,10 +9,8 @@ Run with: python -m pytest packages/screener/tests/test_lot_sizes.py -v --import
 
 from __future__ import annotations
 
-import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from packages.screener.src.lot_sizes import (
     FALLBACK_LOT_SIZES,

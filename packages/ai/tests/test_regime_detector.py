@@ -19,7 +19,6 @@ import random
 import pytest
 
 from packages.ai.src.regime_detector import (
-    RegimeResult,
     RegimeState,
     _atr,
     _bollinger_bands,
@@ -175,16 +174,16 @@ class TestDetectRegimeInputValidation:
         adx_period = 14
         min_bars = adx_period * 2 + 1
         h = [100.0 + i * 0.1 for i in range(min_bars)]
-        l = [99.0 + i * 0.1 for i in range(min_bars)]
+        lo = [99.0 + i * 0.1 for i in range(min_bars)]
         c = [99.5 + i * 0.1 for i in range(min_bars)]
 
         # Should not raise
-        state = detect_regime(h, l, c, adx_period=adx_period)
+        state = detect_regime(h, lo, c, adx_period=adx_period)
         assert isinstance(state, RegimeState)
 
     def test_accepts_list_sequences(self) -> None:
-        h, l, c = _ranging()
-        state = detect_regime(h, l, c)
+        h, lo, c = _ranging()
+        state = detect_regime(h, lo, c)
         assert isinstance(state, RegimeState)
 
 
@@ -197,8 +196,8 @@ class TestRegimeResult:
     """Tests for the RegimeResult dataclass."""
 
     def test_to_dict_contains_all_keys(self) -> None:
-        h, l, c = _ranging()
-        result = detect_regime_detailed(h, l, c)
+        h, lo, c = _ranging()
+        result = detect_regime_detailed(h, lo, c)
         d = result.to_dict()
 
         expected_keys = {
@@ -208,28 +207,28 @@ class TestRegimeResult:
         assert set(d.keys()) == expected_keys
 
     def test_state_in_dict_is_string(self) -> None:
-        h, l, c = _ranging()
-        result = detect_regime_detailed(h, l, c)
+        h, lo, c = _ranging()
+        result = detect_regime_detailed(h, lo, c)
         assert isinstance(result.to_dict()["state"], str)
 
     def test_n_bars_matches_input_length(self) -> None:
-        h, l, c = _ranging(n=80)
-        result = detect_regime_detailed(h, l, c)
+        h, lo, c = _ranging(n=80)
+        result = detect_regime_detailed(h, lo, c)
         assert result.n_bars == 80
 
     def test_close_matches_last_price(self) -> None:
-        h, l, c = _ranging()
-        result = detect_regime_detailed(h, l, c)
+        h, lo, c = _ranging()
+        result = detect_regime_detailed(h, lo, c)
         assert result.close == pytest.approx(c[-1])
 
     def test_adx_is_positive(self) -> None:
-        h, l, c = _trending_up()
-        result = detect_regime_detailed(h, l, c)
+        h, lo, c = _trending_up()
+        result = detect_regime_detailed(h, lo, c)
         assert result.adx > 0.0
 
     def test_bb_width_is_positive(self) -> None:
-        h, l, c = _volatile_directionless()
-        result = detect_regime_detailed(h, l, c)
+        h, lo, c = _volatile_directionless()
+        result = detect_regime_detailed(h, lo, c)
         assert result.bb_width > 0.0
 
 
@@ -242,20 +241,20 @@ class TestRegimeDetectionStates:
     """Verify each of the 6 regime states is reachable."""
 
     def test_trending_up_detected(self) -> None:
-        h, l, c = _trending_up(n=100)
-        state = detect_regime(h, l, c, adx_threshold=20.0)
+        h, lo, c = _trending_up(n=100)
+        state = detect_regime(h, lo, c, adx_threshold=20.0)
         # Strong uptrend should yield either TRENDING_UP or VOLATILE_DIRECTIONAL
         assert state in {RegimeState.TRENDING_UP, RegimeState.VOLATILE_DIRECTIONAL}
 
     def test_trending_down_detected(self) -> None:
-        h, l, c = _trending_down(n=100)
-        state = detect_regime(h, l, c, adx_threshold=20.0)
+        h, lo, c = _trending_down(n=100)
+        state = detect_regime(h, lo, c, adx_threshold=20.0)
         assert state in {RegimeState.TRENDING_DOWN, RegimeState.VOLATILE_DIRECTIONAL}
 
     def test_ranging_detected(self) -> None:
-        h, l, c = _ranging(n=100)
+        h, lo, c = _ranging(n=100)
         state = detect_regime(
-            h, l, c,
+            h, lo, c,
             adx_threshold=30.0,       # high threshold so low-ADX ranging passes
             bb_width_threshold=0.10,  # wide threshold so narrow BB is "ranging"
             low_vol_bb_threshold=0.001,
@@ -264,9 +263,9 @@ class TestRegimeDetectionStates:
 
     def test_volatile_directionless_detected(self) -> None:
         """Pre-expiry manipulation zone: low ADX, wide BB."""
-        h, l, c = _volatile_directionless(n=100)
+        h, lo, c = _volatile_directionless(n=100)
         state = detect_regime(
-            h, l, c,
+            h, lo, c,
             adx_threshold=40.0,       # force into low-ADX branch
             bb_width_threshold=0.001,  # very low → wide BB triggers VD
         )
@@ -274,9 +273,9 @@ class TestRegimeDetectionStates:
 
     def test_volatile_directionless_is_not_tradeable(self) -> None:
         """Confirm the pre-expiry zone is flagged as non-tradeable."""
-        h, l, c = _volatile_directionless(n=100)
+        h, lo, c = _volatile_directionless(n=100)
         result = detect_regime_detailed(
-            h, l, c,
+            h, lo, c,
             adx_threshold=40.0,
             bb_width_threshold=0.001,
         )
@@ -284,9 +283,9 @@ class TestRegimeDetectionStates:
             assert not result.state.is_tradeable
 
     def test_low_volatility_detected(self) -> None:
-        h, l, c = _low_volatility(n=100)
+        h, lo, c = _low_volatility(n=100)
         state = detect_regime(
-            h, l, c,
+            h, lo, c,
             adx_threshold=40.0,         # force low-ADX
             bb_width_threshold=1.0,     # wide threshold so we never hit VD
             low_vol_bb_threshold=0.5,   # very wide → almost any narrow BB qualifies
@@ -304,17 +303,17 @@ class TestRegimeDetectionStates:
 class TestTrueRange:
     def test_first_bar_is_high_minus_low(self) -> None:
         h = [105.0]
-        l = [95.0]
+        lo = [95.0]
         c = [100.0]
-        tr = _true_range(h, l, c)
+        tr = _true_range(h, lo, c)
         assert tr[0] == pytest.approx(10.0)
 
     def test_gaps_are_captured(self) -> None:
         """True range captures gap-up scenarios."""
         h = [100.0, 120.0]
-        l = [90.0, 115.0]
+        lo = [90.0, 115.0]
         c = [95.0, 118.0]
-        tr = _true_range(h, l, c)
+        tr = _true_range(h, lo, c)
         # Second bar: max(120-115, |120-95|, |115-95|) = max(5, 25, 20) = 25
         assert tr[1] == pytest.approx(25.0)
 
@@ -322,14 +321,14 @@ class TestTrueRange:
 class TestAtr:
     def test_nan_for_insufficient_bars(self) -> None:
         h = [100.0] * 5
-        l = [95.0] * 5
+        lo = [95.0] * 5
         c = [97.0] * 5
-        atr = _atr(h, l, c, period=14)
+        atr = _atr(h, lo, c, period=14)
         assert all(math.isnan(v) for v in atr)
 
     def test_atr_positive_for_valid_series(self) -> None:
-        h, l, c = _trending_up(n=50)
-        atr = _atr(h, l, c, period=14)
+        h, lo, c = _trending_up(n=50)
+        atr = _atr(h, lo, c, period=14)
         valid = [v for v in atr if not math.isnan(v)]
         assert all(v > 0 for v in valid)
 
@@ -341,14 +340,14 @@ class TestBollingerBands:
         assert len(upper) == len(mid) == len(lower) == 30
 
     def test_upper_above_lower(self) -> None:
-        h, l, c = _ranging()
+        h, lo, c = _ranging()
         upper, mid, lower = _bollinger_bands(c, period=20)
         for u, lo in zip(upper, lower):
             if not (math.isnan(u) or math.isnan(lo)):
                 assert u >= lo
 
     def test_mid_between_upper_and_lower(self) -> None:
-        h, l, c = _ranging()
+        h, lo, c = _ranging()
         upper, mid, lower = _bollinger_bands(c, period=20)
         for u, m, lo in zip(upper, mid, lower):
             if not any(math.isnan(v) for v in (u, m, lo)):
@@ -357,20 +356,20 @@ class TestBollingerBands:
 
 class TestDirectionalMovement:
     def test_output_lengths_match_input(self) -> None:
-        h, l, c = _trending_up(n=60)
-        pdi, mdi, adx = _directional_movement(h, l, c, period=14)
+        h, lo, c = _trending_up(n=60)
+        pdi, mdi, adx = _directional_movement(h, lo, c, period=14)
         assert len(pdi) == len(mdi) == len(adx) == 60
 
     def test_adx_in_0_100_range_for_valid_values(self) -> None:
-        h, l, c = _trending_up(n=80)
-        _, _, adx = _directional_movement(h, l, c, period=14)
+        h, lo, c = _trending_up(n=80)
+        _, _, adx = _directional_movement(h, lo, c, period=14)
         for v in adx:
             if not math.isnan(v):
                 assert 0.0 <= v <= 100.0
 
     def test_trending_up_has_plus_di_gt_minus_di(self) -> None:
-        h, l, c = _trending_up(n=80)
-        pdi, mdi, _ = _directional_movement(h, l, c, period=14)
+        h, lo, c = _trending_up(n=80)
+        pdi, mdi, _ = _directional_movement(h, lo, c, period=14)
         valid = [
             (p, m) for p, m in zip(pdi, mdi)
             if not math.isnan(p) and not math.isnan(m)

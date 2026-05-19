@@ -6,7 +6,7 @@ All broker/router interactions are mocked — no live OpenAlgo required.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

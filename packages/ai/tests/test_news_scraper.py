@@ -5,7 +5,6 @@ Uses monkeypatched httpx responses to avoid hitting real RSS feeds.
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest

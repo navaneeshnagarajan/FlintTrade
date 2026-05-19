@@ -25,7 +25,6 @@ from ws_proxy.depth_20 import (
     Depth20Aggregator,
     Depth20Tick,
     DepthLevel,
-    _parse_levels,
     parse_depth_20_payload,
 )
 from ws_proxy.mock_adapter import MockBrokerAdapter

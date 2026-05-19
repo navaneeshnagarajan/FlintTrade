@@ -122,11 +122,11 @@ class TestLongStrangle:
         assert all(leg.action == "BUY" for leg in self.legs)
 
     def test_call_leg_strike(self):
-        call_leg = next(l for l in self.legs if "CE" in l.symbol)
+        call_leg = next(leg for leg in self.legs if "CE" in leg.symbol)
         assert "26000" in call_leg.symbol
 
     def test_put_leg_strike(self):
-        put_leg = next(l for l in self.legs if "PE" in l.symbol)
+        put_leg = next(leg for leg in self.legs if "PE" in leg.symbol)
         assert "24000" in put_leg.symbol
 
     def test_quantity(self):
@@ -157,11 +157,11 @@ class TestIronCondor:
         assert len(self.legs) == 4
 
     def test_buy_legs_count(self):
-        buy_legs = [l for l in self.legs if l.action == "BUY"]
+        buy_legs = [leg for leg in self.legs if leg.action == "BUY"]
         assert len(buy_legs) == 2
 
     def test_sell_legs_count(self):
-        sell_legs = [l for l in self.legs if l.action == "SELL"]
+        sell_legs = [leg for leg in self.legs if leg.action == "SELL"]
         assert len(sell_legs) == 2
 
     def test_buy_legs_appear_before_sell_legs(self):
@@ -202,15 +202,15 @@ class TestIronButterfly:
         assert len(self.legs) == 4
 
     def test_two_buy_two_sell(self):
-        assert sum(1 for l in self.legs if l.action == "BUY") == 2
-        assert sum(1 for l in self.legs if l.action == "SELL") == 2
+        assert sum(1 for leg in self.legs if leg.action == "BUY") == 2
+        assert sum(1 for leg in self.legs if leg.action == "SELL") == 2
 
     def test_atm_symbols_are_sell(self):
-        sell_symbols = [l.symbol for l in self.legs if l.action == "SELL"]
+        sell_symbols = [leg.symbol for leg in self.legs if leg.action == "SELL"]
         assert all("52000" in s for s in sell_symbols)
 
     def test_wing_strikes(self):
-        buy_symbols = [l.symbol for l in self.legs if l.action == "BUY"]
+        buy_symbols = [leg.symbol for leg in self.legs if leg.action == "BUY"]
         assert any("51500" in s for s in buy_symbols)
         assert any("52500" in s for s in buy_symbols)
 
@@ -243,11 +243,11 @@ class TestBullCallSpread:
         assert all("CE" in leg.symbol for leg in self.legs)
 
     def test_buy_lower_strike(self):
-        buy_leg = next(l for l in self.legs if l.action == "BUY")
+        buy_leg = next(leg for leg in self.legs if leg.action == "BUY")
         assert "25000" in buy_leg.symbol
 
     def test_sell_higher_strike(self):
-        sell_leg = next(l for l in self.legs if l.action == "SELL")
+        sell_leg = next(leg for leg in self.legs if leg.action == "SELL")
         assert "26000" in sell_leg.symbol
 
     def test_invalid_strikes_raise(self):
@@ -284,11 +284,11 @@ class TestBearPutSpread:
         assert all("PE" in leg.symbol for leg in self.legs)
 
     def test_buy_higher_strike(self):
-        buy_leg = next(l for l in self.legs if l.action == "BUY")
+        buy_leg = next(leg for leg in self.legs if leg.action == "BUY")
         assert "25000" in buy_leg.symbol
 
     def test_sell_lower_strike(self):
-        sell_leg = next(l for l in self.legs if l.action == "SELL")
+        sell_leg = next(leg for leg in self.legs if leg.action == "SELL")
         assert "24000" in sell_leg.symbol
 
     def test_invalid_strikes_raise(self):
@@ -310,11 +310,11 @@ class TestLegsAreBasketLegs:
 
     def test_short_straddle_produces_basket_legs(self):
         legs = OptionsStrategyBuilder.short_straddle("NIFTY", "25MAY25", 25000.0, 1)
-        assert all(isinstance(l, BasketLeg) for l in legs)
+        assert all(isinstance(leg, BasketLeg) for leg in legs)
 
     def test_iron_condor_produces_basket_legs(self):
         legs = OptionsStrategyBuilder.iron_condor("NIFTY", "25MAY25", 24500, 24000, 26000, 26500, 1)
-        assert all(isinstance(l, BasketLeg) for l in legs)
+        assert all(isinstance(leg, BasketLeg) for leg in legs)
 
     def test_custom_exchange_propagated(self):
         legs = OptionsStrategyBuilder.short_straddle(

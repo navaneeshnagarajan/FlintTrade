@@ -218,7 +218,7 @@ class TestGridEquitySL:
 
         # Hit the stop-loss
         strat.on_bar(_bar(close=975.0))  # below SL = 980
-        orders = strat.generate_orders()
+        strat.generate_orders()
         # After SL, reset_count should have incremented
         assert strat._reset_count >= 1
 

@@ -6,8 +6,12 @@ All monetary values use Decimal for precision. Known-input → expected-output t
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:  # forward-ref for `-> "IndianTaxCalculator"` annotation
+    from tax_calculator import IndianTaxCalculator
 
 
 # ---------------------------------------------------------------------------
