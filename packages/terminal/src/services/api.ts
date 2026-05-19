@@ -228,20 +228,23 @@ async function get<T>(endpoint: string): Promise<T> {
 //
 //   core   orders_bp at /api/v1/orders : place, place-smart, modify, cancel,
 //                                        cancel-all, close-position,
-//                                        open-position
+//                                        open-position, options, options-multi
 //   engine order_bp  at /api/v1/orders : basket, split, options-strategy
 //
 // Pre-2026-05-19 this file mixed FT-proxy names (place, place-smart,
 // cancel-all, close-position) with OpenAlgo-style names (cancelorder,
 // openposition, basketorder, splitorder, optionsorder, optionsmultiorder),
 // so half the order endpoints 404'd in production. Codex stop-gate review
-// caught the mismatch.
+// caught the mismatch on 2026-05-19 (task-mpcpfmws-5rokaa). A follow-up
+// review then flagged that `optionsOrder` / `optionsMultiOrder` had been
+// routed through `post()` (OpenAlgo direct) as a stopgap, bypassing the
+// FT mode/safety gate. Both endpoints are now backed by /options and
+// /options-multi handlers in core orders_bp that delegate to OpenAlgo's
+// `optionsorder` and `optionsmultiorder` through `_dispatch_order`, so
+// every options trade is mode-gated identically to a regular order.
 //
-// `optionsOrder` and `optionsMultiOrder` still have NO matching FT-proxy
-// route — there is no /api/v1/orders/options-multi-strategy yet. Until
-// the backend grows them, they fall through `post()` to OpenAlgo direct,
-// which means they BYPASS the FT mode/safety gating. Flagged at the
-// call site to make this explicit.
+// `orderStatus` stays on the OpenAlgo direct path (read-only, no mode
+// gating needed for reads).
 export const placeOrder = (params: PlaceOrderParams) =>
   postOrder<{ orderId: string }>("place", params);
 export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
@@ -262,15 +265,10 @@ export const openPosition = (params: OpenPositionParams) =>
   postOrder<{ orderId: string }>("open-position", params);
 export const basketOrder = (params: BasketOrderParams) =>
   postOrder<{ orderId: string }>("basket", params);
-/** TODO: BACKEND-GAP — no FT-proxy route for single-leg options orders yet.
- *  Falls through to OpenAlgo direct, which bypasses mode gating. Add an
- *  /api/v1/orders/options endpoint in engine order_bp, then switch back to
- *  postOrder. */
 export const optionsOrder = (params: OptionsOrderParams) =>
-  post<{ orderId: string }>("optionsorder", params);
-/** TODO: BACKEND-GAP — same as optionsOrder above for multi-leg flows. */
+  postOrder<{ orderId: string }>("options", params);
 export const optionsMultiOrder = (params: OptionsMultiOrderParams) =>
-  post<{ orderId: string }>("optionsmultiorder", params);
+  postOrder<{ orderId: string }>("options-multi", params);
 export const splitOrder = (params: SplitOrderParams) =>
   postOrder<{ orderId: string }>("split", params);
 

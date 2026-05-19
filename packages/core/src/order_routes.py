@@ -70,6 +70,8 @@ _ENDPOINT_MAP: dict[str, str] = {
     "cancel-all":     "cancelallorder",
     "close-position": "closeposition",
     "open-position":  "openposition",
+    "options":        "optionsorder",
+    "options-multi":  "optionsmultiorder",
 }
 
 # ---------------------------------------------------------------------------
@@ -568,3 +570,49 @@ def open_position() -> tuple[Any, int]:
         JSON with ``status``, ``order_id``, and ``message``.
     """
     return _dispatch_order("open-position")
+
+
+@orders_bp.route("/options", methods=["POST"])
+def options_order() -> tuple[Any, int]:
+    """Place a single-leg options order — maps to OpenAlgo ``optionsorder``.
+
+    Routes a generic single-leg options order through the FT safety proxy
+    so that explore and practice modes are blocked by the mode gate before
+    any real-money order can reach OpenAlgo. Added 2026-05-19 to close the
+    gap flagged by the Codex stop-gate review (options orders were briefly
+    falling through to OpenAlgo direct, bypassing the mode gate).
+
+    Request headers:
+        X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
+
+    Request JSON: forwarded as-is to OpenAlgo's ``optionsorder`` endpoint.
+        Typical fields: ``symbol``, ``exchange``, ``action``, ``quantity``,
+        ``price``, ``product``, ``order_type``, ``strike``, ``expiry``,
+        ``option_type`` (``CE``/``PE``).
+
+    Returns:
+        JSON with ``status``, ``order_id``, and ``message``.
+    """
+    return _dispatch_order("options")
+
+
+@orders_bp.route("/options-multi", methods=["POST"])
+def options_multi_order() -> tuple[Any, int]:
+    """Place a multi-leg options order — maps to OpenAlgo ``optionsmultiorder``.
+
+    Like :func:`options_order` but for multi-leg payloads (spreads,
+    straddles, condors written as a legs array). Same safety-proxy
+    semantics — mode gate applied before forwarding to OpenAlgo.
+
+    Request headers:
+        X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
+
+    Request JSON: forwarded as-is to OpenAlgo's ``optionsmultiorder``
+        endpoint. Typical shape: ``{"legs": [{"strike": ..., "option_type":
+        ..., "action": ..., "quantity": ...}, ...], "exchange": ...,
+        "product": ..., "expiry": ...}``.
+
+    Returns:
+        JSON with ``status``, ``order_id``s per leg, and ``message``.
+    """
+    return _dispatch_order("options-multi")
