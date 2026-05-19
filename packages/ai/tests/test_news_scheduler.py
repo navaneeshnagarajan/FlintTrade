@@ -7,9 +7,8 @@ NewsScraper so no real HTTP requests are made.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, AsyncMock, patch
-from typing import Any
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,7 +16,6 @@ from packages.ai.src.news_scheduler import (
     NewsEvent,
     NewsScheduler,
     PollType,
-    ScheduledJob,
     _NewsCache,
     _IST,
 )

@@ -12,13 +12,11 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
-from packages.ai.src.agent_models import AgentRole, AgentRoleType
 from packages.ai.src.llm_client import LLMResponse
-from packages.ai.src.multi_agent import AgentTeam, default_agents
+from packages.ai.src.multi_agent import AgentTeam
 
 
 # ---------------------------------------------------------------------------

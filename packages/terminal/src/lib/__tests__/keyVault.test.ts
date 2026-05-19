@@ -52,6 +52,28 @@ describe("keyVault", () => {
       // With overwhelming probability the two random pads differ.
       expect(first).not.toBe(second);
     });
+
+    it("correctly obfuscates against a known fixed pad", () => {
+      // Set a known fixed pad in sessionStorage
+      sessionStorage.setItem("flinttrade:kp", "0123");
+      const plaintext = "hello";
+
+      // Expected result calculation:
+      // 'h' (104) ^ '0' (48) = 88 = 0x58 -> "0058"
+      // 'e' (101) ^ '1' (49) = 84 = 0x54 -> "0054"
+      // 'l' (108) ^ '2' (50) = 94 = 0x5e -> "005e"
+      // 'l' (108) ^ '3' (51) = 95 = 0x5f -> "005f"
+      // 'o' (111) ^ '0' (48) = 95 = 0x5f -> "005f" (wraps around)
+      expect(obfuscate(plaintext)).toBe("00580054005e005f005f");
+      sessionStorage.removeItem("flinttrade:kp");
+    });
+
+    it("bidirectionally completes obfuscation and deobfuscation", () => {
+      const plaintext = "my-secret-key!@#123";
+      const obfuscated = obfuscate(plaintext);
+      expect(obfuscated).not.toBe(plaintext);
+      expect(deobfuscate(obfuscated)).toBe(plaintext);
+    });
   });
 
   describe("deobfuscate", () => {
