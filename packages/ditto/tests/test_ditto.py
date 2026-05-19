@@ -737,7 +737,11 @@ class TestDefaultDB:
         mock_core.src.workspace = mock_workspace
         monkeypatch.setitem(sys.modules, 'packages.core.src.workspace', mock_core.src.workspace)
 
-        assert _default_db() == "/workspace/data/ditto_accounts.sqlite"
+        # Production code does str(Path(workspace.fast_data_dir) / "ditto_accounts.sqlite"),
+        # so on Windows the separator is \, on POSIX it is /. Compose the expected
+        # value through Path() the same way to keep the test cross-platform.
+        expected = str(Path("/workspace/data") / "ditto_accounts.sqlite")
+        assert _default_db() == expected
 
     def test_default_db_fallback(self, monkeypatch):
         import sys
@@ -752,7 +756,10 @@ class TestDefaultDB:
         mock_home = Path("/home/mockuser")
         monkeypatch.setattr(Path, "home", lambda: mock_home)
 
-        assert _default_db() == "/home/mockuser/.flinttrade/data/ditto_accounts.sqlite"
+        # As above, compose through Path() so the assertion uses the OS-native
+        # separator and matches production output on Windows + POSIX alike.
+        expected = str(mock_home / ".flinttrade" / "data" / "ditto_accounts.sqlite")
+        assert _default_db() == expected
 
 
 class TestAccountManagerExtra:

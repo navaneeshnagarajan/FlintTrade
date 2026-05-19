@@ -68,7 +68,14 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: pip install -r requirements.txt
-      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60
+      # --timeout-method=thread uses a watchdog thread + _thread.interrupt_main()
+      # instead of SIGALRM. SIGALRM can't reliably interrupt CPython's
+      # thread.join() on Linux (the C wait loop doesn't propagate EINTR), which
+      # is how a single bad thread cleanup deadlocks the whole job until the
+      # 6-hour runner timeout. Watchdog method works regardless. See the
+      # PositionWatcher fix in packages/ditto/src/mirror.py for the original
+      # hang vector.
+      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
       - run: ruff check packages/*/src/ --output-format=github
 
   # NOTE: macOS and Windows cross-platform checks used to run on every push +
@@ -86,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: TypeScript strict check
@@ -103,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run trading + utility A-H widget tests
@@ -116,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run utility widget tests (M-S)
@@ -129,7 +136,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run utility widget tests (S-W, one at a time)
@@ -152,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
       - run: cd packages/terminal && npm ci --legacy-peer-deps
       - name: Run analysis + routes + tools + components tests

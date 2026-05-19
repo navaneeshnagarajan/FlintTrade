@@ -417,6 +417,13 @@ class PositionWatcher:
         self._last_snapshot: dict[str, dict] = {}  # symbol → position dict
         self._running = False
         self._thread: threading.Thread | None = None
+        # Cooperative stop: the poll loop blocks on this event instead of
+        # time.sleep() so stop() can wake it instantly. With a plain
+        # time.sleep(poll_interval), stop() had to wait the full interval
+        # before the loop noticed _running=False, which deadlocked CI
+        # whenever tests used poll_interval≥60 (pytest-timeout's SIGALRM
+        # can't interrupt CPython's thread.join() reliably on Linux).
+        self._stop_event = threading.Event()
 
     # ------------------------------------------------------------------
     # Public API
@@ -440,6 +447,7 @@ class PositionWatcher:
         if self._running:
             return
         self._running = True
+        self._stop_event.clear()  # Reset in case the watcher is restarted.
         self._thread = threading.Thread(
             target=self._poll_loop,
             name=f"pos-watcher-{self._account.account_id}",
@@ -451,6 +459,7 @@ class PositionWatcher:
     def stop(self) -> None:
         """Signal the polling thread to stop and wait for it to exit."""
         self._running = False
+        self._stop_event.set()  # Wake the loop immediately.
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=self._poll_interval * 2 + 1)
         self._thread = None
@@ -466,10 +475,15 @@ class PositionWatcher:
     # ------------------------------------------------------------------
 
     def _poll_loop(self) -> None:
-        """Background loop: poll positionbook and detect changes."""
-        import time
+        """Background loop: poll positionbook and detect changes.
 
-        while self._running:
+        Blocks on ``_stop_event.wait(timeout=poll_interval)`` rather than
+        ``time.sleep`` so that ``stop()`` can wake the loop immediately —
+        otherwise a watcher created with a large poll interval (e.g. 60 s
+        in lifecycle tests) would force ``stop()`` to wait the full
+        interval before the thread observed the stop signal and exited.
+        """
+        while not self._stop_event.is_set():
             try:
                 self._poll_once()
             except Exception as exc:
@@ -478,7 +492,9 @@ class PositionWatcher:
                     self._account.account_id,
                     exc,
                 )
-            time.sleep(self._poll_interval)
+            # Returns True if event was set (stop requested), False on timeout
+            # (continue polling). Either way the next while-check handles it.
+            self._stop_event.wait(timeout=self._poll_interval)
 
     def _poll_once(self) -> None:
         """Fetch current positionbook and compare with the last snapshot."""
