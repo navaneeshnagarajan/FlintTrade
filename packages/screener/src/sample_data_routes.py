@@ -18,7 +18,7 @@ The eight endpoints are (full URL after WSGI prefix strip):
 - ``GET /api/v1/sectors/rotation``
 - ``GET /api/v1/analytics/risk-return``
 - ``GET /api/v1/crypto/funding_rates``
-- ``GET /api/v1/global/indices``
+- ``GET /api/v1/market/global_indices``
 - ``GET /api/v1/screener/shareholding?symbol=<sym>``
 - ``GET /api/v1/screener/sector-constituents?sector=<sec>``
 - ``GET /api/v1/screener/lot-size?symbol=<sym>&exchange=<exch>``
@@ -261,7 +261,7 @@ def get_crypto_funding_rates() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/v1/global/indices
+# GET /api/v1/market/global_indices
 # ---------------------------------------------------------------------------
 
 
@@ -278,9 +278,15 @@ _SAMPLE_GLOBAL_INDICES: list[dict[str, Any]] = [
 ]
 
 
-@sample_data_bp.route("/global/indices", methods=["GET"])
+@sample_data_bp.route("/market/global_indices", methods=["GET"])
 def get_global_indices() -> Any:
-    """Return a placeholder global-indices payload flagged as sample data."""
+    """Return a placeholder global-indices payload flagged as sample data.
+
+    Route path matches the frontend caller in
+    ``packages/terminal/src/services/ftApi.analysis.ts:245``
+    (``get<...>("market/global_indices")``) — NOT ``/global/indices``,
+    which an earlier draft used and Codex caught before ship.
+    """
     return jsonify({
         "indices": _SAMPLE_GLOBAL_INDICES,
         "updated_at": _utc_iso(),

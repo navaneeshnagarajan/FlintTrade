@@ -120,7 +120,11 @@ def test_crypto_funding_rates_returns_sample_data(client):
 
 
 def test_global_indices_returns_sample_data(client):
-    resp = client.get("/api/v1/global/indices")
+    # Frontend calls `market/global_indices` (see
+    # packages/terminal/src/services/ftApi.analysis.ts:245), so the
+    # backend route MUST live at /api/v1/market/global_indices. A
+    # mismatched route here would silently 404 in production.
+    resp = client.get("/api/v1/market/global_indices")
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["is_sample_data"] is True
@@ -129,6 +133,16 @@ def test_global_indices_returns_sample_data(client):
     regions = {idx["region"] for idx in data["indices"]}
     assert regions <= {"India", "US", "Europe", "Asia"}
     assert "India" in regions  # NIFTY/SENSEX must be present
+
+
+def test_global_indices_old_path_returns_404(client):
+    """Sanity check that the old (incorrect) path doesn't accidentally work.
+
+    Locks the contract — if anyone re-introduces /global/indices as a
+    duplicate route, this fails. Frontend pairs with /market/global_indices.
+    """
+    resp = client.get("/api/v1/global/indices")
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
