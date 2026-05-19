@@ -222,7 +222,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.5.1 (tag `v0.5.1`, 2026-05-20) — security hardening + CI stability patch release. Diff vs v0.5.0: 60 commits, no breaking API changes. See `docs/RELEASE_NOTES_v0.5.1.md`.
+- **Version:** 0.5.1 (tag `v0.5.1`, 2026-05-20) — security hardening + CI stability patch release. Diff vs v0.5.0: 65 commits, no breaking API changes; final commits reconcile release metadata, package versions, and lockfile self-version fields. See `docs/RELEASE_NOTES_v0.5.1.md`.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
 - **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI_BUDGET_AND_QUALITY.md` for the contract.
 - **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell

@@ -1,9 +1,15 @@
 # FlintTrade v0.5.1 — release notes
 
-**Status:** GA — tagged `v0.5.1` (`ea64af5`, 2026-05-20).
+**Status:** GA — tagged `v0.5.1` after release-version reconciliation (2026-05-20).
 **Base:** v0.5.0 GA (`2741cad`, 2026-04-19).
-**Diff:** 59 commits, no breaking API changes.
-**Verification:** CI green on `ea64af5` — 8,989 Python tests passed + 147 skipped, 0 warnings, 0 ruff errors, 0 open Dependabot alerts.
+**Diff:** 65 commits, no breaking API changes.
+**Verification:** CI green on `ea64af5` — 8,989 Python tests passed + 147 skipped, 0 warnings, 0 ruff errors, 0 open Dependabot alerts. Final post-CI commits reconcile release metadata, package versions, and lockfile self-version fields.
+
+**Release boundary correction:** the first published `v0.5.1` tag pointed at
+`6277333`, before the adopted versioning sweep completed. That snapshot still
+reported `VERSION=0.5.0-dev` and package manifests at `0.5.0`. The release tag
+now includes the version sweep through `47a3f22` plus this metadata correction,
+so the tagged artifact reports `0.5.1` consistently.
 
 This is a **patch release** focused entirely on security hardening, route-contract correctness, and CI infrastructure. No new user-facing features. Safe upgrade from v0.5.0 — every public API on the backend kept its existing call shape; the sandbox executor's `SandboxExecutor.run` and `ftApi.helpers.{post,get,put,del}` are backwards-compatible.
 
@@ -83,7 +89,7 @@ This is a **patch release** focused entirely on security hardening, route-contra
 ## Commit range
 
 ```text
-2741cad (v0.5.0 GA, 2026-04-19) .. 270c2f8 (HEAD, 2026-05-20)
+2741cad (v0.5.0 GA, 2026-04-19) .. v0.5.1 (release-version reconciliation complete, 2026-05-20)
 ```
 
 Notable commits:
@@ -97,6 +103,10 @@ Notable commits:
 - `cbc237b` chore(deps): bump postcss
 - `301f7c3` fix(ci,deps): vitest pool=forks unblocks widget-tests + cargo update closes rand vuln
 - `270c2f8` fix(security,perf): sandbox subprocess isolation + radix-ui umbrella unwound
+- `6277333` release: v0.5.1 — bump version, finalise release notes
+- `55ef6fb` docs+pkg: bump all package versions 0.5.0 → 0.5.1
+- `ef8f1d4` chore: bump VERSION file 0.5.0-dev → 0.5.1
+- `47a3f22` chore: sync Cargo.lock + package-lock.json to v0.5.1
 
 ## Upgrade notes
 

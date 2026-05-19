@@ -15,9 +15,10 @@ endpoints still returning `is_sample_data: true`, glib upstream wait
 
 ## [0.5.1] - 2026-05-20
 
-Tag: `v0.5.1` · Base: `2741cad` (v0.5.0) · Diff: 60 commits · CI: green
+Tag: `v0.5.1` · Base: `2741cad` (v0.5.0) · Diff: 65 commits · CI: green
 on `ea64af5` (8,989 Python tests passed, 147 skipped, 0 warnings,
-0 ruff errors, 0 open Dependabot alerts).
+0 ruff errors, 0 open Dependabot alerts). Final post-CI commits reconcile
+release metadata, package versions, and lockfile self-version fields.
 
 See `docs/RELEASE_NOTES_v0.5.1.md` for the GA narrative. Highlights:
 

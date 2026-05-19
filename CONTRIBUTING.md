@@ -27,8 +27,8 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | 0.5.0-alpha | Released (2026-04-XX) | Live signals + multi-agent AI + bracket orders + MCX |
 | 0.5.0-beta | Released (2026-04-XX) | Glass Adaptive UI + Crawl4AI + WhatsApp + Pine editor |
 | 0.5.0 | Released (2026-04-19, tag `2741cad`) | OpenAlgo v2.0.0.4 parity complete (5 waves, 1,499 tests) |
-| 0.5.1 | Released (2026-05-20, tag `v0.5.1`) | Security hardening (4 Codex findings) + CI infra (60 commits, 0 warnings, 0 ruff errors, 8,989 tests green) |
-| 0.5.1-dev | **CURRENT** | v0.5.2 carry: Windows Job Object sandbox, trusted-mode spawn bypass, 8 stub backend endpoints, glib upstream wait |
+| 0.5.1 | Released (2026-05-20, tag `v0.5.1`) | Security hardening (4 Codex findings) + CI infra (65 commits, 0 warnings, 0 ruff errors, 8,989 tests green; final commits reconcile release metadata) |
+| 0.5.2-dev | **CURRENT** | v0.5.2 carry: Windows Job Object sandbox, trusted-mode spawn bypass, 8 stub backend endpoints, glib upstream wait |
 | 1.0.0 | Planned | Full production release, all platforms tested |
 
 **Pre-release progression:** `alpha` → `beta` → `rc.1` → stable
