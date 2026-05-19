@@ -41,16 +41,19 @@ describe("SessionStatsWidget", () => {
     expect(screen.getByText("Session Stats")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("shows Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<SessionStatsWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when connected", () => {
+  it("still shows Sample data badge when connected — no live endpoint yet", () => {
+    // SessionStatsWidget's badge is unconditional (the in-widget comment
+    // explains the previous disconnected-only version was misleading
+    // once a broker connects but the backend route still doesn't exist).
     mockConnected.mockReturnValue(true);
     render(<SessionStatsWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
   it("renders session equity chart with aria label", () => {
