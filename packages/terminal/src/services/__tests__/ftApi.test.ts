@@ -79,7 +79,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/sentiment/analyze");
+    expect(url).toContain("/api/v1/sentiment/analyse");
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual(
       expect.objectContaining({ "Content-Type": "application/json" }),

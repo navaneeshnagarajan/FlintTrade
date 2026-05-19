@@ -135,7 +135,7 @@ export const updateSignalConfig = (config: Partial<SignalConfig>) =>
   post<SignalConfig>("signals/configure", config);
 
 export const analyzeSentiment = (text: string) =>
-  post<SentimentResult>("sentiment/analyze", { text });
+  post<SentimentResult>("sentiment/analyse", { text });
 
 export const queryKnowledge = (query: string, top_k?: number) =>
   post<{ results: RAGResult[] }>("rag/query", {
@@ -148,7 +148,7 @@ export const runTeamAnalysis = (
   exchange: string,
   market_data?: Record<string, unknown>,
 ) =>
-  post<TeamAnalyzeResponse>("ai/team/analyze", {
+  post<TeamAnalyzeResponse>("ai/team/analyse", {
     symbol,
     exchange,
     ...(market_data ? { market_data: market_data } : {}),

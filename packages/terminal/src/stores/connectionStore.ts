@@ -21,9 +21,16 @@ interface ConnectionStore {
 }
 
 // Inner StateCreator (no middleware mutators — persist is applied outside)
+//
+// SECURITY: do NOT seed `apiKey` from a Vite env var. Vite inlines `VITE_*`
+// values into the production JS bundle at build time, which would leak the
+// broker API key to anyone who downloads the static site (or pastes the
+// bundle into a paste site, etc.). The key must be set via the in-app
+// Settings → Connection flow only — that path persists to ~/.flinttrade/
+// workspace.json server-side and never crosses the Vite build boundary.
 const storeImpl: StateCreator<ConnectionStore, [["zustand/persist", unknown]]> = (set) => ({
   host: import.meta.env.VITE_OPENALGO_HOST || "",
-  apiKey: import.meta.env.VITE_OPENALGO_API_KEY || "",
+  apiKey: "",
   wsUrl: import.meta.env.VITE_OPENALGO_WS
     || (import.meta.env.VITE_OPENALGO_HOST
       ? `ws://${new URL(import.meta.env.VITE_OPENALGO_HOST).hostname}:${import.meta.env.VITE_OPENALGO_WS_PORT || "8765"}`

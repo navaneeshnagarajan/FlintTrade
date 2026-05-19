@@ -999,7 +999,13 @@ def create_flask_app(
         "/v1/admin/introspect",
         "/v1/auth/",          # Auth endpoints are public (login, setup, status)
         "/v1/auth/callback",
-        "/api/v1/errors",     # Frontend error reporting — public, rate-limited
+        "/v1/errors",         # Frontend error reporting — public, rate-limited.
+                              # Blueprint mounted at /v1/errors (see
+                              # frontend_error_routes.py:Blueprint(..., url_prefix="/v1")).
+                              # NOTE: was incorrectly listed as /api/v1/errors prior
+                              # to 2026-05-19, which caused auth to reject every
+                              # frontend error report.
+        "/v1/changelog",      # Frontend changelog viewer — public, paired with /v1/errors.
         "/api/v1/ping",       # Liveness probe — no auth required
         "/v1/config/openalgo",          # Setup wizard — public, localhost-only
         "/v1/test-connection",          # Setup wizard — public, localhost-only
