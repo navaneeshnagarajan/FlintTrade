@@ -590,6 +590,13 @@ def create_flask_app(
     from packages.screener.src.analysis_routes import analysis_bp  # noqa: PLC0415
     app.register_blueprint(analysis_bp)
 
+    # Register sample-data placeholder blueprint — eight endpoints whose real
+    # implementations are not yet built. Each returns is_sample_data=true so
+    # widgets show their "Demo" badge instead of 404-ing. See
+    # packages/screener/src/sample_data_routes.py.
+    from packages.screener.src.sample_data_routes import sample_data_bp  # noqa: PLC0415
+    app.register_blueprint(sample_data_bp)
+
     # Register stock screener blueprint (/v1/stocks/*)
     from packages.screener.src.stock_routes import stock_bp  # noqa: PLC0415
     app.register_blueprint(stock_bp)

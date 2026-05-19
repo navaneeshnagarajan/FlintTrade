@@ -6,6 +6,24 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5.0-dev
 
+### Orphan API stubs + remaining hook coverage (2026-05-19)
+
+- **`packages/screener/src/sample_data_routes.py`** added — eight Flask routes that previously 404'd in production now return `is_sample_data: true` placeholders matching the frontend TypeScript interfaces:
+  - `GET /api/v1/etf/screener` — ETF screener rows (NIFTYBEES, GOLDBEES, BANKBEES)
+  - `GET /api/v1/sectors/rotation` — RRG-quadrant-tagged sector momentum
+  - `GET /api/v1/analytics/risk-return` — annualised return/volatility scatter
+  - `GET /api/v1/crypto/funding_rates` — BTC/ETH perp funding rate snapshot
+  - `GET /api/v1/global/indices` — 9 indices across India/US/Europe/Asia regions
+  - `GET /api/v1/screener/shareholding?symbol=` — promoter/FII/DII/public/government percentages summing to ~100, financials = null placeholders
+  - `GET /api/v1/screener/sector-constituents?sector=` — 4-stock RRG drill-down with tail points
+  - `GET /api/v1/screener/lot-size?symbol=&exchange=` — real lookup against a 15-symbol F&O lot-size table (NIFTY=75, BANKNIFTY=30, FINNIFTY=65, USDINR=1000, etc.); unknown symbols return `0` so the ScalperWidget falls back to its built-in config rather than getting an error.
+- The blueprint registers in `core.app` alongside `analysis_bp`. Widgets that already check `is_sample_data` (EtfScreenerTab, RiskReturnTab, SectorRotationTab, ShareholdingTab, PortfolioRRGTab, etc.) now render their "Demo" badge instead of an error panel. `retry: false` is no longer strictly necessary on PortfolioRRGTab but is kept as a safety net against accidental regressions.
+- **`packages/screener/tests/test_sample_data_routes.py`** added — 12 tests confirm every route returns HTTP 200, `is_sample_data: true`, the response shape matches the frontend interface, and query params (symbol/sector/exchange) echo through correctly. Lot-size table values are pinned: NIFTY=75, BANKNIFTY=30, USDINR=1000. A future PR replacing a stub with a real implementation MUST keep these assertions passing.
+
+### Additional hook coverage (2026-05-19)
+
+- **`packages/terminal/src/hooks/__tests__/useOrdersPositionsMargin.test.ts`** added — 12 tests covering the three remaining REST-query hooks. `useOrders` and `usePositions` get URL-called, response-shape, and error-state coverage. `useMargin` gets the load-bearing conditional `enabled` gate locked end-to-end: fires only when symbol non-empty AND exchange non-empty AND qty>0 AND caller's `enabled` is true. Four no-fetch branches + one positive fetch branch + one success-shape assertion = full coverage of the gate logic.
+
 ### Critical safety — advanced order mode-guard (2026-05-19)
 
 - **Codex stop-gate finding #4 closed**: engine `order_bp` routes (basket, split, options-strategy) and `bracket_bp.place_bracket` were carrying only `@require_non_explore`, which blocks explore-mode but never checks the `live_mode_unlocked` JWT claim. These four routes execute orders via FT's own executors (`BasketOrderExecutor`, `SplitOrderExecutor`, `OptionsStrategyBuilder`, `BracketOrderService`) that call OpenAlgo *directly* — they don't re-enter the mode-aware `core.order_routes` proxy, so the proxy's safety fan-out never protects them. Net effect before this fix: a live-mode user without a PIN-verified JWT could place basket/split/options-strategy/bracket orders that hit the broker.
