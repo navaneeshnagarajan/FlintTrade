@@ -506,44 +506,22 @@ def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
 
 
 # ------------------------------------------------------------------
-# Monitoring proxy routes (/api/v1/...) — delegate to blueprint singletons
-# The monitoring_bp Blueprint serves at /v1/* and the Vite proxy
-# strips /ft-api before forwarding to Flask on port 5001.
+# Monitoring proxy routes were REMOVED 2026-05-19. The previous version of
+# this file registered duplicate handlers for /api/v1/health,
+# /api/v1/traffic/stats, and /api/v1/latency/stats — all of which already
+# exist on `monitoring_bp` (packages/core/src/monitoring_routes.py:75, 100,
+# 147). Flask resolved by registration order, so whichever blueprint
+# happened to register last in `app.py` won — non-deterministic if the
+# import order ever shifted. The dedicated `monitoring_bp` is the
+# canonical owner; the operations_bp wrappers were thin delegations to
+# the same `_health_agg` / `get_traffic_counter()` / `get_latency_tracker()`
+# singletons anyway, so removing them has zero behaviour change.
+#
+# Frontend `ftApi.admin.ts::getHealth/getTrafficStats/getLatencyStats`
+# continues to call `/api/v1/health`, `/api/v1/traffic/stats`, and
+# `/api/v1/latency/stats` — those paths now resolve to monitoring_bp
+# without ambiguity.
 # ------------------------------------------------------------------
-
-@operations_bp.route("/health", methods=["GET"])
-def api_health() -> tuple[Any, int]:
-    """Proxy health endpoint for frontend compatibility."""
-    from .monitoring_routes import _health_agg  # noqa: PLC0415
-
-    registry_inst = current_app.config.get("REGISTRY")
-    result = _health_agg.get_health(registry=registry_inst)
-    http_status = 200 if result["status"] == "ok" else 503
-    return jsonify(result), http_status
-
-
-@operations_bp.route("/traffic/stats", methods=["GET"])
-def api_traffic_stats() -> tuple[Any, int]:
-    """Proxy traffic stats endpoint for frontend compatibility."""
-    from .monitoring_routes import get_traffic_counter  # noqa: PLC0415
-
-    minutes_raw = request.args.get("minutes", "5")
-    try:
-        minutes = int(minutes_raw)
-        if minutes < 1:
-            raise ValueError
-    except ValueError:
-        return jsonify({"status": "error", "message": "minutes must be a positive integer"}), 400
-
-    return jsonify({"status": "success", "data": get_traffic_counter().get_stats(minutes=minutes)}), 200
-
-
-@operations_bp.route("/latency/stats", methods=["GET"])
-def api_latency_stats() -> tuple[Any, int]:
-    """Proxy latency stats endpoint for frontend compatibility."""
-    from .monitoring_routes import get_latency_tracker  # noqa: PLC0415
-
-    return jsonify({"status": "success", "data": get_latency_tracker().get_stats()}), 200
 
 
 # ------------------------------------------------------------------

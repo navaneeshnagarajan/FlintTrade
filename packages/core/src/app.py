@@ -1060,9 +1060,15 @@ def create_flask_app(
         "/v1/errors",         # Frontend error reporting — public, rate-limited.
                               # Blueprint mounted at /v1/errors (see
                               # frontend_error_routes.py:Blueprint(..., url_prefix="/v1")).
-                              # NOTE: was incorrectly listed as /api/v1/errors prior
-                              # to 2026-05-19, which caused auth to reject every
-                              # frontend error report.
+                              # Persists to ErrorLog (DuckDB) for post-mortem.
+        "/api/v1/errors",     # Same purpose, different sink: this path is
+                              # handled by `operations_bp.receive_frontend_error`
+                              # which forwards to structlog + Sentry/Glitchtip
+                              # instead of DuckDB. Kept public so the React app,
+                              # the Chrome extension, and external automation
+                              # can all fire-and-forget error reports without
+                              # an API key — neither sink leaks sensitive data
+                              # back to the caller.
         "/v1/changelog",      # Frontend changelog viewer — public, paired with /v1/errors.
         "/api/v1/ping",       # Liveness probe — no auth required
         "/v1/config/openalgo",          # Setup wizard — public, localhost-only
