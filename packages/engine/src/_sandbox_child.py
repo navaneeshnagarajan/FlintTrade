@@ -97,6 +97,49 @@ def _apply_rlimits(memory_limit_bytes: int, timeout_seconds: int) -> None:
             )
 
 
+def _load_executor_module():
+    """Load ``sandbox_executor.py`` from the directory this file lives in.
+
+    Returns the loaded module, or ``None`` after emitting an error frame
+    if the load fails for any reason. Using
+    ``importlib.util.spec_from_file_location`` means the child does not
+    care whether it was invoked from the source checkout
+    (``packages.engine.src._sandbox_child``) or from an installed wheel
+    (``flint_engine._sandbox_child``) — it simply loads the sibling
+    file by absolute path. The module is registered in
+    ``sys.modules`` under a private name (``_flinttrade_sandbox_exec``)
+    so any internal lookups via ``__name__`` continue to work.
+    """
+    import importlib.util
+    import os as _os
+
+    exec_path = _os.path.join(
+        _os.path.dirname(_os.path.abspath(__file__)),
+        "sandbox_executor.py",
+    )
+    if not _os.path.isfile(exec_path):
+        _emit_error(
+            "SandboxBootstrapError",
+            f"sandbox_executor.py not found next to _sandbox_child.py at {exec_path}",
+            "",
+        )
+        return None
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "_flinttrade_sandbox_exec", exec_path,
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not build spec for {exec_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception as exc:
+        _emit_error("SandboxBootstrapError", str(exc), traceback.format_exc())
+        return None
+
+
 def _json_safe(obj):
     """Recursively coerce a value into a JSON-serialisable shape.
 
@@ -165,12 +208,21 @@ def main() -> None:
 
     _apply_rlimits(memory_limit, timeout_seconds)
 
-    # Import the executor module AFTER applying rlimits so allocation
-    # for the import itself counts against the limit.
-    try:
-        from packages.engine.src import sandbox_executor as se
-    except Exception as exc:
-        _emit_error("ImportError", str(exc), traceback.format_exc())
+    # Load sandbox_executor.py from THIS module's directory regardless
+    # of how the child was spawned. The previous version did
+    # ``from packages.engine.src import sandbox_executor`` which only
+    # resolves in the source checkout — once ``flint-engine`` is
+    # installed from its wheel (which maps ``src/`` to ``flint_engine``
+    # per packages/engine/pyproject.toml), the ``packages.engine.src``
+    # dotted name doesn't exist and the child crashed with ImportError
+    # on every single sandbox call. Loading the sibling file directly
+    # via ``importlib.util.spec_from_file_location`` sidesteps package
+    # naming entirely. Codex stop-gate 2026-05-19 BLOCK after commit
+    # 5779e59.
+    se = _load_executor_module()
+    if se is None:
+        # _load_executor_module already wrote the error frame to stdout
+        # via _emit_error before returning None.
         sys.exit(2)
 
     # Run via the in-process helper that performs AST validation + exec.

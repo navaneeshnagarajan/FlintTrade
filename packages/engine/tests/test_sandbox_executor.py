@@ -531,3 +531,75 @@ class TestSubprocessIsolation:
             f"Sandbox child entry point missing at {child_path} — would crash "
             "in installed-package layouts."
         )
+
+    def test_subprocess_child_works_without_packages_on_pythonpath(self):
+        """Simulate installed-wheel layout: no ``packages`` package on sys.path.
+
+        Codex stop-gate after 5779e59 flagged that I'd fixed the
+        spawn cmd but left ``from packages.engine.src import
+        sandbox_executor`` inside ``_sandbox_child.py``. When the wheel
+        is installed (``packages/engine/pyproject.toml`` maps ``src/``
+        to ``flint_engine``), the dotted name doesn't exist and the
+        child crashed with ``SandboxBootstrapError`` on every call.
+        Fix loads ``sandbox_executor.py`` from the sibling directory
+        via ``importlib.util.spec_from_file_location`` regardless of
+        package layout. This test runs the child with an env that
+        strips the repo root from ``PYTHONPATH``, proving the child
+        can bootstrap from disk-path alone.
+        """
+        import os as _os
+        import subprocess as _sp
+        import sys as _sys
+        import pickle as _pickle
+        import struct as _struct
+        import json as _json
+        from packages.engine.src import sandbox_executor as se
+
+        child_path = _os.path.join(
+            _os.path.dirname(_os.path.abspath(se.__file__)),
+            "_sandbox_child.py",
+        )
+
+        # Build an env that ONLY has the system Python paths — no repo
+        # root, no editable install. This mirrors what happens after
+        # `pip install flint-engine` on a clean machine.
+        clean_env = {
+            k: v for k, v in _os.environ.items()
+            if not k.startswith("PYTHON")
+        }
+        # Reuse the system's site-packages but DROP the repo root so
+        # `import packages.engine.src.sandbox_executor` would fail.
+        system_paths = [
+            p for p in _sys.path
+            if p and "site-packages" in p.replace("\\", "/")
+        ]
+        clean_env["PYTHONPATH"] = _os.pathsep.join(system_paths)
+
+        payload = _pickle.dumps({
+            "source": "long_entry(price=7.0)",
+            "context": {},
+            "memory_limit": 256 * 1024 * 1024,
+            "timeout": 5,
+        })
+
+        proc = _sp.Popen(
+            [_sys.executable, child_path],
+            stdin=_sp.PIPE,
+            stdout=_sp.PIPE,
+            stderr=_sp.PIPE,
+            env=clean_env,
+        )
+        stdout, stderr = proc.communicate(input=payload, timeout=15)
+
+        assert proc.returncode == 0, (
+            f"child exited {proc.returncode}; stderr: "
+            f"{stderr.decode('utf-8', errors='replace')[:400]}"
+        )
+        assert len(stdout) >= 8, "no result frame from child"
+        length = _struct.unpack(">Q", stdout[:8])[0]
+        body = stdout[8:8 + length]
+        data = _json.loads(body.decode("utf-8"))
+        assert data["success"] is True, f"child reported failure: {data}"
+        assert len(data["signals"]) == 1
+        assert data["signals"][0]["action"] == "long_entry"
+        assert data["signals"][0]["price"] == 7.0
