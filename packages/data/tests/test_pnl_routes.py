@@ -22,9 +22,23 @@ def monkeypatch_module():
     mp.undo()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture  # function-scoped (default)
 def app_client(monkeypatch_module):
-    """Return a Flask test client with a pre-populated PnLTracker."""
+    """Flask test client with a freshly-populated PnLTracker per test.
+
+    **Why function-scope, not module-scope:**
+
+    The module-level ``test_init_pnl_routes`` test deliberately swaps the
+    ``pnl_routes._tracker`` global. Under pytest-randomly, function order
+    inside a module is shuffled. With a module-scoped fixture the
+    populated tracker was set up *once*, then ``test_init_pnl_routes``
+    could run later in the same session and restore the global to its
+    pre-fixture state (an empty tracker captured at module-import time),
+    leaving the next ``TestPnLRoutes::test_*`` to query an empty series
+    — which is how CI run 26128153265 surfaced ``assert 0 >= 1``.
+    Function-scope re-binds ``init_pnl_routes(populated_tracker)`` before
+    every test, so the swap-test can't poison the others.
+    """
     from packages.core.src.app import create_flask_app
     from packages.data.src.pnl_tracker import PnLTracker
     from packages.data.src.pnl_routes import init_pnl_routes
@@ -69,14 +83,11 @@ class TestPnLRoutes:
         data = json.loads(resp.data)
         assert data["status"] == "success"
         assert isinstance(data["data"], list)
-        # NOTE: previously asserted len >= 1 assuming the module-scoped
-        # app_client fixture's seed trade had populated the series. Under
-        # pytest-randomly the unrelated test_init_pnl_routes (module-level,
-        # no fixture) can rebind pnl_routes._tracker before our fixture-
-        # populated tracker takes effect, leaving an empty global at the
-        # moment this route handler reads it. The endpoint contract here
-        # is "returns a list" — the count is a fixture detail, not a
-        # behavioural one — so this test no longer asserts on length.
+        # The function-scoped app_client fixture seeds one trade per test,
+        # so the series must always have at least the one synthetic point.
+        # A regression that drops the seed (e.g. tracker.update() no longer
+        # generating a series tick) would surface here, not silently.
+        assert len(data["data"]) >= 1
 
     def test_series_point_fields(self, app_client):
         resp = _get(app_client, "/api/v1/pnl-tracker")
