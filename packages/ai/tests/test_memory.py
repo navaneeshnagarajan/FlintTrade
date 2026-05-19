@@ -14,6 +14,18 @@ import uuid
 import pytest
 
 chromadb = pytest.importorskip("chromadb", reason="chromadb not installed")
+# sentence-transformers is the embedding backbone for semantic search. Without it,
+# chromadb falls back to a default-ONNX embedder whose nearest-neighbour quality
+# is too low for the layer-membership tests to behave deterministically (the
+# warning surfaces as "sentence-transformers not available, using default
+# embeddings" and get_memories then returns 0 results for queries that *should*
+# hit the seeded memory). CI installs sentence-transformers; local devs running
+# without it correctly skip this whole module rather than seeing spurious flakes.
+pytest.importorskip(
+    "sentence_transformers",
+    reason="sentence-transformers not installed — semantic search returns "
+           "non-deterministic results with chromadb's fallback embedder",
+)
 
 from packages.ai.src.memory import (  # noqa: E402 — must follow chromadb importorskip
     MemoryLayer,

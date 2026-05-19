@@ -4,7 +4,54 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — v0.5.0-dev
+## [Unreleased] — v0.5.2-dev
+
+Carry from v0.5.1: Windows sandbox Job Object via pywin32, trusted-mode
+subprocess spawn bypass for BacktestLab inner loops, 8 stub backend
+endpoints still returning `is_sample_data: true`, glib upstream wait
+(tracked in dismissed Dependabot alert).
+
+---
+
+## [0.5.1] - 2026-05-20
+
+Tag: `v0.5.1` · Base: `2741cad` (v0.5.0) · Diff: 60 commits · CI: green
+on `ea64af5` (8,989 Python tests passed, 147 skipped, 0 warnings,
+0 ruff errors, 0 open Dependabot alerts).
+
+See `docs/RELEASE_NOTES_v0.5.1.md` for the GA narrative. Highlights:
+
+- 4 Codex stop-gate findings closed (advanced-order mode-safety,
+  helper auth-header propagation, JWT-revocation lifecycle,
+  rate-limit auto-discovery + fail-closed mode downgrade)
+- Sandbox subprocess isolation (closes Codex MEDIUM finding) — hostile
+  code can no longer outlive its wall-clock timeout
+- Python CI hang root-caused to `PositionWatcher._poll_loop` using
+  uninterruptible `time.sleep`; rewritten on `threading.Event.wait`
+- CI MemoryError root-caused to `_run_in_thread` calling process-wide
+  `setrlimit(RLIMIT_AS)` from a worker thread (poisoned the pytest
+  parent at 256 MiB after any in-thread test ran)
+- Workspace shallow-copy bug — `_DEFAULT_CONFIG`'s nested dicts were
+  shared across `Workspace` instances, letting `ws.set` mutate the
+  default; replaced with `copy.deepcopy`
+- 2 flaky route tests fixed (`test_pnl_routes::test_series_returns_ok`
+  via function-scoped fixture; `test_watchlist_routes::test_list_after_add`
+  made self-contained)
+- 24 src/ + 286 test/ ruff errors cleared (renames, unused imports,
+  E402 fixes, TYPE_CHECKING forward refs)
+- 49 CI warnings → 0 (datetime.utcnow, tar.extractall PEP 706, JWT
+  HMAC key length, numpy divide-by-zero in corrcoef, AsyncMock coro
+  leaks, huggingface_hub filter)
+- CI infra: `actions/setup-python@v5→v6`, `actions/setup-node@v4→v5`,
+  `--timeout-method=thread` added to pytest, vitest `pool=forks` to
+  unblock widget tests, radix-ui umbrella unwound for ~40× module-graph
+  reduction
+- Per-package versions bumped 0.5.0 → 0.5.1 across 12 Python packages
+  + terminal + desktop/src-tauri
+
+---
+
+## [Pre-0.5.1 unreleased work merged into v0.5.1]
 
 ### Sandbox hardening + Vitest OOM root-cause fix (2026-05-19/20)
 
