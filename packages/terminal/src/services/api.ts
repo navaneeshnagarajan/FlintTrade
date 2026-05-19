@@ -37,6 +37,7 @@ import type {
 } from "@/types/api";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
@@ -78,11 +79,26 @@ function getApiKey(): string {
 /** POST an order through the FlintTrade safety proxy.
  *
  *  The backend at order_routes.py:
- *    - Reads X-FlintTrade-Mode to enforce explore/practice/live guards
- *    - Injects the OpenAlgo API key before forwarding the request
+ *    - Validates `X-API-Key` against OPENALGO_API_KEY (via require_auth).
+ *    - Reads `X-FlintTrade-Mode` to enforce explore / practice / live gates.
+ *    - For live-mode orders, additionally requires
+ *      `Authorization: Bearer <jwt>` with the `live_mode_unlocked` claim.
  *
- *  The API key is therefore NOT sent from the browser here; the backend
- *  holds it securely and adds it server-side.
+ *  Headers we attach:
+ *    - `Content-Type: application/json`
+ *    - `X-FlintTrade-Mode: <explore|practice|live>`
+ *    - `X-API-Key: <connectionStore.apiKey>`  (gates the auth middleware)
+ *    - `Authorization: Bearer <authStore.token>` when a session token is
+ *      available; the backend ignores it in explore/practice mode and
+ *      checks the `live_mode_unlocked` claim before letting a real order
+ *      reach OpenAlgo.
+ *
+ *  Pre-2026-05-19 this function only sent `Content-Type` and
+ *  `X-FlintTrade-Mode`. Codex stop-gate review (task-mpcpfmws-5rokaa)
+ *  flagged that every real terminal order placement would 401 against
+ *  the require_auth middleware, even though the backend tests passed
+ *  because they fabricated `X-API-Key` and `Authorization` in the test
+ *  client.
  */
 async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
   // Apply the order rate limit (10/s) — identical to OpenAlgo direct calls
@@ -90,18 +106,23 @@ async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
     throw new Error(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);
   }
 
-  // Read the current operating mode and attach it as a header so the
-  // backend safety layer can enforce practice/explore blocking.
+  // Read the current operating mode and auth state to assemble headers.
   const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  const jwt = useAuthStore.getState().token;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-FlintTrade-Mode": mode,
+  };
+  if (apiKey) headers["X-API-Key"] = apiKey;
+  if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
 
   let resp: Response;
   try {
     resp = await fetch(`${getFtBase()}/api/v1/orders/${ftEndpoint}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-FlintTrade-Mode": mode,
-      },
+      headers,
       body: JSON.stringify(body),
     });
   } catch {
@@ -202,11 +223,25 @@ async function get<T>(endpoint: string): Promise<T> {
 }
 
 // --- Orders (routed through FlintTrade safety proxy) ---
-// These three functions no longer call OpenAlgo directly. Every request passes
-// through order_routes.py in the FlintTrade backend, which:
-//   1. Reads X-FlintTrade-Mode and blocks real orders in explore/practice mode
-//   2. Injects the OpenAlgo API key before forwarding to OpenAlgo
-// The API key is therefore never sent from the browser for order endpoints.
+//
+// The leaf names below MUST match the backend route registrations:
+//
+//   core   orders_bp at /api/v1/orders : place, place-smart, modify, cancel,
+//                                        cancel-all, close-position,
+//                                        open-position
+//   engine order_bp  at /api/v1/orders : basket, split, options-strategy
+//
+// Pre-2026-05-19 this file mixed FT-proxy names (place, place-smart,
+// cancel-all, close-position) with OpenAlgo-style names (cancelorder,
+// openposition, basketorder, splitorder, optionsorder, optionsmultiorder),
+// so half the order endpoints 404'd in production. Codex stop-gate review
+// caught the mismatch.
+//
+// `optionsOrder` and `optionsMultiOrder` still have NO matching FT-proxy
+// route — there is no /api/v1/orders/options-multi-strategy yet. Until
+// the backend grows them, they fall through `post()` to OpenAlgo direct,
+// which means they BYPASS the FT mode/safety gating. Flagged at the
+// call site to make this explicit.
 export const placeOrder = (params: PlaceOrderParams) =>
   postOrder<{ orderId: string }>("place", params);
 export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
@@ -214,23 +249,30 @@ export const placeSmartOrder = (params: PlaceOrderParams & { position_size: numb
 export const cancelAllOrders = (strategy = "Flint") =>
   postOrder<void>("cancel-all", { strategy });
 export const cancelOrder = (orderId: string, strategy = "Flint") =>
-  postOrder<void>("cancelorder", { orderId, strategy });
+  postOrder<void>("cancel", { orderId, strategy });
 export const closePosition = (strategy = "Flint") =>
   postOrder<void>("close-position", { strategy });
 export const modifyOrder = (params: ModifyOrderParams) =>
-  post<{ orderId: string }>("modifyorder", params);
+  postOrder<{ orderId: string }>("modify", params);
+/** orderStatus is a READ-only endpoint, intentionally routed through OpenAlgo
+ *  direct rather than the safety proxy (no mode gating needed for reads). */
 export const orderStatus = (params: OrderStatusParams) =>
   post<{ status: string }>("orderstatus", params);
 export const openPosition = (params: OpenPositionParams) =>
-  postOrder<{ orderId: string }>("openposition", params);
+  postOrder<{ orderId: string }>("open-position", params);
 export const basketOrder = (params: BasketOrderParams) =>
-  postOrder<{ orderId: string }>("basketorder", params);
+  postOrder<{ orderId: string }>("basket", params);
+/** TODO: BACKEND-GAP — no FT-proxy route for single-leg options orders yet.
+ *  Falls through to OpenAlgo direct, which bypasses mode gating. Add an
+ *  /api/v1/orders/options endpoint in engine order_bp, then switch back to
+ *  postOrder. */
 export const optionsOrder = (params: OptionsOrderParams) =>
-  postOrder<{ orderId: string }>("optionsorder", params);
+  post<{ orderId: string }>("optionsorder", params);
+/** TODO: BACKEND-GAP — same as optionsOrder above for multi-leg flows. */
 export const optionsMultiOrder = (params: OptionsMultiOrderParams) =>
-  postOrder<{ orderId: string }>("optionsmultiorder", params);
+  post<{ orderId: string }>("optionsmultiorder", params);
 export const splitOrder = (params: SplitOrderParams) =>
-  postOrder<{ orderId: string }>("splitorder", params);
+  postOrder<{ orderId: string }>("split", params);
 
 // --- Data ---
 
