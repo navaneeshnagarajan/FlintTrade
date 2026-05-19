@@ -116,7 +116,7 @@ Packages never read `os.environ` for data paths directly. They use the
 The `Makefile` is the primary interface:
 
 ```bash
-make setup      # First-time install (deps, submodules, workspace)
+make setup      # First-time install (deps, workspace)
 make start      # Start OpenAlgo service
 make stop       # Stop OpenAlgo
 make status     # Show service and port status
@@ -125,8 +125,10 @@ make lint       # Run ruff linter
 make dev        # Start React dev servers + OpenAlgo
 make health     # Run health check
 make clean      # Remove build artifacts
-make update     # Update submodules + deps
+make update     # Update Python + Node deps
 ```
+
+OpenAlgo and OpenClaw are no longer git submodules; for local development clone them once via `bash scripts/setup-test-deps.sh` (see "External Test Dependencies" below).
 
 ### External Test Dependencies
 
@@ -142,10 +144,12 @@ OpenAlgo and OpenClaw are external services that FlintTrade communicates with ov
 | Script | Purpose |
 |--------|---------|
 | `infra/scripts/setup.sh` | First-time installation |
-| `infra/scripts/start-openalgo.sh` | Start OpenAlgo as background process |
-| `infra/scripts/stop-openalgo.sh` | Stop OpenAlgo gracefully |
+| `infra/scripts/openalgo/start-openalgo.sh` | Start OpenAlgo as background process |
+| `infra/scripts/openalgo/stop-openalgo.sh` | Stop OpenAlgo gracefully |
 | `infra/scripts/status.sh` | Service status, ports, disk usage |
 | `infra/scripts/health-check.sh` | Health check (exit 0/1) |
+| `scripts/setup-test-deps.sh` | Clone OpenAlgo + OpenClaw external test-deps to `.local/external/` |
+| `scripts/reset-flinttrade-state.sh` | Wipe `~/.flinttrade/` for a fresh-user test without touching OpenAlgo |
 
 ### Broker Authentication
 

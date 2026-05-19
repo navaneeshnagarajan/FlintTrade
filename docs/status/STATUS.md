@@ -85,20 +85,19 @@ ERROR packages/gateway/tests/test_startup.py
 
 ```
 INTERNALERROR> _duckdb.IOException: IO Error: Cannot open file
-"c:\users\navan\.flinttrade\security.db": The process cannot access the file
+"%USERPROFILE%\.flinttrade\security.db": The process cannot access the file
 because it is being used by another process.
 INTERNALERROR>
-INTERNALERROR> File is already open in
-C:\Users\navan\AppData\Local\Python\pythoncore-3.14-64\python.exe (PID 26840)
+INTERNALERROR> File is already open in another Python process
 ```
 
 **Verdict:** Python test suite **DID NOT RUN TO COMPLETION** on this machine.
 
 - Collection reports **8,348 tests collected, 6 errors during collection** (import failures in `packages/gateway/tests/`).
-- Full run aborted with a `pytest` INTERNALERROR caused by a DuckDB file lock on `~/.flinttrade/security.db` held by another Python process (PID 26840).
+- Full run aborted with a `pytest` INTERNALERROR caused by a DuckDB file lock on `~/.flinttrade/security.db` held by another Python process on the same host.
 - Running Python is **3.14.3**, while `pyproject.toml` declares `target-version = "py312"` — version drift relative to project intent.
 
-Pass/fail counts: **UNKNOWN — needs manual verification** after terminating PID 26840 or moving the security.db.
+Pass/fail counts: **UNKNOWN — needs manual verification** after stopping the conflicting Python process or moving the `security.db` file.
 
 ### Terminal (Vitest)
 

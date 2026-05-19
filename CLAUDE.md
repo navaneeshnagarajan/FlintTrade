@@ -13,12 +13,12 @@ npm install                                    # install deps
 npm run dev                                    # dev server at localhost:5173
 npm run build                                  # tsc --noEmit + vite build
 npm run typecheck                              # tsc --noEmit only
-npx vitest run                                 # all tests (~1,696)
+npx vitest run                                 # all tests (~2,973)
 npx vitest run src/path/to/file.test.ts        # single test file
 npx vitest run -t "test name"                  # single test by name
 
 # Python — run from repo root
-make test                                      # all pytest tests (~3,900)
+make test                                      # all pytest tests (~9,089)
 make test-fast                                 # stop on first failure
 python -m pytest packages/core/tests/test_foo.py -v              # single file
 python -m pytest packages/core/tests/test_foo.py::test_name -v   # single test
@@ -31,7 +31,7 @@ make dev                                       # terminal dev + OpenAlgo
 make status                                    # check services
 make health                                    # health check
 
-# CI (GitHub Actions — 3 jobs: python-tests, node-tests, secrets-check)
+# CI (GitHub Actions — 9 jobs: python-tests, python-tests-macos, python-tests-windows, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check)
 gh run list --limit 1                          # check latest CI
 gh run view <id> --log-failed                  # diagnose failure
 ```
@@ -70,7 +70,7 @@ localhost:5173/
 ├── /explore        → Demo mode with sample data (no broker needed)
 ├── /setup          → First-time wizard (Quick / Guided / Advanced)
 ├── /settings       → Standalone settings page
-├── /trade          → Trader workspace (Dockview canvas, 30 widgets)
+├── /trade          → Trader workspace (Dockview canvas, 82 widgets)
 ├── /invest         → Investor dashboard (holdings, net worth, SIPs)
 ├── /learn          → Beginner center (courses, glossary, strategies)
 ├── /lab            → Strategy Lab (backtest, forward test, optimize)
@@ -211,21 +211,21 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Terminal — Widgets & Tools
 
-30 widgets (all TSX) + 7 tools + 6 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
+82 widgets (all TSX) + 7 tools + 13 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx`.
 
-- **Widgets:** `src/widgets/` — Trading (10: dashboard, scalper, positions, orders, holdings, tradebook, orderpad, mtmmonitor, riskpanel, actioncenter), Analysis (14: chart, optionchain, oichart, straddle, depth, greeks, sectormap, gex, volsurface, ivsmile, straddlepnl, oiprofile, orderflow, depthheatmap), Utility (6: watchlist, calculator, news, ticker, aiadvisor, scanner)
-- **Tools:** `src/tools/` — Canvas overlays (3: P&L Dashboard, Market Intelligence, Trade Journal) + Full-page tools (3: Backtest Lab, Flow Builder, Strategy Builder) + Settings
-- **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG)
-- **Workspace presets:** Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View. Serialized via Dockview API.
+- **Widgets:** `src/widgets/` — Trading (22), Analysis (38), Utility (22). See `packages/terminal/src/widgets/{trading,analysis,utility}/` for the full set.
+- **Tools:** `src/tools/` — BacktestLab, FlowBuilder, MarketIntelligence, PnLDashboard, Settings, StrategyBuilder, TradeJournal.
+- **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG).
+- **Workspace presets:** 13 presets in `packages/terminal/src/layout/workspacePresets.ts` (Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View, plus 7 more). Serialised via Dockview API.
 
 ## Current State
 
-- **Version:** 0.5.0-dev — Post-Wave 63 + Flint Suite redesign (7 phases) + full codebase audit (2026-04-14)
-- **Tests:** ~2,935 terminal (Vitest, 254+ files) + ~6,310 Python (pytest) = ~9,245 total
-- **CI:** 5 parallel jobs (python-tests, node-core-tests, node-widget-tests-1, node-widget-tests-2, secrets-check)
-- **Terminal:** 83 widgets (TSX) + 7 tools + 13 routes + 13 workspace presets in Dockview v5.1 shell
-- **AI Skills:** 30 markdown files covering trading, analysis, execution, compliance, options, psychology domains
-- **Strategies:** 96 backtest templates in `backtest-engine/` (across 16 categories) + 2 live-engine strategies in `engine/src/strategies/` (`ema_crossover`, `wheel_live`)
+- **Version:** 0.5.0-dev (post-v0.5.0 GA tag `2741cad`, 2026-04-19) — post-GA hardening continues
+- **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
+- **CI:** 9 parallel GitHub Actions jobs — python-tests, python-tests-macos, python-tests-windows, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check
+- **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
+- **AI Skills:** 30 markdown files under `packages/ai/skills/` covering trading, analysis, execution, compliance, options, psychology domains
+- **Strategies:** 94 backtest templates in `packages/backtest-engine/src/strategies/` + 2 live-engine strategies in `packages/engine/src/strategies/` (`ema_crossover`, `wheel_live`)
 - **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor, Crawl4AI client
 - **Analytics:** Options payoff engine, regime detector, correlation matrix, portfolio optimiser, order analytics, strategy comparator, multi-phase simulation
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement
@@ -238,7 +238,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 - **Command Palette:** 4-tab Unified Search (Symbols with live prices, Commands, Widgets, Ask AI), prefix routing
 - **Ticker System:** Configurable marquee (4 modes), symbol editor, settings integration
 - **Onboarding:** Cinematic /welcome, /explore demo mode, setup wizard with persona × interest matrix
-- **Routes:** 13 total — all with Glass Adaptive styling
+- **Routes:** 12 public (`/welcome`, `/explore`, `/setup`, `/setup-account`, `/settings`, `/home`, `/trade`, `/invest`, `/learn`, `/lab`, `/automate`, `/ai`, `/ditto`) + DEV-only `/admin` + 404 — all with Glass Adaptive styling. `/terminal` is an alias for `/trade`. Routes are lazy-loaded in `packages/terminal/src/main.tsx`.
 - **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), 20 FlintTrade backend endpoints
 - **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion, OrderPad form a11y, route focus management
 - **Package structure:** 12 Python packages with pyproject.toml + hatchling, uv workspace, wheel source mappings
@@ -357,7 +357,7 @@ For the complete list of upstream projects and libraries, see `docs/REFERENCES.m
 3. Check `docs/REFERENCES.md` — absorb before building
 4. Use `/brainstorm` and `/write-plan` for non-trivial tasks
 5. Implement — full permissions: create, edit, delete, refactor as needed
-6. Run: `make test` (must pass 3,900+ Python) and `npx vitest run` in terminal (must pass 1,696+)
+6. Run: `make test` (must pass ~9,089 Python) and `npx vitest run` in terminal (must pass ~2,973)
 7. For React: `npm run build` in `packages/terminal` (must build clean)
 8. Mark task done in PLAN.md
 9. Update CHANGELOG.md [Unreleased] section for notable changes
@@ -380,8 +380,8 @@ To set up a new machine:
 3. `cp .env.example .env` and set `OPENALGO_API_KEY`
 4. Install OpenAlgo separately (see its docs), OR run `scripts/setup-test-deps.sh` to clone a local-dev copy into `.local/external/openalgo/` and configure its `.env` with broker credentials
 5. `make start` (starts OpenAlgo from the local-dev copy if present)
-6. `make test` (verify 3,900+ pass)
-7. `cd packages/terminal && npm install && npm run build` (verify clean build, 1,696+ vitest pass)
+6. `make test` (verify ~9,089 pass)
+7. `cd packages/terminal && npm install && npm run build` (verify clean build, ~2,973 vitest pass)
 8. Read PLAN.md, pick a task, start building
 
 See `docs/machine-setup/QUICKSTART.md` for detailed instructions.

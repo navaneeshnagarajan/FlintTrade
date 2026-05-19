@@ -6,6 +6,34 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5.0-dev
 
+### Post-v0.5.0 GA hardening (commits since `2741cad`, 2026-04-19 → 2026-05-19)
+
+#### Changed
+- **Infra:** OpenAlgo + OpenClaw detached from git submodules (commit `3da42e4`). They are now external services FlintTrade talks to over HTTP/WS; contributors can clone local-dev copies into `.local/external/{openalgo,openclaw}/` via `scripts/setup-test-deps.sh` (gitignored, not shipped). The legacy `infra/openalgo/` path remains as a fallback in `packages/gateway/src/adapter.py:_resolve_openalgo_root()` for older checkouts.
+- **Ditto:** `algomirror_bridge.py` and its tests dropped (commit `ce5f6df`). AlgoMirror's multi-account mirroring patterns are fully absorbed in-process by `packages/ditto/` (`PositionMirror`, `TrailingSLManager`, `MarginCalculator`, `RiskManager`). There is no live AlgoMirror integration; the upstream repo is no longer tracked.
+- **Compat:** `docs/COMPATIBILITY.md` refocused on min + latest tested versions (drift-tracking removed, commit `fa59ef7`).
+- **Test infra (commits `268e8e7`, `3826662`, `84637f1`, `879b3da`):** Batch test-suite cleanup — real bug fixed in routes, dead tests removed, stale fixtures refreshed, parallel-test dependencies registered, isolated workspace per worker, custom markers (`unit`, `integration`, `slow`) registered with `--strict-markers`.
+- **Setup wizard (commit `41d319f`):** End-to-end account creation flow with escape hatches and `/v1/test-connection` backend-proxy that avoids OpenAlgo CORS.
+- **Reference repos (commit `12bea2b`):** 15 redundant repo clones deleted; absorption tracking reconciled (`.local/reference/REFERENCE_MAP.md` now ~230 repos).
+- **Backend boot (commit `cd2d374`):** structlog single pipeline, ANSI off, Waitress (production WSGI server), three-state health check.
+- **Privacy scrub (commit `c563bd5`):** Removed personal identifiers and infrastructure from tracked files.
+- **Audit passes (commits `ab0b595`, `e61b7a8`, `bb51149`, `025a552`):** Four full-repo audit sweeps — security, privacy, WCAG, state boundaries, persistence, tests, a11y, CI matrix, hook tests, screener tests, zero `any` types.
+
+#### Tooling
+- `.codex/` gitignored alongside other agent tool caches (commit `aa7b387`).
+- Codex CLI integration verified and stop-time review gate enabled.
+
+#### Verified metrics (2026-05-19)
+- Total tests collected: **~12,062** (9,089 pytest + ~2,973 vitest).
+- Test file counts: 313 Python + 264 vitest.
+- Widget count: 82 directories under `packages/terminal/src/widgets/` (22 trading + 38 analysis + 22 utility); registry has 83 entries (`chartgrid` reuses the Chart folder).
+- Tool count: 7 (`BacktestLab`, `FlowBuilder`, `MarketIntelligence`, `PnLDashboard`, `Settings`, `StrategyBuilder`, `TradeJournal`).
+- Routes: 12 public + DEV `/admin` + `*` 404 catch-all.
+- Workspace presets: 13 (`packages/terminal/src/layout/workspacePresets.ts`).
+- Backtest strategy templates: 94 (`packages/backtest-engine/src/strategies/`); plus 2 live-engine strategies in `packages/engine/src/strategies/`.
+- AI skill markdown files: 30 (`packages/ai/skills/`).
+- CI jobs: 9 parallel GitHub Actions jobs.
+
 ### Added — OpenAlgo v2.0.0.4 Parity (Waves 1-5, 1,499 tests)
 - Wave 1 — Scanner, cron, error log, seasonality, security/session tooling (253 tests)
 - Wave 2 — Analytics + orders + infra: GEX, IV smile, vol surface, OI profile, straddle P&L, basket/split orders, traffic/latency/event-bus (347 tests)
@@ -75,7 +103,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - Nginx hardening: rate limiting, CSP headers, HSTS, X-Frame-Options
 - Security headers middleware: CSP, X-Frame-Options, HSTS, X-Content-Type-Options on all responses
 - WebSocket handler upgrade: mode-specific subscribe, batch subscribe, reference counting
-- All 3 git submodules synced (openalgo, algomirror, openclaw)
+- All 3 git submodules synced (openalgo, algomirror, openclaw) — historical: submodules were later detached in commit `3da42e4` (2026-04-30); see Post-v0.5.0 section below
 
 ### Added — Features (Wave 24 — Absorption)
 - CommandPalette (Ctrl+K): global command search with 51 commands, fuzzy search, recent history, keyboard navigation (absorbed from openalgo-chart)
@@ -105,7 +133,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - MCX lot sizes (46 tests), useSignals hook tests, security headers tests
 - AlertsWidget tests (20), LegBuilder tests (31), FlowBuilder tests (5), ETF analytics tests (22)
 - Python engine tests: position_tracker (46), state_manager (34), swing_detector (37)
-- Total terminal tests: ~2,500 (Vitest, 227+ files) | Python: ~6,500 (pytest) = ~9,000 total
+- Total terminal tests: ~2,500 (Vitest, 227+ files) | Python: ~6,500 (pytest) = ~9,000 total (snapshot at Wave 24; current ~12,062 — see Post-v0.5.0 section)
 
 ### Added — Features (Wave 25 — Engine + Analytics)
 - Backtest engine: event-driven BacktestEngine with MARKET/LIMIT/STOP/STOP_LIMIT orders, slippage, commission (absorbed from trading-strategies-openalgo)

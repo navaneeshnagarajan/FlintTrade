@@ -6,9 +6,9 @@
 
 | Project | Repository | License | Used In |
 |---|---|---|---|
-| [OpenAlgo](https://openalgo.in) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | AGPL-3.0 | Broker gateway (33 brokers) |
-| [AlgoMirror](https://github.com/marketcalls/algomirror) | marketcalls/algomirror | AGPL-3.0 | Multi-account mirroring patterns |
-| [OpenClaw](https://github.com/openclaw/openclaw) | openclaw/openclaw | MIT | AI agent framework |
+| [OpenAlgo](https://openalgo.in) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | AGPL-3.0 | Broker gateway (33 brokers) — external service, talk over REST/WS |
+| [OpenClaw](https://github.com/openclaw/openclaw) | openclaw/openclaw | MIT | AI agent framework — external service |
+| [AlgoMirror](https://github.com/marketcalls/algomirror) | marketcalls/algomirror | AGPL-3.0 | Multi-account mirroring patterns — **patterns absorbed in-process by `packages/ditto/`; no live integration**. Reference only. |
 | [FastScalper](https://github.com/marketcalls/fastscalper-tauri) | marketcalls/fastscalper-tauri | — | Scalper UI patterns |
 | [OpenTerminal](https://github.com/marketcalls/OpenTerminal) | marketcalls/OpenTerminal | — | Terminal reference |
 | [OpenEngine](https://github.com/marketcalls/openengine) | marketcalls/openengine | — | Strategy engine |

@@ -7,7 +7,7 @@
 - `strategy_runner.py` — Strategy execution engine
 - `strategy_lifecycle.py` — Strategy start/stop/pause lifecycle management
 - `strategy_routes.py` — Strategy API routes
-- `strategies/` — Live strategy implementations (currently 2: `ema_crossover.py`, `wheel_live.py`). The 96+ backtest-only templates live in `packages/backtest-engine/src/strategies/`.
+- `strategies/` — Live strategy implementations (currently 2: `ema_crossover.py`, `wheel_live.py`). The 94 backtest-only templates live in `packages/backtest-engine/src/strategies/`.
 - `router.py` — Order routing with smart execution
 - `safety.py` — 5-layer safety system and kill switches
 - `scheduler.py` — Cron-based strategy scheduling

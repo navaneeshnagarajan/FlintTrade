@@ -12,20 +12,16 @@ Read `packages/terminal/CLAUDE.md` first. This is the React frontend.
 - Data grids: Glide Data Grid (streaming) + TanStack Table v8 (static)
 - Branch: main (pre-release, all commits to main)
 
-## Widgets (30 TSX)
-Trading (10): Dashboard, Scalper, OrderPad, Positions, Orders, Holdings, TradeBook, MTMMonitor, RiskPanel, ActionCenter
-Analysis (14): Chart, OptionChain, OIChart, Straddle, Depth, Greeks, SectorMap, GEX, VolSurface, IVSmile, StraddlePnL, OIProfile, OrderFlow, DepthHeatmap
-Utility (6): Watchlist, Calculator, News, Ticker, AIAdvisor, Scanner
+## Widgets (82 TSX)
+Trading (22): under `src/widgets/trading/` — Dashboard, Scalper, OrderPad, Positions, Orders, Holdings, TradeBook, MTMMonitor, RiskPanel, ActionCenter, IntradayPnL, NetPosition, OrderLadder, PortfolioAllocation, PositionHeatMap, QuickTrade, RiskDashboard, SessionStats, StrategyMonitor, TradeCopier, TradeLog, TradePerformance.
+Analysis (38): under `src/widgets/analysis/` — Chart, OptionChain, OIChart, Straddle, Depth, Greeks, SectorMap, GEX, VolSurface, IVSmile, StraddlePnL, OIProfile, OrderFlow, DepthHeatmap, CorrelationMatrix, CorrelationPairs, DOMHeatmap, Footprint, GapAnalysis, GreeksHeatmap, GreeksSurface, HeatCalendar, ImpliedMove, InstrumentCompare, IVSkew, MarketBreadth, Microstructure, MultiTimeframe, OIHeatmap, OptionsFlow, OrderBookReplay, PCRTrend, PivotPoints, SectorPerformance, SpreadView, ThreePanel, VolatilityCone, VWAPBands.
+Utility (22): under `src/widgets/utility/` — Watchlist, Calculator, News, Ticker, AIAdvisor, Scanner, Alerts, AuditTrail, CurrencyConverter, EarningsCalendar, EconomicCalendar, ExpiryCountdown, FundingRate, GlobalIndices, Health, MarketClock, MarketSummary, PositionSizing, ProfitTarget, StrategyTemplates, TickSpeed, TradeIdea.
 
-## Tools (6)
-Canvas overlays: P&L Dashboard, Market Intelligence, Trade Journal
-Full-page tools: Backtest Lab, Flow Builder, Strategy Builder
+## Tools (7)
+Under `src/tools/`: BacktestLab, FlowBuilder, MarketIntelligence, PnLDashboard, Settings, StrategyBuilder, TradeJournal.
 
-## Routes (13)
-/welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /ditto, /admin, 404
-
-## Invest Tabs (16)
-Portfolio overview, holdings, mutual funds, SIPs, net worth, tax harvesting, goals, dividends, fixed deposits, gold/silver, PPF/EPF, NPS, insurance, real estate, crypto, summary
+## Routes (12 public + DEV `/admin` + 404)
+/welcome, /explore, /setup, /setup-account, /settings, /home, /trade (with `/terminal` alias), /invest, /learn, /lab, /automate, /ai, /ditto. Plus DEV-only `/admin` and `*` 404 catch-all.
 
 ## Tests
-Vitest — 1,696 tests. Run: `npx vitest run`
+Vitest — ~2,973 tests across 264 files. Run: `npx vitest run`. Verified 2026-05-19.

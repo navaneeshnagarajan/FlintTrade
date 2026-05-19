@@ -4,13 +4,13 @@
 
 # FlintTrade
 
-![Tests](https://img.shields.io/badge/tests-9200%2B%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-12000%2B%20passed-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
 ![Status](https://img.shields.io/badge/status-v0.5.0--dev-blue)
 
-> **v0.5.0-dev** — 63 build waves + Flint Suite Glass Adaptive redesign complete. 83 widgets, 101 strategies, 16 packages, 13 routes, 9,200+ tests.
+> **v0.5.0-dev** — post-v0.5.0 GA hardening. 82 widgets, 94 backtest strategy templates + 2 live-engine strategies, 16 packages, 12 public routes (+ DEV `/admin` + 404), ~12,062 tests.
 > Glass Adaptive design system, 4-tab Unified Search (Ctrl+K), macOS dock sidebar, Bento Grid dashboard, Crawl4AI integration, full codebase audit.
 
 Open-source modular trading platform for Indian markets with direct broker connections. Built on [OpenAlgo](https://openalgo.in) adapters. Supports 33 brokers, equities, F&O, commodities, currency derivatives, and crypto.
@@ -75,7 +75,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 | **data** | Tick capture, trade logs, DuckDB storage, SEBI audit trail | ✅ Built |
 | **historical** | Multi-source downloader, free NSE data, DuckDB/Parquet pipeline | ✅ Built |
 | **screener** | Option chain, OI analysis, futures quadrant, Greeks, IV | ✅ Built |
-| **backtest-engine** | Event-driven simulator, 101 strategies, walk-forward optimizer | ✅ Built |
+| **backtest-engine** | Event-driven simulator, 94 strategy templates, walk-forward optimiser | ✅ Built |
 | **ai** | LLM client, RAG, ML signals, sentiment, MCP bridge | ✅ Built |
 | **integration** | TradingView webhooks, ChartInk, visual flow builder | ✅ Built |
 | **automation** | Cron jobs, Telegram bot, OpenClaw bridge | ✅ Built |
@@ -90,19 +90,19 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 ## Current State
 
 **What works:**
-- 16 packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri) with **5,600+ passing tests** (3,900+ Python + 1,696 terminal)
+- 16 packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri) with **~12,062 collected tests** (9,089 Python + ~2,973 terminal)
 - Async OpenAlgo v2 API client with 45+ endpoint wrappers
 - 5-layer safety system (order validation → position limits → portfolio risk → P&L limits → kill switch)
 - Per-exchange market hours (NSE/NFO 15:30, CDS 17:00, MCX 23:30, DELTA 24/7)
-- 101 backtest strategy templates with walk-forward optimizer
-- React terminal with Dockview widget-composable workspace and 6 preset templates
+- 94 backtest strategy templates with walk-forward optimiser
+- React terminal with Dockview widget-composable workspace and 13 preset templates
 - 20+ FlintTrade backend endpoints (backtest, signals, sentiment, RAG, cron, audit, safety, screener, IPO, MF, users)
 - Docker production config (multi-stage, uv, tini, non-root)
 
 **What's complete:**
 - TypeScript strict mode migration (zero JSX/JS files remain)
-- Dockview v5.1 widget-composable workspace with 30 widgets + 7 tools
-- 13 routes: /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /ditto, /admin, 404
+- Dockview v5.1 widget-composable workspace with 82 widgets + 7 tools
+- 12 public routes (+ DEV `/admin` + 404): /welcome, /explore, /setup, /setup-account, /settings, /home, /trade, /invest, /learn, /lab, /automate, /ai, /ditto
 - State architecture: Zustand 5 + Jotai + TanStack Query 5
 - Cinematic welcome (/welcome), Explore mode (/explore), Setup wizard (/setup)
 - Investor dashboard (/invest) with Mutual Fund explorer, IPO tracker, SIP calculator
@@ -130,7 +130,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 - External test-deps: OpenAlgo and OpenClaw (cloned via `scripts/setup-test-deps.sh`). AlgoMirror patterns absorbed in-process by `packages/ditto/` — no live integration.
 - Live WebSocket data feed with ping/pong heartbeat
 - Indicators package (31 indicators, 150+ tests)
-- CI: GitHub Actions (python-tests, node-tests, secrets-check)
+- CI: GitHub Actions (9 parallel jobs — python-tests, python-tests-macos, python-tests-windows, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check)
 
 **What's planned:**
 - Production deployment + monitoring
@@ -145,7 +145,7 @@ FlintTrade is not a broker, not a data vendor, and not a hosted service. It's a 
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pip install -r requirements.txt
-python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 3,900+ tests
+python -m pytest packages/*/tests/ tests/ -v --import-mode=importlib  # 9,089 tests
 ```
 
 Full `make setup` deployment is under development. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
@@ -162,10 +162,10 @@ docker compose up
 
 | Phase | What | Status |
 |-------|------|--------|
-| Foundation | Monorepo, 16 packages, 5,600+ tests, CI | ✅ Complete |
-| Infrastructure | Makefile, systemd, Docker (multi-stage, uv, tini), deploy scripts, submodules synced | ✅ Complete |
+| Foundation | Monorepo, 16 packages, ~12,062 tests, CI | ✅ Complete |
+| Infrastructure | Makefile, systemd, Docker (multi-stage, uv, tini), deploy scripts; OpenAlgo + OpenClaw as external test-deps via `scripts/setup-test-deps.sh` | ✅ Complete |
 | Live Connection | OpenAlgo sandbox trading, WebSocket data + batch subscribe, REST fallback | ✅ Complete |
-| Terminal UI | 30 widgets, 7 tools, 13 routes, Dockview v5.1, 6 presets | ✅ Complete |
+| Terminal UI | 82 widgets, 7 tools, 12 public routes (+ DEV `/admin` + 404), Dockview v5.1, 13 presets | ✅ Complete |
 | Full-Stack Wiring | 20+ backend endpoints, all routes functional, 3 canonical themes | ✅ Complete |
 | UI/UX Polish | Accessibility, animations, responsive, error handling | ✅ Complete |
 | Feature Sprint | Signals, MCX, Pine Script, MF, IPO, Chrome ext, Desktop, multi-user, FinRL | ✅ Complete |

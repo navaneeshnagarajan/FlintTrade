@@ -19,12 +19,15 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 |---|---|---|
 | 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
 | 0.1.0-alpha | Released (2026-03-21) | 13 packages, 1,018 tests, 10 routes, full-stack wiring, 5 themes |
-| 0.1.0-beta | Released (2026-03-24) | Security audit, WCAG a11y, perf optimization, god component splits |
+| 0.1.0-beta | Released (2026-03-24) | Security audit, WCAG a11y, perf optimisation, god component splits |
 | 0.2.0-alpha | Released (2026-03-25) | OpenAlgo absorption: gateway, analysis tools, platform features |
-| 0.2.0-beta | Released (2026-03-25) | Audit fixes, 101 strategies, absorption tracks |
-| 0.3.0 | Released (2026-03-30) | "Structured Calm" UI redesign, 101 strategies, backend wiring |
-| 0.4.0 | Released (2026-04-04) | Unified mode system, server-side order safety, 20-wave feature sprint |
-| 0.5.0-dev | **CURRENT** (2026-04-08) | 23-wave build: multi-agent AI, FinRL, signals, MCX, Pine editor, Chrome ext, desktop, bracket orders |
+| 0.2.0-beta | Released (2026-03-25) | Audit fixes, absorption tracks |
+| 0.3.0 | Released (2026-03-30) | "Structured Calm" UI redesign, backend wiring |
+| 0.4.0 | Released (2026-04-04) | Unified mode system, server-side order safety |
+| 0.5.0-alpha | Released (2026-04-XX) | Live signals + multi-agent AI + bracket orders + MCX |
+| 0.5.0-beta | Released (2026-04-XX) | Glass Adaptive UI + Crawl4AI + WhatsApp + Pine editor |
+| 0.5.0 | Released (2026-04-19, tag `2741cad`) | OpenAlgo v2.0.0.4 parity complete (5 waves, 1,499 tests) |
+| 0.5.0-dev | **CURRENT** | Post-v0.5.0 GA hardening: full repo audit passes (1–4), privacy scrub, setup wizard end-to-end, Waitress boot, OpenAlgo v2.0.0.5 sync, test-suite cleanup batches, test-infra parallelisation, external test-dep detachment, AlgoMirror bridge dropped |
 | 1.0.0 | Planned | Full production release, all platforms tested |
 
 **Pre-release progression:** `alpha` → `beta` → `rc.1` → stable
@@ -112,7 +115,7 @@ READ → PLAN → APPROVE → BUILD → VERIFY → TEST → UPDATE → COMMIT
 3. **APPROVE** — Get approval for architecture changes or new files
 4. **BUILD** — Use TypeScript strict, shadcn/ui, Dockview panels. Check reference repos before writing from scratch
 5. **VERIFY** — `tsc --noEmit` (zero errors), `npm run build` (clean), visual check
-6. **TEST** — `npx vitest run` (1,696+ pass), `make test` (3,900+ pass), `ruff check`
+6. **TEST** — `npx vitest run` (~2,973 pass), `make test` (~9,089 pass), `ruff check`
 7. **UPDATE** — Update `CHANGELOG.md` [Unreleased] section, mark task done in `PLAN.md`
 8. **COMMIT** — Conventional commit, specific file staging, push, wait for CI green
 
@@ -127,12 +130,18 @@ Before creating any new file:
 
 ## CI/CD
 
-Every push triggers 3 GitHub Actions jobs:
+Every push triggers 9 parallel GitHub Actions jobs:
 
 | Job | What it checks |
 |---|---|
-| `python-tests` | pytest (3,900+ tests) + ruff lint |
-| `node-tests` | tsc strict + vitest (1,696+) + production build |
+| `python-tests` | pytest (~9,089 tests) + ruff lint (Linux) |
+| `python-tests-macos` | pytest cross-platform check (macOS) |
+| `python-tests-windows` | pytest cross-platform check (Windows) |
+| `node-core-tests` | tsc strict + vitest core suite + production build |
+| `node-widget-tests-1` | vitest shard 1 (widgets) |
+| `node-widget-tests-2a` | vitest shard 2a (widgets) |
+| `node-widget-tests-2b` | vitest shard 2b (widgets) |
+| `node-widget-tests-3` | vitest shard 3 (widgets) |
 | `secrets-check` | Scans for leaked API keys and credentials |
 
 **CI must be green before any new work.** If CI fails, fix immediately.

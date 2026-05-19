@@ -8,19 +8,19 @@
 
 ---
 
-## Current State (updated 2026-04-13)
+## Current State (updated 2026-05-19)
 
-- **Version:** v0.5.0-dev — Post-Wave 59 (sessions 2026-04-07/08/09/10/13)
-- **Tests:** ~2,500 terminal (Vitest, 227+ files) + ~6,500 Python (pytest) = ~9,000 total
+- **Version:** v0.5.0-dev — post-v0.5.0 GA tag (`2741cad`, 2026-04-19); post-GA hardening continues
+- **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total — verified 2026-05-19
 - **Packages:** 16 (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri)
-- **Widgets:** 80
-- **AI Skills:** 30
-- **Strategies:** 101+ (29 backtest templates + 4 MTM straddle + Wheel + engine strategies)
-- **Themes:** 3 (Graphite/Midnight/Ember) x dark/light/system
-- **Terminal:** 80 widgets (TSX) + 7 tools + 13 routes + 12 workspace presets in Dockview v5.1 shell
-- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types.
-- **Python:** 12 Python packages + tick-engine (Rust/PyO3) + indicators, ~6,500 tests passing
-- **CI:** 7 parallel GitHub Actions jobs — ALL GREEN (python-tests, node-core-tests, node-widget-tests-1/2a/2b/3, secrets-check)
+- **Widgets:** 82 (22 trading + 38 analysis + 22 utility)
+- **AI Skills:** 30 markdown files under `packages/ai/skills/`
+- **Strategies:** 94 backtest templates in `packages/backtest-engine/src/strategies/` + 2 live-engine strategies (`ema_crossover`, `wheel_live`)
+- **Themes:** 3 (Graphite/Midnight/Ember) × dark/light/system
+- **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV `/admin` + 404) + 13 workspace presets in Dockview v5.1 shell
+- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types in production code.
+- **Python:** 12 Python packages + tick-engine (Rust/PyO3), 9,089 tests collected
+- **CI:** 9 parallel GitHub Actions jobs — python-tests, python-tests-macos, python-tests-windows, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement via JWT claims
 - **Auth:** argon2id passwords, Fernet TOTP, JWT with jti revocation blocklist, HMAC-SHA256 webhook auth
 - **UI:** v0.3.0 "Structured Calm" base — ContentShell centering, 4-level surface hierarchy, Graphite default theme, shadcn/ui migration complete

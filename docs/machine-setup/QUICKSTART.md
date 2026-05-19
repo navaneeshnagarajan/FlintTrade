@@ -39,7 +39,7 @@ Edit OpenAlgo's own `.env` — for the local-dev clone, that's `.local/external/
 ```bash
 make start       # Starts OpenAlgo on port 5000
 make status      # Verify API responding
-make test        # 2,903+ tests pass
+make test        # ~9,089 tests pass
 ```
 
 ## 5. Run Terminal
@@ -68,15 +68,17 @@ Sessions expire at ~3:30 AM IST. Re-login daily when using live broker.
 
 ## Terminal .env
 
-`packages/terminal/.env` is gitignored. Create it for direct API access (bypassing Vite proxy):
+`packages/terminal/.env` is gitignored. The Vite proxy in `vite.config.ts` already forwards `/api` to OpenAlgo, `/ft-api` to the FlintTrade backend, and `/ws` to the WebSocket — you should not need a terminal-side `.env` for normal development.
 
 ```
+# Only the host/WS endpoints are configurable from VITE_* env vars.
+# DO NOT put the API key here — Vite inlines VITE_* at build time, leaking
+# the key into the production JS bundle. Configure OPENALGO_API_KEY in the
+# in-app Settings → Connection flow (it persists to ~/.flinttrade/workspace.json,
+# server-side only) or in the repo-root .env which the FlintTrade backend reads.
 VITE_OPENALGO_HOST=http://127.0.0.1:5000
 VITE_OPENALGO_WS=ws://127.0.0.1:8765
-VITE_OPENALGO_API_KEY=your_key_here
 ```
-
-Or use Vite proxy (already configured in `vite.config.ts` for `/api` routes).
 
 ## Claude Code Skills & Plugins
 

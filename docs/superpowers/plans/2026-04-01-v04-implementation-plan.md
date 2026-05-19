@@ -209,7 +209,7 @@ class TestLoginAttempts:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd c:/Users/navan/Documents/GitHub/FlintTrade && python -m pytest packages/core/tests/test_auth_service.py -v --tb=short`
+Run: `python -m pytest packages/core/tests/test_auth_service.py -v --tb=short` (from the repo root)
 Expected: All tests FAIL with `ImportError: cannot import name 'AuthService'`
 
 - [ ] **Step 3: Install dependencies**
@@ -500,7 +500,7 @@ class AuthService:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd c:/Users/navan/Documents/GitHub/FlintTrade && python -m pytest packages/core/tests/test_auth_service.py -v --tb=short`
+Run: `python -m pytest packages/core/tests/test_auth_service.py -v --tb=short` (from the repo root)
 Expected: All 16 tests PASS
 
 - [ ] **Step 6: Commit**

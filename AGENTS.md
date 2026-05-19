@@ -32,14 +32,14 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.5.0-dev
 **Chrome Extension (1):** chrome-extension (quick order entry from any browser tab)
 **Desktop (1):** desktop (Tauri native shell wrapping the React terminal)
 
-## Current State (v0.5.0-dev)
+## Current State (v0.5.0-dev — post-v0.5.0 GA)
 
-- 5,600+ tests passing (3,900+ Python + 1,696 terminal)
-- Terminal: 30 widgets (TSX), 7 tools, 13 routes, 6 workspace presets, 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
-- Mode system: 3 modes (Explore/Practice/Live) with server-side order enforcement
-- Auth: argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry
-- 101 backtest strategies across 16 categories
-- 20 FlintTrade backend endpoints, 100% OpenAlgo API coverage (45+ endpoints)
+- ~12,062 tests collected (9,089 Python + ~2,973 terminal) — verified 2026-05-19
+- Terminal: 82 widgets (TSX), 7 tools, 12 public routes (+ DEV `/admin` + 404), 13 workspace presets, 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
+- Mode system: 3 modes (Explore/Practice/Live) with server-side order enforcement via JWT claims
+- Auth: argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry, jti revocation blocklist
+- 94 backtest strategy templates + 2 live-engine strategies (`ema_crossover`, `wheel_live`)
+- 20+ FlintTrade backend endpoints, 100% OpenAlgo API coverage (45+ endpoints)
 - Read PLAN.md for next tasks
 
 ## OpenAlgo API

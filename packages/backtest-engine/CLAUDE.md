@@ -4,7 +4,7 @@
 
 ## Absorbs
 - openengine → Backtester class, YahooFinance/OpenAlgo connectors, live trader
-- vectorbt-backtesting-skills → 101 strategies across 16 categories, TA-Lib indicators, QuantStats tearsheets
+- vectorbt-backtesting-skills → 94 strategy templates across 16 categories (live count in `src/strategies/`), TA-Lib indicators, QuantStats tearsheets
 - openalgo-backtrader (p2c2e) → Backtrader integration pattern (reference-absorbed; `pip install backtrader` used where needed)
 
 ## Depends on: core, historical, engine

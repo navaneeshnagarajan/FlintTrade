@@ -4,11 +4,11 @@
 
 [project]
 name = "FlintTrade"
-version = "0.4.1"
+version = "0.5.0-dev"
 description = "Open-source algorithmic and manual trading platform built on OpenAlgo"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
-python_requires = ">=3.11"
+python_requires = ">=3.12,<3.14"
 node_requires = ">=20.0.0"
 
 [packages]
@@ -25,6 +25,9 @@ backtest-engine = { path = "packages/backtest-engine", lang = "python", descript
 integration = { path = "packages/integration", lang = "python", description = "TradingView, ChartInk, webhooks, Chrome extension, Excel, Amibroker" }
 automation = { path = "packages/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, post-market analysis" }
 ditto = { path = "packages/ditto", lang = "python", description = "Multi-broker, multi-account orchestration — in-process mirroring, trailing SL, margin calculator, risk manager (AlgoMirror patterns absorbed)" }
+tick-engine = { path = "packages/tick-engine", lang = "rust", description = "High-performance tick processing engine — Rust core with Python bindings via PyO3" }
+chrome-extension = { path = "packages/chrome-extension", lang = "javascript", description = "Browser extension for quick trading from any page" }
+desktop = { path = "packages/desktop", lang = "rust", description = "Tauri-based native desktop app wrapper" }
 
 # [infra] — external test-only dependencies, not bundled with FlintTrade.
 # OpenAlgo and OpenClaw used to be git submodules under infra/. They are
