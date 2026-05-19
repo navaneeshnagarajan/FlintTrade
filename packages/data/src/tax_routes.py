@@ -92,17 +92,34 @@ def _get_trades_for_fy(fy: str) -> list[TaxableTransaction]:
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+def _current_fy() -> str:
+    """Return the current Indian fiscal year (e.g. ``"2026-27"``).
+
+    Indian FY runs April → March. Before 1 April we are still in the
+    previous-calendar-year FY; on or after 1 April we move into the
+    current-calendar-year FY. Used as the default for `fy` query
+    parameters so the endpoint always tracks the live calendar instead
+    of a hardcoded "2025-26" that goes stale on FY-rollover.
+    """
+    import datetime as _dt
+    today = _dt.date.today()
+    start = today.year - 1 if today.month < 4 else today.year
+    return f"{start}-{str(start + 1)[2:]}"
+
+
 @tax_bp.route("/v1/tax/summary", methods=["GET"])
 def tax_summary() -> tuple[Any, int]:
     """Return tax summary for a financial year.
 
     Query parameters:
-        fy (str): Financial year (e.g. "2025-26"). Defaults to "2025-26".
+        fy (str): Financial year (e.g. "2025-26"). Defaults to the
+            currently-active Indian fiscal year computed by
+            ``_current_fy()`` — see that helper for FY-rollover semantics.
 
     Returns:
         JSON ``{"status": "success", "data": {...}}`` with TaxSummary fields.
     """
-    fy = request.args.get("fy", "2025-26")
+    fy = request.args.get("fy", _current_fy())
     trades = _get_trades_for_fy(fy)
     summary = _generator.compute_pnl_by_segment(trades, fy)
 
@@ -130,12 +147,13 @@ def tax_report() -> tuple[Any, int]:
     """Return detailed tax report with per-segment breakdown.
 
     Query parameters:
-        fy (str): Financial year (e.g. "2025-26"). Defaults to "2025-26".
+        fy (str): Financial year (e.g. "2025-26"). Defaults to the
+            currently-active Indian fiscal year.
 
     Returns:
         JSON ``{"status": "success", "data": {...}}`` with summary and segments.
     """
-    fy = request.args.get("fy", "2025-26")
+    fy = request.args.get("fy", _current_fy())
     trades = _get_trades_for_fy(fy)
     report = _generator.generate_report(trades, fy)
 

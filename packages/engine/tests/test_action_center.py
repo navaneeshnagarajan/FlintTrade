@@ -201,21 +201,45 @@ class TestGetters:
 
 
 class TestExpiry:
-    """Tests for automatic order expiry via TTL."""
+    """Tests for automatic order expiry via TTL.
 
-    def test_expired_order_removed_from_pending(self):
+    The two tests below previously used `time.sleep(1.05)` to wait for the
+    1-second TTL window to elapse. The 2026-05-19 multi-agent audit flagged
+    the sleeps as wasted CI wall-time and a flake risk. Replaced with a
+    `monkeypatch` over the `time.time` reference inside the action_center
+    module so the TTL logic sees an artificially advanced clock without any
+    real wait.
+    """
+
+    def test_expired_order_removed_from_pending(self, monkeypatch):
+        from packages.engine.src import action_center as ac_mod  # noqa: PLC0415
+
+        # PendingOrder.created_at uses `default_factory=time.time` which was
+        # captured at class-definition time, so it always pulls the REAL wall
+        # clock. Our mock only affects the cutoff comparison in `cleanup()`.
+        # To make the expiry math work we seed the mocked clock at
+        # `real_now + 100` so cutoff (mocked_now - ttl) is comfortably ahead
+        # of `created_at` (real_now) once we advance past the TTL.
+        clock = {"t": time.time() + 100.0}
+        monkeypatch.setattr(ac_mod.time, "time", lambda: clock["t"])
+
         ActionCenter, *_ = _ac_module()
         ac = ActionCenter(ttl_seconds=1)
         ac.submit("e1", "acct-1", _make_order_data())
-        time.sleep(1.05)
+        clock["t"] += 1.05  # advance past the 1-second TTL
         pending = ac.get_pending()
         assert len(pending) == 0
 
-    def test_expired_order_present_in_get_all_with_expired_status(self):
+    def test_expired_order_present_in_get_all_with_expired_status(self, monkeypatch):
+        from packages.engine.src import action_center as ac_mod  # noqa: PLC0415
+
+        clock = {"t": time.time() + 100.0}
+        monkeypatch.setattr(ac_mod.time, "time", lambda: clock["t"])
+
         ActionCenter, _, OrderApprovalStatus, _ = _ac_module()
         ac = ActionCenter(ttl_seconds=1)
         ac.submit("e2", "acct-1", _make_order_data())
-        time.sleep(1.05)
+        clock["t"] += 1.05
         all_orders = ac.get_all()
         assert len(all_orders) == 1
         assert all_orders[0].status == OrderApprovalStatus.EXPIRED

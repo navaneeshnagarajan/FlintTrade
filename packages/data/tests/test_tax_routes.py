@@ -5,9 +5,26 @@ Run with:
 """
 from __future__ import annotations
 
+import datetime
 import json
 
 import pytest
+
+
+def _current_fy() -> str:
+    """Return the current Indian fiscal-year string (e.g. ``"2025-26"``).
+
+    Indian FY runs April → March. Before 1 April we are still in the
+    previous-calendar-year FY; on or after 1 April we are in the
+    current-calendar-year FY. Mirrors the server-side default so the
+    `test_default_fy` assertion ages with the calendar.
+    """
+    today = datetime.date.today()
+    if today.month < 4:
+        start = today.year - 1
+    else:
+        start = today.year
+    return f"{start}-{str(start + 1)[2:]}"
 
 
 _TEST_API_KEY = "test-tax-routes-key"
@@ -66,9 +83,13 @@ class TestTaxSummaryEndpoint:
         assert data["fy"] == "2024-25"
 
     def test_default_fy(self, app_client) -> None:
+        """The endpoint's default FY must track the wall-clock Indian fiscal
+        year. Previously hardcoded as ``"2025-26"`` which would have started
+        failing on 1 April 2026 when FY rolls to 2026-27. Now computed
+        locally so the test ages with the calendar."""
         resp = _get(app_client, "/v1/tax/summary")
         data = json.loads(resp.data)["data"]
-        assert data["fy"] == "2025-26"
+        assert data["fy"] == _current_fy()
 
     def test_trade_count_matches_sample(self, app_client) -> None:
         resp = _get(app_client, "/v1/tax/summary?fy=2025-26")

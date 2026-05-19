@@ -140,17 +140,34 @@ class TestBanUnban:
 
 
 class TestBanExpiry:
-    def test_expired_ban_lifted_on_is_banned_call(self):
+    # NOTE: These two tests previously used `time.sleep(1.05)` to wait for the
+    # ban window to elapse. The Codex / multi-agent audit on 2026-05-19 flagged
+    # the 1-second sleeps as wasted CI wall-time and a flake risk on slow
+    # runners. Replaced with a `monkeypatch` over the `time.time` reference in
+    # `packages.core.src.security` so the SecurityMonitor sees an artificially
+    # advanced clock without any real wait.
+
+    def test_expired_ban_lifted_on_is_banned_call(self, monkeypatch):
+        import packages.core.src.security as sec_mod
+
+        clock = {"t": 1_700_000_000.0}
+        monkeypatch.setattr(sec_mod.time, "time", lambda: clock["t"])
+
         sm = _strict_monitor(ban_duration=1)
         sm.ban_ip("20.0.0.1", "short ban", duration=1)
         assert sm.is_banned("20.0.0.1")
-        time.sleep(1.05)
+        clock["t"] += 1.05  # advance past the 1-second ban window
         assert not sm.is_banned("20.0.0.1")
 
-    def test_expired_ban_absent_from_get_banned(self):
+    def test_expired_ban_absent_from_get_banned(self, monkeypatch):
+        import packages.core.src.security as sec_mod
+
+        clock = {"t": 1_700_000_000.0}
+        monkeypatch.setattr(sec_mod.time, "time", lambda: clock["t"])
+
         sm = _strict_monitor()
         sm.ban_ip("20.0.0.2", "expiring", duration=1)
-        time.sleep(1.05)
+        clock["t"] += 1.05
         bans = sm.get_banned_ips()
         assert all(r.ip != "20.0.0.2" for r in bans)
 

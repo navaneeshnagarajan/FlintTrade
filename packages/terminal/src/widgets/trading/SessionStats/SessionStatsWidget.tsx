@@ -17,7 +17,6 @@ import { useMemo, useEffect, memo } from "react";
 import { Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -251,7 +250,10 @@ function OrderBar({ summary }: { summary: OrderSummary }) {
 
 function SessionStatsWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
+  // NOTE: We previously read `isConnected = useBrokerConnected()` to gate the
+  // "Sample" badge on disconnect-only. Now the badge is unconditional (the
+  // widget always renders sample data because no backend endpoint exists yet
+  // — see header comment below), so the hook is no longer needed here.
 
   useEffect(() => {
     track("trade", "widget_view_session_stats");
@@ -267,11 +269,19 @@ function SessionStatsWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Clock size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Session Stats</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — `computeSessionMetrics(SAMPLE_SESSION_TRADES)`
+            is the only data source today; no backend session-aggregation
+            endpoint exists. The badge previously hid in `isConnected` mode,
+            which masked the fact that we were still showing sample data
+            even after a broker connection. Keep visible at all times. */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live backend endpoint yet"
+          title="No live data wired yet — showing sample session statistics so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <span className={cn("text-sm font-bold font-mono tabular-nums", metrics.totalPnl >= 0 ? "text-profit" : "text-loss")}>
           {fmtPnl(metrics.totalPnl)}

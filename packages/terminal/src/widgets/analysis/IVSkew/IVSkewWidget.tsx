@@ -353,6 +353,19 @@ function IVSkewWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
         <Activity size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">IV Skew</span>
+        {/* Honest disclosure — the widget renders SAMPLE_IV_SKEW_DATA unconditionally
+            because no backend `/api/v1/analysis/ivskew` endpoint exists yet
+            (see `services/ftApi.analysis.ts` — no `getIVSkew` defined). When
+            that endpoint lands, gate this badge on `isConnected && mode !== "live"`
+            and add a TanStack Query call alongside. */}
+        <span
+          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+          role="status"
+          aria-label="Showing sample data; no live backend endpoint yet"
+          title="No live data wired yet — showing sample IV skew curves so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
 
         <Select value={symbol} onValueChange={setSymbol}>
           <SelectTrigger className="ml-auto h-6 w-32 text-xs bg-surface-hover border-border-default" aria-label="Select symbol">

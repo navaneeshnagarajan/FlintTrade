@@ -343,11 +343,20 @@ function GreeksHeatmapWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Grid3x3 size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Greeks Heatmap</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — the widget renders SAMPLE_GREEKS_HEATMAP_DATA
+            unconditionally because no backend `/api/v1/analysis/greeks-heatmap`
+            endpoint exists yet. The badge previously hid in `isConnected` mode,
+            which masked the fact that we were still showing sample data even
+            after a broker connection. Until the endpoint lands, keep the
+            badge visible at all times. */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live backend endpoint yet"
+          title="No live data wired yet — showing a sample Greeks heatmap so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <button
           onClick={handleRefresh}
