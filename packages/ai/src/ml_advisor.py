@@ -38,11 +38,19 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import os
 import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+def _const_time_eq(a: str, b: str) -> bool:
+    """Constant-time equality for hex digest strings (no timing side-channel)."""
+    return hmac.compare_digest(a, b)
 
 import numpy as np
 import pandas as pd
@@ -381,8 +389,27 @@ class MLAdvisor:
     # Persistence
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _checksum_path(model_path: Path) -> Path:
+        """Return the sidecar path for the model's SHA-256 checksum."""
+        return model_path.with_suffix(model_path.suffix + ".sha256")
+
+    @staticmethod
+    def _compute_sha256(path: Path) -> str:
+        """Stream-read ``path`` and return its hex SHA-256 digest."""
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 16), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
     def save(self, path: str | Path | None = None) -> Path:
-        """Serialise the trained model to a pickle file.
+        """Serialise the trained model to a pickle file with a SHA-256 sidecar.
+
+        The sidecar file (``<model>.pkl.sha256``) is written alongside the
+        model so that :meth:`load` can verify the model bytes have not been
+        tampered with before unpickling. See :meth:`load` for the threat
+        model.
 
         Args:
             path: Override save path.  Falls back to ``config.model_path``,
@@ -401,11 +428,30 @@ class MLAdvisor:
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(target, "wb") as f:
             pickle.dump({"model": self._model, "feature_names": self._feature_names}, f)
-        logger.info("[MLAdvisor] Model saved to %s", target)
+        digest = self._compute_sha256(target)
+        self._checksum_path(target).write_text(digest, encoding="ascii")
+        logger.info("[MLAdvisor] Model saved to %s (sha256=%s)", target, digest[:12])
         return target
 
     def load(self, path: str | Path | None = None) -> None:
-        """Load a previously saved model from a pickle file.
+        """Load a previously saved model, verifying its SHA-256 checksum first.
+
+        Security model: pickle deserialisation is arbitrary-code-execution by
+        design. The 2026-05-19 multi-agent audit (CRITICAL-3) flagged this
+        path as RCE-exploitable if an attacker can drop a malicious
+        ``ml_advisor.pkl`` (e.g. via a different vulnerability, shared
+        workspace, backup restore, or a "pre-trained model" download).
+
+        We mitigate by writing a SHA-256 sidecar in :meth:`save` and
+        verifying it here before unpickling. An attacker who can write the
+        model file would also need to write the matching sidecar; an
+        attacker who can do both has full FS write access already and is
+        beyond this layer's scope.
+
+        For development workflows where the sidecar is missing (legacy
+        models, hand-built test fixtures), set
+        ``FLINTTRADE_ML_ADVISOR_TRUST_UNVERIFIED=1`` to load anyway. The
+        load logs a loud warning when that flag is honoured.
 
         Args:
             path: Override load path.  Falls back to ``config.model_path``,
@@ -413,15 +459,50 @@ class MLAdvisor:
 
         Raises:
             FileNotFoundError: If the model file does not exist.
+            RuntimeError: If the checksum sidecar is missing or does not
+                match the model bytes (unless trust override is set).
         """
         target = Path(path or self.config.model_path or self._default_model_path())
         if not target.exists():
             raise FileNotFoundError(f"Model file not found: {target}")
+
+        checksum_file = self._checksum_path(target)
+        actual = self._compute_sha256(target)
+
+        if checksum_file.exists():
+            expected = checksum_file.read_text(encoding="ascii").strip()
+            if not _const_time_eq(expected, actual):
+                raise RuntimeError(
+                    f"Refusing to load {target.name}: SHA-256 checksum mismatch "
+                    f"(expected {expected[:12]}…, got {actual[:12]}…). Either "
+                    "regenerate the model with MLAdvisor.save() or delete the "
+                    "sidecar to force a fresh integrity record."
+                )
+        else:
+            trust = os.environ.get(
+                "FLINTTRADE_ML_ADVISOR_TRUST_UNVERIFIED", ""
+            ).strip().lower() in ("1", "true", "yes")
+            if not trust:
+                raise RuntimeError(
+                    f"Refusing to load {target.name}: no SHA-256 sidecar found "
+                    f"at {checksum_file.name}. Pickle deserialisation is RCE — "
+                    "loading unverified model files is disabled. Either save "
+                    "the model via MLAdvisor.save() (which writes the sidecar) "
+                    "or set FLINTTRADE_ML_ADVISOR_TRUST_UNVERIFIED=1 to override."
+                )
+            logger.warning(
+                "[MLAdvisor] Loading %s WITHOUT sha256 verification because "
+                "FLINTTRADE_ML_ADVISOR_TRUST_UNVERIFIED is set. Do not use in "
+                "production.", target,
+            )
+
         with open(target, "rb") as f:
             payload = pickle.load(f)  # noqa: S301
         self._model = payload["model"]
         self._feature_names = payload.get("feature_names", list(_FEATURE_COLUMNS))
-        logger.info("[MLAdvisor] Model loaded from %s", target)
+        logger.info(
+            "[MLAdvisor] Model loaded from %s (sha256=%s)", target, actual[:12]
+        )
 
     # ------------------------------------------------------------------
     # Internal
