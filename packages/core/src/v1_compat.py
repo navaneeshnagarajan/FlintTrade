@@ -249,7 +249,7 @@ def register_v1_compat(app: Any) -> None:  # noqa: ANN401 — Flask app type var
         level instead.
     """
     try:
-        from flask import g, request, after_this_request  # type: ignore[import]
+        from flask import g, request  # type: ignore[import]
     except ImportError:  # pragma: no cover
         logger.warning("Flask not available — v1 compat middleware not registered")
         return

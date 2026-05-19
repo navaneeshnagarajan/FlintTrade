@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .flow_nodes.base import FlowContext, FlowResult
+from .flow_nodes.base import FlowContext
 from .flow_nodes.executor import FlowExecutor, FlowRunResult, NodeSpec
 from .flow_nodes import (
     AlertNode,

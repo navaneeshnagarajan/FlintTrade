@@ -282,7 +282,7 @@ def _extract_snippet(body: str, query_tokens: list[str], window: int = 160) -> s
         Snippet string with leading/trailing ellipsis as needed.
     """
     # Split into sentences/lines
-    lines = [l.strip() for l in re.split(r"[\n.!?]+", body) if l.strip()]
+    lines = [line.strip() for line in re.split(r"[\n.!?]+", body) if line.strip()]
     best_line = ""
     best_hits = -1
 

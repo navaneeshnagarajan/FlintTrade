@@ -47,14 +47,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pandas as pd
+from pydantic import BaseModel, Field
+
 
 def _const_time_eq(a: str, b: str) -> bool:
     """Constant-time equality for hex digest strings (no timing side-channel)."""
     return hmac.compare_digest(a, b)
 
-import numpy as np
-import pandas as pd
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger("flinttrade.ai.ml_advisor")
 

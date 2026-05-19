@@ -17,10 +17,9 @@ import asyncio
 import logging
 import random
 import time
-from typing import Callable
 
 from .broker_adapter import AbstractBrokerAdapter, Mode, TickCallback
-from .depth_20 import Depth20Tick, DepthLevel, parse_depth_20_payload
+from .depth_20 import Depth20Tick, parse_depth_20_payload
 
 logger = logging.getLogger("flinttrade.gateway.ws_proxy.mock_adapter")
 

@@ -23,7 +23,7 @@ import logging
 import secrets
 from typing import Any
 
-from flask import Blueprint, Response, g, jsonify, request
+from flask import Blueprint, Response, g, request
 
 logger = logging.getLogger("flinttrade.csp")
 

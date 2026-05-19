@@ -35,7 +35,6 @@ Example::
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
@@ -44,7 +43,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from packages.core.src.openalgo_client import OpenAlgoClient
-from .downloader import DownloadResult, HistoricalDownloader
+from .downloader import DownloadResult
 from .pipeline import DataPipeline, INTERVAL_TABLES
 
 logger = logging.getLogger("flinttrade.historical.historify")

@@ -45,12 +45,7 @@ logger = logging.getLogger("flinttrade.engine.strategy_hot_reload")
 # ---------------------------------------------------------------------------
 
 try:
-    from watchdog.events import (  # type: ignore[import]
-        FileCreatedEvent,
-        FileDeletedEvent,
-        FileModifiedEvent,
-        FileSystemEventHandler,
-    )
+    from watchdog.events import FileSystemEventHandler  # type: ignore[import]
     from watchdog.observers import Observer  # type: ignore[import]
 
     _WATCHDOG_AVAILABLE = True

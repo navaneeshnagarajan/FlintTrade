@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone

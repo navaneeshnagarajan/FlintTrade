@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Literal
 
-from packages.core.src.models import Action, Exchange, Order, OrderResponse, PriceType
+from packages.core.src.models import Action, Exchange, Order, PriceType
 
 logger = logging.getLogger("flinttrade.engine.smart_router")
 

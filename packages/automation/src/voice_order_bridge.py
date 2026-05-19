@@ -604,7 +604,6 @@ class VoiceOrderBridge:
                 "Run: pip install openai-whisper"
             ) from exc
 
-        import io
         import tempfile
         import os
 

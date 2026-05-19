@@ -191,7 +191,6 @@ def _validate_split_params(
             f"trigger_price must be > 0 for {order_type} orders"
         )
 
-    import math
     num_full = total_quantity // chunk_size
     has_remainder = (total_quantity % chunk_size) > 0
     total_chunks = num_full + (1 if has_remainder else 0)
