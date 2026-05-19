@@ -21,6 +21,10 @@ dependencies = [
     "numpy>=1.26.0",
     "duckdb>=1.0.0",
     "qrcode[svg]>=8.0",
+    # health_monitor.check_thread_count + check_memory import psutil at
+    # runtime. Without it those checks early-return "skipped" and the
+    # _thread_baseline never gets set — see test_baseline_set_on_first_call.
+    "psutil>=5.9",
 ]
 
 [build-system]
