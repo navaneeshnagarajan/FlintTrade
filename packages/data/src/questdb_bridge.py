@@ -25,6 +25,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import re
 import socket
 import time
 from typing import Any
@@ -92,6 +93,75 @@ def _build_ilp_line(tick: dict[str, Any], table: str = "ticks") -> str | None:
 
 class QuestDBBridgeError(Exception):
     """Raised when a QuestDB operation fails."""
+
+
+# ---------------------------------------------------------------------------
+# Input validation — defence-in-depth for SQL-injection vectors
+# ---------------------------------------------------------------------------
+#
+# QuestDB's REST `/exec` endpoint is the only query path we use. It accepts
+# a single `query` URL parameter, so we cannot bind parameters via the
+# native protocol the way psycopg2 / pyodbc do — strings end up interpolated
+# regardless. Defence is therefore strict regex validation BEFORE the
+# interpolation, plus an allowlist for `interval` and `table`.
+#
+# The 2026-05-19 security audit (CRITICAL-2) flagged the f-string SQL in
+# `aggregate_ohlcv` and `get_latest_tick` because callers reach these
+# methods via authenticated POST routes (`/api/v1/data/questdb/ohlcv`,
+# `/api/v1/data/questdb/tick/latest/<symbol>`) — once the API key is
+# compromised, the f-string lets an attacker write any SQL through.
+# Validation closes that path.
+
+_SYMBOL_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,32}$")
+_INTERVAL_RE = re.compile(r"^[0-9]{1,3}[smhdMy]$")
+_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?Z?)?$"
+)
+_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+def _validate_symbol(symbol: str) -> str:
+    """Strict allowlist for trading symbols. Returns the symbol unchanged
+    when valid; raises ``QuestDBBridgeError`` otherwise."""
+    if not isinstance(symbol, str) or not _SYMBOL_RE.match(symbol):
+        raise QuestDBBridgeError(
+            f"Invalid symbol {symbol!r}: must match {_SYMBOL_RE.pattern}"
+        )
+    return symbol
+
+
+def _validate_interval(interval: str) -> str:
+    """Allow QuestDB SAMPLE BY interval literals only: ``1m``, ``5m``, ``1h``,
+    ``1d``, ``1M``, ``1y`` — i.e. ``<int><unit>`` where unit is one of
+    s/m/h/d/M/y. Raises on anything else."""
+    if not isinstance(interval, str) or not _INTERVAL_RE.match(interval):
+        raise QuestDBBridgeError(
+            f"Invalid interval {interval!r}: must match {_INTERVAL_RE.pattern}"
+        )
+    return interval
+
+
+def _validate_timestamp(ts: str, *, label: str) -> str:
+    """Accept ISO-8601 dates and date-times that QuestDB understands. The
+    regex is intentionally permissive on the time half so callers can pass
+    ``2026-04-08``, ``2026-04-08T09:15``, ``2026-04-08T09:15:00``, etc.,
+    but rejects anything containing quote or semicolon characters."""
+    if not isinstance(ts, str) or not _TIMESTAMP_RE.match(ts):
+        raise QuestDBBridgeError(
+            f"Invalid {label} timestamp {ts!r}: must be ISO-8601 "
+            "(e.g. '2026-04-08' or '2026-04-08T09:15:00')"
+        )
+    return ts
+
+
+def _validate_table_name(name: str) -> str:
+    """Allow only standard SQL identifier characters for table names. Used
+    to protect the literal interpolation of ``self.table`` in queries."""
+    if not isinstance(name, str) or not _TABLE_RE.match(name):
+        raise QuestDBBridgeError(
+            f"Invalid table name {name!r}: must match {_TABLE_RE.pattern}"
+        )
+    return name
 
 
 class QuestDBBridge:
@@ -276,13 +346,23 @@ class QuestDBBridge:
         Raises:
             QuestDBBridgeError: If the query fails.
         """
+        # Defence-in-depth: validate every interpolated value against a
+        # strict allowlist before assembling the SQL. See module-level
+        # `_validate_*` helpers for the policy. Any reject raises
+        # QuestDBBridgeError — the SQL string is never built with bad input.
+        symbol_v = _validate_symbol(symbol)
+        interval_v = _validate_interval(interval)
+        start_v = _validate_timestamp(start, label="start")
+        end_v = _validate_timestamp(end, label="end")
+        table_v = _validate_table_name(self.table)
+
         sql = (
             f"SELECT timestamp, first(ltp) AS open, max(ltp) AS high, "
             f"min(ltp) AS low, last(ltp) AS close, sum(volume) AS volume "
-            f"FROM '{self.table}' "
-            f"WHERE symbol = '{symbol}' "
-            f"AND timestamp BETWEEN '{start}' AND '{end}' "
-            f"SAMPLE BY {interval} ALIGN TO CALENDAR"
+            f"FROM '{table_v}' "
+            f"WHERE symbol = '{symbol_v}' "
+            f"AND timestamp BETWEEN '{start_v}' AND '{end_v}' "
+            f"SAMPLE BY {interval_v} ALIGN TO CALENDAR"
         )
         return self.query(sql)
 
@@ -298,9 +378,12 @@ class QuestDBBridge:
         Raises:
             QuestDBBridgeError: If the query fails.
         """
+        symbol_v = _validate_symbol(symbol)
+        table_v = _validate_table_name(self.table)
+
         sql = (
-            f"SELECT * FROM '{self.table}' "
-            f"WHERE symbol = '{symbol}' "
+            f"SELECT * FROM '{table_v}' "
+            f"WHERE symbol = '{symbol_v}' "
             f"ORDER BY timestamp DESC LIMIT 1"
         )
         rows = self.query(sql)
