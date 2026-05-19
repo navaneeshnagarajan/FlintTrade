@@ -49,6 +49,8 @@ _ORDER_ENDPOINTS = [
     "/api/v1/orders/cancel-all",
     "/api/v1/orders/close-position",
     "/api/v1/orders/open-position",
+    "/api/v1/orders/options",
+    "/api/v1/orders/options-multi",
 ]
 
 _SAMPLE_ORDER_BODY = {
@@ -502,6 +504,8 @@ class TestLiveModeForwarding:
             "/api/v1/orders/cancel-all": "cancelallorder",
             "/api/v1/orders/close-position": "closeposition",
             "/api/v1/orders/open-position": "openposition",
+            "/api/v1/orders/options": "optionsorder",
+            "/api/v1/orders/options-multi": "optionsmultiorder",
         }
 
         for ft_route, oa_endpoint in endpoint_map.items():
