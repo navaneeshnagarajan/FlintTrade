@@ -229,3 +229,78 @@ class TestModeSwitchEndpoint:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 401
+
+    def test_revocation_failure_fails_closed(self, client):
+        """If JTI revocation raises, the endpoint MUST return 5xx and
+        MUST NOT mint a new Practice token. Otherwise the frontend would
+        flip the UI to Practice while the stale live-unlocked JWT in
+        memory remained replayable. Codex stop-gate caught this gap on
+        commit 00c06e7 — the original best-effort revoke was a silent
+        defeat of the whole mode-downgrade safety property.
+        """
+        c, _ = client
+        live_token = self._setup_and_pin_unlock(c)
+
+        with patch("packages.core.src.auth_routes._revoke_jti") as mock_revoke:
+            mock_revoke.side_effect = RuntimeError("DuckDB lock error")
+            resp = c.post(
+                "/v1/auth/mode",
+                json={"mode": "practice"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {live_token}",
+                },
+            )
+        assert resp.status_code == 503
+        assert "live" in resp.get_json()["message"].lower()
+        # No token should have been minted on the failure path — caller
+        # keeps the old live-unlocked JWT, frontend stays in Live.
+        assert "data" not in resp.get_json() or "token" not in resp.get_json().get("data", {})
+
+
+class TestRateLimitRegistration:
+    """Codex stop-gate caught that the new `/mode`, `/forgot-password`,
+    and `/reset-password` decorators were never registered with
+    Flask-Limiter because `_apply_rate_limits` had a hardcoded list of
+    five legacy endpoints. The fix swaps that for module-globals
+    auto-discovery; this test asserts every `@_rate_limit`-decorated
+    view in the module gets at least one rule registered.
+    """
+
+    def test_every_decorated_view_is_registered(self):
+        import inspect
+        from packages.core.src import auth_routes as mod
+
+        # Collect functions that carry the _rate_limits attribute set
+        # by the @_rate_limit decorator. ``inspect.isfunction`` is
+        # intentionally strict — without it we'd try to ``getattr`` on
+        # ``current_app`` (a Werkzeug LocalProxy in module globals),
+        # which resolves the proxy and raises "outside request context".
+        decorated_views = [
+            (name, obj)
+            for name, obj in vars(mod).items()
+            if inspect.isfunction(obj) and getattr(obj, "_rate_limits", None)
+        ]
+        # Sanity check — the module should have multiple decorated views.
+        assert len(decorated_views) >= 7
+
+        # Each view that's been auto-discovered MUST appear by name in
+        # the decorator-aware set so a future contributor can't silently
+        # add a route without rate limiting kicking in.
+        names = {name for name, _ in decorated_views}
+        for required in (
+            "auth_status",
+            "auth_setup",
+            "auth_login",
+            "auth_pin_verify",
+            "auth_logout",
+            "auth_mode_switch",
+            "auth_forgot_password",
+            "auth_reset_password",
+            "auth_setup_reset",
+            "auth_setup_regenerate_2fa",
+        ):
+            assert required in names, (
+                f"Auth view '{required}' is missing the @_rate_limit decorator — "
+                "every public auth endpoint must be rate-limited."
+            )

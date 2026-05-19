@@ -177,7 +177,17 @@ def _rate_limit(limit_string: str):
 
 @auth_bp.record
 def _apply_rate_limits(state):
-    """Apply deferred rate limits once the blueprint is registered on an app."""
+    """Apply deferred rate limits once the blueprint is registered on an app.
+
+    Auto-discovers every blueprint view that carries the ``_rate_limits``
+    attribute set by the ``@_rate_limit(...)`` decorator. The previous
+    hardcoded list (auth_status, auth_setup, auth_login, auth_pin_verify,
+    auth_logout) silently skipped every other ``@_rate_limit`` decorator
+    in the module — including pre-existing ones on ``auth_setup_reset``
+    and ``auth_setup_regenerate_2fa`` and the 2026-05-19 additions on
+    ``auth_mode_switch``, ``auth_forgot_password``, ``auth_reset_password``.
+    Codex caught the new gaps; this rewrite also closes the older ones.
+    """
     limiter = state.app.config.get("LIMITER")
     if limiter is None:
         logger.warning(
@@ -185,10 +195,30 @@ def _apply_rate_limits(state):
         )
         return
 
-    for rule_func in [auth_status, auth_setup, auth_login, auth_pin_verify, auth_logout]:
-        limits = getattr(rule_func, "_rate_limits", [])
+    registered = 0
+    # Scan the module's own globals for any function carrying the
+    # ``_rate_limits`` attribute the ``@_rate_limit`` decorator sets.
+    # This is module-local so it cannot accidentally pick up unrelated
+    # view functions registered by other blueprints on the same app.
+    #
+    # ``inspect.isfunction`` is intentionally strict so that Flask's
+    # ``current_app`` (a Werkzeug LocalProxy in globals) is not poked —
+    # ``getattr(current_app, "_rate_limits", None)`` would otherwise
+    # try to resolve the proxy outside a request context and raise.
+    import inspect  # noqa: PLC0415
+    for obj in list(globals().values()):
+        if not inspect.isfunction(obj):
+            continue
+        limits = getattr(obj, "_rate_limits", None)
+        if not limits:
+            continue
         for limit_str in limits:
-            limiter.limit(limit_str)(rule_func)
+            limiter.limit(limit_str)(obj)
+            registered += 1
+        logger.debug(
+            "Registered %d rate limit(s) on %s", len(limits), obj.__name__,
+        )
+    logger.info("Auth blueprint: %d rate-limit rules registered with Flask-Limiter", registered)
 
 # JWT config
 _JWT_SECRET_KEY = ""  # Set from env or generated at startup
@@ -539,27 +569,48 @@ def auth_mode_switch() -> tuple[Any, int]:
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
 
-    # Issue the new Practice-mode JWT first; if anything goes wrong below
-    # we don't want to revoke the old token without a replacement.
+    # Revoke the prior JTI FIRST — fail-closed. If the revocation can't
+    # be persisted (DB lock, disk full, whatever), the old live-unlocked
+    # token is still replayable until its 8 AM IST expiry, so we MUST NOT
+    # tell the frontend the downgrade succeeded; the UI would then flip to
+    # Practice while a stale live token sits in memory ready to place
+    # real orders. Codex stop-gate 2026-05-19 flagged this as the inverse
+    # of the original CRITICAL finding.
+    old_jti = str(payload.get("jti", ""))
+    old_exp = float(payload.get("exp", 0))
+    if not old_jti:
+        logger.warning(
+            "Mode-switch token missing jti claim — refusing downgrade "
+            "(cannot revoke a token without an id)",
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Token missing jti claim — cannot perform mode downgrade.",
+        }), 400
+
+    try:
+        _revoke_jti(old_jti, old_exp)
+    except Exception:
+        logger.exception(
+            "Mode-switch revocation failed — refusing downgrade so the frontend "
+            "stays in Live and the stale token doesn't go quietly unrevoked | jti=%s",
+            old_jti,
+        )
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Could not revoke previous session token — try again. "
+                "Staying in Live mode for safety."
+            ),
+        }), 503
+
+    # Only AFTER successful revocation do we mint the new Practice token.
     username = str(payload.get("sub") or svc.get_profile().get("username", "user"))
     new_token = _create_token(
         username,
         live_mode_unlocked=False,
         mode="practice",
     )
-
-    # Revoke the prior JTI (best-effort — if revocation fails the new JWT
-    # is still valid, and the worst case is the old token continues to
-    # work until its 8 AM IST expiry).
-    old_jti = str(payload.get("jti", ""))
-    old_exp = float(payload.get("exp", 0))
-    if old_jti:
-        try:
-            _revoke_jti(old_jti, old_exp)
-        except Exception:
-            logger.exception(
-                "Failed to revoke prior JTI on mode-switch (continuing) — jti=%s", old_jti,
-            )
 
     return jsonify({
         "status": "success",
