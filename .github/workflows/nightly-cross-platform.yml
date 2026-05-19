@@ -1,0 +1,51 @@
+name: Nightly Cross-Platform Tests
+
+# Cross-platform validation that used to run on every push (see test.yml).
+# Moved to a weekly cron on 2026-05-19 because the macOS runner costs 10×
+# and the Windows runner costs 2× the Linux minute rate; with both gates
+# marked `continue-on-error: true` they never blocked a commit, so per-push
+# execution was burning minutes without delivering signal.
+#
+# A weekly run on Sunday at 03:00 UTC (08:30 IST Sunday) is enough to
+# catch slow-burn platform regressions before they pile up; manual
+# `workflow_dispatch` is available for any contributor who needs an
+# on-demand check (e.g. after merging a Windows-path-handling change).
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'    # Sunday 03:00 UTC = 08:30 IST Sunday
+  workflow_dispatch:        # Allow manual trigger from the Actions tab
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Concurrency: only one nightly run at a time. A manual dispatch while
+# a scheduled run is in flight cancels the scheduled one so the manual
+# one wins.
+concurrency:
+  group: nightly-cross-platform
+  cancel-in-progress: true
+
+jobs:
+  python-tests-macos:
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -r requirements.txt
+      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60
+
+  python-tests-windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -r requirements.txt
+      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"

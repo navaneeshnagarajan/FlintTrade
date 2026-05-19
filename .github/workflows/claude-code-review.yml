@@ -2,16 +2,29 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    # 2026-05-19: removed `synchronize` from the trigger list. Every PR
+    # commit used to fire a Claude review; on a multi-commit PR that
+    # billed Claude's runtime ~5–10× per PR. Now the review runs once
+    # when the PR is opened / marked ready-for-review / reopened, and
+    # the author can request an updated review by commenting `@claude`
+    # (handled by claude.yml).
+    types: [opened, ready_for_review, reopened]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.local/**'
+      - '.gitignore'
+      - '.gitattributes'
+      - '.editorconfig'
+
+# Only one Claude review per PR ref at a time.
+concurrency:
+  group: claude-review-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   claude-review:
+    if: github.event.pull_request.draft != true
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||

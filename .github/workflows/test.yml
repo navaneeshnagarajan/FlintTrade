@@ -2,10 +2,49 @@ name: Test
 on:
   pull_request:
     branches: [main, dev]
+    types: [opened, synchronize, ready_for_review, reopened]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.local/**'
+      - 'NOTICE'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+      - '.editorconfig'
+      - '.github/workflows/claude*.yml'
+      - '.github/workflows/status-report.yml'
+      - '.github/ISSUE_TEMPLATE/**'
   push:
     branches: [main, dev]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.local/**'
+      - 'NOTICE'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+      - '.editorconfig'
+      - '.github/workflows/claude*.yml'
+      - '.github/workflows/status-report.yml'
+      - '.github/ISSUE_TEMPLATE/**'
+
+# Cancel earlier in-flight runs when a new commit lands on the same ref.
+# Stops the back-to-back-push amplification that was burning minutes —
+# multiple pushes within a few minutes used to all run to completion;
+# now only the latest does.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Skip the whole matrix on draft PRs — cuts noise while a PR is in
+# active development. A PR-author opens the PR as draft, pushes
+# iteratively without CI cost, then marks ready-for-review when they
+# want CI to run.
 jobs:
   # ----------------------------------------------------------------------
   # Python tests
@@ -20,6 +59,9 @@ jobs:
   # order-dependent flakes early so they get fixed before we go parallel.
   # ----------------------------------------------------------------------
   python-tests:
+    # Skip the matrix on draft PRs — open as draft, push iteratively without
+    # CI cost, then mark ready-for-review when you want CI to run.
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -29,30 +71,18 @@ jobs:
       - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60
       - run: ruff check packages/*/src/ --output-format=github
 
-  python-tests-macos:
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
-      - run: pip install -r requirements.txt
-      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60
-
-  python-tests-windows:
-    runs-on: windows-latest
-    continue-on-error: true
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
-      - run: pip install -r requirements.txt
-      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"
+  # NOTE: macOS and Windows cross-platform checks used to run on every push +
+  # PR with `continue-on-error: true` (cosmetic — never gated anything). On
+  # GitHub-hosted runners macOS costs 10× and Windows 2× the Linux minute
+  # rate, so a single push burned ≈13× the minutes of a Linux-only run for
+  # signal that nobody actioned on. Moved to a dedicated weekly nightly
+  # workflow (`.github/workflows/nightly-cross-platform.yml`) on a cron
+  # schedule + manual `workflow_dispatch`. If a cross-platform regression
+  # surfaces in the weekly run, fix-it-then commit; per-push doesn't need
+  # the matrix.
 
   node-core-tests:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -69,6 +99,7 @@ jobs:
         run: cd packages/terminal && npm run build
 
   node-widget-tests-1:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -81,6 +112,7 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2a:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -93,6 +125,7 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2b:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -115,6 +148,7 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=6144'
 
   node-widget-tests-3:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -127,6 +161,7 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   secrets-check:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

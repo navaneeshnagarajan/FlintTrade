@@ -10,8 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
+        # NOTE: `submodules: recursive` was removed 2026-05-19. OpenAlgo +
+        # OpenClaw + AlgoMirror are no longer git submodules — they were
+        # detached in commit 3da42e4 and live under `.local/external/`
+        # (gitignored, cloned on demand via scripts/setup-test-deps.sh).
+        # Trying to recursively check them out triggered noisy warnings
+        # on every weekly run.
 
       - uses: actions/setup-python@v5
         with:

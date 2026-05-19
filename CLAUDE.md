@@ -31,10 +31,12 @@ make dev                                       # terminal dev + OpenAlgo
 make status                                    # check services
 make health                                    # health check
 
-# CI (GitHub Actions — 9 jobs: python-tests, python-tests-macos, python-tests-windows, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check)
+# CI per-push (test.yml — 7 Ubuntu jobs after 2026-05-19 cost-control: python-tests, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check). Cross-platform matrix (macOS + Windows) moved to nightly-cross-platform.yml (weekly Sun 03:00 UTC).
 gh run list --limit 1                          # check latest CI
 gh run view <id> --log-failed                  # diagnose failure
 ```
+
+See `docs/CI_BUDGET_AND_QUALITY.md` for the per-commit checklist, hosted-runner cost model, defence-in-depth layers, and runbook if the monthly minute bill spikes.
 
 ## What This Is
 
@@ -222,7 +224,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 - **Version:** 0.5.0-dev (post-v0.5.0 GA tag `2741cad`, 2026-04-19) — post-GA hardening continues
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
-- **CI:** 9 parallel GitHub Actions jobs — python-tests, python-tests-macos, python-tests-windows, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check
+- **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI_BUDGET_AND_QUALITY.md` for the contract.
 - **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
 - **AI Skills:** 30 markdown files under `packages/ai/skills/` covering trading, analysis, execution, compliance, options, psychology domains
 - **Strategies:** 94 backtest templates in `packages/backtest-engine/src/strategies/` + 2 live-engine strategies in `packages/engine/src/strategies/` (`ema_crossover`, `wheel_live`)

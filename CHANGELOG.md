@@ -6,6 +6,16 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5.0-dev
 
+### CI budget + quality plan (2026-05-19)
+
+- **`test.yml` cost reduced ~64%** per push (effective minute weight): macOS and Windows runners removed from the always-on matrix and moved to a new weekly `nightly-cross-platform.yml` (Sunday 03:00 UTC). macOS billed 10× and Windows 2× the Linux rate, both with `continue-on-error: true` so they never gated anything — pure budget burn.
+- **`test.yml` paths-ignore** added — doc-only commits (`*.md`, `docs/**`, `.local/**`, `NOTICE`, `LICENSE`, `.gitignore`, `.gitattributes`, `.editorconfig`, sibling Claude/status workflow files, issue templates) skip the entire matrix.
+- **`test.yml` concurrency cancel** added — back-to-back pushes only run the latest, no more amplification.
+- **`test.yml` draft-PR guard** added — every job gates on `github.event.pull_request.draft != true`, so iterative draft pushes cost nothing.
+- **`claude-code-review.yml`** trimmed: removed `synchronize` trigger (was firing on every PR commit — 5–10× per multi-commit PR), added paths-ignore and concurrency cancel, added draft-PR guard.
+- **`status-report.yml`** repaired: dropped `submodules: recursive` (submodules were detached in `3da42e4`); fixed `scripts/audit_repos.py` to accept both legacy dict and current list shapes of `absorption-status.json` (was crashing every weekly run with `AttributeError: 'list' object has no attribute 'get'`).
+- **`docs/CI_BUDGET_AND_QUALITY.md`** added — the contract: hosted-runner cost model, per-commit checklist, workflow inventory, defence-in-depth layers, runbook for bill spikes. Any future workflow change must update this doc in the same commit.
+
 ### Post-v0.5.0 GA hardening (commits since `2741cad`, 2026-04-19 → 2026-05-19)
 
 #### Changed

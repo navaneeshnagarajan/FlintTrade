@@ -20,7 +20,7 @@
 - **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV `/admin` + 404) + 13 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types in production code.
 - **Python:** 12 Python packages + tick-engine (Rust/PyO3), 9,089 tests collected
-- **CI:** 9 parallel GitHub Actions jobs — python-tests, python-tests-macos, python-tests-windows, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check
+- **CI:** 7 per-push Ubuntu jobs (`test.yml`) + 2 nightly cross-platform (`nightly-cross-platform.yml`, weekly Sun 03:00 UTC) + 1 weekly status-report. Per-push has paths-ignore for docs, `cancel-in-progress` concurrency, draft-PR guard. Contract in `docs/CI_BUDGET_AND_QUALITY.md`.
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement via JWT claims
 - **Auth:** argon2id passwords, Fernet TOTP, JWT with jti revocation blocklist, HMAC-SHA256 webhook auth
 - **UI:** v0.3.0 "Structured Calm" base — ContentShell centering, 4-level surface hierarchy, Graphite default theme, shadcn/ui migration complete

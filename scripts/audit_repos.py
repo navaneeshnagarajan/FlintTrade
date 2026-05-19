@@ -221,8 +221,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: Invalid JSON — {exc}", file=sys.stderr)
         return 1
 
-    repos = data.get("repos", {})
-    total_declared = data.get("total_repos")
+    # absorption-status.json has historically used two different shapes:
+    # legacy was `{"total_repos": N, "repos": {…}}`, current form is a flat
+    # list `[{name, status, package, …}, …]`. The CI status-report
+    # workflow seeds an empty list (`[]`) when the file is absent, which
+    # used to crash here with `AttributeError: 'list' object has no attribute
+    # 'get'`. Normalise both shapes so the script is shape-agnostic.
+    if isinstance(data, list):
+        repos = {entry.get("name", f"repo-{i}"): entry for i, entry in enumerate(data)}
+        total_declared = len(data)
+    elif isinstance(data, dict):
+        repos = data.get("repos", {})
+        total_declared = data.get("total_repos")
+    else:
+        print(f"Error: unexpected JSON shape in {args.file} ({type(data).__name__})", file=sys.stderr)
+        return 1
 
     filtered = filter_repos(repos, status=args.status, package=args.package)
 
