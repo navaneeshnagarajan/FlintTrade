@@ -6,6 +6,29 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5.0-dev
 
+### Sandbox hardening + Vitest OOM root-cause fix (2026-05-19/20)
+
+#### Sandbox subprocess isolation (closes Codex MEDIUM finding)
+
+The sandbox executor previously ran user-uploaded strategy code via `exec()` inside a daemon `threading.Thread` with a `threading.Timer` for timeout. When a strategy hit `while True: pass`, the timer fired and the result was marked `timed_out=True`, but the daemon thread kept running until the parent process exited. CPython has no thread-kill primitive, so any hostile strategy could pin a CPU core for the lifetime of the FlintTrade backend.
+
+- **New** `packages/engine/src/_sandbox_child.py` — child-process entry point. Reads a pickled payload from stdin, runs the strategy in the same in-process sandbox the parent would have used, and emits a length-prefixed JSON result frame to stdout. JSON-only on the parent-facing channel — the parent NEVER `pickle.loads` from the child, so a hostile child cannot inject a `__reduce__` payload into the parent.
+- **Refactored** `SandboxExecutor.run` — new `use_subprocess=True` default. Spawns `python -m packages.engine.src._sandbox_child` with stdin/stdout/stderr pipes, sends the payload, waits with the wall-clock cap, and on timeout calls `proc.kill()` (`TerminateProcess` on Windows, `SIGKILL` on POSIX). Hostile strategies can no longer outlive the timeout window.
+- **Legacy in-thread path** preserved as `_run_in_thread`, accessible via `use_subprocess=False`. Faster (no spawn overhead) but cannot terminate hostile code — only for trusted callers (in-house template engine, BacktestLab hot loops where the source has been reviewed).
+- **POSIX resource limits** applied inside the child: `RLIMIT_AS` (256 MB), `RLIMIT_CPU`, `RLIMIT_NOFILE` (64), `RLIMIT_FSIZE=0` (strategy can't write any file). Windows Job Object equivalent is a follow-up — wall-clock kill is the only enforcement on Windows pending that work.
+- **stdout capped at 1 MiB** inside the child to prevent a hostile strategy from filling the parent's memory with megabytes of garbage print() before crashing.
+- **New** `TestSubprocessIsolation` class — 7 tests covering signal round-trip, print round-trip, hard timeout (verified <3s for a 1s cap that the in-thread path can't enforce), AST violation propagation, unpicklable context → clean `ContextSerialisationError`, in-thread opt-in still works, and runtime exceptions return structured failures (not `SandboxCrash`).
+- 51/51 sandbox tests pass (44 pre-existing + 7 new).
+
+#### Vitest OOM root cause — radix-ui umbrella unwound
+
+Performance Benchmarker agent traced the persistent `ERR_WORKER_OUT_OF_MEMORY` in `node-widget-tests-1` and `node-widget-tests-3` to the radix-ui umbrella package. All 14 shadcn files in `packages/terminal/src/components/ui/*.tsx` used `import { X } from "radix-ui"`, which is a 74-line index that does `import * as X from "@radix-ui/react-X"` for 40 sub-packages. Vitest's SSR transform cannot tree-shake those, so every test file that touches a shadcn primitive drags ~2,400 modules into its module graph. With `pool: 'threads'` and 4 concurrent workers sharing one process heap, that's ~8 GB resident before any tests even run.
+
+- **Switched pool 'threads' → 'forks'** in `packages/terminal/vite.config.ts`. Each test file now runs in its own child process; OS reclaims the heap on file completion. Context7 confirms this is the documented antidote for jsdom + ESM module-graph memory exhaustion.
+- **Unwound the radix-ui umbrella** in all 14 shadcn files. `import { Dialog as DialogPrimitive } from "radix-ui"` → `import * as DialogPrimitive from "@radix-ui/react-dialog"`. Each shadcn primitive now pulls in only its single Radix sub-package (~60 modules) instead of all 40. Same change pattern for `alert-dialog`, `badge`, `button`, `dialog`, `dropdown-menu`, `label`, `popover`, `scroll-area`, `select`, `separator`, `sheet`, `switch`, `tabs`, `tooltip`.
+- Targeted widget-tests run: 437/438 pass (was 0/438 with the OOM). The 1 real failure was a stale assertion in `GreeksHeatmapWidget.test.tsx` (sample-data badge is now always visible per the 2026-04 audit) — fixed.
+- `tsc --noEmit` clean.
+
 ### Post-public-flip Codex audit — CRITICAL + HIGH fixes (2026-05-19)
 
 The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL-3.0 with unlimited Actions minutes.

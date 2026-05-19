@@ -373,3 +373,104 @@ class TestMemoryLimit:
         with patch.object(mod, "_RESOURCE_AVAILABLE", True), \
              patch.object(mod, "_resource_mod", mock_res):
             executor._apply_memory_limit()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# SandboxExecutor — subprocess isolation (default path post-2026-05-19)
+# ---------------------------------------------------------------------------
+
+
+class TestSubprocessIsolation:
+    """Tests for the subprocess-isolated execution path.
+
+    The default ``SandboxExecutor()`` spawns a child Python interpreter
+    that runs the actual ``exec()``. The parent communicates via
+    pickle-on-stdin / length-prefixed-JSON-on-stdout, and kills the
+    child via SIGKILL/TerminateProcess on timeout. These tests verify
+    the boundary contracts that the in-thread fallback CANNOT enforce.
+    """
+
+    def test_subprocess_signal_capture_round_trips(self):
+        """A signal emitted in the child reaches the parent unchanged."""
+        executor = SandboxExecutor()  # use_subprocess=True default
+        result = executor.run("long_entry(price=100.5, tag='breakout')")
+        assert result.success is True
+        assert len(result.signals) == 1
+        sig = result.signals[0]
+        assert sig.action == "long_entry"
+        assert sig.price == 100.5
+        assert sig.metadata == {"tag": "breakout"}
+
+    def test_subprocess_print_round_trips(self):
+        """Strategy print() captured in the child reaches the parent."""
+        executor = SandboxExecutor()
+        result = executor.run("print('hello from child', 1 + 2)")
+        assert result.success is True
+        assert "hello from child 3" in result.stdout
+
+    def test_subprocess_timeout_returns_timed_out(self):
+        """Wall-clock timeout sets timed_out=True; the child is killed.
+
+        Critical property: the in-thread fallback can only flag
+        ``timed_out`` while the daemon thread keeps running; the
+        subprocess path actually terminates the child via
+        SIGKILL/TerminateProcess, so the strategy cannot continue
+        consuming resources past the deadline.
+        """
+        executor = SandboxExecutor(timeout_seconds=1)
+        import time
+        t0 = time.time()
+        result = executor.run("while True: pass")
+        elapsed = time.time() - t0
+        assert result.success is False
+        assert result.timed_out is True
+        assert result.error_type == "TimeoutError"
+        # Within 3s window — kill + reap should be sub-second after the
+        # 1s wall-clock cap. Tight bound catches regressions where we
+        # accidentally fall back to the in-thread path (which can't
+        # actually kill).
+        assert elapsed < 3.0, f"timeout took {elapsed:.2f}s — child not killed?"
+
+    def test_subprocess_ast_violation_returns_security_error(self):
+        """AST validator runs inside the child — violations propagate back."""
+        executor = SandboxExecutor()
+        result = executor.run("__import__('os').system('echo pwned')")
+        assert result.success is False
+        assert result.error_type == "SecurityError"
+        assert "Blocked" in result.error or "import" in result.error.lower()
+
+    def test_subprocess_unpicklable_context_returns_clean_error(self):
+        """Unpicklable context (e.g. a generator) doesn't crash the parent."""
+        executor = SandboxExecutor()
+        # Generators are explicitly unpicklable in CPython — pickle raises
+        # TypeError: cannot pickle 'generator' object.
+        def _gen():
+            yield 1
+        result = executor.run(
+            "x = data",
+            context={"data": _gen()},
+        )
+        assert result.success is False
+        assert result.error_type == "ContextSerialisationError"
+
+    def test_in_thread_mode_still_works_when_opted_in(self):
+        """`use_subprocess=False` falls back to the legacy in-thread path.
+
+        Kept for trusted callers (in-house templates, hot backtest loops)
+        where the spawn overhead matters and the source is reviewed.
+        """
+        executor = SandboxExecutor(use_subprocess=False)
+        result = executor.run("long_entry(price=42.0)")
+        assert result.success is True
+        assert len(result.signals) == 1
+        assert result.signals[0].price == 42.0
+
+    def test_subprocess_runtime_error_returns_clean_failure(self):
+        """A normal Python exception in the child returns a structured failure."""
+        executor = SandboxExecutor()
+        result = executor.run("raise ValueError('boom')")
+        assert result.success is False
+        assert result.error_type == "ValueError"
+        assert "boom" in result.error
+        # Not a crash — we got a real exception, not a SandboxCrash.
+        assert result.error_type != "SandboxCrash"

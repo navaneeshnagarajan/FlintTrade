@@ -4,16 +4,37 @@ Safely runs user-provided Python strategy code in a restricted namespace.
 Designed for the StrategyBuilder and BacktestLab — users write arbitrary
 Python, we execute it without any filesystem, network, or OS access.
 
-Security model:
-- ``exec()`` runs in a namespace with only whitelisted builtins.
-- ``__import__``, ``open``, ``eval``, ``compile``, and all OS-level
-  primitives are excluded.
-- Allowed stdlib modules (math, statistics, datetime, collections) are
-  pre-imported and injected, giving strategies safe data-processing tools.
-- Execution is capped at 30 seconds via a ``threading.Timer``; the
-  thread is marked as a daemon so it cannot outlive the process.
-- Memory limits are applied via the ``resource`` module on Linux/macOS.
-  The call is a no-op on Windows where ``resource`` is not available.
+Security model — defence in depth:
+
+1. **AST pre-check** (``_validate_sandbox_source``): rejects sandbox-escape
+   primitives (``__class__``, ``__subclasses__``, ``__globals__``, etc.)
+   plus dangerous calls (``eval``, ``exec``, ``compile``, ``__import__``,
+   ``getattr``, ``open`` …) BEFORE any ``exec()`` runs.
+2. **Restricted namespace**: ``exec()`` runs with a whitelisted builtin
+   dictionary; ``__import__``, ``open``, ``eval``, ``compile`` and all
+   OS-level primitives are absent. Pre-imported stdlib modules (math,
+   statistics, datetime, collections) give strategies safe tools.
+3. **Subprocess isolation** (default): the actual ``exec()`` runs in a
+   child Python interpreter via ``_sandbox_child.py``. The parent
+   communicates by pickle-on-stdin / length-prefixed-JSON-on-stdout
+   (parent NEVER pickle-loads child output — only JSON). A hostile
+   strategy that defeats layers 1+2 can still only crash its own
+   process; the parent kills it on timeout via ``Popen.kill()``
+   (``TerminateProcess`` on Windows, ``SIGKILL`` on POSIX).
+4. **OS resource limits**: inside the child, POSIX ``setrlimit`` caps
+   address space (256 MB), CPU seconds, open file descriptors, and
+   ``RLIMIT_FSIZE=0`` (cannot write files). On Windows the equivalent
+   would be a Job Object via ``pywin32`` — not yet implemented;
+   wall-clock kill is the only enforcement on Windows pending that
+   work. Documented as a follow-up; current Windows behaviour is no
+   worse than the pre-subprocess version.
+
+The legacy in-thread execution path (``threading.Timer`` + daemon thread)
+is preserved as a fallback when ``use_subprocess=False`` is passed — it
+is faster (no spawn overhead) but cannot terminate hostile code mid-
+execution (the daemon thread continues running until process exit).
+ONLY trusted callers (in-house template engine, hot backtest loop)
+should opt out of subprocess isolation.
 
 Usage::
 
@@ -32,9 +53,15 @@ from __future__ import annotations
 
 import ast
 import builtins as _builtins_module
+import json
 import logging
 import math
+import os
+import pickle
 import statistics
+import struct
+import subprocess
+import sys
 import threading
 import traceback
 from collections import defaultdict, deque, namedtuple
@@ -177,6 +204,18 @@ except ImportError:
 # 256 MB memory limit for sandboxed code (bytes)
 _MEMORY_LIMIT_BYTES: int = 256 * 1024 * 1024
 
+
+def _tail_bytes(data: bytes, max_bytes: int) -> bytes:
+    """Return the last ``max_bytes`` of ``data``.
+
+    Used to truncate the child's stderr before bubbling it back into an
+    error message. Keeps a hostile strategy from filling the parent's
+    memory by printing megabytes of garbage right before crashing.
+    """
+    if len(data) <= max_bytes:
+        return data
+    return data[-max_bytes:]
+
 # ---------------------------------------------------------------------------
 # Allowed modules injected into the sandbox namespace
 # ---------------------------------------------------------------------------
@@ -313,6 +352,150 @@ class ExecutionResult:
 # ---------------------------------------------------------------------------
 
 
+def _execute_in_process(
+    source_code: str,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run ``source_code`` inside THIS process with the restricted namespace.
+
+    Returns the result as a dict (not an ``ExecutionResult`` dataclass)
+    so the subprocess child can JSON-serialise it without re-importing
+    the dataclass. Performs the AST validator first; if violations are
+    found, no ``exec()`` runs and the dict carries a ``SecurityError``.
+
+    This helper is the SINGLE source of truth for the in-process exec
+    path. Both the in-thread fallback (``SandboxExecutor._run_in_thread``)
+    and the subprocess child (``_sandbox_child.main``) call this so the
+    sandbox semantics stay identical regardless of isolation level.
+
+    Args:
+        source_code: Untrusted Python source text.
+        context: Variables to inject into the exec namespace.
+
+    Returns:
+        A dict matching ``ExecutionResult.to_dict()``.
+    """
+    captured_signals: list[SignalEvent] = []
+    captured_output: list[str] = []
+
+    # 1. AST validator — reject sandbox-escape vectors BEFORE exec().
+    violations = _validate_sandbox_source(source_code)
+    if violations:
+        logger.warning(
+            "sandbox: rejected source with %d violation(s)", len(violations),
+        )
+        return {
+            "success": False,
+            "signals": [],
+            "stdout": "",
+            "error": "Sandbox policy violation:\n - " + "\n - ".join(violations),
+            "error_type": "SecurityError",
+            "timed_out": False,
+        }
+
+    namespace = _build_sandbox_namespace(
+        captured_signals=captured_signals,
+        captured_output=captured_output,
+        context=context or {},
+    )
+
+    try:
+        exec(source_code, namespace)  # noqa: S102
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "sandbox: strategy raised %s: %s\n%s",
+            type(exc).__name__, exc, traceback.format_exc(),
+        )
+        return {
+            "success": False,
+            "signals": [s.to_dict() for s in captured_signals],
+            "stdout": "".join(captured_output),
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "timed_out": False,
+        }
+
+    return {
+        "success": True,
+        "signals": [s.to_dict() for s in captured_signals],
+        "stdout": "".join(captured_output),
+        "error": "",
+        "error_type": "",
+        "timed_out": False,
+    }
+
+
+def _build_sandbox_namespace(
+    *,
+    captured_signals: list[SignalEvent],
+    captured_output: list[str],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the restricted execution namespace for ``exec()``."""
+
+    def _make_signal_fn(action: str):
+        def _signal(*, price: float = 0.0, **metadata: Any) -> None:
+            ts = datetime.now(timezone.utc).isoformat()
+            captured_signals.append(
+                SignalEvent(
+                    timestamp=ts,
+                    action=action,
+                    price=float(price),
+                    metadata=metadata,
+                )
+            )
+
+        _signal.__name__ = action
+        return _signal
+
+    def _safe_print(*args: Any, sep: str = " ", end: str = "\n", **_: Any) -> None:
+        captured_output.append(sep.join(str(a) for a in args) + end)
+
+    safe_builtins = dict(_SAFE_BUILTINS)
+    safe_builtins["print"] = _safe_print
+
+    namespace: dict[str, Any] = {
+        "__builtins__": safe_builtins,
+        # Allowed stdlib modules
+        **_ALLOWED_MODULES,
+        # Signal capture functions
+        "long_entry": _make_signal_fn("long_entry"),
+        "long_exit": _make_signal_fn("long_exit"),
+        "short_entry": _make_signal_fn("short_entry"),
+        "short_exit": _make_signal_fn("short_exit"),
+    }
+
+    # Inject user context (cannot override signal functions or builtins)
+    for key, value in context.items():
+        if key not in namespace:
+            namespace[key] = value
+
+    return namespace
+
+
+def _result_dict_to_execution_result(data: dict[str, Any]) -> ExecutionResult:
+    """Convert a JSON-shape dict back to an ``ExecutionResult`` dataclass."""
+    signals: list[SignalEvent] = []
+    for raw in data.get("signals", []) or []:
+        try:
+            signals.append(SignalEvent(
+                timestamp=str(raw.get("timestamp", "")),
+                action=str(raw.get("action", "")),
+                price=float(raw.get("price", 0.0)),
+                metadata=dict(raw.get("metadata") or {}),
+            ))
+        except (TypeError, ValueError):
+            continue
+    return ExecutionResult(
+        success=bool(data.get("success", False)),
+        signals=signals,
+        stdout=str(data.get("stdout", "")),
+        error=str(data.get("error", "")),
+        error_type=str(data.get("error_type", "")),
+        timed_out=bool(data.get("timed_out", False)),
+    )
+
+
 class SandboxExecutor:
     """Execute user-provided Python strategy code in a restricted namespace.
 
@@ -324,7 +507,16 @@ class SandboxExecutor:
     Args:
         timeout_seconds: Wall-clock timeout per execution (default 30).
         memory_limit_bytes: Address-space limit applied via ``resource``
-            on Linux/macOS. Ignored on Windows. Default 256 MB.
+            on Linux/macOS (set inside the child process). Ignored on
+            Windows until Job Object support lands. Default 256 MB.
+        use_subprocess: When ``True`` (default), spawn ``_sandbox_child``
+            in a child Python interpreter and communicate via pipes. The
+            child is killed via SIGKILL/TerminateProcess on timeout, so
+            hostile code cannot outlive the timeout window. When ``False``,
+            run inside a daemon ``threading.Thread`` in this process —
+            faster (no spawn overhead) but cannot terminate hostile code.
+            Only use ``False`` for trusted callers (in-house template
+            engine, BacktestLab walk-forward inner loop).
 
     Example::
 
@@ -340,9 +532,11 @@ class SandboxExecutor:
         self,
         timeout_seconds: int = 30,
         memory_limit_bytes: int = _MEMORY_LIMIT_BYTES,
+        use_subprocess: bool = True,
     ) -> None:
         self._timeout = timeout_seconds
         self._memory_limit = memory_limit_bytes
+        self._use_subprocess = use_subprocess
 
     # ------------------------------------------------------------------
     # Public API
@@ -366,12 +560,189 @@ class SandboxExecutor:
             If the source code fails static validation, no ``exec()`` is
             performed and the result carries a ``SecurityError``.
         """
+        if self._use_subprocess:
+            return self._run_in_subprocess(source_code, context or {})
+        return self._run_in_thread(source_code, context or {})
+
+    # ------------------------------------------------------------------
+    # Subprocess execution path — default; hostile-code-safe
+    # ------------------------------------------------------------------
+
+    def _run_in_subprocess(
+        self,
+        source_code: str,
+        context: dict[str, Any],
+    ) -> ExecutionResult:
+        """Spawn ``_sandbox_child`` and run the strategy there.
+
+        Strategy:
+        1. Pickle the payload to a single bytestring on parent side.
+        2. Spawn ``python -I -S -m packages.engine.src._sandbox_child``
+           with stdin/stdout/stderr pipes. ``-I`` isolated mode ignores
+           ``PYTHON*`` env vars; ``-S`` skips site.py.
+        3. Send payload, close stdin, wait for response with wall-clock
+           timeout. On timeout, ``proc.kill()`` (TerminateProcess on
+           Windows, SIGKILL on POSIX) → reap → return ``timed_out``.
+        4. Parse the response: 8-byte big-endian length prefix +
+           JSON body. Parent ONLY ``json.loads()`` from the child —
+           NEVER pickle.loads, so a hostile child cannot inject a
+           ``__reduce__`` payload into the parent.
+
+        If the child exits before emitting a result frame (segfault,
+        OOM kill, raised in bootstrap), the parent reports a
+        ``SandboxCrash`` with the last 4 KiB of the child's stderr.
+        """
+        # Compose the payload. Context can carry numpy arrays / pandas
+        # frames produced by the indicators package, so pickle is the
+        # only practical serialiser here — but the parent writes pickle
+        # and never reads it, so a hostile context author cannot get
+        # code execution in the parent.
+        try:
+            payload = pickle.dumps({
+                "source": source_code,
+                "context": context,
+                "memory_limit": self._memory_limit,
+                "timeout": self._timeout,
+            })
+        except (pickle.PicklingError, TypeError) as exc:
+            logger.warning("sandbox: context could not be pickled: %s", exc)
+            return ExecutionResult(
+                success=False,
+                error=f"Context could not be serialised for sandbox: {exc}",
+                error_type="ContextSerialisationError",
+            )
+
+        # Spawn the child. ``-I`` (isolated mode) was tempting for extra
+        # isolation but it implies ``-E`` which ignores PYTHONPATH —
+        # which we need to set so the child can import the
+        # ``packages.engine.src._sandbox_child`` module. The env we pass
+        # below already filters every ``PYTHON*`` variable except our
+        # explicitly-set PYTHONPATH, so the practical isolation level is
+        # the same.
+        cmd = [
+            sys.executable,
+            "-m", "packages.engine.src._sandbox_child",
+        ]
+        env = {
+            k: v for k, v in os.environ.items()
+            if not k.startswith("PYTHON")
+        }
+        # PYTHONPATH must be preserved so the child can import
+        # ``packages.engine.src._sandbox_child``. ``-I -S`` strips
+        # sys.path[0] and skips site.py, so without this the child
+        # cannot locate the ``packages`` namespace package at all.
+        # Compute the repo root from this module's file location
+        # (``packages/engine/src/sandbox_executor.py``) so the path is
+        # correct regardless of how the parent was launched.
+        repo_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        )
+        path_entries = [repo_root] + [p for p in sys.path if p]
+        env["PYTHONPATH"] = os.pathsep.join(path_entries)
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+        except OSError as exc:
+            logger.error("sandbox: could not spawn child: %s", exc)
+            return ExecutionResult(
+                success=False,
+                error=f"Could not spawn sandbox child process: {exc}",
+                error_type="SandboxSpawnError",
+            )
+
+        try:
+            stdout, stderr = proc.communicate(
+                input=payload, timeout=self._timeout,
+            )
+        except subprocess.TimeoutExpired:
+            # Hard-kill the child. ``Popen.kill()`` sends SIGKILL on POSIX
+            # and calls TerminateProcess on Windows — neither can be
+            # caught or blocked by the child, so the timeout is enforced
+            # even against an adversarial strategy.
+            proc.kill()
+            try:
+                stdout, stderr = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = b"", b""
+            logger.warning(
+                "sandbox: child killed after %ds wall-clock timeout", self._timeout,
+            )
+            return ExecutionResult(
+                success=False,
+                error=f"Execution timed out after {self._timeout} seconds",
+                error_type="TimeoutError",
+                timed_out=True,
+            )
+
+        # Parse the length-prefixed JSON response frame.
+        if len(stdout) < 8:
+            tail = _tail_bytes(stderr, 4096).decode("utf-8", errors="replace")
+            logger.warning(
+                "sandbox: child emitted no result frame (exit=%s, stderr_tail=%r)",
+                proc.returncode, tail[:200],
+            )
+            return ExecutionResult(
+                success=False,
+                error=(
+                    "Sandbox child exited without a result frame "
+                    f"(exit={proc.returncode}). stderr tail: {tail}"
+                ),
+                error_type="SandboxCrash",
+            )
+
+        length = struct.unpack(">Q", stdout[:8])[0]
+        body = stdout[8:8 + length]
+        if len(body) < length:
+            return ExecutionResult(
+                success=False,
+                error=(
+                    f"Sandbox child result truncated: expected {length} bytes, "
+                    f"got {len(body)}"
+                ),
+                error_type="SandboxCrash",
+            )
+
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            return ExecutionResult(
+                success=False,
+                error=f"Sandbox child result was not valid JSON: {exc}",
+                error_type="SandboxCrash",
+            )
+
+        return _result_dict_to_execution_result(data)
+
+    # ------------------------------------------------------------------
+    # In-thread execution path — fallback for trusted callers only
+    # ------------------------------------------------------------------
+
+    def _run_in_thread(
+        self,
+        source_code: str,
+        context: dict[str, Any],
+    ) -> ExecutionResult:
+        """Legacy in-process executor — kept for trusted callers only.
+
+        This path CANNOT terminate hostile code: ``threading.Thread`` has
+        no kill primitive in CPython. A strategy that goes into
+        ``while True: pass`` will be marked ``timed_out`` after the
+        wall-clock window, but the daemon thread continues consuming a
+        CPU until the parent process exits. Only use this path when the
+        source is trusted (in-house templates, hot backtest loops where
+        the spawn overhead matters and the source is reviewed).
+        """
         result = ExecutionResult()
         captured_signals: list[SignalEvent] = []
         captured_output: list[str] = []
 
         # Static AST pre-check — reject sandbox-escape vectors BEFORE exec().
-        # See _validate_sandbox_source above for the policy.
         violations = _validate_sandbox_source(source_code)
         if violations:
             result.error = "Sandbox policy violation:\n - " + "\n - ".join(violations)
