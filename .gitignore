@@ -64,6 +64,7 @@ chroma_data/
 .firecrawl/
 .playwright-mcp/
 .claude/
+.codex/
 
 # === Local dev (private docs, reference repos) ===
 .local/
