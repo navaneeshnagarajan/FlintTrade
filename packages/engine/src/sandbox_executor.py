@@ -803,7 +803,19 @@ class SandboxExecutor:
         timed_out_flag: list[bool] = [False]
 
         def _run() -> None:
-            self._apply_memory_limit()
+            # NOTE: We DO NOT call self._apply_memory_limit() here. On Linux,
+            # resource.setrlimit(RLIMIT_AS, ...) is process-wide regardless
+            # of which thread invokes it — calling it from this worker thread
+            # would permanently cap the calling process's address space. In
+            # the pytest test runner that means subsequent tests OOM-fail
+            # once accumulated test state (reports, fixtures, module caches)
+            # exceeds the 256 MiB cap — observed in CI as a deluge of
+            # ``MemoryError`` after a single in-thread test runs early in
+            # pytest-randomly's order (2026-05-19, run 26124613073). Memory
+            # enforcement only makes sense in the subprocess child, which
+            # has its own address space — see _sandbox_child._apply_rlimits.
+            # The in-thread path is for TRUSTED callers (in-house templates,
+            # hot backtest loops); no hostile-code scenario applies here.
             try:
                 exec(source_code, namespace)  # noqa: S102
             except Exception as exc:  # noqa: BLE001
@@ -914,8 +926,21 @@ class SandboxExecutor:
         """Apply address-space limit via ``resource`` (Linux/macOS only).
 
         On Windows (no ``resource`` module) this is a silent no-op.
-        The limit is applied inside the worker thread so it only
-        constrains that thread's process-level address space.
+
+        WARNING — process-wide effect:
+            ``setrlimit(RLIMIT_AS, …)`` on Linux is **per-process**, not
+            per-thread. Calling this from any thread caps the entire
+            calling process's address space. This method is therefore
+            NOT called from :meth:`_run_in_thread` — that would poison
+            the pytest runner (and any other long-lived host) by lowering
+            its memory ceiling permanently. Memory enforcement happens
+            inside the sandbox subprocess (see ``_sandbox_child._apply_rlimits``)
+            where a tight address-space cap is exactly what we want and
+            the child exits before the cap matters elsewhere.
+
+            The method is retained only so the existing unit tests can
+            exercise its three branches in isolation. Production callers
+            should NOT invoke it on the host process.
         """
         if not _RESOURCE_AVAILABLE or _resource_mod is None:
             return
