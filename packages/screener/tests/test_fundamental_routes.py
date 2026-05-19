@@ -3,12 +3,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 from flask import Flask
 
 import packages.screener.src.fundamental_routes as mod
+
+
+def _async_returns(value: Any):
+    """Mock-side-effect for _run_async that consumes the coroutine.
+
+    The route handlers call ``_run_async(screener.method(args))`` — Python
+    evaluates ``screener.method(args)`` first, creating a coroutine, which
+    is then passed to ``_run_async``. When ``_run_async`` is patched with
+    ``return_value=...`` the coroutine is never awaited or closed, and
+    Python's garbage collector eventually emits a "coroutine was never
+    awaited" RuntimeWarning at whatever point GC runs (often inside an
+    unrelated test's werkzeug routing code). Closing the coroutine here
+    suppresses the leak at the source.
+    """
+    def _impl(coro):
+        if hasattr(coro, "close"):
+            coro.close()
+        return value
+    return _impl
+
+
+def _async_raises(exc: BaseException):
+    """Mock-side-effect that closes the inbound coroutine then raises ``exc``."""
+    def _impl(coro):
+        if hasattr(coro, "close"):
+            coro.close()
+        raise exc
+    return _impl
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +107,7 @@ def test_search_ok(client):
     """200 with company search results."""
     with patch(
         "packages.screener.src.fundamental_routes._run_async",
-        return_value=[_SearchResult()],
+        side_effect=_async_returns([_SearchResult()]),
     ):
         resp = client.get("/api/v1/screener/fundamental/search?q=reliance")
     assert resp.status_code == 200
@@ -109,7 +138,7 @@ def test_get_company_ok(client):
     """200 with company fundamentals."""
     with patch(
         "packages.screener.src.fundamental_routes._run_async",
-        return_value=_CompanyData(),
+        side_effect=_async_returns(_CompanyData()),
     ):
         resp = client.get("/api/v1/screener/fundamental/RELIANCE")
     assert resp.status_code == 200
@@ -122,7 +151,7 @@ def test_get_company_not_found(client):
     """500 or 404 when company data not found (asdict on None raises exception)."""
     with patch(
         "packages.screener.src.fundamental_routes._run_async",
-        side_effect=Exception("Not found"),
+        side_effect=_async_raises(Exception("Not found")),
     ):
         resp = client.get("/api/v1/screener/fundamental/UNKNOWNSYMBOL")
     # The route catches all exceptions and returns 500
@@ -139,7 +168,7 @@ def test_screen_ok(client):
     """200 with screened companies list."""
     with patch(
         "packages.screener.src.fundamental_routes._run_async",
-        return_value=[_ScreenResult()],
+        side_effect=_async_returns([_ScreenResult()]),
     ):
         resp = client.post(
             "/api/v1/screener/fundamental/screen",
@@ -156,7 +185,7 @@ def test_screen_empty_result(client):
     """200 with empty stocks list when no companies pass the filter."""
     with patch(
         "packages.screener.src.fundamental_routes._run_async",
-        return_value=[],
+        side_effect=_async_returns([]),
     ):
         resp = client.post("/api/v1/screener/fundamental/screen", json={})
     assert resp.status_code == 200

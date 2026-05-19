@@ -38,9 +38,9 @@ def app(monkeypatch, tmp_path) -> Flask:
     """
     # Pin JWT secret so token creation/decoding stays in sync regardless of
     # whether a previous test has touched the cached module-level secret.
-    monkeypatch.setenv("JWT_SECRET", "test-secret-for-mode-guard")
+    monkeypatch.setenv("JWT_SECRET", "test-secret-for-mode-guard-hs256")
     import packages.core.src.auth_routes as auth_mod
-    monkeypatch.setattr(auth_mod, "_JWT_SECRET_KEY", "test-secret-for-mode-guard")
+    monkeypatch.setattr(auth_mod, "_JWT_SECRET_KEY", "test-secret-for-mode-guard-hs256")
 
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = False  # MUST be False to exercise the guard
@@ -190,7 +190,7 @@ def test_live_unlocked_unknown_mode_returns_400(app, monkeypatch):
         # require_exp isn't set. Include a far-future exp for safety.
         "exp": 9999999999,
     }
-    tok = pyjwt.encode(payload, "test-secret-for-mode-guard", algorithm="HS256")
+    tok = pyjwt.encode(payload, "test-secret-for-mode-guard-hs256", algorithm="HS256")
     with app.test_client() as c:
         resp = c.post("/test/live-unlocked", headers=_bearer(tok))
     assert resp.status_code == 400

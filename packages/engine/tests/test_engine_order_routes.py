@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from flask import Flask
 
 import packages.engine.src.order_routes as mod
+
+
+def _async_returns(value: Any):
+    """Mock-side-effect for _run_async that consumes the inbound coroutine.
+
+    The route handler does ``_run_async(executor.execute(...))`` — Python
+    creates the AsyncMock coroutine first, then passes it to _run_async.
+    A bare ``return_value=...`` patch on _run_async leaves the coroutine
+    unawaited, which Python's GC later flags as a RuntimeWarning at some
+    unrelated location (often werkzeug's URL routing). Closing the
+    coroutine here suppresses the leak at the source.
+    """
+    def _impl(coro):
+        if hasattr(coro, "close"):
+            coro.close()
+        return value
+    return _impl
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +114,7 @@ def test_basket_ok():
     with _make_app(basket_executor=ex).test_client() as c:
         with patch(
             "packages.engine.src.order_routes._run_async",
-            return_value=result,
+            side_effect=_async_returns(result),
         ):
             resp = c.post("/api/v1/orders/basket", json={"legs": legs})
 
@@ -136,7 +154,7 @@ def test_split_ok():
     with _make_app(split_executor=ex).test_client() as c:
         with patch(
             "packages.engine.src.order_routes._run_async",
-            return_value=result,
+            side_effect=_async_returns(result),
         ):
             resp = c.post(
                 "/api/v1/orders/split",

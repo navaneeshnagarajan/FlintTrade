@@ -839,7 +839,10 @@ def _coerce_ts(ts: datetime | None) -> datetime:
         Naive UTC datetime.
     """
     if ts is None:
-        return datetime.utcnow()
+        # datetime.utcnow() is deprecated in Python 3.12+; preserve the naive-UTC
+        # semantic the rest of this module expects (psycopg2 wire adapter doesn't
+        # take tzinfo) by using timezone-aware now() and stripping tzinfo.
+        return datetime.now(timezone.utc).replace(tzinfo=None)
     if ts.tzinfo is not None:
         return ts.astimezone(timezone.utc).replace(tzinfo=None)
     return ts

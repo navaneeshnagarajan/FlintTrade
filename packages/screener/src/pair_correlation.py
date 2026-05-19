@@ -173,7 +173,13 @@ class PairCorrelationEngine:
         if len(xa_clean) < _MIN_OBSERVATIONS:
             corr = 0.0
         else:
-            raw_corr = float(np.corrcoef(xa_clean, xb_clean)[0, 1])
+            # np.corrcoef divides each row by its stddev — for flat or
+            # identical inputs that stddev is zero and numpy emits a
+            # RuntimeWarning. The downstream `np.isfinite` check already
+            # falls back to 0.0 in that case, so silence the harmless
+            # warning at the call site.
+            with np.errstate(invalid="ignore", divide="ignore"):
+                raw_corr = float(np.corrcoef(xa_clean, xb_clean)[0, 1])
             corr = round(raw_corr if np.isfinite(raw_corr) else 0.0, 4)
 
         # Spread statistics over the price window

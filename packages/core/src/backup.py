@@ -215,7 +215,13 @@ class WorkspaceBackup:
                             )
 
                 target_dir.mkdir(parents=True, exist_ok=True)
-                tar.extractall(path=target_dir)  # noqa: S202
+                # filter="data" applies the PEP 706 safe filter that rejects
+                # absolute paths, links escaping the destination, and special
+                # files. Required ahead of Python 3.14 which emits a
+                # DeprecationWarning today and will default to rejecting
+                # unfiltered extracts. We're extracting our own backups so
+                # the conservative "data" profile is the right fit.
+                tar.extractall(path=target_dir, filter="data")  # noqa: S202
 
         except tarfile.TarError as exc:
             raise BackupError(f"Archive is corrupt or invalid: {exc}") from exc

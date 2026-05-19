@@ -423,9 +423,15 @@ class StrategyComparator:
 
         for name in names_with_returns:
             for sel in selected:
-                corr = float(
-                    np.corrcoef(aligned[name], aligned[sel])[0, 1]
-                )
+                # Same divide-by-zero guard as the matrix builder below; a
+                # zero-variance return series here just means we skip the
+                # high-correlation penalty for that pair.
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    corr = float(
+                        np.corrcoef(aligned[name], aligned[sel])[0, 1]
+                    )
+                if not math.isfinite(corr):
+                    continue
                 if abs(corr) > 0.95:
                     penalties[name] *= 0.5
             selected.append(name)
@@ -521,7 +527,12 @@ class StrategyComparator:
                 min_len = min(len(ri), len(rj))
                 if min_len < 2:
                     continue
-                corr_matrix = np.corrcoef(ri[:min_len], rj[:min_len])
+                # Suppress the divide-by-zero warning numpy emits when one or
+                # both return series have zero variance (flat equity curve).
+                # The math.isfinite check below already coerces NaN → 0.0,
+                # so the warning is noise.
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    corr_matrix = np.corrcoef(ri[:min_len], rj[:min_len])
                 corr = float(corr_matrix[0, 1])
                 if not math.isfinite(corr):
                     corr = 0.0

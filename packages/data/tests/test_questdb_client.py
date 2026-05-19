@@ -194,9 +194,12 @@ class TestInsertLtp:
 
     def test_insert_ltp_defaults_timestamp_to_utcnow(self):
         client, _, mock_cursor = _make_client()
-        before = datetime.utcnow()
+        # datetime.utcnow() is deprecated in 3.12+; the production code now uses
+        # `datetime.now(timezone.utc).replace(tzinfo=None)` to keep the naive-UTC
+        # contract — mirror that here so the bracketing assertion is exact.
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
         client.insert_ltp("RELIANCE", "NSE", 2985.5)
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
         ts = mock_cursor.execute.call_args[0][1][0]
         assert isinstance(ts, datetime)
         assert before <= ts <= after
@@ -430,9 +433,10 @@ class TestCoerceTs:
     def test_none_returns_utcnow(self):
         from packages.data.src.questdb_client import _coerce_ts
 
-        before = datetime.utcnow()
+        # Match the new naive-UTC pattern the production helper now uses.
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
         result = _coerce_ts(None)
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
         assert result.tzinfo is None
         assert before <= result <= after
 
