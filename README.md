@@ -8,9 +8,9 @@
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-orange)
-![Status](https://img.shields.io/badge/status-v0.5.0--dev-blue)
+![Status](https://img.shields.io/badge/status-v0.5.1-blue)
 
-> **v0.5.0-dev** — post-v0.5.0 GA hardening. 82 widgets, 94 backtest strategy templates + 2 live-engine strategies, 16 packages, 12 public routes (+ DEV `/admin` + 404), ~12,062 tests.
+> **v0.5.1** — security hardening + CI stability patch release (2026-05-20, tag `v0.5.1`). 82 widgets, 94 backtest strategy templates + 2 live-engine strategies, 16 packages, 12 public routes (+ DEV `/admin` + 404), ~12,062 tests, 0 ruff errors, 0 CI warnings.
 > Glass Adaptive design system, 4-tab Unified Search (Ctrl+K), macOS dock sidebar, Bento Grid dashboard, Crawl4AI integration, full codebase audit.
 
 Open-source modular trading platform for Indian markets with direct broker connections. Built on [OpenAlgo](https://openalgo.in) adapters. Supports 33 brokers, equities, F&O, commodities, currency derivatives, and crypto.

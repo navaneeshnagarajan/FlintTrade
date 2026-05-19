@@ -10,7 +10,7 @@
 
 ## Current State (updated 2026-05-19)
 
-- **Version:** v0.5.0-dev — post-v0.5.0 GA tag (`2741cad`, 2026-04-19); post-GA hardening continues
+- **Version:** v0.5.1 (tag `v0.5.1`, 2026-05-20) — security hardening + CI stability patch release. Now on `v0.5.2-dev`; see `docs/RELEASE_NOTES_v0.5.1.md` and CHANGELOG for the GA narrative.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total — verified 2026-05-19
 - **Packages:** 16 (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri)
 - **Widgets:** 82 (22 trading + 38 analysis + 22 utility)
