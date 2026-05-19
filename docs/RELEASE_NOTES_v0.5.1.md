@@ -1,8 +1,9 @@
 # FlintTrade v0.5.1 — release notes
 
-**Status:** release candidate (`flint.toml` version `0.5.1-rc`).
+**Status:** GA — tagged `v0.5.1` (`ea64af5`, 2026-05-20).
 **Base:** v0.5.0 GA (`2741cad`, 2026-04-19).
-**Diff:** 46 commits, ~8,800 inserts / ~3,500 deletes, no breaking API changes.
+**Diff:** 59 commits, no breaking API changes.
+**Verification:** CI green on `ea64af5` — 8,989 Python tests passed + 147 skipped, 0 warnings, 0 ruff errors, 0 open Dependabot alerts.
 
 This is a **patch release** focused entirely on security hardening, route-contract correctness, and CI infrastructure. No new user-facing features. Safe upgrade from v0.5.0 — every public API on the backend kept its existing call shape; the sandbox executor's `SandboxExecutor.run` and `ftApi.helpers.{post,get,put,del}` are backwards-compatible.
 
