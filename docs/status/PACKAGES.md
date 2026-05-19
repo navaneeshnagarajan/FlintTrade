@@ -26,10 +26,10 @@ All counts are raw outputs of `find` / manifest parsing on the working tree at c
 ## Package version drift
 
 - **All Python packages:** `0.5.1`
-- **Repo-level `VERSION`:** `0.5.0-dev`
-- **`packages/terminal/package.json`:** `0.3.0` — noticeably behind
-- **`packages/desktop` (npm):** `0.1.0`
-- **`packages/desktop` (cargo):** `0.5.0`
+- **Repo-level `VERSION`:** `0.5.1`
+- **`packages/terminal/package.json`:** `0.5.1`
+- **`packages/desktop` (npm):** `0.1.0` (independent versioning — npm shell only)
+- **`packages/desktop` (cargo):** `0.5.1`
 - **`packages/chrome-extension/manifest.json`:** `0.2.0`
 - **`packages/tick-engine/pyproject.toml`:** `0.1.0`
 - **`packages/tick-engine/Cargo.toml`:** `0.2.0`
