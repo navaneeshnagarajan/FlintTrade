@@ -180,16 +180,25 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
-    // Vitest defaults to a worker pool sized to CPU count, which OOMs on the
-    // 16 GB dev box and 7 GB CI runner because each jsdom worker holds a full
-    // DOM + the entire app's module graph. Cap workers + isolate per-file so
-    // memory does not balloon across the ~260 test files.
-    pool: "threads",
+    // Vitest's worker pool blows the heap when `pool: 'threads'` because
+    // every thread shares a single process and each jsdom worker holds a
+    // full DOM + the entire app's module graph in memory. With ~260 test
+    // files and 4 concurrent workers, that's ~4 × 2 GB of resident memory,
+    // which OOMs both the 16 GB dev box and the 7 GB CI Ubuntu runner.
+    // `node-widget-tests-1` and `node-widget-tests-3` reliably died here.
+    //
+    // Switching to `pool: 'forks'` (Vitest's default, but we used to
+    // override) puts each test file in its own child process, so the
+    // OS reclaims the heap when the file finishes. Context7 confirms
+    // this is the canonical fix for jsdom + ESM heap exhaustion (see
+    // https://vitest.dev/guide/common-errors#segfaults-and-native-code-errors
+    // and https://vitest.dev/guide/improving-performance#pool).
+    pool: "forks",
     poolOptions: {
-      threads: {
-        // Tuned for 16 GB local + 7 GB CI runner. Override with VITEST_MAX_THREADS.
-        maxThreads: Number(process.env.VITEST_MAX_THREADS ?? 4),
-        minThreads: 1,
+      forks: {
+        // Tuned for 16 GB local + 7 GB CI runner. Override with VITEST_MAX_FORKS.
+        maxForks: Number(process.env.VITEST_MAX_FORKS ?? 4),
+        minForks: 1,
         isolate: true,
       },
     },

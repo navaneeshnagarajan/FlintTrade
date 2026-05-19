@@ -38,16 +38,19 @@ describe("GreeksHeatmapWidget", () => {
     expect(screen.getByText("Greeks Heatmap")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("shows Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<GreeksHeatmapWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when connected", () => {
+  it("still shows Sample data badge when connected — no live endpoint yet", () => {
+    // Per the widget header comment, the /api/v1/analysis/greeks-heatmap
+    // backend route doesn't exist; the badge stays visible at all times
+    // to avoid lying about the source of the data once a broker connects.
     mockConnected.mockReturnValue(true);
     render(<GreeksHeatmapWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
   it("renders Greek toggle buttons", () => {
