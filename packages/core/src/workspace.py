@@ -12,6 +12,7 @@ in workspace.json. Infrastructure settings (OpenAlgo connection) stay in .env.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -167,7 +168,14 @@ class Workspace:
                 self._config = json.load(f)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to load workspace.json: %s — using defaults", exc)
-            self._config = dict(_DEFAULT_CONFIG)
+            # deepcopy: _DEFAULT_CONFIG contains nested dicts ("ui", "modules",
+            # "storage", etc.). dict() does a shallow copy, so calls like
+            # ws.set("ui.theme", "light") would mutate the SHARED nested dict
+            # inside _DEFAULT_CONFIG itself — poisoning every subsequent
+            # Workspace() that initialises from defaults. Surfaced in CI as
+            # the test_get_dot_notation flake when pytest-randomly happened
+            # to schedule test_set_and_persist first.
+            self._config = copy.deepcopy(_DEFAULT_CONFIG)
         return self._config
 
     def save(self, config: dict[str, Any] | None = None) -> None:
@@ -179,8 +187,13 @@ class Workspace:
             json.dump(self._config, f, indent=2, sort_keys=True)
 
     def initialise(self, config: dict[str, Any] | None = None) -> None:
-        """First-time setup — create dirs, write default config."""
-        self._config = config or dict(_DEFAULT_CONFIG)
+        """First-time setup — create dirs, write default config.
+
+        deepcopy of ``_DEFAULT_CONFIG`` (not ``dict()``) because the default
+        config contains nested dicts that later ``set()`` calls would mutate
+        in place — sharing those mutations across every Workspace instance.
+        """
+        self._config = config or copy.deepcopy(_DEFAULT_CONFIG)
         self._config["initialized"] = True
         self.ensure_directories()
         self.save()

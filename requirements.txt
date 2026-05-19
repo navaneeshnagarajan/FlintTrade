@@ -30,3 +30,7 @@ structlog>=24.1.0
 flask-cors>=4.0
 flask-limiter>=3.5
 sentry-sdk[flask]>=2.0
+# psutil for HealthMonitor.check_thread_count + check_memory; without it
+# the health monitor returns "skipped" and tests asserting baseline state
+# fail in CI environments that don't ship psutil by transitive pull-in.
+psutil>=5.9
