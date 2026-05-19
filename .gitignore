@@ -86,3 +86,4 @@ progress.md
 qa-*.png
 packages/tick-engine/target/
 packages/desktop/src-tauri/target/
+coverage

@@ -163,19 +163,21 @@ describe("evaluateContrast", () => {
     expect(result.ratio).toBe(21);
   });
 
-  it("labels a ~4.5:1 pair as AA", () => {
-    // #595959 on white is ≈ 7.0, use a pair we know is between 4.5 and 7.0
-    // Just test that if ratio >= 4.5 and < 7.0, label is AA
-    const result = evaluateContrast("#22c55e", "#0a0a0f");
-    if (result.ratio >= 4.5 && result.ratio < 7.0) {
-      expect(result.label).toBe("AA");
-    } else if (result.ratio >= 7.0) {
-      expect(result.label).toBe("AAA");
-    }
+  it("labels a pair with ratio >= 4.5 and < 7.0 as AA", () => {
+    // #767676 on #ffffff has ratio 4.54
+    const result = evaluateContrast("#767676", "#ffffff");
+    expect(result.label).toBe("AA");
     expect(result.passes).toBe(true);
   });
 
-  it("labels a low-contrast pair as Fail", () => {
+  it("labels a pair with ratio >= 3.0 and < 4.5 as AA Large", () => {
+    // #888888 on #ffffff has ratio 3.54
+    const result = evaluateContrast("#888888", "#ffffff");
+    expect(result.label).toBe("AA Large");
+    expect(result.passes).toBe(false); // Fails default (4.5) threshold
+  });
+
+  it("labels a pair with ratio < 3.0 as Fail", () => {
     const result = evaluateContrast("#222222", "#333333");
     expect(result.label).toBe("Fail");
     expect(result.passes).toBe(false);
@@ -188,18 +190,14 @@ describe("evaluateContrast", () => {
   });
 
   it("large text flag affects passes for border-line ratio", () => {
-    // Find a border-line pair (ratio ~3.5)
-    const result = evaluateContrast("#888888", "#ffffff");
-    if (result.ratio >= 3.0 && result.ratio < 4.5) {
-      const normalResult = evaluateContrast("#888888", "#ffffff", false);
-      const largeResult  = evaluateContrast("#888888", "#ffffff", true);
-      expect(normalResult.passes).toBe(false);
-      expect(largeResult.passes).toBe(true);
-    } else {
-      // Ratio outside border range — just verify structure
-      expect(result).toHaveProperty("ratio");
-      expect(result).toHaveProperty("passes");
-      expect(result).toHaveProperty("label");
-    }
+    // #888888 on #ffffff has ratio 3.54
+    const normalResult = evaluateContrast("#888888", "#ffffff", false);
+    const largeResult  = evaluateContrast("#888888", "#ffffff", true);
+
+    expect(normalResult.passes).toBe(false);
+    expect(normalResult.label).toBe("AA Large");
+
+    expect(largeResult.passes).toBe(true);
+    expect(largeResult.label).toBe("AA Large");
   });
 });

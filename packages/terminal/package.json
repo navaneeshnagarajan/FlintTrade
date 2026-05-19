@@ -67,6 +67,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/react-plotly.js": "^2.6.4",
     "@vitejs/plugin-react": "^4.0.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "jsdom": "^29.0.0",
     "marked": "^17.0.5",
     "react-responsive-carousel": "^3.2.23",
