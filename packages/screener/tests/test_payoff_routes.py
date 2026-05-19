@@ -60,7 +60,7 @@ def test_payoff_analyse_ok(client):
     }
     with patch.object(mod._payoff_engine, "calculate", return_value=result):
         resp = client.post(
-            "/v1/payoff/analyse",
+            "/api/v1/payoff/analyse",
             json={"legs": [_LEG], "spot": 24000.0, "iv": 0.18, "days_to_expiry": 7},
         )
     assert resp.status_code == 200
@@ -71,7 +71,7 @@ def test_payoff_analyse_ok(client):
 
 def test_payoff_analyse_no_legs(client):
     """400 when legs list is empty."""
-    resp = client.post("/v1/payoff/analyse", json={"legs": [], "spot": 24000.0})
+    resp = client.post("/api/v1/payoff/analyse", json={"legs": [], "spot": 24000.0})
     assert resp.status_code == 400
     body = resp.get_json()
     assert body["status"] == "error"
@@ -81,7 +81,7 @@ def test_payoff_analyse_invalid_leg(client):
     """400 when a leg object has invalid fields."""
     bad_leg = {"side": "INVALID_SIDE", "option_type": "CE", "strike": 24000.0}
     resp = client.post(
-        "/v1/payoff/analyse",
+        "/api/v1/payoff/analyse",
         json={"legs": [bad_leg], "spot": 24000.0},
     )
     assert resp.status_code == 400
@@ -91,7 +91,7 @@ def test_payoff_analyse_engine_error(client):
     """500 when the payoff engine raises an unexpected exception."""
     with patch.object(mod._payoff_engine, "calculate", side_effect=RuntimeError("GPU OOM")):
         resp = client.post(
-            "/v1/payoff/analyse",
+            "/api/v1/payoff/analyse",
             json={"legs": [_LEG], "spot": 24000.0},
         )
     assert resp.status_code == 500
@@ -115,7 +115,7 @@ def test_payoff_curve_ok(client):
     points = [_make_point(24000.0, -150.0), _make_point(24150.0, 0.0)]
     with patch.object(mod._payoff_engine, "payoff_at_expiry", return_value=points):
         resp = client.post(
-            "/v1/payoff/curve",
+            "/api/v1/payoff/curve",
             json={"legs": [_LEG], "spot": 24000.0, "n_points": 50},
         )
     assert resp.status_code == 200
@@ -127,7 +127,7 @@ def test_payoff_curve_ok(client):
 
 def test_payoff_curve_no_legs(client):
     """400 when legs list is absent."""
-    resp = client.post("/v1/payoff/curve", json={"spot": 24000.0})
+    resp = client.post("/api/v1/payoff/curve", json={"spot": 24000.0})
     assert resp.status_code == 400
 
 
@@ -136,7 +136,7 @@ def test_payoff_curve_with_explicit_range(client):
     points = [_make_point()]
     with patch.object(mod._payoff_engine, "payoff_at_expiry", return_value=points):
         resp = client.post(
-            "/v1/payoff/curve",
+            "/api/v1/payoff/curve",
             json={
                 "legs": [_LEG],
                 "spot": 24000.0,
@@ -152,7 +152,7 @@ def test_payoff_curve_engine_error(client):
         mod._payoff_engine, "payoff_at_expiry", side_effect=ValueError("bad range")
     ):
         resp = client.post(
-            "/v1/payoff/curve",
+            "/api/v1/payoff/curve",
             json={"legs": [_LEG], "spot": 24000.0},
         )
     assert resp.status_code == 500
@@ -183,7 +183,7 @@ def test_regime_current_ok(client):
     """200 with regime signal when VIX is provided."""
     signal = _make_regime_signal()
     with patch.object(mod._regime_detector, "detect", return_value=signal):
-        resp = client.get("/v1/regime/current?vix=15.0")
+        resp = client.get("/api/v1/regime/current?vix=15.0")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"
@@ -194,7 +194,7 @@ def test_regime_current_defaults(client):
     """200 using default VIX=15 when no params are given."""
     signal = _make_regime_signal()
     with patch.object(mod._regime_detector, "detect", return_value=signal):
-        resp = client.get("/v1/regime/current")
+        resp = client.get("/api/v1/regime/current")
     assert resp.status_code == 200
 
 
@@ -203,7 +203,7 @@ def test_regime_current_full_params(client):
     signal = _make_regime_signal()
     with patch.object(mod._regime_detector, "detect", return_value=signal):
         resp = client.get(
-            "/v1/regime/current"
+            "/api/v1/regime/current"
             "?vix=18.5&dxy=104.2&fii_net=1200&breadth=55&advance=1200&decline=800"
         )
     assert resp.status_code == 200
@@ -214,7 +214,7 @@ def test_regime_current_detector_error(client):
     with patch.object(
         mod._regime_detector, "detect", side_effect=RuntimeError("model failure")
     ):
-        resp = client.get("/v1/regime/current?vix=20.0")
+        resp = client.get("/api/v1/regime/current?vix=20.0")
     assert resp.status_code == 500
     body = resp.get_json()
     assert body["status"] == "error"
@@ -249,7 +249,7 @@ def test_correlation_post_ok(client):
         return_value={"NIFTY": [0.01] * 90, "BANKNIFTY": [0.009] * 90},
     ):
         resp = client.post(
-            "/v1/analytics/correlation",
+            "/api/v1/analytics/correlation",
             json={"symbols": ["NIFTY", "BANKNIFTY"], "vix": 15.0},
         )
     assert resp.status_code == 200
@@ -266,7 +266,7 @@ def test_correlation_get_ok(client):
         "packages.screener.src.payoff_routes.make_sample_returns",
         return_value={"NIFTY": [0.01] * 90},
     ):
-        resp = client.get("/v1/analytics/correlation?vix=15.0")
+        resp = client.get("/api/v1/analytics/correlation?vix=15.0")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "success"
@@ -279,7 +279,7 @@ def test_correlation_sample_data_flag(client):
         "packages.screener.src.payoff_routes.make_sample_returns",
         return_value={"NIFTY": [0.01] * 90},
     ):
-        resp = client.post("/v1/analytics/correlation", json={})
+        resp = client.post("/api/v1/analytics/correlation", json={})
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["data"]["is_sample_data"] is True
@@ -293,7 +293,7 @@ def test_correlation_engine_error(client):
         "packages.screener.src.payoff_routes.make_sample_returns",
         return_value={"NIFTY": [0.01] * 90},
     ):
-        resp = client.post("/v1/analytics/correlation", json={})
+        resp = client.post("/api/v1/analytics/correlation", json={})
     assert resp.status_code == 500
     body = resp.get_json()
     assert body["status"] == "error"

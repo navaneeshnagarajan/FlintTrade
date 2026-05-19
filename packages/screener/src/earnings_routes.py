@@ -38,7 +38,7 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger("flinttrade.screener.earnings_routes")
 
-earnings_bp = Blueprint("earnings", __name__, url_prefix="/v1/earnings")
+earnings_bp = Blueprint("earnings", __name__, url_prefix="/api/v1/earnings")
 
 # ---------------------------------------------------------------------------
 # Lazy calendar singleton

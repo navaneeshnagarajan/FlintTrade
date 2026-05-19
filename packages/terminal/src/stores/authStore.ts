@@ -25,6 +25,12 @@ interface AuthState {
   checkIdle: () => void;
   /** Schedules automatic logout at the next 08:00 IST. Called by setLoggedIn. */
   startExpiryTimer: () => void;
+  /**
+   * Replace the active JWT in-place (used after PIN unlock or
+   * mode-switch downgrade). Preserves status/username/expiresAt and
+   * resets activity so the idle timer doesn't immediately downgrade.
+   */
+  updateToken: (token: string) => void;
 }
 
 const IDLE_PIN_THRESHOLD = 5 * 60 * 1000;    // 5 min → PIN required
@@ -91,6 +97,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setSetupRequired: () =>
     set({ status: "setup-required", token: null, username: null }),
+
+  updateToken: (token) => set({ token, lastActivity: Date.now() }),
 
   touchActivity: () => set({ lastActivity: Date.now() }),
 

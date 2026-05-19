@@ -195,23 +195,29 @@ export const runBacktest = (config: BacktestConfig) =>
 export const runPortfolioBacktest = (config: PortfolioBacktestConfig) =>
   post<PortfolioBacktestResult>("backtest/portfolio", config);
 
+// Backtest built-in strategy catalogue lives under /backtest/strategies* so
+// it doesn't collide with the engine's strategy_bp (which owns
+// /api/v1/strategies for live strategy lifecycle). Pre-2026-05-19 these
+// shared the same URL path and Flask first-match-wins silently shadowed
+// the backtest list with the live runner list.
+
 export const getStrategies = () =>
-  get<{ strategies: StrategyInfo[] }>("strategies").then((r) => r.strategies);
+  get<{ strategies: StrategyInfo[] }>("backtest/strategies").then((r) => r.strategies);
 
 export const getRunningStrategies = () =>
-  get<{ strategies: RunningStrategy[] }>("strategies/running").then(
+  get<{ strategies: RunningStrategy[] }>("backtest/strategies/running").then(
     (r) => r.strategies,
   );
 
 export const startStrategy = (name: string, config: Record<string, unknown>) =>
   post<{ status: string }>(
-    "strategies/" + encodeURIComponent(name) + "/start",
+    "backtest/strategies/" + encodeURIComponent(name) + "/start",
     config,
   );
 
 export const stopStrategy = (name: string) =>
   post<{ status: string }>(
-    "strategies/" + encodeURIComponent(name) + "/stop",
+    "backtest/strategies/" + encodeURIComponent(name) + "/stop",
   );
 
 export const getForwardTrades = (name: string) =>
@@ -220,7 +226,7 @@ export const getForwardTrades = (name: string) =>
   ).then((r) => r.trades);
 
 export const getUploadedStrategies = () =>
-  get<{ strategies: UploadedStrategy[] }>("strategies/uploaded").then(
+  get<{ strategies: UploadedStrategy[] }>("backtest/strategies/uploaded").then(
     (r) => r.strategies,
   );
 
@@ -244,19 +250,24 @@ export const uploadStrategy = (file: File): Promise<UploadedStrategy> => {
     });
 };
 
+// Uploaded-strategy lifecycle is owned by the engine's strategy_bp at
+// /api/v1/strategies/<id>/{start,stop,logs} — the previous
+// /api/v1/strategies/uploaded/<id>/* URLs were unmatched on the backend
+// (no blueprint registered them) and silently 404'd in production.
+
 export const startUploadedStrategy = (id: string) =>
   post<{ status: string }>(
-    "strategies/uploaded/" + encodeURIComponent(id) + "/start",
+    "strategies/" + encodeURIComponent(id) + "/start",
   );
 
 export const stopUploadedStrategy = (id: string) =>
   post<{ status: string }>(
-    "strategies/uploaded/" + encodeURIComponent(id) + "/stop",
+    "strategies/" + encodeURIComponent(id) + "/stop",
   );
 
 export const getStrategyLogs = (id: string) =>
   get<{ strategy_id: string; lines: string[] }>(
-    "strategies/uploaded/" + encodeURIComponent(id) + "/logs",
+    "strategies/" + encodeURIComponent(id) + "/logs",
   ).then((r) =>
     r.lines.map((line): StrategyLogEntry => {
       const match = line.match(/^(\S+ \S+)\s+\[(\w+)]\s+(.*)/);

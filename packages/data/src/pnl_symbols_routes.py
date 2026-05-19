@@ -76,16 +76,23 @@ def _parse_iso_date(value: str, field_name: str) -> tuple[datetime | None, tuple
     )
 
 
-@pnl_symbols_bp.route("/pnl/symbols", methods=["GET"])
+@pnl_symbols_bp.route("/pnl/symbols", methods=["GET", "POST"])
 def pnl_by_symbols() -> tuple[Any, int]:
     """Return P&L aggregated by symbol for a given date range.
+
+    Accepts both GET (query params) and POST (JSON body) so the route
+    contract matches OpenAlgo's ``POST /api/v1/pnl/symbols`` endpoint —
+    which the terminal's ``api.ts`` ``getPnlSymbols()`` helper targets.
+    The FlintTrade backend version is currently unused by the terminal
+    (Vite's ``/api`` proxy routes that helper to OpenAlgo, not here), but
+    accepting both verbs prevents a future caller from hitting a 405.
 
     The endpoint reads the in-memory P&L series held by the module-level
     :class:`PnLTracker` singleton.  Because :class:`PnLTracker` stores
     aggregate snapshots rather than per-trade records, the response
     exposes the *latest* snapshot values alongside time-series stats.
 
-    Query parameters:
+    Query parameters / JSON body:
         date_from (str, optional): ISO-8601 start date, e.g. ``2026-04-01``.
         date_to (str, optional): ISO-8601 end date, e.g. ``2026-04-30``.
 
@@ -93,8 +100,13 @@ def pnl_by_symbols() -> tuple[Any, int]:
         JSON ``{"status": "success", "date_from": "...", "date_to": "...",
         "summary": {...}, "series_count": N}``.
     """
-    date_from_raw: str = request.args.get("date_from", "").strip()
-    date_to_raw: str = request.args.get("date_to", "").strip()
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        date_from_raw: str = str(body.get("date_from", "")).strip()
+        date_to_raw: str = str(body.get("date_to", "")).strip()
+    else:
+        date_from_raw = request.args.get("date_from", "").strip()
+        date_to_raw = request.args.get("date_to", "").strip()
 
     since_ts: float | None = None
     until_ts: float | None = None

@@ -480,6 +480,97 @@ def auth_pin_verify() -> tuple[Any, int]:
     }), 200
 
 
+@auth_bp.route("/mode", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_mode_switch() -> tuple[Any, int]:
+    """Downgrade the current session to Practice mode.
+
+    Issues a NEW JWT with ``mode: "practice"`` and
+    ``live_mode_unlocked: false``, and REVOKES the caller's existing JWT
+    (so a stale live-unlocked token can't be replayed). This closes the
+    2026-05-19 Codex audit finding that ``ModeIndicator.tsx`` was
+    flipping local UI state to Practice without ever invalidating the
+    PIN-unlocked JWT — meaning a retained live-unlocked JWT could still
+    place live orders even after the UI displayed Practice.
+
+    Only ``mode: "practice"`` is accepted. Upgrading to Live ALWAYS goes
+    through ``/v1/auth/pin`` (re-authenticates with PIN) — no shortcut
+    exists from this endpoint, by design.
+
+    Request JSON:
+        mode (str): Must be ``"practice"``. Any other value is a 400.
+
+    Auth:
+        Caller must send a valid Bearer JWT (Practice or Live). The
+        endpoint reads the JTI from that token, issues a fresh JWT for
+        the same user, then revokes the original JTI.
+
+    Returns:
+        JSON ``{"status": "success", "data": {"token": <new_jwt>,
+        "mode": "practice", "live_mode_unlocked": false}}`` on 200.
+        401 if no/invalid token; 400 if requested mode is not practice;
+        503 if auth service is not configured.
+    """
+    target_mode = str((request.get_json(silent=True) or {}).get("mode", "")).strip().lower()
+    if target_mode != "practice":
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Only downgrades to 'practice' are allowed here. Upgrade to "
+                "'live' via POST /v1/auth/pin with PIN verification."
+            ),
+        }), 400
+
+    # Extract and verify the caller's existing JWT.
+    auth_header = request.headers.get("Authorization", "")
+    raw_token = auth_header.removeprefix("Bearer ").strip()
+    if not raw_token:
+        raw_token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not raw_token:
+        return jsonify({"status": "error", "message": "Authentication required."}), 401
+
+    try:
+        payload = decode_token(raw_token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError) as exc:
+        logger.info("Mode-switch with invalid/expired token: %s", exc)
+        return jsonify({"status": "error", "message": "Token invalid or expired."}), 401
+
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    # Issue the new Practice-mode JWT first; if anything goes wrong below
+    # we don't want to revoke the old token without a replacement.
+    username = str(payload.get("sub") or svc.get_profile().get("username", "user"))
+    new_token = _create_token(
+        username,
+        live_mode_unlocked=False,
+        mode="practice",
+    )
+
+    # Revoke the prior JTI (best-effort — if revocation fails the new JWT
+    # is still valid, and the worst case is the old token continues to
+    # work until its 8 AM IST expiry).
+    old_jti = str(payload.get("jti", ""))
+    old_exp = float(payload.get("exp", 0))
+    if old_jti:
+        try:
+            _revoke_jti(old_jti, old_exp)
+        except Exception:
+            logger.exception(
+                "Failed to revoke prior JTI on mode-switch (continuing) — jti=%s", old_jti,
+            )
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "token": new_token,
+            "mode": "practice",
+            "live_mode_unlocked": False,
+        },
+    }), 200
+
+
 @auth_bp.route("/logout", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_logout() -> tuple[Any, int]:
@@ -560,10 +651,14 @@ except ImportError:
 
 
 @auth_bp.route("/forgot-password", methods=["POST"])
+@_rate_limit("3 per hour")
 def auth_forgot_password() -> tuple[Any, int]:
     """Request a password reset email.
 
     Always returns 200 to avoid leaking whether the email exists.
+    Rate-limited to 3 per hour per client (matches the OTP-reset path).
+    A faster cadence here would let an attacker spray emails or
+    fingerprint registered addresses via timing.
     """
     mail = current_app.config.get("MAIL")
     if mail is None:
@@ -595,8 +690,15 @@ def auth_forgot_password() -> tuple[Any, int]:
 
 
 @auth_bp.route("/reset-password", methods=["POST"])
+@_rate_limit("5 per minute")
 def auth_reset_password() -> tuple[Any, int]:
-    """Reset password using a valid reset token."""
+    """Reset password using a valid reset token.
+
+    Rate-limited to 5 per minute per client to bound brute-force attempts
+    against the reset-token namespace. The token itself is signed + has a
+    one-hour expiry + is single-use via the JTI blocklist, so this is
+    defence-in-depth.
+    """
     body = request.get_json(silent=True) or {}
     token = str(body.get("token", "")).strip()
     new_password = str(body.get("new_password", ""))

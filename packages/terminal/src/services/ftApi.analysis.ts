@@ -177,7 +177,7 @@ export const getFtIVSmile = (
   exchange: string,
   expiry_dates?: string[],
 ) =>
-  post<IVSmileData>("iv_smile", {
+  post<IVSmileData>("ivsmile", {
     symbol,
     exchange,
     ...(expiry_dates ? { expiry_dates } : {}),

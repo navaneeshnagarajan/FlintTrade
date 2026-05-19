@@ -6,6 +6,33 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5.0-dev
 
+### Post-public-flip Codex audit — CRITICAL + HIGH fixes (2026-05-19)
+
+The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL-3.0 with unlimited Actions minutes.
+
+#### CRITICAL — JWT lifecycle drift between PIN unlock and UI mode toggle
+- `ModeIndicator.tsx:71-93` previously called `/ft-api/v1/auth/pin` and **discarded the returned live-unlocked JWT**, so a stale Practice JWT stayed in `authStore` while the UI displayed Live. Backend `require_live_unlocked` then rejected every live order, and conversely, if the user later switched the UI to Practice the still-valid live-unlocked JWT in memory could place real orders.
+- **Fix**:
+  - `handleConfirmLive` now parses the PIN response and calls `useAuthStore.updateToken(newToken)` so the in-memory token actually carries `live_mode_unlocked: true`.
+  - **New** `POST /v1/auth/mode` backend endpoint accepts `{mode: "practice"}` from a valid Bearer-authenticated caller, mints a new Practice JWT, revokes the original JTI via the shared blocklist, and returns the new token. Upgrades to `live` are explicitly rejected here (400 with a message pointing back at `/v1/auth/pin`).
+  - `handleToggle` (live → practice) now POSTs to `/v1/auth/mode`, swaps the new token in via `updateToken`, then flips local UI state. If the call fails the UI surfaces a `role="alert"` error and stays in Live (no silent downgrade-of-display-only).
+  - New `authStore.updateToken(token)` action — replaces the JWT in-place while preserving username/expiresAt and resetting activity.
+- **Tests** in `test_auth_routes.py::TestModeSwitchEndpoint` lock four invariants: practice-downgrade returns a fresh distinct token, the prior token is revoked (second call with the same Bearer gets 401), upgrading to `live` here is 400, and missing/invalid token is 401. Plus a new `test_pin_response_includes_new_token` regression on the PIN handler.
+
+#### HIGH — frontend↔backend route drift (silent 404s in production)
+- `ftApi.analysis.ts:180` was calling `iv_smile`; backend route is `/ivsmile`. Fixed frontend.
+- `packages/screener/src/payoff_routes.py` blueprint was mounted at `/v1` instead of `/api/v1`, so all `analytics/correlation`, `payoff/*`, and `regime/current` POSTs from `ftApi.analysis.ts` 404'd. Moved to `/api/v1`; test files updated.
+- `packages/screener/src/earnings_routes.py` had the same `/v1/earnings/` prefix mismatch. Moved to `/api/v1/earnings/`; both `test_earnings_routes.py` and `test_earnings_calendar.py` updated.
+- `pnl_symbols_routes.py` only accepted GET. Added POST handler (reads from JSON body) so the route contract matches OpenAlgo's `POST /api/v1/pnl/symbols` — defensive; the actual frontend call goes via Vite's `/api` proxy to OpenAlgo, but a FlintTrade-side caller would now also work.
+- `ftApi.backtest.ts` was calling `strategies/uploaded/<id>/{start,stop,logs}` which matched no backend route (404). Engine's `strategy_bp` handles uploaded strategy lifecycle at `/api/v1/strategies/<id>/{start,stop,logs}`. Removed the spurious `/uploaded/` segment from frontend.
+
+#### HIGH — legacy password reset endpoints not rate-limited
+- `auth_routes.auth_forgot_password` and `auth_reset_password` lacked rate-limit decorators. Added `@_rate_limit("3 per hour")` and `@_rate_limit("5 per minute")` respectively. OTP-reset paths were already rate-limited; these are defence-in-depth on top of single-use JTI tokens.
+
+#### Duplicate-route audit cleanup (Codex finding #2)
+- **Security routes**: removed `/security/{stats,bans,ban,unban}` from `operations_routes.py` — `security_bp` already owns them at `/api/v1/security/*` and registered first, silently shadowing these duplicates. Kept the `/security/settings` GET/POST handlers since `security_bp` doesn't expose those.
+- **Strategy routes**: `backtest_routes.py` registered `/strategies`, `/strategies/running`, `/strategies/uploaded`, `/strategies/<name>/start`, `/strategies/<name>/stop` — all of which collided with engine's `strategy_bp` (live strategy lifecycle). Renamed every backtest_bp strategy route to `/backtest/strategies*` so the two surfaces don't fight over Flask's URL dispatcher. Frontend `ftApi.backtest.ts` (`getStrategies`, `getRunningStrategies`, `getUploadedStrategies`, `startStrategy`, `stopStrategy`) updated to match. Tests in `test_backtest_routes.py` updated.
+
 ### Orphan API stubs + remaining hook coverage (2026-05-19)
 
 - **`packages/screener/src/sample_data_routes.py`** added — eight Flask routes that previously 404'd in production now return `is_sample_data: true` placeholders matching the frontend TypeScript interfaces:

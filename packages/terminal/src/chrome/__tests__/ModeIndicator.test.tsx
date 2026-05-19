@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
 import ModeIndicator from "../ModeIndicator";
 
 // ---------------------------------------------------------------------------
@@ -17,6 +18,16 @@ import ModeIndicator from "../ModeIndicator";
 
 function resetStore(mode: "explore" | "practice" | "live" = "explore") {
   useModeStore.setState({ mode });
+  // Reset auth state to a known starting token so the mode-switch
+  // requests carry an Authorization header.
+  useAuthStore.setState({ token: "initial-jwt-token" });
+}
+
+function jsonResponse(body: object, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -118,10 +129,15 @@ describe("ModeIndicator", () => {
       expect(confirmBtn).toBeDisabled();
     });
 
-    it("switches to live after successful PIN verification", async () => {
-      // Mock successful PIN fetch
+    it("switches to live after successful PIN verification + stores the live JWT", async () => {
+      // PIN response now must include a token — frontend uses it to
+      // replace authStore.token so future order calls send the
+      // live-unlocked JWT (closes the 2026-05-19 Codex CRITICAL finding).
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(null, { status: 200 }),
+        jsonResponse({
+          status: "success",
+          data: { token: "live-unlocked-jwt", live_mode_unlocked: true },
+        }),
       );
 
       resetStore("practice");
@@ -140,6 +156,35 @@ describe("ModeIndicator", () => {
       await waitFor(() => {
         expect(useModeStore.getState().mode).toBe("live");
       });
+      // The authStore token must now be the live-unlocked JWT, NOT the
+      // initial Practice JWT that was in place before.
+      expect(useAuthStore.getState().token).toBe("live-unlocked-jwt");
+    });
+
+    it("rejects PIN flow if server returned no token", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        jsonResponse({ status: "success", data: {} }),
+      );
+
+      resetStore("practice");
+      render(<ModeIndicator />);
+
+      fireEvent.click(screen.getByRole("button", { name: /practice mode/i }));
+
+      const pinInput = screen.getByPlaceholderText("6-digit PIN");
+      fireEvent.change(pinInput, { target: { value: "123456" } });
+
+      const confirmBtn = screen.getByRole("button", {
+        name: /switch to live/i,
+      });
+      fireEvent.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(globalThis.fetch).toHaveBeenCalledOnce();
+      });
+      // Mode stays practice and the in-memory token doesn't change.
+      expect(useModeStore.getState().mode).toBe("practice");
+      expect(useAuthStore.getState().token).toBe("initial-jwt-token");
     });
 
     it("does not switch to live on incorrect PIN", async () => {
@@ -221,21 +266,82 @@ describe("ModeIndicator", () => {
       expect(screen.getByText("LIVE")).toBeInTheDocument();
     });
 
-    it("switches to practice instantly on click (no PIN needed)", () => {
+    it("calls /v1/auth/mode + stores new practice JWT + flips UI", async () => {
+      // Mode-switch response carries the new Practice JWT. The frontend
+      // MUST swap it in via authStore.updateToken so a stale
+      // live-unlocked token doesn't outlive the UI toggle (closes
+      // 2026-05-19 Codex CRITICAL finding).
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: {
+            token: "fresh-practice-jwt",
+            mode: "practice",
+            live_mode_unlocked: false,
+          },
+        }),
+      );
+
       resetStore("live");
+      useAuthStore.setState({ token: "stale-live-jwt" });
       render(<ModeIndicator />);
 
       fireEvent.click(screen.getByRole("button", { name: /live trading/i }));
 
-      expect(useModeStore.getState().mode).toBe("practice");
+      await waitFor(() => {
+        expect(useModeStore.getState().mode).toBe("practice");
+      });
+      expect(useAuthStore.getState().token).toBe("fresh-practice-jwt");
+
+      // Confirm the call shape — Bearer auth + practice body.
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const [url, init] = fetchCall as [string, RequestInit];
+      expect(url).toBe("/ft-api/v1/auth/mode");
+      expect(init.method).toBe("POST");
+      const headers = init.headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe("Bearer stale-live-jwt");
+      expect(JSON.parse(init.body as string)).toEqual({ mode: "practice" });
     });
 
-    it("does not open a PIN dialog when switching to practice", () => {
+    it("does NOT flip to practice if mode-switch endpoint fails", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("", { status: 500 }),
+      );
+
+      resetStore("live");
+      useAuthStore.setState({ token: "stale-live-jwt" });
+      render(<ModeIndicator />);
+
+      fireEvent.click(screen.getByRole("button", { name: /live trading/i }));
+
+      await waitFor(() => {
+        expect(globalThis.fetch).toHaveBeenCalledOnce();
+      });
+      // Stayed in live — the UI must never claim Practice while the
+      // backend still has a live-unlocked JWT in its blocklist's good
+      // standing.
+      expect(useModeStore.getState().mode).toBe("live");
+      expect(useAuthStore.getState().token).toBe("stale-live-jwt");
+      // The error message is surfaced to the user.
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    it("does not open a PIN dialog when switching to practice", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        jsonResponse({
+          status: "success",
+          data: { token: "p", mode: "practice", live_mode_unlocked: false },
+        }),
+      );
+
       resetStore("live");
       render(<ModeIndicator />);
 
       fireEvent.click(screen.getByRole("button", { name: /live trading/i }));
 
+      await waitFor(() => {
+        expect(useModeStore.getState().mode).toBe("practice");
+      });
       expect(
         screen.queryByText("Switch to Live Trading?"),
       ).not.toBeInTheDocument();

@@ -359,7 +359,7 @@ def backtest_portfolio() -> tuple[Any, int]:
     return jsonify({"status": "success", "data": response_data}), 200
 
 
-@backtest_bp.route("/strategies/uploaded", methods=["GET"])
+@backtest_bp.route("/backtest/strategies/uploaded", methods=["GET"])
 def list_uploaded_strategies() -> tuple[Any, int]:
     """Return user-uploaded strategy files managed by the strategy runner.
 
@@ -384,9 +384,15 @@ def list_uploaded_strategies() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@backtest_bp.route("/strategies", methods=["GET"])
+@backtest_bp.route("/backtest/strategies", methods=["GET"])
 def list_strategies() -> tuple[Any, int]:
     """Return available backtest strategy names and descriptions.
+
+    Mounted at ``/backtest/strategies`` (not ``/strategies``) because the
+    engine's ``strategy_bp`` owns ``/api/v1/strategies`` for live strategy
+    lifecycle. Pre-2026-05-19 both blueprints registered ``/strategies``
+    and Flask first-match-wins silently shadowed this one; Codex caught
+    it in the duplicate-route audit.
 
     Returns:
         JSON with ``status`` and ``data.strategies`` — a list of objects
@@ -418,7 +424,7 @@ def list_strategies() -> tuple[Any, int]:
     return jsonify({"status": "success", "data": {"strategies": strategies}}), 200
 
 
-@backtest_bp.route("/strategies/running", methods=["GET"])
+@backtest_bp.route("/backtest/strategies/running", methods=["GET"])
 def strategies_running() -> tuple[Any, int]:
     """Return status of all currently registered and running strategies.
 
@@ -445,7 +451,7 @@ def strategies_running() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@backtest_bp.route("/strategies/<name>/start", methods=["POST"])
+@backtest_bp.route("/backtest/strategies/<name>/start", methods=["POST"])
 def strategy_start(name: str) -> tuple[Any, int]:
     """Start a registered strategy by name.
 
@@ -477,7 +483,7 @@ def strategy_start(name: str) -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@backtest_bp.route("/strategies/<name>/stop", methods=["POST"])
+@backtest_bp.route("/backtest/strategies/<name>/stop", methods=["POST"])
 def strategy_stop(name: str) -> tuple[Any, int]:
     """Stop a running strategy by name.
 

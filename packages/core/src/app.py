@@ -878,7 +878,9 @@ def create_flask_app(
     from packages.screener.src.ipo_routes import ipo_bp  # noqa: PLC0415
     app.register_blueprint(ipo_bp)
 
-    # Register Earnings Calendar blueprint (/v1/earnings/* — external: /ft-api/v1/earnings/*)
+    # Register Earnings Calendar blueprint (/api/v1/earnings/* — external:
+    # /ft-api/api/v1/earnings/*). Prefix flipped 2026-05-19 (was /v1/) so the
+    # frontend's ftApi.helpers /api/v1 path lines up with the registered route.
     from packages.screener.src.earnings_routes import earnings_bp  # noqa: PLC0415
     app.register_blueprint(earnings_bp)
 
@@ -966,8 +968,9 @@ def create_flask_app(
     #
     #   webhook_bp                — /v1/webhook/<source>, /v1/webhook/log
     #                               (TradingView + ChartInk webhook receivers)
-    #   payoff_bp                 — /v1/payoff/{analyse,curve}, /v1/regime/current,
-    #                               /v1/analytics/correlation
+    #   payoff_bp                 — /api/v1/payoff/{analyse,curve}, /api/v1/regime/current,
+    #                               /api/v1/analytics/correlation
+    #                               (prefix flipped 2026-05-19 to align with ftApi.helpers)
     #   health_bp                 — /health, /health/detail, /healthz, /readyz,
     #                               /api/v1/ping (K8s + LB probes; /api/v1/ping
     #                               is already in `_PUBLIC_V1_PREFIXES`)

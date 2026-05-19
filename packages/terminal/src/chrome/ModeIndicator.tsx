@@ -28,6 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -36,10 +37,13 @@ import { useModeStore } from "@/stores/modeStore";
 export default function ModeIndicator() {
   const mode = useModeStore((s) => s.mode);
   const setMode = useModeStore((s) => s.setMode);
+  const token = useAuthStore((s) => s.token);
+  const updateToken = useAuthStore((s) => s.updateToken);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
+  const [toggleError, setToggleError] = useState("");
 
   // ── Explore: static pill, no interaction ────────────────────────────────
   if (mode === "explore") {
@@ -56,9 +60,37 @@ export default function ModeIndicator() {
 
   // ── Practice ↔ Live toggle ──────────────────────────────────────────────
 
-  const handleToggle = useCallback(() => {
+  const handleToggle = useCallback(async () => {
     if (mode === "live") {
-      // Live → Practice: instant, no confirmation needed (safety action)
+      // Live → Practice: must revoke the live-unlocked JWT on the server
+      // and replace it with a fresh Practice JWT. Without this the
+      // backend's require_live_unlocked guard would still let the stale
+      // token place real orders even though the UI says Practice.
+      setToggleError("");
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetch("/ft-api/v1/auth/mode", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ mode: "practice" }),
+        });
+        if (!res.ok) {
+          setToggleError("Could not downgrade to Practice — try again.");
+          return;
+        }
+        const body = (await res.json()) as {
+          data?: { token?: string };
+          token?: string;
+        };
+        const newToken = body?.data?.token ?? body?.token;
+        if (newToken) updateToken(newToken);
+      } catch {
+        setToggleError("Could not downgrade to Practice — check connection.");
+        return;
+      }
       setMode("practice");
     } else {
       // Practice → Live: requires PIN confirmation
@@ -66,7 +98,7 @@ export default function ModeIndicator() {
       setPinError("");
       setConfirmOpen(true);
     }
-  }, [mode, setMode]);
+  }, [mode, setMode, token, updateToken]);
 
   const handleConfirmLive = useCallback(async () => {
     if (pin.length !== 6 || /\D/.test(pin)) {
@@ -83,6 +115,22 @@ export default function ModeIndicator() {
         setPinError("Incorrect PIN. Try again.");
         return;
       }
+      // Capture the live-unlocked JWT the backend just minted. Without
+      // this the in-memory token stayed at the Explore/Practice JWT
+      // issued by login, so the server-side require_live_unlocked guard
+      // would reject every subsequent order. (Fixed 2026-05-19 per
+      // Codex audit — previously this response was thrown away.)
+      const body = (await res.json()) as {
+        data?: { token?: string };
+        token?: string;
+      };
+      const newToken = body?.data?.token ?? body?.token;
+      if (newToken) {
+        updateToken(newToken);
+      } else {
+        setPinError("Server did not return a session token — try again.");
+        return;
+      }
     } catch {
       setPinError("Could not verify PIN — check connection.");
       return;
@@ -90,7 +138,7 @@ export default function ModeIndicator() {
     setPinError("");
     setConfirmOpen(false);
     setMode("live");
-  }, [pin, setMode]);
+  }, [pin, setMode, updateToken]);
 
   const handleCancel = useCallback(() => {
     setConfirmOpen(false);
@@ -168,13 +216,23 @@ export default function ModeIndicator() {
 
   // mode === "live"
   return (
-    <button
-      onClick={handleToggle}
-      aria-label="Live trading mode active — real money. Click to switch to Practice mode."
-      className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 transition-colors"
-    >
-      <Zap size={11} aria-hidden="true" />
-      LIVE
-    </button>
+    <div className="flex items-center gap-2">
+      <button
+        onClick={handleToggle}
+        aria-label="Live trading mode active — real money. Click to switch to Practice mode."
+        className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 transition-colors"
+      >
+        <Zap size={11} aria-hidden="true" />
+        LIVE
+      </button>
+      {toggleError && (
+        <span
+          role="alert"
+          className="text-xs text-loss"
+        >
+          {toggleError}
+        </span>
+      )}
+    </div>
   );
 }

@@ -32,7 +32,7 @@ from .regime_detector import RegimeDetector
 
 logger = logging.getLogger("flinttrade.screener.payoff_routes")
 
-payoff_bp = Blueprint("payoff", __name__, url_prefix="/v1")
+payoff_bp = Blueprint("payoff", __name__, url_prefix="/api/v1")
 
 # Engine singletons (created once per process)
 _payoff_engine = OptionsPayoffEngine()

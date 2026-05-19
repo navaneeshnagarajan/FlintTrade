@@ -77,11 +77,11 @@ class TestListStrategies:
 
 
 class TestListUploadedStrategies:
-    """GET /api/v1/strategies/uploaded — list user-uploaded strategies."""
+    """GET /api/v1/backtest/strategies/uploaded — list user-uploaded strategies."""
 
     def test_uploaded_returns_200_when_runner_not_configured(self, client):
         """When STRATEGY_RUNNER is not set, returns an empty list."""
-        resp = client.get("/api/v1/strategies/uploaded", headers=_auth_headers())
+        resp = client.get("/api/v1/backtest/strategies/uploaded", headers=_auth_headers())
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -95,7 +95,7 @@ class TestListUploadedStrategies:
         ]
         flask_app.config["STRATEGY_RUNNER"] = mock_runner
         try:
-            resp = client.get("/api/v1/strategies/uploaded", headers=_auth_headers())
+            resp = client.get("/api/v1/backtest/strategies/uploaded", headers=_auth_headers())
             assert resp.status_code == 200
             data = resp.get_json()
             assert data["status"] == "success"
@@ -111,7 +111,7 @@ class TestListUploadedStrategies:
         mock_runner.list_strategies.side_effect = RuntimeError("DB locked")
         flask_app.config["STRATEGY_RUNNER"] = mock_runner
         try:
-            resp = client.get("/api/v1/strategies/uploaded", headers=_auth_headers())
+            resp = client.get("/api/v1/backtest/strategies/uploaded", headers=_auth_headers())
             assert resp.status_code == 500
             data = resp.get_json()
             assert data["status"] == "error"
@@ -157,11 +157,11 @@ class TestBacktestRun:
 
 
 class TestStrategiesRunning:
-    """GET /api/v1/strategies/running — running strategy status."""
+    """GET /api/v1/backtest/strategies/running — running strategy status."""
 
     def test_running_returns_200_when_scheduler_not_configured(self, client):
         """When SCHEDULER is not set, returns an empty list."""
-        resp = client.get("/api/v1/strategies/running", headers=_auth_headers())
+        resp = client.get("/api/v1/backtest/strategies/running", headers=_auth_headers())
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"

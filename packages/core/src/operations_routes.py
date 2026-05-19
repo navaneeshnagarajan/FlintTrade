@@ -525,72 +525,14 @@ def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
 
 
 # ------------------------------------------------------------------
-# Security proxy routes (/api/v1/security/...) — delegate to SecurityMonitor
+# Security-settings proxy routes (/api/v1/security/settings) — these
+# are the ONLY security routes operations_bp owns; the stats/bans/ban/
+# unban handlers that used to live here have been removed because
+# security_bp at /api/v1/security/{stats,bans,ban,unban,records} already
+# serves them (2026-05-19 audit found the duplicates were silently
+# shadowed by Flask's first-registered-wins URL dispatch). Settings GET
+# and POST stay here because security_bp does not own them.
 # ------------------------------------------------------------------
-
-@operations_bp.route("/security/stats", methods=["GET"])
-def api_security_stats() -> tuple[Any, int]:
-    """Proxy security stats endpoint for frontend compatibility."""
-    from .security import SecurityMonitor as _SM  # noqa: PLC0415
-
-    monitor = current_app.config.get("SECURITY_MONITOR")
-    if not isinstance(monitor, _SM):
-        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
-    return jsonify({"status": "success", "data": monitor.get_stats()}), 200
-
-
-@operations_bp.route("/security/bans", methods=["GET"])
-def api_security_bans() -> tuple[Any, int]:
-    """Proxy security bans list for frontend compatibility."""
-    from .security import SecurityMonitor as _SM  # noqa: PLC0415
-
-    monitor = current_app.config.get("SECURITY_MONITOR")
-    if not isinstance(monitor, _SM):
-        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
-    bans = monitor.get_banned_ips()
-    return jsonify({"status": "success", "data": {"bans": [r.to_dict() for r in bans]}}), 200
-
-
-@operations_bp.route("/security/ban", methods=["POST"])
-def api_security_ban() -> tuple[Any, int]:
-    """Proxy ban-IP endpoint for frontend compatibility."""
-    from .security import SecurityMonitor as _SM  # noqa: PLC0415
-
-    monitor = current_app.config.get("SECURITY_MONITOR")
-    if not isinstance(monitor, _SM):
-        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
-    body = request.get_json(silent=True) or {}
-    ip: str = (body.get("ip") or "").strip()
-    reason: str = (body.get("reason") or "").strip()
-    if not ip:
-        return jsonify({"status": "error", "message": "ip is required"}), 400
-    if not reason:
-        return jsonify({"status": "error", "message": "reason is required"}), 400
-    duration_val: int | None = None
-    raw_duration = body.get("duration")
-    if raw_duration is not None:
-        try:
-            duration_val = int(raw_duration)
-        except (TypeError, ValueError):
-            return jsonify({"status": "error", "message": "duration must be an integer"}), 400
-    monitor.ban_ip(ip, reason, duration_val)
-    return jsonify({"status": "success", "data": {"ip": ip, "reason": reason, "duration": duration_val}}), 200
-
-
-@operations_bp.route("/security/unban", methods=["POST"])
-def api_security_unban() -> tuple[Any, int]:
-    """Proxy unban-IP endpoint for frontend compatibility."""
-    from .security import SecurityMonitor as _SM  # noqa: PLC0415
-
-    monitor = current_app.config.get("SECURITY_MONITOR")
-    if not isinstance(monitor, _SM):
-        return jsonify({"status": "error", "message": "Security monitor not available"}), 503
-    body = request.get_json(silent=True) or {}
-    ip: str = (body.get("ip") or "").strip()
-    if not ip:
-        return jsonify({"status": "error", "message": "ip is required"}), 400
-    monitor.unban_ip(ip)
-    return jsonify({"status": "success", "data": {"ip": ip}}), 200
 
 
 @operations_bp.route("/security/settings", methods=["GET"])
