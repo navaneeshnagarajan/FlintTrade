@@ -1,6 +1,41 @@
+import { useAuthStore } from "@/stores/authStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+
 export function getBase(): string {
   if (import.meta.env.DEV) return "/ft-api";
   return "";
+}
+
+/**
+ * Build the standard request headers for every FT-API helper call.
+ *
+ * Universally attaches the OpenAlgo ``X-API-Key`` (from
+ * :mod:`connectionStore`) and the FlintTrade JWT
+ * ``Authorization: Bearer <jwt>`` (from :mod:`authStore`) when present.
+ * This ensures server-side guards like :func:`require_live_unlocked` and
+ * :func:`require_auth` see the auth context regardless of which helper a
+ * caller picked — previously only :func:`api.postOrder` attached these,
+ * which left helper-based callers (e.g. :func:`placeBracketOrder`)
+ * unauthenticated and rejected by the new mode-guard.
+ *
+ * The ``Content-Type`` is conditionally added only for body-bearing
+ * methods (POST/PUT) so that GET/DELETE preflights are not affected.
+ *
+ * @param includeJson — add ``Content-Type: application/json`` (true for POST/PUT).
+ */
+function buildHeaders(includeJson: boolean): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (includeJson) headers["Content-Type"] = "application/json";
+
+  // Read store state imperatively — these are React-store hooks but
+  // ``.getState()`` works outside of components.
+  const apiKey = useConnectionStore.getState().apiKey;
+  const jwt = useAuthStore.getState().token;
+
+  if (apiKey) headers["X-API-Key"] = apiKey;
+  if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
+
+  return headers;
 }
 
 export async function parseResponse<T>(res: Response, endpoint: string): Promise<T> {
@@ -27,7 +62,7 @@ export async function parseResponse<T>(res: Response, endpoint: string): Promise
 export async function post<T>(endpoint: string, body: object = {}): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
   if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
@@ -35,7 +70,9 @@ export async function post<T>(endpoint: string, body: object = {}): Promise<T> {
 }
 
 export async function get<T>(endpoint: string): Promise<T> {
-  const resp = await fetch(`${getBase()}/api/v1/${endpoint}`);
+  const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
+    headers: buildHeaders(false),
+  });
   if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
   return parseResponse<T>(resp, endpoint);
 }
@@ -43,7 +80,7 @@ export async function get<T>(endpoint: string): Promise<T> {
 export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
   if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
@@ -53,6 +90,7 @@ export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
 export async function del<T>(endpoint: string): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "DELETE",
+    headers: buildHeaders(false),
   });
   if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
   return parseResponse<T>(resp, endpoint);

@@ -496,6 +496,7 @@ const DrillDownPanel = memo(function DrillDownPanel({ sector, onBack }: DrillDow
     queryFn: () => getSectorConstituents(sector),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
+    retry: false,
   });
 
   return (

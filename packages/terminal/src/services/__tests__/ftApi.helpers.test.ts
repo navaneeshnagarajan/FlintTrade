@@ -16,9 +16,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Force DEV mode so getBase() returns "/ft-api". Stub before the helper
 // import because Vite inlines `import.meta.env.DEV` at module-load time.
-vi.stubEnv("DEV", "true");
+vi.stubEnv("DEV", true);
+
+// The helpers now read X-API-Key from connectionStore and the JWT from
+// authStore on every call, so each test mocks both stores to return empty
+// values by default. Individual tests override via getState mocks.
+vi.mock("@/stores/connectionStore", () => ({
+  useConnectionStore: { getState: () => ({ apiKey: "" }) },
+}));
+vi.mock("@/stores/authStore", () => ({
+  useAuthStore: { getState: () => ({ token: "" }) },
+}));
 
 import { parseResponse, post, get } from "../ftApi.helpers";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -118,5 +130,73 @@ describe("get — HTTP error handling", () => {
     );
     const result = await get<{ accounts: unknown[] }>("ditto/accounts");
     expect(result).toStrictEqual({ accounts: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auth header attachment — regression for Codex stop-gate finding
+// "Preserve auth headers for bracket order placement"
+// ---------------------------------------------------------------------------
+
+describe("buildHeaders — auth attachment", () => {
+  it("post attaches X-API-Key and Authorization Bearer when stores are populated", async () => {
+    // Re-mock the store getters for this test only.
+    (useConnectionStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      apiKey: "test-openalgo-key",
+    }));
+    (useAuthStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      token: "test-jwt-abc",
+    }));
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ data: { ok: true } }),
+    );
+
+    await post("orders/bracket", { entry: { symbol: "NIFTY" } });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-API-Key"]).toBe("test-openalgo-key");
+    expect(headers["Authorization"]).toBe("Bearer test-jwt-abc");
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("get attaches auth headers but no Content-Type", async () => {
+    (useConnectionStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      apiKey: "k",
+    }));
+    (useAuthStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      token: "t",
+    }));
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ data: [] }),
+    );
+
+    await get("positions");
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init?.headers as Record<string, string>;
+    expect(headers["X-API-Key"]).toBe("k");
+    expect(headers["Authorization"]).toBe("Bearer t");
+    expect(headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("omits both headers when stores are empty", async () => {
+    (useConnectionStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      apiKey: "",
+    }));
+    (useAuthStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      token: "",
+    }));
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ data: null }),
+    );
+
+    await post("safety/config", {});
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-API-Key"]).toBeUndefined();
+    expect(headers["Authorization"]).toBeUndefined();
+    expect(headers["Content-Type"]).toBe("application/json");
   });
 });
