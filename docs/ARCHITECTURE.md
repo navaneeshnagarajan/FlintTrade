@@ -1,99 +1,321 @@
 # FlintTrade Architecture
 
-## Package Dependency Graph
+> Reflects `v0.5.2-dev`. 16 packages (12 Python + 1 React + 1 Rust/PyO3 +
+> 1 Chrome Extension + 1 Tauri). About 12,062 tests in total
+> (9,089 pytest + 2,973 Vitest, measured 2026-05-19).
 
-```
-┌─── FlintTrade (one repo) ─────────────────────────────────┐
-│                                                            │
-│  terminal (React + TypeScript, Dockview workspace)         │
-│      │                                                     │
-│      ├── screener ─── ai                                   │
-│      │      │          │                                   │
-│      ├── engine ◄──── backtest-engine                      │
-│      │      │          │                                   │
-│      ├── core ◄──── data ◄── historical                    │
-│      │      │                                              │
-│      └── automation ──── integration ── ditto               │
-└────────────────────┼───────────────────────────────────────┘
-                     │ REST API + WebSocket
-              ┌──────┴───────┐
-              │   OpenAlgo   │ external service (separately installed)
-              │  33 brokers  │ — local-dev clone: .local/external/openalgo/
-              └──────────────┘
-```
+This document is the architectural reference for contributors. For a
+user-facing overview, see [USER_GUIDE.md](USER_GUIDE.md). For HTTP /
+WebSocket contracts, see [API.md](API.md). For repo conventions, see
+[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
 
-## Frontend Architecture (terminal)
+---
 
-The terminal is a single React + TypeScript application using **Dockview** for a
-widget-composable workspace. Users build their own layouts by dragging and
-docking widgets (charts, order pad, positions, option chain, etc.).
+## 1. High-level component diagram
 
-### State Management
+```mermaid
+flowchart LR
+    subgraph Browser["Browser / Desktop wrapper"]
+        T[Terminal React App]
+    end
 
-| Layer | Library | Purpose |
-|-------|---------|---------|
-| Global UI state | Zustand | Theme, layout, connection status, settings |
-| Per-widget state | Jotai | Atomic state for individual widget instances |
-| Server state | TanStack Query | API data fetching, caching, polling |
+    subgraph Backend["FlintTrade backend (Python)"]
+        F[Flask app · port 5100]
+        E[engine]
+        S[screener]
+        AI[ai]
+        D[data]
+        H[historical]
+        BT[backtest-engine]
+        AUT[automation]
+        DIT[ditto]
+        IND[indicators]
+        ING[integration]
+        GW[gateway]
+        TICK[tick-engine · Rust/PyO3]
+    end
 
-### Key Frontend Dependencies
+    subgraph OpenAlgo["OpenAlgo · port 5000 / WS 8765 (external service)"]
+        OA[33 broker adapters]
+    end
 
-| Library | Purpose |
-|---------|---------|
-| Dockview + dockview-react | Widget docking and layout management |
-| shadcn/ui + Radix UI | Accessible, themeable UI components |
-| TanStack React Table | High-performance data tables |
-| Glide Data Grid | Virtualized grids for option chains and order books |
-| react-hook-form + zod | Form validation |
-| TradingView Lightweight Charts v5 | Financial charting |
-| Tailwind CSS v4 | Utility-first styling |
+    subgraph Brokers["Brokers (live)"]
+        B1[Zerodha · Upstox · Fyers · Angel · ...]
+    end
 
-## Safety Layers (engine)
-
-1. Order validation (price ±5% LTP, qty limits)
-2. Position limits (max 5 simultaneous, 60% margin)
-3. Portfolio risk (net delta/vega limits)
-4. Daily P&L limit (3% pause, 15% kill)
-5. Kill switch (Telegram, UI, auto-trigger)
-
-## Configuration Architecture
-
-FlintTrade uses a two-tier configuration model:
-
-### Tier 1: `.env` — Infrastructure only
-
-The `.env` file (never committed) contains only OpenAlgo connection settings:
-
-```
-OPENALGO_HOST=http://127.0.0.1:5000
-OPENALGO_PORT=5000
-OPENALGO_API_KEY=<your key>
-OPENALGO_WS_PORT=8765
+    T -- "/api/v1/* + /ft-api/v1/* (HTTP)" --> F
+    T -- "WS /ws (port 8765 via proxy)" --> OA
+    F --> E
+    F --> S
+    F --> AI
+    F --> D
+    F --> H
+    F --> BT
+    F --> AUT
+    F --> DIT
+    F --> ING
+    F --> GW
+    E --> TICK
+    BT --> TICK
+    IND --> TICK
+    F -- "REST" --> OA
+    OA --> B1
 ```
 
-Broker credentials are configured in OpenAlgo directly, not in FlintTrade.
+The terminal speaks to two HTTP origins (OpenAlgo on 5000, FlintTrade on
+5100) and one WebSocket (OpenAlgo on 8765). All three are proxied
+through Vite in development.
 
-### Tier 2: `~/.flinttrade/workspace.json` — User preferences
+---
 
-Everything else lives in a cross-platform workspace directory:
+## 2. Package dependency graph
+
+```mermaid
+flowchart TD
+    terminal --> core
+    terminal --> ditto
+    terminal --> screener
+    terminal --> ai
+    terminal --> automation
+    terminal --> integration
+    terminal --> engine
+    terminal --> historical
+
+    engine --> core
+    engine --> data
+    engine --> gateway
+    backtestEngine[backtest-engine] --> engine
+    backtestEngine --> tickEngine[tick-engine]
+    backtestEngine --> historical
+    backtestEngine --> indicators
+
+    screener --> data
+    screener --> historical
+    screener --> indicators
+
+    ai --> core
+    ai --> data
+
+    integration --> core
+    integration --> engine
+
+    automation --> core
+    automation --> engine
+
+    ditto --> engine
+    ditto --> gateway
+
+    historical --> data
+    historical --> core
+
+    data --> core
+    indicators --> core
+    gateway --> core
+```
+
+Arrows point from dependent to dependency. The 12 Python packages plus
+the Rust/PyO3 `tick-engine` plus the `terminal` SPA add up to 14 of the
+16 packages in the repo; the remaining two are `chrome-extension` and
+`desktop`, which are deployment wrappers around the terminal rather than
+core packages.
+
+---
+
+## 3. Frontend architecture (terminal)
+
+The terminal is a single React 19 + TypeScript application built with
+Vite 6. Layout is managed by [Dockview v5.1](https://dockview.dev/),
+which provides drag-and-drop panels, tabs, floating windows, and
+serialisable layouts. Users compose their workspace from 82 widgets
+(22 trading + 38 analysis + 22 utility) split across 12 routes.
+
+### State architecture
+
+```mermaid
+flowchart LR
+    WS[OpenAlgo WebSocket\nport 8765] --> J[Jotai atoms\nper-instrument LTP/Quote/Depth]
+    REST[REST API\n/api/v1 + /ft-api/v1] --> TQ[TanStack Query cache\npositions, orders, holdings, funds, optionchain]
+    J --> Z[Zustand stores\nconnection, layout, settings, aggregated P&L, mode]
+    TQ --> Z
+    Z --> UI[Widgets and routes]
+    J --> UI
+    TQ --> UI
+```
+
+**Boundary rules** — data enters through one path only and is never
+duplicated:
+
+- **Jotai atoms** — WebSocket real-time data only.
+- **TanStack Query** — REST API responses only.
+- **Zustand stores** — derived and UI state only (connection status,
+  active layout, settings mirror, aggregated P&L, current mode).
+
+### Frontend stack
+
+| Category | Library | Why it's pinned |
+|---|---|---|
+| Language | TypeScript 5 (strict) | No `any`, no `@ts-ignore`. |
+| Framework | React 19 | Server Actions, `use()`, the new compiler. |
+| Build | Vite 6.4 | Fast HMR, ESM-first. |
+| CSS | Tailwind CSS v4 | `@tailwindcss/vite` plugin, no `tailwind.config.js` for tokens. |
+| Components | shadcn/ui | Copy-paste ownership, Radix accessibility primitives. |
+| Layout | Dockview v5.1 | Floating, tabs, popout, JSON-serialisable. |
+| Charts | Lightweight Charts v5 | 35 KB, multi-pane, plugin-able. |
+| Streaming grid | Glide Data Grid | Canvas-rendered, 100K updates/sec. |
+| Static grid | TanStack Table v8 | Headless, sortable, filterable. |
+| State | Zustand v5 + Jotai + TanStack Query v5 | Separation of concerns by boundary. |
+| Forms | react-hook-form + zod | Runtime validation, type inference. |
+| Router | react-router-dom | Lazy-loaded route modules. |
+
+---
+
+## 4. Backend architecture
+
+FlintTrade's backend is a single Flask application registered as
+`packages/core/src/app.py`. It binds to port 5100, mounts every package's
+blueprints behind `/v1/*`, and exposes them externally under
+`/ft-api/v1/*` thanks to the WSGI prefix-strip middleware (see §6).
+
+### Safety layers
+
+Every order placed through FlintTrade passes five safety layers in order
+inside `packages/engine/`:
+
+1. **Order validation** — price within ±5 % of LTP, quantity multiple of
+   lot size.
+2. **Position limits** — max five simultaneous positions, no single
+   position over 60 % of free margin.
+3. **Portfolio risk** — net delta and net vega caps across the book.
+4. **Daily P&L** — pause at 3 % drawdown, kill at 15 % drawdown.
+5. **Kill switch** — manual (UI button, Telegram bot) or automatic
+   (daily P&L breach, OpenAlgo session loss, exchange holiday detector).
+
+### Mode-system state machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Explore
+    Explore --> Practice: /auth/mode {mode:practice}
+    Practice --> Live: /auth/mode {mode:live} + password\nconfirm
+    Live --> Practice: /auth/mode {mode:practice}
+    Practice --> Explore: /auth/mode {mode:explore}
+    Live --> Explore: /auth/mode {mode:explore}\n(forces kill-switch)
+
+    state Explore {
+        [*] --> noOrders
+        noOrders: All order paths return\nsimulated success without\ntouching OpenAlgo
+    }
+    state Practice {
+        [*] --> sandbox
+        sandbox: Orders routed to OpenAlgo's\nanalyzer (sandbox) endpoints
+    }
+    state Live {
+        [*] --> realOrders
+        realOrders: Orders routed to OpenAlgo's\nreal endpoints; safety\nlayers active
+    }
+```
+
+Each transition issues a fresh JWT with the new `mode` claim and revokes
+the old token's `jti`. The guard lives at
+`packages/engine/src/mode_guard.py`.
+
+---
+
+## 5. Data flow
+
+```mermaid
+flowchart TD
+    Tick[OpenAlgo WS tick] --> Atom[Jotai atom\nltpAtomFamily(symbol)]
+    Atom --> Derived[Derived atoms\nPCR · straddle · greeks]
+    Derived --> UI1[Charts · Option Chain · Order Pad]
+
+    REST[REST poll · TanStack Query] --> Cache[Query cache\npositions · orders · holdings]
+    Cache --> UI2[Positions · Orderbook · Funds]
+
+    UI1 --> Order[Order placement\nthrough engine]
+    UI2 --> Order
+    Order --> Safety[5-layer safety system]
+    Safety --> ModeGuard[Mode guard]
+    ModeGuard --> OpenAlgo[OpenAlgo /api/v1/placeorder]
+    OpenAlgo --> Broker[Broker]
+    Broker -. fill .-> Tick
+```
+
+Ticks fan in to per-instrument Jotai atoms which power every chart and
+quote widget. REST data populates a separate query cache. Orders flow
+out through the safety layers and the mode guard before reaching
+OpenAlgo. Fills come back through the tick stream and reconcile with
+the REST cache via `packages/engine/src/reconciliation.py`.
+
+---
+
+## 6. WSGI prefix strip
+
+The terminal calls `/ft-api/v1/X`. The Vite dev proxy and the production
+reverse proxy forward that to the FlintTrade backend on port 5100. The
+WSGI middleware in `packages/core/src/app.py` strips the `/ft-api`
+prefix before URL dispatch:
+
+```
+External:  GET /ft-api/v1/gex?symbol=NIFTY
+            │
+            ▼  (Vite proxy or reverse proxy)
+Backend:   GET /v1/gex?symbol=NIFTY
+            │
+            ▼  (Flask URL map)
+Handler:   screener.analysis_routes:gex_handler
+```
+
+This means a blueprint registered at `url_prefix="/v1"` (or
+`url_prefix="/api/v1"`, depending on the route family) answers requests
+at the external `/ft-api/v1/…` path automatically. **Never
+double-prefix.** Routes documented in [API.md](API.md) as
+`/ft-api/v1/X` are the external view; routes documented as `/v1/X` are
+the internal view of the same endpoint.
+
+---
+
+## 7. Configuration architecture
+
+Two tiers. No exceptions.
+
+### Tier 1: `.env` — infrastructure only
+
+Lives in the repo root, never committed. Four variables:
+
+| Variable | Purpose |
+|---|---|
+| `OPENALGO_HOST` | OpenAlgo server URL. |
+| `OPENALGO_PORT` | OpenAlgo server port. |
+| `OPENALGO_API_KEY` | OpenAlgo API key (not your broker's key). |
+| `OPENALGO_WS_PORT` | OpenAlgo WebSocket port (default `8765`). |
+
+Broker credentials are configured **in OpenAlgo**, not in FlintTrade.
+FlintTrade never sees them.
+
+### Tier 2: `workspace.json` — user preferences
+
+Lives in a platform-specific workspace directory:
 
 | Platform | Location |
-|----------|----------|
+|---|---|
 | Linux | `~/.flinttrade/` |
 | macOS | `~/Library/Application Support/flinttrade/` |
 | Windows | `%APPDATA%/flinttrade/` |
 | Override | `FLINTTRADE_HOME` env var |
 
-The `workspace.json` file contains:
-- **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD)
-- **Enabled modules** — which packages are active
-- **UI preferences** — theme, default exchange, timezone
-- **LLM config** — provider, host, model
-- **Notification config** — Telegram bot settings
-- **SEBI settings** — rate limits, audit retention, kill switch
+`workspace.json` contains:
 
-API keys and tokens are stored as `_ref` fields (references). Actual secrets
-should be stored in the OS keyring or as environment variables.
+- **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
+- **Enabled modules** — which packages are active.
+- **UI preferences** — theme, default exchange, time zone, density.
+- **LLM config** — provider, host, model.
+- **Notification config** — Telegram bot settings.
+- **SEBI settings** — rate limits, audit retention, kill-switch.
+
+API keys and tokens are stored as `_ref` fields (references). Actual
+secrets live in the OS keyring or in environment variables, never in
+`workspace.json`.
 
 ### How packages read config
 
@@ -107,60 +329,107 @@ config.workspace.get("ui.theme")  # dot-notation access
 ```
 
 Packages never read `os.environ` for data paths directly. They use the
-`Workspace` class which resolves paths from workspace.json with fallbacks.
+`Workspace` class, which resolves paths from `workspace.json` with
+fallbacks.
 
-## Infrastructure & Deployment
+---
+
+## 8. Authentication
+
+### FlintTrade JWT
+
+- Issued on `/ft-api/v1/auth/login` after argon2id password
+  verification.
+- Optional second factor: TOTP enrolment with Fernet-encrypted seed.
+- **Expires at 8 AM IST the next day.** No refresh tokens — sign in
+  again.
+- Carries `sub` (user), `exp` (expiry), `mode` (Explore / Practice /
+  Live), `jti` (unique ID).
+- Revocation blocklist keyed by `jti` in
+  `packages/core/src/auth_state.py`.
+
+### Server-side mode enforcement
+
+Every order-path endpoint asks `mode_guard` whether the JWT permits a
+live action. Trying to place a live order on a Practice JWT returns
+`MODE_NOT_ALLOWED` immediately — the request never reaches OpenAlgo.
+
+### OpenAlgo X-API-Key
+
+OpenAlgo's own endpoints use API-key auth, forwarded as the
+`X-API-KEY` header by `packages/core/src/openalgo_client.py`. The key
+comes from `.env`.
+
+---
+
+## 9. Infrastructure and deployment
 
 ### Makefile
 
-The `Makefile` is the primary interface:
+`Makefile` is the primary interface:
 
 ```bash
-make setup      # First-time install (deps, workspace)
-make start      # Start OpenAlgo service
-make stop       # Stop OpenAlgo
-make status     # Show service and port status
-make test       # Run all tests
-make lint       # Run ruff linter
-make dev        # Start React dev servers + OpenAlgo
-make health     # Run health check
-make clean      # Remove build artifacts
-make update     # Update Python + Node deps
+make setup      # first-time install (deps, workspace)
+make start      # start OpenAlgo (from .local/external/openalgo/ if present)
+make stop       # stop OpenAlgo
+make status     # show service and port status
+make test       # run all Python tests
+make test-fast  # stop on first failure
+make lint       # run ruff
+make dev        # start React dev server + OpenAlgo
+make health     # health check
+make clean      # remove build artefacts
+make update     # update Python + Node deps
 ```
 
-OpenAlgo and OpenClaw are no longer git submodules; for local development clone them once via `bash scripts/setup-test-deps.sh` (see "External Test Dependencies" below).
+OpenAlgo and OpenClaw are external services; they are NOT git submodules
+and are NOT bundled. For local development, run
+`scripts/setup-test-deps.sh` once per machine to clone local-dev copies
+into `.local/external/`.
 
-### External Test Dependencies
+### External test dependencies
 
-OpenAlgo and OpenClaw are external services that FlintTrade communicates with over HTTP/WebSocket. They are NOT bundled with FlintTrade and are NOT git submodules. End users install them separately as prerequisites; contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/` (gitignored). AlgoMirror is intentionally absent — its mirroring patterns are absorbed in-process by `packages/ditto/` and the upstream repo is no longer tracked.
+| Service | Local-dev path | Source | Role |
+|---|---|---|---|
+| OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | Broker gateway. |
+| OpenClaw | `.local/external/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | AI agent gateway. |
 
-| Service | Local-dev clone path | Source | Role |
-|---------|----------------------|--------|------|
-| OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | broker gateway |
-| OpenClaw | `.local/external/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | AI agent gateway |
+AlgoMirror is intentionally absent — its mirroring patterns are absorbed
+in-process by `packages/ditto/` and the upstream repo is no longer
+tracked.
 
 ### Scripts
 
 | Script | Purpose |
-|--------|---------|
-| `infra/scripts/setup.sh` | First-time installation |
-| `infra/scripts/openalgo/start-openalgo.sh` | Start OpenAlgo as background process |
-| `infra/scripts/openalgo/stop-openalgo.sh` | Stop OpenAlgo gracefully |
-| `infra/scripts/status.sh` | Service status, ports, disk usage |
-| `infra/scripts/health-check.sh` | Health check (exit 0/1) |
-| `scripts/setup-test-deps.sh` | Clone OpenAlgo + OpenClaw external test-deps to `.local/external/` |
-| `scripts/reset-flinttrade-state.sh` | Wipe `~/.flinttrade/` for a fresh-user test without touching OpenAlgo |
-
-### Broker Authentication
-
-Broker login is handled entirely by OpenAlgo (not by FlintTrade).
-FlintTrade connects via API key only. If the OpenAlgo session expires,
-the terminal notifies the user to re-authenticate at the OpenAlgo web interface.
+|---|---|
+| `infra/scripts/setup.sh` | First-time installation. |
+| `infra/scripts/openalgo/start-openalgo.sh` | Start OpenAlgo as a background process. |
+| `infra/scripts/openalgo/stop-openalgo.sh` | Stop OpenAlgo gracefully. |
+| `infra/scripts/status.sh` | Service status, ports, disk usage. |
+| `infra/scripts/health-check.sh` | Health check (exit 0/1). |
+| `scripts/setup-test-deps.sh` | Clone OpenAlgo and OpenClaw to `.local/external/`. |
+| `scripts/reset-flinttrade-state.sh` | Wipe the FlintTrade workspace for a fresh-user test. |
 
 ### Docker
 
 ```bash
-make docker-up     # Start all services
-make docker-down   # Stop
-make docker-build  # Rebuild images
+make docker-up     # start all services
+make docker-down   # stop
+make docker-build  # rebuild images
 ```
+
+### Production
+
+Production deployments use `systemd` units under `infra/systemd/`. See
+[setup/linux.md](setup/linux.md) for the canonical recipe.
+
+---
+
+## 10. Where to read more
+
+- HTTP and WebSocket contract — [API.md](API.md)
+- How to contribute — [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)
+- Per-version change notes — [releases/](releases/)
+- CI behaviour — [CI.md](CI.md)
+- Supported brokers / exchanges / platforms — [COMPATIBILITY.md](COMPATIBILITY.md)
+- SEBI compliance — [SEBI_COMPLIANCE.md](SEBI_COMPLIANCE.md)
