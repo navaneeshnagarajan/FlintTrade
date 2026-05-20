@@ -63,6 +63,7 @@ chroma_data/
 .superpowers/
 .firecrawl/
 .playwright-mcp/
+.vercel/
 .claude/
 .codex/
 
