@@ -74,6 +74,17 @@ DEVLOG.md
 SOP.md
 REPOS.md
 
+# === Agent-internal context (machine-local; scaffold via scripts/setup-agent-context.sh) ===
+# CLAUDE.md / AGENTS.md / PLAN.md no longer ship with the public repo. They
+# remain useful for personal coding-agent workflows but are kept out of
+# tracking. Templates live at templates/agent-context/ and the script writes
+# them to .local/agent-context/ for local use.
+/CLAUDE.md
+/AGENTS.md
+/PLAN.md
+/packages/*/CLAUDE.md
+/packages/*/AGENTS.md
+
 # === Planning files (session-specific) ===
 task_plan.md
 findings.md
