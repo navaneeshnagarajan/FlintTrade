@@ -51,7 +51,7 @@ npm run dev      # Terminal on http://localhost:5173
 
 ## 6. Start Building
 
-Read `PLAN.md` at the repo root. Pick the first unchecked task. Build it.
+Read [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for the contribution flow, then check the [issue tracker](https://github.com/navaneeshnagarajan/FlintTrade/issues) — the `good first issue` label is a good place to land your first PR. If you use a CLAUDE-aware or AGENTS-aware coding agent (Claude Code, Cursor, Aider, Continue, Codex, etc.), run `bash scripts/setup-agent-context.sh` once to scaffold your machine-local agent context.
 
 ---
 

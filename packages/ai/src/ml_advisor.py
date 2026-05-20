@@ -16,7 +16,7 @@ Signal enum:
 Absorbed from: openadvisor/training_predictions.py (CatBoost → LightGBM per project stack).
 
 Design decisions:
-- LightGBM (not CatBoost / sklearn): project stack choice in packages/ai/CLAUDE.md.
+- LightGBM (not CatBoost / sklearn): project stack choice. See docs/ARCHITECTURE.md.
 - Classifier (BUY/SELL/HOLD), not regressor: actionable discrete signals.
 - Label generation: forward-looking n-bar return thresholds (configurable).
 - Feature engineering is pure NumPy / pandas — no TA-Lib dependency here

@@ -42,7 +42,7 @@ class ExchangeSchedule:
     is_24x7: bool = False
 
 
-# From CLAUDE.md + engine CLAUDE.md
+# Exchange schedules — see docs/ARCHITECTURE.md and docs/USER_GUIDE.md (Operations).
 EXCHANGE_SCHEDULES: dict[str, ExchangeSchedule] = {
     "NSE": ExchangeSchedule("NSE", time(9, 15), time(15, 30), time(15, 15)),
     "BSE": ExchangeSchedule("BSE", time(9, 15), time(15, 30), time(15, 15)),
@@ -58,7 +58,7 @@ EXCHANGE_SCHEDULES: dict[str, ExchangeSchedule] = {
 }
 
 
-# Deploy freeze windows per market segment (from CLAUDE.md)
+# Deploy freeze windows per market segment — see docs/USER_GUIDE.md (Operations).
 _DEPLOY_FREEZE_WINDOWS: dict[str, tuple[time, time]] = {
     "equity":   (time(9, 15), time(15, 30)),
     "currency": (time(9, 0),  time(17, 0)),
@@ -174,7 +174,7 @@ class TimeScheduler:
     def is_deploy_frozen(self, exchanges: list[str] | None = None, at: datetime | None = None) -> bool:
         """Check if ANY of the given exchanges is in a deploy freeze window.
 
-        If no exchanges given, checks equity window (default from CLAUDE.md).
+        If no exchanges given, checks the equity window (NSE) as the default.
         """
         now_t = (at or self.now_ist()).time().replace(tzinfo=None)
         target_exchanges = exchanges or ["NSE"]
