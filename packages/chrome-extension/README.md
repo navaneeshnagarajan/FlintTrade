@@ -1,50 +1,46 @@
-# FlintTrade Chrome Extension
+# Chrome Extension
 
-Quick trade from any webpage. Companion extension for FlintTrade.
+> Browser extension for quick trading from any web page (Manifest V3).
 
-## Features
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 
-- **Popup:** Connection status, quick order form, recent signals
-- **Content Script:** Detects stock symbols on NSE India and Moneycontrol pages, adds "Trade" buttons
+**Language:** TypeScript
 
-## Installation (Developer Mode)
+## Public surface
 
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in the top-right corner)
-3. Click **Load unpacked**
-4. Select the `packages/chrome-extension/` directory
-5. The extension icon should appear in your toolbar
+- `manifest.json — extension declaration`
+- `src/content.ts — content script injected into broker / charting pages`
+- `src/popup/ — popup UI for one-click order placement`
 
-## Configuration
+(See the source for the full surface.)
 
-1. Click the FlintTrade extension icon
-2. Click **Settings** to expand the settings panel
-3. Enter your FlintTrade host (default: `http://localhost:5173`)
-4. Enter your API key
-5. Click **Save**
+## Install
 
-## Supported Sites
+This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
-- [NSE India](https://www.nseindia.com/) — detects symbols on quote pages
-- [Moneycontrol](https://www.moneycontrol.com/) — detects symbols on stock pages
+```bash
+# Python packages
+uv pip install -e packages/chrome-extension
+```
 
-## Icons
+If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
 
-Place icon files in the `icons/` directory:
-- `icon-16.png` (16x16)
-- `icon-48.png` (48x48)
-- `icon-128.png` (128x128)
+## Tests
 
-You can generate these from the FlintTrade logo SVG.
+```bash
+cd packages/chrome-extension && npm test
+```
 
-## Development
+For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../docs/DEVELOPER_GUIDE.md).
 
-This is a scaffold (v0.1.0). Planned improvements:
+## How this fits in
 
-- [ ] Proper icon assets
-- [ ] Background service worker for persistent connection
-- [ ] Real-time price display in popup
-- [ ] Keyboard shortcuts for quick orders
-- [ ] Support more financial sites (Screener.in, Tickertape, etc.)
-- [ ] Options quick-order form
-- [ ] Position summary in popup
+This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../docs/USER_GUIDE.md).
+
+## Contributing
+
+Contributions welcome. Please read [`CONTRIBUTING.md`](../../CONTRIBUTING.md) at the repo root before opening a pull request.
+
+## License
+
+AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../LICENSE) for the full text.

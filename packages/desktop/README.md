@@ -1,44 +1,46 @@
-# @flinttrade/desktop
+# Desktop
 
-Native desktop wrapper for FlintTrade using Tauri v2. Wraps the existing React terminal app in a native window.
+> Tauri-based native desktop wrapper around the terminal package (scaffolded).
 
-## Prerequisites
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 
-- [Rust](https://rustup.rs/) (stable toolchain)
-- [Node.js](https://nodejs.org/) 20+
-- The terminal package built first: `cd ../terminal && npm run build`
-- Platform-specific dependencies:
-  - **Windows:** WebView2 (included in Windows 11, install manually on Windows 10)
-  - **macOS:** Xcode Command Line Tools
-  - **Linux:** `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`
+**Language:** TypeScript + Rust
 
-## Development
+## Public surface
 
-```bash
-# Ensure the terminal dev server is running first
-cd ../terminal && npm run dev
+- `src-tauri/Cargo.toml — Tauri shell configuration`
+- `src-tauri/tauri.conf.json — window + permissions`
+- `src/ — TypeScript renderer entry`
 
-# In another terminal, start Tauri dev mode (hot-reloads the native window)
-npm run dev
-```
+(See the source for the full surface.)
 
-This opens a native window pointing at `http://localhost:5173` (the Vite dev server).
+## Install
 
-## Building
+This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Build the terminal frontend first
-cd ../terminal && npm run build
-
-# Build the native binary
-npm run build
+# Python packages
+uv pip install -e packages/desktop
 ```
 
-The compiled binary and installer will be in `src-tauri/target/release/bundle/`.
+If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
 
-## Architecture
+## Tests
 
-- `src-tauri/tauri.conf.json` -- Tauri configuration (window size, dev URL, bundle settings)
-- `src-tauri/Cargo.toml` -- Rust dependencies
-- `src-tauri/src/main.rs` -- Rust entry point (minimal, just launches the webview)
-- The frontend is the terminal package (`packages/terminal/dist`) -- no code is duplicated.
+```bash
+cd packages/desktop && npm test  # plus `cargo test` in src-tauri/
+```
+
+For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../docs/DEVELOPER_GUIDE.md).
+
+## How this fits in
+
+This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../docs/USER_GUIDE.md).
+
+## Contributing
+
+Contributions welcome. Please read [`CONTRIBUTING.md`](../../CONTRIBUTING.md) at the repo root before opening a pull request.
+
+## License
+
+AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../LICENSE) for the full text.

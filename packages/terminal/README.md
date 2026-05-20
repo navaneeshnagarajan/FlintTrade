@@ -1,4 +1,47 @@
-# flint-terminal
-React + TypeScript trading terminal. Single app (port 5173), 12 public routes (+ DEV `/admin` + 404), 82 widgets, 7 tools, 13 workspace presets.
-Dockview v5.1 widget-composable workspace. Zustand + Jotai + TanStack Query state layer.
-Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade). See CLAUDE.md for dev context.
+# Terminal
+
+> Single-page terminal — Dockview workspace with 82 widgets, 7 tools, 13 workspace presets, and 12 public routes.
+
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+
+**Language:** TypeScript + React 19
+
+## Public surface
+
+- `src/main.tsx — entry point and route registration`
+- `src/layout/widgetFactory.tsx — widget registry (83 entries)`
+- `src/layout/workspacePresets.ts — 13 named presets`
+- `src/services/api.ts — REST + WebSocket client`
+
+(See the source for the full surface.)
+
+## Install
+
+This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
+
+```bash
+# Python packages
+uv pip install -e packages/terminal
+```
+
+If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+
+## Tests
+
+```bash
+cd packages/terminal && npx vitest run
+```
+
+For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../docs/DEVELOPER_GUIDE.md).
+
+## How this fits in
+
+This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../docs/USER_GUIDE.md).
+
+## Contributing
+
+Contributions welcome. Please read [`CONTRIBUTING.md`](../../CONTRIBUTING.md) at the repo root before opening a pull request.
+
+## License
+
+AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../LICENSE) for the full text.

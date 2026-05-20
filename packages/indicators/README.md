@@ -1,62 +1,48 @@
-# flint-indicators
-Technical analysis indicator library — pure NumPy implementation for batch use.
-Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade). See CLAUDE.md for dev context.
+# Indicators
 
-## Indicators (43 functions across 7 modules)
+> 43 indicator functions across 7 modules — TA-Lib (batch, 150+ indicators) plus Numba-accelerated streaming variants plus Pine Script conversion.
 
-| Category | Indicators |
-|----------|-----------|
-| Trend | EMA, SMA, DEMA, TEMA, WMA, Hull MA, Supertrend, VWAP, Ichimoku, Parabolic SAR |
-| Momentum | RSI, MACD, Stochastic, Williams %R, CCI, ROC, CMO, TRIX, StochRSI, BOP |
-| Volatility | ATR, Bollinger Bands, Keltner Channels, Donchian Channels, NATR, Historical Volatility |
-| Volume | OBV, AD, CMF, MFI, VWMA |
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 
-## Usage
+**Language:** Python + Numba
 
-```python
-import numpy as np
-from packages.indicators.src.trend import ema, sma, dema, tema, wma, hull, supertrend, vwap, ichimoku, parabolic_sar
-from packages.indicators.src.momentum import rsi, macd, stochastic, williams_r, cci, roc, cmo, trix, stoch_rsi, bop
-from packages.indicators.src.volatility import atr, bollinger_bands, keltner_channels, donchian_channels, natr, historical_volatility
-from packages.indicators.src.volume import obv, ad, cmf, mfi, vwma
+## Public surface
 
-close  = np.array([...], dtype=np.float64)
-high   = np.array([...], dtype=np.float64)
-low    = np.array([...], dtype=np.float64)
-volume = np.array([...], dtype=np.float64)
+- `src/trend.py — SMA, EMA, MACD, ADX`
+- `src/momentum.py — RSI, Stochastic, ROC, MFI`
+- `src/oscillators.py — CCI, Williams %R, TRIX`
+- `src/volatility.py — ATR, Bollinger Bands, Keltner Channels`
+- `src/volume.py — OBV, Chaikin, VWAP`
 
-# Trend
-ema20 = ema(close, period=20)
-st, direction = supertrend(high, low, close, period=10, multiplier=3.0)
-tenkan, kijun, span_a, span_b, chikou = ichimoku(high, low, close)
-sar, uptrend = parabolic_sar(high, low)
+(See the source for the full surface.)
 
-# Momentum
-rsi14 = rsi(close, period=14)
-macd_line, signal_line, histogram = macd(close, fast=12, slow=26, signal=9)
-k, d = stoch_rsi(close)
+## Install
 
-# Volatility
-atr14 = atr(high, low, close, period=14)
-upper, middle, lower = bollinger_bands(close, period=20, std_dev=2.0)
-dc_upper, dc_mid, dc_lower = donchian_channels(high, low, period=20)
+This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
-# Volume
-obv_vals = obv(close, volume)
-mfi14 = mfi(high, low, close, volume, period=14)
+```bash
+# Python packages
+uv pip install -e packages/indicators
 ```
 
-## Additional Modules
+If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
 
-- `signals.py` — Signal generation from indicator crossovers and thresholds
-- `streaming.py` — Streaming (incremental) indicator updates for real-time data
-- `numba_kernels.py` — Numba JIT-compiled kernels for hot-path indicators
-- `pipeline.py` — Indicator pipeline chaining and composition
-- `utils.py` — Shared utility functions
+## Tests
 
-## Design rules
+```bash
+python -m pytest packages/indicators/tests/ -v
+```
 
-- All inputs: `NDArray[np.float64]`
-- All outputs: `NDArray[np.float64]` (or tuples thereof)
-- NaN is returned for bars with insufficient history — never forward-filled
-- Wilder smoothing (RMA) used for RSI and ATR — matches TradingView
+For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../docs/DEVELOPER_GUIDE.md).
+
+## How this fits in
+
+This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../docs/USER_GUIDE.md).
+
+## Contributing
+
+Contributions welcome. Please read [`CONTRIBUTING.md`](../../CONTRIBUTING.md) at the repo root before opening a pull request.
+
+## License
+
+AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../LICENSE) for the full text.

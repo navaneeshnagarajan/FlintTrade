@@ -6,7 +6,41 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Public repo modernisation pass (2026-05-20)
+
+Reshapes the contributor-facing surface of the repository now that it is public AGPL-3.0. No application code, tests, or runtime behaviour touched.
+
+#### Changed
+
+- **README.md** rewritten as a hybrid trader + developer landing page. Top fold opens with a four-screenshot trader pitch, badges, a feature list, and a five-minute Docker quickstart. Second fold opens the developer view with a Mermaid component diagram, a 16-package map, and the tech stack.
+- **`docs/`** restructured by audience. New `USER_GUIDE.md` (trader-facing walkthrough), `DEVELOPER_GUIDE.md` (contributor-facing), `API.md` (REST + WebSocket reference), and `docs/README.md` (landing index). `ARCHITECTURE.md` refreshed with current package count, test count, and three Mermaid diagrams. `CI_BUDGET_AND_QUALITY.md` reframed as `CI.md` for contributors.
+- **Release notes** moved from `docs/RELEASE_NOTES_v0.5.x.md` into `docs/releases/`.
+- **`docs/machine-setup/`** renamed to `docs/setup/`.
+- **CONTRIBUTING.md** rewritten end-to-end. Drops references to agent-internal context files; adds Conventional Commits, code style + lint, areas where help is wanted, AGPL-3.0 implications.
+- **CODE_OF_CONDUCT.md** updated. Preserves Contributor Covenant v2.1; enforcement contact moved from a personal email to private GitHub Security Advisories; full Enforcement Guidelines section added.
+- **SECURITY.md** rewritten. Supported-versions table updated to reflect that only the latest minor receives patches pre-1.0. Reporting moves to GitHub Security Advisories with a documented SLA and safe-harbour policy for researchers.
+- **Per-package READMEs** added for all 16 packages, generated from `templates/package-purposes.yml` via `scripts/generate-package-readmes.py`.
+
+#### Added
+
+- `.github/ISSUE_TEMPLATE/bug_report.md`, `feature_request.md`, `question.md`, `config.yml` — three structured templates plus a config that disables blank issues and redirects security to private Advisories.
+- `.github/PULL_REQUEST_TEMPLATE.md` — checklist-style template with summary, change type, persona affected, testing, screenshots, and reviewer-friendly checklist.
+- `.github/FUNDING.yml` — multi-platform sponsorship (GitHub Sponsors, Buy Me a Coffee, Patreon, custom).
+- `scripts/setup-agent-context.sh` — idempotent scaffolder that copies `templates/agent-context/*.template` to `.local/agent-context/` so contributors using a CLAUDE-aware or AGENTS-aware coding agent can populate their machine-local context after a fresh clone.
+- `scripts/generate-package-readmes.py` — generates the 16 per-package READMEs from a YAML data file.
+- `templates/agent-context/` — tracked source for the 35 previously-tracked agent-internal context files.
+- `templates/package-purposes.yml` — single source of truth for per-package purpose + entry points.
+- `docs/superpowers/specs/2026-05-20-public-repo-modernisation-design.md` — the spec governing this pass.
+- `docs/superpowers/plans/2026-05-20-public-repo-modernisation.md` — the implementation plan.
+
+#### Removed (from tracking — content preserved on disk)
+
+- 35 agent-internal `.md` files removed from tracking: root `CLAUDE.md`, `AGENTS.md`, `PLAN.md`, plus `packages/<pkg>/CLAUDE.md` and `packages/<pkg>/AGENTS.md` across all 16 packages. Templates preserved under `templates/agent-context/`; machine-local working copies scaffolded under `.local/agent-context/` via `scripts/setup-agent-context.sh`. `.gitignore` updated.
+- 5 stale docs archived to `.local/archive/docs-internal/`: `docs/COMPETITIVE_ANALYSIS.md`, `docs/research/` (3 files), `docs/status/` (6 files), `docs/superpowers/plans/2026-04-*` (2 superseded plans), and the full version of `docs/REFERENCES.md`.
+
+#### Process notes
+
+Executed via the `superpowers:brainstorming` → `writing-plans` → `subagent-driven-development` workflow. Four parallel Technical Writer subagents handled README, docs restructure, governance, and `.github/` metadata in parallel. One subagent's summary output was blocked by a content-safety filter on security-policy content; the file content it produced had already landed and the missing summary work was completed inline.
 
 ---
 
