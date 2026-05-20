@@ -1,189 +1,195 @@
 # Contributing to FlintTrade
 
-## Quick Start
+FlintTrade is an open-source Indian fintech project — a modular trading and investment platform for F&O, commodities, and crypto, built on top of the [OpenAlgo](https://github.com/marketcalls/openalgo) broker gateway and licensed under AGPL-3.0. We're building it in the open because Indian retail traders deserve serious, transparent tooling, and because every contributor makes the platform sharper.
+
+Whether you're fixing a typo, shipping a new broker adapter, translating the UI into Hindi, or rewriting an entire widget — you're welcome here. This guide tells you everything you need to start.
+
+## Before you start
+
+Please read these first. They're short:
+
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — how we behave with one another.
+- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability privately.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the 10-minute tour of how FlintTrade fits together.
+
+If you're filing a security issue, please do **not** open a public GitHub issue. Use the channels in `SECURITY.md`.
+
+## Development setup
+
+Detailed, platform-specific setup guides live under [`docs/setup/`](docs/setup/):
+
+- [`docs/setup/windows.md`](docs/setup/windows.md)
+- [`docs/setup/macos.md`](docs/setup/macos.md)
+- [`docs/setup/linux.md`](docs/setup/linux.md)
+- [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) — the short version
+
+One-line summary for the impatient:
 
 ```bash
-git clone https://github.com/navaneeshnagarajan/FlintTrade.git
-cd FlintTrade
-cp .env.example .env && make setup
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git && cd FlintTrade && cp .env.example .env && make setup
 ```
 
-> **Note:** During pre-release (v0.x), all work goes directly to main.
-> Feature branches and PRs activate at v1.0.0.
+You'll also need an OpenAlgo instance running locally — see [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) for the recommended way to clone a local-dev copy.
 
-## Versioning
+## How to run tests
 
-FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
+FlintTrade has roughly 12,000 tests across Python and TypeScript. Run them with:
 
-Release rules:
+```bash
+make test                                        # all pytest tests (~9,089)
+make test-fast                                   # stop on first failure
+python -m pytest packages/core/tests/ -v         # single package
+cd packages/terminal && npx vitest run           # all Vitest (~2,973)
+```
 
-- Manifest versions use bare SemVer, for example `0.5.2-dev`; git tags use the
-  project tag convention `v<semver>`, for example `v0.5.2-dev`.
-- Published releases are immutable. If release metadata or notes need a change
-  after publication, cut a new prerelease or patch instead of moving the old
-  tag.
-- `0.y.z` remains pre-1.0 development; compatibility can change, but patch
-  releases are still reserved for backwards-compatible fixes and release
-  hygiene.
-- Prereleases are published as GitHub prereleases and use lowercase
-  dot-separated identifiers: `dev`, `alpha`, `beta`, `rc.1`.
-- Independent deliverables keep their own package versions unless they are
-  explicitly part of the monorepo release train.
+To run a single file or a single test by name:
 
-| Version | Status | Meaning |
+```bash
+python -m pytest packages/core/tests/test_foo.py -v
+python -m pytest packages/core/tests/test_foo.py::test_name -v
+cd packages/terminal && npx vitest run src/widgets/orderpad/OrderPad.test.tsx
+cd packages/terminal && npx vitest run -t "places a market order"
+```
+
+Lint passes are part of CI too:
+
+```bash
+make lint                                        # ruff over all Python packages
+cd packages/terminal && npm run typecheck        # tsc --noEmit, strict mode
+```
+
+## How to build
+
+```bash
+# Terminal (React + Vite)
+cd packages/terminal && npm run build
+
+# Rust tick-engine (PyO3 bindings)
+cd packages/tick-engine && cargo build --release
+```
+
+The terminal build runs `tsc --noEmit` followed by `vite build`. A clean build is required before any commit that touches `packages/terminal/`.
+
+## Branch and commit conventions
+
+FlintTrade follows [Conventional Commits](https://www.conventionalcommits.org/). The shape is:
+
+```
+type(scope): short imperative summary
+
+Optional body — explain the WHY, not just the WHAT.
+Wrap at 72 characters. Reference issues with #123.
+```
+
+Allowed types and examples:
+
+| Type | When to use it | Example |
 |---|---|---|
-| 0.0.1-dev | Done | Foundation, monorepo structure, CI/CD |
-| 0.1.0-alpha | Released (2026-03-21) | 13 packages, 1,018 tests, 10 routes, full-stack wiring, 5 themes |
-| 0.1.0-beta | Released (2026-03-24) | Security audit, WCAG a11y, perf optimisation, god component splits |
-| 0.2.0-alpha | Released (2026-03-25) | OpenAlgo absorption: gateway, analysis tools, platform features |
-| 0.2.0-beta | Released (2026-03-25) | Audit fixes, absorption tracks |
-| 0.3.0 | Released (2026-03-31, tag `v0.3.0`) | "Structured Calm" UI redesign, backend wiring |
-| 0.4.0 | Released (2026-04-02, tag `v0.4.0`) | Auth foundation, theme v4, execution modes, welcome/setup flow |
-| 0.4.1 | Released (2026-04-08, tag `v0.4.1`) | Mode wiring, deployment readiness, endpoint alignment, audit fixes |
-| 0.5.0-alpha | Released (2026-04-15, tag `v0.5.0-alpha`) | Glass Adaptive preview and v0.5 production-readiness track |
-| 0.5.0-beta | Released (2026-04-19, tag `v0.5.0-beta`) | OpenAlgo v2.0.0.4 parity beta |
-| 0.5.0 | Released (2026-04-19, tag `v0.5.0`) | OpenAlgo v2.0.0.4 parity complete (5 waves, 1,499 tests) |
-| 0.5.1 | Released (2026-05-20, tag `v0.5.1`) | Security hardening (4 Codex findings) + CI infra (65 commits, 0 warnings, 0 ruff errors, 8,989 tests green; final commits reconcile release metadata) |
-| 0.5.2-dev | **CURRENT** prerelease (tag `v0.5.2-dev`) | Release hygiene snapshot: SemVer-aligned tags/releases, standard release-note structure, current manifests advanced past immutable `v0.5.1` |
-| 1.0.0 | Planned | Full production release, all platforms tested |
+| `feat` | New user-visible behaviour | `feat(terminal): add sector rotation widget` |
+| `fix` | Bug fix | `fix(engine): rate limiter not resetting after market close` |
+| `docs` | Documentation only | `docs: clarify OpenAlgo port mapping in architecture guide` |
+| `test` | Tests added or refactored, no behaviour change | `test(screener): cover option chain Greeks edge cases` |
+| `chore` | Tooling, dependencies, repo housekeeping | `chore: bump vite to 6.4.2` |
+| `refactor` | Code restructure with no behaviour change | `refactor(ditto): extract margin calculator into its own module` |
+| `perf` | Performance improvement | `perf(tick-engine): avoid allocating per-tick in hot path` |
+| `ci` | CI configuration only | `ci: shard widget tests across four runners` |
 
-**Pre-release progression:** `dev` → `alpha` → `beta` → `rc.1` → stable
-**Version bumps:**
-- Update `VERSION` file
-- Update `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com/)
-- Tag: `git tag -a v0.1.0-beta -m "Beta release"`
-- GitHub Release with changelog summary
+Scopes are package names (`terminal`, `engine`, `gateway`, `screener`, …) or focus areas (`docs`, `ci`, `repo`).
 
-**Patch versions (0.1.1, 0.1.2):** bug fixes within a release.
-**Minor versions (0.2.0, 0.3.0):** new package/feature added.
-**Major version (1.0.0):** full platform ready for production.
+**Pre-1.0 branching:** while FlintTrade is pre-1.0, contributors commit to `main` directly for trivial fixes (typos, doc tweaks, one-line bug fixes). Pull requests are welcome at any time and encouraged for anything larger than a tiny patch. After v1.0.0 this changes — feature branches and pull requests become mandatory.
 
-## Commit Guidelines
+Never use `git add -A` or `git add .`. Stage the files you actually changed. Never commit `.env`, API keys, broker account names, fund amounts, or order IDs.
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
+## Pull request flow
 
-```
-feat(terminal): add sector rotation widget
-fix(engine): rate limiter not resetting after market close
-docs: update SEBI compliance matrix with April 2026 timeline
-test(screener): add option chain Greeks calculation tests
-chore: clean up stale gitignore entries
-```
+1. **Fork** the repository on GitHub.
+2. **Create a branch** from `main`. Name it after what it does: `feat/terminal-sector-rotation`, `fix/engine-rate-limit-reset`.
+3. **Make your change.** Keep commits focused; one logical change per commit.
+4. **Run tests locally** before pushing. CI will catch failures but it's faster to find them yourself.
+5. **Push** your branch and **open a pull request** against `main`.
+6. **Fill in the checklist** in the PR template (tests added, docs updated, conventional commit format).
+7. **Address reviewer feedback.** Push follow-up commits rather than force-pushing — it makes review diffs easier to read.
+8. **Merge.** Maintainers will squash and merge once CI is green and review is approved.
 
-### Commit message rules
+Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to `main` — but only while we're pre-1.0.
 
-1. **Type prefix required:** `feat`, `fix`, `docs`, `test`, `chore`, `refactor`, `perf`, `ci`
-2. **Scope in parentheses:** package name or area — `(terminal)`, `(engine)`, `(docs)`, `(ci)`
-3. **Imperative mood:** "add feature" not "added feature" or "adding feature"
-4. **Body for context:** explain WHY, not just WHAT. Reference issue numbers if applicable.
-5. **Detailed messages:** each commit should fully describe the change so `git log` tells the project story
-6. **Stage specific files:** never use `git add -A` or `git add .` — stage only what you changed
+## Code style and lint
 
-### What NEVER goes in commits
+### Python
 
-- API keys, tokens, passwords, secrets
-- Personal hostnames, IP addresses, VPN endpoints
-- Broker account names, fund amounts, order IDs
-- Machine hardware specs (use generic names: `dev-machine`, `test-machine`, `server`)
-- Personal file paths (use `$HOME`, `~/`, relative paths)
-- Conversation references, session IDs, memory content
+- Follow PEP 8. Lint with `ruff` — `make lint` must be clean before commit.
+- Type hints on every public function and class attribute.
+- Google-style docstrings (`Args:`, `Returns:`, `Raises:`).
+- Absolute imports only — no `from .foo import bar`.
+- Target Python 3.12. We use `StrEnum` and other 3.11+ features deliberately.
 
-## Changelog
+### TypeScript and React
 
-All notable changes go in [CHANGELOG.md](CHANGELOG.md) following [Keep a Changelog](https://keepachangelog.com/):
+- Strict mode is on and stays on. No `any`. No `@ts-ignore`. No `@ts-expect-error` without an issue link in the comment.
+- All new code lives in `.ts` or `.tsx`. No new `.js` or `.jsx` files.
+- Functional components and hooks only.
+- Use `shadcn/ui` components and `lucide-react` icons. No raw HTML `<button>`, `<input>`, or `<dialog>`.
+- Every widget is registered as a Dockview panel in `widgetFactory.tsx`.
 
-```markdown
-## [Unreleased]
-### Added
-- New feature description
-### Changed
-- What changed and why
-### Fixed
-- Bug fix description
-```
+### British English (prose, not code)
 
-The changelog replaces per-commit dev logs. Git history (`git log --oneline`) provides the detailed timeline.
+User-visible strings, error messages, ARIA labels, docstrings, comments, and documentation use **British English** spelling and idiom:
 
-## Bug Reports
+- behaviour, organise, prioritise, optimise, customise, analyse, recognise, summarise, normalise, serialise
+- centred, colour, honour, favour, neighbour, defence, licence (noun) / license (verb)
+- "while" (not "whilst" unless you really mean it)
 
-When filing bugs (issues or `bugs/` tracker), you MAY include:
+**Exceptions** — code stays as it is, because code is not prose:
 
-- OS name and version (e.g., "Ubuntu 24.04", "Windows 11", "macOS 15")
-- Node.js / Python version
-- Browser name and version
-- Error messages and stack traces
-- Steps to reproduce
+- Code identifiers, variable names, function names, class names: keep upstream spelling. `useColorScheme`, `normalize()`, `optimizer` if that's what the library exports.
+- CSS class names and Tailwind utilities: American (Tailwind ships American spellings).
+- Third-party APIs, library names, brand names: as the upstream spells them.
+- **Indian market terminology overrides everywhere:** "expiry" is correct (never "expiration"), "lakh" and "crore" are correct, "scrip" is correct.
 
-You must NOT include:
+## Areas where help is wanted
 
-- Personal IP addresses or hostnames
-- Broker account details or API keys
-- Fund balances, order IDs, or trade details
-- Machine serial numbers or exact hardware specs beyond what's relevant
+Look at the [`good first issue`](https://github.com/navaneeshnagarajan/FlintTrade/labels/good%20first%20issue) label for entry points. Beyond that, here's where the project most needs hands:
 
-## Development Workflow
+- **Broker adapters** — especially crypto exchanges beyond Delta (CoinDCX, WazirX, Bybit, Binance India), and any broker not yet covered by the 33 OpenAlgo gateways.
+- **Strategy templates** — we ship 96 backtest templates and want more. Mean reversion, momentum, options spreads, sector rotation, volatility plays.
+- **AI prompt engineering** — improving the 30 trading skills under `packages/ai/skills/`, refining RAG retrieval, sharpening signal explanations.
+- **Translations** — Hindi and Tamil first, then other Indian regional languages. The UI needs an i18n pass; we're looking for translators and engineers to set up the framework.
+- **Accessibility** — WCAG AA is in place; AAA is the target. Screen-reader testing, keyboard-only flows, contrast audits, focus management.
+- **Documentation** — user guides, walkthroughs, video scripts, API references. Every doc PR is a high-value PR.
+- **Mobile** — the React Native / Expo app is greenfield. If you build mobile, talk to us.
 
-```
-READ → PLAN → APPROVE → BUILD → VERIFY → TEST → UPDATE → COMMIT
-```
+## Good first issue pointers
 
-1. **READ** — Start every session by reading `CLAUDE.md` and `PLAN.md`
-2. **PLAN** — Pick next unchecked task. For non-trivial work, plan before coding
-3. **APPROVE** — Get approval for architecture changes or new files
-4. **BUILD** — Use TypeScript strict, shadcn/ui, Dockview panels. Check reference repos before writing from scratch
-5. **VERIFY** — `tsc --noEmit` (zero errors), `npm run build` (clean), visual check
-6. **TEST** — `npx vitest run` (~2,973 pass), `make test` (~9,089 pass), `ruff check`
-7. **UPDATE** — Update `CHANGELOG.md` [Unreleased] section, mark task done in `PLAN.md`
-8. **COMMIT** — Conventional commit, specific file staging, push, wait for CI green
+If you're new to the project, start with the [`good first issue`](https://github.com/navaneeshnagarajan/FlintTrade/labels/good%20first%20issue) label. Look for:
 
-## File Creation Rules
+- Issues tagged `docs` — usually self-contained and a good way to learn the codebase.
+- Issues tagged `widget` with a clear screenshot — small, visual, satisfying.
+- Issues tagged `test` — adding tests teaches you the module you're testing.
 
-Before creating any new file:
+Comment on the issue before you start so we don't double-allocate work.
 
-1. **Check if it already exists** — search the repo and `.local/` for similar files
-2. **If exists and needs update** — update it in place
-3. **If exists but outdated** — archive old file to `.local/archive/`, create new one with same name, include all important content from old + new updates
-4. **Never duplicate** — one source of truth per topic
+## Reporting bugs, requesting features, asking questions
 
-## CI/CD
+We use GitHub issue templates. Pick the one that fits:
 
-Every push triggers 9 parallel GitHub Actions jobs:
+- [`.github/ISSUE_TEMPLATE/bug_report.md`](.github/ISSUE_TEMPLATE/bug_report.md) — something broken.
+- [`.github/ISSUE_TEMPLATE/feature_request.md`](.github/ISSUE_TEMPLATE/feature_request.md) — something missing.
+- Questions and discussion: please use [GitHub Discussions](https://github.com/navaneeshnagarajan/FlintTrade/discussions) rather than the issue tracker.
 
-| Job | What it checks |
-|---|---|
-| `python-tests` | pytest (~9,089 tests) + ruff lint (Linux) |
-| `python-tests-macos` | pytest cross-platform check (macOS) |
-| `python-tests-windows` | pytest cross-platform check (Windows) |
-| `node-core-tests` | tsc strict + vitest core suite + production build |
-| `node-widget-tests-1` | vitest shard 1 (widgets) |
-| `node-widget-tests-2a` | vitest shard 2a (widgets) |
-| `node-widget-tests-2b` | vitest shard 2b (widgets) |
-| `node-widget-tests-3` | vitest shard 3 (widgets) |
-| `secrets-check` | Scans for leaked API keys and credentials |
+When reporting a bug, please include OS and version, Python and Node versions, the exact error message, and steps to reproduce. Please **never** include API keys, broker account names, fund balances, order IDs, personal IP addresses, or hostnames.
 
-**CI must be green before any new work.** If CI fails, fix immediately.
+For security vulnerabilities, follow [`SECURITY.md`](SECURITY.md) — do not open a public issue.
 
-## Pre-release Phase (v0.x — current)
+## License notice
 
-- All commits go directly to main
-- No PRs required until v1.0.0
-- CHANGELOG entry required for notable changes
-- Never commit `.env`, secrets, or private data to any branch
-- AI tools (Claude Code, Antigravity) may be credited in commit bodies
+FlintTrade is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0). By contributing, you agree that your contributions will be licensed under the same terms.
 
-## Post-release (v1.0.0 onward)
+What AGPL-3.0 means in practice:
 
-- Branch: `feature/{pkg}-{name}`, `fix/{pkg}-{name}`, `hotfix/{name}`
-- PRs to dev require 1 approval from a maintainer
-- Always squash and merge
-- Run `make test && make lint` before pushing
-- Never commit secrets (`.env`, keys, tokens)
-- Never reference specific brokers in package code (use OpenAlgo abstraction)
+- **Copyleft.** Any derivative work — fork, modification, or distribution — must also be licensed under AGPL-3.0 and must preserve the licence.
+- **Network-use clause.** If you run a modified version of FlintTrade as a network service (a hosted SaaS, an API, a multi-tenant platform), you must offer the modified source code to every user of that service. This is the key difference between AGPL and GPL.
+- **No warranty.** The software is provided as-is. See the full [`LICENSE`](LICENSE) for the legal text.
 
-## Code of Conduct
+If AGPL-3.0 doesn't work for your use case, please open a discussion before forking — we're open to talking, but we cannot relicense contributed code without contributor consent.
 
-See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
-## License
-
-By contributing, you agree that your contributions will be licensed under [AGPL-3.0](LICENSE).
+Thank you for being here. Every commit, every issue, every translation, every README improvement makes FlintTrade better for the next person who walks in.

@@ -1,56 +1,73 @@
 # Security Policy
 
-## Supported Versions
+Thank you for helping keep FlintTrade and its users safe.
+
+## Supported versions
+
+FlintTrade is pre-1.0. Only the latest minor release receives patches.
 
 | Version | Supported |
 |---------|-----------|
-| 0.5.x | :white_check_mark: Current development |
-| 0.4.x | :white_check_mark: Supported |
-| 0.3.x | :x: End of life |
+| 0.5.x   | Yes (latest, receives patches) |
+| 0.4.x   | No                             |
+| < 0.4   | No                             |
 
-## Reporting a Vulnerability
+When 1.0 ships, this policy will expand to cover the previous minor for a defined window.
 
-**Do NOT open a public GitHub issue for security vulnerabilities.**
+## Reporting an issue
 
-Instead, please report them responsibly:
+Please report issues privately. Do **not** open a public GitHub issue with details.
 
-1. **Email:** navaneeshnagarajan@gmail.com
-2. **Subject:** `[SECURITY] FlintTrade — <brief description>`
-3. **Include:**
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if any)
+**Primary channel:** [Open a private GitHub Security Advisory](https://github.com/navaneeshnagarajan/FlintTrade/security/advisories/new) for this repository. GitHub Security Advisories let maintainers triage, discuss, and coordinate a fix in private, then publish the advisory once a patch is available.
 
-You will receive an acknowledgment within 48 hours and a detailed response
-within 7 days.
+**Fallback channel:** If you cannot use Security Advisories, open a regular issue titled `[SECURITY]` with no technical detail, asking a maintainer to contact you privately. A maintainer will follow up.
 
-## Security Considerations
+## What to include in a report
 
-FlintTrade is a trading platform that connects to broker APIs. Security is critical:
+- A description of the issue and the affected component or endpoint.
+- Steps to reproduce, ideally with a minimal test case.
+- The version of FlintTrade and the operating system you tested on.
+- Whether the issue is reachable without authentication, or requires a logged-in session, or requires a specific mode (Explore / Practice / Live).
+- Any logs or screenshots — please redact broker credentials, account identifiers, and order identifiers before sharing.
 
-### What we protect
-- **API keys** — never committed to git, stored in `.env` (gitignored)
-- **Broker credentials** — managed by OpenAlgo, never in FlintTrade
-- **Trade data** — SEBI-compliant 5-year audit trail
-- **User preferences** — stored locally in `~/.flinttrade/workspace.json`
+## Response timeline
 
-### What we enforce
-- `.env.example` has ALL values blank (open-source rule)
-- No personal hostnames, IPs, or provider names in committed code
-- CI/CD secrets check scans for leaked credentials
-- Rate limiting on all API calls (SEBI compliance)
-- WebSocket connections only via WireGuard VPN in production
+| Stage | Target |
+|-------|--------|
+| Initial acknowledgement | Within 7 days |
+| Triage outcome (accepted / declined / needs more info) | Within 14 days |
+| Fix or status update | Within 30 days |
+| Public disclosure | Up to 90 days from confirmed report |
 
-### Known attack surfaces
-- OpenAlgo REST API (mitigated: rate limiting, API key auth)
-- WebSocket market data (mitigated: VPN-only in production)
-- Local storage (mitigated: no credentials stored client-side)
+If a report stalls or you have not heard back within these windows, please open a second Security Advisory referencing the first.
 
-## Disclosure Policy
+## Scope
 
-We follow responsible disclosure. We will:
-1. Acknowledge your report within 48 hours
-2. Provide a timeline for the fix
-3. Credit you in the fix commit (unless you prefer anonymity)
-4. Not take legal action against good-faith security researchers
+Reports about the FlintTrade codebase itself are in scope. This includes everything under `packages/`, `scripts/`, the GitHub workflows under `.github/`, the build configuration (Docker, Makefile, `pyproject.toml`, `flint.toml`), and the documentation under `docs/` and the repo root.
+
+The mode system (Explore / Practice / Live), the authentication layer (JWT plus API key), the order-safety proxy, the strategy sandbox executor, and any code that touches broker credentials or trade-execution paths are all in scope.
+
+## Out of scope
+
+- Issues in upstream projects FlintTrade depends on or talks to over the network — [OpenAlgo](https://github.com/marketcalls/openalgo), OpenClaw, or any third-party broker integration shipped by those projects. Report those to their respective maintainers.
+- Issues in third-party Python or Node dependencies. Report those upstream (the corresponding `pyproject.toml` or `package.json` is the source of truth).
+- Issues caused by user misconfiguration — for example, committing `.env` files with live credentials, exposing the FlintTrade backend port to the public internet, or running the broker gateway without TLS.
+- Self-inflicted issues from running modified forks. We can only support unmodified FlintTrade.
+
+## Recognition
+
+If you'd like to be credited, we'll add your name (or chosen handle) to the next release's `CHANGELOG.md` under a "Security" subheading. If you'd rather stay anonymous, we'll respect that — just tell us in the report.
+
+## Safe-harbour for researchers
+
+We will not pursue legal action against anyone who:
+
+- Reports an issue privately through the channels above,
+- Acts in good faith and avoids privacy violations, service disruption, data destruction, and degradation of the user experience for others,
+- Gives us reasonable time to fix the issue before any public discussion.
+
+## Recent advisories
+
+Once published, advisories live at: <https://github.com/navaneeshnagarajan/FlintTrade/security/advisories>.
+
+Thank you for taking the time to report responsibly — it makes the platform better for every trader who depends on it.
