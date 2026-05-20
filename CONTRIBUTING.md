@@ -22,11 +22,12 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | 0.1.0-beta | Released (2026-03-24) | Security audit, WCAG a11y, perf optimisation, god component splits |
 | 0.2.0-alpha | Released (2026-03-25) | OpenAlgo absorption: gateway, analysis tools, platform features |
 | 0.2.0-beta | Released (2026-03-25) | Audit fixes, absorption tracks |
-| 0.3.0 | Released (2026-03-30) | "Structured Calm" UI redesign, backend wiring |
-| 0.4.0 | Released (2026-04-04) | Unified mode system, server-side order safety |
-| 0.5.0-alpha | Released (2026-04-XX) | Live signals + multi-agent AI + bracket orders + MCX |
-| 0.5.0-beta | Released (2026-04-XX) | Glass Adaptive UI + Crawl4AI + WhatsApp + Pine editor |
-| 0.5.0 | Released (2026-04-19, tag `2741cad`) | OpenAlgo v2.0.0.4 parity complete (5 waves, 1,499 tests) |
+| 0.3.0 | Released (2026-03-31, tag `v0.3.0`) | "Structured Calm" UI redesign, backend wiring |
+| 0.4.0 | Released (2026-04-02, tag `v0.4.0`) | Auth foundation, theme v4, execution modes, welcome/setup flow |
+| 0.4.1 | Released (2026-04-08, tag `v0.4.1`) | Mode wiring, deployment readiness, endpoint alignment, audit fixes |
+| 0.5.0-alpha | Released (2026-04-15, tag `v0.5.0-alpha`) | Glass Adaptive preview and v0.5 production-readiness track |
+| 0.5.0-beta | Released (2026-04-19, tag `v0.5.0-beta`) | OpenAlgo v2.0.0.4 parity beta |
+| 0.5.0 | Released (2026-04-19, tag `v0.5.0`) | OpenAlgo v2.0.0.4 parity complete (5 waves, 1,499 tests) |
 | 0.5.1 | Released (2026-05-20, tag `v0.5.1`) | Security hardening (4 Codex findings) + CI infra (65 commits, 0 warnings, 0 ruff errors, 8,989 tests green; final commits reconcile release metadata) |
 | 0.5.2-dev | **CURRENT** | v0.5.2 carry: Windows Job Object sandbox, trusted-mode spawn bypass, 8 stub backend endpoints, glib upstream wait |
 | 1.0.0 | Planned | Full production release, all platforms tested |

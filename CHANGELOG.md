@@ -11,6 +11,10 @@ subprocess spawn bypass for BacktestLab inner loops, 8 stub backend
 endpoints still returning `is_sample_data: true`, glib upstream wait
 (tracked in dismissed Dependabot alert).
 
+### Changed
+- Release hygiene: normalised annotated tag dates, rebuilt GitHub releases in
+  chronological SemVer order, and standardised release-note structure.
+
 ---
 
 ## [0.5.1] - 2026-05-20
@@ -52,7 +56,7 @@ See `docs/RELEASE_NOTES_v0.5.1.md` for the GA narrative. Highlights:
 
 ---
 
-## [Pre-0.5.1 unreleased work merged into v0.5.1]
+### Detailed implementation notes
 
 ### Sandbox hardening + Vitest OOM root-cause fix (2026-05-19/20)
 
@@ -168,6 +172,13 @@ The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL
 - Backtest strategy templates: 94 (`packages/backtest-engine/src/strategies/`); plus 2 live-engine strategies in `packages/engine/src/strategies/`.
 - AI skill markdown files: 30 (`packages/ai/skills/`).
 - CI jobs: 9 parallel GitHub Actions jobs.
+
+---
+
+## [0.5.0] - 2026-04-19
+
+Tag: `v0.5.0` · Base: `v0.5.0-beta` (`a0c0f29`) · Stable OpenAlgo
+v2.0.0.4 parity baseline.
 
 ### Added — OpenAlgo v2.0.0.4 Parity (Waves 1-5, 1,499 tests)
 - Wave 1 — Scanner, cron, error log, seasonality, security/session tooling (253 tests)
@@ -492,7 +503,42 @@ The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL
 - Dead code: unused FlexLayoutNode imports, orphan utility functions, unreachable switch branches
 - Legacy /api/v0/ route prefix (all endpoints now under /api/v1/ or /ft-api/v1/)
 
-## [0.3.0] — 2026-03-30
+---
+
+## [0.4.1] - 2026-04-08
+
+Tag: `v0.4.1` · Base: `v0.4.0` (`d202d1f`) · Patch release for
+mode wiring, deployment readiness, endpoint alignment, and audit fixes.
+
+### Added
+- Unified mode system wiring with server-side order safety refinements.
+- Production infrastructure for logging, monitoring, and deployment.
+
+### Fixed
+- Backend port alignment to the FlintTrade `5100` standard.
+- Welcome auth checks, OpenAlgo fresh-clone support, API route issues,
+  accessibility findings, and CI dependency gaps.
+
+---
+
+## [0.4.0] - 2026-04-02
+
+Tag: `v0.4.0` · Base: `v0.3.0` (`10228da`) · Security, themes, execution
+modes, and welcome/setup flow overhaul.
+
+### Added
+- Auth foundation with password/PIN setup, lock-screen flow, setup resume,
+  and 8 AM IST session expiry.
+- Three execution modes in the UI: Demo, Sandbox, and Live.
+- Theme v4 and welcome/setup flow improvements.
+
+### Fixed
+- Light-mode contrast, broker-skip setup paths, dev-mode auth fallback,
+  Flask threading, and auth endpoint security edge cases.
+
+---
+
+## [0.3.0] — 2026-03-31
 
 v0.3.0 "Structured Calm" — Bloomberg precision + Stripe polish + Linear minimalism.
 
