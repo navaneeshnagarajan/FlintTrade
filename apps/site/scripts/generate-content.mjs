@@ -2,12 +2,54 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const siteRoot = path.resolve(new URL('.', import.meta.url).pathname, '..');
-const repoRoot = path.resolve(siteRoot, '..', '..');
+const repoRoot = process.env.FLINTTRADE_REPO_ROOT
+  ? path.resolve(process.env.FLINTTRADE_REPO_ROOT)
+  : path.resolve(siteRoot, '..', '..');
 
 const contentRoot = path.join(siteRoot, 'content', 'docs');
 const generatedRoot = path.join(siteRoot, 'src', 'generated');
 const publicRoot = path.join(siteRoot, 'public', 'flinttrade');
 const generationLockDir = path.join(siteRoot, '.content-generation.lock');
+const repositoryOwner = 'navaneeshnagarajan';
+const repositoryName = 'FlintTrade';
+const repositoryRef = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_REF || 'main';
+
+const fallbackPackageNames = [
+  'ai',
+  'automation',
+  'backtest-engine',
+  'chrome-extension',
+  'core',
+  'data',
+  'desktop',
+  'ditto',
+  'engine',
+  'gateway',
+  'historical',
+  'indicators',
+  'integration',
+  'screener',
+  'terminal',
+  'tick-engine',
+];
+
+const fallbackScreenshotFiles = [
+  '01-welcome.png',
+  '02-explore.png',
+  '03-invest.png',
+  '04-trade-dismissed.png',
+  '04-trade.png',
+  '05-learn.png',
+  '06-lab.png',
+  '07-automate.png',
+  '08-ai.png',
+  '09-ditto.png',
+  '10-settings.png',
+  '11-ditto-fixed.png',
+  '12-welcome-broken.png',
+  '13-welcome-fixed.png',
+  'structure-1.png',
+];
 
 const rootDocs = [
   ['docs/README.md', 'index', 'Docs', 'Project documentation index'],
@@ -107,6 +149,13 @@ async function writeFileAtomic(destination, content) {
   await fs.mkdir(path.dirname(destination), { recursive: true });
   const temporary = path.join(path.dirname(destination), `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
   await fs.writeFile(temporary, content, 'utf8');
+  await fs.rename(temporary, destination);
+}
+
+async function writeBinaryFileAtomic(destination, content) {
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  const temporary = path.join(path.dirname(destination), `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
+  await fs.writeFile(temporary, content);
   await fs.rename(temporary, destination);
 }
 
@@ -210,6 +259,117 @@ function normaliseMarkdown(markdown, sourcePath) {
   return value;
 }
 
+function rawRepositoryUrl(relativePath) {
+  return `https://raw.githubusercontent.com/${repositoryOwner}/${repositoryName}/${repositoryRef}/${relativePath}`;
+}
+
+function repositoryApiUrl(relativePath) {
+  return `https://api.github.com/repos/${repositoryOwner}/${repositoryName}/contents/${relativePath}?ref=${encodeURIComponent(repositoryRef)}`;
+}
+
+async function fetchRepositoryText(relativePath) {
+  const response = await fetch(rawRepositoryUrl(relativePath), {
+    headers: { 'User-Agent': 'flinttrade-site-generator' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to fetch ${relativePath} from GitHub at ${repositoryRef}: ${response.status}`);
+  }
+
+  return response.text();
+}
+
+async function fetchRepositoryBinary(relativePath) {
+  const response = await fetch(rawRepositoryUrl(relativePath), {
+    headers: { 'User-Agent': 'flinttrade-site-generator' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to fetch ${relativePath} from GitHub at ${repositoryRef}: ${response.status}`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function fetchRepositoryDirectory(relativePath) {
+  const response = await fetch(repositoryApiUrl(relativePath), {
+    headers: { 'User-Agent': 'flinttrade-site-generator' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to list ${relativePath} from GitHub at ${repositoryRef}: ${response.status}`);
+  }
+
+  const entries = await response.json();
+  if (!Array.isArray(entries)) {
+    throw new Error(`Expected ${relativePath} to be a GitHub directory listing.`);
+  }
+
+  return entries;
+}
+
+async function readRepositoryText(relativePath) {
+  try {
+    return await fs.readFile(path.join(repoRoot, relativePath), 'utf8');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    return fetchRepositoryText(relativePath);
+  }
+}
+
+async function listRepositoryDirectories(relativePath, fallbackNames) {
+  try {
+    const directory = path.join(repoRoot, relativePath);
+    return (await fs.readdir(directory, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+
+  try {
+    const entries = await fetchRepositoryDirectory(relativePath);
+    return entries
+      .filter((entry) => entry.type === 'dir')
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return fallbackNames;
+  }
+}
+
+async function listRepositoryFiles(relativePath, extension, fallbackFiles) {
+  try {
+    const directory = path.join(repoRoot, relativePath);
+    return (await fs.readdir(directory))
+      .filter((file) => file.endsWith(extension))
+      .sort();
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+
+  try {
+    const entries = await fetchRepositoryDirectory(relativePath);
+    return entries
+      .filter((entry) => entry.type === 'file' && entry.name.endsWith(extension))
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return fallbackFiles;
+  }
+}
+
+async function copyRepositoryFile(relativePath, destination) {
+  try {
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.copyFile(path.join(repoRoot, relativePath), destination);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    await writeBinaryFileAtomic(destination, await fetchRepositoryBinary(relativePath));
+  }
+}
+
 async function writeDocPage({ slug, title, description, body }) {
   const destination = path.join(contentRoot, `${slug}.mdx`);
   await fs.mkdir(path.dirname(destination), { recursive: true });
@@ -224,15 +384,11 @@ async function writeDocPage({ slug, title, description, body }) {
 }
 
 async function readMarkdown(relativePath) {
-  return fs.readFile(path.join(repoRoot, relativePath), 'utf8');
+  return readRepositoryText(relativePath);
 }
 
 async function buildPackageEntries() {
-  const packagesDir = path.join(repoRoot, 'packages');
-  const names = (await fs.readdir(packagesDir, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const names = await listRepositoryDirectories('packages', fallbackPackageNames);
 
   const packages = [];
   for (const name of names) {
@@ -266,15 +422,12 @@ async function buildPackageEntries() {
 
 async function copyPublicAssets() {
   await fs.mkdir(path.join(publicRoot, 'screenshots'), { recursive: true });
-  await fs.copyFile(path.join(repoRoot, 'docs/assets/logo.svg'), path.join(publicRoot, 'logo.svg'));
+  await copyRepositoryFile('docs/assets/logo.svg', path.join(publicRoot, 'logo.svg'));
 
-  const screenshotDir = path.join(repoRoot, 'docs/screenshots');
-  const screenshots = (await fs.readdir(screenshotDir))
-    .filter((file) => file.endsWith('.png'))
-    .sort();
+  const screenshots = await listRepositoryFiles('docs/screenshots', '.png', fallbackScreenshotFiles);
 
   for (const screenshot of screenshots) {
-    await fs.copyFile(path.join(screenshotDir, screenshot), path.join(publicRoot, 'screenshots', screenshot));
+    await copyRepositoryFile(`docs/screenshots/${screenshot}`, path.join(publicRoot, 'screenshots', screenshot));
   }
 
   return screenshots.map((file) => ({

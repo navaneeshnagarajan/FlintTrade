@@ -9,3 +9,4 @@ public/llms.txt
 public/llms-full.txt
 src/generated/
 *.tsbuildinfo
+.vercel
