@@ -1,6 +1,6 @@
 [project]
 name = "flint-engine"
-version = "0.5.1"
+version = "0.5.2-dev"
 description = "5-layer safety system, order router, scheduler, strategy registry, position sizer, sandbox executor"
 requires-python = ">=3.12"
 dependencies = [

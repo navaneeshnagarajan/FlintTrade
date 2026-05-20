@@ -1,6 +1,6 @@
 [project]
 name = "flint-screener"
-version = "0.5.1"
+version = "0.5.2-dev"
 description = "Option chain, OI analysis, PCR, max pain, portfolio Greeks, IV surface, market scanner"
 requires-python = ">=3.12"
 dependencies = [

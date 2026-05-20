@@ -4,7 +4,16 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — v0.5.2-dev
+## [Unreleased]
+
+No unreleased changes yet.
+
+---
+
+## [0.5.2-dev] - 2026-05-20
+
+Tag: `v0.5.2-dev` · Base: `514dcd4` (`v0.5.1`) · Diff: 2 commits ·
+Type: SemVer prerelease development snapshot. Latest stable remains `v0.5.1`.
 
 Carry from v0.5.1: Windows sandbox Job Object via pywin32, trusted-mode
 subprocess spawn bypass for BacktestLab inner loops, 8 stub backend
@@ -14,6 +23,19 @@ endpoints still returning `is_sample_data: true`, glib upstream wait
 ### Changed
 - Release hygiene: normalised annotated tag dates, rebuilt GitHub releases in
   chronological SemVer order, and standardised release-note structure.
+- Version metadata: advanced the root project, release-tracked Python packages,
+  terminal, and desktop Tauri manifests to `0.5.2-dev`; Chrome extension,
+  tick-engine, and the private desktop npm shell remain on independent package
+  version tracks.
+- Release policy: documented that manifests use bare SemVer, git tags use
+  `v<semver>`, prereleases are marked as GitHub prereleases, and published
+  release contents stay immutable.
+
+### Notes
+- `0.5.2-dev` is a prerelease snapshot, not the stable production target.
+  Production users should stay on `v0.5.1` until a stable `v0.5.2` is cut.
+- Python package tooling normalises `0.5.2-dev` to `0.5.2.dev0` internally;
+  source manifests keep the project SemVer spelling.
 
 ---
 

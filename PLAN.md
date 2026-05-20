@@ -10,7 +10,7 @@
 
 ## Current State (updated 2026-05-19)
 
-- **Version:** v0.5.1 (tag `v0.5.1`, 2026-05-20) — security hardening + CI stability patch release. Now on `v0.5.2-dev`; see `docs/RELEASE_NOTES_v0.5.1.md` and CHANGELOG for the GA narrative.
+- **Version:** v0.5.2-dev (tag `v0.5.2-dev`, 2026-05-20) — SemVer release-hygiene prerelease snapshot. Latest stable remains `v0.5.1`; see `docs/RELEASE_NOTES_v0.5.1.md` and CHANGELOG for the GA narrative.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total — verified 2026-05-19
 - **Packages:** 16 (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri)
 - **Widgets:** 82 (22 trading + 38 analysis + 22 utility)

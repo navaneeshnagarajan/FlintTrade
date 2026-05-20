@@ -1,6 +1,6 @@
 [project]
 name = "flint-historical"
-version = "0.5.1"
+version = "0.5.2-dev"
 description = "OHLCV downloader, free data sources (OpenChart/yfinance/jugaad), DuckDB pipeline, expiry manager"
 requires-python = ">=3.12"
 dependencies = [

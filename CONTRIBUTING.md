@@ -13,7 +13,22 @@ cp .env.example .env && make setup
 
 ## Versioning
 
-FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`
+FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
+
+Release rules:
+
+- Manifest versions use bare SemVer, for example `0.5.2-dev`; git tags use the
+  project tag convention `v<semver>`, for example `v0.5.2-dev`.
+- Published releases are immutable. If release metadata or notes need a change
+  after publication, cut a new prerelease or patch instead of moving the old
+  tag.
+- `0.y.z` remains pre-1.0 development; compatibility can change, but patch
+  releases are still reserved for backwards-compatible fixes and release
+  hygiene.
+- Prereleases are published as GitHub prereleases and use lowercase
+  dot-separated identifiers: `dev`, `alpha`, `beta`, `rc.1`.
+- Independent deliverables keep their own package versions unless they are
+  explicitly part of the monorepo release train.
 
 | Version | Status | Meaning |
 |---|---|---|
@@ -29,10 +44,10 @@ FlintTrade follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATC
 | 0.5.0-beta | Released (2026-04-19, tag `v0.5.0-beta`) | OpenAlgo v2.0.0.4 parity beta |
 | 0.5.0 | Released (2026-04-19, tag `v0.5.0`) | OpenAlgo v2.0.0.4 parity complete (5 waves, 1,499 tests) |
 | 0.5.1 | Released (2026-05-20, tag `v0.5.1`) | Security hardening (4 Codex findings) + CI infra (65 commits, 0 warnings, 0 ruff errors, 8,989 tests green; final commits reconcile release metadata) |
-| 0.5.2-dev | **CURRENT** | v0.5.2 carry: Windows Job Object sandbox, trusted-mode spawn bypass, 8 stub backend endpoints, glib upstream wait |
+| 0.5.2-dev | **CURRENT** prerelease (tag `v0.5.2-dev`) | Release hygiene snapshot: SemVer-aligned tags/releases, standard release-note structure, current manifests advanced past immutable `v0.5.1` |
 | 1.0.0 | Planned | Full production release, all platforms tested |
 
-**Pre-release progression:** `alpha` → `beta` → `rc.1` → stable
+**Pre-release progression:** `dev` → `alpha` → `beta` → `rc.1` → stable
 **Version bumps:**
 - Update `VERSION` file
 - Update `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com/)
