@@ -1,5 +1,7 @@
-CLAUDE.md @navaneeshnagarajan
-AGENTS.md @navaneeshnagarajan
-flint.toml @navaneeshnagarajan
-packages/ @navaneeshnagarajan
-infra/ @navaneeshnagarajan
+# FlintTrade CODEOWNERS
+#
+# Default owner for the whole repo. Pre-1.0 the project has a single
+# maintainer — additional area-owners will be added as the contributor
+# base grows.
+
+* @navaneeshnagarajan
