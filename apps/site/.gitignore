@@ -1,0 +1,11 @@
+.next/
+.source/
+.content-generation.lock/
+node_modules/
+.npm-cache/
+content/docs/
+public/flinttrade/
+public/llms.txt
+public/llms-full.txt
+src/generated/
+*.tsbuildinfo

@@ -1,0 +1,41 @@
+name: Site
+
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, ready_for_review, reopened]
+    paths:
+      - 'apps/site/**'
+      - 'docs/**'
+      - 'packages/*/README.md'
+      - '.github/workflows/site.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'apps/site/**'
+      - 'docs/**'
+      - 'packages/*/README.md'
+      - '.github/workflows/site.yml'
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  site:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/site/package-lock.json
+      - run: cd apps/site && npm ci
+      - run: cd apps/site && npm run typecheck
+      - run: cd apps/site && npm run test
+      - run: cd apps/site && npm run build
