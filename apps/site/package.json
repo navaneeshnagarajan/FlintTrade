@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.26.0",
+    "@vercel/speed-insights": "^2.0.0",
     "fumadocs-core": "^16.8.12",
     "fumadocs-mdx": "^15.0.7",
     "fumadocs-ui": "^16.8.12",
