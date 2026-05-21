@@ -171,7 +171,10 @@ function DepthRow({ bidOrders, bidQty, bidPrice, askPrice, askQty, askOrders, ma
 // Main widget
 // ---------------------------------------------------------------------------
 
-const KNOWN_EXCHANGES = ["NSE", "BSE", "NFO", "BFO", "MCX", "NSE_INDEX", "BSE_INDEX"];
+const KNOWN_EXCHANGES = [
+  "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NCO",
+  "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+];
 
 function DepthWidget() {
   const [symbol,   setSymbol]   = useState("NIFTY");

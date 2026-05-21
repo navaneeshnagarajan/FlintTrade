@@ -18,7 +18,7 @@ auxiliary distribution wrappers.
 
 | Package | Language | Purpose | Tests |
 |---|---|---|---|
-| `gateway` | Python | Direct broker connections (33 brokers via OpenAlgo shims), credential store, WebSocket bridge | `packages/gateway/tests/` |
+| `gateway` | Python | Direct broker connections (32 brokers via OpenAlgo shims), credential store, WebSocket bridge | `packages/gateway/tests/` |
 | `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/tests/` |
 | `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/engine/tests/` |
 | `data` | Python | Tick recorder, audit logger (SEBI 5 year), trade logger, DuckDB storage | `packages/data/tests/` |

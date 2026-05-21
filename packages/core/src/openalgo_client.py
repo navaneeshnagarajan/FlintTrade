@@ -13,10 +13,14 @@ from .config import Settings
 from .exceptions import APIError, AuthError, RateLimitError
 from .models import (
     BasketOrder,
+    CancelGttOrder,
     Depth,
     DepthLevel,
     Fund,
+    GttOrder,
+    GttTrigger,
     Holding,
+    ModifyGttOrder,
     ModifyOrder,
     OHLCV,
     OptionChain,
@@ -495,10 +499,25 @@ class OpenAlgoClient:
         payload = self._body({"symbol": symbol, "exchange": exchange})
         return await self._post("symbol", payload)
 
-    async def search(self, query: str) -> dict[str, Any]:
-        """POST /api/v1/search"""
-        payload = self._body({"query": query})
-        return await self._post("search", payload)
+    async def search(
+        self,
+        query: str,
+        exchange: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/search.
+
+        Args:
+            query: Search query / symbol prefix.
+            exchange: Optional exchange filter. Upstream accepts a single
+                exchange code (e.g. ``"NSE"``) and validates it against
+                ``VALID_EXCHANGES``. Pass ``None`` (default) to search
+                across all exchanges; this preserves the v0.5.0 behaviour.
+                Mirrors the upstream OpenAlgo v2.0.1.x ``SearchSchema``.
+        """
+        body: dict[str, Any] = {"query": query}
+        if exchange:
+            body["exchange"] = exchange
+        return await self._post("search", self._body(body))
 
     async def ticker(self, exchange: str, symbol: str, interval: str = "5m", from_date: str = "", to_date: str = "") -> Any:
         """GET /api/v1/ticker/{exchange}:{symbol} — uses X-API-KEY header."""
@@ -593,11 +612,22 @@ class OpenAlgoClient:
         return await self._post("instruments", self._body({"exchange": exchange}))
 
     async def analyzer_status(self) -> dict[str, Any]:
-        """POST /api/v1/analyzer/status — check if sandbox mode is active."""
+        """POST /api/v1/analyzer/status — check whether sandbox trading
+        mode is active on the connected OpenAlgo instance.
+
+        Upstream renamed "virtual / paper trading" to "sandbox trading"
+        in v2.0.0.6; route slugs (``analyzer/status``, ``analyzer/toggle``)
+        and response keys (``analyzer_status``, ``analyzer_update``) were
+        kept stable so this wrapper is unchanged.
+        """
         return await self._post("analyzer/status", self._body())
 
     async def analyzer_toggle(self) -> dict[str, Any]:
-        """POST /api/v1/analyzer/toggle — toggle sandbox/live mode."""
+        """POST /api/v1/analyzer/toggle — toggle between sandbox trading
+        mode and live mode on the connected OpenAlgo instance.
+
+        See :meth:`analyzer_status` for the v2.0.0.6 terminology note.
+        """
         return await self._post("analyzer/toggle", self._body())
 
     # ==================================================================
@@ -652,3 +682,99 @@ class OpenAlgoClient:
         brokers like Delta Exchange.
         """
         return await self._get("broker/leverage")
+
+    # ==================================================================
+    # GTT (Good Till Triggered) — added in OpenAlgo v2.0.0.9
+    # ==================================================================
+    #
+    # Live broker support upstream: Dhan + Zerodha. Other brokers return
+    # a clean 501 ("GTT orders are not supported for broker 'X' yet").
+    # FlintTrade forwards whatever OpenAlgo replies; we do NOT gate
+    # client-side because broker support can change between releases.
+
+    async def place_gtt(self, gtt: GttOrder) -> OrderResponse:
+        """POST /api/v1/placegttorder — place a Good Till Triggered order.
+
+        Single or two-leg OCO depending on ``gtt.trigger_type``. Upstream
+        validates ``triggerprice_sl`` / ``triggerprice_tg`` against the
+        trigger type and rejects ``MIS`` product at the schema layer.
+        """
+        payload = self._body(gtt.model_dump(exclude_none=True))
+        raw = await self._post("placegttorder", payload)
+        data = self._unwrap(raw)
+        if isinstance(data, dict):
+            return OrderResponse(
+                status=str(data.get("status", "")),
+                orderid=str(data.get("orderid", data.get("trigger_id", ""))),
+                message=str(data.get("message", "")),
+            )
+        return OrderResponse(status="error", message=str(data))
+
+    async def modify_gtt(self, gtt: ModifyGttOrder) -> OrderResponse:
+        """POST /api/v1/modifygttorder — modify an active GTT.
+
+        Modify is a full replacement: the broker's PUT semantics replace
+        trigger prices, last price, and order params atomically.
+        """
+        payload = self._body(gtt.model_dump(exclude_none=True))
+        raw = await self._post("modifygttorder", payload)
+        data = self._unwrap(raw)
+        if isinstance(data, dict):
+            return OrderResponse(
+                status=str(data.get("status", "")),
+                orderid=str(data.get("orderid", data.get("trigger_id", ""))),
+                message=str(data.get("message", "")),
+            )
+        return OrderResponse(status="error", message=str(data))
+
+    async def cancel_gtt(self, cancel: CancelGttOrder) -> OrderResponse:
+        """POST /api/v1/cancelgttorder — cancel an active GTT by ``trigger_id``."""
+        payload = self._body(cancel.model_dump(exclude_none=True))
+        raw = await self._post("cancelgttorder", payload)
+        data = self._unwrap(raw)
+        if isinstance(data, dict):
+            return OrderResponse(
+                status=str(data.get("status", "")),
+                orderid=str(data.get("orderid", cancel.trigger_id)),
+                message=str(data.get("message", "")),
+            )
+        return OrderResponse(status="error", message=str(data))
+
+    async def gtt_orderbook(self) -> list[GttTrigger]:
+        """POST /api/v1/gttorderbook — list active GTT triggers.
+
+        Upstream broker mappers drop terminal-state rows (Dhan filters
+        TRADED/EXPIRED/CANCELLED/REJECTED; Zerodha drops triggered/
+        disabled/expired/cancelled/rejected/deleted) so the returned list
+        reflects only live, waiting triggers.
+        """
+        raw = await self._post("gttorderbook", self._body())
+        data = self._unwrap(raw)
+        if isinstance(data, list):
+            triggers: list[GttTrigger] = []
+            for row in data:
+                if isinstance(row, dict):
+                    # Coerce non-string fields to str so the model never
+                    # rejects a numeric payload from a broker SDK.
+                    safe = {k: ("" if v is None else str(v)) for k, v in row.items()}
+                    try:
+                        triggers.append(GttTrigger(**{
+                            k: safe[k] for k in safe
+                            if k in GttTrigger.model_fields
+                        }))
+                    except Exception:  # pragma: no cover - tolerant boundary
+                        triggers.append(GttTrigger())
+            return triggers
+        if isinstance(data, dict):
+            inner = data.get("data") if isinstance(data.get("data"), list) else None
+            if isinstance(inner, list):
+                return [
+                    GttTrigger(**{
+                        k: ("" if v is None else str(v))
+                        for k, v in row.items()
+                        if k in GttTrigger.model_fields
+                    })
+                    for row in inner
+                    if isinstance(row, dict)
+                ]
+        return []

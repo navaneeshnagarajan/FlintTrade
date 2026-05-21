@@ -39,6 +39,26 @@ POST unless explicitly marked **GET**.
 | `basketorder` | Submit a basket of orders atomically. |
 | `splitorder` | Split a large order into smaller child orders. |
 
+### GTT (Good Till Triggered) — added in OpenAlgo 2.0.0.9
+
+GTT triggers sit on the broker until the LTP crosses the trigger price,
+at which point the broker emits a real order. The schema rejects MIS
+(intraday) product because triggers can sit for days. Live broker support
+upstream: Dhan + Zerodha. Other brokers respond with a clean 501 that
+FlintTrade propagates unchanged.
+
+| Endpoint | Purpose |
+|---|---|
+| `placegttorder` | Place a single-leg (SINGLE) or two-leg (OCO) GTT trigger. |
+| `modifygttorder` | Full-replacement modify of an active trigger by `trigger_id`. |
+| `cancelgttorder` | Cancel an active trigger by `trigger_id`. |
+| `gttorderbook` | List all live (non-terminal) GTT triggers for the user. |
+
+FlintTrade surfaces these through the safety proxy at
+`/api/v1/orders/gtt-{place,modify,cancel}` so the mode gate
+(explore / practice / live) and the live-mode JWT unlock are enforced
+identically to regular orders.
+
 ### Accounts
 
 | Endpoint | Purpose |
@@ -86,6 +106,7 @@ POST unless explicitly marked **GET**.
 | `holidays` | Exchange holiday list. |
 | `timings` | Exchange-timing windows for a date. |
 | `telegram` | Send a Telegram message via the OpenAlgo bot. |
+| `whatsapp/notify` | Send a WhatsApp message via the OpenAlgo bot (added in 2.0.1.1). Public surface deliberately narrowed — pairing / start / stop are admin-only on OpenAlgo's `/whatsapp` web UI. |
 
 ### Broker management (session-authenticated, NOT under `/api/v1/`)
 

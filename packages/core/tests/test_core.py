@@ -365,10 +365,31 @@ class TestClientInit:
             "iv_smile",
             "max_pain",
             "oi_profile",
+            # v2.0.0.2 endpoints
+            "broker_capabilities",
+            # v2.0.0.9 / v2.0.1.1 endpoints
+            "place_gtt",
+            "modify_gtt",
+            "cancel_gtt",
+            "gtt_orderbook",
         ]
         for method_name in expected_methods:
             assert hasattr(client, method_name), f"Missing method: {method_name}"
             assert callable(getattr(client, method_name)), f"Not callable: {method_name}"
+
+    def test_search_forwards_exchange_when_provided(self):
+        """OpenAlgo v2.0.1.x exposes an exchange filter on /api/v1/search."""
+        from packages.core.src.openalgo_client import OpenAlgoClient
+        from packages.core.src.config import Settings
+        import inspect
+
+        sig = inspect.signature(OpenAlgoClient.search)
+        params = sig.parameters
+        assert "query" in params
+        assert "exchange" in params
+        # exchange must be optional so callers that omit it preserve the
+        # broker-wide search behaviour from earlier versions.
+        assert params["exchange"].default is None
 
 
 # ======================================================================

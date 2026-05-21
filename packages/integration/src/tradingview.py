@@ -41,7 +41,9 @@ logger = logging.getLogger("flinttrade.integration.tradingview")
 
 # Valid actions
 _VALID_ACTIONS = {"BUY", "SELL"}
-_VALID_EXCHANGES = {"NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"}
+_VALID_EXCHANGES = {
+    "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NCO", "DELTA",
+}
 _VALID_PRICETYPES = {"MARKET", "LIMIT", "SL", "SL-M"}
 _VALID_PRODUCTS = {"MIS", "CNC", "NRML"}
 

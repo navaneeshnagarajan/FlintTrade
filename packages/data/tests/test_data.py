@@ -645,7 +645,12 @@ class TestTickRecorder:
     def test_all_exchange_symbols(self):
         """Verify recorder handles all supported exchanges."""
         _, recorder = self._make_recorder()
-        exchanges = ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "DELTA"]
+        # NCO, MCX_INDEX, GLOBAL_INDEX joined the supported list in the
+        # OpenAlgo v2.0.0.7 sync.
+        exchanges = [
+            "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX",
+            "NCO", "MCX_INDEX", "GLOBAL_INDEX", "DELTA",
+        ]
         for exch in exchanges:
             recorder._process_tick({"symbol": "TEST", "exchange": exch, "ltp": 100.0})
         assert recorder.tick_count == len(exchanges)

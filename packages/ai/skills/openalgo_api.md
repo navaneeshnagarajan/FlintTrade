@@ -18,6 +18,10 @@ FlintTrade routes all broker operations through OpenAlgo (port 5000). Never call
 | `cancelallorder` | — cancels all open orders |
 | `closeposition` | — squares off all net positions |
 | `basketorder` | orders: list of order dicts |
+| `placegttorder` | trigger_type (SINGLE/OCO), symbol, exchange, action, product (CNC/NRML — MIS rejected), quantity, pricetype, price, triggerprice_sl, triggerprice_tg, stoploss?, target? — Dhan/Zerodha live (v2.0.0.9+) |
+| `modifygttorder` | same + trigger_id (full-replacement modify) |
+| `cancelgttorder` | trigger_id |
+| `gttorderbook` | lists live GTT triggers (terminal states filtered by broker mapper) |
 
 ### Product Types
 - `MIS` — Intraday margin (NSE/BSE/MCX)

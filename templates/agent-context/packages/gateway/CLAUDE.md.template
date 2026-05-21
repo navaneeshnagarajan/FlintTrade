@@ -1,11 +1,11 @@
 # FlintTrade — gateway
 
-> Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge
+> Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge
 
 ## Key Modules
 - `adapter.py` — Base broker adapter interface
 - `auth.py` — Authentication flows (OAuth, TOTP, OTP, API key)
-- `registry.py` — Broker registry (33 brokers)
+- `registry.py` — Broker registry (32 brokers)
 - `contracts.py` — Instrument contract normalization
 - `credentials.py` — Encrypted credential storage
 - `session.py` — Session management and reconnection

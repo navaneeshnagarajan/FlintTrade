@@ -129,6 +129,75 @@ def _read_version() -> str:
 # ---------------------------------------------------------------------------
 
 _MASTER_PASSWORD: str | None = None
+_API_KEY_PEPPER: str | None = None
+
+
+def _get_api_key_pepper() -> str:
+    """Get or generate the OpenAlgo-compatible ``API_KEY_PEPPER``.
+
+    Priority mirrors :func:`_get_master_password`:
+      1. ``API_KEY_PEPPER`` environment variable (any non-empty value).
+      2. Persisted secret at ``~/.flinttrade/api_key_pepper``.
+      3. Generate a fresh ``secrets.token_urlsafe(64)`` and persist it.
+
+    Upstream OpenAlgo's v2.0.0.6 hardening rejected the publicly leaked
+    placeholder pepper and auto-rotates on first run. FlintTrade's broker
+    shim (``packages/gateway/src/shims/config_shim.py``) re-exports this
+    value as ``utils.config.API_KEY_PEPPER`` so the OpenAlgo broker
+    modules get the same pepper on both code paths.
+
+    Returns the secret string; subsequent calls within the same process
+    return the cached value. A best-effort persist on disk is attempted
+    so restarts pick up the same pepper.
+    """
+    global _API_KEY_PEPPER
+    if _API_KEY_PEPPER:
+        return _API_KEY_PEPPER
+
+    env_pepper = os.environ.get("API_KEY_PEPPER", "")
+    # Reject upstream's public placeholder values. Their full literals
+    # in .sample.env include a ``_REGENERATE_BEFORE_USE`` suffix — e.g.
+    # ``OPENALGO_PLACEHOLDER_API_KEY_PEPPER_REGENERATE_BEFORE_USE`` and
+    # the analogous APP_KEY / FERNET_SALT variants. We match by prefix
+    # so any historical leaked variant — including suffix-stripped
+    # forms — is treated as "not set". Upstream v2.0.0.6 introduced
+    # auto-rotation for exactly this hazard; see commit ``0162ce3a``.
+    _PLACEHOLDER_PREFIX = "OPENALGO_PLACEHOLDER"
+    if env_pepper and not env_pepper.startswith(_PLACEHOLDER_PREFIX):
+        _API_KEY_PEPPER = env_pepper
+        return _API_KEY_PEPPER
+
+    pepper_file = _workspace_dir() / "api_key_pepper"
+    try:
+        if pepper_file.exists():
+            stored = pepper_file.read_text().strip()
+            if stored:
+                _API_KEY_PEPPER = stored
+                # Propagate to env so OpenAlgo modules imported later
+                # pick up the same value without needing to re-read disk.
+                os.environ["API_KEY_PEPPER"] = stored
+                return _API_KEY_PEPPER
+    except OSError:
+        pass
+
+    new_pepper = secrets.token_urlsafe(64)
+    try:
+        pepper_file.parent.mkdir(parents=True, exist_ok=True)
+        pepper_file.write_text(new_pepper)
+        pepper_file.chmod(0o600)
+        logger.info(
+            "Generated new API_KEY_PEPPER at %s", pepper_file,
+        )
+    except OSError as exc:
+        logger.warning(
+            "Could not persist API_KEY_PEPPER to %s: %s — using ephemeral value",
+            pepper_file,
+            exc,
+        )
+
+    _API_KEY_PEPPER = new_pepper
+    os.environ["API_KEY_PEPPER"] = new_pepper
+    return _API_KEY_PEPPER
 
 
 def _get_master_password() -> str:
@@ -496,6 +565,46 @@ def create_flask_app(
     app.wsgi_app = _ft_api_prefix_stripper  # type: ignore[assignment]
 
     # ------------------------------------------------------------------
+    # Trusted forwarded-IP handling — gated behind TRUST_PROXY_HEADERS.
+    # Without this, deployments behind Nginx see `request.remote_addr ==
+    # 127.0.0.1` for every request, which collapses rate-limit buckets,
+    # brute-force tracking, and 404 flood guards onto the loopback origin.
+    # When the env flag is truthy we wrap wsgi_app with Werkzeug's ProxyFix
+    # so `request.remote_addr` reflects the original client IP.
+    # Default is FALSE because trusting forwarded headers from an
+    # untrusted upstream would let any client spoof its source IP.
+    # Mirrors the upstream OpenAlgo behaviour added in v2.0.0.7
+    # (see TRUST_PROXY_HEADERS in .local/external/openalgo/utils/ip_helper.py).
+    # ------------------------------------------------------------------
+    if os.environ.get("TRUST_PROXY_HEADERS", "").lower() in {"1", "true", "yes", "on"}:
+        try:
+            from werkzeug.middleware.proxy_fix import ProxyFix  # noqa: PLC0415
+
+            _proxy_for = int(os.environ.get("TRUST_PROXY_HEADERS_X_FOR", "1") or "1")
+            _proxy_proto = int(os.environ.get("TRUST_PROXY_HEADERS_X_PROTO", "1") or "1")
+            _proxy_host = int(os.environ.get("TRUST_PROXY_HEADERS_X_HOST", "0") or "0")
+            _proxy_port = int(os.environ.get("TRUST_PROXY_HEADERS_X_PORT", "0") or "0")
+            _proxy_prefix = int(os.environ.get("TRUST_PROXY_HEADERS_X_PREFIX", "0") or "0")
+            app.wsgi_app = ProxyFix(  # type: ignore[assignment]
+                app.wsgi_app,
+                x_for=_proxy_for,
+                x_proto=_proxy_proto,
+                x_host=_proxy_host,
+                x_port=_proxy_port,
+                x_prefix=_proxy_prefix,
+            )
+            logger.info(
+                "TRUST_PROXY_HEADERS active — ProxyFix: x_for=%d x_proto=%d "
+                "x_host=%d x_port=%d x_prefix=%d",
+                _proxy_for, _proxy_proto, _proxy_host, _proxy_port, _proxy_prefix,
+            )
+        except Exception as exc:  # pragma: no cover - import/config edge case
+            logger.warning(
+                "TRUST_PROXY_HEADERS requested but ProxyFix could not be installed: %s",
+                exc,
+            )
+
+    # ------------------------------------------------------------------
     # CORS — allow requests from the Vite dev server and any origins
     # configured via the CORS_ORIGINS environment variable.
     # ------------------------------------------------------------------
@@ -563,6 +672,12 @@ def create_flask_app(
     # --- Gateway initialization ---
     if registry is None:
         registry = BrokerRegistry()
+
+    # Ensure API_KEY_PEPPER is set in os.environ BEFORE the OpenAlgo
+    # broker modules are imported via the gateway shim. Upstream's
+    # ``utils.config.API_KEY_PEPPER`` is captured at import time, so a
+    # later os.environ tweak is too late.
+    _get_api_key_pepper()
 
     if credential_store is None:
         flinttrade_dir = _workspace_dir()

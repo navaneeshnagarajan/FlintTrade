@@ -1,6 +1,6 @@
 # FlintTrade — gateway
 
-> Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge. Read `packages/gateway/CLAUDE.md` first.
+> Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge. Read `packages/gateway/CLAUDE.md` first.
 
 ## Absorbs
 - openalgo broker/* modules → 33 broker adapter implementations (via `_resolve_openalgo_root()` in `adapter.py`)

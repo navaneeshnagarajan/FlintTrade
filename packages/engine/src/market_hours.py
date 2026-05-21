@@ -72,8 +72,14 @@ STANDARD_HOURS: dict[str, tuple[time, time]] = {
     "BCD": (time(9, 0), time(17, 0)),
     "MCX": (time(9, 0), time(23, 30)),
     "NCDEX": (time(10, 0), time(23, 30)),
+    "NCO": (time(9, 0), time(17, 0)),
     "NSE_INDEX": (time(9, 15), time(15, 30)),
     "BSE_INDEX": (time(9, 15), time(15, 30)),
+    "MCX_INDEX": (time(9, 0), time(23, 30)),
+    # GLOBAL_INDEX mirrors US/UK reference feeds. We expose the widest
+    # plausible LTP window (Sydney open through US close) so the UI
+    # reports "open" whenever the upstream feed could plausibly tick.
+    "GLOBAL_INDEX": (time(0, 0), time(23, 59)),
 }
 
 #: Equity exchanges that participate in Muhurat Trading

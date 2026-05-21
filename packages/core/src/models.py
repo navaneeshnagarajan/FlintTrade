@@ -26,8 +26,19 @@ class Exchange(StrEnum):
     CDS = "CDS"
     BCD = "BCD"
     NCDEX = "NCDEX"
+    # NCO (NSE Commodities) added upstream in v2.0.0.7 — Zerodha-only as of v2.0.1.1.
+    NCO = "NCO"
     NSE_INDEX = "NSE_INDEX"
     BSE_INDEX = "BSE_INDEX"
+    # MCX_INDEX (commodity indices, e.g. MCXBULLDEX) added upstream in v2.0.0.7.
+    MCX_INDEX = "MCX_INDEX"
+    # GLOBAL_INDEX (foreign + IFSC reference indices, e.g. US30, JAPAN225,
+    # GIFTNIFTY) added upstream in v2.0.0.7.
+    GLOBAL_INDEX = "GLOBAL_INDEX"
+    # Delta Exchange crypto. Upstream's plugin.json declares the value as
+    # CRYPTO; FlintTrade-internal names sometimes alias it as DELTA for
+    # broker-side disambiguation — both forms are accepted at validation.
+    CRYPTO = "CRYPTO"
 
 
 class PriceType(StrEnum):
@@ -166,6 +177,121 @@ class ModifyOrder(BaseModel):
     quantity: str = "1"
     price: str = "0"
     strategy: str = "Flint"
+
+
+# ---------------------------------------------------------------------------
+# GTT (Good Till Triggered) — added to mirror OpenAlgo v2.0.0.9
+# ---------------------------------------------------------------------------
+#
+# GTTs sit on the broker as a trigger condition; when LTP crosses the
+# trigger, the broker emits a real order. They live for days/weeks, so
+# the schema rejects MIS (intraday) — only CNC / NRML pass validation.
+#
+# Two trigger types:
+#   * SINGLE — exactly one of triggerprice_sl / triggerprice_tg is set
+#   * OCO    — both triggers + both limit prices (stoploss / target)
+#
+# Upstream live support: Dhan + Zerodha. Other brokers return a clean
+# 501 — FlintTrade does not gate on broker; we forward the request and
+# surface whatever OpenAlgo replies. See restx_api/place_gtt_order.py
+# in .local/external/openalgo/ for the canonical schema.
+
+
+class GttTriggerType(StrEnum):
+    SINGLE = "SINGLE"
+    OCO = "OCO"
+
+
+class GttProduct(StrEnum):
+    """Products accepted on GTTs. MIS is intentionally absent —
+    upstream rejects intraday product on triggers that can sit for days."""
+
+    CNC = "CNC"
+    NRML = "NRML"
+
+
+class GttOrder(BaseModel):
+    """Place a GTT (Good Till Triggered) — single or two-leg OCO.
+
+    Required fields mirror OpenAlgo's flat ``PlaceGTTOrderSchema``. Field
+    naming follows the upstream wire format exactly (snake_case JSON
+    tokens) so the wrapper does not need to remap.
+    """
+
+    strategy: str = "Flint"
+    trigger_type: GttTriggerType = GttTriggerType.SINGLE
+    exchange: Exchange = Exchange.NSE
+    symbol: str
+    action: Action = Action.BUY
+    product: GttProduct = GttProduct.CNC
+    quantity: str = "1"
+    pricetype: PriceType = PriceType.LIMIT
+    price: str = "0"
+    triggerprice_sl: str = "0"
+    """Stoploss leg trigger price. Required for SINGLE-SL and OCO."""
+    triggerprice_tg: str = "0"
+    """Target leg trigger price. Required for SINGLE-TG and OCO."""
+    stoploss: str | None = None
+    """Stoploss leg limit price (OCO only)."""
+    target: str | None = None
+    """Target leg limit price (OCO only)."""
+    expires_at: str | None = None
+    """Optional ISO timestamp at which the trigger auto-expires."""
+
+
+class ModifyGttOrder(BaseModel):
+    """Modify an active GTT. Same fields as :class:`GttOrder` plus
+    ``trigger_id`` (the broker-returned identifier of the live trigger).
+
+    Modify is a full replacement: trigger prices, last price, and order
+    params are replaced atomically by the broker's PUT semantics.
+    """
+
+    strategy: str = "Flint"
+    trigger_id: str
+    trigger_type: GttTriggerType = GttTriggerType.SINGLE
+    exchange: Exchange = Exchange.NSE
+    symbol: str
+    action: Action = Action.BUY
+    product: GttProduct = GttProduct.CNC
+    quantity: str = "1"
+    pricetype: PriceType = PriceType.LIMIT
+    price: str = "0"
+    triggerprice_sl: str = "0"
+    triggerprice_tg: str = "0"
+    stoploss: str | None = None
+    target: str | None = None
+
+
+class CancelGttOrder(BaseModel):
+    """Cancel an active GTT by its trigger identifier."""
+
+    strategy: str = "Flint"
+    trigger_id: str
+
+
+class GttTrigger(BaseModel):
+    """Single row returned by GTT orderbook listings.
+
+    Field names follow OpenAlgo's response; unknown brokers may add
+    extras which are silently dropped at the Pydantic boundary.
+    """
+
+    trigger_id: str = ""
+    status: str = ""
+    trigger_type: str = ""
+    symbol: str = ""
+    exchange: str = ""
+    action: str = ""
+    quantity: str = ""
+    product: str = ""
+    price: str = ""
+    triggerprice_sl: str = ""
+    triggerprice_tg: str = ""
+    stoploss: str = ""
+    target: str = ""
+    created_at: str = ""
+    expires_at: str = ""
 
 
 # ---------------------------------------------------------------------------

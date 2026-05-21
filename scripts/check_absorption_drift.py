@@ -41,7 +41,7 @@ ABSORBED_REPOS: list[dict] = [
             "Option chain/Greeks -> packages/screener/",
             "React dashboard patterns -> packages/terminal/",
         ],
-        "last_absorbed_commit": "960b2ad2",  # Updated 2026-03-31
+        "last_absorbed_commit": "7e48b2e8",  # Updated 2026-05-21 — v2.0.1.1 sync
         "missing_since": [
             "Zebu OAuth migration (TOTP -> OAuth 2.0)",
             "Flattrade V2 API endpoint migration",

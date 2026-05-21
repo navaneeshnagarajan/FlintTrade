@@ -13,7 +13,7 @@
 # certainly want OpenAlgo installed under its own /opt/openalgo/ tree
 # (or wherever you prefer), with its own venv and .env.
 #
-# Broker gateway (31 brokers), REST API on port 5000, WebSocket on port 8765.
+# Broker gateway (32 brokers), REST API on port 5000, WebSocket on port 8765.
 # Both processes run under a single service using a wrapper script.
 #
 # INSTALL:

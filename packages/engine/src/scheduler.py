@@ -52,9 +52,18 @@ EXCHANGE_SCHEDULES: dict[str, ExchangeSchedule] = {
     "BCD": ExchangeSchedule("BCD", time(9, 0), time(17, 0), time(16, 45)),
     "MCX": ExchangeSchedule("MCX", time(9, 0), time(23, 55), time(23, 30)),
     "NCDEX": ExchangeSchedule("NCDEX", time(10, 0), time(17, 0), time(16, 45)),
+    # NCO (NSE Commodities) — Zerodha-only on upstream as of v2.0.0.7.
+    "NCO": ExchangeSchedule("NCO", time(9, 0), time(17, 0), time(16, 45)),
     "DELTA": ExchangeSchedule("DELTA", time(0, 0), time(23, 59), time(23, 59), is_24x7=True),
     "NSE_INDEX": ExchangeSchedule("NSE_INDEX", time(9, 15), time(15, 30), time(15, 30)),
     "BSE_INDEX": ExchangeSchedule("BSE_INDEX", time(9, 15), time(15, 30), time(15, 30)),
+    "MCX_INDEX": ExchangeSchedule("MCX_INDEX", time(9, 0), time(23, 30), time(23, 30)),
+    # GLOBAL_INDEX is reference-only; we treat it as 24/7 for scheduling so
+    # cron strategies that read GLOBAL_INDEX quotes never get blocked by a
+    # closed-market guard.
+    "GLOBAL_INDEX": ExchangeSchedule(
+        "GLOBAL_INDEX", time(0, 0), time(23, 59), time(23, 59), is_24x7=True,
+    ),
 }
 
 
@@ -71,8 +80,8 @@ _EXCHANGE_TO_SEGMENT: dict[str, str] = {
     "NSE": "equity", "BSE": "equity", "NFO": "equity", "BFO": "equity",
     "NSE_INDEX": "equity", "BSE_INDEX": "equity",
     "CDS": "currency", "BCD": "currency",
-    "MCX": "mcx", "NCDEX": "mcx",
-    "DELTA": "crypto",
+    "MCX": "mcx", "NCDEX": "mcx", "MCX_INDEX": "mcx", "NCO": "mcx",
+    "DELTA": "crypto", "GLOBAL_INDEX": "crypto",
 }
 
 

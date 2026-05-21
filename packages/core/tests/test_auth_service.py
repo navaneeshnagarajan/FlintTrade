@@ -243,3 +243,42 @@ class TestSetupEscapeHatches:
     def test_regenerate_totp_rejects_wrong_password(self, tmp_path: Path):
         svc = self._fresh(tmp_path)
         assert svc.regenerate_totp("WrongPassword") is None
+
+
+class TestPasswordChangedAtStamp:
+    """update_password() must stamp ``password_changed_at`` so previously
+    issued JWTs (whose ``iat`` predates the change) can be rejected at
+    decode time. Mirrors OpenAlgo v2.0.0.7's session-invalidation behaviour.
+    """
+
+    def _fresh(self, tmp_path: Path) -> AuthService:
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
+        )
+        return svc
+
+    def test_get_password_changed_at_zero_after_setup(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        # The new column starts at 0 — setup_account does NOT touch it
+        # because there is no prior session to invalidate.
+        assert svc.get_password_changed_at() == 0.0
+
+    def test_update_password_stamps_password_changed_at(self, tmp_path: Path):
+        import time as _time
+        svc = self._fresh(tmp_path)
+        before = _time.time()
+        assert svc.update_password("alice", "NewStrongP@ss!234")
+        stamp = svc.get_password_changed_at()
+        # Stamp should be a fresh epoch — never zero, never far in the past.
+        assert stamp >= before - 1.0
+        assert stamp <= _time.time() + 1.0
+
+    def test_update_password_with_unknown_username_does_not_stamp(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        assert svc.update_password("bob", "NewStrongP@ss!234") is False
+        # Stamp stays at the post-setup zero because no row was updated.
+        assert svc.get_password_changed_at() == 0.0

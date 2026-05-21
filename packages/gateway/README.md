@@ -1,6 +1,6 @@
 # Gateway
 
-> Direct broker connections for 33 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge.
+> Direct broker connections for 32 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 
@@ -9,7 +9,7 @@
 ## Public surface
 
 - `src/adapter.py — base adapter class + OpenAlgo resolver`
-- `src/registry.py — 33-broker registry`
+- `src/registry.py — 32-broker registry`
 - `src/credentials.py — Fernet-encrypted credential storage`
 - `src/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients`
 

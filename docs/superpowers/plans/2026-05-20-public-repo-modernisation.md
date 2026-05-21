@@ -270,7 +270,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 > 2. **Badges row** — License (AGPL-3.0, shields.io), version (from VERSION file, dynamic), CI status (`test.yml` workflow), tests count (~12,062 hard-coded), GitHub stars, last-commit. Use shields.io URLs.
 > 3. **Hero screenshots** — 4 images using existing files under `docs/screenshots/`. Pick the strongest 4 from the repo (welcome, trade canvas, options chain / IV smile, and an analysis tool). Use HTML `<picture>` or markdown image grid, centred.
 > 4. **What it does** — 6-8 trader-facing bullets (intraday F&O scalping, multi-broker support, options analysis, paper trading mode, AI-assisted signals, custom strategies, automation flows, multi-account orchestration).
-> 5. **Supported brokers** — one-liner "33 brokers via the OpenAlgo gateway — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the full list".
+> 5. **Supported brokers** — one-liner "32 brokers via the OpenAlgo gateway — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the full list".
 > 6. **Quickstart (5-min Docker)** — 3-4 commands max:
 >    ```bash
 >    git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -683,7 +683,7 @@ engine:
   purpose: "Five-layer safety system, order router, scheduler, base strategy, sandbox executor (AST-guarded), bracket-order engine, mode guard, reconciliation."
   entry_points: ["safety.py", "router.py", "strategy.py", "sandbox_executor.py"]
 gateway:
-  purpose: "Direct broker connections (33 brokers via OpenAlgo adapter pattern), encrypted credentials, WebSocket bridge."
+  purpose: "Direct broker connections (32 brokers via OpenAlgo adapter pattern), encrypted credentials, WebSocket bridge."
   entry_points: ["adapter.py", "auth.py", "credentials.py", "registry.py", "ws_bridge.py"]
 historical:
   purpose: "OHLCV downloader, free-data sources (OpenChart + yfinance), DuckDB pipeline, expiry manager for derivatives."

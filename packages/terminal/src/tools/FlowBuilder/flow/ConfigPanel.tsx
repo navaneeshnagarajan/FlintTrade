@@ -11,7 +11,8 @@
  *   select     → Select with options
  *   expression → ExpressionInput ({{...}} highlighting + autocomplete)
  *   symbol     → Input with "SYM" badge (symbol search placeholder)
- *   exchange   → Select (NSE / BSE / NFO / BFO / MCX / CDS)
+ *   exchange   → Select (NSE / BSE / NFO / BFO / MCX / CDS / BCD / NCDEX /
+ *                NCO / NSE_INDEX / BSE_INDEX / MCX_INDEX / GLOBAL_INDEX)
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -39,14 +40,19 @@ import type { FlowNodeData } from "@/stores/flowStore";
 // ---------------------------------------------------------------------------
 
 const EXCHANGE_OPTIONS: { label: string; value: string }[] = [
-  { label: "NSE (Equity)", value: "NSE" },
-  { label: "BSE (Equity)", value: "BSE" },
-  { label: "NFO (F&O)", value: "NFO" },
-  { label: "BFO (BSE F&O)", value: "BFO" },
-  { label: "MCX (Commodity)", value: "MCX" },
-  { label: "CDS (Currency)", value: "CDS" },
-  { label: "NSE_INDEX", value: "NSE_INDEX" },
-  { label: "BSE_INDEX", value: "BSE_INDEX" },
+  { label: "NSE (Equity)",       value: "NSE" },
+  { label: "BSE (Equity)",       value: "BSE" },
+  { label: "NFO (F&O)",          value: "NFO" },
+  { label: "BFO (BSE F&O)",      value: "BFO" },
+  { label: "MCX (Commodity)",    value: "MCX" },
+  { label: "CDS (Currency)",     value: "CDS" },
+  { label: "BCD (BSE Currency)", value: "BCD" },
+  { label: "NCDEX (Agri)",       value: "NCDEX" },
+  { label: "NCO (NSE Commodity)", value: "NCO" },
+  { label: "NSE Indices",        value: "NSE_INDEX" },
+  { label: "BSE Indices",        value: "BSE_INDEX" },
+  { label: "MCX Indices",        value: "MCX_INDEX" },
+  { label: "Global Indices",     value: "GLOBAL_INDEX" },
 ];
 
 // ---------------------------------------------------------------------------

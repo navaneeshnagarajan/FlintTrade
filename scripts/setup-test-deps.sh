@@ -37,7 +37,10 @@ mkdir -p "$EXTERNAL_DIR"
 # clone for testing.
 # ---------------------------------------------------------------------------
 declare -A PINS=(
-    [openalgo]="08c2a55313f66dc54e01d4881f657676ed9e6c72"
+    # OpenAlgo v2.0.1.1 — synced 2026-05-21. Brings GTT orders,
+    # NCO/MCX_INDEX/GLOBAL_INDEX exchanges, WhatsApp bot, IIFL Capital,
+    # FERNET_SALT rotation, and ProxyFix-style forwarded-IP gating.
+    [openalgo]="7e48b2e8b9b682347c2985f6d7339541bcee70c7"
     [openclaw]="8c4ecf42dfcf8f0265081e2801d221a70dc96886"
 )
 declare -A REPOS=(

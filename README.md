@@ -37,7 +37,7 @@ A self-hosted trading workspace that turns 33 broker accounts, real-time tick st
 
 ## Supported brokers
 
-33 brokers via the [OpenAlgo](https://github.com/marketcalls/openalgo) gateway — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the full list.
+32 brokers via the [OpenAlgo](https://github.com/marketcalls/openalgo) gateway — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the full list.
 
 ## Quickstart (5-minute Docker)
 
@@ -69,7 +69,7 @@ flowchart LR
     end
 
     OA["OpenAlgo<br/>Flask gateway<br/>port 5000"]
-    BR["Broker API<br/>33 brokers"]
+    BR["Broker API<br/>32 brokers"]
 
     UI <-->|"REST + WebSocket"| OA
     BE <-->|"REST + WebSocket"| OA
@@ -93,7 +93,7 @@ FlintTrade sits on top of OpenAlgo and never modifies it. Every machine runs its
 | `desktop` | Rust (Tauri) | Native desktop shell wrapping the React terminal |
 | `ditto` | Python | Multi-account mirroring, margin calculator, trailing stop-loss |
 | `engine` | Python | 5-layer safety system, order router, scheduler, strategy registry |
-| `gateway` | Python | Direct broker connections (33 brokers), adapter pattern, credential vault |
+| `gateway` | Python | Direct broker connections (32 brokers), adapter pattern, credential vault |
 | `historical` | Python | OHLCV downloader, free NSE data, DuckDB/Parquet pipeline, expiry manager |
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS |
 | `integration` | Python | TradingView, ChartInk, custom webhooks, visual flow builder |

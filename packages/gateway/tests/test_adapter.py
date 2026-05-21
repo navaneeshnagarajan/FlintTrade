@@ -51,13 +51,25 @@ from models import BrokerInfo  # noqa: E402 — see comment above
 class TestBrokerCatalog:
     """Verify the BROKER_CATALOG constants are consistent and complete."""
 
-    def test_broker_catalog_has_30_non_sandbox_entries(self):
-        """Exactly 30 live (non-sandbox) brokers must be in the catalog."""
+    def test_broker_catalog_has_31_non_sandbox_entries(self):
+        """Exactly 31 live (non-sandbox) brokers must be in the catalog.
+
+        Upstream gained ``iiflcapital`` as a distinct entry in OpenAlgo
+        v2.0.1.1; FlintTrade tracks the upstream count exactly so a future
+        addition trips this assertion.
+        """
         live = [info for info in BROKER_CATALOG.values() if not info.is_sandbox]
-        assert len(live) == 30, (
-            f"Expected 30 live brokers, got {len(live)}: "
+        assert len(live) == 31, (
+            f"Expected 31 live brokers, got {len(live)}: "
             f"{sorted(info.name for info in live)}"
         )
+
+    def test_broker_catalog_includes_iiflcapital(self):
+        """iiflcapital must be present and distinct from iifl (added v2.0.1.1)."""
+        assert "iiflcapital" in BROKER_CATALOG
+        assert "iifl" in BROKER_CATALOG
+        assert BROKER_CATALOG["iiflcapital"].name == "iiflcapital"
+        assert BROKER_CATALOG["iifl"].name == "iifl"
 
     def test_broker_catalog_has_dhan_sandbox(self):
         """dhan_sandbox must be present and marked is_sandbox=True."""
@@ -76,8 +88,20 @@ class TestBrokerCatalog:
             )
 
     def test_catalog_total_size(self):
-        """Total catalog entries must be exactly 31 (30 live + 1 sandbox)."""
-        assert len(BROKER_CATALOG) == 31
+        """Total catalog entries must be exactly 32 (31 live + 1 sandbox)."""
+        assert len(BROKER_CATALOG) == 32
+
+    def test_zerodha_supports_new_exchanges(self):
+        """Zerodha gained NCO, MCX_INDEX, GLOBAL_INDEX in OpenAlgo v2.0.0.7+."""
+        zerodha = BROKER_CATALOG["zerodha"]
+        for code in ("NCO", "MCX_INDEX", "GLOBAL_INDEX", "NSE_INDEX", "BSE_INDEX"):
+            assert code in zerodha.exchanges, (
+                f"Expected Zerodha to advertise {code} after v2.0.1.1 sync"
+            )
+
+    def test_upstox_supports_global_index(self):
+        """Upstox added GLOBAL_INDEX (world feeds + USDINR / BRENT / WTI)."""
+        assert "GLOBAL_INDEX" in BROKER_CATALOG["upstox"].exchanges
 
     def test_all_auth_flow_types_are_valid(self):
         """Every entry must have a recognised AuthFlowType."""

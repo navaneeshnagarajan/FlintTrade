@@ -132,7 +132,8 @@ class AuthService:
                 pin_hash TEXT NOT NULL,
                 totp_secret_encrypted BLOB NOT NULL,
                 totp_salt BLOB NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                password_changed_at REAL NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS backup_codes (
                 code_hash TEXT PRIMARY KEY,
@@ -144,6 +145,16 @@ class AuthService:
                 success INTEGER NOT NULL
             );
         """)
+        # Idempotent migration — older DBs predate the password_changed_at
+        # column. ADD COLUMN is cheap and avoids a destructive rebuild.
+        try:
+            self._db.execute(
+                "ALTER TABLE account ADD COLUMN password_changed_at REAL NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            # Column already exists — fresh installs hit this on the
+            # CREATE TABLE path above.
+            pass
         self._db.commit()
 
     def is_setup(self) -> bool:
@@ -436,6 +447,12 @@ class AuthService:
     def update_password(self, username: str, new_password: str) -> bool:
         """Update the password for *username*.
 
+        Stamps ``password_changed_at`` with the current epoch so that
+        previously issued JWTs (whose ``iat`` predates the change) can be
+        rejected at decode time — mirrors the upstream OpenAlgo v2.0.0.7
+        session-invalidation behaviour. Without this stamp a leaked token
+        would remain valid until natural expiry.
+
         Args:
             username: Must match the stored username.
             new_password: The new password (must pass strength check).
@@ -456,12 +473,32 @@ class AuthService:
             return False
 
         password_hash = self._hasher.hash(new_password)
-        self._db.execute(
-            "UPDATE account SET password_hash = ? WHERE id = 1",
-            [password_hash],
-        )
-        self._db.commit()
+        with self._write_lock:
+            self._db.execute(
+                "UPDATE account SET password_hash = ?, password_changed_at = ? WHERE id = 1",
+                [password_hash, time.time()],
+            )
+            self._db.commit()
         return True
+
+    def get_password_changed_at(self) -> float:
+        """Return the epoch timestamp of the most recent password change.
+
+        Returns 0.0 when no account exists or when the column is unset
+        (older DBs migrated in-place default to 0). Callers compare a JWT's
+        ``iat`` against this value: any token with ``iat`` strictly less
+        than the returned epoch was issued before the password change and
+        MUST be rejected.
+        """
+        row = self._db.execute(
+            "SELECT password_changed_at FROM account WHERE id = 1"
+        ).fetchone()
+        if not row:
+            return 0.0
+        try:
+            return float(row["password_changed_at"] or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
 
     def reset_account(self, password: str) -> bool:
         """Delete the single-user account entirely. Requires password confirmation.

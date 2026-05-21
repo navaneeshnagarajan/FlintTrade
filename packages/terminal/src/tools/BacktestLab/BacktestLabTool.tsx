@@ -128,7 +128,13 @@ const STRATEGIES: StrategyDef[] = [
   },
 ];
 
-const EXCHANGES = ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS"] as const;
+// Exchange list mirrors lib/tradingConstants.EXCHANGES — includes the
+// quote-only segments (NSE_INDEX, BSE_INDEX, MCX_INDEX, GLOBAL_INDEX)
+// so users can backtest index-only feeds.
+const EXCHANGES = [
+  "NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "NCO",
+  "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+] as const;
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "1d"] as const;
 
 // ---------------------------------------------------------------------------

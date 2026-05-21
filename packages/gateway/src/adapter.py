@@ -300,7 +300,13 @@ class _WrappedBrokerAdapter:
 
 
 # ---------------------------------------------------------------------------
-# Broker catalog — all 31 entries (30 live + 1 sandbox)
+# Broker catalog — 32 entries (31 live + 1 sandbox).
+#
+# Exchange lists are sourced from each broker's plugin.json in
+# .local/external/openalgo/broker/<name>/plugin.json so the catalog stays
+# in lock-step with what upstream actually supports. Re-run the catalogue
+# diff helper in scripts/check_absorption_drift.py after every external
+# refresh to catch upstream additions.
 # ---------------------------------------------------------------------------
 
 BROKER_CATALOG: dict[str, BrokerInfo] = {
@@ -309,122 +315,128 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         name="zerodha",
         display_name="Zerodha",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=[
+            "NSE", "BSE", "NFO", "BFO", "CDS", "MCX",
+            "NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+        ],
     ),
     "fyers": BrokerInfo(
         name="fyers",
         display_name="Fyers",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "flattrade": BrokerInfo(
         name="flattrade",
         display_name="Flattrade",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "pocketful": BrokerInfo(
         name="pocketful",
         display_name="Pocketful",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "paytm": BrokerInfo(
         name="paytm",
         display_name="Paytm Money",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "CDS"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),
     "dhan": BrokerInfo(
         name="dhan",
         display_name="Dhan",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "aliceblue": BrokerInfo(
         name="aliceblue",
         display_name="AliceBlue",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "upstox": BrokerInfo(
         name="upstox",
         display_name="Upstox",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=[
+            "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX",
+            "NSE_INDEX", "BSE_INDEX", "GLOBAL_INDEX",
+        ],
     ),
     "compositedge": BrokerInfo(
         name="compositedge",
         display_name="Compositedge",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "rmoney": BrokerInfo(
         name="rmoney",
         display_name="RMoney",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),
     # ---- TOTP form flow (10) ---------------------------------------------
     "angel": BrokerInfo(
         name="angel",
         display_name="Angel One",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX"],
     ),
     "fivepaisa": BrokerInfo(
         name="fivepaisa",
         display_name="5paisa",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "zebu": BrokerInfo(
         name="zebu",
         display_name="Zebu",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX"],
     ),
     "shoonya": BrokerInfo(
         name="shoonya",
         display_name="Shoonya",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "firstock": BrokerInfo(
         name="firstock",
         display_name="Firstock",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX"],
     ),
     "tradejini": BrokerInfo(
         name="tradejini",
         display_name="Tradejini",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "mstock": BrokerInfo(
         name="mstock",
         display_name="mStock",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "NSE_INDEX", "BSE_INDEX"],
     ),
     "kotak": BrokerInfo(
         name="kotak",
         display_name="Kotak Securities",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "motilal": BrokerInfo(
         name="motilal",
         display_name="Motilal Oswal",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "nubra": BrokerInfo(
         name="nubra",
         display_name="Nubra",
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),
     # ---- OTP multistep flow (1) ------------------------------------------
     "samco": BrokerInfo(
@@ -438,71 +450,83 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         # The secret_api_key and IP registration fields are stored encrypted
         # in the CredentialStore alongside the standard client credentials.
         auth_flow=AuthFlowType.otp_multistep,
-        exchanges=["NSE", "BSE", "NFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
         aux_params=["secret_api_key", "primary_ip", "secondary_ip"],
     ),
-    # ---- API key direct flow (9) -----------------------------------------
+    # ---- API key direct flow (10) ----------------------------------------
     "deltaexchange": BrokerInfo(
         name="deltaexchange",
         display_name="Delta Exchange",
         auth_flow=AuthFlowType.api_key_direct,
+        # Upstream plugin.json declares CRYPTO. FlintTrade-internal
+        # naming uses "DELTA" in some constants — those are aliases for
+        # this broker, not a different exchange code.
         exchanges=["CRYPTO"],
     ),
     "groww": BrokerInfo(
         name="groww",
         display_name="Groww",
         auth_flow=AuthFlowType.api_key_direct,
-        exchanges=["NSE", "BSE", "NFO", "BFO"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),
     "wisdom": BrokerInfo(
         name="wisdom",
         display_name="Wisdom Capital (XTS)",
         auth_flow=AuthFlowType.api_key_direct,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "ibulls": BrokerInfo(
         name="ibulls",
         display_name="IBulls",
         auth_flow=AuthFlowType.api_key_direct,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "iifl": BrokerInfo(
         name="iifl",
         display_name="IIFL",
         auth_flow=AuthFlowType.api_key_direct,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
+    ),
+    "iiflcapital": BrokerInfo(
+        name="iiflcapital",
+        display_name="IIFL Capital",
+        # IIFL Capital ships its own native MQTT market-data feed and
+        # uses a direct API-key flow (added upstream in v2.0.1.1 via
+        # commits 3ba5bf08 + 73857264 + 0ad69cf3 + 15179371).
+        auth_flow=AuthFlowType.api_key_direct,
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     "jainamxts": BrokerInfo(
         name="jainamxts",
         display_name="Jainam XTS",
         auth_flow=AuthFlowType.api_key_direct,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),
     "indmoney": BrokerInfo(
         name="indmoney",
         display_name="INDmoney",
         auth_flow=AuthFlowType.api_key_direct,
-        exchanges=["NSE", "BSE", "NFO", "BFO"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),
     "fivepaisaxts": BrokerInfo(
         name="fivepaisaxts",
         display_name="5paisa XTS",
         auth_flow=AuthFlowType.api_key_direct,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
     ),
     # ---- OTP SMS flow (1) ------------------------------------------------
     "definedge": BrokerInfo(
         name="definedge",
         display_name="DefinedGe Securities",
         auth_flow=AuthFlowType.otp_sms,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
     # ---- Sandbox (1) -----------------------------------------------------
     "dhan_sandbox": BrokerInfo(
         name="dhan_sandbox",
         display_name="Dhan Sandbox",
         auth_flow=AuthFlowType.oauth_redirect,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
         is_sandbox=True,
     ),
 }

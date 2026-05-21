@@ -26,6 +26,16 @@ export interface TelegramSettings {
   chatId: string;
 }
 
+export interface WhatsAppSettings {
+  enabled: boolean;
+  /** Operator phone in E.164 format (e.g. ``+919876543210``). Display only —
+   * the actual Signal pairing lives in OpenAlgo's admin UI. */
+  phoneE164: string;
+  /** Optional override for OpenAlgo's WhatsApp admin URL.
+   * Defaults to ``/whatsapp`` (resolved against the configured OpenAlgo host). */
+  adminUrl: string;
+}
+
 export interface DataPaths {
   fastStoragePath: string;
   archiveStoragePath: string;
@@ -59,6 +69,7 @@ interface SettingsStore {
   riskLimits: RiskLimits;
   llm: LLMSettings;
   telegram: TelegramSettings;
+  whatsapp: WhatsAppSettings;
   dataPaths: DataPaths;
   name: string;
   interests: string[];
@@ -78,6 +89,7 @@ interface SettingsStore {
   setRiskLimits: (limits: Partial<RiskLimits>) => void;
   setLLM: (llm: Partial<LLMSettings>) => void;
   setTelegram: (telegram: Partial<TelegramSettings>) => void;
+  setWhatsApp: (whatsapp: Partial<WhatsAppSettings>) => void;
   setDataPaths: (dataPaths: Partial<DataPaths>) => void;
   setName: (name: string) => void;
   setInterests: (interests: string[]) => void;
@@ -117,6 +129,11 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
     botToken: "",
     chatId: "",
   },
+  whatsapp: {
+    enabled: false,
+    phoneE164: "",
+    adminUrl: "",
+  },
   dataPaths: {
     fastStoragePath: "",
     archiveStoragePath: "",
@@ -141,6 +158,8 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
     set((state) => ({ llm: { ...state.llm, ...llm } })),
   setTelegram: (telegram) =>
     set((state) => ({ telegram: { ...state.telegram, ...telegram } })),
+  setWhatsApp: (whatsapp) =>
+    set((state) => ({ whatsapp: { ...state.whatsapp, ...whatsapp } })),
   setDataPaths: (dataPaths) =>
     set((state) => ({ dataPaths: { ...state.dataPaths, ...dataPaths } })),
   setName: (name) => set({ name }),
@@ -158,13 +177,18 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:settings",
-  version: 6,
+  version: 7,
   partialize: (state) => {
-    const { llm, telegram, ...rest } = state;
+    const { llm, telegram, whatsapp, ...rest } = state;
     return {
       ...rest,
       llm: { ...llm, apiKey: "" },         // never persist LLM API key to localStorage
       telegram: { ...telegram, botToken: "" }, // never persist bot token to localStorage
+      // Phone number is PII (regulated under India's DPDP Act 2023);
+      // localStorage is readable by any script on the same origin and by
+      // browser-extension snooping / shared-machine forensics. The user
+      // re-enters their phone on first WhatsApp section visit.
+      whatsapp: { ...whatsapp, phoneE164: "" },
     };
   },
   migrate: (persistedState: unknown, version: number) => {
@@ -259,6 +283,20 @@ const persistedStore = persist(storeImpl, {
         tickerMode: "marquee" as TickerMode,
         tickerSymbols: DEFAULT_TICKER_SYMBOLS,
         tickerSpeed: 30,
+      };
+    }
+
+    // v6 → v7: add WhatsApp settings section (mirrors upstream OpenAlgo
+    // v2.0.1.1 WhatsApp bot integration).
+    if (version < 7) {
+      state = {
+        ...state,
+        whatsapp: {
+          enabled: false,
+          phoneE164: "",
+          adminUrl: "",
+          ...((state.whatsapp as Record<string, unknown>) ?? {}),
+        } as WhatsAppSettings,
       };
     }
 

@@ -64,16 +64,24 @@ MARKET_HOURS: dict[str, tuple[dt_time, dt_time]] = {
     "BCD":   (dt_time(9, 0),  dt_time(17, 0)),
     "MCX":   (dt_time(9, 0),  dt_time(23, 30)),
     "NCDEX": (dt_time(10, 0), dt_time(17, 0)),
+    "NCO":   (dt_time(9, 0),  dt_time(17, 0)),  # NSE Commodities — Zerodha-only on upstream
     "DELTA": (dt_time(0, 0),  dt_time(23, 59)),  # 24/7 crypto
 }
 
-# Exchanges that are quote-only — orders always rejected
-_QUOTE_ONLY_EXCHANGES = {"NSE_INDEX", "BSE_INDEX"}
+# Exchanges that are quote-only — orders always rejected.
+# Index segments cannot be traded directly; they price the underlying baskets
+# that NSE/BSE/MCX list as derivatives instruments. MCX_INDEX (commodity
+# indices) and GLOBAL_INDEX (foreign + IFSC reference indices) are added
+# alongside NSE_INDEX / BSE_INDEX in the OpenAlgo v2.0.1.0 sync.
+_QUOTE_ONLY_EXCHANGES = {
+    "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+}
 
-# Exchange routing: all exchanges route through OpenAlgo (including Delta Exchange)
+# Exchange routing: all exchanges route through OpenAlgo (including Delta Exchange).
 OPENALGO_EXCHANGES = {
     "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX",
-    "NSE_INDEX", "BSE_INDEX", "NCDEX", "DELTA",
+    "NSE_INDEX", "BSE_INDEX", "NCDEX", "NCO",
+    "MCX_INDEX", "GLOBAL_INDEX", "DELTA",
 }
 
 
@@ -112,6 +120,7 @@ def get_expiry_time(exchange: str) -> dt_time:
         "CDS":   dt_time(12, 30),
         "BCD":   dt_time(12, 30),
         "MCX":   dt_time(23, 30),
+        "NCO":   dt_time(17, 0),
         "DELTA": dt_time(18, 0),  # BTC/ETH weekly options + daily futures: 12:30 UTC = 18:00 IST
     }
     return expiry_times.get(exchange, dt_time(15, 30))
@@ -130,7 +139,9 @@ def _format_market_hours(exchange: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Valid exchanges that can receive orders (excludes index-only segments)
-_TRADEABLE_EXCHANGES = {"NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "DELTA"}
+_TRADEABLE_EXCHANGES = {
+    "NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "NCO", "DELTA",
+}
 
 # Per-exchange max single-order quantity defaults (can be overridden)
 _DEFAULT_QTY_LIMITS: dict[str, int] = {
@@ -142,6 +153,7 @@ _DEFAULT_QTY_LIMITS: dict[str, int] = {
     "CDS": 10_000,
     "BCD": 10_000,
     "NCDEX": 5_000,
+    "NCO": 5_000,
 }
 
 

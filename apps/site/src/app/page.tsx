@@ -72,7 +72,7 @@ export default function HomePage() {
       <section className="section">
         <div className="metric-rail" aria-label="Project facts">
           <div>
-            <strong>33</strong>
+            <strong>32</strong>
             <span>OpenAlgo broker integrations documented for compatibility checks.</span>
           </div>
           <div>

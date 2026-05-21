@@ -72,6 +72,13 @@ _ENDPOINT_MAP: dict[str, str] = {
     "open-position":  "openposition",
     "options":        "optionsorder",
     "options-multi":  "optionsmultiorder",
+    # GTT — Good Till Triggered orders (added in OpenAlgo v2.0.0.9).
+    # Live broker support upstream: Dhan + Zerodha. Other brokers respond
+    # with a 501 that this dispatcher propagates unchanged so the UI can
+    # surface the actual error message.
+    "gtt-place":      "placegttorder",
+    "gtt-modify":     "modifygttorder",
+    "gtt-cancel":     "cancelgttorder",
 }
 
 # ---------------------------------------------------------------------------
@@ -190,6 +197,13 @@ def _forward_to_openalgo(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]
     url = f"{_openalgo_base_url()}/api/v1/{endpoint}"
     payload = dict(body)
     payload["apikey"] = api_key  # OpenAlgo requires key in body
+    # Upstream marks ``strategy`` as required on every order endpoint
+    # (Place/Modify/Cancel for regular orders AND GTT). Frontends omit
+    # it for ergonomic reasons — inject a stable default so a missing
+    # field never triggers a 400 from upstream. Callers that supply
+    # their own ``strategy`` (BacktestLab, AI agent, etc.) win.
+    if not payload.get("strategy"):
+        payload["strategy"] = "Flint"
 
     try:
         with httpx.Client(timeout=10.0) as client:
@@ -433,6 +447,19 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
             ),
         }
 
+    if ft_action in ("gtt-place", "gtt-modify", "gtt-cancel"):
+        # GTT triggers are inherently multi-day live broker constructs.
+        # The practice sandbox does not simulate price triggers, so reject
+        # cleanly rather than pretend a trigger was created.
+        return {
+            "trigger_id": "",
+            "status": "REJECTED",
+            "message": (
+                "GTT (Good Till Triggered) orders require live mode — "
+                "they are not simulated in Practice mode."
+            ),
+        }
+
     # Fallback for any unmapped action — should never reach here
     return {
         "order_id": "",
@@ -616,3 +643,33 @@ def options_multi_order() -> tuple[Any, int]:
         JSON with ``status``, ``order_id``s per leg, and ``message``.
     """
     return _dispatch_order("options-multi")
+
+
+# ---------------------------------------------------------------------------
+# GTT (Good Till Triggered) — placed/modified/cancelled through the same
+# safety proxy as regular orders so live-mode JWT unlock and explore-mode
+# blocking apply identically. Upstream live broker support: Dhan + Zerodha.
+# ---------------------------------------------------------------------------
+
+
+@orders_bp.route("/gtt-place", methods=["POST"])
+def gtt_place_order() -> tuple[Any, int]:
+    """Place a GTT (Good Till Triggered) order — maps to ``placegttorder``.
+
+    Single-leg or two-leg OCO triggers. Upstream rejects MIS product
+    because triggers can sit for days; expects ``triggerprice_sl`` /
+    ``triggerprice_tg`` and (for OCO) ``stoploss`` / ``target`` limits.
+    """
+    return _dispatch_order("gtt-place")
+
+
+@orders_bp.route("/gtt-modify", methods=["POST"])
+def gtt_modify_order() -> tuple[Any, int]:
+    """Modify an active GTT — maps to ``modifygttorder``. Full replacement."""
+    return _dispatch_order("gtt-modify")
+
+
+@orders_bp.route("/gtt-cancel", methods=["POST"])
+def gtt_cancel_order() -> tuple[Any, int]:
+    """Cancel an active GTT by ``trigger_id`` — maps to ``cancelgttorder``."""
+    return _dispatch_order("gtt-cancel")

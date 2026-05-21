@@ -12,7 +12,7 @@ python_requires = ">=3.12,<3.14"
 node_requires = ">=20.0.0"
 
 [packages]
-gateway = { path = "packages/gateway", lang = "python", description = "Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge" }
+gateway = { path = "packages/gateway", lang = "python", description = "Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge" }
 core = { path = "packages/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }
 engine = { path = "packages/engine", lang = "python", description = "Strategy execution, order routing, safety layers, kill switches" }
 terminal = { path = "packages/terminal", lang = "react", description = "Trading UI — scalper, option chain, OI analysis, DOM, charts" }
@@ -75,7 +75,9 @@ maintenance_window_start = "15:45"
 maintenance_window_end = "18:00"
 
 [exchanges]
-# All exchanges supported by OpenAlgo — FlintTrade must handle ALL of these
+# All exchanges supported by OpenAlgo — FlintTrade must handle ALL of these.
+# Index-only segments (NSE_INDEX, BSE_INDEX, MCX_INDEX, GLOBAL_INDEX) are
+# quote-only and reject orders at the safety layer.
 NSE = { name = "NSE Equity", hours = "09:15-15:30" }
 BSE = { name = "BSE Equity", hours = "09:15-15:30" }
 NFO = { name = "NSE F&O", hours = "09:15-15:30" }
@@ -84,6 +86,11 @@ CDS = { name = "Currency Derivatives", hours = "09:00-17:00" }
 BCD = { name = "BSE Currency", hours = "09:00-17:00" }
 MCX = { name = "Commodities", hours = "09:00-23:55" }
 NCDEX = { name = "Agri Commodities", hours = "10:00-17:00" }
+NCO = { name = "NSE Commodities", hours = "09:00-17:00" }
+NSE_INDEX = { name = "NSE Indices", hours = "09:15-15:30", quote_only = true }
+BSE_INDEX = { name = "BSE Indices", hours = "09:15-15:30", quote_only = true }
+MCX_INDEX = { name = "MCX Commodity Indices", hours = "09:00-23:30", quote_only = true }
+GLOBAL_INDEX = { name = "Foreign + IFSC Indices (reference feed)", hours = "24/7", quote_only = true }
 
 [exchanges.deploy_freeze]
 # Deploy freeze must cover ALL active exchanges
@@ -99,12 +106,14 @@ DELTA = { name = "Delta Exchange (Crypto)", hours = "24/7", products = "BTC/ETH 
 # INR settlement, FIU-India compliant, no 30% crypto tax (derivatives = speculative income)
 
 [brokers]
-# Full broker list supported by OpenAlgo (FlintTrade works with ALL of them)
+# Full broker list supported by OpenAlgo (FlintTrade works with ALL of them).
+# Mirrors BROKER_CATALOG in packages/gateway/src/adapter.py — keep in sync
+# after every .local/external/openalgo refresh.
 supported = [
   "5paisa", "5paisa-xts", "AliceBlue", "AngelOne", "Compositedge",
   "Definedge", "Delta Exchange", "Dhan", "Dhan-Sandbox", "Firstock",
-  "Flattrade", "Fyers", "Groww", "IIFL-XTS", "IndiaBulls", "IndMoney",
-  "JainamXTS", "Kotak Neo", "Motilal Oswal", "Mstock", "Nubra",
-  "Paytm Money", "Pocketful", "RMoney", "Samco", "Shoonya",
-  "Tradejini", "Upstox", "Wisdom Capital", "Zebu", "Zerodha"
+  "Flattrade", "Fyers", "Groww", "IBulls", "IIFL", "IIFL Capital",
+  "IndMoney", "JainamXTS", "Kotak Neo", "Motilal Oswal",
+  "Mstock", "Nubra", "Paytm Money", "Pocketful", "RMoney", "Samco",
+  "Shoonya", "Tradejini", "Upstox", "Wisdom Capital", "Zebu", "Zerodha"
 ]

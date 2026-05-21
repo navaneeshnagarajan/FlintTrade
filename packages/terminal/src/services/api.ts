@@ -272,6 +272,78 @@ export const optionsMultiOrder = (params: OptionsMultiOrderParams) =>
 export const splitOrder = (params: SplitOrderParams) =>
   postOrder<{ orderId: string }>("split", params);
 
+// --- GTT (Good Till Triggered) ---
+//
+// Mirrors the OpenAlgo v2.0.0.9 GTT surface. All four endpoints are routed
+// through the FlintTrade safety proxy (`postOrder`) so live triggers honour
+// the mode gate and live_mode_unlocked JWT claim. Upstream supports Dhan
+// and Zerodha live; other brokers return a clean 501 that surfaces here as
+// a postOrder error.
+
+export interface PlaceGttParams {
+  /** Trigger type — SINGLE for one-leg, OCO for stoploss + target. */
+  trigger_type: "SINGLE" | "OCO";
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  /** GTT product is restricted to CNC or NRML — MIS is rejected by upstream. */
+  product: "CNC" | "NRML";
+  quantity: number;
+  pricetype?: "LIMIT" | "MARKET";
+  price: number;
+  /** Stoploss-leg trigger price (SINGLE-SL or OCO). */
+  triggerprice_sl?: number;
+  /** Target-leg trigger price (SINGLE-TG or OCO). */
+  triggerprice_tg?: number;
+  /** Stoploss limit price — OCO only. */
+  stoploss?: number;
+  /** Target limit price — OCO only. */
+  target?: number;
+  /** Optional ISO timestamp at which the trigger auto-expires. */
+  expires_at?: string;
+  strategy?: string;
+}
+
+export interface ModifyGttParams extends PlaceGttParams {
+  trigger_id: string;
+}
+
+export interface CancelGttParams {
+  trigger_id: string;
+  strategy?: string;
+}
+
+export interface GttTrigger {
+  trigger_id: string;
+  status: string;
+  trigger_type: string;
+  symbol: string;
+  exchange: string;
+  action: string;
+  quantity: string;
+  product: string;
+  price: string;
+  triggerprice_sl: string;
+  triggerprice_tg: string;
+  stoploss: string;
+  target: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export const placeGtt = (params: PlaceGttParams) =>
+  postOrder<{ orderId: string; trigger_id?: string }>("gtt-place", params);
+
+export const modifyGtt = (params: ModifyGttParams) =>
+  postOrder<{ orderId: string; trigger_id?: string }>("gtt-modify", params);
+
+export const cancelGtt = (params: CancelGttParams) =>
+  postOrder<{ orderId: string; trigger_id?: string }>("gtt-cancel", params);
+
+export const getGttOrderbook = () =>
+  // Read-only — go via OpenAlgo direct to avoid the safety-proxy overhead.
+  post<GttTrigger[]>("gttorderbook", {});
+
 // --- Data ---
 
 /**
@@ -343,13 +415,18 @@ export const getExpiry = (
   exchange = "NFO",
   instrumenttype: "options" | "futures" = "options",
 ) => post<{ expiry: string[] }>("expiry", { symbol, exchange, instrumenttype });
-export function searchSymbol(query: string): Promise<Array<{ symbol: string; exchange: string }>> {
+export function searchSymbol(
+  query: string,
+  exchange?: string,
+): Promise<Array<{ symbol: string; exchange: string }>> {
   // Sanitize: strip characters that are not word chars, spaces, hyphens, or dots
   const sanitized = query.replace(/[^\w\s\-.]/g, "").slice(0, 50).trim();
   if (!sanitized) {
     throw new Error("Search query is empty after sanitization");
   }
-  return post<Array<{ symbol: string; exchange: string }>>("search", { query: sanitized });
+  const body: Record<string, string> = { query: sanitized };
+  if (exchange) body.exchange = exchange;
+  return post<Array<{ symbol: string; exchange: string }>>("search", body);
 }
 export const getIntervals = () => get<string[]>("intervals");
 export const getMultiOptionGreeks = (symbols: Array<{ symbol: string; exchange: string }>) =>

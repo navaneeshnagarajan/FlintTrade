@@ -25,7 +25,7 @@
 services:
 
   # ---------------------------------------------------------------------------
-  # OpenAlgo — Broker gateway (31 brokers), REST API + WebSocket
+  # OpenAlgo — Broker gateway (32 brokers), REST API + WebSocket
   # ---------------------------------------------------------------------------
   # NOTE: OpenAlgo is no longer bundled with FlintTrade. It is an external
   # service that users deploy separately. The block below is kept commented

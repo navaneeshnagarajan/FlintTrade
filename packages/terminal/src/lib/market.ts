@@ -17,16 +17,24 @@ interface ExchangeHours {
 }
 
 const EXCHANGE_HOURS: Record<string, ExchangeHours> = {
-  NSE:       { open: 9 * 60 + 15, close: 15 * 60 + 30 },  // 9:15–15:30
-  BSE:       { open: 9 * 60 + 15, close: 15 * 60 + 30 },
-  NFO:       { open: 9 * 60 + 15, close: 15 * 60 + 30 },
-  BFO:       { open: 9 * 60 + 15, close: 15 * 60 + 30 },
-  CDS:       { open: 9 * 60,      close: 17 * 60 },        // 9:00–17:00
-  BCD:       { open: 9 * 60,      close: 17 * 60 },
-  MCX:       { open: 9 * 60,      close: 23 * 60 + 30 },   // 9:00–23:30
-  NCDEX:     { open: 10 * 60,     close: 17 * 60 },        // 10:00–17:00
-  NSE_INDEX: { open: 9 * 60 + 15, close: 15 * 60 + 30 },  // quote-only, mirrors NSE
-  BSE_INDEX: { open: 9 * 60 + 15, close: 15 * 60 + 30 },
+  NSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },  // 9:15–15:30
+  BSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
+  NFO:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
+  BFO:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
+  CDS:          { open: 9 * 60,      close: 17 * 60 },        // 9:00–17:00
+  BCD:          { open: 9 * 60,      close: 17 * 60 },
+  MCX:          { open: 9 * 60,      close: 23 * 60 + 30 },   // 9:00–23:30
+  NCDEX:        { open: 10 * 60,     close: 17 * 60 },        // 10:00–17:00
+  // NCO (NSE Commodities, Zerodha-only) — added upstream in OpenAlgo v2.0.0.7.
+  NCO:          { open: 9 * 60,      close: 17 * 60 },        // 9:00–17:00
+  NSE_INDEX:    { open: 9 * 60 + 15, close: 15 * 60 + 30 },  // quote-only, mirrors NSE
+  BSE_INDEX:    { open: 9 * 60 + 15, close: 15 * 60 + 30 },
+  // MCX_INDEX (commodity indices, e.g. MCXBULLDEX) — quote-only.
+  MCX_INDEX:    { open: 9 * 60,      close: 23 * 60 + 30 },
+  // GLOBAL_INDEX (foreign + IFSC reference indices) — always-on reference
+  // feed; we expose the widest plausible window so the UI never reports
+  // "closed" for a US/UK/Asia index quote.
+  GLOBAL_INDEX: { open: 0,           close: 23 * 60 + 59 },
 };
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,99 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### OpenAlgo v2.0.1.1 parity sync (2026-05-21)
+
+Refresh of the OpenAlgo integration from upstream `08c2a553` (post-v2.0.0.5)
+to `7e48b2e8` (post-v2.0.1.1) — 199 commits across six version bumps.
+Findings catalogued in `.local/openalgo-sync-2.0.1.1/`.
+
+#### Added
+
+- **GTT (Good Till Triggered) orders** end-to-end. New methods
+  `place_gtt` / `modify_gtt` / `cancel_gtt` / `gtt_orderbook` on
+  `OpenAlgoClient`. New Pydantic models `GttOrder`, `ModifyGttOrder`,
+  `CancelGttOrder`, `GttTrigger`. New safety-proxy routes at
+  `/api/v1/orders/gtt-{place,modify,cancel}` that honour the mode gate
+  and live-mode JWT unlock. Frontend helpers `placeGtt` / `modifyGtt` /
+  `cancelGtt` / `getGttOrderbook` plus `GTT_PRODUCTS` / `GTT_TRIGGER_TYPES`
+  constants and `tradingConstants.GTT_PRODUCTS`. Live broker support
+  upstream: Dhan + Zerodha. Other brokers return clean 501.
+- **New exchanges** `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`
+  added to `Exchange` enum (`packages/core/src/models.py`), per-broker
+  `BROKER_CATALOG` (`packages/gateway/src/adapter.py`), backend enums
+  (`safety.py`, `market_hours.py`, `scheduler.py`, `strategy_routes.py`,
+  `historical/downloader.py`, `integration/tradingview.py`), `flint.toml`,
+  and frontend constants (`tradingConstants.ts`, `market.ts`, `BacktestLab`,
+  `StrategyBuilder/types.ts`, `widgets/analysis/Depth/`,
+  `tools/FlowBuilder/flow/ConfigPanel.tsx`).
+- **IIFL Capital broker** added to `BROKER_CATALOG` as a distinct entry
+  alongside `iifl`. Live MQTT market-data feed picked up automatically
+  from the refreshed upstream checkout.
+- **`search()` exchange filter** — `OpenAlgoClient.search()` and the
+  terminal `searchSymbol()` helper now forward the optional `exchange`
+  kwarg added to upstream's `SearchSchema` in v2.0.1.x.
+- **WhatsApp settings section** in Settings → WhatsApp. Outbound-only
+  surface (`POST /api/v1/whatsapp/notify`) wired to the existing
+  `testWhatsAppAlert` helper. `settingsStore` bumped to v7 with an
+  idempotent migration that adds the WhatsApp default block.
+- **`TRUST_PROXY_HEADERS` env gate** in `packages/core/src/app.py`. When
+  set, wraps `wsgi_app` with Werkzeug's `ProxyFix` so deployments behind
+  Nginx see real client IPs instead of `127.0.0.1`. Mirrors the same
+  gate upstream added in OpenAlgo v2.0.0.7 for `utils/ip_helper.py`.
+- **Password-change session invalidation** — new `password_changed_at`
+  column on `AuthService.account`, stamped on every successful
+  `update_password()`. `decode_token()` rejects any JWT whose `iat`
+  predates the stamp (with a 2-second skew tolerance), so leaked
+  reset / session tokens cannot survive a password change. Mirrors
+  OpenAlgo's v2.0.0.7 hardening.
+- **`API_KEY_PEPPER` first-run generation + persist** — new
+  `_get_api_key_pepper()` in `packages/core/src/app.py` generates a
+  64-byte pepper on first boot and persists it to
+  `~/.flinttrade/api_key_pepper` (mode 0600), then pushes it into
+  `os.environ` before the gateway shim imports OpenAlgo's broker
+  modules. Rejects the publicly leaked placeholder values upstream
+  flagged in commit `0162ce3a`.
+
+#### Changed
+
+- **`COMPATIBILITY.md`, `PARITY_STATUS.md`, `REFERENCE_MAP.md`,
+  `absorption-status.json`** updated to declare v2.0.1.1 parity with
+  the 32-broker count (including IIFL Capital), and the new GTT /
+  exchange / WhatsApp surfaces. Pin in
+  `scripts/setup-test-deps.sh` and `scripts/check_absorption_drift.py`
+  bumped from `08c2a553` to `7e48b2e8`.
+- **`docs/API.md`, `docs/.../OPENALGO_API.md`, AI skill
+  `packages/ai/skills/openalgo_api.md`, agent-context template
+  `templates/agent-context/CLAUDE.md.template`** gained GTT sections
+  and WhatsApp notify documentation.
+- **Analyzer docstrings** in `OpenAlgoClient.analyzer_status` /
+  `analyzer_toggle` updated to reference upstream's v2.0.0.6
+  "sandbox trading" terminology. Route slugs and response keys are
+  unchanged so no client-call sites needed touching.
+- **`flint.toml`** broker count corrected from 30 → 32 (the previous
+  list mistakenly conflated `IIFL` with the legacy `IIFL-XTS`
+  designation that upstream never used). Exchange section gained the
+  five new entries with `quote_only` markers for the index segments.
+- **`.local/external/openalgo/`** fast-forwarded to upstream HEAD
+  (`7e48b2e8`, v2.0.1.1). Brings in the silent broker fixes that
+  FlintTrade picks up automatically through the in-process adapter
+  shim — Kotak Neo payload alignment, Angel defensive `.get()`,
+  Paytm / Groww / Kotak index symbol normalisation, ~12 WebSocket
+  adapters hardened (batch-queue subscribes, auth-fail short-circuit,
+  FD-leak fixes across reconnect).
+
+#### Notes
+
+- **Not absorbed** — OpenAlgo's Remote MCP (OAuth 2.1 + JSON-RPC) is
+  orthogonal to FlintTrade's in-process MCP bridge at
+  `packages/ai/src/mcp_bridge.py`. WhatsApp inbound slash commands are
+  intentionally outbound-only on FlintTrade so orders cannot bypass
+  the mode guard. The `opengreeks` Rust replacement for `py_vollib`
+  is transparent — same response shape, no code change required.
+- **Tests** — 370 tests across the touched packages pass. The
+  pre-existing `test_bootstrap_is_idempotent` order-dependent flake
+  in `packages/gateway/tests/test_adapter.py` is unchanged.
+
 ### Public repo modernisation pass (2026-05-20)
 
 Reshapes the contributor-facing surface of the repository now that it is public AGPL-3.0. No application code, tests, or runtime behaviour touched.

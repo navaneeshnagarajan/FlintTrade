@@ -152,14 +152,12 @@ class TestHistoricalDownloader:
 
     def test_all_exchanges_accepted(self):
         from packages.historical.src.downloader import SUPPORTED_EXCHANGES
-        assert "NSE" in SUPPORTED_EXCHANGES
-        assert "BSE" in SUPPORTED_EXCHANGES
-        assert "NFO" in SUPPORTED_EXCHANGES
-        assert "BFO" in SUPPORTED_EXCHANGES
-        assert "CDS" in SUPPORTED_EXCHANGES
-        assert "BCD" in SUPPORTED_EXCHANGES
-        assert "MCX" in SUPPORTED_EXCHANGES
-        assert "NCDEX" in SUPPORTED_EXCHANGES
+        # Base set
+        for exch in ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"):
+            assert exch in SUPPORTED_EXCHANGES, f"{exch} missing"
+        # Added in OpenAlgo v2.0.0.7 sync — see CHANGELOG.
+        for exch in ("NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX"):
+            assert exch in SUPPORTED_EXCHANGES, f"{exch} missing after v2.0.1.1 sync"
 
 
 # ======================================================================

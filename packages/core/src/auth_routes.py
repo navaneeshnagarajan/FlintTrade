@@ -324,7 +324,11 @@ def decode_token(token: str) -> dict[str, Any]:
     """Decode and verify a FlintTrade JWT.
 
     Also checks the server-side JTI revocation blocklist so that tokens
-    invalidated by logout or password change are rejected even before expiry.
+    invalidated by logout are rejected even before expiry, and rejects
+    every token whose ``iat`` predates the user's most recent password
+    change so that leaked sessions cannot survive a password reset. This
+    is the FlintTrade analogue of OpenAlgo v2.0.0.7's session-on-password-
+    change invalidation.
 
     Args:
         token: Encoded JWT string.
@@ -334,12 +338,41 @@ def decode_token(token: str) -> dict[str, Any]:
 
     Raises:
         jwt.ExpiredSignatureError: If the token has expired.
-        jwt.InvalidTokenError: If the token is invalid or has been revoked.
+        jwt.InvalidTokenError: If the token is invalid, has been revoked,
+            or was issued before the most recent password change.
     """
     payload = jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
     jti = payload.get("jti", "")
     if jti and _is_jti_revoked(jti):
         raise jwt.InvalidTokenError("Token has been revoked")
+
+    # iat vs. password_changed_at — a password change invalidates every
+    # token issued before it. Tokens minted for password resets carry
+    # ``type == "reset"`` and are exempt so the reset flow itself can
+    # complete. The OTP-driven reset path (``auth_reset_password_otp``)
+    # does NOT mint a JWT — it consumes an in-memory OTP and calls
+    # ``svc.update_password()`` directly, so no token-type exemption is
+    # needed there.
+    if payload.get("type") != "reset":
+        iat = payload.get("iat")
+        if iat is not None:
+            try:
+                iat_epoch = float(iat)
+            except (TypeError, ValueError):
+                iat_epoch = 0.0
+            svc = _get_auth_service()
+            if svc is not None:
+                try:
+                    pwd_changed_at = svc.get_password_changed_at()
+                except Exception:  # pragma: no cover - defensive
+                    pwd_changed_at = 0.0
+                # Allow a 2-second skew window so a fresh post-change token
+                # whose iat is rounded down isn't accidentally rejected.
+                if pwd_changed_at > 0.0 and iat_epoch + 2.0 < pwd_changed_at:
+                    raise jwt.InvalidTokenError(
+                        "Token issued before most recent password change"
+                    )
+
     return payload
 
 

@@ -95,7 +95,9 @@ class TestOrderValidation:
     def test_all_tradeable_exchanges_pass(self):
         from packages.engine.src.safety import OrderValidation
         layer = OrderValidation(check_market_hours=False)
-        for exch in ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX"]:
+        # NCO (NSE Commodities, Zerodha-only) joined the tradeable list in
+        # the OpenAlgo v2.0.0.7 sync.
+        for exch in ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "NCO"]:
             order = self._make_order(exchange=exch)
             assert layer.validate(order).passed, f"{exch} should pass"
 
@@ -217,7 +219,10 @@ class TestMarketHours:
 
     def test_openalgo_exchanges_complete(self):
         from packages.engine.src.safety import OPENALGO_EXCHANGES
-        for exch in ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NSE_INDEX", "BSE_INDEX"]:
+        for exch in [
+            "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX",
+            "NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+        ]:
             assert exch in OPENALGO_EXCHANGES, f"{exch} missing from OPENALGO_EXCHANGES"
 
     def test_order_rejected_outside_market_hours(self):

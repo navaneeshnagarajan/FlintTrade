@@ -14,6 +14,7 @@ import {
   Keyboard,
   Brain,
   Send,
+  MessageCircle,
   HardDrive,
   ShieldCheck,
   Activity,
@@ -42,6 +43,7 @@ export type SectionId =
   | "keyboard"
   | "llm"
   | "telegram"
+  | "whatsapp"
   | "dataPaths"
   | "security"
   | "monitoring"
@@ -71,6 +73,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard     },
   { id: "llm",        label: "LLM Config",         icon: Brain        },
   { id: "telegram",   label: "Telegram",           icon: Send         },
+  { id: "whatsapp",   label: "WhatsApp",           icon: MessageCircle },
   { id: "dataPaths",  label: "Data Paths",         icon: HardDrive    },
   { id: "security",   label: "Security",           icon: ShieldCheck  },
   { id: "monitoring", label: "Monitoring",         icon: Activity     },

@@ -3,7 +3,7 @@
 Welcome to the FlintTrade documentation. FlintTrade is an open-source, modular
 trading and investment platform for Indian F&O, commodities, and crypto, built
 on top of the [OpenAlgo](https://github.com/marketcalls/openalgo) broker gateway
-(33 brokers supported). One application serves three audiences from a single
+(32 brokers supported). One application serves three audiences from a single
 React workspace — **traders** (intraday F&O, options analysis), **investors**
 (mutual funds, SIPs, net worth), and **beginners** (guided learning, paper
 trading). FlintTrade is AGPL-3.0 licensed.

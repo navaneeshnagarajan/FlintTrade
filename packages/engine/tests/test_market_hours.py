@@ -89,7 +89,14 @@ class TestStandardHours:
         assert close_t == time(17, 0)
 
     def test_all_exchanges_present(self) -> None:
-        expected = {"NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NSE_INDEX", "BSE_INDEX"}
+        # NCO (NSE Commodities), MCX_INDEX (commodity indices), and
+        # GLOBAL_INDEX (world reference feeds) were added in the OpenAlgo
+        # v2.0.0.7 sync; keep this list in lock-step with STANDARD_HOURS
+        # so any future addition trips the assertion.
+        expected = {
+            "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX",
+            "NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+        }
         assert set(STANDARD_HOURS.keys()) == expected
 
     def test_unknown_exchange_raises(self) -> None:

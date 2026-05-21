@@ -71,10 +71,10 @@ engine:
     - "src/mode_guard.py — server-side Explore / Practice / Live enforcement"
 gateway:
   language: Python
-  purpose: "Direct broker connections for 33 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge."
+  purpose: "Direct broker connections for 32 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge."
   entry_points:
     - "src/adapter.py — base adapter class + OpenAlgo resolver"
-    - "src/registry.py — 33-broker registry"
+    - "src/registry.py — 32-broker registry"
     - "src/credentials.py — Fernet-encrypted credential storage"
     - "src/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
 historical:

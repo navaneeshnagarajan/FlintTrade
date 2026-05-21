@@ -26,8 +26,13 @@ _DAILY_INTERVALS = {"D", "1d", "1W", "1M"}
 _DEFAULT_CHUNK_DAYS_INTRADAY = 30
 _DEFAULT_CHUNK_DAYS_DAILY = 365
 
-# All tradeable exchanges
-SUPPORTED_EXCHANGES = {"NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"}
+# All tradeable exchanges. Index segments (*_INDEX, GLOBAL_INDEX) are
+# downloadable too — OpenAlgo's history API resolves NIFTY/BANKNIFTY etc.
+# against NSE_INDEX. NCO arrived upstream in v2.0.0.7 (Zerodha-only).
+SUPPORTED_EXCHANGES = {
+    "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX",
+    "NCO", "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+}
 
 # Canonical interval mapping — normalise user-friendly names to OpenAlgo format
 _INTERVAL_MAP: dict[str, str] = {

@@ -353,7 +353,9 @@ def get_strategy_logs(strategy_id: str) -> Response:
 # Supported exchanges for cron scheduling — mirrors EXCHANGE_SCHEDULES in scheduler.py.
 _SUPPORTED_EXCHANGES = frozenset({
     "NSE", "BSE", "NFO", "BFO", "CDS", "BCD",
-    "MCX", "NCDEX", "NSE_INDEX", "BSE_INDEX", "DELTA",
+    "MCX", "NCDEX", "NCO",
+    "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
+    "DELTA",
 })
 
 

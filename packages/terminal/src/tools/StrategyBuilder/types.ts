@@ -112,10 +112,12 @@ export const STRATEGY_TEMPLATES: Record<
   },
 };
 
-// Exchange codes aligned with FlintTrade multi-exchange support
+// Exchange codes aligned with FlintTrade multi-exchange support.
+// Mirrors lib/tradingConstants.EXCHANGES — including the new NCO,
+// MCX_INDEX, and GLOBAL_INDEX segments added in the OpenAlgo v2.0.1.1 sync.
 export const EXCHANGES = [
-  "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX",
-  "NSE_INDEX", "BSE_INDEX",
+  "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NCO",
+  "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
 ] as const;
 
 // Interval labels — OpenAlgo supported intervals

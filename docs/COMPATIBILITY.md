@@ -8,7 +8,7 @@
 
 | Service | Role | Minimum | Latest tested | Upstream |
 |---|---|---|---|---|
-| **OpenAlgo** | Broker gateway (33 brokers, REST + WebSocket) | v2.0.0 | `08c2a553` (2026-04-23) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
+| **OpenAlgo** | Broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
 | **OpenClaw** | Optional AI agent gateway (Telegram / WhatsApp) | (any) | `8c4ecf42` (2026-04-19) | [openclaw/openclaw](https://github.com/openclaw/openclaw) |
 
 **OpenAlgo minimum (v2.0.0):** required for the v2 API surface FlintTrade
@@ -36,8 +36,51 @@ call AlgoMirror at runtime. The upstream repo is not tracked or pulled.
 ## Brokers
 
 FlintTrade itself does not connect to brokers — OpenAlgo does. Whatever
-broker version OpenAlgo supports, FlintTrade supports. The 33-broker
-list lives in [`flint.toml`](../flint.toml) under `[brokers]`.
+broker version OpenAlgo supports, FlintTrade supports. The 32-broker
+list lives in [`flint.toml`](../flint.toml) under `[brokers]`. The 2026-05
+sync added **IIFL Capital** as a distinct entry alongside the existing
+**IIFL** adapter.
+
+### Surface added in v2.0.1.1
+
+- **GTT (Good Till Triggered) orders** — `placegttorder`, `modifygttorder`,
+  `cancelgttorder`, `gttorderbook`. Live broker support: Dhan + Zerodha.
+  Other brokers return a clean 501 ("GTT orders are not supported for
+  broker 'X' yet"). FlintTrade exposes these through the safety proxy
+  at `/api/v1/orders/gtt-{place,modify,cancel}`.
+- **New exchanges** — `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`.
+- **WhatsApp bot** — `POST /api/v1/whatsapp/notify`. FlintTrade exposes
+  the outbound test endpoint at `/ft-api/v1/alerts/whatsapp/test`.
+- **opengreeks** — Rust-based replacement for `py_vollib`. Same response
+  shape, ~12× faster on option-chain refresh. No FlintTrade change.
+
+### Sandbox terminology
+
+Upstream renamed "virtual / paper trading" to "sandbox trading" in
+v2.0.0.6. API field names (`analyzer_status`, `analyzer_toggle`) were
+left intact, so FlintTrade's client wrappers needed only docstring
+updates. FlintTrade's own Explore / Practice / Live tri-mode is a
+separate concept and stays named "Practice".
+
+### Deployment security — `TRUST_PROXY_HEADERS`
+
+Set `TRUST_PROXY_HEADERS=1` **only** when a trusted reverse proxy
+(nginx, Caddy, Cloudflare) terminates the connection in front of
+FlintTrade. The proxy MUST strip any client-supplied `X-Forwarded-For`
+and append its own hop. When the env is unset (default) FlintTrade
+reads `request.remote_addr` directly and the rate limiter,
+brute-force tracker, and 404 abuse guard all see the real source IP.
+
+> **Do not** enable this flag without a real reverse proxy in front.
+> If you do, any client can send `X-Forwarded-For: 1.2.3.4` and
+> trivially evade per-IP login lockout, rate limits, and the 404
+> flood guard. The hop-count knobs are configurable via
+> `TRUST_PROXY_HEADERS_X_FOR` (default `1`), `_X_PROTO` (default `1`),
+> `_X_HOST` (default `0`), `_X_PORT` (default `0`), `_X_PREFIX`
+> (default `0`). Match these to your proxy chain depth.
+
+Mirrors the same security gate OpenAlgo added in v2.0.0.7 for its
+`utils/ip_helper.py` (commit `d3e2e0ef`).
 
 ## Bumping these
 

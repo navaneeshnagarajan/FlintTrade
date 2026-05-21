@@ -62,7 +62,7 @@ For step-by-step instructions tailored to each operating system, see:
 ## 2. First broker connection (via OpenAlgo)
 
 FlintTrade never speaks to your broker directly. Every order, every tick,
-every position lookup goes through OpenAlgo. OpenAlgo supports 33 brokers in
+every position lookup goes through OpenAlgo. OpenAlgo supports 32 brokers in
 India — see [COMPATIBILITY.md](COMPATIBILITY.md) for the full list.
 
 ### Steps

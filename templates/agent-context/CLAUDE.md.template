@@ -55,7 +55,7 @@ One app. One port. Route-based separation. Widget-composable workspace.
 
 FlintTrade sits ON TOP of OpenAlgo. Never modifies it.
 
-- **OpenAlgo:** Broker connections (33 brokers), REST API port 5000, WebSocket port 8765
+- **OpenAlgo:** Broker connections (32 brokers), REST API port 5000, WebSocket port 8765
 - **FlintTrade:** Single React app (Dockview workspace) + Python backend (strategy engine, backtesting, AI, data pipelines, screener, multi-account orchestration)
 - **External test-deps (not bundled, not submodules):** OpenAlgo and OpenClaw are external services FlintTrade talks to over HTTP/WS. Users install them separately as a prerequisite. Contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/{openalgo,openclaw}/` (gitignored, not shipped). AlgoMirror is intentionally absent — its mirroring patterns are absorbed into `packages/ditto/` and run in-process; the upstream repo is no longer tracked.
 - Every machine runs its own OpenAlgo instance for development and testing. You CANNOT write correct code without testing against a live OpenAlgo.
@@ -177,7 +177,7 @@ Two-tier config. No exceptions.
 
 | Package | Description |
 |---|---|
-| `gateway` | Direct broker connections (33 brokers), adapter pattern, encrypted credentials, WebSocket bridge |
+| `gateway` | Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge |
 | `core` | Framework, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions |
 | `engine` | 5-layer safety system, order router, scheduler, base strategy, strategy registry |
 | `data` | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
@@ -278,6 +278,9 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 ### Orders (all POST)
 `placeorder`, `placesmartorder`, `modifyorder`, `cancelorder`, `cancelallorder`, `closeposition`, `openposition`, `orderstatus`, `optionsorder`, `optionsmultiorder`, `basketorder`, `splitorder`
 
+### GTT — Good Till Triggered (added OpenAlgo 2.0.0.9)
+`placegttorder`, `modifygttorder`, `cancelgttorder`, `gttorderbook` — live broker support: Dhan + Zerodha. MIS product rejected. Surfaced via FlintTrade safety proxy at `/api/v1/orders/gtt-{place,modify,cancel}`.
+
 ### Accounts (POST unless noted)
 `funds`, `orderbook`, `tradebook`, `positionbook`, `holdings`, `margin`, `ping` (**POST**), `analyzer` (**POST**), `analyzer/toggle` (**POST**), `pnl/symbols` (**POST**)
 
@@ -285,7 +288,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 `quotes`, `multiquotes`, `depth`, `history`, `optionchain`, `optiongreeks`, `multioptiongreeks`, `optionsymbol`, `symbol`, `search`, `expiry`, `intervals` (**GET**), `syntheticfuture`, `ticker`, `instruments` (**GET**), `gex`, `iv_smile`, `max_pain`, `oi_profile`, `chart` (**GET/POST** — chart preferences)
 
 ### Utilities
-`holidays` (**POST**), `timings` (**POST**), `telegram` (POST)
+`holidays` (**POST**), `timings` (**POST**), `telegram` (POST), `whatsapp/notify` (POST — added 2.0.1.1; outbound only — pairing is admin-only on OpenAlgo's `/whatsapp` web UI)
 
 ### Broker Management (added OpenAlgo 2.0.0.2)
 **NOTE:** These are session-authenticated, NOT under `/api/v1/`.

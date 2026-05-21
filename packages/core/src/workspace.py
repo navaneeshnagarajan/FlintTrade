@@ -108,10 +108,28 @@ def workspace_dir() -> Path:
     if override:
         p = Path(override).expanduser().resolve()
         p.mkdir(parents=True, exist_ok=True)
+        _lock_workspace_perms(p)
         return p
     p = _default_home()
     p.mkdir(parents=True, exist_ok=True)
+    _lock_workspace_perms(p)
     return p
+
+
+def _lock_workspace_perms(p: Path) -> None:
+    """Best-effort restrict workspace directory perms to owner-only.
+
+    On Linux / macOS the workspace holds the master password, API key
+    pepper, auth DB, credential DB, and DuckDB telemetry logs — any
+    local user on a multi-tenant host could read them otherwise. POSIX
+    ``chmod 0o700`` denies group/other access. Failure is non-fatal
+    (read-only filesystems, Windows ACL paths). Pytest workspaces under
+    ``/tmp`` benefit from this too without breaking the test runner.
+    """
+    try:
+        p.chmod(0o700)
+    except OSError:
+        pass
 
 
 class Workspace:
