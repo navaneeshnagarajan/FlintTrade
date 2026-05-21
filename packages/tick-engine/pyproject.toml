@@ -10,7 +10,7 @@ description = "High-performance tick-level backtesting simulator for FlintTrade 
 license = { text = "AGPL-3.0" }
 
 [tool.maturin]
-features = ["pyo3/abi3-py312"]
+features = ["extension-module"]
 python-source = "python"
 module-name = "tick_engine"
 

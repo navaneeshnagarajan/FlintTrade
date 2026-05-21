@@ -57,9 +57,22 @@ export default defineConfig({
     },
   },
   build: {
-    chunkSizeWarningLimit: 300,
+    // Plotly powers 3D volatility surfaces and is isolated in a lazy analysis
+    // chunk. Keep the warning budget above that known async payload so new
+    // warnings point at unexpected growth, not the intentional chart engine.
+    chunkSizeWarningLimit: 5_000,
     target: "es2022",
     rollupOptions: {
+      onwarn(warning, warn) {
+        if (
+          warning.code === "INVALID_ANNOTATION" &&
+          typeof warning.id === "string" &&
+          warning.id.includes("@glideapps/glide-data-grid")
+        ) {
+          return;
+        }
+        warn(warning);
+      },
       // Glide Data Grid v6 has optional peer deps we don't use. Externalize them
       // to suppress "unresolved import" build errors without installing them.
       //   react-responsive-carousel — image overlay editor (unused)
@@ -138,19 +151,19 @@ export default defineConfig({
           // only pulls in the icons it explicitly imports).
           // Framer Motion — loaded async, not needed on initial page
           if (id.includes("node_modules/framer-motion")) return "vendor-framer";
-          // d3-* — heavy math/scale/shape modules, lazy-loaded via Tremor/Recharts
+          // d3-* — heavy math/scale/shape modules, lazy-loaded via chart widgets
           if (id.includes("node_modules/d3-")) return "vendor-d3";
-          // Recharts — chart rendering (lazy, only dashboards/lab/invest)
-          if (id.includes("node_modules/recharts")) return "vendor-recharts";
-          // Tremor + headlessui — dashboard UI components (lazy)
+          // Tremor wraps Recharts primitives, so keep them in one async chunk
+          // instead of creating a Rollup circular chunk pair.
           // NOTE: @floating-ui is intentionally omitted here — it lives in
           // vendor-radix to avoid the circular chunk warning.
           if (
+            id.includes("node_modules/recharts") ||
             id.includes("node_modules/@tremor/") ||
             id.includes("node_modules/@headlessui/") ||
             id.includes("node_modules/react-day-picker") ||
             id.includes("node_modules/react-transition-state")
-          ) return "vendor-tremor";
+          ) return "vendor-chart-ui";
           // date-fns — date formatting/parsing; pulled in by many widgets
           if (id.includes("node_modules/date-fns/")) return "vendor-dates";
           // Styling utilities — tiny but imported by every component
@@ -180,6 +193,7 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    silent: "passed-only",
     // Vitest's worker pool blows the heap when `pool: 'threads'` because
     // every thread shares a single process and each jsdom worker holds a
     // full DOM + the entire app's module graph in memory. With ~260 test
@@ -196,8 +210,9 @@ export default defineConfig({
     pool: "forks",
     poolOptions: {
       forks: {
-        // Tuned for 16 GB local + 7 GB CI runner. Override with VITEST_MAX_FORKS.
-        maxForks: Number(process.env.VITEST_MAX_FORKS ?? 4),
+        // Keep the default conservative for jsdom-heavy suites on CI and
+        // newer Node runtimes; override locally with VITEST_MAX_FORKS.
+        maxForks: Number(process.env.VITEST_MAX_FORKS ?? 1),
         minForks: 1,
         isolate: true,
       },

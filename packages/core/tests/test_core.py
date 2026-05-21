@@ -380,7 +380,6 @@ class TestClientInit:
     def test_search_forwards_exchange_when_provided(self):
         """OpenAlgo v2.0.1.x exposes an exchange filter on /api/v1/search."""
         from packages.core.src.openalgo_client import OpenAlgoClient
-        from packages.core.src.config import Settings
         import inspect
 
         sig = inspect.signature(OpenAlgoClient.search)

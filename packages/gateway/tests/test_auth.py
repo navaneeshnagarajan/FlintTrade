@@ -134,14 +134,16 @@ def client(app):
 
 
 def test_list_brokers(client) -> None:
-    """GET /v1/brokers returns all 30 non-sandbox brokers."""
+    """GET /v1/brokers returns every non-sandbox broker."""
+    from adapter import BROKER_CATALOG
+
     response = client.get("/v1/brokers")
     assert response.status_code == 200
     data = response.get_json()
     assert data["status"] == "success"
     brokers = data["brokers"]
-    # 31 total in catalog; 1 is sandbox → expect 30
-    assert len(brokers) == 30
+    expected_live_brokers = [info for info in BROKER_CATALOG.values() if not info.is_sandbox]
+    assert len(brokers) == len(expected_live_brokers)
     # All returned brokers must not be sandboxes
     assert all(not b["is_sandbox"] for b in brokers)
 

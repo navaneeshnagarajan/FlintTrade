@@ -7,12 +7,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+
+const mockTradingState = vi.hoisted(() => ({
+  totalPnl: 0,
+  mtmStoploss: 5000,
+}));
 
 const mockNavigate = vi.fn();
 
@@ -73,11 +79,6 @@ vi.mock("@/chrome/PresetPicker", () => ({
   default: () => <div data-testid="preset-picker" />,
 }));
 
-// Child route components
-vi.mock("@/routes/trade/TradeSidebar", () => ({
-  TradeSidebar: () => <nav data-testid="trade-sidebar">Sidebar</nav>,
-}));
-
 vi.mock("@/routes/trade/TradeBottomPanel", () => ({
   TradeBottomPanel: () => <div data-testid="trade-bottom-panel">Bottom</div>,
 }));
@@ -115,13 +116,13 @@ vi.mock("@/stores/themeStore", () => ({
 
 vi.mock("@/stores/tradingStore", () => ({
   useTradingStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ totalPnl: 0 }),
+    selector({ totalPnl: mockTradingState.totalPnl }),
   ),
 }));
 
 vi.mock("@/stores/settingsStore", () => ({
   useSettingsStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ riskLimits: { mtmStoploss: 5000 } }),
+    selector({ riskLimits: { mtmStoploss: mockTradingState.mtmStoploss } }),
   ),
 }));
 
@@ -169,32 +170,69 @@ vi.mock("@/layout/workspacePresets", () => ({
 
 import TerminalRoute from "../TerminalRoute";
 
+function renderTerminalRoute() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <TerminalRoute />
+    </QueryClientProvider>,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("TerminalRoute", () => {
   beforeEach(() => {
+    mockTradingState.totalPnl = 0;
+    mockTradingState.mtmStoploss = 5000;
     vi.clearAllMocks();
   });
 
   it("renders without crashing and shows the sr-only heading", () => {
-    render(<TerminalRoute />);
+    renderTerminalRoute();
 
     expect(screen.getByText("Trade Workspace")).toBeInTheDocument();
   });
 
   it("renders resizable panel structure with separators", () => {
-    render(<TerminalRoute />);
+    renderTerminalRoute();
 
     // Resizable groups and separators should be present
     expect(screen.getAllByRole("separator").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId("trade-sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("panel-trade-sidebar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("separator-trade-sep-left")).not.toBeInTheDocument();
     expect(screen.getByTestId("trade-bottom-panel")).toBeInTheDocument();
   });
 
+  it("opens the command palette from the top-bar custom event", () => {
+    renderTerminalRoute();
+
+    expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:open-command-palette"));
+    });
+
+    expect(screen.getByTestId("command-palette")).toBeInTheDocument();
+  });
+
+  it("keeps the kill switch inside the trade route instead of the global sidebar", () => {
+    mockTradingState.totalPnl = -3000;
+
+    renderTerminalRoute();
+
+    const alert = screen.getByRole("status", { name: /daily loss alert/i });
+    expect(alert).toHaveClass("absolute");
+    expect(alert).not.toHaveClass("fixed");
+  });
+
   it("renders the tool overlay containers (widget picker and preset picker)", () => {
-    render(<TerminalRoute />);
+    renderTerminalRoute();
 
     expect(screen.getByTestId("widget-picker")).toBeInTheDocument();
     expect(screen.getByTestId("preset-picker")).toBeInTheDocument();

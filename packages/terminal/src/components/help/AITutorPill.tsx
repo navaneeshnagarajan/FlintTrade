@@ -78,6 +78,8 @@ interface AdvisorResponse {
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
+    const token = useAuthStore.getState().token;
+    if (!token || token === "demo-user" || token === "dev-bypass") return;
     const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`);
     if (!resp.ok) return;
     const json = (await resp.json()) as AdvisorStatusResponse;

@@ -44,7 +44,7 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
 
       <FieldRow
         label="API Key"
-        hint="Your OpenAlgo API key. Stored in localStorage — do not use on shared machines."
+        hint="Your OpenAlgo API key. Kept in session storage for this browser tab."
       >
         <TextInput
           value={settings.apiKey}

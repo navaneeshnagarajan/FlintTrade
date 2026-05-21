@@ -153,7 +153,7 @@ def _lightgbm_available() -> bool:
     try:
         import lightgbm  # noqa: F401
         return True
-    except ImportError:
+    except (ImportError, OSError):
         return False
 
 

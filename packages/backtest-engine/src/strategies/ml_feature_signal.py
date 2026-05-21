@@ -22,10 +22,10 @@ logger = logging.getLogger("flinttrade.backtest.strategies.ml_feature_signal")
 try:
     import lightgbm as lgb  # type: ignore[import]  # noqa: F401
     _LGBM_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     lgb = None  # type: ignore[assignment]
     _LGBM_AVAILABLE = False
-    logger.info("lightgbm not installed; ML strategy uses RSI+EMA fallback")
+    logger.info("lightgbm unavailable; ML strategy uses RSI+EMA fallback")
 
 
 def _make_features(

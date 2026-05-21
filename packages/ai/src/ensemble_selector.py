@@ -431,7 +431,7 @@ class EnsembleSelector:
         """
         try:
             import lightgbm as lgb
-        except ImportError:
+        except (ImportError, OSError):
             raise ImportError("lightgbm required -- pip install lightgbm")
 
         try:

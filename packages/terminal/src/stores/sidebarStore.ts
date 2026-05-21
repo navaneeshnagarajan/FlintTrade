@@ -44,7 +44,7 @@ export interface SidebarState {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_ITEMS: SidebarItem[] = [
-  { id: "home",      label: "Home",      icon: "Home",          route: "/",         type: "route" },
+  { id: "home",      label: "Home",      icon: "Home",          route: "/home",     type: "route" },
   { id: "trade",     label: "Trade",     icon: "TrendingUp",    route: "/trade",    type: "route" },
   { id: "invest",    label: "Invest",    icon: "Wallet",        route: "/invest",   type: "route" },
   { id: "learn",     label: "Learn",     icon: "BookOpen",      route: "/learn",    type: "route" },
@@ -57,6 +57,25 @@ const DEFAULT_ITEMS: SidebarItem[] = [
   { id: "sep-2",     label: "",          icon: "",              route: "",          type: "separator" },
   { id: "settings",  label: "Settings",  icon: "Settings",      route: "/settings", type: "route" },
 ];
+
+function reconcileSidebarItems(persistedItems: SidebarItem[] | undefined): SidebarItem[] {
+  if (!persistedItems || persistedItems.length === 0) return DEFAULT_ITEMS;
+
+  const defaultsById = new Map(DEFAULT_ITEMS.map((item) => [item.id, item]));
+  const seenIds = new Set<string>();
+  const reconciled = persistedItems.map((item) => {
+    const defaultItem = defaultsById.get(item.id);
+    if (!defaultItem) return item;
+    seenIds.add(item.id);
+    return defaultItem;
+  });
+
+  for (const item of DEFAULT_ITEMS) {
+    if (!seenIds.has(item.id)) reconciled.push(item);
+  }
+
+  return reconciled;
+}
 
 // ---------------------------------------------------------------------------
 // Store implementation
@@ -103,7 +122,7 @@ const persistedStore = persist(storeImpl, {
     return {
       ...current,
       ...p,
-      items: p.items && p.items.length > 0 ? p.items : current.items,
+      items: reconcileSidebarItems(p.items),
     };
   },
 });

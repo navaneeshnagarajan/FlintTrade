@@ -5,8 +5,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 // Mocks
 // ---------------------------------------------------------------------------
 
+const trackBehaviorMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@/hooks/useTrackBehavior", () => ({
-  useTrackBehavior: () => vi.fn(),
+  useTrackBehavior: () => trackBehaviorMock,
 }));
 
 // Stub lucide-react to avoid heavy icon tree-shaking in JSDOM/CI
@@ -51,6 +53,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  trackBehaviorMock.mockClear();
   localStorage.clear();
 });
 

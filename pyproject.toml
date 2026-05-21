@@ -1,5 +1,34 @@
 [tool.uv.workspace]
-members = ["packages/*"]
+members = [
+    "packages/ai",
+    "packages/automation",
+    "packages/backtest-engine",
+    "packages/core",
+    "packages/data",
+    "packages/ditto",
+    "packages/engine",
+    "packages/gateway",
+    "packages/historical",
+    "packages/indicators",
+    "packages/integration",
+    "packages/screener",
+    "packages/tick-engine",
+]
+
+[tool.uv.sources]
+flint-ai = { workspace = true }
+flint-automation = { workspace = true }
+flint-backtest-engine = { workspace = true }
+flint-core = { workspace = true }
+flint-data = { workspace = true }
+flint-ditto = { workspace = true }
+flint-engine = { workspace = true }
+flint-gateway = { workspace = true }
+flint-historical = { workspace = true }
+flint-indicators = { workspace = true }
+flint-integration = { workspace = true }
+flint-screener = { workspace = true }
+tick-engine = { workspace = true }
 
 # ----------------------------------------------------------------------------
 # Pytest configuration

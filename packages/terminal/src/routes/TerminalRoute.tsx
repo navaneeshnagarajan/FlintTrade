@@ -25,7 +25,6 @@ import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { SectionHeader } from "@/components/layout/SectionHeader";
-import { TradeSidebar } from "./trade/TradeSidebar";
 import { TradeBottomPanel } from "./trade/TradeBottomPanel";
 
 // ---------------------------------------------------------------------------
@@ -77,7 +76,7 @@ function KillSwitchPill() {
       aria-live="assertive"
       aria-atomic="true"
       aria-label={`Daily loss alert: ₹${Math.abs(totalPnl).toFixed(0)}`}
-      className="fixed bottom-4 left-4 z-40 bg-surface-card border border-loss/30 rounded-lg p-3 backdrop-blur-sm shadow-lg max-w-45"
+      className="absolute bottom-4 left-4 z-40 bg-surface-card border border-loss/30 rounded-lg p-3 backdrop-blur-sm shadow-lg max-w-45"
     >
       <div className="flex items-center gap-1.5 mb-1.5">
         <ShieldOff size={13} className="text-loss shrink-0" aria-hidden="true" />
@@ -188,9 +187,10 @@ export default function TerminalRoute() {
   // ---------------------------------------------------------------------------
   // Resizable panels — layout persistence via localStorage
   // ---------------------------------------------------------------------------
-  // Horizontal layout: [sidebar, dockview, right-panel]
+  // Horizontal layout: [dockview, right-panel]. The v2 key ignores older
+  // persisted layouts that included the retired internal trade sidebar.
   const { defaultLayout: hLayout, onLayoutChanged: onHLayoutChanged } = useDefaultLayout({
-    id: "trade-h-layout",
+    id: "trade-h-layout-v2",
     storage: localStorage,
   });
   // Vertical layout: [main, bottom-panel]
@@ -219,6 +219,14 @@ export default function TerminalRoute() {
   const presetPickerOpen = useLayoutStore((s) => s.presetPickerOpen);
   const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
 
+  const toggleCommandPalette = useCallback(() => {
+    setCmdPaletteOpen((prev) => !prev);
+  }, []);
+
+  const openCommandPalette = useCallback(() => {
+    setCmdPaletteOpen(true);
+  }, []);
+
   // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
   useGlobalKeys({
     onEscape: useCallback(() => {
@@ -226,8 +234,15 @@ export default function TerminalRoute() {
       if (presetPickerOpen) { setPresetPickerOpen(false); return; }
       if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
     }, [activeTool, presetPickerOpen, widgetPickerOpen, setPresetPickerOpen, setWidgetPickerOpen]),
-    onCommandPalette: useCallback(() => setCmdPaletteOpen((prev) => !prev), []),
+    onCommandPalette: toggleCommandPalette,
   });
+
+  useEffect(() => {
+    window.addEventListener("flinttrade:open-command-palette", openCommandPalette);
+    return () => {
+      window.removeEventListener("flinttrade:open-command-palette", openCommandPalette);
+    };
+  }, [openCommandPalette]);
 
   // ---------------------------------------------------------------------------
   // ARIA injection for Dockview panels (Issue #46)
@@ -383,7 +398,7 @@ export default function TerminalRoute() {
 
   return (
     <CinematicLayout mode="focused">
-    <div className="h-full flex flex-col text-text-primary overflow-hidden select-none">
+    <div className="relative h-full flex flex-col text-text-primary overflow-hidden select-none">
       <h1 className="sr-only">Trade Workspace</h1>
       {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
       <RouteBanner
@@ -416,7 +431,7 @@ export default function TerminalRoute() {
           defaultLayout={vLayout}
           onLayoutChanged={onVLayoutChanged}
         >
-          {/* ---- Main row: sidebar + dockview + right panel ---- */}
+          {/* ---- Main row: dockview + right panel ---- */}
           <Panel id="trade-main" defaultSize={75} minSize={40}>
             <Group
               orientation="horizontal"
@@ -424,23 +439,6 @@ export default function TerminalRoute() {
               defaultLayout={hLayout}
               onLayoutChanged={onHLayoutChanged}
             >
-              {/* Left sidebar */}
-              <Panel
-                id="trade-sidebar"
-                defaultSize={18}
-                minSize={14}
-                maxSize={28}
-                collapsible
-                collapsedSize={0}
-              >
-                <TradeSidebar />
-              </Panel>
-
-              <Separator
-                id="trade-sep-left"
-                className="w-1 cursor-col-resize bg-border-default hover:bg-primary/50 active:bg-primary/70 transition-colors shrink-0"
-              />
-
               {/* Center: Dockview canvas */}
               <Panel id="trade-dockview">
                 {/* overflow-hidden is mandatory — Dockview measures its parent

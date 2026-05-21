@@ -305,7 +305,7 @@ class MLAdvisor:
         """
         try:
             import lightgbm as lgb  # type: ignore[import]
-        except ImportError:
+        except (ImportError, OSError):
             raise ImportError("lightgbm required — pip install lightgbm")
 
         if len(df) < self.config.lookback:

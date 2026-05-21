@@ -58,7 +58,7 @@ vi.mock("framer-motion", () => ({
 // ---------------------------------------------------------------------------
 
 const DEFAULT_MOCK_ITEMS = [
-  { id: "home",     label: "Home",     icon: "Home",         route: "/",         type: "route" as const },
+  { id: "home",     label: "Home",     icon: "Home",         route: "/home",     type: "route" as const },
   { id: "trade",    label: "Trade",    icon: "TrendingUp",   route: "/trade",    type: "route" as const },
   { id: "invest",   label: "Invest",   icon: "Wallet",       route: "/invest",   type: "route" as const },
   { id: "learn",    label: "Learn",    icon: "BookOpen",     route: "/learn",    type: "route" as const },
@@ -160,6 +160,19 @@ describe("DockSidebar", () => {
 
     const tradeBtn = screen.getByRole("button", { name: "Trade" });
     expect(tradeBtn).toHaveAttribute("aria-current", "page");
+  });
+
+  it("marks Home active on the dashboard route", () => {
+    renderSidebar("/home");
+
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("exposes stable test ids on route buttons for browser QA", () => {
+    renderSidebar("/trade");
+
+    expect(screen.getByTestId("sidebar-item-home-button")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-item-settings-button")).toBeInTheDocument();
   });
 
   it("does not mark inactive routes with aria-current", () => {

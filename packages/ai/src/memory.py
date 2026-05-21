@@ -205,6 +205,7 @@ class TradedMemory:
         collection_prefix: str = _DEFAULT_COLLECTION_PREFIX,
         embedding_model: str = _EMBEDDING_MODEL,
         _chroma_client: Any | None = None,
+        _embedding_fn: Any | None = None,
     ) -> None:
         """Initialise TradedMemory.
 
@@ -215,6 +216,8 @@ class TradedMemory:
             embedding_model: sentence-transformers model name for embeddings.
             _chroma_client: Override ChromaDB client (used in tests to inject
                 an ``EphemeralClient``).
+            _embedding_fn: Override ChromaDB embedding function (used in tests
+                to keep unit tests independent from transformer runtimes).
         """
         self._persist_dir = persist_dir
         self._collection_prefix = collection_prefix
@@ -224,7 +227,7 @@ class TradedMemory:
         # Lazy-initialised per layer
         self._chroma_client: Any | None = None
         self._collections: dict[MemoryLayer, Any] = {}
-        self._embedding_fn: Any | None = None
+        self._embedding_fn: Any | None = _embedding_fn
 
         # Thread safety for lazy-init helpers (RLock because _get_collection
         # calls _get_client and _get_embedding_fn while already holding the lock)

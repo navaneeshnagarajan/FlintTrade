@@ -420,7 +420,7 @@ class SignalGenerator:
         """
         try:
             import lightgbm as lgb
-        except ImportError:
+        except (ImportError, OSError):
             raise ImportError("lightgbm required — pip install lightgbm")
 
         features = engineer_features(bars)

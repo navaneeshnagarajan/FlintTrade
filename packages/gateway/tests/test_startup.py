@@ -39,6 +39,7 @@ if _GATEWAY_SRC not in sys.path:
 
 from registry import BrokerRegistry  # noqa: E402
 from credentials import CredentialStore  # noqa: E402
+from adapter import BROKER_CATALOG  # noqa: E402
 from auth import gateway_bp  # noqa: E402
 from contracts import ContractManager  # noqa: E402
 from exceptions import AuthFlowError  # noqa: E402
@@ -130,8 +131,8 @@ def test_gateway_blueprint_registered() -> None:
     assert response.status_code == 200
     data = response.get_json()
     assert data["status"] == "success"
-    # Catalog has 31 entries; 1 is sandbox — expect 30 live brokers
-    assert len(data["brokers"]) == 30
+    expected_live_brokers = [info for info in BROKER_CATALOG.values() if not info.is_sandbox]
+    assert len(data["brokers"]) == len(expected_live_brokers)
 
 
 # ---------------------------------------------------------------------------

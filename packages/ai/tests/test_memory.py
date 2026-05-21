@@ -11,21 +11,10 @@ import math
 import os
 import uuid
 
+import numpy as np
 import pytest
 
 chromadb = pytest.importorskip("chromadb", reason="chromadb not installed")
-# sentence-transformers is the embedding backbone for semantic search. Without it,
-# chromadb falls back to a default-ONNX embedder whose nearest-neighbour quality
-# is too low for the layer-membership tests to behave deterministically (the
-# warning surfaces as "sentence-transformers not available, using default
-# embeddings" and get_memories then returns 0 results for queries that *should*
-# hit the seeded memory). CI installs sentence-transformers; local devs running
-# without it correctly skip this whole module rather than seeing spurious flakes.
-pytest.importorskip(
-    "sentence_transformers",
-    reason="sentence-transformers not installed — semantic search returns "
-           "non-deterministic results with chromadb's fallback embedder",
-)
 
 from packages.ai.src.memory import (  # noqa: E402 — must follow chromadb importorskip
     MemoryLayer,
@@ -41,6 +30,63 @@ from packages.ai.src.memory import (  # noqa: E402 — must follow chromadb impo
 _EPHEMERAL_CLIENT = chromadb.EphemeralClient()
 
 
+class _DeterministicEmbeddingFunction:
+    """Fast ChromaDB-compatible embedder for unit tests."""
+
+    @staticmethod
+    def name() -> str:
+        return "flinttrade-test-deterministic"
+
+    @staticmethod
+    def default_space() -> str:
+        return "l2"
+
+    @staticmethod
+    def supported_spaces() -> list[str]:
+        return ["l2"]
+
+    @staticmethod
+    def get_config() -> dict[str, str]:
+        return {}
+
+    @staticmethod
+    def validate_config(config: dict[str, str]) -> None:
+        return None
+
+    @classmethod
+    def build_from_config(cls, config: dict[str, str]) -> "_DeterministicEmbeddingFunction":
+        return cls()
+
+    @staticmethod
+    def is_legacy() -> bool:
+        return False
+
+    def __call__(self, input):
+        documents = [input] if isinstance(input, str) else list(input)
+        return [self._embed(str(document)) for document in documents]
+
+    def embed_query(self, input):
+        return self.__call__(input)
+
+    @staticmethod
+    def _embed(text: str) -> np.ndarray:
+        lowered = text.lower()
+        return np.array(
+            [
+                float("nifty" in lowered),
+                float("reliance" in lowered),
+                float("tcs" in lowered),
+                float("bullish" in lowered or "trend" in lowered or "signal" in lowered),
+                float("persistent" in lowered or "specific" in lowered or "memory" in lowered),
+                min(len(text) / 100.0, 1.0),
+            ],
+            dtype=np.float32,
+        )
+
+
+_TEST_EMBEDDING_FN = _DeterministicEmbeddingFunction()
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -53,6 +99,7 @@ def make_memory(**kwargs) -> TradedMemory:
         persist_dir="",
         collection_prefix=prefix,
         _chroma_client=_EPHEMERAL_CLIENT,
+        _embedding_fn=_TEST_EMBEDDING_FN,
     )
     defaults.update(kwargs)
     return TradedMemory(**defaults)
@@ -407,6 +454,7 @@ class TestPersistence:
         mem1 = TradedMemory(
             persist_dir=persist_dir,
             collection_prefix="persist_test",
+            _embedding_fn=_TEST_EMBEDDING_FN,
         )
         mem_id = mem1.add_memory("NIFTY", "persistent NIFTY memory", MemoryLayer.REFLECTION)
 
@@ -414,6 +462,7 @@ class TestPersistence:
         mem2 = TradedMemory(
             persist_dir=persist_dir,
             collection_prefix="persist_test",
+            _embedding_fn=_TEST_EMBEDDING_FN,
         )
         # Force the collection to re-open (lazy init)
         result = mem2.get_memories("NIFTY", "persistent NIFTY", MemoryLayer.REFLECTION, n=5)

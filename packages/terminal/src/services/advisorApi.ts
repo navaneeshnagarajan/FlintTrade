@@ -10,6 +10,7 @@
  * use the prefix only in dev. In production the app is co-served with the
  * backend on the same origin so no prefix is needed.
  */
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Base URL
@@ -29,6 +30,8 @@ export function getAdvisorBase(): string {
  */
 export async function fetchAdvisorStatus(): Promise<boolean> {
   try {
+    const token = useAuthStore.getState().token;
+    if (!token || token === "demo-user" || token === "dev-bypass") return false;
     const res = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`);
     if (!res.ok) return false;
     const data = (await res.json()) as { status?: string; data?: { configured?: boolean } };

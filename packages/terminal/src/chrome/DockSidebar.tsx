@@ -156,6 +156,7 @@ function DockRouteItem({ item, isActive, showLabel, onNavigate }: DockRouteItemP
         type="button"
         aria-label={item.label}
         aria-current={isActive ? "page" : undefined}
+        data-testid={`sidebar-item-${item.id}-button`}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         onHoverStart={() => setHovered(true)}

@@ -60,7 +60,7 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
 
       <FieldRow
         label="Bot Token"
-        hint="Create a bot via @BotFather on Telegram. Stored in localStorage."
+        hint="Create a bot via @BotFather on Telegram. Kept in memory and not persisted."
       >
         <TextInput
           value={settings.botToken}

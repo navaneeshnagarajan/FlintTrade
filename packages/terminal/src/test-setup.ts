@@ -3,7 +3,16 @@ import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// 1. DOM cleanup after every test.
+// 1. React test environment flag.
+// ---------------------------------------------------------------------------
+Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+  writable: true,
+  configurable: true,
+  value: true,
+});
+
+// ---------------------------------------------------------------------------
+// 2. DOM cleanup after every test.
 //
 // @testing-library/react auto-registers afterEach(cleanup) when the global
 // afterEach is available. We re-register explicitly so that the cleanup runs
@@ -13,10 +22,16 @@ import { afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 afterEach(() => {
   cleanup();
+  if (typeof globalThis.localStorage?.clear === "function") {
+    globalThis.localStorage.clear();
+  }
+  if (typeof globalThis.sessionStorage?.clear === "function") {
+    globalThis.sessionStorage.clear();
+  }
 });
 
 // ---------------------------------------------------------------------------
-// 2. window.matchMedia stub.
+// 3. window.matchMedia stub.
 //
 // jsdom does not implement window.matchMedia. Several components (themeStore,
 // GlassCard, particles) call it during render. We define a stable stub once
@@ -39,3 +54,76 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+// ---------------------------------------------------------------------------
+// 4. Web Storage globals.
+//
+// Newer Node runtimes expose their own Web Storage globals, but leave them
+// unavailable unless Node is started with --localstorage-file. Vitest runs the
+// app in jsdom, where window.localStorage/window.sessionStorage are the stores
+// we actually want tests and Zustand persistence middleware to use. Rebind the
+// unqualified globals so code that calls localStorage directly hits jsdom.
+// ---------------------------------------------------------------------------
+class TestStorage implements Storage {
+  #items: Record<string, string> = {};
+
+  get length(): number {
+    return Object.keys(this.#items).length;
+  }
+
+  clear(): void {
+    for (const key of Object.keys(this.#items)) {
+      this.removeItem(key);
+    }
+  }
+
+  getItem(key: string): string | null {
+    return Object.hasOwn(this.#items, key) ? this.#items[key] : null;
+  }
+
+  key(index: number): string | null {
+    return Object.keys(this.#items)[index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    delete this.#items[key];
+    delete (this as unknown as Record<string, string>)[key];
+  }
+
+  setItem(key: string, value: string): void {
+    this.#items[key] = String(value);
+    if (!Object.hasOwn(this, key)) {
+      Object.defineProperty(this, key, {
+        configurable: true,
+        enumerable: true,
+        get: () => this.#items[key],
+        set: (nextValue: string) => {
+          this.#items[key] = String(nextValue);
+        },
+      });
+    }
+  }
+}
+
+Object.defineProperty(globalThis, "Storage", {
+  writable: true,
+  configurable: true,
+  value: TestStorage,
+});
+
+const testLocalStorage = new TestStorage();
+const testSessionStorage = new TestStorage();
+
+for (const target of [globalThis, window]) {
+  Object.defineProperty(target, "localStorage", {
+    writable: true,
+    configurable: true,
+    value: testLocalStorage,
+  });
+
+  Object.defineProperty(target, "sessionStorage", {
+    writable: true,
+    configurable: true,
+    value: testSessionStorage,
+  });
+}

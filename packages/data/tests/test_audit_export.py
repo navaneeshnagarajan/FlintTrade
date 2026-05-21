@@ -163,20 +163,16 @@ class TestToPDF:
         exporter = AuditExporter(logger)
         out = tmp_path / "audit.pdf"
 
-        with patch.dict("sys.modules", {"reportlab": None, "reportlab.lib": None}):
-            import sys
+        real_import = __import__
 
-            # Simulate import failure by temporarily removing reportlab.
-            saved = {}
-            for key in list(sys.modules):
-                if key.startswith("reportlab"):
-                    saved[key] = sys.modules.pop(key)
+        def blocked_reportlab_import(name, *args, **kwargs):
+            if name == "reportlab" or name.startswith("reportlab."):
+                raise ImportError("reportlab deliberately hidden for this test")
+            return real_import(name, *args, **kwargs)
 
-            try:
-                with pytest.raises(AuditExportError, match="reportlab"):
-                    exporter.to_pdf(date(2026, 4, 15), date(2026, 4, 15), out)
-            finally:
-                sys.modules.update(saved)
+        with patch("builtins.__import__", side_effect=blocked_reportlab_import):
+            with pytest.raises(AuditExportError, match="reportlab"):
+                exporter.to_pdf(date(2026, 4, 15), date(2026, 4, 15), out)
 
     def test_pdf_creates_file_when_reportlab_available(self, tmp_path: Path) -> None:
         """to_pdf() creates a PDF file when reportlab is importable."""

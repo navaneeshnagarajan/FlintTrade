@@ -14,7 +14,8 @@
  * NO AI pill — that is a separate persistent overlay at bottom-right.
  * NO route tabs — those move to the sidebar in Phase 2.
  *
- * Ctrl+K fires flinttrade:open-command-palette custom event (palette built separately).
+ * Click fires flinttrade:open-command-palette; keyboard handling is owned by
+ * the active route's global shortcut layer.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -245,18 +246,6 @@ function SearchButton() {
     window.dispatchEvent(new CustomEvent("flinttrade:open-command-palette"));
   }, []);
 
-  // Ctrl+K / Cmd+K global shortcut
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("flinttrade:open-command-palette"));
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-
   const shortcutHint = isMac ? "⌘K" : "Ctrl+K";
 
   return (
@@ -410,17 +399,19 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
       </div>
 
       {/* QuickAccessPanel portal — renders outside TopBar stacking context */}
-      <AnimatePresence>
-        {quickSettingsOpen &&
-          createPortal(
+      {createPortal(
+        <AnimatePresence>
+          {quickSettingsOpen && (
             <QuickAccessPanel
+              key="quick-settings"
               onClose={() => setQuickSettingsOpen(false)}
               triggerRef={gearRef}
               anchorRect={gearRef.current?.getBoundingClientRect()}
-            />,
-            document.body,
+            />
           )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }

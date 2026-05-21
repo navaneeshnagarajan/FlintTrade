@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
+import { useAuthStore } from "@/stores/authStore";
 import { getAdvisorBase } from "@/services/advisorApi";
 
 // ---------------------------------------------------------------------------
@@ -131,6 +132,8 @@ function useIsAIConfigured(): boolean {
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
+    const token = useAuthStore.getState().token;
+    if (!token || token === "demo-user" || token === "dev-bypass") return;
     const base = getAdvisorBase();
     const resp = await fetch(`${base}/api/v1/advisor/status`);
     if (!resp.ok) return;

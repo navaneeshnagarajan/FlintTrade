@@ -39,6 +39,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { orderLimiter, smartOrderLimiter, generalLimiter } from "@/services/rateLimiter";
+import { mockDataEngine } from "@/services/mockDataEngine";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
 const ORDER_ENDPOINTS = new Set([
@@ -74,6 +75,180 @@ function getFtBase(): string {
 
 function getApiKey(): string {
   return useConnectionStore.getState().apiKey;
+}
+
+function isExploreModeWithoutKey(): boolean {
+  return useModeStore.getState().mode === "explore" && getApiKey().trim().length === 0;
+}
+
+function requireApiKey(endpoint: string): void {
+  if (getApiKey().trim().length > 0) return;
+  throw new Error(`OpenAlgo API key is not configured for ${endpoint}. Check Settings -> Connection.`);
+}
+
+function findMockQuote(symbol = "NIFTY", exchange = "NSE_INDEX"): Quote {
+  const snapshot = mockDataEngine.getSnapshot();
+  const match = snapshot.find((tick) => (
+    tick.symbol === symbol || `${tick.exchange}:${tick.symbol}` === symbol
+  )) ?? snapshot.find((tick) => tick.exchange === exchange) ?? snapshot[0];
+
+  return {
+    symbol: match?.symbol ?? symbol,
+    exchange: match?.exchange ?? exchange,
+    ltp: match?.ltp ?? 0,
+    open: match?.open ?? 0,
+    high: match?.high ?? 0,
+    low: match?.low ?? 0,
+    close: match?.close ?? 0,
+    prev_close: match?.close ?? 0,
+    volume: match?.volume ?? 0,
+    change: match?.change ?? 0,
+    pct: match?.changePct ?? 0,
+  };
+}
+
+function makeMockHistory(symbol?: string, exchange?: string): OHLCVBar[] {
+  const quote = findMockQuote(symbol, exchange);
+  const now = Math.floor(Date.now() / 1000);
+  return Array.from({ length: 96 }, (_, index) => {
+    const drift = Math.sin(index / 6) * quote.ltp * 0.002;
+    const open = quote.ltp + drift;
+    const close = open + Math.cos(index / 5) * quote.ltp * 0.0015;
+    return {
+      timestamp: now - (95 - index) * 300,
+      open,
+      high: Math.max(open, close) + quote.ltp * 0.001,
+      low: Math.min(open, close) - quote.ltp * 0.001,
+      close,
+      volume: Math.max(1, Math.round(quote.volume / 100 + index * 37)),
+    };
+  });
+}
+
+function mockOrders(): Order[] {
+  return mockDataEngine.getMockOrders().map((order) => ({
+    orderId: order.orderId,
+    symbol: order.symbol,
+    exchange: order.exchange,
+    action: order.side,
+    quantity: order.quantity,
+    price: order.price,
+    orderType: order.orderType,
+    status: order.status,
+    product: order.product,
+    strategy: "Explore",
+    timestamp: order.timestamp,
+  }));
+}
+
+function mockPositions(): Position[] {
+  return mockDataEngine.getMockPositions().map((position) => ({
+    symbol: position.symbol,
+    exchange: position.exchange,
+    product: position.product,
+    quantity: position.quantity,
+    averagePrice: position.avgPrice,
+    ltp: position.ltp,
+    pnl: position.pnl,
+    pnlPercent: position.avgPrice > 0 ? (position.pnl / (position.avgPrice * position.quantity)) * 100 : 0,
+  }));
+}
+
+function mockHoldings(): Holding[] {
+  return mockDataEngine.getMockHoldings().map((holding) => ({
+    symbol: holding.symbol,
+    exchange: holding.exchange,
+    quantity: holding.quantity,
+    averagePrice: holding.avgPrice,
+    ltp: holding.ltp,
+    pnl: holding.pnl,
+    pnlPercent: holding.pnlPct,
+  }));
+}
+
+function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefined {
+  const params = extra as Record<string, unknown>;
+  const symbol = typeof params.symbol === "string" ? params.symbol : undefined;
+  const exchange = typeof params.exchange === "string" ? params.exchange : undefined;
+
+  switch (endpoint) {
+    case "ping":
+      return { status: "explore" } as T;
+    case "quotes":
+    case "ticker":
+      return findMockQuote(symbol, exchange) as T;
+    case "multiquotes": {
+      const symbols = Array.isArray(params.symbols)
+        ? params.symbols as Array<{ symbol?: string; exchange?: string }>
+        : [];
+      const results = symbols.map((item) => ({
+        symbol: item.symbol ?? "NIFTY",
+        exchange: item.exchange ?? "NSE_INDEX",
+        data: findMockQuote(item.symbol, item.exchange),
+      }));
+      return { results } as T;
+    }
+    case "history":
+      return makeMockHistory(symbol, exchange) as T;
+    case "symbol":
+      return {
+        symbol: symbol ?? "NIFTY",
+        name: symbol ?? "NIFTY",
+        exchange: exchange ?? "NSE_INDEX",
+        instrumenttype: "INDEX",
+        lotsize: 1,
+        tick_size: 0.05,
+      } as T;
+    case "funds":
+      return {
+        availableCash: 250_000,
+        usedMargin: 48_500,
+        totalBalance: 298_500,
+      } as T;
+    case "margin":
+      return {
+        total_margin_required: 0,
+        span_margin: 0,
+        exposure_margin: 0,
+      } as T;
+    case "orderbook":
+      return { orders: mockOrders() } as T;
+    case "positionbook":
+      return { positions: mockPositions() } as T;
+    case "holdings":
+      return { holdings: mockHoldings() } as T;
+    case "holidays":
+      return [] as T;
+    case "timings":
+      return [
+        { exchange: "NSE", start_time: 915, end_time: 1530 },
+        { exchange: "BSE", start_time: 915, end_time: 1530 },
+        { exchange: "MCX", start_time: 900, end_time: 2330 },
+      ] as T;
+    default:
+      return undefined;
+  }
+}
+
+function getExploreGetFallback<T>(endpoint: string): T | undefined {
+  switch (endpoint) {
+    case "intervals":
+      return ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as T;
+    case "../broker/capabilities":
+      return {
+        broker_name: "Explore",
+        broker_type: "multi",
+        supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
+        features: {
+          market_protection: false,
+          leverage: false,
+          bracket_orders: false,
+          cover_orders: false,
+        },
+      } as T;
+    default:
+      return undefined;
+  }
 }
 
 /** POST an order through the FlintTrade safety proxy.
@@ -169,6 +344,14 @@ async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
     }
   }
 
+  if (isExploreModeWithoutKey()) {
+    const fallback = getExplorePostFallback<T>(endpoint, extra);
+    if (fallback !== undefined) return fallback;
+    requireApiKey(endpoint);
+  } else {
+    requireApiKey(endpoint);
+  }
+
   let resp: Response;
   try {
     resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
@@ -204,6 +387,15 @@ async function get<T>(endpoint: string): Promise<T> {
   if (!generalLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for GET ${endpoint}`);
   }
+
+  if (isExploreModeWithoutKey()) {
+    const fallback = getExploreGetFallback<T>(endpoint);
+    if (fallback !== undefined) return fallback;
+    requireApiKey(endpoint);
+  } else {
+    requireApiKey(endpoint);
+  }
+
   let resp: Response;
   try {
     resp = await fetch(`${getBase()}/api/v1/${endpoint}`);

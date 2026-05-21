@@ -6,6 +6,7 @@ lives under each package's tests/ folder.
 """
 
 import os
+import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -51,6 +52,17 @@ REQUIRED_ROOT_FILES = [
 ]
 
 
+def is_tracked(path: str) -> bool:
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", path],
+        cwd=ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def test_root_files():
     for f in REQUIRED_ROOT_FILES:
         assert os.path.exists(os.path.join(ROOT, f)), f"Missing: {f}"
@@ -76,18 +88,15 @@ def test_version():
 def test_no_tracked_agent_internal_files():
     """CLAUDE.md / AGENTS.md / PLAN.md must not be tracked at the repo root."""
     for f in ["CLAUDE.md", "AGENTS.md", "PLAN.md"]:
-        assert not os.path.exists(
-            os.path.join(ROOT, f)
-        ), f"{f} should be gitignored — found at repo root"
+        assert not is_tracked(f), f"{f} should be gitignored — tracked at repo root"
 
 
 def test_no_tracked_per_package_agent_files():
     """packages/<pkg>/CLAUDE.md and AGENTS.md must not exist after the move."""
     for pkg in PACKAGES:
         for f in ["CLAUDE.md", "AGENTS.md"]:
-            assert not os.path.exists(
-                os.path.join(ROOT, "packages", pkg, f)
-            ), f"packages/{pkg}/{f} should be gitignored — found on disk"
+            path = os.path.join("packages", pkg, f)
+            assert not is_tracked(path), f"{path} should be gitignored — tracked in git"
 
 
 def test_agent_context_templates_present():

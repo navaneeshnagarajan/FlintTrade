@@ -14,22 +14,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // ---------------------------------------------------------------------------
 // Framer-motion stub
 // ---------------------------------------------------------------------------
-vi.mock("framer-motion", () => ({
-  motion: {
+vi.mock("framer-motion", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("framer-motion")>();
+  return {
+    ...actual,
+    motion: {
     div: ({ children, ...props }: Record<string, unknown>) => (
       <div {...props}>{children as React.ReactNode}</div>
     ),
   },
-  AnimatePresence: ({ children }: { children: React.ReactNode }) => (
-    <>{children}</>
-  ),
-}));
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Child component stubs
 // ---------------------------------------------------------------------------
 vi.mock("../QuickAccessPanel", () => ({
-  default: () => null,
+  default: () => (
+    <div role="dialog" aria-label="Quick settings" data-testid="quick-access-panel" />
+  ),
 }));
 
 vi.mock("@/components/NotificationCentre/NotificationCentre", () => ({
@@ -155,14 +158,14 @@ describe("TopBarV2", () => {
     window.removeEventListener("flinttrade:open-command-palette", listener);
   });
 
-  it("Ctrl+K dispatches flinttrade:open-command-palette event", () => {
+  it("leaves Ctrl+K handling to the route shortcut layer", () => {
     renderTopBarV2();
     const listener = vi.fn();
     window.addEventListener("flinttrade:open-command-palette", listener);
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
 
-    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
     window.removeEventListener("flinttrade:open-command-palette", listener);
   });
 
@@ -213,6 +216,14 @@ describe("TopBarV2", () => {
   it("renders the gear/settings button", () => {
     renderTopBarV2();
     expect(screen.getByTestId("gear-btn")).toBeInTheDocument();
+  });
+
+  it("opens quick settings from the gear button", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("gear-btn"));
+
+    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeInTheDocument();
   });
 
   it("renders the user avatar button", () => {
