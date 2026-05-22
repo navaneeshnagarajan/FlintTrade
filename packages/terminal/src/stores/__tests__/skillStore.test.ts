@@ -65,12 +65,11 @@ describe("skillStore", () => {
 
   // 9. setHelpPref
   it("setHelpPref toggles individual help preferences", () => {
-    // Default is all true
     expect(useSkillStore.getState().helpPrefs.inlineHints).toBe(true);
     useSkillStore.getState().setHelpPref("inlineHints", false);
     expect(useSkillStore.getState().helpPrefs.inlineHints).toBe(false);
     // Other prefs are unaffected
-    expect(useSkillStore.getState().helpPrefs.spotlightTours).toBe(true);
+    expect(useSkillStore.getState().helpPrefs.spotlightTours).toBe(false);
     expect(useSkillStore.getState().helpPrefs.aiTutor).toBe(true);
   });
 

@@ -25,8 +25,8 @@ export function SectorCard() {
     <BentoCard size="default" label="Sector Performance" data-testid="sector-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <Layers size={13} className="text-[#505068]" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+          <Layers size={13} className="text-text-muted" aria-hidden="true" />
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Sectors
           </p>
         </div>
@@ -48,10 +48,10 @@ export function SectorCard() {
                     : "rgba(239,68,68,0.12)",
                 }}
               >
-                <span className="text-[10px] font-medium text-[#9090b0]">{s.name}</span>
+                <span className="text-[10px] font-medium text-text-secondary">{s.name}</span>
                 <span
                   className="font-mono text-[10px] font-semibold"
-                  style={{ color: positive ? "#22c55e" : "#ef4444" }}
+                  style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
                 >
                   {positive ? "+" : ""}{s.change.toFixed(2)}%
                 </span>

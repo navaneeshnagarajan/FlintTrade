@@ -184,9 +184,9 @@ const TRADING_LIGHT: ThemeVariant["trading"] = {
   profit:      "#22c55e",
   loss:        "#ef4444",
   warning:     "#f59e0b",
-  profitText:  "#15803d",  // green-700 — 4.55:1 on white (#fff)
-  lossText:    "#dc2626",  // red-600 — passes on light backgrounds
-  warningText: "#b45309",  // amber-700 — passes on light backgrounds
+  profitText:  "#166534",  // green-800 — safe on white and pale green tints
+  lossText:    "#991b1b",  // red-800 — safe on white and pale red tints
+  warningText: "#92400e",  // amber-800 — safe on white and pale amber tints
 };
 
 // ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ const graphite: CinematicTheme = {
       textMuted:     "#71717a",
       textSecondary: "#52525b",
       textDisabled:  "#a1a1aa",
-      accent:        "#16a34a",   // green-700 — WCAG AA on #f5f5f7 (4.6:1)
+      accent:        "#15803d",   // green-700 — WCAG AA on #ffffff
       accentText:    "#ffffff",
     },
     trading:      TRADING_LIGHT,
@@ -423,7 +423,7 @@ const ember: CinematicTheme = {
       textMuted:     "#8a6030",
       textSecondary: "#604010",
       textDisabled:  "#c0a060",
-      accent:        "#ea580c",   // orange-600 — WCAG AA on #fffbf5 (4.8:1)
+      accent:        "#c2410c",   // orange-700 — WCAG AA on #ffffff
       accentText:    "#ffffff",
     },
     trading:      TRADING_LIGHT,

@@ -70,7 +70,7 @@ export function BentoGridContainer({ children, className = "" }: { children: Rea
         overflowX: "hidden",
         height: "100%",
         scrollbarWidth: "thin",
-        scrollbarColor: "rgba(255,255,255,0.1) transparent",
+        scrollbarColor: "var(--color-border-default) transparent",
       }}
     >
       {children}
@@ -82,11 +82,11 @@ export function BentoGridContainer({ children, className = "" }: { children: Rea
           background: transparent;
         }
         .bento-scroll-container::-webkit-scrollbar-thumb {
-          background: rgba(255,255,255,0.1);
+          background: var(--color-border-default);
           border-radius: 2px;
         }
         .bento-scroll-container::-webkit-scrollbar-thumb:hover {
-          background: rgba(255,255,255,0.2);
+          background: var(--color-border-strong);
         }
       `}</style>
     </div>

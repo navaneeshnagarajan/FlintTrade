@@ -12,6 +12,7 @@ import {
 import { getLotSize } from "@/services/ftApi";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useVoiceAlert } from "@/hooks/useVoiceAlert";
+import { useModeStore } from "@/stores/modeStore";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { ScalperControls } from "./ScalperControls";
@@ -30,7 +31,40 @@ import {
   type StatusType,
 } from "./types";
 
+const DEMO_SPOT_BY_SYMBOL: Record<string, number> = {
+  NIFTY: 25062,
+  BANKNIFTY: 56240,
+  FINNIFTY: 23980,
+  MIDCPNIFTY: 12920,
+  SENSEX: 82460,
+  BANKEX: 63850,
+};
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getDemoExpiries(referenceDate = new Date()): string[] {
+  const daysUntilThursday = (4 - referenceDate.getDay() + 7) % 7 || 7;
+  const weeklyExpiry = addDays(referenceDate, daysUntilThursday);
+  return [
+    weeklyExpiry,
+    addDays(weeklyExpiry, 7),
+    addDays(weeklyExpiry, 28),
+  ].map(formatDateInputValue);
+}
+
 function ScalperWidget(_props: WidgetProps) {
+  const isExplore = useModeStore((s) => s.mode === "explore");
   const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
   const [lots, setLots] = useState(1);
   const [product, setProduct] = useState<ProductType>("MIS");
@@ -105,6 +139,13 @@ function ScalperWidget(_props: WidgetProps) {
       setExpiriesError(false);
       setExpiries([]);
       setExpiry("");
+      if (isExplore) {
+        const demoExpiries = getDemoExpiries();
+        if (signal?.cancelled) return;
+        setExpiries(demoExpiries);
+        setExpiry(demoExpiries[0] ?? "");
+        return;
+      }
       try {
         const data = await getExpiry(symbol, optExch);
         if (signal?.cancelled) return;
@@ -116,7 +157,7 @@ function ScalperWidget(_props: WidgetProps) {
         setExpiriesError(true);
       }
     },
-    [symbol, optExch],
+    [symbol, optExch, isExplore],
   );
 
   useEffect(() => {
@@ -132,12 +173,14 @@ function ScalperWidget(_props: WidgetProps) {
   useEffect(() => {
     if (spotLtp != null) {
       setAtmStrike(roundToStrike(spotLtp, step));
+    } else if (isExplore) {
+      setAtmStrike(roundToStrike(DEMO_SPOT_BY_SYMBOL[symbol] ?? DEMO_SPOT_BY_SYMBOL[DEFAULT_SYMBOL], step));
     }
-  }, [spotLtp, step]);
+  }, [spotLtp, step, isExplore, symbol]);
 
   // Fallback: fetch from API once if tick not yet available
   useEffect(() => {
-    if (spotLtp != null || !symbol) return;
+    if (spotLtp != null || !symbol || isExplore) return;
     let cancelled = false;
 
     async function fetchSpot() {
@@ -168,6 +211,10 @@ function ScalperWidget(_props: WidgetProps) {
         showStatus("Strike not resolved", "error");
         return;
       }
+      if (isExplore) {
+        showStatus("Connect a broker to place orders", "error");
+        return;
+      }
       const qty = lots * lotSize;
       const params: PlaceOrderParams = {
         symbol: sym,
@@ -188,7 +235,7 @@ function ScalperWidget(_props: WidgetProps) {
         showStatus(err instanceof Error ? err.message : "Order failed", "error");
       }
     },
-    [lots, lotSize, orderType, product, showStatus, announceOrder],
+    [lots, lotSize, orderType, product, showStatus, announceOrder, isExplore],
   );
 
   const handleOrder = useCallback(
@@ -211,6 +258,10 @@ function ScalperWidget(_props: WidgetProps) {
 
   const confirmCloseAll = useCallback(async () => {
     setCloseAllOpen(false);
+    if (isExplore) {
+      showStatus("Connect a broker to manage live orders", "error");
+      return;
+    }
     showStatus("Closing all…", "pending", 0);
     try {
       await closePosition("FlintScalper");
@@ -218,10 +269,14 @@ function ScalperWidget(_props: WidgetProps) {
     } catch (err) {
       showStatus(err instanceof Error ? err.message : "Close failed", "error");
     }
-  }, [showStatus]);
+  }, [showStatus, isExplore]);
 
   const confirmCancelAll = useCallback(async () => {
     setCancelAllOpen(false);
+    if (isExplore) {
+      showStatus("Connect a broker to manage live orders", "error");
+      return;
+    }
     showStatus("Cancelling…", "pending", 0);
     try {
       await cancelAllOrders("FlintScalper");
@@ -229,7 +284,7 @@ function ScalperWidget(_props: WidgetProps) {
     } catch (err) {
       showStatus(err instanceof Error ? err.message : "Cancel failed", "error");
     }
-  }, [showStatus]);
+  }, [showStatus, isExplore]);
 
   // Keyboard shortcuts — only when focused
   useEffect(() => {

@@ -33,13 +33,13 @@ export function PortfolioCard() {
   return (
     <BentoCard size="default" label="Portfolio" data-testid="portfolio-card">
       <div className="p-4 h-full flex flex-col gap-3">
-        <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+        <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
           Portfolio
         </p>
 
         <div>
-          <p className="text-[10px] text-[#505068] mb-0.5">Net Worth</p>
-          <p className="font-mono text-xl font-semibold text-[#e8e8f0]">
+          <p className="text-[10px] text-text-muted mb-0.5">Net Worth</p>
+          <p className="font-mono text-xl font-semibold text-text-primary">
             {netWorth > 0
               ? netWorth.toLocaleString("en-IN", {
                   style: "currency",
@@ -52,7 +52,7 @@ export function PortfolioCard() {
 
         {/* Allocation bar */}
         <div>
-          <p className="text-[10px] text-[#505068] mb-1.5">Allocation</p>
+          <p className="text-[10px] text-text-muted mb-1.5">Allocation</p>
           <div
             className="flex h-2 rounded-full overflow-hidden"
             role="img"
@@ -75,7 +75,7 @@ export function PortfolioCard() {
                   style={{ background: slice.color }}
                   aria-hidden="true"
                 />
-                <span className="text-[10px] text-[#6b6b8a]">
+                <span className="text-[10px] text-text-secondary">
                   {slice.label} {slice.pct}%
                 </span>
               </div>

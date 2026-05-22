@@ -14,12 +14,24 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockModeStore = vi.hoisted(() => vi.fn());
+const mockPlaceOrder = vi.hoisted(() => vi.fn());
+const mockCancelAllOrders = vi.hoisted(() => vi.fn());
+const mockClosePosition = vi.hoisted(() => vi.fn());
+const mockGetExpiry = vi.hoisted(() => vi.fn());
+const mockGetQuotes = vi.hoisted(() => vi.fn());
+
 vi.mock("@/services/api", () => ({
-  placeOrder: vi.fn().mockResolvedValue({}),
-  cancelAllOrders: vi.fn().mockResolvedValue({}),
-  closePosition: vi.fn().mockResolvedValue({}),
-  getExpiry: vi.fn().mockResolvedValue(["2026-04-10", "2026-04-17"]),
-  getQuotes: vi.fn().mockResolvedValue({ ltp: 24000 }),
+  placeOrder: mockPlaceOrder,
+  cancelAllOrders: mockCancelAllOrders,
+  closePosition: mockClosePosition,
+  getExpiry: mockGetExpiry,
+  getQuotes: mockGetQuotes,
+}));
+
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector: (s: { mode: string }) => unknown) =>
+    mockModeStore(selector),
 }));
 
 vi.mock("@/hooks/useWebSocket", () => ({
@@ -71,7 +83,15 @@ const defaultProps = makeDockviewPanelProps();
 
 describe("ScalperWidget", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "live" }),
+    );
+    mockPlaceOrder.mockResolvedValue({});
+    mockCancelAllOrders.mockResolvedValue({});
+    mockClosePosition.mockResolvedValue({});
+    mockGetExpiry.mockResolvedValue(["2026-04-10", "2026-04-17"]);
+    mockGetQuotes.mockResolvedValue({ ltp: 24000 });
   });
 
   it("renders without crashing", () => {
@@ -174,5 +194,19 @@ describe("ScalperWidget", () => {
     // Default is 1; decrease is clamped by Math.max(1, l-1)
     fireEvent.click(decreaseBtn);
     expect(lotSpan.textContent).toContain("1");
+  });
+
+  it("keeps expiry and strike controls usable in explore mode without broker expiry calls", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+    mockGetExpiry.mockRejectedValue(new Error("OpenAlgo unavailable"));
+
+    render(<ScalperWidget {...defaultProps} />);
+
+    const ceStrikeLabel = await screen.findByText("CE Strike");
+    expect(ceStrikeLabel.closest("div")).toHaveTextContent(/\d{4,}/);
+    expect(screen.queryByText("Failed to load")).not.toBeInTheDocument();
+    expect(mockGetExpiry).not.toHaveBeenCalled();
   });
 });

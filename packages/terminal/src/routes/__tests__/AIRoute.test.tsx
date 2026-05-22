@@ -120,4 +120,12 @@ describe("AIRoute", () => {
     expect(screen.getByLabelText("Chat")).toBeInTheDocument();
     expect(screen.getByLabelText("Signals")).toBeInTheDocument();
   });
+
+  it("keeps AI section navigation in normal flow so it cannot cover the chat composer", () => {
+    renderAI();
+
+    const nav = screen.getByRole("navigation", { name: /ai section navigation/i });
+    expect(nav).not.toHaveClass("absolute");
+    expect(nav).not.toHaveClass("bottom-5");
+  });
 });

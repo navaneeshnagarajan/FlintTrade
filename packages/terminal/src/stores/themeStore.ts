@@ -307,9 +307,18 @@ const storeImpl: StateCreator<
 
     // ---- Fixed trading semantic colors ----
     // These are consistent across ALL themes and modes.
-    style.setProperty("--color-profit",  variant.trading.profit);
-    style.setProperty("--color-loss",    variant.trading.loss);
-    style.setProperty("--color-warning", variant.trading.warning);
+    style.setProperty(
+      "--color-profit",
+      resolvedMode === "light" ? variant.trading.profitText : variant.trading.profit,
+    );
+    style.setProperty(
+      "--color-loss",
+      resolvedMode === "light" ? variant.trading.lossText : variant.trading.loss,
+    );
+    style.setProperty(
+      "--color-warning",
+      resolvedMode === "light" ? variant.trading.warningText : variant.trading.warning,
+    );
 
     // Derived bullish / bearish / warning tokens (WCAG AA compliant per mode)
     style.setProperty("--color-bullish-text",   variant.trading.profitText);
@@ -360,6 +369,34 @@ const storeImpl: StateCreator<
     style.setProperty("--glass-transparency", String(glassOpacity));
     // Expose raw glass enabled state for CSS consumers
     style.setProperty("--glass-enabled", glass ? "1" : "0");
+
+    // ---- Legacy glass surface tokens ----
+    // Shared chrome and card components consume these older tokens directly.
+    // Make them mode-aware so light mode gets visible panels and readable chrome.
+    style.setProperty("--glass-base", variant.colors.base);
+    if (resolvedMode === "light") {
+      style.setProperty("--glass-l1-bg", glass ? "rgba(255,255,255,0.82)" : variant.colors.card);
+      style.setProperty("--glass-l1-border", "rgba(15,23,42,0.10)");
+      style.setProperty("--glass-l2-bg", glass ? "rgba(248,250,252,0.92)" : variant.colors.cardHover);
+      style.setProperty("--glass-l2-border", "rgba(15,23,42,0.12)");
+      style.setProperty("--glass-l3-bg", glass ? "rgba(241,245,249,0.96)" : variant.colors.cardHover);
+      style.setProperty("--glass-chrome-bg", glass ? "rgba(255,255,255,0.94)" : variant.colors.card);
+      style.setProperty("--glass-chrome-border", "rgba(15,23,42,0.10)");
+      style.setProperty("--glass-hover-border", hexToRgba(variant.colors.accent, 0.28));
+      style.setProperty("--glass-hover-shadow", "0 6px 18px rgba(15,23,42,0.08)");
+      style.setProperty("--glass-hover-inset", "inset 0 1px 0 rgba(255,255,255,0.70)");
+    } else {
+      style.setProperty("--glass-l1-bg", glass ? "rgba(255,255,255,0.018)" : variant.colors.card);
+      style.setProperty("--glass-l1-border", "rgba(255,255,255,0.045)");
+      style.setProperty("--glass-l2-bg", glass ? "rgba(255,255,255,0.030)" : variant.colors.cardHover);
+      style.setProperty("--glass-l2-border", "rgba(255,255,255,0.060)");
+      style.setProperty("--glass-l3-bg", glass ? "rgba(255,255,255,0.060)" : variant.colors.cardHover);
+      style.setProperty("--glass-chrome-bg", "rgba(12,12,20,0.85)");
+      style.setProperty("--glass-chrome-border", "rgba(255,255,255,0.05)");
+      style.setProperty("--glass-hover-border", "rgba(255,255,255,0.09)");
+      style.setProperty("--glass-hover-shadow", "0 8px 32px rgba(0,0,0,0.30)");
+      style.setProperty("--glass-hover-inset", "inset 0 1px 0 rgba(255,255,255,0.04)");
+    }
 
     // ---- Glow tokens ----
     style.setProperty("--glow-color",   variant.glow.color);
@@ -434,8 +471,11 @@ const storeImpl: StateCreator<
 
     // ---- shadcn/ui HSL tokens ----
     const accentHsl = hexToHslString(variant.colors.accent);
+    const accentTextHsl = hexToHslString(variant.colors.accentText);
     style.setProperty("--primary", accentHsl);
     style.setProperty("--ring",    accentHsl);
+    style.setProperty("--accent",  accentHsl);
+    style.setProperty("--accent-foreground", accentTextHsl);
 
     if (resolvedMode === "light") {
       style.setProperty("--background",         "0 0% 98%");

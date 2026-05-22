@@ -86,7 +86,7 @@ describe("useHelpPrefs", () => {
     const { result } = renderHook(() => useHelpPrefs());
 
     expect(result.current.inlineHints).toBe(true);
-    expect(result.current.spotlightTours).toBe(true);
+    expect(result.current.spotlightTours).toBe(false);
     expect(result.current.aiTutor).toBe(true);
   });
 
@@ -98,7 +98,7 @@ describe("useHelpPrefs", () => {
     });
 
     expect(result.current.inlineHints).toBe(false);
-    expect(result.current.spotlightTours).toBe(true); // unchanged
+    expect(result.current.spotlightTours).toBe(false); // unchanged
   });
 
   it("reflects changes after reset to defaults", () => {
@@ -113,7 +113,7 @@ describe("useHelpPrefs", () => {
     });
 
     expect(result.current.aiTutor).toBe(true);
-    expect(result.current.spotlightTours).toBe(true);
+    expect(result.current.spotlightTours).toBe(false);
   });
 });
 

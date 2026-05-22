@@ -7,7 +7,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
     class="w-full"
   >
     <div
-      class="relative group rounded-xl border border-border-default bg-surface-card overflow-hidden p-4"
+      class="relative group overflow-hidden rounded-xl border border-border-default/70 bg-surface-card/60 shadow-xl shadow-black/10 backdrop-blur-xl p-4"
     >
       <div
         aria-hidden="true"

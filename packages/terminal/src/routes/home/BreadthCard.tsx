@@ -22,8 +22,8 @@ export function BreadthCard() {
     <BentoCard size="default" label="Market Breadth" data-testid="breadth-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <BarChart2 size={13} className="text-[#505068]" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+          <BarChart2 size={13} className="text-text-muted" aria-hidden="true" />
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Market Breadth
           </p>
         </div>
@@ -34,34 +34,34 @@ export function BreadthCard() {
           role="img"
           aria-label={`Advances: ${BREADTH.advances}, Declines: ${BREADTH.declines}, Unchanged: ${BREADTH.unchanged}`}
         >
-          <div style={{ width: `${advPct}%`, background: "#22c55e" }} />
-          <div style={{ width: `${unchPct}%`, background: "#505068" }} />
-          <div style={{ width: `${decPct}%`, background: "#ef4444" }} />
+          <div style={{ width: `${advPct}%`, background: "var(--color-bullish-text)" }} />
+          <div style={{ width: `${unchPct}%`, background: "var(--color-text-muted)" }} />
+          <div style={{ width: `${decPct}%`, background: "var(--color-bearish-text)" }} />
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-2 text-center">
           <div>
-            <p className="font-mono text-sm font-semibold text-[#22c55e]">
+            <p className="font-mono text-sm font-semibold text-bullish-text">
               {BREADTH.advances.toLocaleString()}
             </p>
-            <p className="text-[10px] text-[#505068]">Adv</p>
+            <p className="text-[10px] text-text-muted">Adv</p>
           </div>
           <div>
-            <p className="font-mono text-sm font-semibold text-[#9090b0]">
+            <p className="font-mono text-sm font-semibold text-text-secondary">
               {BREADTH.unchanged.toLocaleString()}
             </p>
-            <p className="text-[10px] text-[#505068]">Unch</p>
+            <p className="text-[10px] text-text-muted">Unch</p>
           </div>
           <div>
-            <p className="font-mono text-sm font-semibold text-[#ef4444]">
+            <p className="font-mono text-sm font-semibold text-bearish-text">
               {BREADTH.declines.toLocaleString()}
             </p>
-            <p className="text-[10px] text-[#505068]">Dec</p>
+            <p className="text-[10px] text-text-muted">Dec</p>
           </div>
         </div>
 
-        <p className="text-[10px] text-[#505068] text-center mt-auto">
+        <p className="text-[10px] text-text-muted text-center mt-auto">
           NSE · {total.toLocaleString()} total
         </p>
       </div>

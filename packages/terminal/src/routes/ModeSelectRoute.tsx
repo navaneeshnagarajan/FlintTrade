@@ -44,8 +44,8 @@ const MODE_CARDS: ModeCardConfig[] = [
     brokerNote: "No broker needed",
     icon: <Monitor size={22} aria-hidden="true" />,
     pillClass: "bg-text-muted/20 text-text-secondary",
-    borderClass: "border-border-default hover:border-text-muted/60",
-    selectedBorderClass: "border-text-secondary ring-1 ring-text-secondary/30",
+    borderClass: "border-border-default/70 hover:border-text-muted/60",
+    selectedBorderClass: "border-text-secondary ring-1 ring-text-secondary/30 shadow-[0_0_30px_rgba(148,163,184,0.16)]",
     iconBgClass: "bg-text-muted/10 text-text-secondary",
   },
   {
@@ -55,8 +55,8 @@ const MODE_CARDS: ModeCardConfig[] = [
     brokerNote: "Broker required",
     icon: <FlaskConical size={22} aria-hidden="true" />,
     pillClass: "bg-amber-500/20 text-amber-400",
-    borderClass: "border-border-default hover:border-amber-500/50",
-    selectedBorderClass: "border-amber-500 ring-1 ring-amber-500/30",
+    borderClass: "border-border-default/70 hover:border-amber-500/50",
+    selectedBorderClass: "border-amber-500 ring-1 ring-amber-500/30 shadow-[0_0_30px_rgba(245,158,11,0.16)]",
     iconBgClass: "bg-amber-500/10 text-amber-400",
   },
   {
@@ -66,8 +66,8 @@ const MODE_CARDS: ModeCardConfig[] = [
     brokerNote: "Broker required · PIN required",
     icon: <Zap size={22} aria-hidden="true" />,
     pillClass: "bg-profit/20 text-profit",
-    borderClass: "border-border-default hover:border-profit/50",
-    selectedBorderClass: "border-profit ring-1 ring-profit/30",
+    borderClass: "border-border-default/70 hover:border-profit/50",
+    selectedBorderClass: "border-profit ring-1 ring-profit/30 shadow-[0_0_30px_rgba(34,197,94,0.16)]",
     iconBgClass: "bg-profit/10 text-profit",
   },
 ];
@@ -101,8 +101,8 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-surface-base p-6">
-      <div className="w-full max-w-lg space-y-8">
+    <div className="flex items-center justify-center">
+      <div className="w-full space-y-6">
         {/* Heading */}
         <div className="text-center space-y-1">
           <h1 className="font-heading font-bold text-2xl text-text-primary">
@@ -124,14 +124,15 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
                 aria-checked={isSelected}
                 onClick={() => handleCardSelect(card.id)}
                 className={`
-                  relative flex flex-col items-center gap-3 p-5 rounded-xl border
-                  bg-surface-card text-left transition-all duration-150 cursor-pointer
+                  relative flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border p-4
+                  bg-surface-card/60 text-left shadow-xl shadow-black/10 backdrop-blur-xl transition-all duration-150 cursor-pointer
+                  hover:-translate-y-0.5 hover:bg-surface-card/75
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50
                   ${isSelected ? card.selectedBorderClass : card.borderClass}
                 `}
               >
                 {/* Mode icon */}
-                <div className={`flex items-center justify-center w-11 h-11 rounded-xl ${card.iconBgClass}`}>
+                <div className={`flex size-10 items-center justify-center rounded-md ${card.iconBgClass}`}>
                   {card.icon}
                 </div>
 
@@ -165,7 +166,7 @@ export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
         {/* PIN input — only shown when Live is selected */}
         {selected === "live" && (
           <div className="space-y-3 animate-fade-in">
-            <div className="p-4 rounded-lg border border-profit/20 bg-profit/5 space-y-3">
+            <div className="space-y-3 rounded-xl border border-profit/25 bg-profit/8 p-4 shadow-xl shadow-black/10 backdrop-blur-xl">
               <p className="text-xs text-text-secondary flex items-center gap-1.5">
                 <Zap size={12} className="text-profit shrink-0" aria-hidden="true" />
                 Live mode executes real orders with real money. Enter your PIN to confirm.

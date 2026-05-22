@@ -53,7 +53,7 @@ export function MiniChartCard() {
   const svgHeight = 60;
   const ys = normalise(data, svgHeight - 4);
   const points = buildPoints(ys, svgWidth);
-  const strokeColor = positive ? "#22c55e" : "#ef4444";
+  const strokeColor = positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)";
 
   return (
     <BentoCard size="wide" label="NIFTY Chart" data-testid="mini-chart-card">
@@ -61,18 +61,18 @@ export function MiniChartCard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <TrendingUp size={13} className="text-[#505068]" aria-hidden="true" />
-            <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+            <TrendingUp size={13} className="text-text-muted" aria-hidden="true" />
+            <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
               NIFTY 50
             </p>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="font-mono text-sm font-semibold text-[#e8e8f0]">
+            <span className="font-mono text-sm font-semibold text-text-primary">
               {lastValue.toLocaleString("en-IN")}
             </span>
             <span
               className="font-mono text-xs"
-              style={{ color: positive ? "#22c55e" : "#ef4444" }}
+              style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
             >
               {positive ? "+" : ""}{change.toFixed(0)} ({positive ? "+" : ""}{changePct}%)
             </span>
@@ -118,12 +118,12 @@ export function MiniChartCard() {
               className="px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors"
               style={{
                 background: timeframe === tf
-                  ? "rgba(255,255,255,0.08)"
+                  ? "var(--color-surface-active)"
                   : "transparent",
-                color: timeframe === tf ? "#e8e8f0" : "#505068",
+                color: timeframe === tf ? "var(--color-text-primary)" : "var(--color-text-muted)",
                 border: "1px solid",
                 borderColor: timeframe === tf
-                  ? "rgba(255,255,255,0.1)"
+                  ? "var(--color-border-default)"
                   : "transparent",
               }}
             >

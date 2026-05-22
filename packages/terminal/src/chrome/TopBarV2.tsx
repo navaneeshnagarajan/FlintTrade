@@ -127,8 +127,8 @@ function LiveBadge() {
     <div
       className="flex items-center gap-1 px-1.5 py-0.5 rounded shrink-0"
       style={{
-        background: isOpen ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.05)",
-        border: isOpen ? "1px solid rgba(34,197,94,0.25)" : "1px solid rgba(255,255,255,0.08)",
+        background: isOpen ? "var(--color-bullish-bg)" : "var(--glass-l2-bg)",
+        border: isOpen ? "1px solid var(--color-bullish-border)" : "1px solid var(--glass-l2-border)",
       }}
       aria-label={`Market status: ${statusInfo.label}`}
       data-testid="live-badge"
@@ -166,7 +166,7 @@ function Divider() {
   return (
     <div
       className="w-px shrink-0"
-      style={{ height: 18, background: "rgba(255,255,255,0.08)" }}
+      style={{ height: 18, background: "var(--glass-chrome-border, rgba(255,255,255,0.08))" }}
       aria-hidden="true"
     />
   );
@@ -321,10 +321,10 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   }, [quickSettingsOpen]);
 
   const barStyle: React.CSSProperties = {
-    background: "rgba(12, 12, 20, 0.85)",
+    background: "var(--glass-chrome-bg, rgba(12,12,20,0.85))",
     backdropFilter: "blur(16px)",
     WebkitBackdropFilter: "blur(16px)",
-    borderBottom: "1px solid rgba(255,255,255,0.05)",
+    borderBottom: "1px solid var(--glass-chrome-border, rgba(255,255,255,0.05))",
   };
 
   return (

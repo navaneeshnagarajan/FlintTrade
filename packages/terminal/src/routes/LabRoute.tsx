@@ -54,8 +54,8 @@ export default function LabRoute() {
         hintId="lab-import-strategy"
         text="Import a ready-made strategy from the library — open the Backtest tab and click 'Choose Strategy' to get started."
       />
-      <div className="border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md px-6 pt-4 pb-0">
-        <div className="flex items-center gap-3 pb-3" data-tour-target="strategy-picker">
+      <div className="border-b border-glass-chrome bg-glass-chrome/70 px-6 pt-4 pb-0 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 pb-3 text-center" data-tour-target="strategy-picker">
           <Zap className="w-6 h-6 text-accent" />
           <div>
             <h1 className="font-heading font-bold text-lg text-text-primary">
@@ -68,7 +68,9 @@ export default function LabRoute() {
             </p>
           </div>
         </div>
-        <LabTabBar active={activeTab} onChange={setActiveTab} tabs={visibleTabs} />
+        <div className="mx-auto max-w-5xl">
+          <LabTabBar active={activeTab} onChange={setActiveTab} tabs={visibleTabs} />
+        </div>
       </div>
 
       <div
@@ -78,7 +80,7 @@ export default function LabRoute() {
         className="flex-1"
       >
         <ScrollArea className="h-full">
-          <div className="p-6 max-w-5xl mx-auto" data-tour-target="backtest-results">
+          <div className="mx-auto max-w-5xl p-6" data-tour-target="backtest-results">
             <TabTransition tabKey={activeTab}>
               {renderTab(activeTab)}
             </TabTransition>

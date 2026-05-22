@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 // ---------------------------------------------------------------------------
 // Mock sessionStorage to avoid side effects
@@ -25,20 +26,29 @@ Object.defineProperty(window, "sessionStorage", { value: sessionStorageMock });
 
 import DemoChoice from "../DemoChoice";
 
+function renderDemoChoice() {
+  return render(
+    <MemoryRouter>
+      <DemoChoice onChoice={vi.fn()} />
+    </MemoryRouter>,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("DemoChoice", () => {
   it("renders the heading", () => {
-    render(<DemoChoice onChoice={vi.fn()} />);
+    renderDemoChoice();
     expect(
       screen.getByText("How would you like to explore FlintTrade?"),
     ).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: /explore mode entry/i })).toBeInTheDocument();
   });
 
   it("shows Free Explore and Guided Tour options as radio buttons", () => {
-    render(<DemoChoice onChoice={vi.fn()} />);
+    renderDemoChoice();
     expect(screen.getByRole("radio", { name: /free explore/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /guided tour/i })).toBeInTheDocument();
   });

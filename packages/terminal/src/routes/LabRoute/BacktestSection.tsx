@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { FlaskConical, Loader2 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -58,8 +57,11 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
   const runError = backtestMutation.error;
 
   return (
-    <PanelGroup orientation="horizontal" className="flex gap-0 items-start min-h-0">
-      <Panel defaultSize={30} minSize={22} className="min-w-70">
+    <div
+      data-testid="backtest-layout"
+      className="mx-auto grid w-full max-w-4xl grid-cols-1 items-start justify-center gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(320px,1fr)]"
+    >
+      <div className="min-w-0">
         <BacktestConfigPanel
           symbol={symbol}
           onSymbol={setSymbol}
@@ -84,16 +86,11 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
           isSuccess={backtestMutation.isSuccess}
           onRetry={handleRun}
         />
-      </Panel>
+      </div>
 
-      <PanelResizeHandle
-        data-separator
-        className="w-1 mx-2 rounded-full cursor-col-resize"
-      />
-
-      <Panel minSize={40}>
+      <div className="min-w-0">
         {isRunning ? (
-          <GlassCard className="p-6 flex items-center gap-3">
+          <GlassCard className="flex items-center justify-center gap-3 p-6 text-center">
             <Loader2 className="w-5 h-5 text-accent animate-spin" />
             <p className="text-sm text-text-secondary">
               Running backtest… this may take a few seconds.
@@ -102,7 +99,7 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
         ) : lastResult ? (
           <BacktestResultDisplay result={lastResult} />
         ) : (
-          <GlassCard className="p-8 text-center gap-2">
+          <GlassCard className="min-h-40 justify-center gap-2 p-8 text-center">
             <FlaskConical className="w-8 h-8 text-text-muted mx-auto mb-2" />
             <p className="text-sm font-semibold text-text-secondary">
               No results yet
@@ -113,7 +110,7 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
             </p>
           </GlassCard>
         )}
-      </Panel>
-    </PanelGroup>
+      </div>
+    </div>
   );
 }

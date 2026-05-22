@@ -7,7 +7,7 @@
  * connect OpenAlgo for live data.
  */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -29,19 +29,13 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LogoIcon } from "@/components/brand/Logo";
+import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { motionConfig } from "@/lib/motion";
-import { useThemeStore } from "@/stores/themeStore";
 import DemoChoice, { hasMadeDemoChoice } from "@/components/demo/DemoChoice";
 import type { DemoChoiceValue } from "@/components/demo/DemoChoice";
 import SpotlightTour, { hasCompletedExploreTour } from "@/components/demo/ExploreTour";
 import type { TourStep } from "@/components/demo/ExploreTour";
-
-// Magic UI
-import { Particles } from "@/components/magicui/particles";
-import { AnimatedCounter } from "@/components/magicui/animated-counter";
-import { ShimmerButton } from "@/components/magicui/shimmer-button";
 
 // Aceternity UI
 import { HoverCard } from "@/components/aceternity/card-hover-effect";
@@ -470,7 +464,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
       <button
         type="button"
         onClick={() => onNavigate(module.route, module.title)}
-        className="relative text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-xl"
+        className="relative text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-lg"
         aria-label={`Explore ${module.title} module`}
       >
         {/*
@@ -493,7 +487,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
            */}
           <GlassCard
             glass={false}
-            className="bg-transparent border-0 rounded-xl p-5 h-full shadow-none gap-0"
+            className="bg-transparent border-0 rounded-lg p-5 h-full shadow-none gap-0"
           >
             {/* Preview badge */}
             <span className="absolute top-3 right-3 text-xxs font-medium px-1.5 py-0.5 rounded bg-surface-elevated text-text-muted border border-border-subtle">
@@ -566,7 +560,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     placement: "top",
   },
   {
-    target: ".rounded-xl.border.border-border-default.bg-surface-card",
+    target: ".rounded-lg.border.border-border-default.bg-surface-card",
     title: "Ready to Go Live?",
     description:
       "Connect an existing OpenAlgo instance in Settings, or run the setup wizard to configure everything from scratch. Takes about 2 minutes.",
@@ -579,17 +573,6 @@ export default function ExploreRoute() {
   const [toast, setToast] = useState<ToastState>({ visible: false, message: "" });
   const [showDemoChoice, setShowDemoChoice] = useState(() => !hasMadeDemoChoice());
   const [showTour, setShowTour] = useState(false);
-  const theme = useThemeStore((s) => s.activeThemeId);
-
-  // Read primary particle color from CSS vars — reactive to theme changes
-  const particlePrimary = useMemo(() => {
-    if (typeof window === "undefined") return "#22c55e";
-    return (
-      getComputedStyle(document.documentElement).getPropertyValue("--particle-primary").trim() ||
-      "#22c55e"
-    );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [theme]);
 
   const dismissToast = useCallback(() => {
     setToast({ visible: false, message: "" });
@@ -633,120 +616,75 @@ export default function ExploreRoute() {
 
   return (
     <>
-      {/* Skip link for /explore — this route renders outside AppLayout so it
-          needs its own skip navigation (Issue #63). Matches AppLayout's style. */}
-      <a
-        href="#explore-main"
-        className="sr-only focus:not-sr-only focus:fixed focus:z-[200] focus:top-2 focus:left-2 focus:bg-accent focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-medium focus:shadow-lg"
-      >
-        Skip to main content
-      </a>
-      <div className="fixed inset-0 bg-surface-base overflow-y-auto">
-        {/* ------------------------------------------------------------------ */}
-        {/* Top bar                                                              */}
-        {/* ------------------------------------------------------------------ */}
-        <header className="sticky top-0 z-40 border-b border-border-subtle bg-surface-base/90 backdrop-blur-sm">
-          <div className="max-w-6xl mx-auto px-6 h-12 flex items-center justify-between">
-            <Link
-              to="/welcome"
-              className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
+      <PublicRouteShell
+        mainLabel="Explore mode"
+        eyebrow="Sample workspace"
+        title="Explore FlintTrade"
+        subtitle="Open every module with simulated data, then connect OpenAlgo in Settings when you are ready for live data."
+        actions={
+          <nav aria-label="Explore navigation" className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-text-muted hover:text-text-primary"
+              asChild
             >
-              <LogoIcon size={20} />
-              <span className="font-heading font-semibold text-sm">FlintTrade</span>
-            </Link>
-            <nav aria-label="Explore navigation" className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs text-text-muted hover:text-text-primary"
-                asChild
-              >
-                <Link to="/settings">Settings</Link>
-              </Button>
-              {/* ShimmerButton wrapping the Get Started navigation */}
-              <ShimmerButton
-                onClick={() => navigate("/setup")}
-                className="text-xs px-4 py-1.5"
-              >
-                Get Started
-                <ArrowRight className="w-3.5 h-3.5" />
-              </ShimmerButton>
-            </nav>
+              <Link to="/settings">Settings</Link>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="text-xs"
+              onClick={() => navigate("/setup")}
+            >
+              Get Started
+              <ArrowRight className="size-3.5" aria-hidden="true" />
+            </Button>
+          </nav>
+        }
+      >
+        <div id="explore-main" className="mx-auto max-w-6xl space-y-8">
+          <div className="mx-auto flex max-w-2xl items-start gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-left shadow-xl shadow-black/10 backdrop-blur-xl">
+            <Info className="mt-0.5 size-4 shrink-0 text-accent" />
+            <p className="text-xs leading-relaxed text-accent">
+              <strong>Explore Mode</strong> - all data shown is sample only. Connect a broker in Settings to see live data.
+            </p>
           </div>
-        </header>
 
-        {/* Explore mode banner — persistent, below the sticky header */}
-        <div className="bg-accent/10 border border-accent/30 rounded-lg px-4 py-2 mx-4 mt-2 flex items-center gap-2">
-          <Info className="w-4 h-4 text-accent shrink-0" />
-          <p className="text-xs text-accent">
-            <strong>Explore Mode</strong> — All data shown is sample only. Connect a broker in Settings to see live data.
-          </p>
-        </div>
-
-        <main id="explore-main" aria-label="Explore mode" className="max-w-6xl mx-auto px-6 py-12 space-y-12">
-          {/* ---------------------------------------------------------------- */}
-          {/* Hero — Particles background + heading                            */}
-          {/* ---------------------------------------------------------------- */}
-          <div className="relative text-center space-y-4 py-8 overflow-hidden rounded-2xl animate-fade-in">
-              {/* Particles layer — behind everything */}
-              <Particles
-                quantity={40}
-                color={particlePrimary}
-                size={1.5}
-                className="rounded-2xl"
-              />
-
-              <div className="relative z-10 space-y-4">
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-card border border-border-default text-xs text-text-muted">
-                  <BarChart3 className="w-3.5 h-3.5 text-primary" />
-                  Sample data only — no broker connection needed
-                </div>
-
-                <h1
-                  className="font-heading font-bold text-text-primary tracking-tight"
-                  style={{ fontSize: "clamp(1.75rem, 4vw, 2.75rem)" }}
-                >
-                  Explore FlintTrade
-                </h1>
-
-                <p
-                  className="text-text-secondary max-w-xl mx-auto leading-relaxed"
-                  style={{ fontSize: "clamp(0.875rem, 1.5vw, 1rem)" }}
-                >
-                  See what&apos;s possible — no broker connection needed. Click any module to open it,
-                  then connect OpenAlgo in Settings for live data.
-                </p>
-
-                {/* Stats row — AnimatedCounter for each number */}
-                <div className="flex flex-wrap justify-center gap-6 pt-2">
-                  {STATS.map((stat) => (
-                    <div key={stat.label} className="text-center">
-                      <div className="font-heading font-bold text-text-primary text-lg">
-                        <AnimatedCounter
-                          value={stat.value}
-                          duration={1.5}
-                          formatter={(v) => `${v}${stat.suffix}`}
-                        />
-                      </div>
-                      <div className="text-xxs text-text-muted">{stat.label}</div>
-                    </div>
-                  ))}
-                </div>
+          <section className="mx-auto grid max-w-4xl gap-5 border-b border-border-default/60 pb-6 text-center">
+            <div className="mx-auto space-y-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-border-default/70 bg-surface-card/60 px-3 py-1.5 text-xs text-text-muted shadow-lg shadow-black/10 backdrop-blur-xl">
+                <BarChart3 className="size-3.5 text-primary" aria-hidden="true" />
+                No broker connection needed
               </div>
-          </div>
+              <p className="mx-auto max-w-2xl text-sm leading-relaxed text-text-secondary">
+                The preview uses the same cards, controls, and route behaviour as the app so visual checks here match what users see after setup.
+              </p>
+            </div>
+            <div className="mx-auto grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
+              {STATS.map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-xl border border-border-default/70 bg-surface-card/60 px-3 py-2 shadow-xl shadow-black/10 backdrop-blur-xl"
+                >
+                  <div className="font-heading text-lg font-bold text-text-primary">
+                    {stat.value}{stat.suffix}
+                  </div>
+                  <div className="text-xxs text-text-muted">{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          </section>
 
-          {/* ---------------------------------------------------------------- */}
-          {/* Module grid — motion.div fade-in wrapper, cards stagger inside   */}
-          {/* ---------------------------------------------------------------- */}
           <motion.div
             variants={motionConfig.variants.fadeIn}
             initial="initial"
             animate="animate"
           >
-            <h2 className="font-heading font-semibold text-text-secondary text-xs uppercase tracking-widest mb-5">
+            <h2 className="mb-4 text-center font-heading text-xs font-semibold uppercase tracking-[0.28em] text-text-secondary">
               All Modules
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {MODULES.map((mod, i) => (
                 <ModuleCard
                   key={mod.id}
@@ -758,64 +696,55 @@ export default function ExploreRoute() {
             </div>
           </motion.div>
 
-          {/* ---------------------------------------------------------------- */}
-          {/* Bottom CTA — smooth opacity fade, matches welcome screen style   */}
-          {/* ---------------------------------------------------------------- */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 1, ease: "easeOut", delay: 0.4 }}
+            transition={{ duration: 0.3, ease: "easeOut", delay: 0.1 }}
           >
-            <div className="rounded-xl border border-border-default bg-surface-card px-8 py-8 text-center space-y-4">
-              <TrendingUp className="w-8 h-8 text-profit mx-auto" />
-              <div>
-                <h2 className="font-heading font-bold text-text-primary text-lg">
-                  Ready to start?
-                </h2>
-                <p className="text-text-muted text-sm mt-1">
-                  Set up your workspace in 2 minutes — or connect an existing OpenAlgo instance.
-                </p>
-              </div>
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
-                <ShimmerButton
-                  onClick={() => navigate("/setup")}
-                  shimmerColor="#22c55e"
-                  className="px-8 py-3 text-base font-semibold bg-profit/10 border-profit/40 text-profit hover:bg-profit/15"
-                >
-                  Set Up Workspace
-                  <ArrowRight className="w-4 h-4" />
-                </ShimmerButton>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 1, ease: "easeOut", delay: 0.7 }}
-                >
+            <div className="rounded-xl border border-border-default/70 bg-surface-card/70 px-5 py-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
+              <div className="flex flex-col items-center gap-4 text-center">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-profit/10 text-profit">
+                    <TrendingUp className="size-4" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h2 className="font-heading text-base font-semibold text-text-primary">
+                      Ready to start?
+                    </h2>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Set up your workspace in 2 minutes or connect an existing OpenAlgo instance.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button
+                    type="button"
+                    onClick={() => navigate("/setup")}
+                    className="sm:min-w-44"
+                  >
+                    Set Up Workspace
+                    <ArrowRight className="size-4" aria-hidden="true" />
+                  </Button>
                   <Button
                     variant="outline"
-                    size="lg"
-                    className="border-border-default text-text-primary hover:bg-surface-hover px-8"
+                    className="border-border-default text-text-primary hover:bg-surface-hover sm:min-w-44"
                     asChild
                   >
                     <Link to="/settings">
                       Already have OpenAlgo?
                     </Link>
                   </Button>
-                </motion.div>
+                </div>
               </div>
             </div>
           </motion.div>
+        </div>
+      </PublicRouteShell>
 
-          {/* Bottom spacer */}
-          <div className="h-8" />
-        </main>
-      </div>
-
-      {/* Toast — smooth opacity fade, no popup effect */}
       {toast.visible && (
         <Toast message={toast.message} onClose={dismissToast} />
       )}
 
-      {/* SpotlightTour — only rendered when user chose "tour" in DemoChoice */}
       {showTour && (
         <SpotlightTour
           steps={EXPLORE_TOUR_STEPS}

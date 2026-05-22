@@ -1,4 +1,4 @@
-import { get, post } from "./ftApi.helpers";
+import { get, isDemoAuthSession, post } from "./ftApi.helpers";
 
 export interface DittoAccount {
   id: string;
@@ -47,10 +47,22 @@ export interface DittoRiskData {
 }
 
 export const getDittoAccounts = () =>
-  get<{ accounts: DittoAccount[] }>("ditto/accounts");
+  isDemoAuthSession()
+    ? Promise.resolve({ accounts: [] })
+    : get<{ accounts: DittoAccount[] }>("ditto/accounts");
 
 export const getDittoMirrorStatus = () =>
-  get<MirrorStatus>("ditto/mirror/status");
+  isDemoAuthSession()
+    ? Promise.resolve({
+      active: false,
+      source_account: null,
+      target_accounts: [],
+      mode: "equal" as const,
+      mirrored_positions: 0,
+      last_sync: null,
+      errors: [],
+    })
+    : get<MirrorStatus>("ditto/mirror/status");
 
 export const startDittoMirror = (
   source_account: string,
@@ -66,7 +78,14 @@ export const startDittoMirror = (
 export const stopDittoMirror = () =>
   post<{ active: boolean; stopped_at: string }>("ditto/mirror/stop");
 
-export const getDittoRisk = () => get<DittoRiskData>("ditto/risk");
+export const getDittoRisk = () =>
+  isDemoAuthSession()
+    ? Promise.resolve({
+      aggregate_pnl: 0,
+      aggregate_capital: 0,
+      accounts: [],
+    })
+    : get<DittoRiskData>("ditto/risk");
 
 export const dittoKillAll = () =>
   post<{ message: string; accounts_affected: number }>("ditto/kill-all");

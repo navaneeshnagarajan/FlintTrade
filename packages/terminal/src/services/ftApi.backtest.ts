@@ -1,4 +1,4 @@
-import { get, getBase, post } from "./ftApi.helpers";
+import { get, getBase, isDemoAuthSession, post } from "./ftApi.helpers";
 
 export interface BacktestConfig {
   symbol: string;
@@ -201,13 +201,38 @@ export const runPortfolioBacktest = (config: PortfolioBacktestConfig) =>
 // shared the same URL path and Flask first-match-wins silently shadowed
 // the backtest list with the live runner list.
 
+const DEMO_STRATEGIES: StrategyInfo[] = [
+  {
+    name: "sma_crossover",
+    description: "Simple moving average crossover starter strategy",
+    category: "Trend",
+    parameters: [
+      { name: "fast_window", type: "number", default: 20 },
+      { name: "slow_window", type: "number", default: 50 },
+    ],
+  },
+  {
+    name: "rsi_mean_reversion",
+    description: "RSI oversold and overbought reversion template",
+    category: "Mean Reversion",
+    parameters: [
+      { name: "period", type: "number", default: 14 },
+      { name: "entry_threshold", type: "number", default: 30 },
+    ],
+  },
+];
+
 export const getStrategies = () =>
-  get<{ strategies: StrategyInfo[] }>("backtest/strategies").then((r) => r.strategies);
+  isDemoAuthSession()
+    ? Promise.resolve(DEMO_STRATEGIES)
+    : get<{ strategies: StrategyInfo[] }>("backtest/strategies").then((r) => r.strategies);
 
 export const getRunningStrategies = () =>
-  get<{ strategies: RunningStrategy[] }>("backtest/strategies/running").then(
-    (r) => r.strategies,
-  );
+  isDemoAuthSession()
+    ? Promise.resolve([])
+    : get<{ strategies: RunningStrategy[] }>("backtest/strategies/running").then(
+      (r) => r.strategies,
+    );
 
 export const startStrategy = (name: string, config: Record<string, unknown>) =>
   post<{ status: string }>(
@@ -226,9 +251,11 @@ export const getForwardTrades = (name: string) =>
   ).then((r) => r.trades);
 
 export const getUploadedStrategies = () =>
-  get<{ strategies: UploadedStrategy[] }>("backtest/strategies/uploaded").then(
-    (r) => r.strategies,
-  );
+  isDemoAuthSession()
+    ? Promise.resolve([])
+    : get<{ strategies: UploadedStrategy[] }>("backtest/strategies/uploaded").then(
+      (r) => r.strategies,
+    );
 
 export const uploadStrategy = (file: File): Promise<UploadedStrategy> => {
   const base = getBase() + "/api/v1/strategies/upload";

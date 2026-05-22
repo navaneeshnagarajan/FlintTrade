@@ -26,7 +26,13 @@ vi.mock("@/components/brand/Logo", () => ({
 }));
 
 vi.mock("@/components/layout/CinematicLayout", () => ({
-  CinematicLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CinematicLayout: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+  }) => <div className={className} data-testid="settings-layout">{children}</div>,
 }));
 
 vi.mock("@/tools/Settings/shared", () => ({
@@ -132,5 +138,13 @@ describe("SettingsRoute", () => {
     expect(screen.getAllByText("General").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Appearance").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("About").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("fits inside the shared app chrome instead of covering the full viewport", () => {
+    render(<SettingsRoute />);
+
+    expect(screen.getByRole("region", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-layout")).toHaveClass("h-full");
+    expect(screen.getByTestId("settings-layout")).not.toHaveClass("fixed");
   });
 });

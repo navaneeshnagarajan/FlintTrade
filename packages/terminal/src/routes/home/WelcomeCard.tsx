@@ -26,10 +26,10 @@ export function WelcomeCard() {
     <BentoCard size="wide" label="Welcome" data-testid="welcome-card">
       <div className="p-5 h-full flex flex-col justify-between gap-4">
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068] mb-1">
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted mb-1">
             Dashboard
           </p>
-          <h2 className="font-heading text-xl font-semibold text-[#e8e8f0]">
+          <h2 className="font-heading text-xl font-semibold text-text-primary">
             {getGreeting()}{name ? `, ${name}` : ""}
           </h2>
         </div>
@@ -37,12 +37,12 @@ export function WelcomeCard() {
         <div className="flex items-end justify-between gap-4">
           {/* Daily P&L */}
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-[#505068] mb-0.5">
+            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5">
               Today&apos;s P&amp;L
             </p>
             <p
               className="font-mono text-2xl font-semibold"
-              style={{ color: pnlPositive ? "#22c55e" : "#ef4444" }}
+              style={{ color: pnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
             >
               {pnlPositive ? "+" : ""}
               {totalPnl.toLocaleString("en-IN", {
@@ -55,20 +55,20 @@ export function WelcomeCard() {
 
           {/* Position count */}
           <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wider text-[#505068] mb-0.5">
+            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5">
               Open Positions
             </p>
-            <p className="font-mono text-2xl font-semibold text-[#e8e8f0]">
+            <p className="font-mono text-2xl font-semibold text-text-primary">
               {positionCount}
             </p>
           </div>
 
           {/* Regime badge */}
           <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wider text-[#505068] mb-0.5">
+            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5">
               Regime
             </p>
-            <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-[rgba(59,130,246,0.15)] text-[#3b82f6] border border-[rgba(59,130,246,0.25)]">
+            <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-neutral-bg text-text-primary border border-neutral-border">
               Neutral
             </span>
           </div>

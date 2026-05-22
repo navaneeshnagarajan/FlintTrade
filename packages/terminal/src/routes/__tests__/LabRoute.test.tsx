@@ -79,12 +79,6 @@ vi.mock("@tremor/react", () => ({
   BarChart: () => <div data-testid="bar-chart" />,
 }));
 
-vi.mock("react-resizable-panels", () => ({
-  Group: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Separator: () => <div />,
-}));
-
 vi.mock("@/routes/lab/PineEditor", () => ({
   default: () => <div data-testid="pine-editor" />,
 }));
@@ -139,5 +133,12 @@ describe("LabRoute", () => {
     renderLab();
 
     expect(screen.getByRole("tab", { name: /pine editor/i })).toBeInTheDocument();
+  });
+
+  it("uses a stable grid layout for backtest config and results", () => {
+    renderLab();
+
+    expect(screen.getByTestId("backtest-layout")).toHaveClass("grid");
+    expect(screen.getByTestId("backtest-layout").className).toContain("lg:grid-cols");
   });
 });

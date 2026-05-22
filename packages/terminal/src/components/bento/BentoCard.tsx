@@ -44,8 +44,8 @@ export function BentoCard({
       aria-label={label}
       style={{
         ...sizeStyles[size],
-        background: "var(--glass-l1-bg, rgba(255,255,255,0.018))",
-        border: "1px solid var(--glass-l1-border, rgba(255,255,255,0.045))",
+        background: "var(--glass-l1-bg, var(--color-surface-card))",
+        border: "1px solid var(--glass-l1-border, var(--color-border-default))",
         borderRadius: "var(--glass-radius-card, 14px)",
         backdropFilter: "var(--glass-blur, blur(16px))",
         overflow: "hidden",
@@ -56,9 +56,6 @@ export function BentoCard({
         y: -1,
         transition: { duration: 0.15, ease: "easeOut" },
       }}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
     >
       {/* Inset top highlight on hover — rendered via CSS */}
       <div className="bento-card-inset" aria-hidden="true" />
@@ -68,7 +65,7 @@ export function BentoCard({
           transition: border-color 150ms ease, box-shadow 150ms ease;
         }
         .bento-card:hover {
-          border-color: var(--glass-hover-border, rgba(255,255,255,0.09));
+          border-color: var(--glass-hover-border, var(--color-border-strong));
           box-shadow: var(--glass-hover-shadow, 0 8px 32px rgba(0,0,0,0.3)),
                       var(--glass-hover-inset, inset 0 1px 0 rgba(255,255,255,0.04));
         }

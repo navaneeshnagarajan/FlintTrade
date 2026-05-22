@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -18,6 +18,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const mockTradingState = vi.hoisted(() => ({
   totalPnl: 0,
   mtmStoploss: 5000,
+  mode: "live",
 }));
 
 const mockNavigate = vi.fn();
@@ -126,6 +127,12 @@ vi.mock("@/stores/settingsStore", () => ({
   ),
 }));
 
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+    selector({ mode: mockTradingState.mode }),
+  ),
+}));
+
 // Hooks
 vi.mock("@/hooks/useGlobalKeys", () => ({
   default: vi.fn(),
@@ -152,12 +159,6 @@ vi.mock("@/lib/tourDefinitions", () => ({
 vi.mock("@/layout/widgetFactory", () => ({
   widgetComponents: {},
   widgetCatalog: [],
-}));
-
-// Command palette — isolated from TerminalRoute tests
-vi.mock("@/components/CommandPalette/CommandPalette", () => ({
-  default: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="command-palette" /> : null,
 }));
 
 vi.mock("@/layout/workspacePresets", () => ({
@@ -190,6 +191,7 @@ describe("TerminalRoute", () => {
   beforeEach(() => {
     mockTradingState.totalPnl = 0;
     mockTradingState.mtmStoploss = 5000;
+    mockTradingState.mode = "live";
     vi.clearAllMocks();
   });
 
@@ -209,26 +211,24 @@ describe("TerminalRoute", () => {
     expect(screen.getByTestId("trade-bottom-panel")).toBeInTheDocument();
   });
 
-  it("opens the command palette from the top-bar custom event", () => {
-    renderTerminalRoute();
-
-    expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent("flinttrade:open-command-palette"));
-    });
-
-    expect(screen.getByTestId("command-palette")).toBeInTheDocument();
-  });
-
-  it("keeps the kill switch inside the trade route instead of the global sidebar", () => {
+  it("keeps the kill switch in reserved trade-route layout space", () => {
     mockTradingState.totalPnl = -3000;
 
     renderTerminalRoute();
 
     const alert = screen.getByRole("status", { name: /daily loss alert/i });
-    expect(alert).toHaveClass("absolute");
+    expect(alert).toHaveClass("shrink-0");
     expect(alert).not.toHaveClass("fixed");
+    expect(alert).not.toHaveClass("absolute");
+  });
+
+  it("hides the kill switch in explore mode", () => {
+    mockTradingState.totalPnl = -3000;
+    mockTradingState.mode = "explore";
+
+    renderTerminalRoute();
+
+    expect(screen.queryByRole("status", { name: /daily loss alert/i })).not.toBeInTheDocument();
   });
 
   it("renders the tool overlay containers (widget picker and preset picker)", () => {

@@ -83,6 +83,15 @@ describe("useGlobalKeys", () => {
     expect(onCommandPalette).toHaveBeenCalledOnce();
   });
 
+  it("handles uppercase Ctrl+K keyboard events", () => {
+    const onCommandPalette = vi.fn();
+    renderHook(() => useGlobalKeys({ onCommandPalette }));
+
+    fireKey("K", { ctrlKey: true });
+
+    expect(onCommandPalette).toHaveBeenCalledOnce();
+  });
+
   it("calls cancelAllOrders when C is pressed", () => {
     renderHook(() => useGlobalKeys({}));
 

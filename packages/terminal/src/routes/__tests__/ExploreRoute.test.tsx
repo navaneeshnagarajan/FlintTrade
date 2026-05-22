@@ -47,6 +47,7 @@ vi.mock("@/stores/themeStore", () => ({
     selector({
       activeThemeId: "default",
       mode: "dark",
+      setMode: vi.fn(),
     }),
   ),
 }));

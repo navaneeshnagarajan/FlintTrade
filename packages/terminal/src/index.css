@@ -481,13 +481,15 @@ html.density-compact {
 .cell-flash-down { animation: cell-flash-down 0.3s ease-out; }
 
 /* ---------- Dockview theme overrides — compact, content-first ---------- */
-.dockview-theme-dark {
+.dockview-theme-dark,
+.dockview-theme-light {
   /* Slim tab bar — less chrome, more content */
   --dv-tabs-and-actions-container-height: 28px;
   --dv-tabs-and-actions-container-font-size: 11px;
   --dv-tab-font-size: 11px;
 
   /* Tab colors — subtle, not attention-grabbing */
+  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
   --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
@@ -510,17 +512,21 @@ html.density-compact {
 }
 
 /* Hide close buttons on tabs — less visual noise */
-.dockview-theme-dark .dv-default-tab-action {
+.dockview-theme-dark .dv-default-tab-action,
+.dockview-theme-light .dv-default-tab-action {
   display: none;
 }
 
 /* Show close button only on hover of active tab */
-.dockview-theme-dark .dv-tab.dv-active-tab:hover .dv-default-tab-action {
+.dockview-theme-dark .dv-tab.dv-active-tab:hover .dv-default-tab-action,
+.dockview-theme-light .dv-tab.dv-active-tab:hover .dv-default-tab-action {
   display: flex;
 }
 
 /* ---------- Dockview light theme overrides ---------- */
+html.theme-light .dockview-theme-light,
 html.theme-light .dockview-theme-dark {
+  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
   --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);

@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { motionConfig } from "@/lib/motion";
+import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -363,18 +364,18 @@ export default function SetupRoute() {
   };
 
   return (
-      <main aria-label="Setup wizard" className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-lg w-full space-y-6">
+      <PublicRouteShell mainLabel="Setup wizard" maxWidth="sm" contentClassName="py-6 sm:py-8">
+        <div className="w-full space-y-6">
           {/* Header */}
           <div className="text-center space-y-1">
-              <p className="text-text-muted text-xxs uppercase tracking-widest">FlintTrade Setup</p>
+              <p className="text-accent/80 text-xxs uppercase tracking-[0.32em]">FlintTrade Setup</p>
               <AnimatePresence mode="wait">
                 <motion.h2
                   key={`label-${step}`}
                   initial={{ opacity: 0, y: reduced ? 0 : -4 }}
                   animate={{ opacity: 1, y: 0, transition: { duration: motionConfig.duration.normal, ease: motionConfig.ease.enter } }}
                   exit={{ opacity: 0, y: reduced ? 0 : 4, transition: { duration: motionConfig.duration.fast, ease: motionConfig.ease.exit } }}
-                  className="font-heading font-bold text-lg text-text-primary"
+                  className="font-heading text-2xl font-bold text-text-primary"
                 >
                   {stepLabel}
                 </motion.h2>
@@ -385,7 +386,7 @@ export default function SetupRoute() {
           <StepIndicator total={totalSteps} current={step} onStepClick={(i) => setStep(i)} />
 
           {/* Card with slide transitions */}
-          <Card className="bg-surface-card border-border-default overflow-hidden">
+          <Card className="overflow-hidden rounded-xl border-border-default/70 bg-surface-card/70 shadow-2xl shadow-black/20 backdrop-blur-xl">
             <CardContent className="pt-6 pb-6 px-6">
               <AnimatePresence mode="wait">
                 <motion.div
@@ -419,6 +420,6 @@ export default function SetupRoute() {
             </div>
           )}
         </div>
-      </main>
+      </PublicRouteShell>
   );
 }

@@ -696,7 +696,7 @@ export default function DittoRoute() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md shrink-0">
+      <div className="border-b border-glass-chrome bg-glass-chrome backdrop-blur-md shrink-0">
         {/* Title row */}
         <div className="flex items-center justify-between px-6 pt-4 pb-3">
           <div className="flex items-center gap-3">

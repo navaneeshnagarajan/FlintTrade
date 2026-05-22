@@ -758,7 +758,7 @@ function AISettingsSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Floating pill navigation — bottom center
+// Pill navigation — shared route header
 // ---------------------------------------------------------------------------
 
 interface FloatingPillNavProps {
@@ -775,9 +775,10 @@ function FloatingPillNav({ active, onSelect, sections = SECTIONS }: FloatingPill
     <div
       role="navigation"
       aria-label="AI section navigation"
-      className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30"
+      data-tour-target="ai-section-nav"
+      className="min-w-0 max-w-full overflow-x-auto scrollbar-none"
     >
-      <div className="flex items-center gap-0.5 bg-[rgba(12,12,20,0.88)] backdrop-blur-md border border-glass-l2 rounded-full px-1.5 py-1.5 shadow-lg">
+      <div className="inline-flex items-center gap-0.5 bg-glass-chrome backdrop-blur-md border border-glass-l2 rounded-full px-1.5 py-1.5 shadow-lg">
         {sections.map((section) => {
           const Icon = section.icon;
           const isActive = active === section.id;
@@ -856,7 +857,7 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
     <motion.div
       role="dialog"
       aria-label={title}
-      className="absolute inset-y-0 right-0 w-full max-w-lg z-20 flex flex-col bg-[rgba(12,12,20,0.92)] backdrop-blur-md border-l border-glass-l1 shadow-2xl"
+      className="absolute inset-y-0 right-0 w-full max-w-lg z-20 flex flex-col bg-glass-chrome backdrop-blur-md border-l border-glass-l1 shadow-2xl"
       initial={{ x: "100%", opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: "100%", opacity: 0 }}
@@ -981,10 +982,10 @@ export default function AIRoute() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Top header bar */}
-      <div className="border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md px-5 py-3 shrink-0">
-          <div className="flex items-center gap-2.5">
+      <div className="border-b border-glass-chrome bg-glass-chrome backdrop-blur-md px-5 py-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-3">
             <Bot className="w-5 h-5 text-accent" />
-            <div className="flex-1">
+            <div className="flex-1 min-w-[12rem]">
               <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
                 AI Center
               </h1>
@@ -993,9 +994,16 @@ export default function AIRoute() {
                   ? "Ask me anything about markets, stocks, or how to trade"
                   : level === "intermediate"
                     ? "Local LLM advisor · ML signals · Market sentiment · Regime detector"
-                    : "Local LLM advisor · ML signals · Market sentiment · Regime · Knowledge base"}
+                  : "Local LLM advisor · ML signals · Market sentiment · Regime · Knowledge base"}
               </p>
             </div>
+            {visibleSections.length > 1 && (
+              <FloatingPillNav
+                active={activeSection}
+                onSelect={handleSelectSection}
+                sections={visibleSections}
+              />
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -1039,15 +1047,6 @@ export default function AIRoute() {
             </OverlayPanel>
           )}
         </AnimatePresence>
-
-        {/* Floating pill nav — filtered by skill level */}
-        {visibleSections.length > 1 && (
-          <FloatingPillNav
-            active={activeSection}
-            onSelect={handleSelectSection}
-            sections={visibleSections}
-          />
-        )}
       </div>
 
       {/* Guided tour — beginner only, first visit */}

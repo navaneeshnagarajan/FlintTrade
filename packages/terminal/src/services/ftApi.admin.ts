@@ -1,4 +1,4 @@
-import { get, post, put, del } from "./ftApi.helpers";
+import { get, isDemoAuthSession, post, put, del } from "./ftApi.helpers";
 
 export interface AuditLog {
   timestamp: string;
@@ -114,20 +114,66 @@ export const getAuditLogs = (
   );
 };
 
-export const getSecurityStats = () => get<SecurityStats>("security/stats");
-export const getBannedIPs     = () => get<{ bans: BannedIP[] }>("security/bans");
+const DEMO_SECURITY_SETTINGS: SecuritySettings = {
+  auto_ban_enabled: false,
+  ban_threshold: 25,
+  notfound_ban_threshold: 10,
+  ban_duration: 24,
+};
+
+const DEMO_HEALTH: SystemHealth = {
+  status: "degraded",
+  broker: { status: "degraded", note: "Explore mode" },
+  duckdb: { status: "ok" },
+  disk: { status: "ok", free_gb: 128, total_gb: 256, used_pct: 50 },
+  memory: { status: "ok", used_mb: 2048, total_mb: 8192, used_pct: 25 },
+};
+
+export const getSecurityStats = () =>
+  isDemoAuthSession()
+    ? Promise.resolve({ total_ips: 0, banned_count: 0, top_offenders: [] })
+    : get<SecurityStats>("security/stats");
+export const getBannedIPs = () =>
+  isDemoAuthSession()
+    ? Promise.resolve({ bans: [] })
+    : get<{ bans: BannedIP[] }>("security/bans");
 export const banIP            = (ip: string, reason: string) =>
-  post<{ status: string }>("security/ban", { ip, reason });
+  isDemoAuthSession()
+    ? Promise.resolve({ status: "demo" })
+    : post<{ status: string }>("security/ban", { ip, reason });
 export const unbanIP          = (ip: string) =>
-  post<{ status: string }>("security/unban", { ip });
+  isDemoAuthSession()
+    ? Promise.resolve({ status: "demo" })
+    : post<{ status: string }>("security/unban", { ip });
 
-export const getSecuritySettings = () => get<SecuritySettings>("security/settings");
+export const getSecuritySettings = () =>
+  isDemoAuthSession()
+    ? Promise.resolve(DEMO_SECURITY_SETTINGS)
+    : get<SecuritySettings>("security/settings");
 export const updateSecuritySettings = (settings: Partial<SecuritySettings>) =>
-  post<{ status: string }>("security/settings", settings);
+  isDemoAuthSession()
+    ? Promise.resolve({ status: "demo" })
+    : post<{ status: string }>("security/settings", settings);
 
-export const getHealth       = () => get<SystemHealth>("health");
-export const getTrafficStats = () => get<TrafficStats>("traffic/stats");
-export const getLatencyStats = () => get<LatencyStats>("latency/stats");
+export const getHealth = () =>
+  isDemoAuthSession()
+    ? Promise.resolve(DEMO_HEALTH)
+    : get<SystemHealth>("health");
+export const getTrafficStats = () =>
+  isDemoAuthSession()
+    ? Promise.resolve({
+      window_minutes: 15,
+      total_requests: 0,
+      requests_per_sec: 0,
+      error_rate: 0,
+      avg_latency_ms: 0,
+      top_paths: [],
+    })
+    : get<TrafficStats>("traffic/stats");
+export const getLatencyStats = () =>
+  isDemoAuthSession()
+    ? Promise.resolve({})
+    : get<LatencyStats>("latency/stats");
 
 export const listUsers = () =>
   get<{ users: UserAccount[] }>("users");

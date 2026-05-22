@@ -12,6 +12,7 @@ import { safeParse } from "@/lib/safeParse";
 import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X, Activity } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SystemMetricsPanel } from "./admin/SystemMetricsPanel";
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,12 +103,30 @@ interface IntrospectData {
   package_count: number;
 }
 
+const EMPTY_INTROSPECT: IntrospectData = {
+  packages: [],
+  endpoints: [],
+  endpoint_count: 0,
+  package_count: 0,
+};
+
+function isDemoAuthSession(): boolean {
+  const token = useAuthStore.getState().token;
+  return token === "demo-user" || token === "dev-bypass";
+}
+
 function useIntrospect(): { data: IntrospectData | null; loading: boolean; error: string | null } {
   const [data, setData] = useState<IntrospectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isDemoAuthSession()) {
+      setData(EMPTY_INTROSPECT);
+      setLoading(false);
+      return;
+    }
+
     fetch("/ft-api/v1/admin/introspect")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -815,7 +834,7 @@ export default function AdminRoute(): JSX.Element {
   return (
     <div className="min-h-screen bg-background text-text-primary">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-[rgba(12,12,20,0.85)] backdrop-blur-md border-b border-glass-l1">
+      <header className="sticky top-0 z-10 bg-glass-chrome backdrop-blur-md border-b border-glass-chrome">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
@@ -835,7 +854,7 @@ export default function AdminRoute(): JSX.Element {
       </header>
 
       {/* Tab bar */}
-      <nav className="bg-[rgba(12,12,20,0.78)] backdrop-blur-sm border-b border-glass-l1" role="tablist" aria-label="Admin sections">
+      <nav className="bg-glass-l2 backdrop-blur-sm border-b border-glass-l1" role="tablist" aria-label="Admin sections">
         <div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
           {TABS.map((tab) => {
             const Icon = tab.icon;

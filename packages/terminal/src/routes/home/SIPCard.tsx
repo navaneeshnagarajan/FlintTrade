@@ -25,8 +25,8 @@ export function SIPCard() {
     <BentoCard size="default" label="Active SIPs" data-testid="sip-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <RefreshCw size={13} className="text-[#505068]" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+          <RefreshCw size={13} className="text-text-muted" aria-hidden="true" />
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Active SIPs
           </p>
         </div>
@@ -38,12 +38,12 @@ export function SIPCard() {
               className="flex items-center justify-between py-1"
             >
               <div className="min-w-0">
-                <p className="text-xs text-[#e8e8f0] truncate">{sip.fundName}</p>
-                <p className="text-[10px] text-[#505068]">
+                <p className="text-xs text-text-primary truncate">{sip.fundName}</p>
+                <p className="text-[10px] text-text-muted">
                   Next: {format(sip.nextDate, "dd MMM")}
                 </p>
               </div>
-              <span className="font-mono text-xs font-medium text-[#9090b0] shrink-0 ml-2">
+              <span className="font-mono text-xs font-medium text-text-secondary shrink-0 ml-2">
                 ₹{sip.amount.toLocaleString("en-IN")}
               </span>
             </div>

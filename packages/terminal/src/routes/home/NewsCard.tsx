@@ -2,9 +2,9 @@
  * NewsCard — Top 3 news stories with sentiment-coloured left borders.
  *
  * Sentiment colour mapping:
- *   positive → #22c55e (green)
- *   negative → #ef4444 (red)
- *   neutral  → #505068 (muted)
+ *   positive → bullish token
+ *   negative → bearish token
+ *   neutral  → current muted text token
  */
 
 import { BentoCard } from "@/components/bento/BentoCard";
@@ -21,9 +21,9 @@ interface NewsItem {
 }
 
 const SENTIMENT_COLOR: Record<Sentiment, string> = {
-  positive: "#22c55e",
-  negative: "#ef4444",
-  neutral:  "#505068",
+  positive: "var(--color-bullish-text)",
+  negative: "var(--color-bearish-text)",
+  neutral:  "var(--color-text-muted)",
 };
 
 // Placeholder stories — will be replaced by real news API in Phase 2
@@ -56,8 +56,8 @@ export function NewsCard() {
     <BentoCard size="wide" label="Top Stories" data-testid="news-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <Newspaper size={13} className="text-[#505068]" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+          <Newspaper size={13} className="text-text-muted" aria-hidden="true" />
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Top Stories
           </p>
         </div>
@@ -73,10 +73,10 @@ export function NewsCard() {
               }}
             >
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-[#e8e8f0] leading-snug line-clamp-2">
+                <p className="text-xs text-text-primary leading-snug line-clamp-2">
                   {item.headline}
                 </p>
-                <p className="text-[10px] text-[#505068] mt-0.5">
+                <p className="text-[10px] text-text-muted mt-0.5">
                   {item.source} · {item.timeAgo}
                 </p>
               </div>

@@ -25,7 +25,7 @@ const defaultMetrics = (): DomainMetrics => ({
 
 const defaultHelpPrefs = (): HelpPrefs => ({
   inlineHints: true,
-  spotlightTours: true,
+  spotlightTours: false,
   aiTutor: true,
 });
 

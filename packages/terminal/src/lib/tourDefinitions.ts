@@ -63,7 +63,7 @@ export const TOUR_DEFINITIONS: Record<string, TourStep[]> = {
       target: "holdings",
       title: "Your Holdings",
       description: "All your investments in one place.",
-      position: "bottom",
+      position: "right",
     },
     {
       target: "networth",
@@ -131,14 +131,14 @@ export const TOUR_DEFINITIONS: Record<string, TourStep[]> = {
       title: "AI Chat",
       description:
         "Ask questions about markets, strategies, or your portfolio. Powered by your local LLM — fully private.",
-      position: "bottom",
+      position: "top",
     },
     {
-      target: "ai-signals",
-      title: "AI Signals",
+      target: "ai-section-nav",
+      title: "AI Suggestions",
       description:
-        "Get AI-generated trading signals based on technical analysis. Review confidence scores before acting.",
-      position: "left",
+        "Switch to suggestions when you want the advisor to draft strategy ideas from your current market context.",
+      position: "bottom",
     },
   ],
 };

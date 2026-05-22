@@ -675,15 +675,19 @@ export function AITutorPill() {
 
   const routeName = routeLabel(location.pathname);
   const reduced = motionConfig.prefersReducedMotion();
+  const denseWorkspace = location.pathname === "/trade" || location.pathname === "/lab";
+
+  if (denseWorkspace && !isOpen) return null;
 
   return (
     /*
      * Fixed bottom-right, z-50.
-     * bottom-16 leaves room above the TickerBar (h-8/h-10).
+     * The closed pill is hidden on dense workspaces such as Trade and Lab so
+     * it does not obscure order tickets, backtest forms, or result panels.
      * Hidden on xs screens (< sm) via `hidden sm:flex`.
      */
     <div
-      className="fixed bottom-16 right-4 z-50 hidden sm:flex flex-col items-end gap-2"
+      className="fixed bottom-24 right-4 z-50 hidden sm:flex flex-col items-end gap-2"
       aria-live="polite"
     >
       <AnimatePresence mode="wait">

@@ -17,6 +17,9 @@ const mockNavigate = vi.fn();
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
+  Link: ({ children, to, ...props }: Record<string, unknown>) => (
+    <a href={String(to)} {...props}>{children as React.ReactNode}</a>
+  ),
 }));
 
 vi.mock("framer-motion", () => ({
@@ -126,8 +129,7 @@ describe("WelcomeRoute", () => {
   it("renders the welcome heading", () => {
     render(<WelcomeRoute />);
 
-    // sr-only h1
-    expect(screen.getByText("Welcome to FlintTrade")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "FlintTrade" })).toBeInTheDocument();
   });
 
   it("shows Get Started and Explore CTAs for setup-required users", () => {

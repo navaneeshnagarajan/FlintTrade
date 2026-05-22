@@ -1,6 +1,7 @@
-import { ArrowRight, Bot, BookOpen, Boxes, Cable, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ArrowRight, Bot, Cable, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import type { CSSProperties } from 'react';
 
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
@@ -30,16 +31,73 @@ const docsCards = [
   { href: '/api-reference', label: 'API Reference', copy: 'OpenAlgo passthrough, FlintTrade endpoints, auth, and WebSocket contracts.' },
 ];
 
+const meteorTracks = [8, 19, 31, 44, 58, 71, 84];
+const wordmarkChars = 'FlintTrade'.split('');
+const impactDebris = [
+  ['-54px', '-38px'],
+  ['48px', '-52px'],
+  ['-44px', '34px'],
+  ['62px', '28px'],
+  ['-26px', '-62px'],
+  ['38px', '52px'],
+  ['-66px', '8px'],
+  ['24px', '-66px'],
+] as const;
+
 export default function HomePage() {
   const packages = listPackages().slice(0, 8);
 
   return (
     <main className="site-shell">
+      <div className="site-cinematic-backdrop" aria-hidden="true">
+        {meteorTracks.map((left, index) => (
+          <span
+            className="site-meteor"
+            key={left}
+            style={{
+              left: `${left}%`,
+              animationDelay: `${index * 0.68}s`,
+              animationDuration: `${4.1 + index * 0.36}s`,
+            }}
+          />
+        ))}
+      </div>
       <SiteHeader />
 
       <section className="section hero">
         <div className="hero-copy">
-          <h1>FlintTrade</h1>
+          <div className="hero-logo-stage" aria-hidden="true">
+            <span className="site-hero-fireball" />
+            <span className="site-impact-blast" />
+            <span className="site-shock-ring" />
+            <span className="site-shock-ring site-shock-ring-secondary" />
+            {impactDebris.map(([dx, dy], index) => (
+              <span
+                className="site-impact-debris"
+                key={`${dx}-${dy}`}
+                style={{
+                  '--dx': dx,
+                  '--dy': dy,
+                  animationDelay: `${1.34 + index * 0.025}s`,
+                } as CSSProperties}
+              />
+            ))}
+            <div className="hero-logo-mark hero-logo-reveal">
+              <Image src="/flinttrade/logo.svg" alt="" width={86} height={86} priority />
+            </div>
+          </div>
+          <h1 aria-label="FlintTrade">
+            {wordmarkChars.map((char, index) => (
+              <span
+                aria-hidden="true"
+                className="hero-title-char"
+                key={`${char}-${index}`}
+                style={{ animationDelay: `${1.95 + index * 0.055}s` }}
+              >
+                {char}
+              </span>
+            ))}
+          </h1>
           <p>
             An open-source modular trading platform for Indian F&O, commodities, and crypto. It layers a
             keyboard-driven terminal, analytics, automation, and AI workflows over self-hosted OpenAlgo.
@@ -57,10 +115,10 @@ export default function HomePage() {
         <div className="hero-visual" aria-label="FlintTrade terminal screenshots">
           <div className="screenshot-stack">
             <figure className="screen-frame main">
-              <Image src="/flinttrade/screenshots/04-trade.png" alt="FlintTrade trade canvas" fill priority sizes="(max-width: 900px) 100vw, 54vw" />
+              <Image src="/flinttrade/screenshots/01-welcome.png" alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
             </figure>
             <figure className="screen-frame side">
-              <Image src="/flinttrade/screenshots/08-ai.png" alt="AI centre panels" fill sizes="(max-width: 900px) 46vw, 22vw" />
+              <Image src="/flinttrade/screenshots/04-trade.png" alt="FlintTrade trade canvas" fill sizes="(max-width: 900px) 46vw, 22vw" />
             </figure>
             <figure className="screen-frame float">
               <Image src="/flinttrade/screenshots/06-lab.png" alt="Strategy lab" fill sizes="(max-width: 900px) 42vw, 20vw" />

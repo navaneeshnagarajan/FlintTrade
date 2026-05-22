@@ -155,6 +155,15 @@ describe("SpotlightTour", () => {
     expect(screen.getByTestId("tour-next")).toHaveTextContent("Finish");
   });
 
+  it("does not block app chrome clicks outside the tour card", () => {
+    render(
+      <SpotlightTour tourId="test-tour" steps={testSteps} />,
+    );
+
+    expect(screen.getByTestId("spotlight-tour")).toHaveClass("pointer-events-none");
+    expect(screen.getByTestId("spotlight-tour-card")).toHaveClass("pointer-events-auto");
+  });
+
   it("stores completion in localStorage on finish", () => {
     const handleComplete = vi.fn();
 

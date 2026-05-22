@@ -12,7 +12,7 @@
  * CSS vars consumed:
  *   --color-base     page background
  *   --color-card     panel / tab surface
- *   --color-hover    hover surface
+ *   --color-surface-hover / --color-card-hover    hover surface
  *   --color-border   separator / border
  *   --color-accent   active tab indicator
  *   --color-text     primary text
@@ -52,7 +52,7 @@ export function useDockviewTheme(): Record<string, string> {
   return useMemo(() => {
     const base = cssVar("--color-base", "#0a0a0f");
     const card = cssVar("--color-card", "#16161f");
-    const hover = cssVar("--color-hover", "#24242e");
+    const hover = cssVar("--color-surface-hover", cssVar("--color-card-hover", "#24242e"));
     const border = cssVar("--color-border", "#2a2a3a");
     const accent = cssVar("--color-accent", "#6366f1");
     const text = cssVar("--color-text", "#e4e4e7");
@@ -63,9 +63,18 @@ export function useDockviewTheme(): Record<string, string> {
       "--dv-background-color": base,
       "--dv-pane-background-color": card,
       "--dv-header-background-color": card,
+      "--dv-tabs-and-actions-container-background-color": card,
       "--dv-active-group-visible-panel-header-color": card,
       "--dv-active-group-hovered-panel-header-color": hover,
       "--dv-inactive-group-visible-panel-header-color": base,
+      "--dv-activegroup-visiblepanel-tab-background-color": card,
+      "--dv-activegroup-hiddenpanel-tab-background-color": base,
+      "--dv-inactivegroup-visiblepanel-tab-background-color": hover,
+      "--dv-inactivegroup-hiddenpanel-tab-background-color": base,
+      "--dv-activegroup-visiblepanel-tab-color": text,
+      "--dv-activegroup-hiddenpanel-tab-color": textSecondary,
+      "--dv-inactivegroup-visiblepanel-tab-color": textSecondary,
+      "--dv-inactivegroup-hiddenpanel-tab-color": textSecondary,
       "--dv-tab-divider-color": border,
       "--dv-separator-border": border,
       "--dv-group-view-background-color": base,

@@ -137,7 +137,7 @@ function ConnectionCard({ connected, practiceMode }: ConnectionCardProps) {
   return (
     <div
       className="flex items-center justify-between p-2.5 rounded-lg border border-border-default"
-      style={{ backgroundColor: "rgba(255,255,255,0.03)" }}
+      style={{ backgroundColor: "var(--glass-l2-bg, var(--color-surface-elevated))" }}
     >
       <div className="flex items-center gap-2">
         <div
@@ -329,7 +329,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         backdropFilter: "blur(24px)",
         WebkitBackdropFilter: "blur(24px)",
         backgroundColor: "color-mix(in srgb, var(--color-card) 85%, transparent)",
-        border: "1px solid rgba(255,255,255,0.08)",
+        border: "1px solid var(--glass-l2-border, var(--color-border-default))",
       }}
       variants={motionConfig.variants.scaleIn}
       initial="initial"
@@ -437,9 +437,9 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
                 className={cn(
                   "relative h-6 w-6 rounded-full transition-[transform,colors] duration-150",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
-                  "focus-visible:ring-white/40",
+                  "focus-visible:ring-accent/50",
                   activeThemeId === dot.id
-                    ? "ring-2 ring-offset-1 ring-white/50 scale-110"
+                    ? "ring-2 ring-offset-1 ring-accent/50 scale-110"
                     : "opacity-70 hover:opacity-100 hover:scale-105",
                 )}
                 style={{ backgroundColor: dot.color }}

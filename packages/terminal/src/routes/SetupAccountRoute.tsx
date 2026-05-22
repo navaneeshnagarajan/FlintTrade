@@ -36,16 +36,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
-  Moon,
-  Sun,
-  Monitor,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { LogoIcon } from "@/components/brand/Logo";
+import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { StepIndicator } from "@/routes/setup/StepIndicator";
 import { PersonaPicker, type Persona } from "@/routes/setup/PersonaStep";
 import { ConnectionStep, type ConnectionFormValues } from "@/routes/setup/ConnectionStep";
@@ -53,9 +50,7 @@ import { TradingStep, type TradingDefaultsFormValues } from "@/routes/setup/Trad
 import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
 import ModeSelectRoute from "@/routes/ModeSelectRoute";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
-import { useThemeStore } from "@/stores/themeStore";
 import { useAuthStore } from "@/stores/authStore";
-import type { ColorMode } from "@/lib/cinematicThemes";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -454,7 +449,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
 
       <div className="flex justify-between items-center mt-6">
         <Button variant="ghost" onClick={onBack} type="button">
-          ← Back
+          Back
         </Button>
         <Button type="submit" disabled={isLoading}>
           {isLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
@@ -771,7 +766,7 @@ function TotpDisplay({
 
       <div className="flex justify-between items-center mt-6">
         <Button variant="ghost" onClick={handleInternalBack} type="button">
-          ← Back
+          Back
         </Button>
         <Button onClick={onConfirmed}>
           I have saved my codes — Continue
@@ -801,7 +796,7 @@ function PersonaStepWrapper({ initialSelected, onComplete, onBack }: PersonaStep
       <PersonaPicker selected={selected} onSelect={setSelected} />
       <div className="flex justify-between items-center mt-6">
         <Button variant="ghost" onClick={onBack} type="button">
-          ← Back
+          Back
         </Button>
         <Button
           onClick={() => selected && onComplete(selected)}
@@ -833,8 +828,6 @@ const TOTAL_STEPS = STEP_LABELS.length; // 7
 export default function SetupAccountRoute() {
   const navigate = useNavigate();
   const setMode = useModeStore((s) => s.setMode);
-  const colorMode = useThemeStore((s) => s.mode);
-  const setColorMode = useThemeStore((s) => s.setMode);
 
   // ---------------------------------------------------------------------------
   // Load persisted progress. We trust localStorage as the source of truth for
@@ -990,62 +983,40 @@ export default function SetupAccountRoute() {
   const remaining = TOTAL_STEPS - currentStep - 1;
 
   return (
-    <main aria-label="Account setup" className="min-h-screen bg-surface-base flex flex-col items-center justify-center p-6 relative">
-
-      {/* Dark / light / system mode toggle — top-right */}
-      <div className="absolute top-4 right-4 flex gap-1 z-50">
-        {(["dark", "light", "system"] as const).map((m) => {
-          const Icon = m === "dark" ? Moon : m === "light" ? Sun : Monitor;
-          return (
-            <button
-              key={m}
-              onClick={() => setColorMode(m as ColorMode)}
-              aria-label={`${m} mode`}
-              className={`p-1.5 rounded transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none ${
-                colorMode === m ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary"
-              }`}
-            >
-              <Icon size={14} />
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="w-full max-w-lg space-y-8">
-
-        {/* Header */}
-        <div className="flex flex-col items-center gap-3 text-center">
-          <LogoIcon size={36} />
-          <div className="space-y-1">
-            <h1 className="font-heading font-bold text-xl text-text-primary">
-              Set up FlintTrade
-            </h1>
+    <PublicRouteShell
+      mainLabel="Account setup"
+      maxWidth="sm"
+      contentClassName="py-4 sm:py-5"
+      eyebrow="Account Setup"
+      title="Set up FlintTrade"
+      subtitle={`Step ${currentStep + 1} of ${TOTAL_STEPS} - ${STEP_LABELS[currentStep]}`}
+    >
+      <div className="space-y-4">
+        {currentStep > 0 && currentStep < 6 && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default/70 bg-surface-card/60 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur-xl">
             <p className="text-xs text-text-muted">
-              Step {currentStep + 1} of {TOTAL_STEPS} — {STEP_LABELS[currentStep]}
-            </p>
-            <p className="text-[11px] text-text-muted/80">
               {completedCount} of {TOTAL_STEPS} completed
-              {remaining > 0 ? ` · ${remaining} remaining` : " · last step"}
+              {remaining > 0 ? ` - ${remaining} remaining` : " - last step"}
             </p>
-            {currentStep > 0 && currentStep < 6 && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Start over from the beginning? Your in-progress entries (persona, broker, trading, risk) will be cleared. The account itself is kept on the server — you'll need to sign in to delete it.",
-                    )
-                  ) {
-                    handleStartOver();
-                  }
-                }}
-                className="text-[11px] text-text-muted/60 underline decoration-dotted underline-offset-4 hover:text-text-primary"
-              >
-                Start over
-              </button>
-            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="text-text-muted hover:text-text-primary"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Start over from the beginning? Your in-progress entries (persona, broker, trading, risk) will be cleared. The account itself is kept on the server - you will need to sign in to delete it.",
+                  )
+                ) {
+                  handleStartOver();
+                }
+              }}
+            >
+              Start over
+            </Button>
           </div>
-        </div>
+        )}
 
         {/* Step indicator */}
         <StepIndicator
@@ -1060,9 +1031,11 @@ export default function SetupAccountRoute() {
 
         {/* Step body — Mode step renders its own full layout */}
         {currentStep === 6 ? (
-          <ModeSelectRoute onSelect={handleModeSelect} />
+          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <ModeSelectRoute onSelect={handleModeSelect} />
+          </div>
         ) : (
-          <div className="rounded-xl border border-border-default bg-surface-card p-6">
+          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
             {currentStep === 0 && (
               <AccountSecurityStep
                 onComplete={handleAccountComplete}
@@ -1116,12 +1089,12 @@ export default function SetupAccountRoute() {
             own their own Back button. */}
         {currentStep >= 3 && currentStep <= 5 && (
           <div className="flex justify-start">
-            <Button variant="ghost" onClick={handleBack} type="button">
-              ← Back
+              <Button variant="ghost" onClick={handleBack} type="button">
+              Back
             </Button>
           </div>
         )}
       </div>
-    </main>
+    </PublicRouteShell>
   );
 }

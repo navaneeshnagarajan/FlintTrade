@@ -40,7 +40,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { X, ChevronRight, ChevronLeft } from "lucide-react";
 import { useHelpPrefs } from "@/hooks/useHelpPrefs";
-import { DURATION, EASE_ENTER, EASE_EXIT, EASE_MOVE } from "@/lib/motion";
+import { DURATION, EASE_ENTER, EASE_EXIT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import type { TourStep } from "@/lib/tourDefinitions";
 
@@ -117,6 +117,9 @@ function getTargetRect(target: string): TargetRect | null {
 // ---------------------------------------------------------------------------
 
 const CARD_OFFSET = 12;
+const CARD_WIDTH = 280;
+const CARD_HEIGHT_ESTIMATE = 160;
+const VIEWPORT_PADDING = 16;
 
 interface CardPosition {
   top?: number;
@@ -125,31 +128,46 @@ interface CardPosition {
   bottom?: number;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
 function computeCardPosition(
   rect: TargetRect,
   position: TourStep["position"] = "bottom",
 ): CardPosition {
+  const maxLeft = window.innerWidth - CARD_WIDTH - VIEWPORT_PADDING;
+  const maxTop = window.innerHeight - CARD_HEIGHT_ESTIMATE - VIEWPORT_PADDING;
+
   switch (position) {
     case "top":
       return {
-        bottom: window.innerHeight - rect.top + CARD_OFFSET,
-        left: rect.left,
+        top: clamp(
+          rect.top - CARD_HEIGHT_ESTIMATE - CARD_OFFSET,
+          VIEWPORT_PADDING,
+          maxTop,
+        ),
+        left: clamp(rect.left, VIEWPORT_PADDING, maxLeft),
       };
     case "left":
       return {
-        top: rect.top,
-        right: window.innerWidth - rect.left + CARD_OFFSET,
+        top: clamp(rect.top, VIEWPORT_PADDING, maxTop),
+        left: clamp(
+          rect.left - CARD_WIDTH - CARD_OFFSET,
+          VIEWPORT_PADDING,
+          maxLeft,
+        ),
       };
     case "right":
       return {
-        top: rect.top,
-        left: rect.right + CARD_OFFSET,
+        top: clamp(rect.top, VIEWPORT_PADDING, maxTop),
+        left: clamp(rect.right + CARD_OFFSET, VIEWPORT_PADDING, maxLeft),
       };
     case "bottom":
     default:
       return {
-        top: rect.bottom + CARD_OFFSET,
-        left: rect.left,
+        top: clamp(rect.bottom + CARD_OFFSET, VIEWPORT_PADDING, maxTop),
+        left: clamp(rect.left, VIEWPORT_PADDING, maxLeft),
       };
   }
 }
@@ -184,11 +202,6 @@ const cardVariants = {
     scale: 0.98,
     transition: { duration: DURATION.fast, ease: EASE_EXIT },
   },
-};
-
-const spotlightTransition = {
-  duration: DURATION.slow,
-  ease: EASE_MOVE,
 };
 
 // ---------------------------------------------------------------------------
@@ -296,7 +309,10 @@ export function SpotlightTour({
   const isLast = currentStep === steps.length - 1;
   const cardPosition = targetRect
     ? computeCardPosition(targetRect, step.position)
-    : { top: "50%", left: "50%" };
+    : {
+        top: Math.max(VIEWPORT_PADDING, window.innerHeight / 2 - CARD_HEIGHT_ESTIMATE / 2),
+        left: Math.max(VIEWPORT_PADDING, window.innerWidth / 2 - CARD_WIDTH / 2),
+      };
 
   return (
     <AnimatePresence>
@@ -304,8 +320,7 @@ export function SpotlightTour({
         <div
           role="dialog"
           aria-label={`Guided tour: ${tourId}`}
-          aria-modal="true"
-          className="fixed inset-0 z-[9998]"
+          className="fixed inset-0 z-[9998] pointer-events-none"
           data-testid="spotlight-tour"
         >
           {/* Dark overlay with spotlight cutout */}
@@ -326,20 +341,13 @@ export function SpotlightTour({
                 <mask id={`spotlight-mask-${tourId}`}>
                   <rect width="100%" height="100%" fill="white" />
                   {targetRect && (
-                    <motion.rect
+                    <rect
                       x={targetRect.left}
                       y={targetRect.top}
                       width={targetRect.width}
                       height={targetRect.height}
                       rx={8}
                       fill="black"
-                      animate={{
-                        x: targetRect.left,
-                        y: targetRect.top,
-                        width: targetRect.width,
-                        height: targetRect.height,
-                      }}
-                      transition={spotlightTransition}
                     />
                   )}
                 </mask>
@@ -364,8 +372,9 @@ export function SpotlightTour({
               animate="animate"
               exit="exit"
               onKeyDown={handleKeyDown}
+              data-testid="spotlight-tour-card"
               className={cn(
-                "absolute z-[9999]",
+                "absolute z-[9999] pointer-events-auto",
                 "w-[280px] rounded-xl p-4",
                 "border border-border-default/50",
                 "bg-surface-card/85",

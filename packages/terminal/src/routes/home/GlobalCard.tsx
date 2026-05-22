@@ -25,8 +25,8 @@ export function GlobalCard() {
     <BentoCard size="default" label="Global Indices" data-testid="global-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <Globe size={13} className="text-[#505068]" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+          <Globe size={13} className="text-text-muted" aria-hidden="true" />
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Global
           </p>
         </div>
@@ -43,15 +43,15 @@ export function GlobalCard() {
                   <span className="text-base leading-none" aria-hidden="true">
                     {idx.flag}
                   </span>
-                  <span className="text-xs text-[#9090b0]">{idx.name}</span>
+                  <span className="text-xs text-text-secondary">{idx.name}</span>
                 </div>
                 <div className="text-right">
-                  <span className="font-mono text-xs text-[#e8e8f0]">
+                  <span className="font-mono text-xs text-text-primary">
                     {idx.value.toLocaleString("en-US")}
                   </span>
                   <span
                     className="font-mono text-[10px] ml-1.5"
-                    style={{ color: positive ? "#22c55e" : "#ef4444" }}
+                    style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
                   >
                     {positive ? "+" : ""}{idx.change.toFixed(2)}%
                   </span>

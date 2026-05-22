@@ -81,14 +81,14 @@ function DockItemTooltip({ label, visible }: TooltipProps) {
       style={{ pointerEvents: "none" }}
       className="absolute left-[52px] top-1/2 -translate-y-1/2 z-50 ml-2
                  px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap
-                 text-[var(--color-text)] select-none"
+                 text-text-primary select-none"
       aria-hidden={!visible}
     >
       {/* Glass background */}
       <span
-        className="absolute inset-0 rounded-md border border-white/[0.08]"
+        className="absolute inset-0 rounded-md border border-glass-chrome"
         style={{
-          background: "rgba(20,20,32,0.88)",
+          background: "var(--glass-chrome-bg, rgba(20,20,32,0.88))",
           backdropFilter: "blur(8px)",
         }}
         aria-hidden="true"
@@ -171,8 +171,8 @@ function DockRouteItem({ item, isActive, showLabel, onNavigate }: DockRouteItemP
             ? "w-full px-3 py-2 justify-start"
             : "w-9 h-9 justify-center",
           isActive
-            ? "bg-white/[0.08] text-[var(--color-text)]"
-            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/[0.05]",
+            ? "bg-surface-active text-text-primary"
+            : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
         ].join(" ")}
       >
         <Icon
@@ -204,7 +204,7 @@ function DockSeparator({ id }: { id: string }) {
     <div
       data-testid={`sidebar-separator-${id}`}
       aria-hidden="true"
-      className="w-6 h-px mx-auto my-0.5 bg-white/[0.08]"
+      className="w-6 h-px mx-auto my-0.5 bg-border-default"
     />
   );
 }
@@ -355,10 +355,10 @@ export default function DockSidebar() {
       style={{
         width: springWidth,
         opacity,
-        background: "rgba(12,12,20,0.6)",
+        background: "var(--glass-chrome-bg, rgba(12,12,20,0.6))",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
-        borderRight: "1px solid rgba(255,255,255,0.04)",
+        borderRight: "1px solid var(--glass-chrome-border, rgba(255,255,255,0.04))",
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

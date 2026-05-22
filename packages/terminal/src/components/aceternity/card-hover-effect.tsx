@@ -14,7 +14,7 @@ export function HoverCard({ children, className }: HoverCardProps) {
   return (
     <div
       className={cn(
-        "relative group rounded-xl border border-border-default bg-surface-card overflow-hidden",
+        "relative group overflow-hidden rounded-xl border border-border-default/70 bg-surface-card/60 shadow-xl shadow-black/10 backdrop-blur-xl",
         className,
       )}
       onMouseMove={(e) => {

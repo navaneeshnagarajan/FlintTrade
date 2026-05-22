@@ -40,15 +40,7 @@ vi.mock("@/components/motion/PageTransition", () => ({
 }));
 
 vi.mock("@/components/welcome/DailyWelcome", () => ({
-  default: () => null,
-}));
-
-vi.mock("@/components/tour/InteractiveTour", () => ({
-  default: ({ onComplete }: { onComplete: () => void }) => (
-    <div data-testid="interactive-tour">
-      <button onClick={onComplete}>Skip Tour</button>
-    </div>
-  ),
+  default: () => <div data-testid="daily-welcome" />,
 }));
 
 vi.mock("@/components/NoConnectionOverlay", () => ({
@@ -77,6 +69,11 @@ vi.mock("@/hooks/useGlobalKeys", () => ({
 
 vi.mock("@/components/KeyboardShortcuts/KeyboardShortcutsDialog", () => ({
   default: () => null,
+}));
+
+vi.mock("@/components/CommandPalette/CommandPalette", () => ({
+  default: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="command-palette" /> : null,
 }));
 
 // useTradingStoreSync calls useFunds + usePositions internally; stub it so
@@ -140,6 +137,9 @@ function renderApp() {
 describe("AppLayout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
+      selector({ mode: "live" }),
+    );
     // Reset sessionStorage so DailyWelcome / small screen overlays don't interfere
     sessionStorage.clear();
     // Reset localStorage so tour state is fresh per test
@@ -175,36 +175,54 @@ describe("AppLayout", () => {
     expect(screen.getByText(/simulated/i)).toBeInTheDocument();
   });
 
-  // -------------------------------------------------------------------------
-  // Interactive tour tests
-  // -------------------------------------------------------------------------
+  it("does not show the daily welcome card in explore mode", () => {
+    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
+      selector({ mode: "explore" }),
+    );
 
-  it("shows InteractiveTour on /trade when tour has not been completed", () => {
-    // localStorage is already clear from beforeEach — tour has not been seen
     renderApp();
 
-    expect(screen.getByTestId("interactive-tour")).toBeInTheDocument();
+    expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
   });
 
-  it("does not show InteractiveTour when tour has already been completed", () => {
-    localStorage.setItem("flinttrade:tourComplete", "true");
-
+  it("does not render the removed legacy dot tour overlay", () => {
     renderApp();
 
-    expect(screen.queryByTestId("interactive-tour")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /interactive tour/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /skip tour/i })).not.toBeInTheDocument();
   });
 
-  it("hides InteractiveTour after onComplete is called", () => {
+  it("opens the command palette from the top-bar custom event", () => {
     renderApp();
 
-    expect(screen.getByTestId("interactive-tour")).toBeInTheDocument();
+    expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
 
-    // Simulate tour completion via the Skip button exposed by the mock.
-    // Wrapped in act() because the click triggers a React state update (setShowTour).
     act(() => {
-      screen.getByRole("button", { name: /skip tour/i }).click();
+      window.dispatchEvent(new CustomEvent("flinttrade:open-command-palette"));
     });
 
-    expect(screen.queryByTestId("interactive-tour")).not.toBeInTheDocument();
+    expect(screen.getByTestId("command-palette")).toBeInTheDocument();
+  });
+
+  it("navigates when the global navigation event uses a path string", () => {
+    renderApp();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/ai" }));
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith("/ai");
+  });
+
+  it("navigates when the global navigation event uses a structured path detail", () => {
+    renderApp();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:navigate", { detail: { path: "/lab" } }),
+      );
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith("/lab");
   });
 });

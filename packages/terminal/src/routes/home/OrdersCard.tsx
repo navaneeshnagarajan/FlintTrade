@@ -14,19 +14,19 @@ export function OrdersCard() {
     <BentoCard size="default" label="Recent Orders" data-testid="orders-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <ClipboardList size={13} className="text-[#505068]" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+          <ClipboardList size={13} className="text-text-muted" aria-hidden="true" />
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Recent Orders
           </p>
         </div>
 
         {isLoading ? (
           <div className="flex-1 flex items-center justify-center">
-            <Loader2 size={16} className="animate-spin text-[#505068]" aria-label="Loading orders" />
+            <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading orders" />
           </div>
         ) : recentOrders.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
-            <p className="text-xs text-[#505068]">No recent orders</p>
+            <p className="text-xs text-text-muted">No recent orders</p>
           </div>
         ) : (
           <div className="flex-1 space-y-2">
@@ -44,7 +44,7 @@ export function OrdersCard() {
                         background: isBuy
                           ? "rgba(34,197,94,0.12)"
                           : "rgba(239,68,68,0.12)",
-                        color: isBuy ? "#22c55e" : "#ef4444",
+                        color: isBuy ? "var(--color-bullish-text)" : "var(--color-bearish-text)",
                         border: "1px solid",
                         borderColor: isBuy
                           ? "rgba(34,197,94,0.25)"
@@ -53,12 +53,12 @@ export function OrdersCard() {
                     >
                       {order.action}
                     </span>
-                    <span className="text-xs text-[#e8e8f0] truncate">
+                    <span className="text-xs text-text-primary truncate">
                       {order.symbol}
                     </span>
                   </div>
                   <div className="text-right shrink-0 ml-2">
-                    <p className="font-mono text-xs text-[#9090b0]">
+                    <p className="font-mono text-xs text-text-secondary">
                       {order.quantity} × ₹{order.price.toLocaleString("en-IN")}
                     </p>
                     <p
@@ -66,10 +66,10 @@ export function OrdersCard() {
                       style={{
                         color:
                           order.status === "COMPLETE"
-                            ? "#22c55e"
+                            ? "var(--color-bullish-text)"
                             : order.status === "REJECTED"
-                            ? "#ef4444"
-                            : "#f59e0b",
+                            ? "var(--color-bearish-text)"
+                            : "var(--color-warning-text)",
                       }}
                     >
                       {order.status}

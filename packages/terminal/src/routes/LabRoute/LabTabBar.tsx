@@ -13,7 +13,7 @@ export function LabTabBar({ active, onChange, tabs = TABS }: LabTabBarProps) {
     <div
       role="tablist"
       aria-label="Strategy Lab sections"
-      className="flex items-center gap-1 border-b border-border-default bg-surface-card px-6"
+      className="flex items-center justify-center gap-1 border-b border-border-default/70 bg-surface-card/60 px-6 backdrop-blur-xl"
     >
       {tabs.map((tab) => {
         const Icon = tab.icon;

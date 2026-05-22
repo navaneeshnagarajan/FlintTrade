@@ -6,6 +6,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- Removed `.github/FUNDING.yml` until FlintTrade has live sponsorship accounts to link to.
+
 ### OpenAlgo v2.0.1.1 parity sync (2026-05-21)
 
 Refresh of the OpenAlgo integration from upstream `08c2a553` (post-v2.0.0.5)
@@ -118,7 +122,6 @@ Reshapes the contributor-facing surface of the repository now that it is public 
 
 - `.github/ISSUE_TEMPLATE/bug_report.md`, `feature_request.md`, `question.md`, `config.yml` — three structured templates plus a config that disables blank issues and redirects security to private Advisories.
 - `.github/PULL_REQUEST_TEMPLATE.md` — checklist-style template with summary, change type, persona affected, testing, screenshots, and reviewer-friendly checklist.
-- `.github/FUNDING.yml` — multi-platform sponsorship (GitHub Sponsors, Buy Me a Coffee, Patreon, custom).
 - `scripts/setup-agent-context.sh` — idempotent scaffolder that copies `templates/agent-context/*.template` to `.local/agent-context/` so contributors using a CLAUDE-aware or AGENTS-aware coding agent can populate their machine-local context after a fresh clone.
 - `scripts/generate-package-readmes.py` — generates the 16 per-package READMEs from a YAML data file.
 - `templates/agent-context/` — tracked source for the 35 previously-tracked agent-internal context files.

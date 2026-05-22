@@ -231,11 +231,11 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("avatar-btn")).toBeInTheDocument();
   });
 
-  it("has correct glass background style", () => {
+  it("uses adaptive glass chrome tokens for the background", () => {
     renderTopBarV2();
     const bar = screen.getByTestId("topbar-v2");
-    // background is applied via inline style
-    expect(bar).toHaveStyle({ background: "rgba(12, 12, 20, 0.85)" });
+    expect(bar.getAttribute("style")).toContain("--glass-chrome-bg");
+    expect(bar.getAttribute("style")).toContain("--glass-chrome-border");
   });
 
   it("has banner role for accessibility", () => {

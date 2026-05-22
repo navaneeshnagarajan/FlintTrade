@@ -339,19 +339,40 @@ describe("applyTheme CSS properties", () => {
     expect(accent).toBe("#22c55e");
   });
 
-  it("sets --color-profit to fixed #22c55e regardless of theme", () => {
+  it("bridges shadcn accent tokens to the active cinematic accent", () => {
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "light" });
+    useThemeStore.getState().applyTheme();
+
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe(
+      document.documentElement.style.getPropertyValue("--primary"),
+    );
+  });
+
+  it("sets --color-profit to fixed #22c55e in dark mode regardless of theme", () => {
+    useThemeStore.setState({ mode: "dark" });
     useThemeStore.getState().setTheme("midnight");
     expect(document.documentElement.style.getPropertyValue("--color-profit")).toBe("#22c55e");
   });
 
-  it("sets --color-loss to fixed #ef4444 regardless of theme", () => {
+  it("sets --color-loss to fixed #ef4444 in dark mode regardless of theme", () => {
+    useThemeStore.setState({ mode: "dark" });
     useThemeStore.getState().setTheme("ember");
     expect(document.documentElement.style.getPropertyValue("--color-loss")).toBe("#ef4444");
   });
 
-  it("sets --color-warning to fixed #f59e0b regardless of theme", () => {
+  it("sets --color-warning to fixed #f59e0b in dark mode regardless of theme", () => {
+    useThemeStore.setState({ mode: "dark" });
     useThemeStore.getState().setTheme("midnight");
     expect(document.documentElement.style.getPropertyValue("--color-warning")).toBe("#f59e0b");
+  });
+
+  it("sets trading text tokens to readable values in light mode", () => {
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "light" });
+    useThemeStore.getState().applyTheme();
+
+    expect(document.documentElement.style.getPropertyValue("--color-profit")).toBe("#166534");
+    expect(document.documentElement.style.getPropertyValue("--color-loss")).toBe("#991b1b");
+    expect(document.documentElement.style.getPropertyValue("--color-warning")).toBe("#92400e");
   });
 
   it("sets --particle-primary", () => {
@@ -360,6 +381,16 @@ describe("applyTheme CSS properties", () => {
 
   it("sets --glass-tint", () => {
     expect(document.documentElement.style.getPropertyValue("--glass-tint")).toBeTruthy();
+  });
+
+  it("sets adaptive glass surface tokens in light mode", () => {
+    useThemeStore.setState({ activeThemeId: "graphite", mode: "light", glass: true });
+    useThemeStore.getState().applyTheme();
+
+    expect(document.documentElement.style.getPropertyValue("--glass-l1-bg")).toContain("255,255,255");
+    expect(document.documentElement.style.getPropertyValue("--glass-l1-border")).toContain("15,23,42");
+    expect(document.documentElement.style.getPropertyValue("--glass-chrome-bg")).toContain("255,255,255");
+    expect(document.documentElement.style.getPropertyValue("--glass-chrome-border")).toContain("15,23,42");
   });
 
   it("sets --glow-color", () => {

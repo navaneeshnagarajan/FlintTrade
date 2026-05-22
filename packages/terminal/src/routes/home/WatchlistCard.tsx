@@ -21,16 +21,16 @@ interface WatchlistRow {
 function WatchlistRow({ label, value, change }: WatchlistRow) {
   const positive = (change ?? 0) >= 0;
   return (
-    <div className="flex items-center justify-between py-1.5 px-2 rounded-[8px] hover:bg-[rgba(255,255,255,0.03)] transition-colors">
-      <span className="text-xs font-medium text-[#9090b0]">{label}</span>
+    <div className="flex items-center justify-between py-1.5 px-2 rounded-[8px] hover:bg-surface-hover transition-colors">
+      <span className="text-xs font-medium text-text-secondary">{label}</span>
       <div className="flex items-center gap-2">
-        <span className="font-mono text-xs text-[#e8e8f0]">
+        <span className="font-mono text-xs text-text-primary">
           {value != null ? value.toLocaleString("en-IN") : "—"}
         </span>
         {change != null && (
           <span
             className="font-mono text-[10px]"
-            style={{ color: positive ? "#22c55e" : "#ef4444" }}
+            style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
           >
             {positive ? "+" : ""}{change.toFixed(2)}%
           </span>
@@ -58,7 +58,7 @@ export function WatchlistCard() {
   return (
     <BentoCard size="default" label="Watchlist" data-testid="watchlist-card">
       <div className="p-4 h-full flex flex-col gap-2">
-        <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+        <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
           Watchlist
         </p>
         <div className="flex-1 space-y-0.5">

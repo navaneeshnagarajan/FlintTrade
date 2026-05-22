@@ -1,4 +1,4 @@
-import { get, post } from "./ftApi.helpers";
+import { get, isDemoAuthSession, post } from "./ftApi.helpers";
 
 export interface FundamentalSearchResult {
   name: string;
@@ -277,7 +277,21 @@ export const getSectorConstituents = (
 export const getLotSize = (
   symbol: string,
   exchange: string = "NFO",
-): Promise<LotSizeResponse> =>
-  get<LotSizeResponse>(
+): Promise<LotSizeResponse> => {
+  if (isDemoAuthSession()) {
+    const fallbackLotSize = symbol.toUpperCase().includes("BANK")
+      ? 30
+      : symbol.toUpperCase().includes("FIN")
+        ? 40
+        : 75;
+    return Promise.resolve({
+      symbol,
+      exchange,
+      lot_size: fallbackLotSize,
+    });
+  }
+
+  return get<LotSizeResponse>(
     `screener/lot-size?symbol=${encodeURIComponent(symbol)}&exchange=${encodeURIComponent(exchange)}`,
   );
+};

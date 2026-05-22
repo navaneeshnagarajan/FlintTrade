@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { getDepth } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -176,7 +177,25 @@ const KNOWN_EXCHANGES = [
   "NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX",
 ];
 
+const SAMPLE_DEPTH: NormalisedDepth = {
+  bids: [
+    { price: 25062.4, qty: 14850, orders: 46 },
+    { price: 25061.9, qty: 11275, orders: 39 },
+    { price: 25061.35, qty: 9150, orders: 31 },
+    { price: 25060.8, qty: 7625, orders: 26 },
+    { price: 25060.25, qty: 5840, orders: 19 },
+  ],
+  asks: [
+    { price: 25063.15, qty: 13200, orders: 42 },
+    { price: 25063.7, qty: 10450, orders: 34 },
+    { price: 25064.25, qty: 8860, orders: 29 },
+    { price: 25064.8, qty: 7210, orders: 23 },
+    { price: 25065.35, qty: 5685, orders: 18 },
+  ],
+};
+
 function DepthWidget() {
+  const isExplore = useModeStore((s) => s.mode === "explore");
   const [symbol,   setSymbol]   = useState("NIFTY");
   const [exchange, setExchange] = useState("NSE");
   const [depth,    setDepth]    = useState<NormalisedDepth | null>(null);
@@ -189,6 +208,13 @@ function DepthWidget() {
   // fetch depth
   const fetchDepth = useCallback(async () => {
     if (!symbol || !exchange) return;
+    if (isExplore) {
+      setLoading(false);
+      setError(null);
+      setDepth(SAMPLE_DEPTH);
+      setLastTime(new Date());
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -200,7 +226,7 @@ function DepthWidget() {
     } finally {
       setLoading(false);
     }
-  }, [symbol, exchange]);
+  }, [symbol, exchange, isExplore]);
 
   // auto-refresh
   useEffect(() => {
@@ -419,7 +445,7 @@ function DepthWidget() {
             </div>
 
             <div className="text-text-muted text-center">
-              {isMarketHours() ? "Live · 2s" : "Closed · 30s"}
+              {isExplore ? "Explore · sample" : isMarketHours() ? "Live · 2s" : "Closed · 30s"}
             </div>
 
             <div className="flex items-center gap-1">

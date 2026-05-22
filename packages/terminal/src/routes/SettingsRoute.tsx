@@ -1,10 +1,11 @@
 /**
- * SettingsRoute — standalone /settings full-page.
+ * SettingsRoute — /settings app route.
  *
  * Accessible from ALL routes via the TOOLS dropdown, gear icon, or Ctrl+,.
  * Shares section components and Zustand stores with QuickAccessPanel.
  *
- * Layout: slim header + left sidebar nav + scrollable content area.
+ * Layout: slim header + left sidebar nav + scrollable content area inside
+ * the shared app chrome.
  */
 
 import { useState, useCallback, useEffect, useRef, type JSX } from "react";
@@ -126,8 +127,8 @@ export default function SettingsRoute() {
   }
 
   return (
-    <CinematicLayout mode="focused" className="fixed inset-0">
-    <main
+    <CinematicLayout mode="focused" className="h-full">
+    <section
       aria-label="Settings"
       className="h-full flex flex-col overflow-hidden animate-fade-in"
     >
@@ -137,7 +138,7 @@ export default function SettingsRoute() {
         text="Go to the API section to connect FlintTrade to your OpenAlgo instance and start live trading."
       />
       {/* Slim header */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-glass-l1 bg-[rgba(12,12,20,0.85)] backdrop-blur-md shrink-0">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-glass-chrome bg-glass-chrome backdrop-blur-md shrink-0">
         <button
           type="button"
           onClick={() => navigate(-1)}
@@ -217,7 +218,7 @@ export default function SettingsRoute() {
         <div className="w-1.5 h-1.5 rounded-full bg-profit" />
         <span className="text-xs text-text-muted">Changes saved automatically</span>
       </div>
-    </main>
+    </section>
     </CinematicLayout>
   );
 }

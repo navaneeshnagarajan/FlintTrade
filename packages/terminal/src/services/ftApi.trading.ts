@@ -1,4 +1,4 @@
-import { get, post, del } from "./ftApi.helpers";
+import { get, isDemoAuthSession, post, del } from "./ftApi.helpers";
 
 export interface SafetyConfigRaw {
   l1_order: { price_deviation_pct: number; check_market_hours: boolean; qty_limits: Record<string, number> };
@@ -101,6 +101,9 @@ function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
 }
 
 export const getSafetyConfig = async (): Promise<SafetyConfig> => {
+  if (isDemoAuthSession()) {
+    return flattenSafetyConfig({} as SafetyConfigRaw);
+  }
   const raw = await get<SafetyConfigRaw>("safety/config");
   return flattenSafetyConfig(raw);
 };

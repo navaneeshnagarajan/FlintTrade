@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Cpu, HardDrive, MemoryStick, Clock, Network, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SystemMetricsResponseSchema } from "@/lib/schemas/ftApi";
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Types (matches the backend schema from core/monitoring.py)
@@ -80,6 +81,11 @@ async function fetchSystemMetrics(): Promise<SystemMetrics> {
     load_avg_15m: 0,
     collected_at: new Date().toISOString(),
   };
+}
+
+function isDemoAuthSession(): boolean {
+  const token = useAuthStore.getState().token;
+  return token === "demo-user" || token === "dev-bypass";
 }
 
 // ---------------------------------------------------------------------------
@@ -187,17 +193,29 @@ function StatCard({ label, value, sub, icon }: StatCardProps) {
 // ---------------------------------------------------------------------------
 
 export function SystemMetricsPanel() {
+  const demoAdmin = isDemoAuthSession();
   const { data, isLoading, isError, isFetching, dataUpdatedAt, refetch } = useQuery<SystemMetrics>({
     queryKey: ["adminSystemMetrics"],
     queryFn: fetchSystemMetrics,
     refetchInterval: REFETCH_INTERVAL_MS,
     staleTime: 25_000,
     retry: 2,
+    enabled: !demoAdmin,
   });
 
   const lastUpdated = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : null;
+
+  if (demoAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 gap-3 text-sm text-text-muted">
+        <AlertCircle className="w-5 h-5 text-amber-400" />
+        <p>System metrics require a live admin session.</p>
+        <p className="text-xs">Explore mode keeps backend admin endpoints offline.</p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

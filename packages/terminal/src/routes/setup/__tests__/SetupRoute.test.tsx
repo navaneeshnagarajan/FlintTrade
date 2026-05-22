@@ -17,6 +17,9 @@ const mockNavigate = vi.fn();
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
+  Link: ({ children, to, ...props }: Record<string, unknown>) => (
+    <a href={String(to)} {...props}>{children as React.ReactNode}</a>
+  ),
 }));
 
 // framer-motion — render children immediately without animation

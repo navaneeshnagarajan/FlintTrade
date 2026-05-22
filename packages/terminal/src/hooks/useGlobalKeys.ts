@@ -39,7 +39,7 @@ export default function useGlobalKeys({
       if ((document.activeElement as HTMLElement)?.isContentEditable) return;
 
       // Ctrl+K -- Command palette
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         onCommandPalette?.();
         return;

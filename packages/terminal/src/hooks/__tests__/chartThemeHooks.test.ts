@@ -296,6 +296,14 @@ describe("useDockviewTheme", () => {
     const { result } = renderHook(() => useDockviewTheme());
     expect(result.current["--dv-separator-border"]).toBeTruthy();
   });
+
+  it("sets Dockview tab variables used by the bundled light and dark themes", () => {
+    const { result } = renderHook(() => useDockviewTheme());
+
+    expect(result.current["--dv-tabs-and-actions-container-background-color"]).toBe("#16161f");
+    expect(result.current["--dv-activegroup-visiblepanel-tab-background-color"]).toBe("#16161f");
+    expect(result.current["--dv-activegroup-visiblepanel-tab-color"]).toBe("#e4e4e7");
+  });
 });
 
 // ---------------------------------------------------------------------------

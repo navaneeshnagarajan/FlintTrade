@@ -235,7 +235,7 @@ const HELP_PREF_DETAILS = [
   {
     key: "spotlightTours" as const,
     label: "Guided Tours",
-    description: "Offers a step-by-step tour when you visit a module for the first time. Tours can be replayed from Tour Management below.",
+    description: "Enables step-by-step module tours. Keep this off for an uninterrupted workspace, or turn it on when you want onboarding guidance.",
   },
   {
     key: "aiTutor" as const,

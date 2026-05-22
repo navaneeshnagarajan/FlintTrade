@@ -45,6 +45,7 @@ const AutomateRoute = lazy(() => import("./routes/AutomateRoute"));
 const AIRoute = lazy(() => import("./routes/AIRoute"));
 const SettingsRoute = lazy(() => import("./routes/SettingsRoute"));
 const DittoRoute = lazy(() => import("./routes/DittoRoute"));
+const AdminRoute = lazy(() => import("./routes/AdminRoute"));
 const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
 
 function Loading() {
@@ -99,7 +100,6 @@ const router = createBrowserRouter([
       { path: "explore", element: <RouteErrorBoundary routeName="Explore"><Suspense fallback={<Loading />}><ExploreRoute /></Suspense></RouteErrorBoundary> },
       { path: "setup", element: <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
       { path: "setup-account", element: <RouteErrorBoundary routeName="SetupAccount"><Suspense fallback={<Loading />}><SetupAccountRoute /></Suspense></RouteErrorBoundary> },
-      { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {
@@ -114,13 +114,12 @@ const router = createBrowserRouter([
           { path: "automate", element: <ProtectedRoute><RouteErrorBoundary routeName="Automate"><Suspense fallback={<Loading />}><AutomateRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI"><Suspense fallback={<Loading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Ditto"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          ...(import.meta.env.DEV
+            ? [{ path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<Loading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> }]
+            : []),
         ],
       },
-
-      /* Admin dashboard — DEV only */
-      ...(import.meta.env.DEV
-        ? [{ path: "admin", lazy: () => import("./routes/AdminRoute").then((m) => ({ Component: m.default })) }]
-        : []),
 
       /* 404 catch-all — must be last */
       { path: "*", element: <Suspense fallback={<Loading />}><NotFoundRoute /></Suspense> },

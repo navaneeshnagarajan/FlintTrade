@@ -18,12 +18,12 @@ export function PositionsCard() {
     <BentoCard size="tall" label="Open Positions" data-testid="positions-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <p className="text-[10px] font-medium uppercase tracking-widest text-[#505068]">
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Positions
           </p>
           <span
             className="font-mono text-sm font-semibold"
-            style={{ color: totalPnlPositive ? "#22c55e" : "#ef4444" }}
+            style={{ color: totalPnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
           >
             {totalPnlPositive ? "+" : ""}
             {totalPnl.toLocaleString("en-IN", {
@@ -36,11 +36,11 @@ export function PositionsCard() {
 
         {isLoading ? (
           <div className="flex-1 flex items-center justify-center">
-            <Loader2 size={16} className="animate-spin text-[#505068]" aria-label="Loading positions" />
+            <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading positions" />
           </div>
         ) : openPositions.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
-            <p className="text-xs text-[#505068]">No open positions</p>
+            <p className="text-xs text-text-muted">No open positions</p>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto space-y-1" style={{ scrollbarWidth: "none" }}>
@@ -50,18 +50,18 @@ export function PositionsCard() {
                 <div
                   key={`${pos.symbol}-${pos.exchange}`}
                   className="flex items-center justify-between py-1.5 px-2 rounded-[8px]"
-                  style={{ background: "var(--glass-l2-bg, rgba(255,255,255,0.03))" }}
+                  style={{ background: "var(--glass-l2-bg, var(--color-surface-elevated))" }}
                 >
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-[#e8e8f0] truncate">{pos.symbol}</p>
-                    <p className="text-[10px] text-[#505068]">
+                    <p className="text-xs font-medium text-text-primary truncate">{pos.symbol}</p>
+                    <p className="text-[10px] text-text-muted">
                       {pos.quantity > 0 ? "LONG" : "SHORT"} · {Math.abs(pos.quantity)}
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <p
                       className="font-mono text-xs font-semibold"
-                      style={{ color: pnlPositive ? "#22c55e" : "#ef4444" }}
+                      style={{ color: pnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
                     >
                       {pnlPositive ? "+" : ""}
                       {pos.pnl.toLocaleString("en-IN", {
@@ -72,7 +72,7 @@ export function PositionsCard() {
                     </p>
                     <p
                       className="font-mono text-[10px]"
-                      style={{ color: pnlPositive ? "#22c55e" : "#ef4444" }}
+                      style={{ color: pnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
                     >
                       {pnlPositive ? "+" : ""}{pos.pnlPercent.toFixed(2)}%
                     </p>

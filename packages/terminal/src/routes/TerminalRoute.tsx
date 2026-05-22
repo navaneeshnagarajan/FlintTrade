@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } from "react";
-import CommandPalette from "@/components/CommandPalette/CommandPalette";
 import { useNavigate } from "react-router-dom";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
@@ -11,6 +10,7 @@ import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useModeStore } from "@/stores/modeStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import PresetPicker from "@/chrome/PresetPicker";
@@ -38,6 +38,7 @@ import { TradeBottomPanel } from "./trade/TradeBottomPanel";
  * positions via the backend SafetySystem (Layer 5).
  */
 function KillSwitchPill() {
+  const mode = useModeStore((s) => s.mode);
   const totalPnl = useTradingStore((s) => s.totalPnl);
   // mtmStoploss is stored as a positive rupee value, e.g. 5000 = ₹5,000 daily loss limit
   const mtmStoploss = useSettingsStore((s) => s.riskLimits.mtmStoploss);
@@ -48,6 +49,7 @@ function KillSwitchPill() {
   const threshold = mtmStoploss > 0 ? mtmStoploss * 0.5 : Infinity;
   const isNearLimit = totalPnl < 0 && Math.abs(totalPnl) >= threshold;
 
+  if (mode === "explore") return null;
   if (!isNearLimit) return null;
 
   const isAtLimit = mtmStoploss > 0 && Math.abs(totalPnl) >= mtmStoploss;
@@ -76,30 +78,34 @@ function KillSwitchPill() {
       aria-live="assertive"
       aria-atomic="true"
       aria-label={`Daily loss alert: ₹${Math.abs(totalPnl).toFixed(0)}`}
-      className="absolute bottom-4 left-4 z-40 bg-surface-card border border-loss/30 rounded-lg p-3 backdrop-blur-sm shadow-lg max-w-45"
+      className="shrink-0 z-40 border-t border-loss/30 bg-loss/10 px-4 py-2 backdrop-blur-sm"
     >
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <ShieldOff size={13} className="text-loss shrink-0" aria-hidden="true" />
-        <span className="text-xs text-loss font-medium font-mono">
-          -₹{Math.abs(totalPnl).toFixed(0)}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <ShieldOff size={13} className="text-loss shrink-0" aria-hidden="true" />
+            <span className="text-xs text-loss font-medium font-mono">
+              -₹{Math.abs(totalPnl).toFixed(0)}
+            </span>
+          </div>
+          <span className="text-xs text-text-secondary">
+            {isAtLimit
+              ? "MTM limit reached"
+              : `${((Math.abs(totalPnl) / mtmStoploss) * 100).toFixed(0)}% of daily limit`}
+          </span>
+        </div>
+        <Button
+          size="sm"
+          variant="destructive"
+          className="h-7 text-xs gap-1 shrink-0"
+          onClick={handleKillSwitch}
+          disabled={isTriggering || triggered}
+          aria-label="Activate emergency kill switch to cancel all orders and close all positions"
+        >
+          <ShieldOff size={11} aria-hidden="true" />
+          {triggered ? "Kill Active" : isTriggering ? "Activating..." : "Kill Switch"}
+        </Button>
       </div>
-      <div className="text-xxs text-text-muted mb-2 leading-tight">
-        {isAtLimit
-          ? "MTM limit reached"
-          : `${((Math.abs(totalPnl) / mtmStoploss) * 100).toFixed(0)}% of daily limit`}
-      </div>
-      <Button
-        size="sm"
-        variant="destructive"
-        className="w-full h-7 text-xs gap-1"
-        onClick={handleKillSwitch}
-        disabled={isTriggering || triggered}
-        aria-label="Activate emergency kill switch to cancel all orders and close all positions"
-      >
-        <ShieldOff size={11} aria-hidden="true" />
-        {triggered ? "Kill Active" : isTriggering ? "Activating..." : "Kill Switch"}
-      </Button>
     </div>
   );
 }
@@ -174,7 +180,6 @@ const tools: Omit<Record<ToolId, React.LazyExoticComponent<React.ComponentType<{
 export default function TerminalRoute() {
   const navigate = useNavigate();
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
-  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [panelCount, setPanelCount] = useState<number | null>(null);
   // d1/d2/d4 — subscriptions created inside onDockviewReady; cleaned up on unmount.
   const readyDisposablesRef = useRef<Array<{ dispose(): void }>>([]);
@@ -219,14 +224,6 @@ export default function TerminalRoute() {
   const presetPickerOpen = useLayoutStore((s) => s.presetPickerOpen);
   const setPresetPickerOpen = useLayoutStore((s) => s.setPresetPickerOpen);
 
-  const toggleCommandPalette = useCallback(() => {
-    setCmdPaletteOpen((prev) => !prev);
-  }, []);
-
-  const openCommandPalette = useCallback(() => {
-    setCmdPaletteOpen(true);
-  }, []);
-
   // Global keyboard shortcuts (Esc, Ctrl+K, X=exit all, C=cancel all)
   useGlobalKeys({
     onEscape: useCallback(() => {
@@ -234,15 +231,7 @@ export default function TerminalRoute() {
       if (presetPickerOpen) { setPresetPickerOpen(false); return; }
       if (widgetPickerOpen) { setWidgetPickerOpen(false); return; }
     }, [activeTool, presetPickerOpen, widgetPickerOpen, setPresetPickerOpen, setWidgetPickerOpen]),
-    onCommandPalette: toggleCommandPalette,
   });
-
-  useEffect(() => {
-    window.addEventListener("flinttrade:open-command-palette", openCommandPalette);
-    return () => {
-      window.removeEventListener("flinttrade:open-command-palette", openCommandPalette);
-    };
-  }, [openCommandPalette]);
 
   // ---------------------------------------------------------------------------
   // ARIA injection for Dockview panels (Issue #46)
@@ -564,14 +553,9 @@ export default function TerminalRoute() {
         />
       )}
 
-      {/* Kill switch pill — floats over the canvas when daily loss threshold is reached */}
+      {/* Kill switch bar — reserves layout space when daily loss threshold is reached */}
       <KillSwitchPill />
 
-      {/* Command palette — Ctrl+K */}
-      <CommandPalette
-        isOpen={cmdPaletteOpen}
-        onClose={() => setCmdPaletteOpen(false)}
-      />
     </div>
     </CinematicLayout>
   );

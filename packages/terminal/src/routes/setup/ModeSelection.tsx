@@ -4,6 +4,7 @@
 
 import { Zap, BookOpen, Settings2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +25,7 @@ function ModeCard({ title, subtitle, description, badge, icon, onClick }: ModeCa
     <Card
       role="button"
       tabIndex={0}
-      className="bg-surface-card border border-border-default rounded-lg p-6 shadow-sm cursor-pointer hover:border-accent/40 hover:bg-surface-hover transition-colors duration-200 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="group cursor-pointer rounded-xl border border-border-default/70 bg-surface-card/60 p-4 shadow-xl shadow-black/10 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/45 hover:bg-surface-card/75 hover:shadow-[0_0_36px_rgba(34,197,94,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -34,11 +35,11 @@ function ModeCard({ title, subtitle, description, badge, icon, onClick }: ModeCa
       }}
     >
       <CardHeader className="pb-3">
-        <div className="flex items-start justify-between mb-2">
-          <div className="p-2 rounded-lg bg-accent/15 text-accent group-hover:bg-accent/20 transition-colors">
+        <div className="mb-2 flex items-start justify-between">
+          <div className="rounded-lg bg-accent/15 p-2 text-accent transition-colors group-hover:bg-accent/20">
             {icon}
           </div>
-          <Badge variant="outline" className="text-xxs text-text-muted bg-surface-elevated px-2 py-0.5 rounded border-border-default">
+          <Badge variant="outline" className="rounded-full border-border-default/70 bg-surface-elevated/70 px-2 py-0.5 text-xxs text-text-muted">
             {badge}
           </Badge>
         </div>
@@ -60,24 +61,18 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
   const navigate = useNavigate();
 
   return (
-    <main aria-label="Setup wizard" className="min-h-screen bg-surface-base flex items-center justify-center p-4">
-      <div className="max-w-3xl w-full space-y-8">
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/40 bg-accent/15 text-accent text-xxs font-medium mb-2">
-            First Time Setup
-          </div>
-          <h1 className="font-heading font-bold text-2xl text-text-primary tracking-tight">
-            Welcome to FlintTrade
-          </h1>
-          <p className="text-sm text-text-secondary max-w-md mx-auto">
-            Connect to OpenAlgo and configure your workspace. Takes under two minutes.
-          </p>
-        </div>
-
+    <PublicRouteShell
+      mainLabel="Setup wizard"
+      maxWidth="lg"
+      eyebrow="First Time Setup"
+      title="Welcome to FlintTrade"
+      subtitle="Connect to OpenAlgo and configure your workspace. Takes under two minutes."
+    >
+      <div className="mx-auto max-w-5xl space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <ModeCard
             title="Quick Setup"
-            subtitle="2 steps — connect and go"
+            subtitle="2 steps - connect and go"
             description="Enter your OpenAlgo URL and API key, pick your persona, start trading immediately."
             badge="~1 min"
             icon={<Zap className="size-5" />}
@@ -85,7 +80,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
           />
           <ModeCard
             title="Guided Setup"
-            subtitle="7 steps — personalized"
+            subtitle="7 steps - personalised"
             description="Persona, connection, experience, interests, and trading defaults for a tailored workspace."
             badge="~2 min"
             icon={<BookOpen className="size-5" />}
@@ -93,7 +88,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
           />
           <ModeCard
             title="Advanced Setup"
-            subtitle="9 steps — full control"
+            subtitle="9 steps - full control"
             description="Everything in Guided plus LLM provider, risk limits, and workspace preview."
             badge="~4 min"
             icon={<Settings2 className="size-5" />}
@@ -107,10 +102,10 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
             className="text-sm text-text-muted hover:text-text-primary"
             onClick={() => navigate("/trade")}
           >
-            Skip setup — use defaults
+            Skip setup - use defaults
           </Button>
         </div>
       </div>
-    </main>
+    </PublicRouteShell>
   );
 }

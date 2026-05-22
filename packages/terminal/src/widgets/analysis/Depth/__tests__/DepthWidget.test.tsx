@@ -28,6 +28,13 @@ vi.mock("@/services/api", () => ({
   getDepth: vi.fn(() => Promise.resolve(mockDepthResponse)),
 }));
 
+const mockModeStore = vi.fn();
+
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector: (s: { mode: string }) => unknown) =>
+    mockModeStore(selector),
+}));
+
 vi.mock("@/lib/market", () => ({
   isMarketHours: () => false,
 }));
@@ -37,6 +44,7 @@ vi.mock("@/lib/market", () => ({
 // ---------------------------------------------------------------------------
 
 import DepthWidget from "../DepthWidget";
+import { getDepth } from "@/services/api";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -45,6 +53,9 @@ import DepthWidget from "../DepthWidget";
 describe("DepthWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "live" }),
+    );
   });
 
   it("renders without crashing", () => {
@@ -60,5 +71,19 @@ describe("DepthWidget", () => {
       expect(screen.getAllByText("Bid").length).toBeGreaterThanOrEqual(1);
     });
     expect(screen.getAllByText("Ask").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("uses sample depth in explore mode without hitting the broker API", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+
+    render(<DepthWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Explore · sample")).toBeInTheDocument();
+    });
+    expect(getDepth).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Failed to fetch depth/i)).not.toBeInTheDocument();
   });
 });

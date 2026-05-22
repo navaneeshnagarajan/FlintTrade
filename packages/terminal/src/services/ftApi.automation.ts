@@ -1,4 +1,4 @@
-import { get, post, del } from "./ftApi.helpers";
+import { get, isDemoAuthSession, post, del } from "./ftApi.helpers";
 
 export interface CronJob {
   name: string;
@@ -31,7 +31,10 @@ export interface N8nWebhookTriggerResult {
   [key: string]: unknown;
 }
 
-export const getCronJobs = () => get<{ jobs: CronJob[] }>("cron/jobs");
+export const getCronJobs = () =>
+  isDemoAuthSession()
+    ? Promise.resolve({ jobs: [] })
+    : get<{ jobs: CronJob[] }>("cron/jobs");
 
 export const pauseCronJob = (name: string) =>
   post<{ status: string }>(
@@ -43,7 +46,10 @@ export const resumeCronJob = (name: string) =>
     "cron/jobs/" + encodeURIComponent(name) + "/resume",
   );
 
-export const getWebhooks = () => get<{ webhooks: WebhookConfig[] }>("webhooks");
+export const getWebhooks = () =>
+  isDemoAuthSession()
+    ? Promise.resolve({ webhooks: [] })
+    : get<{ webhooks: WebhookConfig[] }>("webhooks");
 
 export const createWebhook = (config: Omit<WebhookConfig, "id">) =>
   post<WebhookConfig>("webhooks", config);
@@ -52,10 +58,14 @@ export const deleteWebhook = (id: string) =>
   del<{ status: string }>("webhooks/" + encodeURIComponent(id));
 
 export const checkN8nHealth = () =>
-  get<{ running: boolean }>("automation/n8n/health");
+  isDemoAuthSession()
+    ? Promise.resolve({ running: false })
+    : get<{ running: boolean }>("automation/n8n/health");
 
 export const listN8nWorkflows = () =>
-  get<{ workflows: N8nWorkflow[]; count: number }>("automation/n8n/workflows");
+  isDemoAuthSession()
+    ? Promise.resolve({ workflows: [], count: 0 })
+    : get<{ workflows: N8nWorkflow[]; count: number }>("automation/n8n/workflows");
 
 export const triggerN8nWebhook = (
   webhookId: string,

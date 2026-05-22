@@ -6,6 +6,11 @@ export function getBase(): string {
   return "";
 }
 
+export function isDemoAuthSession(): boolean {
+  const token = useAuthStore.getState().token;
+  return token === "demo-user" || token === "dev-bypass";
+}
+
 /**
  * Build the standard request headers for every FT-API helper call.
  *

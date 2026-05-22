@@ -128,8 +128,8 @@ export function PreviewBanner({ config, className }: PreviewBannerProps) {
     ? {
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
-        background: "rgba(22,22,31,0.7)",
-        border: "1px solid rgba(255,255,255,0.08)",
+        background: "var(--glass-l2-bg, var(--color-surface-elevated))",
+        border: "1px solid var(--glass-l2-border, var(--color-border-default))",
       }
     : {};
 
