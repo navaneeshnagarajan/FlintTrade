@@ -53,13 +53,14 @@ class TestWorkspaceInit:
         assert ws.log_dir.exists()
 
     def test_initialize_writes_workspace_json(self, tmp_path):
+        from packages.core.src.workspace_migrations import WORKSPACE_VERSION
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
         ws.initialise()
         with open(ws.config_path) as f:
             config = json.load(f)
         assert config["initialized"] is True
-        assert config["version"] == "0.1.0-alpha"
+        assert config["version"] == WORKSPACE_VERSION
         assert "modules" in config
         assert "storage" in config
 
@@ -73,9 +74,10 @@ class TestWorkspaceLoadSave:
     """Test load/save/get/set operations."""
 
     def test_save_and_load(self, tmp_path):
+        from packages.core.src.workspace_migrations import WORKSPACE_VERSION
         from packages.core.src.workspace import Workspace
         ws = Workspace(home_dir=tmp_path / "ws")
-        ws.initialise({"version": "test", "initialized": True, "data": "hello"})
+        ws.initialise({"version": WORKSPACE_VERSION, "initialized": True, "data": "hello"})
         ws2 = Workspace(home_dir=tmp_path / "ws")
         assert ws2.load()["data"] == "hello"
 
@@ -126,9 +128,10 @@ class TestWorkspaceLoadSave:
         assert ws.get("version") != "modified"
 
     def test_corrupt_json_falls_back_to_defaults(self, tmp_path):
+        from packages.core.src.workspace_migrations import WORKSPACE_VERSION
         from packages.core.src.workspace import Workspace
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
         (ws_dir / "workspace.json").write_text("not valid json{{{")
         ws = Workspace(home_dir=ws_dir)
-        assert ws.get("version") == "0.1.0-alpha"  # fell back to defaults
+        assert ws.get("version") == WORKSPACE_VERSION  # fell back to current defaults

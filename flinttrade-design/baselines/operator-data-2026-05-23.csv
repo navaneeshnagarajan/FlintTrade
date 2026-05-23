@@ -1,0 +1,20 @@
+file,owner_package,engine,locked_during_restructure,migration_rule
+workspace.json,flinttrade_core,json,no,run workspace_migrations.run_migrations() on load
+auth.db,flinttrade_core,sqlite WAL,yes - fail loud if locked,password_changed_at column added via IF NOT EXISTS in v1.0
+credentials.db,flinttrade_core,sqlite WAL,yes,no move; per-user envelope encryption deferred
+auth_state.duckdb,flinttrade_core,duckdb,yes,"no move; add audit_chain_head, consent_ledger, sessions, webhooks in v1.0"
+totp_auth.duckdb,flinttrade_core,duckdb,yes (multi-user only),no move
+traffic_log.duckdb,flinttrade_data,duckdb,no - recreatable,rotate over 30 days; add route_classification for drained migration
+error_log.duckdb,flinttrade_data,duckdb,no,no move
+activity.db,flinttrade_data,duckdb,yes,"no move; add gateway.credential.*, auth.dek_rotated actions as needed"
+security.db,flinttrade_data,duckdb,no,no move
+latency_log.duckdb,flinttrade_data,duckdb,no,rotate
+api_analyzer.duckdb,flinttrade_data,duckdb,no,drop and recreate on opt-in
+archive/audit/*.jsonl,flinttrade_data,jsonl,n/a - append-only,add prev_hash and event_hash chaining
+archive/audit/roots/*.txt,flinttrade_data,flat,n/a,new daily merkle root
+contracts/<broker>/,flinttrade_gateway,json to sqlite,no,rebuild on first session per broker
+journal.db,flinttrade_journal,sqlite WAL + fts5,n/a - new,created fresh in commit 1
+master_password,flinttrade_core,flat 0o600,yes,no move; OS keychain deferred
+api_key_pepper,flinttrade_core,flat 0o600,yes,no move
+jwt_secret,flinttrade_core,flat 0o600,yes,no move
+totp_install_key,flinttrade_core,flat 0o600,yes (multi-user only),no move

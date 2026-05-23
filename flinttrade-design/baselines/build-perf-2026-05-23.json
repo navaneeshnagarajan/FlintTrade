@@ -1,0 +1,21 @@
+{
+  "terminal": {
+    "wall_seconds": 32.0,
+    "bundle_kb_gzipped": 2763,
+    "ts_files": 823,
+    "node_modules_mb": 373
+  },
+  "site": {
+    "wall_seconds": 8.0,
+    "bundle_kb_gzipped": 419,
+    "ts_files": 33,
+    "node_modules_mb": 528
+  },
+  "captured_at": "2026-05-23T19:01:53Z",
+  "captured_by": "scripts/capture-build-perf-baseline.sh",
+  "host": {
+    "cpu_model": "arm",
+    "ram_gb": 16,
+    "platform": "macOS-26.5-arm64-arm-64bit"
+  }
+}

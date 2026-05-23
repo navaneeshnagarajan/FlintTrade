@@ -20,51 +20,11 @@ import platform
 from pathlib import Path
 from typing import Any
 
+from .workspace_migrations import WORKSPACE_VERSION, default_workspace_config, run_migrations
+
 logger = logging.getLogger("flinttrade.core.workspace")
 
-_DEFAULT_CONFIG: dict[str, Any] = {
-    "version": "0.1.0-alpha",
-    "initialized": False,
-    "markets": [],
-    "modules": {
-        "terminal": True,
-        "dashboard": True,
-        "screener": True,
-        "backtest": True,
-        "ai": False,
-        "ditto": False,
-        "automation": False,
-    },
-    "storage": {
-        "fast": "~/.flinttrade/data",
-        "archive": "~/.flinttrade/archive",
-    },
-    "openalgo": {
-        "host": "http://127.0.0.1:5000",
-        "ws_port": 8765,
-    },
-    "ui": {
-        "theme": "dark",
-        "default_exchange": "NSE",
-        "timezone": "Asia/Kolkata",
-    },
-    "llm": {
-        "provider": "",
-        "host": "",
-        "model": "",
-        "api_key_ref": "",
-    },
-    "notifications": {
-        "telegram_enabled": False,
-        "telegram_bot_token_ref": "",
-        "telegram_chat_id": "",
-    },
-    "sebi": {
-        "max_ops_per_second": 10,
-        "audit_retention_years": 5,
-        "kill_switch_enabled": True,
-    },
-}
+_DEFAULT_CONFIG: dict[str, Any] = default_workspace_config()
 
 
 def _default_home() -> Path:
@@ -180,10 +140,11 @@ class Workspace:
     # ------------------------------------------------------------------
 
     def load(self) -> dict[str, Any]:
-        """Load workspace.json from disk."""
+        """Load workspace.json from disk and run schema migrations."""
+        if not self.config_path.exists():
+            self.initialise()
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                self._config = json.load(f)
+            self._config = run_migrations(self.workspace_dir)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to load workspace.json: %s — using defaults", exc)
             # deepcopy: _DEFAULT_CONFIG contains nested dicts ("ui", "modules",
@@ -194,6 +155,10 @@ class Workspace:
             # the test_get_dot_notation flake when pytest-randomly happened
             # to schedule test_set_and_persist first.
             self._config = copy.deepcopy(_DEFAULT_CONFIG)
+        if self._config.get("version") != WORKSPACE_VERSION:
+            raise RuntimeError(
+                f"workspace not migrated to {WORKSPACE_VERSION}; got {self._config.get('version')!r}"
+            )
         return self._config
 
     def save(self, config: dict[str, Any] | None = None) -> None:

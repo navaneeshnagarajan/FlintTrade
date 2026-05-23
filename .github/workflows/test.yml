@@ -70,6 +70,40 @@ jobs:
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - run: pip install -r requirements.txt
+      - name: Verify pre-restructure baseline artefacts
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          manifest = json.loads(pathlib.Path("flinttrade-design/baselines/MANIFEST.json").read_text())
+          missing = []
+          for artefact in manifest["artefacts"]:
+              if not any(pathlib.Path(path).exists() for path in artefact["paths"]):
+                  missing.append(artefact["id"])
+          if missing:
+              print("missing baseline artefacts:", ", ".join(missing))
+              sys.exit(1)
+          print("baseline artefacts OK:", ", ".join(a["id"] for a in manifest["artefacts"]))
+          PY
+      - name: Workspace migration round-trip test
+        run: |
+          python -m pytest packages/core/tests/test_workspace_migrations.py -v --import-mode=importlib
+          python - <<'PY'
+          import json
+          import tempfile
+          from pathlib import Path
+          from packages.core.src.workspace_migrations import run_migrations
+
+          with tempfile.TemporaryDirectory() as d:
+              Path(d, "workspace.json").write_text(json.dumps({"version": "0.5.2", "modules": {"ai": True}}))
+              result = run_migrations(Path(d))
+              on_disk = json.loads(Path(d, "workspace.json").read_text())
+              assert result == on_disk, "atomic persist did not happen"
+              assert result["version"] == "1.0.0"
+              assert result["brokers"]["execution"]["default"] == "openalgo:default"
+          PY
       # --timeout-method=thread uses a watchdog thread + _thread.interrupt_main()
       # instead of SIGALRM. SIGALRM can't reliably interrupt CPython's
       # thread.join() on Linux (the C wait loop doesn't propagate EINTR), which

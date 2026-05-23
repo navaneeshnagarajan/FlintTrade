@@ -1,0 +1,48 @@
+{
+  "tag": "pre-restructure-baseline",
+  "artefacts": [
+    {
+      "id": "packages-csv",
+      "paths": ["flinttrade-design/baselines/packages-2026-05-23.csv"]
+    },
+    {
+      "id": "blueprints-csv",
+      "paths": ["flinttrade-design/baselines/blueprints-2026-05-23.csv"]
+    },
+    {
+      "id": "operator-data-csv",
+      "paths": ["flinttrade-design/baselines/operator-data-2026-05-23.csv"]
+    },
+    {
+      "id": "test-count",
+      "paths": ["flinttrade-design/baselines/test-count-2026-05-23.txt"]
+    },
+    {
+      "id": "test-count-sha256",
+      "paths": ["flinttrade-design/baselines/test-count-2026-05-23.sha256"]
+    },
+    {
+      "id": "build-perf",
+      "paths": ["flinttrade-design/baselines/build-perf-2026-05-23.json"]
+    },
+    {
+      "id": "per-file-line-counts",
+      "paths": ["flinttrade-design/baselines/per-file-line-counts-2026-05-23.csv"]
+    },
+    {
+      "id": "visual-regression",
+      "paths": ["flinttrade-design/baselines/visual-regression"]
+    },
+    {
+      "id": "migration-runner",
+      "paths": [
+        "packages/core/src/workspace_migrations.py",
+        "packages/core/core/src/workspace_migrations.py"
+      ]
+    },
+    {
+      "id": "rollback-runbook",
+      "paths": [".local/specs/flinttrade-design/2026-05-24-baselines.md"]
+    }
+  ]
+}

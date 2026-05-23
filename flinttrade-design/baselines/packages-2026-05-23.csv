@@ -1,0 +1,20 @@
+current_key,current_path,target_path,new_pypi_name,new_import_name
+core,packages/core,packages/core/core,flinttrade-core,flinttrade_core
+data,packages/data,"packages/core/data + packages/services/journal",flinttrade-data + flinttrade-journal,flinttrade_data + flinttrade_journal
+historical,packages/historical,packages/core/historical,flinttrade-historical,flinttrade_historical
+indicators,packages/indicators,packages/core/indicators,flinttrade-indicators,flinttrade_indicators
+tick-engine,packages/tick-engine,packages/core/ticks,flinttrade-ticks,flinttrade_ticks
+(new),,packages/core/design-system,@flinttrade/design-system,n/a (ts)
+engine,packages/engine,packages/services/engine,flinttrade-engine,flinttrade_engine
+screener,packages/screener,packages/services/screener,flinttrade-screener,flinttrade_screener
+backtest-engine,packages/backtest-engine,packages/services/backtest,flinttrade-backtest,flinttrade_backtest
+ai,packages/ai,packages/services/ai,flinttrade-ai,flinttrade_ai
+ditto,packages/ditto,packages/services/ditto,flinttrade-ditto,flinttrade_ditto
+automation,packages/automation,packages/services/automation,flinttrade-automation,flinttrade_automation
+(split from data),,packages/services/journal,flinttrade-journal,flinttrade_journal
+gateway,packages/gateway,packages/integrations/gateway,flinttrade-gateway,flinttrade_gateway
+integration,packages/integration,packages/integrations/webhooks,flinttrade-webhooks,flinttrade_webhooks
+terminal,packages/terminal,packages/apps/terminal,@flinttrade/terminal,n/a (ts)
+(from apps/),apps/site,packages/apps/site,@flinttrade/site,n/a (ts)
+chrome-extension,packages/chrome-extension,.local/archive/restructure-2026-05-23/chrome-extension,,
+desktop,packages/desktop,.local/archive/restructure-2026-05-23/desktop,,
