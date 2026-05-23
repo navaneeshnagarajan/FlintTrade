@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # (openalgo, openclaw) used to be git submodules under infra/; they are
 # now plain reference clones under .local/external/ and only present
 # locally if the user ran scripts/setup-test-deps.sh. AlgoMirror is
-# absent: its mirroring patterns are fully absorbed into packages/ditto/
+# absent: its mirroring patterns are fully absorbed into packages/services/ditto/
 # and the repo is no longer pulled or tracked.
 
 ABSORBED_REPOS: list[dict] = [
@@ -35,11 +35,11 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/external/openalgo",
         "type": "reference",
         "absorbed": [
-            "REST API client (45+ endpoints) -> packages/core/src/openalgo_client.py",
-            "WebSocket protocol -> packages/terminal/src/services/websocket.ts",
-            "Broker adapter pattern -> packages/gateway/",
-            "Option chain/Greeks -> packages/screener/",
-            "React dashboard patterns -> packages/terminal/",
+            "REST API client (45+ endpoints) -> packages/core/core/src/openalgo_client.py",
+            "WebSocket protocol -> packages/apps/terminal/src/services/websocket.ts",
+            "Broker adapter pattern -> packages/integrations/gateway/",
+            "Option chain/Greeks -> packages/services/screener/",
+            "React dashboard patterns -> packages/apps/terminal/",
         ],
         "last_absorbed_commit": "7e48b2e8",  # Updated 2026-05-21 — v2.0.1.1 sync
         "missing_since": [
@@ -54,8 +54,8 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/external/openclaw",
         "type": "reference",
         "absorbed": [
-            "Agent gateway pattern -> packages/automation/src/openclaw_bridge.py",
-            "Telegram/WhatsApp transport -> packages/automation/src/telegram_bot.py",
+            "Agent gateway pattern -> packages/services/automation/src/openclaw_bridge.py",
+            "Telegram/WhatsApp transport -> packages/services/automation/src/telegram_bot.py",
         ],
         "last_absorbed_commit": "abce6407",
         "missing_since": [
@@ -71,7 +71,7 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/tier1-core/openalgo-flow",
         "type": "reference",
         "absorbed": [
-            "54 of 54 node types -> packages/integration/src/flow_builder.py",
+            "54 of 54 node types -> packages/integrations/webhooks/src/flow_builder.py",
             "Visual canvas pattern -> /automate route FlowBuilder",
             "Draggable node palette with 8 categories",
         ],
@@ -79,7 +79,7 @@ ABSORBED_REPOS: list[dict] = [
         "missing_since": [],
     },
     # EquiCharts entry removed 2026-04-24: reference repo deleted
-    # (chart patterns were absorbed into packages/terminal/src/components/Chart.tsx;
+    # (chart patterns were absorbed into packages/apps/terminal/src/components/Chart.tsx;
     #  further drift checking against the upstream is no longer relevant since
     #  we standardised on Lightweight Charts v5 for the Chart widget).
     {
@@ -88,7 +88,7 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/tier3-ai-research/TradingAgents",
         "type": "reference",
         "absorbed": [
-            "Multi-agent DAG pattern -> packages/ai/src/analyst_chain.py",
+            "Multi-agent DAG pattern -> packages/services/ai/src/analyst_chain.py",
             "Debate/risk judge flow -> analyst_chain.py",
         ],
         "last_absorbed_commit": "unknown",
@@ -100,8 +100,8 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/tier3-ai-research/FinMem",
         "type": "reference",
         "absorbed": [
-            "4-layer memory architecture -> packages/ai/src/memory.py",
-            "Reflection loop -> packages/ai/src/reflection.py",
+            "4-layer memory architecture -> packages/services/ai/src/memory.py",
+            "Reflection loop -> packages/services/ai/src/reflection.py",
         ],
         "last_absorbed_commit": "unknown",
         "missing_since": [],
@@ -112,7 +112,7 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/external-all/AlgoTrading",
         "type": "reference",
         "absorbed": [
-            "100 strategy templates -> packages/backtest-engine/src/strategies/",
+            "100 strategy templates -> packages/services/backtest/src/strategies/",
         ],
         "last_absorbed_commit": "unknown",
         "missing_since": [],
@@ -123,7 +123,7 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/marketcalls-all/fluxscan",
         "type": "reference",
         "absorbed": [
-            "Scanner engine pattern -> packages/screener/src/scanner.py",
+            "Scanner engine pattern -> packages/services/screener/src/scanner.py",
             "6 built-in scanner templates",
         ],
         "last_absorbed_commit": "2026-03-31",
@@ -135,7 +135,7 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/marketcalls-all/pandas_signals_library",
         "type": "reference",
         "absorbed": [
-            "exrem/flip/valuewhen signal functions -> packages/indicators/src/signals.py",
+            "exrem/flip/valuewhen signal functions -> packages/core/indicators/src/signals.py",
         ],
         "last_absorbed_commit": "2026-03-31",
         "missing_since": [],
@@ -146,7 +146,7 @@ ABSORBED_REPOS: list[dict] = [
         "local_path": ".local/reference/repos/marketcalls-all/raptorbt",
         "type": "reference",
         "absorbed": [
-            "StreamingMetrics (Welford) -> packages/backtest-engine/src/metrics.py",
+            "StreamingMetrics (Welford) -> packages/services/backtest/src/metrics.py",
         ],
         "last_absorbed_commit": "2026-03-31",
         "missing_since": [

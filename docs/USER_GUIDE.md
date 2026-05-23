@@ -38,7 +38,7 @@ cd FlintTrade
 make setup
 cp .env.example .env       # fill in OPENALGO_HOST / PORT / API_KEY
 make start                 # starts OpenAlgo if a local-dev clone is present
-cd packages/terminal && npm install && npm run dev
+cd packages/apps/terminal && npm install && npm run dev
 ```
 
 Open `http://localhost:5173` once the dev server is ready. You should land on
@@ -199,7 +199,7 @@ sync across sessions.
 ### The 82 widgets
 
 Widgets are organised into three categories under
-`packages/terminal/src/widgets/`:
+`packages/apps/terminal/src/widgets/`:
 
 - **Trading (22)** — Order Pad, Positions, Orderbook, Tradebook, Bracket
   Order, Basket Order, Quick Order, Funds, Margin, etc.
@@ -209,7 +209,7 @@ Widgets are organised into three categories under
 - **Utility (22)** — Watchlist, Heatmap, News, Calendar, Ticker, Calculator,
   Notes, Journal, Alerts, etc.
 
-Every widget is registered in `packages/terminal/src/layout/widgetFactory.tsx`.
+Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
 ### The 13 workspace presets
 
@@ -271,7 +271,7 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 ### Backtest
 
 1. **Pick a template.** 94 templates ship under
-   `packages/backtest-engine/src/strategies/` — ranging from simple EMA
+   `packages/services/backtest/src/strategies/` — ranging from simple EMA
    crossover to complex options-spreads strategies.
 2. **Configure parameters.** Each template exposes a parameter form
    (built with `react-hook-form` + `zod`).
@@ -316,7 +316,7 @@ Time-based automations. Examples:
 - Snapshot positions to a CSV at 3:30 PM IST.
 - Post a daily P&L summary to Telegram at end-of-day.
 
-Cron jobs run inside the FlintTrade backend (`packages/automation`).
+Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 
 ### Monitors
 
@@ -329,7 +329,7 @@ than Flows — single-event triggers without action chains.
 
 ## 9. AI Centre walkthrough
 
-Open `/ai`. Four sub-tools backed by `packages/ai`:
+Open `/ai`. Four sub-tools backed by `packages/services/ai`:
 
 ### Chat
 
@@ -373,7 +373,7 @@ risk overrides.
   stop-loss governor.
 
 Position mirroring patterns originally came from AlgoMirror; they now run
-in-process inside `packages/ditto/` (no external service required).
+in-process inside `packages/services/ditto/` (no external service required).
 
 ![Ditto](screenshots/09-ditto.png)
 
@@ -467,7 +467,7 @@ when it detects the 401.
    are sent at all (by design).
 2. Open the **Orderbook** widget and look at the rejection reason column.
 3. Check the FlintTrade backend logs (where you ran `python
-   packages/core/src/app.py` or `make start`) — every rejected order is
+   packages/core/core/src/app.py` or `make start`) — every rejected order is
    logged with the safety-layer that blocked it.
 
 ### Front-end shows stale prices
@@ -479,10 +479,10 @@ terminal (`Ctrl-C` then `npm run dev`).
 
 ### "Cannot find module '@/...'"
 
-The path alias `@` → `packages/terminal/src/` is configured in
+The path alias `@` → `packages/apps/terminal/src/` is configured in
 `tsconfig.json` and `vite.config.ts`. If your editor's TypeScript server
 disagrees, restart it. If `vitest` complains, ensure
-`packages/terminal/vitest.config.ts` extends the same alias.
+`packages/apps/terminal/vitest.config.ts` extends the same alias.
 
 ### Settings page won't save
 

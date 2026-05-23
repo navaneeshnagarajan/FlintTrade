@@ -172,14 +172,14 @@ duplicated:
 ## 4. Backend architecture
 
 FlintTrade's backend is a single Flask application registered as
-`packages/core/src/app.py`. It binds to port 5100, mounts every package's
+`packages/core/core/src/app.py`. It binds to port 5100, mounts every package's
 blueprints behind `/v1/*`, and exposes them externally under
 `/ft-api/v1/*` thanks to the WSGI prefix-strip middleware (see §6).
 
 ### Safety layers
 
 Every order placed through FlintTrade passes five safety layers in order
-inside `packages/engine/`:
+inside `packages/services/engine/`:
 
 1. **Order validation** — price within ±5 % of LTP, quantity multiple of
    lot size.
@@ -217,7 +217,7 @@ stateDiagram-v2
 
 Each transition issues a fresh JWT with the new `mode` claim and revokes
 the old token's `jti`. The guard lives at
-`packages/engine/src/mode_guard.py`.
+`packages/services/engine/src/mode_guard.py`.
 
 ---
 
@@ -245,7 +245,7 @@ Ticks fan in to per-instrument Jotai atoms which power every chart and
 quote widget. REST data populates a separate query cache. Orders flow
 out through the safety layers and the mode guard before reaching
 OpenAlgo. Fills come back through the tick stream and reconcile with
-the REST cache via `packages/engine/src/reconciliation.py`.
+the REST cache via `packages/services/engine/src/reconciliation.py`.
 
 ---
 
@@ -253,7 +253,7 @@ the REST cache via `packages/engine/src/reconciliation.py`.
 
 The terminal calls `/ft-api/v1/X`. The Vite dev proxy and the production
 reverse proxy forward that to the FlintTrade backend on port 5100. The
-WSGI middleware in `packages/core/src/app.py` strips the `/ft-api`
+WSGI middleware in `packages/core/core/src/app.py` strips the `/ft-api`
 prefix before URL dispatch:
 
 ```
@@ -346,7 +346,7 @@ fallbacks.
 - Carries `sub` (user), `exp` (expiry), `mode` (Explore / Practice /
   Live), `jti` (unique ID).
 - Revocation blocklist keyed by `jti` in
-  `packages/core/src/auth_state.py`.
+  `packages/core/core/src/auth_state.py`.
 
 ### Server-side mode enforcement
 
@@ -357,7 +357,7 @@ live action. Trying to place a live order on a Practice JWT returns
 ### OpenAlgo X-API-Key
 
 OpenAlgo's own endpoints use API-key auth, forwarded as the
-`X-API-KEY` header by `packages/core/src/openalgo_client.py`. The key
+`X-API-KEY` header by `packages/core/core/src/openalgo_client.py`. The key
 comes from `.env`.
 
 ---
@@ -395,7 +395,7 @@ into `.local/external/`.
 | OpenClaw | `.local/external/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | AI agent gateway. |
 
 AlgoMirror is intentionally absent — its mirroring patterns are absorbed
-in-process by `packages/ditto/` and the upstream repo is no longer
+in-process by `packages/services/ditto/` and the upstream repo is no longer
 tracked.
 
 ### Scripts

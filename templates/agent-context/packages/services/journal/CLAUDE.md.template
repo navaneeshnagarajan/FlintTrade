@@ -1,0 +1,11 @@
+# FlintTrade — journal
+
+This package contains journal and P&L services.
+
+## Boundaries
+- Depends on core/data for storage helpers and shared models.
+- Does not talk directly to brokers.
+- Does not own tick ingestion or QuestDB availability decisions.
+
+## Checks
+- Run `python -m pytest packages/services/journal/tests -q --import-mode=importlib` for journal changes.

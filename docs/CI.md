@@ -74,8 +74,8 @@ Three mechanisms keep CI inexpensive and signal-rich:
 If the local checklist passes, CI catches drift rather than regressions.
 
 1. **Before you commit:**
-   - `cd packages/terminal && npx tsc --noEmit` — terminal type-check.
-   - `cd packages/terminal && npx vitest run <changed-tests>` — or the
+   - `cd packages/apps/terminal && npx tsc --noEmit` — terminal type-check.
+   - `cd packages/apps/terminal && npx vitest run <changed-tests>` — or the
      full suite if you touched the widget surface.
    - `python -m pytest <changed-tests> --tb=short --import-mode=importlib`
    - `ruff check packages/*/src/`
@@ -95,7 +95,7 @@ If the local checklist passes, CI catches drift rather than regressions.
 | Layer | Mechanism | Catches |
 |---|---|---|
 | 1 | Local pre-commit (`tsc --noEmit` + `vitest run` + `pytest --tb=short` + `ruff check`) | Most syntactic and unit-test regressions. |
-| 2 | Contract tests (e.g. `packages/core/tests/test_orders_contract.py` parses `api.ts` for `postOrder("leaf", ...)` calls and asserts the matching Flask route exists) | Frontend ↔ backend route drift. |
+| 2 | Contract tests (e.g. `packages/core/core/tests/test_orders_contract.py` parses `api.ts` for `postOrder("leaf", ...)` calls and asserts the matching Flask route exists) | Frontend ↔ backend route drift. |
 | 3 | `cancel-in-progress: true` on `test.yml` and `claude-code-review.yml` | Back-to-back-push runner amplification. |
 | 4 | Draft-PR guard on every test job | Wasted CI on work-in-progress PRs. |
 | 5 | `paths-ignore` for doc-only commits | Routine doc updates burning runner minutes. |
@@ -134,11 +134,11 @@ runner. Map the failed job to its local command:
 | Job | Local command |
 |---|---|
 | `python-tests` | `make test` |
-| `node-core-tests` | `cd packages/terminal && npx vitest run --exclude 'src/widgets/**'` |
-| `node-widget-tests-1` | `cd packages/terminal && npx vitest run src/widgets/trading/` |
-| `node-widget-tests-2a` | `cd packages/terminal && npx vitest run src/widgets/analysis/ --shard=1/2` |
-| `node-widget-tests-2b` | `cd packages/terminal && npx vitest run src/widgets/analysis/ --shard=2/2` |
-| `node-widget-tests-3` | `cd packages/terminal && npx vitest run src/widgets/utility/` |
+| `node-core-tests` | `cd packages/apps/terminal && npx vitest run --exclude 'src/widgets/**'` |
+| `node-widget-tests-1` | `cd packages/apps/terminal && npx vitest run src/widgets/trading/` |
+| `node-widget-tests-2a` | `cd packages/apps/terminal && npx vitest run src/widgets/analysis/ --shard=1/2` |
+| `node-widget-tests-2b` | `cd packages/apps/terminal && npx vitest run src/widgets/analysis/ --shard=2/2` |
+| `node-widget-tests-3` | `cd packages/apps/terminal && npx vitest run src/widgets/utility/` |
 | `secrets-check` | `gitleaks detect --source . --no-banner` |
 
 ### Step 4 — fix and push

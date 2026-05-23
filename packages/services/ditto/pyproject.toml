@@ -1,0 +1,40 @@
+[project]
+name = "flinttrade-ditto"
+version = "0.6.0-dev"
+description = "Multi-account manager, position mirror, margin calculator, trailing SL, risk manager"
+requires-python = ">=3.12"
+dependencies = [
+    "flinttrade-core",
+    "httpx>=0.27.0",
+    "cryptography>=46.0.0",
+    "numpy>=1.26.0",
+    "numba>=0.59",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+numba = ["numba>=0.59"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = "flinttrade_ditto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "unit: fast, isolated unit test (default; runs on every commit)",
+    "integration: touches DB or mocked external services (PR gate)",
+    "slow: long-running test >1s (nightly or via --run-slow)",
+]

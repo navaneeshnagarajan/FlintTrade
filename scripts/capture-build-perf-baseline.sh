@@ -25,8 +25,8 @@ run_timed() {
   printf '%s build log: %s\n' "$label" "$log"
 }
 
-run_timed terminal "$ROOT/packages/terminal" "$TERM_LOG"
-run_timed site "$ROOT/apps/site" "$SITE_LOG"
+run_timed terminal "$ROOT/packages/apps/terminal" "$TERM_LOG"
+run_timed site "$ROOT/packages/apps/site" "$SITE_LOG"
 
 "$PYTHON_BIN" "$ROOT/scripts/emit_build_perf_json.py" \
   --terminal-log "$TERM_LOG" \

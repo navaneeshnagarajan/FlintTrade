@@ -244,35 +244,35 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
 ## 5. Files Affected (Estimated)
 
 ### New Files
-- `packages/core/src/auth.py` — auth service (argon2, JWT, TOTP, PIN)
-- `packages/core/src/auth_routes.py` — login/logout/setup/reset endpoints
-- `packages/core/src/auth_middleware.py` — session validation middleware
-- `packages/core/src/email_service.py` — SMTP password reset
-- `packages/terminal/src/routes/LoginRoute.tsx` — daily login screen
-- `packages/terminal/src/routes/SetupAccountRoute.tsx` — one-time account setup
-- `packages/terminal/src/routes/BrokerDashboardRoute.tsx` — daily broker reconnect
-- `packages/terminal/src/routes/ModeSelectRoute.tsx` — mode picker
-- `packages/terminal/src/services/mockDataEngine.ts` — demo mode data generator
-- `packages/terminal/src/stores/authStore.ts` — session state
-- `packages/terminal/src/stores/modeStore.ts` — Demo/Sandbox/Live state
-- `packages/terminal/src/hooks/useAuthGuard.ts` — route protection hook
-- `packages/terminal/src/components/sandbox/SandboxControls.tsx` — capital/reset/export
+- `packages/core/core/src/auth.py` — auth service (argon2, JWT, TOTP, PIN)
+- `packages/core/core/src/auth_routes.py` — login/logout/setup/reset endpoints
+- `packages/core/core/src/auth_middleware.py` — session validation middleware
+- `packages/core/core/src/email_service.py` — SMTP password reset
+- `packages/apps/terminal/src/routes/LoginRoute.tsx` — daily login screen
+- `packages/apps/terminal/src/routes/SetupAccountRoute.tsx` — one-time account setup
+- `packages/apps/terminal/src/routes/BrokerDashboardRoute.tsx` — daily broker reconnect
+- `packages/apps/terminal/src/routes/ModeSelectRoute.tsx` — mode picker
+- `packages/apps/terminal/src/services/mockDataEngine.ts` — demo mode data generator
+- `packages/apps/terminal/src/stores/authStore.ts` — session state
+- `packages/apps/terminal/src/stores/modeStore.ts` — Demo/Sandbox/Live state
+- `packages/apps/terminal/src/hooks/useAuthGuard.ts` — route protection hook
+- `packages/apps/terminal/src/components/sandbox/SandboxControls.tsx` — capital/reset/export
 
 ### Modified Files
-- `packages/terminal/src/main.tsx` — route restructuring, auth guards
-- `packages/terminal/src/routes/WelcomeRoute.tsx` — remove skip + theme icons, new flow
-- `packages/terminal/src/stores/themeStore.ts` — v4 theme system
-- `packages/terminal/src/lib/cinematicThemes.ts` — 3 themes, v4 schema
-- `packages/terminal/src/components/theme/ThemePicker.tsx` — updated for v4
-- `packages/terminal/src/index.css` — remove legacy token overrides
-- `packages/terminal/src/chrome/TopBar.tsx` — mode pill, auth status
-- `packages/core/src/app.py` — register auth blueprint, session middleware
+- `packages/apps/terminal/src/main.tsx` — route restructuring, auth guards
+- `packages/apps/terminal/src/routes/WelcomeRoute.tsx` — remove skip + theme icons, new flow
+- `packages/apps/terminal/src/stores/themeStore.ts` — v4 theme system
+- `packages/apps/terminal/src/lib/cinematicThemes.ts` — 3 themes, v4 schema
+- `packages/apps/terminal/src/components/theme/ThemePicker.tsx` — updated for v4
+- `packages/apps/terminal/src/index.css` — remove legacy token overrides
+- `packages/apps/terminal/src/chrome/TopBar.tsx` — mode pill, auth status
+- `packages/core/core/src/app.py` — register auth blueprint, session middleware
 
 ### Files Requiring Confirmation Before Delete/Modify
 All existing files are preserved unless explicitly confirmed by the user:
-- `packages/terminal/src/themes/*.css` — migrate to v4 format, don't delete originals until confirmed
-- `packages/terminal/src/routes/SetupRoute.tsx` — reuse components in new setup flow, keep file until confirmed
-- `packages/terminal/src/routes/ExploreRoute.tsx` — keep alongside Demo mode until confirmed
+- `packages/apps/terminal/src/themes/*.css` — migrate to v4 format, don't delete originals until confirmed
+- `packages/apps/terminal/src/routes/SetupRoute.tsx` — reuse components in new setup flow, keep file until confirmed
+- `packages/apps/terminal/src/routes/ExploreRoute.tsx` — keep alongside Demo mode until confirmed
 - Any other existing file — ask before deleting or making breaking changes
 
 ---

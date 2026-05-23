@@ -1,0 +1,12 @@
+# FlintTrade — design-system
+
+This package contains reusable UI assets for FlintTrade applications.
+
+## Scope
+- Shared tokens, CSS layers, brand primitives, density-aware components, and form helpers.
+- Terminal and site may import from `@flinttrade/design-system`.
+- Application shells, routes, Dockview panels, and trading widgets stay in their app packages.
+
+## Checks
+- Run the consuming app typechecks/builds after changing public exports.
+- Verify no inline style/CSP regressions are introduced.

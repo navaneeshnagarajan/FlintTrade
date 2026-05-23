@@ -1,0 +1,594 @@
+@import "tailwindcss";
+@source "../../../core/design-system/src/**/*.{ts,tsx}";
+
+/* ---------- Self-hosted fonts (no external CDN, offline-ready) ---------- */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* ---------- Geist font (variable, from geist npm package) ---------- */
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- text-xxs utility (Tailwind v4) ---------- */
+@utility text-xxs {
+  font-size: 10px;
+  line-height: 14px;
+}
+
+/* ---------- Glass Adaptive utilities (Tailwind v4) ---------- */
+@utility bg-glass-l1 {
+  background-color: var(--glass-l1-bg);
+}
+@utility bg-glass-l2 {
+  background-color: var(--glass-l2-bg);
+}
+@utility bg-glass-l3 {
+  background-color: var(--glass-l3-bg);
+}
+@utility bg-glass-chrome {
+  background-color: var(--glass-chrome-bg);
+}
+@utility border-glass-l1 {
+  border-color: var(--glass-l1-border);
+}
+@utility border-glass-l2 {
+  border-color: var(--glass-l2-border);
+}
+@utility border-glass-chrome {
+  border-color: var(--glass-chrome-border);
+}
+@utility rounded-glass-card {
+  border-radius: var(--glass-radius-card);
+}
+@utility rounded-glass-inner {
+  border-radius: var(--glass-radius-inner);
+}
+@utility rounded-glass-control {
+  border-radius: var(--glass-radius-control);
+}
+@utility backdrop-glass {
+  backdrop-filter: var(--glass-blur);
+}
+@utility glass-hover {
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  &:hover {
+    transform: var(--glass-hover-lift);
+    box-shadow: var(--glass-hover-shadow), var(--glass-hover-inset);
+    border-color: var(--glass-hover-border);
+  }
+}
+@utility glass-surface-l1 {
+  background-color: var(--glass-l1-bg);
+  border: 1px solid var(--glass-l1-border);
+  border-radius: var(--glass-radius-card);
+  backdrop-filter: var(--glass-blur);
+}
+@utility glass-surface-l2 {
+  background-color: var(--glass-l2-bg);
+  border: 1px solid var(--glass-l2-border);
+  border-radius: var(--glass-radius-card);
+  backdrop-filter: var(--glass-blur);
+}
+@utility glass-surface-l3 {
+  background-color: var(--glass-l3-bg);
+  border-radius: var(--glass-radius-inner);
+  backdrop-filter: var(--glass-blur);
+}
+
+/* ---------- Base variables (shadcn/ui compat) ---------- */
+@layer base {
+  :root {
+    --radius: 0.5rem;
+    --background: 240 10% 3.9%;
+    --foreground: 240 5% 89%;
+    --card: 240 8% 8.5%;
+    --card-foreground: 240 5% 89%;
+    --popover: 240 8% 11%;
+    --popover-foreground: 240 5% 89%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 15%;
+    --secondary-foreground: 240 5% 89%;
+    --muted: 240 5% 15%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 5% 15%;
+    --accent-foreground: 240 5% 89%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 8% 18%;
+    --input: 240 8% 18%;
+    --ring: 217 91% 60%;
+    --chart-1: 217 91% 60%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 0 84% 60%;
+    --chart-4: 48 96% 53%;
+    --chart-5: 280 65% 60%;
+    --text-2xl: clamp(20px, 2vw, 24px);
+    --text-lg: clamp(16px, 1.5vw, 18px);
+
+    /* Glass Adaptive surfaces */
+    --glass-base: #08080e;
+    --glass-l1-bg: rgba(255, 255, 255, 0.018);
+    --glass-l1-border: rgba(255, 255, 255, 0.045);
+    --glass-l2-bg: rgba(255, 255, 255, 0.03);
+    --glass-l2-border: rgba(255, 255, 255, 0.06);
+    --glass-l3-bg: rgba(255, 255, 255, 0.06);
+    --glass-blur: blur(16px);
+    --glass-radius-card: 14px;
+    --glass-radius-inner: 10px;
+    --glass-radius-control: 8px;
+    --glass-chrome-bg: rgba(12, 12, 20, 0.85);
+    --glass-chrome-border: rgba(255, 255, 255, 0.05);
+    --glass-hover-lift: translateY(-1px);
+    --glass-hover-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    --glass-hover-border: rgba(255, 255, 255, 0.09);
+    --glass-hover-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+    /* Surface defaults (overridden by theme CSS files) */
+    --color-surface-base: #0a0a0f;
+    --color-surface-card: #16161f;
+    --color-surface-elevated: #1e1e28;
+    --color-surface-hover: #24242e;
+    --color-surface-active: #2e2e3a;
+    --color-surface-stripe: #0e0e16;
+    --color-border-default: #2a2a3a;
+    --color-border-subtle: #1e1e2e;
+    --color-border-strong: #3a3a4a;
+    --color-text-primary: #e4e4e7;
+    --color-text-secondary: #8b8b95;
+    --color-text-muted: #9898a4;
+    --color-text-disabled: #636370;
+    --color-profit: #22c55e;
+    --color-loss: #ef4444;
+    --color-warning: #eab308;
+    --color-bullish-bg: rgba(34, 197, 94, 0.10);
+    --color-bullish-border: rgba(34, 197, 94, 0.30);
+    --color-bullish-text: #22c55e;
+    --color-bearish-bg: rgba(239, 68, 68, 0.10);
+    --color-bearish-border: rgba(239, 68, 68, 0.30);
+    --color-bearish-text: #ef4444;
+    --color-atm-bg: rgba(234, 179, 8, 0.08);
+    --color-atm-border: rgba(234, 179, 8, 0.30);
+    --color-atm-text: #eab308;
+    --color-neutral-bg: rgba(59, 130, 246, 0.10);
+    --color-neutral-border: rgba(59, 130, 246, 0.30);
+    --color-neutral-text: #3b82f6;
+    --color-itm-text: #22c55e;
+    --color-otm-text: #f97315;
+
+    /* Surface hierarchy — Structured Calm (v0.3.0) */
+    --color-surface-floating: #242430;
+    --shadow-raised: none;
+    --shadow-elevated: 0 4px 16px rgba(0,0,0,0.4);
+    --shadow-floating: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+
+    /* Typography scale */
+    --data-hero: 2.25rem;
+    --data-primary: 1.25rem;
+    --data-cell: 0.8125rem;
+    --title-route: 1.5rem;
+    --title-section: 1.125rem;
+    --title-card: 0.9375rem;
+  }
+
+  /* Prevent flash of dark colors when OS preference is light.
+     themeStore.applyTheme() overrides these once React initialises. */
+  @media (prefers-color-scheme: light) {
+    :root {
+      --color-surface-base: #f8f8fa;
+      --color-surface-card: #ffffff;
+      --color-surface-elevated: #f0f0f5;
+      --color-surface-hover: #e8e8f0;
+      --color-border-default: #d0d0da;
+      --color-text-primary: #18181b;
+      --color-text-secondary: #52525b;
+      --color-text-muted: #71717a;
+      --color-text-disabled: #a1a1aa;
+      /* WCAG AA contrast on white backgrounds — safer contrast margin */
+      --color-profit: #15803d;
+      --color-loss: #b91c1c;
+      --color-surface-floating: #ffffff;
+      --shadow-raised: 0 1px 3px rgba(0,0,0,0.08);
+      --shadow-elevated: 0 4px 12px rgba(0,0,0,0.12);
+      --shadow-floating: 0 8px 24px rgba(0,0,0,0.16);
+    }
+  }
+
+  /* shadcn/ui HSL tokens for light mode (when .dark class is removed) */
+  :root:not(.dark) {
+    --background: 0 0% 98%;
+    --foreground: 240 10% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 10%;
+    --primary: 142 71% 35%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 92%;
+    --secondary-foreground: 240 10% 10%;
+    --muted: 240 5% 92%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 5% 92%;
+    --accent-foreground: 240 10% 10%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 82%;
+    --input: 240 6% 82%;
+    --ring: 142 71% 35%;
+  }
+}
+
+/* ---------- Theme tokens ---------- */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* --- Fonts (3-tier: heading / body / data) --- */
+  --font-heading: 'Geist', system-ui, sans-serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* --- Surface colors (read from :root, themeable) --- */
+  --color-surface-base: var(--color-surface-base);
+  --color-surface-card: var(--color-surface-card);
+  --color-surface-elevated: var(--color-surface-elevated);
+  --color-surface-hover: var(--color-surface-hover);
+  --color-surface-active: var(--color-surface-active);
+  --color-surface-stripe: var(--color-surface-stripe);
+
+  /* --- Border colors (read from :root, themeable) --- */
+  --color-border-default: var(--color-border-default);
+  --color-border-subtle: var(--color-border-subtle);
+  --color-border-strong: var(--color-border-strong);
+
+  /* --- Text colors (read from :root, themeable) --- */
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-disabled: var(--color-text-disabled);
+
+  /* --- Trading semantic colors (read from :root, themeable) --- */
+  --color-profit: var(--color-profit);
+  --color-loss: var(--color-loss);
+  --color-warning: var(--color-warning);
+
+  --color-bullish-bg: var(--color-bullish-bg);
+  --color-bullish-border: var(--color-bullish-border);
+  --color-bullish-text: var(--color-bullish-text);
+
+  --color-bearish-bg: var(--color-bearish-bg);
+  --color-bearish-border: var(--color-bearish-border);
+  --color-bearish-text: var(--color-bearish-text);
+
+  --color-atm-bg: var(--color-atm-bg);
+  --color-atm-border: var(--color-atm-border);
+  --color-atm-text: var(--color-atm-text);
+
+  --color-neutral-bg: var(--color-neutral-bg);
+  --color-neutral-border: var(--color-neutral-border);
+  --color-neutral-text: var(--color-neutral-text);
+
+  --color-itm-text: var(--color-itm-text);
+  --color-otm-text: var(--color-otm-text);
+
+  /* --- Surface hierarchy (v0.3.0) --- */
+  --color-surface-floating: var(--color-surface-floating);
+
+  /* --- Shadow scale --- */
+  --shadow-raised: var(--shadow-raised);
+  --shadow-elevated: var(--shadow-elevated);
+  --shadow-floating: var(--shadow-floating);
+
+  /* --- Typography scale --- */
+  --data-hero: var(--data-hero);
+  --data-primary: var(--data-primary);
+  --data-cell: var(--data-cell);
+  --title-route: var(--title-route);
+  --title-section: var(--title-section);
+  --title-card: var(--title-card);
+
+  /* --- Glass Adaptive tokens (forwarded for Tailwind utilities) --- */
+  --glass-base: var(--glass-base);
+  --glass-l1-bg: var(--glass-l1-bg);
+  --glass-l1-border: var(--glass-l1-border);
+  --glass-l2-bg: var(--glass-l2-bg);
+  --glass-l2-border: var(--glass-l2-border);
+  --glass-l3-bg: var(--glass-l3-bg);
+  --glass-blur: var(--glass-blur);
+  --glass-radius-card: var(--glass-radius-card);
+  --glass-radius-inner: var(--glass-radius-inner);
+  --glass-radius-control: var(--glass-radius-control);
+  --glass-chrome-bg: var(--glass-chrome-bg);
+  --glass-chrome-border: var(--glass-chrome-border);
+  --glass-hover-lift: var(--glass-hover-lift);
+  --glass-hover-shadow: var(--glass-hover-shadow);
+  --glass-hover-border: var(--glass-hover-border);
+  --glass-hover-inset: var(--glass-hover-inset);
+}
+
+/* ---------- Density overrides for typography scale ---------- */
+[data-density="compact"] {
+  --data-hero: 1.75rem;
+  --data-primary: 1rem;
+  --title-route: 1.25rem;
+}
+
+/* ---------- Elevation layers ---------- */
+[data-elevation="1"] {
+  background-color: var(--color-surface-card);
+}
+[data-elevation="2"] {
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-elevated);
+}
+[data-elevation="3"] {
+  background-color: var(--color-surface-floating);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(8px);
+}
+
+/* ---------- Responsive breakpoints ---------- */
+@media (max-width: 1279px) {
+  html { --card-padding: 12px; --widget-padding: 12px; }
+}
+@media (min-width: 1920px) {
+  html { --widget-padding: 24px; }
+}
+
+/* ---------- Auto-detect density from viewport height ---------- */
+/* On small laptop displays (1366x768 or similar) use compact density unless
+   the user has explicitly requested comfortable density via the class. */
+@media (max-height: 800px) {
+  html:not(.density-comfortable) {
+    --table-cell-px: 8px;
+    --table-cell-py: 6px;
+    --card-padding: 12px;
+    --widget-padding: 12px;
+    --input-height: 32px;
+    --button-height: 32px;
+  }
+}
+
+/* ---------- Balanced headings ---------- */
+h1, h2, h3 { text-wrap: balance; }
+
+/* ---------- Global resets ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default) transparent;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-default); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); }
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+/* ---------- Density modes ---------- */
+html, html.density-comfortable {
+  --table-cell-px: 12px;
+  --table-cell-py: 10px;
+  --card-padding: 16px;
+  --widget-padding: 16px;
+  --input-height: 36px;
+  --button-height: 36px;
+}
+
+html.density-compact {
+  --table-cell-px: 8px;
+  --table-cell-py: 6px;
+  --card-padding: 12px;
+  --widget-padding: 12px;
+  --input-height: 32px;
+  --button-height: 32px;
+}
+
+/* ---------- Slide-in animation (welcome card) ---------- */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@utility animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out both;
+}
+
+/* ---------- Global micro-animations ---------- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-scale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+@utility animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out both;
+}
+
+@utility animate-fade-in-scale {
+  animation: fade-in-scale 0.3s ease-out both;
+}
+
+/* ---------- Option chain cell flash animations ---------- */
+@keyframes cell-flash-up {
+  0% { background-color: rgba(34, 197, 94, 0.3); }
+  100% { background-color: transparent; }
+}
+@keyframes cell-flash-down {
+  0% { background-color: rgba(239, 68, 68, 0.3); }
+  100% { background-color: transparent; }
+}
+.cell-flash-up { animation: cell-flash-up 0.3s ease-out; }
+.cell-flash-down { animation: cell-flash-down 0.3s ease-out; }
+
+/* ---------- Dockview theme overrides — compact, content-first ---------- */
+.dockview-theme-dark,
+.dockview-theme-light {
+  /* Slim tab bar — less chrome, more content */
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tab-font-size: 11px;
+
+  /* Tab colors — subtle, not attention-grabbing */
+  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+
+  /* Clean separators */
+  --dv-separator-border: var(--color-border-subtle);
+  --dv-paneview-header-border-color: var(--color-border-subtle);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--color-border-strong);
+
+  /* Backgrounds */
+  --dv-background-color: var(--color-surface-base);
+  --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* Hide close buttons on tabs — less visual noise */
+.dockview-theme-dark .dv-default-tab-action,
+.dockview-theme-light .dv-default-tab-action {
+  display: none;
+}
+
+/* Show close button only on hover of active tab */
+.dockview-theme-dark .dv-tab.dv-active-tab:hover .dv-default-tab-action,
+.dockview-theme-light .dv-tab.dv-active-tab:hover .dv-default-tab-action {
+  display: flex;
+}
+
+/* ---------- Dockview light theme overrides ---------- */
+html.theme-light .dockview-theme-light,
+html.theme-light .dockview-theme-dark {
+  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-separator-border: var(--color-border-default);
+  --dv-paneview-header-border-color: var(--color-border-default);
+  --dv-background-color: var(--color-surface-base);
+  --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* ---------- react-resizable-panels separator (sash) styling ---------- */
+/* The Separator component renders a div with data-separator attribute.
+   These rules give visual feedback on hover/drag without relying on inline
+   Tailwind classes that might be purged in production builds. */
+[data-separator] {
+  background-color: var(--color-border-default);
+  transition: background-color 150ms ease;
+  position: relative;
+  z-index: 10;
+  /* Widen the interactive hit area beyond the visual 1px/4px rule */
+  flex-shrink: 0;
+}
+[data-separator]:hover,
+[data-separator]:focus-visible {
+  background-color: var(--color-primary);
+  opacity: 0.5;
+}
+[data-separator][data-resize-handle-state="drag"] {
+  background-color: var(--color-primary);
+  opacity: 0.8;
+}
+/* Reduce motion: skip transitions on the drag handle */
+@media (prefers-reduced-motion: reduce) {
+  [data-separator] {
+    transition: none;
+  }
+}
+
+/* ---------- Focus ring animation (WCAG 2.4.7) ---------- */
+@keyframes ring-scale-in {
+  from { outline-width: 0; outline-offset: 4px; }
+  to { outline-width: 3px; outline-offset: 2px; }
+}
+
+*:focus-visible {
+  animation: ring-scale-in 200ms ease-out forwards;
+  outline-color: var(--color-accent);
+  outline-style: solid;
+}
+
+/* ---------- Reduced motion respect (WCAG 2.3.3) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -32,7 +32,7 @@ mkdir -p "$EXTERNAL_DIR"
 # Pinned commits — keep in sync with docs/COMPATIBILITY.md
 #
 # AlgoMirror is intentionally NOT in this list. Its mirroring patterns are
-# fully absorbed into packages/ditto/ (PositionMirror, TrailingSLManager,
+# fully absorbed into packages/services/ditto/ (PositionMirror, TrailingSLManager,
 # MarginCalculator, RiskManager) and run in-process. There is nothing to
 # clone for testing.
 # ---------------------------------------------------------------------------

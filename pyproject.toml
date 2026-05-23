@@ -1,34 +1,36 @@
 [tool.uv.workspace]
 members = [
-    "packages/ai",
-    "packages/automation",
-    "packages/backtest-engine",
-    "packages/core",
-    "packages/data",
-    "packages/ditto",
-    "packages/engine",
-    "packages/gateway",
-    "packages/historical",
-    "packages/indicators",
-    "packages/integration",
-    "packages/screener",
-    "packages/tick-engine",
+    "packages/core/core",
+    "packages/core/data",
+    "packages/core/historical",
+    "packages/core/indicators",
+    "packages/core/ticks",
+    "packages/services/engine",
+    "packages/services/screener",
+    "packages/services/backtest",
+    "packages/services/ai",
+    "packages/services/ditto",
+    "packages/services/automation",
+    "packages/services/journal",
+    "packages/integrations/gateway",
+    "packages/integrations/webhooks",
 ]
 
 [tool.uv.sources]
-flint-ai = { workspace = true }
-flint-automation = { workspace = true }
-flint-backtest-engine = { workspace = true }
-flint-core = { workspace = true }
-flint-data = { workspace = true }
-flint-ditto = { workspace = true }
-flint-engine = { workspace = true }
-flint-gateway = { workspace = true }
-flint-historical = { workspace = true }
-flint-indicators = { workspace = true }
-flint-integration = { workspace = true }
-flint-screener = { workspace = true }
-tick-engine = { workspace = true }
+flinttrade-ai = { workspace = true }
+flinttrade-automation = { workspace = true }
+flinttrade-backtest = { workspace = true }
+flinttrade-core = { workspace = true }
+flinttrade-data = { workspace = true }
+flinttrade-ditto = { workspace = true }
+flinttrade-engine = { workspace = true }
+flinttrade-gateway = { workspace = true }
+flinttrade-historical = { workspace = true }
+flinttrade-indicators = { workspace = true }
+flinttrade-journal = { workspace = true }
+flinttrade-screener = { workspace = true }
+flinttrade-ticks = { workspace = true }
+flinttrade-webhooks = { workspace = true }
 
 # ----------------------------------------------------------------------------
 # Pytest configuration

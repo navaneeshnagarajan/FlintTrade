@@ -13,8 +13,8 @@ REQUIRED_BY_COMMIT: dict[str, set[str]] = {
         "flinttrade-design/baselines/blueprints-2026-05-23.csv",
         "flinttrade-design/baselines/operator-data-2026-05-23.csv",
         "flinttrade-design/baselines/MANIFEST.json",
-        "packages/core/src/workspace_migrations.py",
-        "packages/core/tests/test_workspace_migrations.py",
+        "packages/core/core/src/workspace_migrations.py",
+        "packages/core/core/tests/test_workspace_migrations.py",
         "scripts/dump-blueprints.py",
     },
     "1": {

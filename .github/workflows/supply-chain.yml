@@ -1,0 +1,27 @@
+name: supply-chain
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Broker SDK lock gate
+        run: python scripts/check-brokers-lock.py
+      - name: pnpm lock sanity
+        run: corepack enable && corepack pnpm install --frozen-lockfile --ignore-scripts
+      - name: Dhan token URL grep gate
+        run: |
+          ! grep -R "?version=2&token=" packages scripts .github --exclude-dir=node_modules --exclude-dir=.venv

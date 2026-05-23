@@ -14,8 +14,8 @@
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total — verified 2026-05-19
 - **Packages:** 16 (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri)
 - **Widgets:** 82 (22 trading + 38 analysis + 22 utility)
-- **AI Skills:** 30 markdown files under `packages/ai/skills/`
-- **Strategies:** 94 backtest templates in `packages/backtest-engine/src/strategies/` + 2 live-engine strategies (`ema_crossover`, `wheel_live`)
+- **AI Skills:** 30 markdown files under `packages/services/ai/skills/`
+- **Strategies:** 94 backtest templates in `packages/services/backtest/src/strategies/` + 2 live-engine strategies (`ema_crossover`, `wheel_live`)
 - **Themes:** 3 (Graphite/Midnight/Ember) × dark/light/system
 - **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV `/admin` + 404) + 13 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types in production code.
@@ -33,7 +33,7 @@
 - **BacktestLab:** POST /ft-api/v1/backtest/run wired via TanStack Query mutation
 - **Audit:** 24 findings fixed from 15-skill audit (3 critical, 3 high, 18 important)
 - **Absorption:** REPO_FEATURE_MAP §8 100% complete, 233 repos tracked
-- **External test-deps:** openalgo, openclaw — no longer git submodules; cloned locally under `.local/external/` via `scripts/setup-test-deps.sh` for development only. AlgoMirror's patterns are absorbed in-process by `packages/ditto/`; upstream no longer tracked.
+- **External test-deps:** openalgo, openclaw — no longer git submodules; cloned locally under `.local/external/` via `scripts/setup-test-deps.sh` for development only. AlgoMirror's patterns are absorbed in-process by `packages/services/ditto/`; upstream no longer tracked.
 
 ---
 
@@ -189,7 +189,7 @@
 
 ## Week 5: Python Upgrades + Strategies — from spec Section 13
 
-### New Package: packages/indicators/
+### New Package: packages/core/indicators/
 - [x] Create package — EMA, SMA, DEMA, Supertrend, VWAP, RSI, MACD, Stochastic, Williams %R, ATR, Bollinger Bands, Keltner Channels (pure NumPy, 42 tests)
 - [x] Add Numba streaming indicators (absorbed pyindicators patterns, 31 total) (absorb pyindicators)
 - [x] Wire into Chart widget for indicator overlays — 8 new indicators (Williams %R, CCI, DEMA, Hull MA, Parabolic SAR, OBV, Keltner, VWMA) + POST /api/v1/indicators/compute Python API (23 tests)
@@ -239,7 +239,7 @@
 - [x] `npm run build` — zero warnings (one pre-existing vendor-charts chunk warning)
 - [x] `vitest run` — 547 tests pass
 - [x] `make test` — 1,100+ Python tests pass
-- [x] Update all documentation (CLAUDE.md, README.md, CONTRIBUTING.md, packages/terminal/CLAUDE.md)
+- [x] Update all documentation (CLAUDE.md, README.md, CONTRIBUTING.md, packages/apps/terminal/CLAUDE.md)
 - [x] Clean up git history
 - [x] Tag v0.1.0-beta (tagged 2026-03-24)
 - [x] Publish to GitHub
@@ -253,7 +253,7 @@
 ### Files to REWRITE completely (5)
 - [x] PLAN.md — this file (rewritten)
 - [x] README.md — fix: 662→696 tests, 3 React apps→1, remove TOTP, fix architecture diagram
-- [x] packages/terminal/CLAUDE.md — fix: port 3001→5173, F1-F9→Dockview widgets, TradePulse→removed
+- [x] packages/apps/terminal/CLAUDE.md — fix: port 3001→5173, F1-F9→Dockview widgets, TradePulse→removed
 - [x] docs/ARCHITECTURE.md — already correct (submodule, Dockview, Zustand/Jotai/TanStack)
 - [x] docs/references/TOOLS_AND_DEPS.md — already has all new deps
 
@@ -278,16 +278,16 @@
 - [x] .github/ISSUE_TEMPLATE/*.md — already clean
 
 ### Package READMEs to CHECK (10)
-- [x] packages/core/README.md — clean
-- [x] packages/engine/README.md — clean
-- [x] packages/data/README.md — clean
-- [x] packages/historical/README.md — clean
-- [x] packages/screener/README.md — clean
-- [x] packages/backtest-engine/README.md — updated (VectorBTRunner + Monte Carlo)
-- [x] packages/ai/README.md — clean
-- [x] packages/integration/README.md — clean
-- [x] packages/automation/README.md — clean (no TOTP present)
-- [x] packages/ditto/README.md — updated (AllocationMode.MULTIPLIER + BrokerCostMetadata)
+- [x] packages/core/core/README.md — clean
+- [x] packages/services/engine/README.md — clean
+- [x] packages/core/data/README.md — clean
+- [x] packages/core/historical/README.md — clean
+- [x] packages/services/screener/README.md — clean
+- [x] packages/services/backtest/README.md — updated (VectorBTRunner + Monte Carlo)
+- [x] packages/services/ai/README.md — clean
+- [x] packages/integrations/webhooks/README.md — clean
+- [x] packages/services/automation/README.md — clean (no TOTP present)
+- [x] packages/services/ditto/README.md — updated (AllocationMode.MULTIPLIER + BrokerCostMetadata)
 
 ### Files to ARCHIVE (move to docs/references/historical/)
 - [x] RESTRUCTURE.md → docs/references/historical/RESTRUCTURE_V1.md
@@ -318,7 +318,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 
 | # | Feature | Source Repo | Status |
 |---|---------|-------------|--------|
-| 0 | **Live Market Signals Pipeline** | packages/ai | ✅ Done (Wave 1-9) |
+| 0 | **Live Market Signals Pipeline** | packages/services/ai | ✅ Done (Wave 1-9) |
 | 1 | Chrome Extension | openalgo-chrome | ✅ Done (Wave 1-9) — packages/chrome-extension/ |
 | 2 | Excel Integration | OpenAlgo-Excel | v0.6.0 |
 | 3 | WhatsApp Alerts | wabridge | ✅ Done (Wave 1-9) — whatsapp_alerts.py + routes |
@@ -377,7 +377,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 - [x] Automation: cron scheduler, Telegram bot, OpenClaw bridge, post-market
 - [x] Ditto: account manager, position mirroring, margin calc, trailing SL
 - [x] Infrastructure: Makefile, setup.sh, systemd templates, health-check.sh
-- [x] External test-deps registry: openalgo, openclaw (cloned to `.local/external/` via `scripts/setup-test-deps.sh`; previously git submodules under `infra/`). AlgoMirror dropped from registry — its patterns are absorbed in-process by `packages/ditto/`.
+- [x] External test-deps registry: openalgo, openclaw (cloned to `.local/external/` via `scripts/setup-test-deps.sh`; previously git submodules under `infra/`). AlgoMirror dropped from registry — its patterns are absorbed in-process by `packages/services/ditto/`.
 - [x] First sandbox trade placed successfully
 - [x] CI: GitHub Actions (python-tests, node-tests, secrets-check, claude-review)
 - [x] .env.example: 4 blank vars only (root), 3 VITE_ vars (terminal)

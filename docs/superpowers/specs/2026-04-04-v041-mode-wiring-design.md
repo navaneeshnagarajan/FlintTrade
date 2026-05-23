@@ -203,28 +203,28 @@ User completes setup → logged in → lands in /trade. Never logged out after s
 ## 7. Files Affected
 
 ### New Files
-- `packages/core/src/order_routes.py` — Order proxy with mode enforcement
-- `packages/terminal/src/chrome/ModeIndicator.tsx` — Unified mode pill/toggle
-- `packages/terminal/src/hooks/useModeData.ts` — Mode-aware data hook
-- `packages/terminal/src/tools/Settings/PracticeSection.tsx` — Settings section for SandboxControls
+- `packages/core/core/src/order_routes.py` — Order proxy with mode enforcement
+- `packages/apps/terminal/src/chrome/ModeIndicator.tsx` — Unified mode pill/toggle
+- `packages/apps/terminal/src/hooks/useModeData.ts` — Mode-aware data hook
+- `packages/apps/terminal/src/tools/Settings/PracticeSection.tsx` — Settings section for SandboxControls
 
 ### Modified Files
-- `packages/terminal/src/stores/modeStore.ts` — Rename values, localStorage persist
-- `packages/terminal/src/stores/settingsStore.ts` — Remove sandboxMode
-- `packages/terminal/src/services/api.ts` — Route orders through backend
-- `packages/terminal/src/chrome/TopBar.tsx` — Replace SandboxToggle with ModeIndicator
-- `packages/terminal/src/routes/AppLayout.tsx` — Mode-aware border + banner
-- `packages/terminal/src/routes/WelcomeRoute.tsx` — Remove mode/broker from login flow
-- `packages/terminal/src/routes/SetupAccountRoute.tsx` — Fix completion, persona-adaptive
-- `packages/terminal/src/routes/ExploreRoute.tsx` — Wire MockDataEngine + DemoChoice
-- `packages/core/src/app.py` — Register order proxy blueprint
-- `packages/core/src/auth_routes.py` — Add mode to JWT payload
-- `packages/terminal/src/routes/SettingsRoute.tsx` — Add Practice section
-- `packages/terminal/src/tools/Settings/settingsConfig.ts` — Add "practice" section
+- `packages/apps/terminal/src/stores/modeStore.ts` — Rename values, localStorage persist
+- `packages/apps/terminal/src/stores/settingsStore.ts` — Remove sandboxMode
+- `packages/apps/terminal/src/services/api.ts` — Route orders through backend
+- `packages/apps/terminal/src/chrome/TopBar.tsx` — Replace SandboxToggle with ModeIndicator
+- `packages/apps/terminal/src/routes/AppLayout.tsx` — Mode-aware border + banner
+- `packages/apps/terminal/src/routes/WelcomeRoute.tsx` — Remove mode/broker from login flow
+- `packages/apps/terminal/src/routes/SetupAccountRoute.tsx` — Fix completion, persona-adaptive
+- `packages/apps/terminal/src/routes/ExploreRoute.tsx` — Wire MockDataEngine + DemoChoice
+- `packages/core/core/src/app.py` — Register order proxy blueprint
+- `packages/core/core/src/auth_routes.py` — Add mode to JWT payload
+- `packages/apps/terminal/src/routes/SettingsRoute.tsx` — Add Practice section
+- `packages/apps/terminal/src/tools/Settings/settingsConfig.ts` — Add "practice" section
 
 ### Delete/Archive
-- `packages/terminal/src/chrome/SandboxToggle.tsx` — Replaced by ModeIndicator
-- `packages/terminal/src/chrome/ModePill.tsx` — Merged into ModeIndicator
+- `packages/apps/terminal/src/chrome/SandboxToggle.tsx` — Replaced by ModeIndicator
+- `packages/apps/terminal/src/chrome/ModePill.tsx` — Merged into ModeIndicator
 
 ---
 

@@ -1,0 +1,21 @@
+# FlintTrade — tick-engine
+
+> High-performance tick processing engine — Rust core with Python bindings via PyO3. Read `packages/core/ticks/CLAUDE.md` first.
+
+## Absorbs
+- raptorbt → tick-level backtest patterns (reference only)
+
+## Depends on: none (standalone Rust + PyO3 package; exposes a `tick_engine` Python module)
+
+## Build
+- `maturin develop` — develop install (links the Rust build into the active Python env)
+- `maturin build --release` — produce a release wheel under `dist/`
+
+## Rules
+- Read root CLAUDE.md for project-wide rules.
+- Rust code lives in `src/`; Python bindings + tests in `python/` and `tests/`.
+- Never reference specific brokers — the tick engine processes anonymous OHLCV / tick streams only.
+- Tests live in `packages/core/ticks/tests/`. Add Rust unit tests inline with `#[cfg(test)]` and Python integration tests as `test_*.py`.
+- Cross-platform: code must compile cleanly on Windows, macOS, and Linux (CI matrix). If a feature needs a platform-specific dependency, gate it with `cfg(target_os = …)`.
+- Update root CHANGELOG.md for any API surface change (added/removed exports, signature changes).
+- Branch: main (pre-release, all commits to main).

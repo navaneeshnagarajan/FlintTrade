@@ -90,4 +90,4 @@ exec gunicorn \
     --access-logfile - \
     --error-logfile - \
     --log-level "${LOG_LEVEL:-info}" \
-    'packages.core.src.app:app'
+    'flinttrade_core.app:app'

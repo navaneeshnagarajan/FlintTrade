@@ -10,25 +10,25 @@ import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# All 16 packages currently tracked under packages/.
+# All post-restructure packages tracked under packages/{core,services,integrations,apps}/.
 # Keep this list aligned with templates/package-purposes.yml and flint.toml.
 PACKAGES = [
-    "ai",
-    "automation",
-    "backtest-engine",
-    "chrome-extension",
-    "core",
-    "data",
-    "desktop",
-    "ditto",
-    "engine",
-    "gateway",
-    "historical",
-    "indicators",
-    "integration",
-    "screener",
-    "terminal",
-    "tick-engine",
+    "core/core",
+    "core/data",
+    "core/historical",
+    "core/indicators",
+    "core/ticks",
+    "services/engine",
+    "services/screener",
+    "services/backtest",
+    "services/ai",
+    "services/ditto",
+    "services/automation",
+    "services/journal",
+    "integrations/gateway",
+    "integrations/webhooks",
+    "apps/terminal",
+    "apps/site",
 ]
 
 # Files every fresh clone must have at the repo root for the project to make
@@ -70,7 +70,7 @@ def test_root_files():
 
 def test_packages():
     for pkg in PACKAGES:
-        d = os.path.join(ROOT, "packages", pkg)
+        d = os.path.join(ROOT, "packages", *pkg.split("/"))
         assert os.path.isdir(d), f"Missing package directory: {pkg}"
         assert os.path.exists(
             os.path.join(d, "README.md")
@@ -81,7 +81,7 @@ def test_version():
     with open(os.path.join(ROOT, "VERSION")) as f:
         v = f.read().strip()
     # Strip pre-release suffix (-dev, -alpha, -beta, -rc.N) then check 3-part semver.
-    base = v.split("-")[0]
+    base = v.removeprefix("v").split("-")[0]
     assert len(base.split(".")) == 3, f"VERSION is not 3-part semver: {v!r}"
 
 

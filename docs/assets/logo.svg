@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
   <!-- FlintTrade Logo — Geometric "F" letterform with green spark accent -->
-  <!-- Matches the LogoIcon component in packages/terminal/src/components/brand/Logo.tsx -->
+  <!-- Matches the LogoIcon component in packages/apps/terminal/src/components/brand/Logo.tsx -->
   <!-- Scaled from 32x32 viewBox to 512x512 for high-res display -->
 
   <!-- Vertical bar — left stem of F -->

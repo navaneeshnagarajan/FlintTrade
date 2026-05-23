@@ -63,14 +63,14 @@ def main() -> int:
     payload = {
         "terminal": _entry(
             "terminal",
-            Path("packages/terminal"),
-            [Path("packages/terminal/dist/assets")],
+            Path("packages/apps/terminal"),
+            [Path("packages/apps/terminal/dist/assets")],
             args.terminal_log,
         ),
         "site": _entry(
             "site",
-            Path("apps/site"),
-            [Path("apps/site/.next/static")],
+            Path("packages/apps/site"),
+            [Path("packages/apps/site/.next/static")],
             args.site_log,
         ),
         "captured_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),

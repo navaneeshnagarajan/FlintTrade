@@ -38,37 +38,37 @@ FlintTrade has roughly 12,000 tests across Python and TypeScript. Run them with:
 ```bash
 make test                                        # all pytest tests (~9,089)
 make test-fast                                   # stop on first failure
-python -m pytest packages/core/tests/ -v         # single package
-cd packages/terminal && npx vitest run           # all Vitest (~2,973)
+python -m pytest packages/core/core/tests/ -v         # single package
+cd packages/apps/terminal && npx vitest run           # all Vitest (~2,973)
 ```
 
 To run a single file or a single test by name:
 
 ```bash
-python -m pytest packages/core/tests/test_foo.py -v
-python -m pytest packages/core/tests/test_foo.py::test_name -v
-cd packages/terminal && npx vitest run src/widgets/orderpad/OrderPad.test.tsx
-cd packages/terminal && npx vitest run -t "places a market order"
+python -m pytest packages/core/core/tests/test_foo.py -v
+python -m pytest packages/core/core/tests/test_foo.py::test_name -v
+cd packages/apps/terminal && npx vitest run src/widgets/orderpad/OrderPad.test.tsx
+cd packages/apps/terminal && npx vitest run -t "places a market order"
 ```
 
 Lint passes are part of CI too:
 
 ```bash
 make lint                                        # ruff over all Python packages
-cd packages/terminal && npm run typecheck        # tsc --noEmit, strict mode
+cd packages/apps/terminal && npm run typecheck        # tsc --noEmit, strict mode
 ```
 
 ## How to build
 
 ```bash
 # Terminal (React + Vite)
-cd packages/terminal && npm run build
+cd packages/apps/terminal && npm run build
 
 # Rust tick-engine (PyO3 bindings)
-cd packages/tick-engine && cargo build --release
+cd packages/core/ticks && cargo build --release
 ```
 
-The terminal build runs `tsc --noEmit` followed by `vite build`. A clean build is required before any commit that touches `packages/terminal/`.
+The terminal build runs `tsc --noEmit` followed by `vite build`. A clean build is required before any commit that touches `packages/apps/terminal/`.
 
 ## Branch and commit conventions
 
@@ -152,7 +152,7 @@ Look at the [`good first issue`](https://github.com/navaneeshnagarajan/FlintTrad
 
 - **Broker adapters** — especially crypto exchanges beyond Delta (CoinDCX, WazirX, Bybit, Binance India), and any broker not yet covered by the 33 OpenAlgo gateways.
 - **Strategy templates** — we ship 96 backtest templates and want more. Mean reversion, momentum, options spreads, sector rotation, volatility plays.
-- **AI prompt engineering** — improving the 30 trading skills under `packages/ai/skills/`, refining RAG retrieval, sharpening signal explanations.
+- **AI prompt engineering** — improving the 30 trading skills under `packages/services/ai/skills/`, refining RAG retrieval, sharpening signal explanations.
 - **Translations** — Hindi and Tamil first, then other Indian regional languages. The UI needs an i18n pass; we're looking for translators and engineers to set up the framework.
 - **Accessibility** — WCAG AA is in place; AAA is the target. Screen-reader testing, keyboard-only flows, contrast audits, focus management.
 - **Documentation** — user guides, walkthroughs, video scripts, API references. Every doc PR is a high-value PR.

@@ -12,7 +12,7 @@ make setup
 
 `make setup` installs: Python deps, Node deps, workspace init.
 
-OpenAlgo (and OpenClaw) are no longer bundled as git submodules. They are external services FlintTrade talks to over HTTP/WebSocket. Install OpenAlgo separately, OR run the helper to clone a local-dev copy. AlgoMirror is intentionally absent — its mirroring logic is absorbed in-process by `packages/ditto/`, nothing external to install.
+OpenAlgo (and OpenClaw) are no longer bundled as git submodules. They are external services FlintTrade talks to over HTTP/WebSocket. Install OpenAlgo separately, OR run the helper to clone a local-dev copy. AlgoMirror is intentionally absent — its mirroring logic is absorbed in-process by `packages/services/ditto/`, nothing external to install.
 
 ```bash
 bash scripts/setup-test-deps.sh
@@ -45,7 +45,7 @@ make test        # ~9,089 tests pass
 ## 5. Run Terminal
 
 ```bash
-cd packages/terminal
+cd packages/apps/terminal
 npm run dev      # Terminal on http://localhost:5173
 ```
 
@@ -68,7 +68,7 @@ Sessions expire at ~3:30 AM IST. Re-login daily when using live broker.
 
 ## Terminal .env
 
-`packages/terminal/.env` is gitignored. The Vite proxy in `vite.config.ts` already forwards `/api` to OpenAlgo, `/ft-api` to the FlintTrade backend, and `/ws` to the WebSocket — you should not need a terminal-side `.env` for normal development.
+`packages/apps/terminal/.env` is gitignored. The Vite proxy in `vite.config.ts` already forwards `/api` to OpenAlgo, `/ft-api` to the FlintTrade backend, and `/ws` to the WebSocket — you should not need a terminal-side `.env` for normal development.
 
 ```
 # Only the host/WS endpoints are configurable from VITE_* env vars.

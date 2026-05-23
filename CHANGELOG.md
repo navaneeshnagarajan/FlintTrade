@@ -28,8 +28,8 @@ Findings catalogued in `.local/openalgo-sync-2.0.1.1/`.
   constants and `tradingConstants.GTT_PRODUCTS`. Live broker support
   upstream: Dhan + Zerodha. Other brokers return clean 501.
 - **New exchanges** `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`
-  added to `Exchange` enum (`packages/core/src/models.py`), per-broker
-  `BROKER_CATALOG` (`packages/gateway/src/adapter.py`), backend enums
+  added to `Exchange` enum (`packages/core/core/src/models.py`), per-broker
+  `BROKER_CATALOG` (`packages/integrations/gateway/src/adapter.py`), backend enums
   (`safety.py`, `market_hours.py`, `scheduler.py`, `strategy_routes.py`,
   `historical/downloader.py`, `integration/tradingview.py`), `flint.toml`,
   and frontend constants (`tradingConstants.ts`, `market.ts`, `BacktestLab`,
@@ -45,7 +45,7 @@ Findings catalogued in `.local/openalgo-sync-2.0.1.1/`.
   surface (`POST /api/v1/whatsapp/notify`) wired to the existing
   `testWhatsAppAlert` helper. `settingsStore` bumped to v7 with an
   idempotent migration that adds the WhatsApp default block.
-- **`TRUST_PROXY_HEADERS` env gate** in `packages/core/src/app.py`. When
+- **`TRUST_PROXY_HEADERS` env gate** in `packages/core/core/src/app.py`. When
   set, wraps `wsgi_app` with Werkzeug's `ProxyFix` so deployments behind
   Nginx see real client IPs instead of `127.0.0.1`. Mirrors the same
   gate upstream added in OpenAlgo v2.0.0.7 for `utils/ip_helper.py`.
@@ -56,7 +56,7 @@ Findings catalogued in `.local/openalgo-sync-2.0.1.1/`.
   reset / session tokens cannot survive a password change. Mirrors
   OpenAlgo's v2.0.0.7 hardening.
 - **`API_KEY_PEPPER` first-run generation + persist** — new
-  `_get_api_key_pepper()` in `packages/core/src/app.py` generates a
+  `_get_api_key_pepper()` in `packages/core/core/src/app.py` generates a
   64-byte pepper on first boot and persists it to
   `~/.flinttrade/api_key_pepper` (mode 0600), then pushes it into
   `os.environ` before the gateway shim imports OpenAlgo's broker
@@ -72,7 +72,7 @@ Findings catalogued in `.local/openalgo-sync-2.0.1.1/`.
   `scripts/setup-test-deps.sh` and `scripts/check_absorption_drift.py`
   bumped from `08c2a553` to `7e48b2e8`.
 - **`docs/API.md`, `docs/.../OPENALGO_API.md`, AI skill
-  `packages/ai/skills/openalgo_api.md`, agent-context template
+  `packages/services/ai/skills/openalgo_api.md`, agent-context template
   `templates/agent-context/CLAUDE.md.template`** gained GTT sections
   and WhatsApp notify documentation.
 - **Analyzer docstrings** in `OpenAlgoClient.analyzer_status` /
@@ -95,13 +95,13 @@ Findings catalogued in `.local/openalgo-sync-2.0.1.1/`.
 
 - **Not absorbed** — OpenAlgo's Remote MCP (OAuth 2.1 + JSON-RPC) is
   orthogonal to FlintTrade's in-process MCP bridge at
-  `packages/ai/src/mcp_bridge.py`. WhatsApp inbound slash commands are
+  `packages/services/ai/src/mcp_bridge.py`. WhatsApp inbound slash commands are
   intentionally outbound-only on FlintTrade so orders cannot bypass
   the mode guard. The `opengreeks` Rust replacement for `py_vollib`
   is transparent — same response shape, no code change required.
 - **Tests** — 370 tests across the touched packages pass. The
   pre-existing `test_bootstrap_is_idempotent` order-dependent flake
-  in `packages/gateway/tests/test_adapter.py` is unchanged.
+  in `packages/integrations/gateway/tests/test_adapter.py` is unchanged.
 
 ### Public repo modernisation pass (2026-05-20)
 
@@ -216,7 +216,7 @@ See `docs/RELEASE_NOTES_v0.5.1.md` for the GA narrative. Highlights:
 
 The sandbox executor previously ran user-uploaded strategy code via `exec()` inside a daemon `threading.Thread` with a `threading.Timer` for timeout. When a strategy hit `while True: pass`, the timer fired and the result was marked `timed_out=True`, but the daemon thread kept running until the parent process exited. CPython has no thread-kill primitive, so any hostile strategy could pin a CPU core for the lifetime of the FlintTrade backend.
 
-- **New** `packages/engine/src/_sandbox_child.py` — child-process entry point. Reads a pickled payload from stdin, runs the strategy in the same in-process sandbox the parent would have used, and emits a length-prefixed JSON result frame to stdout. JSON-only on the parent-facing channel — the parent NEVER `pickle.loads` from the child, so a hostile child cannot inject a `__reduce__` payload into the parent.
+- **New** `packages/services/engine/src/_sandbox_child.py` — child-process entry point. Reads a pickled payload from stdin, runs the strategy in the same in-process sandbox the parent would have used, and emits a length-prefixed JSON result frame to stdout. JSON-only on the parent-facing channel — the parent NEVER `pickle.loads` from the child, so a hostile child cannot inject a `__reduce__` payload into the parent.
 - **Refactored** `SandboxExecutor.run` — new `use_subprocess=True` default. Spawns `python -m packages.engine.src._sandbox_child` with stdin/stdout/stderr pipes, sends the payload, waits with the wall-clock cap, and on timeout calls `proc.kill()` (`TerminateProcess` on Windows, `SIGKILL` on POSIX). Hostile strategies can no longer outlive the timeout window.
 - **Legacy in-thread path** preserved as `_run_in_thread`, accessible via `use_subprocess=False`. Faster (no spawn overhead) but cannot terminate hostile code — only for trusted callers (in-house template engine, BacktestLab hot loops where the source has been reviewed).
 - **POSIX resource limits** applied inside the child: `RLIMIT_AS` (256 MB), `RLIMIT_CPU`, `RLIMIT_NOFILE` (64), `RLIMIT_FSIZE=0` (strategy can't write any file). Windows Job Object equivalent is a follow-up — wall-clock kill is the only enforcement on Windows pending that work.
@@ -226,9 +226,9 @@ The sandbox executor previously ran user-uploaded strategy code via `exec()` ins
 
 #### Vitest OOM root cause — radix-ui umbrella unwound
 
-Performance Benchmarker agent traced the persistent `ERR_WORKER_OUT_OF_MEMORY` in `node-widget-tests-1` and `node-widget-tests-3` to the radix-ui umbrella package. All 14 shadcn files in `packages/terminal/src/components/ui/*.tsx` used `import { X } from "radix-ui"`, which is a 74-line index that does `import * as X from "@radix-ui/react-X"` for 40 sub-packages. Vitest's SSR transform cannot tree-shake those, so every test file that touches a shadcn primitive drags ~2,400 modules into its module graph. With `pool: 'threads'` and 4 concurrent workers sharing one process heap, that's ~8 GB resident before any tests even run.
+Performance Benchmarker agent traced the persistent `ERR_WORKER_OUT_OF_MEMORY` in `node-widget-tests-1` and `node-widget-tests-3` to the radix-ui umbrella package. All 14 shadcn files in `packages/apps/terminal/src/components/ui/*.tsx` used `import { X } from "radix-ui"`, which is a 74-line index that does `import * as X from "@radix-ui/react-X"` for 40 sub-packages. Vitest's SSR transform cannot tree-shake those, so every test file that touches a shadcn primitive drags ~2,400 modules into its module graph. With `pool: 'threads'` and 4 concurrent workers sharing one process heap, that's ~8 GB resident before any tests even run.
 
-- **Switched pool 'threads' → 'forks'** in `packages/terminal/vite.config.ts`. Each test file now runs in its own child process; OS reclaims the heap on file completion. Context7 confirms this is the documented antidote for jsdom + ESM module-graph memory exhaustion.
+- **Switched pool 'threads' → 'forks'** in `packages/apps/terminal/vite.config.ts`. Each test file now runs in its own child process; OS reclaims the heap on file completion. Context7 confirms this is the documented antidote for jsdom + ESM module-graph memory exhaustion.
 - **Unwound the radix-ui umbrella** in all 14 shadcn files. `import { Dialog as DialogPrimitive } from "radix-ui"` → `import * as DialogPrimitive from "@radix-ui/react-dialog"`. Each shadcn primitive now pulls in only its single Radix sub-package (~60 modules) instead of all 40. Same change pattern for `alert-dialog`, `badge`, `button`, `dialog`, `dropdown-menu`, `label`, `popover`, `scroll-area`, `select`, `separator`, `sheet`, `switch`, `tabs`, `tooltip`.
 - Targeted widget-tests run: 437/438 pass (was 0/438 with the OOM). The 1 real failure was a stale assertion in `GreeksHeatmapWidget.test.tsx` (sample-data badge is now always visible per the 2026-04 audit) — fixed.
 - `tsc --noEmit` clean.
@@ -248,8 +248,8 @@ The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL
 
 #### HIGH — frontend↔backend route drift (silent 404s in production)
 - `ftApi.analysis.ts:180` was calling `iv_smile`; backend route is `/ivsmile`. Fixed frontend.
-- `packages/screener/src/payoff_routes.py` blueprint was mounted at `/v1` instead of `/api/v1`, so all `analytics/correlation`, `payoff/*`, and `regime/current` POSTs from `ftApi.analysis.ts` 404'd. Moved to `/api/v1`; test files updated.
-- `packages/screener/src/earnings_routes.py` had the same `/v1/earnings/` prefix mismatch. Moved to `/api/v1/earnings/`; both `test_earnings_routes.py` and `test_earnings_calendar.py` updated.
+- `packages/services/screener/src/payoff_routes.py` blueprint was mounted at `/v1` instead of `/api/v1`, so all `analytics/correlation`, `payoff/*`, and `regime/current` POSTs from `ftApi.analysis.ts` 404'd. Moved to `/api/v1`; test files updated.
+- `packages/services/screener/src/earnings_routes.py` had the same `/v1/earnings/` prefix mismatch. Moved to `/api/v1/earnings/`; both `test_earnings_routes.py` and `test_earnings_calendar.py` updated.
 - `pnl_symbols_routes.py` only accepted GET. Added POST handler (reads from JSON body) so the route contract matches OpenAlgo's `POST /api/v1/pnl/symbols` — defensive; the actual frontend call goes via Vite's `/api` proxy to OpenAlgo, but a FlintTrade-side caller would now also work.
 - `ftApi.backtest.ts` was calling `strategies/uploaded/<id>/{start,stop,logs}` which matched no backend route (404). Engine's `strategy_bp` handles uploaded strategy lifecycle at `/api/v1/strategies/<id>/{start,stop,logs}`. Removed the spurious `/uploaded/` segment from frontend.
 
@@ -262,7 +262,7 @@ The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL
 
 ### Orphan API stubs + remaining hook coverage (2026-05-19)
 
-- **`packages/screener/src/sample_data_routes.py`** added — eight Flask routes that previously 404'd in production now return `is_sample_data: true` placeholders matching the frontend TypeScript interfaces:
+- **`packages/services/screener/src/sample_data_routes.py`** added — eight Flask routes that previously 404'd in production now return `is_sample_data: true` placeholders matching the frontend TypeScript interfaces:
   - `GET /api/v1/etf/screener` — ETF screener rows (NIFTYBEES, GOLDBEES, BANKBEES)
   - `GET /api/v1/sectors/rotation` — RRG-quadrant-tagged sector momentum
   - `GET /api/v1/analytics/risk-return` — annualised return/volatility scatter
@@ -272,18 +272,18 @@ The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL
   - `GET /api/v1/screener/sector-constituents?sector=` — 4-stock RRG drill-down with tail points
   - `GET /api/v1/screener/lot-size?symbol=&exchange=` — real lookup against a 15-symbol F&O lot-size table (NIFTY=75, BANKNIFTY=30, FINNIFTY=65, USDINR=1000, etc.); unknown symbols return `0` so the ScalperWidget falls back to its built-in config rather than getting an error.
 - The blueprint registers in `core.app` alongside `analysis_bp`. Widgets that already check `is_sample_data` (EtfScreenerTab, RiskReturnTab, SectorRotationTab, ShareholdingTab, PortfolioRRGTab, etc.) now render their "Demo" badge instead of an error panel. `retry: false` is no longer strictly necessary on PortfolioRRGTab but is kept as a safety net against accidental regressions.
-- **`packages/screener/tests/test_sample_data_routes.py`** added — 12 tests confirm every route returns HTTP 200, `is_sample_data: true`, the response shape matches the frontend interface, and query params (symbol/sector/exchange) echo through correctly. Lot-size table values are pinned: NIFTY=75, BANKNIFTY=30, USDINR=1000. A future PR replacing a stub with a real implementation MUST keep these assertions passing.
+- **`packages/services/screener/tests/test_sample_data_routes.py`** added — 12 tests confirm every route returns HTTP 200, `is_sample_data: true`, the response shape matches the frontend interface, and query params (symbol/sector/exchange) echo through correctly. Lot-size table values are pinned: NIFTY=75, BANKNIFTY=30, USDINR=1000. A future PR replacing a stub with a real implementation MUST keep these assertions passing.
 
 ### Additional hook coverage (2026-05-19)
 
-- **`packages/terminal/src/hooks/__tests__/useOrdersPositionsMargin.test.ts`** added — 12 tests covering the three remaining REST-query hooks. `useOrders` and `usePositions` get URL-called, response-shape, and error-state coverage. `useMargin` gets the load-bearing conditional `enabled` gate locked end-to-end: fires only when symbol non-empty AND exchange non-empty AND qty>0 AND caller's `enabled` is true. Four no-fetch branches + one positive fetch branch + one success-shape assertion = full coverage of the gate logic.
+- **`packages/apps/terminal/src/hooks/__tests__/useOrdersPositionsMargin.test.ts`** added — 12 tests covering the three remaining REST-query hooks. `useOrders` and `usePositions` get URL-called, response-shape, and error-state coverage. `useMargin` gets the load-bearing conditional `enabled` gate locked end-to-end: fires only when symbol non-empty AND exchange non-empty AND qty>0 AND caller's `enabled` is true. Four no-fetch branches + one positive fetch branch + one success-shape assertion = full coverage of the gate logic.
 
 ### Critical safety — advanced order mode-guard (2026-05-19)
 
 - **Codex stop-gate finding #4 closed**: engine `order_bp` routes (basket, split, options-strategy) and `bracket_bp.place_bracket` were carrying only `@require_non_explore`, which blocks explore-mode but never checks the `live_mode_unlocked` JWT claim. These four routes execute orders via FT's own executors (`BasketOrderExecutor`, `SplitOrderExecutor`, `OptionsStrategyBuilder`, `BracketOrderService`) that call OpenAlgo *directly* — they don't re-enter the mode-aware `core.order_routes` proxy, so the proxy's safety fan-out never protects them. Net effect before this fix: a live-mode user without a PIN-verified JWT could place basket/split/options-strategy/bracket orders that hit the broker.
-- **Fix**: new `require_live_unlocked` decorator in `packages/engine/src/mode_guard.py` reproduces the full `core._dispatch_order` semantics at the route boundary — explore→403 (`mode_blocked`), practice→403 (`practice_unsupported` — no sandbox executor parity yet), live without `live_mode_unlocked` claim→403 (`live_locked`), live unlocked→pass, missing JWT→401 (`auth_required`), unknown mode→400 (`mode_invalid`). `TESTING=True` bypass preserved so unit tests keep working.
+- **Fix**: new `require_live_unlocked` decorator in `packages/services/engine/src/mode_guard.py` reproduces the full `core._dispatch_order` semantics at the route boundary — explore→403 (`mode_blocked`), practice→403 (`practice_unsupported` — no sandbox executor parity yet), live without `live_mode_unlocked` claim→403 (`live_locked`), live unlocked→pass, missing JWT→401 (`auth_required`), unknown mode→400 (`mode_invalid`). `TESTING=True` bypass preserved so unit tests keep working.
 - **Applied to** `place_basket`, `place_split`, `place_options_strategy`, `place_bracket` (4 routes). `require_non_explore` is retained for strategy-lifecycle routes whose downstream orders flow back through the mode-aware `orders_bp` and therefore inherit its safety stack.
-- **Tests**: new `packages/engine/tests/test_mode_guard.py` (17 cases) covers both decorators end-to-end with real JWT minting (`TESTING=False`), explore/practice/live × locked/unlocked, missing-token, invalid-token, and unknown-mode paths. Existing route tests stay green via the TESTING-mode bypass.
+- **Tests**: new `packages/services/engine/tests/test_mode_guard.py` (17 cases) covers both decorators end-to-end with real JWT minting (`TESTING=False`), explore/practice/live × locked/unlocked, missing-token, invalid-token, and unknown-mode paths. Existing route tests stay green via the TESTING-mode bypass.
 - **Frontend collateral**: `vi.stubEnv("DEV", "true")` → `vi.stubEnv("DEV", true)` (vitest 3.2.4 requires `boolean` for DEV). `PortfolioRRGTab.tsx` query for `getSectorConstituents` gains `retry: false` to stop the orphan-API retry storm until the backend route is built.
 - **Codex stop-gate finding closed inside the same session**: Codex's review of the first iteration flagged that `placeBracketOrder` (and any other call going through `ftApi.helpers.post`) would now hit `auth_required: 401` because the bare `post()` helper only sent `Content-Type`. Fix: `ftApi.helpers.{post,get,put,del}` all route through a new `buildHeaders()` that imperatively reads `useConnectionStore.getState().apiKey` and `useAuthStore.getState().token`, attaching `X-API-Key` and `Authorization: Bearer <jwt>` whenever they're populated. Three new tests in `ftApi.helpers.test.ts` lock the contract (populated headers, GET without Content-Type, omitted headers when stores are empty). Brings the helper layer to parity with `api.postOrder()`, so basket/split/options-strategy/bracket all carry the JWT the new server-side guard now requires.
 
@@ -300,8 +300,8 @@ The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL
 ### Post-v0.5.0 GA hardening (commits since `2741cad`, 2026-04-19 → 2026-05-19)
 
 #### Changed
-- **Infra:** OpenAlgo + OpenClaw detached from git submodules (commit `3da42e4`). They are now external services FlintTrade talks to over HTTP/WS; contributors can clone local-dev copies into `.local/external/{openalgo,openclaw}/` via `scripts/setup-test-deps.sh` (gitignored, not shipped). The legacy `infra/openalgo/` path remains as a fallback in `packages/gateway/src/adapter.py:_resolve_openalgo_root()` for older checkouts.
-- **Ditto:** `algomirror_bridge.py` and its tests dropped (commit `ce5f6df`). AlgoMirror's multi-account mirroring patterns are fully absorbed in-process by `packages/ditto/` (`PositionMirror`, `TrailingSLManager`, `MarginCalculator`, `RiskManager`). There is no live AlgoMirror integration; the upstream repo is no longer tracked.
+- **Infra:** OpenAlgo + OpenClaw detached from git submodules (commit `3da42e4`). They are now external services FlintTrade talks to over HTTP/WS; contributors can clone local-dev copies into `.local/external/{openalgo,openclaw}/` via `scripts/setup-test-deps.sh` (gitignored, not shipped). The legacy `infra/openalgo/` path remains as a fallback in `packages/integrations/gateway/src/adapter.py:_resolve_openalgo_root()` for older checkouts.
+- **Ditto:** `algomirror_bridge.py` and its tests dropped (commit `ce5f6df`). AlgoMirror's multi-account mirroring patterns are fully absorbed in-process by `packages/services/ditto/` (`PositionMirror`, `TrailingSLManager`, `MarginCalculator`, `RiskManager`). There is no live AlgoMirror integration; the upstream repo is no longer tracked.
 - **Compat:** `docs/COMPATIBILITY.md` refocused on min + latest tested versions (drift-tracking removed, commit `fa59ef7`).
 - **Test infra (commits `268e8e7`, `3826662`, `84637f1`, `879b3da`):** Batch test-suite cleanup — real bug fixed in routes, dead tests removed, stale fixtures refreshed, parallel-test dependencies registered, isolated workspace per worker, custom markers (`unit`, `integration`, `slow`) registered with `--strict-markers`.
 - **Setup wizard (commit `41d319f`):** End-to-end account creation flow with escape hatches and `/v1/test-connection` backend-proxy that avoids OpenAlgo CORS.
@@ -317,12 +317,12 @@ The "fix everything" sweep after the second Codex audit. Repo is now PUBLIC AGPL
 #### Verified metrics (2026-05-19)
 - Total tests collected: **~12,062** (9,089 pytest + ~2,973 vitest).
 - Test file counts: 313 Python + 264 vitest.
-- Widget count: 82 directories under `packages/terminal/src/widgets/` (22 trading + 38 analysis + 22 utility); registry has 83 entries (`chartgrid` reuses the Chart folder).
+- Widget count: 82 directories under `packages/apps/terminal/src/widgets/` (22 trading + 38 analysis + 22 utility); registry has 83 entries (`chartgrid` reuses the Chart folder).
 - Tool count: 7 (`BacktestLab`, `FlowBuilder`, `MarketIntelligence`, `PnLDashboard`, `Settings`, `StrategyBuilder`, `TradeJournal`).
 - Routes: 12 public + DEV `/admin` + `*` 404 catch-all.
-- Workspace presets: 13 (`packages/terminal/src/layout/workspacePresets.ts`).
-- Backtest strategy templates: 94 (`packages/backtest-engine/src/strategies/`); plus 2 live-engine strategies in `packages/engine/src/strategies/`.
-- AI skill markdown files: 30 (`packages/ai/skills/`).
+- Workspace presets: 13 (`packages/apps/terminal/src/layout/workspacePresets.ts`).
+- Backtest strategy templates: 94 (`packages/services/backtest/src/strategies/`); plus 2 live-engine strategies in `packages/services/engine/src/strategies/`.
+- AI skill markdown files: 30 (`packages/services/ai/skills/`).
 - CI jobs: 9 parallel GitHub Actions jobs.
 
 ---
@@ -348,7 +348,7 @@ v2.0.0.4 parity baseline.
 ### Chores
 - Removed personal identifiers from sample data and test fixtures (replaced with generic placeholders + RFC 5737 IPs)
 - Replaced seven realistic Indian client names + broker names in `operations_routes.py` sample accounts with anonymous demo tokens
-- Bumped `packages/terminal/package.json` to `0.5.0` to match the monorepo version
+- Bumped `packages/apps/terminal/package.json` to `0.5.0` to match the monorepo version
 
 ### Added — Features (Waves 1-9)
 - Signals pipeline: real-time signal generation, scoring, and routing to order engine (signal_pipeline.py + signal_routes.py + useSignals hook)
@@ -745,7 +745,7 @@ v0.3.0 "Structured Calm" — Bloomberg precision + Stripe polish + Linear minima
 OpenAlgo absorption: direct broker connections, analysis tools, platform features.
 
 ### Added — Broker Gateway (SP1)
-- New packages/gateway/ package: direct connection to 31 brokers via adapter pattern
+- New packages/integrations/gateway/ package: direct connection to 31 brokers via adapter pattern
 - BrokerRegistry: multi-account management, N simultaneous broker connections
 - Fernet-encrypted credential storage (PBKDF2, per-account salt)
 - WebSocket bridge: TickDispatcher replaces ZMQ PUB/SUB (in-process, no separate server)

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.0,<2"]
+build-backend = "maturin"
+
+[project]
+name = "flinttrade-ticks"
+version = "0.6.0-dev"
+requires-python = ">=3.12"
+description = "High-performance tick-level backtesting simulator for FlintTrade (Rust/PyO3)"
+license = { text = "AGPL-3.0" }
+
+[tool.maturin]
+features = ["extension-module"]
+python-source = "python"
+module-name = "tick_engine"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "unit: fast, isolated unit test (default; runs on every commit)",
+    "integration: touches DB or mocked external services (PR gate)",
+    "slow: long-running test >1s (nightly or via --run-slow)",
+]

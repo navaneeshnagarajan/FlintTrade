@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enumerate Flask blueprints registered in packages/core/src/app.py.
+"""Enumerate Flask blueprints registered in packages/core/core/src/app.py.
 
 Emits the 7-column commit-0 baseline schema:
 blueprint_name,current_url_prefix,line_number,target_url_prefix,methods,
@@ -13,7 +13,7 @@ import csv
 from pathlib import Path
 import sys
 
-APP_PY = Path("packages/core/src/app.py")
+APP_PY = Path("packages/core/core/src/app.py")
 DUPLICATE_PREFIXES: set[str] = {
     "/api/v1/health",
     "/api/v1/errors",
@@ -61,7 +61,7 @@ def _owner_package(bp_name: str, imports: dict[str, str]) -> str:
 
 def _module_path(module: str) -> Path | None:
     if module.startswith("."):
-        return Path("packages/core/src") / f"{module.lstrip('.').replace('.', '/')}.py"
+        return Path("packages/core/core/src") / f"{module.lstrip('.').replace('.', '/')}.py"
     parts = module.split(".")
     if len(parts) >= 3 and parts[0] == "packages":
         return Path(*parts).with_suffix(".py")

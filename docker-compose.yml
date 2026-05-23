@@ -132,7 +132,7 @@ services:
     container_name: flinttrade-terminal-builder
     working_dir: /app
     volumes:
-      - ./packages/terminal:/app
+      - ./packages/apps/terminal:/app
       - terminal_dist:/app/dist
       - terminal_node_modules:/app/node_modules
     command: sh -c "npm ci --silent && npm run build"

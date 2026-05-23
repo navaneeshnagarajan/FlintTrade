@@ -1,0 +1,10 @@
+# FlintTrade — journal
+
+Read `packages/services/journal/CLAUDE.md` first. This package owns trade journal, trade logging, order analytics, and P&L tracking surfaces split from data.
+
+## Rules
+- Keep durable storage access behind `flinttrade_data` helpers.
+- Do not store broker credentials, fund amounts beyond journal records, or personal IPs in logs.
+- Keep audit-friendly event history deterministic and timestamped.
+- Tests live in `tests/`; add focused tests for migrations and calculations.
+- Update root CHANGELOG.md for user-visible journal behaviour changes.

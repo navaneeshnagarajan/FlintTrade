@@ -19,7 +19,7 @@ FlintTrade exposes two HTTP surfaces and one WebSocket channel.
 
 ## 1. OpenAlgo passthrough (`/api/v1/*`)
 
-Source of truth: `packages/core/src/openalgo_client.py`. All endpoints are
+Source of truth: `packages/core/core/src/openalgo_client.py`. All endpoints are
 POST unless explicitly marked **GET**.
 
 ### Orders
@@ -123,7 +123,7 @@ path because they require session auth, not API-key auth.
 
 ## 2. FlintTrade backend (`/ft-api/v1/*`)
 
-Source of truth: `packages/core/src/app.py` and the `*_routes.py` files
+Source of truth: `packages/core/core/src/app.py` and the `*_routes.py` files
 under `packages/*/src/`. Externally clients call `/ft-api/v1/…`;
 internally blueprints are registered at `/v1/…` (or `/api/v1/…` for the
 OpenAlgo-style paths). Both shapes route to the same handler thanks to
@@ -131,7 +131,7 @@ the WSGI prefix-strip.
 
 ### Analysis (`/ft-api/v1/gex` etc.)
 
-GET endpoints. Powered by `packages/screener/`.
+GET endpoints. Powered by `packages/services/screener/`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -144,7 +144,7 @@ GET endpoints. Powered by `packages/screener/`.
 
 ### Gateway (`/ft-api/v1/broker/*`)
 
-POST endpoints. Powered by `packages/gateway/`. Used by the
+POST endpoints. Powered by `packages/integrations/gateway/`. Used by the
 `/setup-account` wizard and by the connection-status indicator.
 
 | Endpoint | Purpose |
@@ -162,7 +162,7 @@ POST endpoints. Powered by `packages/gateway/`. Used by the
 
 ### Auth (`/ft-api/v1/auth/*`)
 
-JWT-based. Source: `packages/core/src/auth_routes.py`.
+JWT-based. Source: `packages/core/core/src/auth_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -175,7 +175,7 @@ JWT-based. Source: `packages/core/src/auth_routes.py`.
 
 ### Monitoring (`/ft-api/v1/monitoring/*`, `/ft-api/v1/health`)
 
-GET endpoints. Source: `packages/core/src/monitoring_routes.py`,
+GET endpoints. Source: `packages/core/core/src/monitoring_routes.py`,
 `health_routes.py`.
 
 | Endpoint | Purpose |
@@ -194,7 +194,7 @@ GET endpoints. Source: `packages/core/src/monitoring_routes.py`,
 
 There are roughly 20 FlintTrade-specific endpoint families across the
 12 Python packages. The complete list of registered Flask blueprints
-appears in `packages/core/src/app.py` — search for `register_blueprint`.
+appears in `packages/core/core/src/app.py` — search for `register_blueprint`.
 
 ---
 
@@ -282,7 +282,7 @@ The JWT carries three claims you care about:
 
 A `jti` (JWT ID) is included so the server can revoke individual tokens
 when the user logs out or switches mode. The revocation blocklist lives
-in `packages/core/src/auth_state.py`.
+in `packages/core/core/src/auth_state.py`.
 
 ### X-API-Key (OpenAlgo passthrough)
 
@@ -294,7 +294,7 @@ read from `.env` (`OPENALGO_API_KEY`) and forwarded as the
 
 ## 5. Rate limits
 
-Source: `packages/core/src/openalgo_client.py` (`_RateLimiter`).
+Source: `packages/core/core/src/openalgo_client.py` (`_RateLimiter`).
 
 | Category | Limit |
 |---|---|
@@ -311,7 +311,7 @@ window opens; you do not get a 429 from the broker.
 ## 6. Mode system
 
 `explore | practice | live` — server-side JWT-claim enforcement. The
-guard lives at `packages/engine/src/mode_guard.py`. Every order-path
+guard lives at `packages/services/engine/src/mode_guard.py`. Every order-path
 endpoint asks the guard whether the current JWT permits live orders;
 the guard returns one of three verdicts:
 

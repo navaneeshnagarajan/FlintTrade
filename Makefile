@@ -16,7 +16,7 @@
 # ============================================================================
 
 SHELL := /usr/bin/env bash
-PYTHON := $(shell which python3 2>/dev/null || which python 2>/dev/null)
+PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,$(shell which python3 2>/dev/null || which python 2>/dev/null))
 NPM := $(shell which npm 2>/dev/null)
 FLINTTRADE_DIR := $(shell pwd)
 
@@ -65,7 +65,7 @@ start: ## Start OpenAlgo service
 # --- Gateway mode (v0.2.0+) — single process, no separate OpenAlgo ---
 
 start-gateway: ## Start FlintTrade gateway backend (standalone, no OpenAlgo)
-	$(PYTHON) -m packages.core.src.app
+	$(PYTHON) -m flinttrade_core.app
 
 # Legacy mode alias — requires separate OpenAlgo instance (same as `start`)
 start-legacy: start ## Start in legacy mode (requires separate OpenAlgo instance)
@@ -87,7 +87,7 @@ dev: ## Start terminal dev server + OpenAlgo
 	@echo "  OpenAlgo:  http://localhost:$(OPENALGO_PORT)"
 	@echo ""
 	@if [ -n "$(NPM)" ]; then \
-	  cd packages/terminal && npm run dev & \
+	  cd packages/apps/terminal && npm run dev & \
 	fi
 	@bash infra/scripts/openalgo/start-openalgo.sh
 
@@ -97,27 +97,23 @@ dev: ## Start terminal dev server + OpenAlgo
 
 test: ## Run all tests
 ifeq ($(OS),Windows_NT)
-	@$(PYTHON) -m pytest packages/core/tests/ packages/engine/tests/ packages/gateway/tests/ packages/screener/tests/ packages/data/tests/ packages/historical/tests/ packages/indicators/tests/ packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/integration/tests/ tests/ -v --tb=short --import-mode=importlib
+	@$(PYTHON) -m pytest packages/core/core/tests/ packages/services/engine/tests/ packages/integrations/gateway/tests/ packages/services/screener/tests/ packages/core/data/tests/ packages/core/historical/tests/ packages/core/indicators/tests/ packages/services/ai/tests/ packages/services/automation/tests/ packages/services/backtest/tests/ packages/services/journal/tests/ packages/integrations/webhooks/tests/ tests/ -v --tb=short --import-mode=importlib
 else
-	@$(PYTHON) -m pytest packages/*/tests/ tests/ -v --tb=short --import-mode=importlib
+	@$(PYTHON) -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib
 endif
 
 test-fast: ## Run tests, stop on first failure
 ifeq ($(OS),Windows_NT)
-	@$(PYTHON) -m pytest packages/core/tests/ packages/engine/tests/ packages/gateway/tests/ packages/screener/tests/ packages/data/tests/ packages/historical/tests/ packages/indicators/tests/ packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/integration/tests/ tests/ -x --tb=short --import-mode=importlib
+	@$(PYTHON) -m pytest packages/core/core/tests/ packages/services/engine/tests/ packages/integrations/gateway/tests/ packages/services/screener/tests/ packages/core/data/tests/ packages/core/historical/tests/ packages/core/indicators/tests/ packages/services/ai/tests/ packages/services/automation/tests/ packages/services/backtest/tests/ packages/services/journal/tests/ packages/integrations/webhooks/tests/ tests/ -x --tb=short --import-mode=importlib
 else
-	@$(PYTHON) -m pytest packages/*/tests/ tests/ -x --tb=short --import-mode=importlib
+	@$(PYTHON) -m pytest packages/*/*/tests/ tests/ -x --tb=short --import-mode=importlib
 endif
 
 lint: ## Run linter (ruff)
 ifeq ($(OS),Windows_NT)
 	@$(PYTHON) -m ruff check packages/ tests/ || echo ruff not installed. Install with: pip install ruff
 else
-	@if command -v ruff >/dev/null 2>&1; then \
-	  ruff check packages/ tests/; \
-	else \
-	  echo -e "$(YELLOW)ruff not installed. Install with: pip install ruff$(RESET)"; \
-	fi
+	@$(PYTHON) -m ruff check packages/ tests/ || echo ruff not installed. Install with: pip install ruff
 endif
 
 # ======================================================================
@@ -160,12 +156,12 @@ docker-build: ## Rebuild Docker images
 full-check: ## Run full health check (tests + lint + typecheck)
 	@echo -e "$(CYAN)=== FlintTrade Health Check ===$(RESET)"
 	@echo -e "$(YELLOW)--- Python Tests ---$(RESET)"
-	@$(PYTHON) -m pytest packages/gateway/tests/ packages/core/tests/ packages/screener/tests/ packages/engine/tests/ -q --no-header --import-mode=importlib 2>&1 | tail -3
+	@set -o pipefail; $(PYTHON) -m pytest packages/integrations/gateway/tests/ packages/core/core/tests/ packages/services/screener/tests/ packages/services/engine/tests/ -q --no-header --import-mode=importlib 2>&1 | tail -3
 	@echo -e "$(YELLOW)--- Ruff Lint ---$(RESET)"
-	@$(PYTHON) -m ruff check packages/*/src/ --statistics 2>&1 | tail -5
+	@set -o pipefail; $(PYTHON) -m ruff check packages/*/*/src/ --statistics 2>&1 | tail -5
 	@echo -e "$(YELLOW)--- Terminal ---$(RESET)"
-	@cd packages/terminal && npm run typecheck 2>&1 | tail -2
-	@cd packages/terminal && npx vitest run 2>&1 | tail -3
+	@cd packages/apps/terminal && set -o pipefail; npm run typecheck 2>&1 | tail -2
+	@cd packages/apps/terminal && set -o pipefail; npx vitest run 2>&1 | tail -3
 	@echo -e "$(GREEN)=== Done ===$(RESET)"
 
 audit: ## Check repo absorption status

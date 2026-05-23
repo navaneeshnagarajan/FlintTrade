@@ -23,7 +23,7 @@ Requires: Python 3.12, Node.js 22, Git
 2. `cd FlintTrade`
 3. `copy .env.example .env`
 4. `pip install -r requirements.txt`
-5. `python packages/core/src/app.py`
+5. `python packages/core/core/src/app.py`
 
 Note: systemd not available on Windows.
 Use Task Scheduler or NSSM to run as a Windows service.

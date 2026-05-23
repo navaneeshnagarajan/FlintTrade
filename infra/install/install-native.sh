@@ -13,7 +13,7 @@
 # your actual install location.
 #
 # AlgoMirror is intentionally not in scope: its mirroring patterns are
-# absorbed into packages/ditto/ and run in-process — nothing external
+# absorbed into packages/services/ditto/ and run in-process — nothing external
 # to install or run.
 #
 # Usage:
@@ -134,7 +134,7 @@ ok "Python dependencies installed"
 # ── Step 4: Build React terminal ───────────────────────────────────────
 log "Building React terminal..."
 
-cd "$INSTALL_DIR/packages/terminal"
+cd "$INSTALL_DIR/packages/apps/terminal"
 npm install --production=false
 npm run build
 
@@ -190,7 +190,7 @@ server {
     server_name $SERVER_NAME;
 
     # Serve built React terminal
-    root $INSTALL_DIR/packages/terminal/dist;
+    root $INSTALL_DIR/packages/apps/terminal/dist;
     index index.html;
 
     # React SPA — fallback to index.html for client-side routing

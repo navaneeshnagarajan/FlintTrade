@@ -15,7 +15,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.5.2-dev
 - FlintTrade sits ON TOP of OpenAlgo (never modifies it)
 - OpenAlgo: broker connections (32 brokers), REST port 5000, WS port 8765
 - FlintTrade: terminal, strategies, backtest, AI, data, screener, multi-account
-- External test-deps (not submodules, not bundled): OpenAlgo and OpenClaw — installed separately, or cloned to `.local/external/` via `scripts/setup-test-deps.sh` for local development. AlgoMirror's mirroring patterns are absorbed in-process by `packages/ditto/`; the upstream repo is no longer tracked.
+- External test-deps (not submodules, not bundled): OpenAlgo and OpenClaw — installed separately, or cloned to `.local/external/` via `scripts/setup-test-deps.sh` for local development. AlgoMirror's mirroring patterns are absorbed in-process by `packages/services/ditto/`; the upstream repo is no longer tracked.
 
 ## Configuration
 

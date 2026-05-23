@@ -89,7 +89,7 @@ if [ "$MODE" = "native" ]; then
     # ── Step 3: Build React terminal ───────────────────────────────────
     log "Building React terminal..."
 
-    cd "$REPO_ROOT/packages/terminal"
+    cd "$REPO_ROOT/packages/apps/terminal"
     npm install
     npm run build
 

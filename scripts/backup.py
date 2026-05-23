@@ -19,7 +19,7 @@ from pathlib import Path
 
 def _cmd_create(args: argparse.Namespace) -> None:
     """Handle the ``create`` sub-command."""
-    from packages.core.src.backup import WorkspaceBackup, BackupError  # noqa: PLC0415
+    from flinttrade_core.backup import WorkspaceBackup, BackupError  # noqa: PLC0415
 
     bk = WorkspaceBackup()
     output = Path(args.output).expanduser()
@@ -34,7 +34,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
 
 def _cmd_restore(args: argparse.Namespace) -> None:
     """Handle the ``restore`` sub-command."""
-    from packages.core.src.backup import WorkspaceBackup, BackupError  # noqa: PLC0415
+    from flinttrade_core.backup import WorkspaceBackup, BackupError  # noqa: PLC0415
 
     bk = WorkspaceBackup()
     input_path = Path(args.input).expanduser()
@@ -55,7 +55,7 @@ def _cmd_restore(args: argparse.Namespace) -> None:
 
 def _cmd_list(args: argparse.Namespace) -> None:
     """Handle the ``list`` sub-command."""
-    from packages.core.src.backup import WorkspaceBackup  # noqa: PLC0415
+    from flinttrade_core.backup import WorkspaceBackup  # noqa: PLC0415
 
     bk = WorkspaceBackup()
     backup_dir = (

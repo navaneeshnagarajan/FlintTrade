@@ -1,0 +1,16 @@
+# FlintTrade — ditto
+
+> Multi-broker, multi-account trade orchestration, position mirroring, margin-aware allocation
+
+## Absorbs
+- algomirror → Multi-account handler (301 commits), trailing SL, Supertrend exits, margin calculator, trade quality grading, ThreadPoolExecutor parallel execution, risk manager — fully in-process; no live integration with the upstream AlgoMirror service
+
+## Depends on: core, engine
+
+## Rules
+- Read root CLAUDE.md for project-wide rules
+- Use packages/core/core/src/openalgo_client.py for ALL OpenAlgo API calls
+- Never reference specific brokers
+- Tests are in the `tests/` directory. Add new test files as needed.
+- Update root CHANGELOG.md
+- Branch: main (pre-release, all commits to main)

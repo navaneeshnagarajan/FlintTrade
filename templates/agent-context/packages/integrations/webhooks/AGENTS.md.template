@@ -1,0 +1,19 @@
+# FlintTrade — integration
+
+> TradingView webhooks, ChartInk alerts, custom webhooks, visual flow builder (54 flow nodes), alerter
+
+## Absorb from (reference only, not built features)
+- openalgo-flow → Visual strategy builder (N8N-style, React)
+- openalgo-chrome → Chrome extension patterns (reference)
+- OpenAlgo-Excel → Excel add-in patterns (reference)
+- OpenAlgoPlugin → Amibroker data plugin patterns (reference)
+
+## Depends on: core, engine
+
+## Rules
+- Read root CLAUDE.md for project-wide rules
+- Use packages/core/core/src/openalgo_client.py for ALL OpenAlgo API calls
+- Never reference specific brokers
+- Tests are in the `tests/` directory. Add new test files as needed.
+- Update root CHANGELOG.md
+- Branch: main (pre-release, all commits to main)

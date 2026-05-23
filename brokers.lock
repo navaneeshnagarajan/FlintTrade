@@ -1,0 +1,32 @@
+[[broker]]
+name = "dhanhq"
+version = "2.2.0"
+sha256 = "0469dc83317dbeeec4990fa249a583157373a91bde1c4738e5ab91313a952f6b"
+licence = "MIT"
+licence_source = "dhanhq-2.2.0.dist-info/LICENSE"
+homepage = "https://github.com/dhan-oss/dhanhq-py"
+sandbox_tested = "2026-05-23"
+approved_by = "navaneeshnagarajan"
+notes = "wave 1 baseline; placeholder hash is refused until requirements.lock is generated with broker SDK pins."
+
+[[broker]]
+name = "upstox-python-sdk"
+version = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"
+licence = "Apache-2.0"
+licence_source = "PLACEHOLDER"
+homepage = "https://github.com/upstox/upstox-python"
+sandbox_tested = ""
+approved_by = ""
+notes = "wave 2; populate before Upstox ships."
+
+[[broker]]
+name = "neo-api-client"
+version = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"
+licence = "PLACEHOLDER_VERIFY"
+licence_source = "PLACEHOLDER"
+homepage = "https://github.com/Kotak-Neo/Kotak-neo-api-v2"
+sandbox_tested = ""
+approved_by = ""
+notes = "wave 3; populate before Kotak Neo ships."

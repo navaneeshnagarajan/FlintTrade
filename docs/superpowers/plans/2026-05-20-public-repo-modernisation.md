@@ -435,7 +435,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 > - Current `docs/ARCHITECTURE.md` (treat as the source of truth for architecture facts)
 > - Current `CHANGELOG.md` (for accurate release content)
 > - `flint.toml` for package list
-> - `packages/core/src/openalgo_client.py` for endpoint inventory
+> - `packages/core/core/src/openalgo_client.py` for endpoint inventory
 >
 > **Output:** Write all new files + perform the moves + log the archive moves. Do NOT commit (orchestrator commits at parcel end).
 
@@ -471,7 +471,7 @@ ls docs/
 > - Welcome paragraph (we're an Indian fintech OSS project, AGPL-3.0)
 > - "Before you start" — review CODE_OF_CONDUCT, SECURITY policy, ARCHITECTURE
 > - Development setup (point to docs/setup/)
-> - How to run tests (`make test` + `npx vitest run` in `packages/terminal/`)
+> - How to run tests (`make test` + `npx vitest run` in `packages/apps/terminal/`)
 > - How to build (terminal + Rust tick-engine commands)
 > - Branch + commit conventions — Conventional Commits, examples
 > - Pull request flow — fork → branch → PR → checklist
@@ -739,10 +739,10 @@ The most important entry points:
 pytest packages/<pkg>/tests/ -v
 
 # React (terminal):
-cd packages/terminal && npx vitest run
+cd packages/apps/terminal && npx vitest run
 
 # Rust (tick-engine):
-cd packages/tick-engine && cargo test
+cd packages/core/ticks && cargo test
 ```
 
 ## Architecture

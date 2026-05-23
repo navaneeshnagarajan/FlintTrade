@@ -248,7 +248,7 @@ services:
     depends_on: [openalgo]
     
   terminal:
-    build: ./packages/terminal
+    build: ./packages/apps/terminal
     # Static build served by Nginx, no runtime container needed
     
   nginx:
@@ -411,10 +411,10 @@ For Docker:
 - `docker-compose.yml` — UPDATED with correct ports + monitoring services
 
 ### Modified Files
-- `packages/core/src/app.py` — add structlog, flask-cors, flask-limiter, Sentry
-- `packages/terminal/src/main.tsx` — add Sentry.init()
+- `packages/core/core/src/app.py` — add structlog, flask-cors, flask-limiter, Sentry
+- `packages/apps/terminal/src/main.tsx` — add Sentry.init()
 - `requirements.txt` — add structlog, flask-cors, flask-limiter, sentry-sdk
-- `packages/terminal/package.json` — add @sentry/react
+- `packages/apps/terminal/package.json` — add @sentry/react
 - `Makefile` — add install-services, update, backup targets
 - `.env.example` — add GLITCHTIP_DSN, BACKUP_TARGET, DOMAIN, VICTORIALOGS_URL
 

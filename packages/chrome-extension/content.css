@@ -1,8 +1,0 @@
-/*
- * FlintTrade Chrome Extension — Content Script Styles
- *
- * NOTE: All styles for the floating button bar and trade buttons are now
- * injected dynamically via content.js to work on all pages (including those
- * without the CSS file loaded). This file is kept for backward compatibility
- * but is no longer referenced in manifest.json.
- */

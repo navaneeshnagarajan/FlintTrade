@@ -1,0 +1,10 @@
+# FlintTrade — site
+
+Read `packages/apps/site/CLAUDE.md` first. This is the public docs and marketing site built with Next.js/Fumadocs.
+
+## Rules
+- Consume shared primitives through `@flinttrade/design-system`.
+- Keep CSP nonce handling intact; do not add script-src `unsafe-inline`.
+- Keep docs paths in sync with the restructured package tree.
+- Run site build/typecheck after changing config, MDX, or shared UI imports.
+- Update screenshots or visual baselines for user-visible layout changes.

@@ -98,7 +98,7 @@ header "External test-deps"
 # already exist, otherwise it tells the user how to get them.
 #
 # AlgoMirror is intentionally absent: its mirroring patterns are
-# absorbed into packages/ditto/ — nothing external to install.
+# absorbed into packages/services/ditto/ — nothing external to install.
 
 # ------------------------------------------------------------------
 # 5. OpenAlgo dependencies (only if local-dev clone exists)
@@ -171,7 +171,7 @@ done
 # ------------------------------------------------------------------
 if [ "$HAS_NODE" = true ]; then
     header "FlintTrade Node packages"
-    for pkg_dir in "$FLINTTRADE_DIR"/packages/terminal "$FLINTTRADE_DIR"/packages/dashboard "$FLINTTRADE_DIR"/packages/backtest; do
+    for pkg_dir in "$FLINTTRADE_DIR"/packages/apps/terminal "$FLINTTRADE_DIR"/packages/dashboard "$FLINTTRADE_DIR"/packages/backtest; do
         [ -f "$pkg_dir/package.json" ] || continue
         pkg=$(basename "$pkg_dir")
         (cd "$pkg_dir" && npm install --silent 2>/dev/null)

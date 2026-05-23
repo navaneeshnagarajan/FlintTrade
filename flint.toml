@@ -4,7 +4,7 @@
 
 [project]
 name = "FlintTrade"
-version = "0.5.2-dev"
+version = "v0.6.0-dev"
 description = "Open-source algorithmic and manual trading platform built on OpenAlgo"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
@@ -12,22 +12,29 @@ python_requires = ">=3.12,<3.14"
 node_requires = ">=20.0.0"
 
 [packages]
-gateway = { path = "packages/gateway", lang = "python", description = "Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge" }
-core = { path = "packages/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }
-engine = { path = "packages/engine", lang = "python", description = "Strategy execution, order routing, safety layers, kill switches" }
-terminal = { path = "packages/terminal", lang = "react", description = "Trading UI — scalper, option chain, OI analysis, DOM, charts" }
-indicators = { path = "packages/indicators", lang = "python", description = "TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion)" }
-ai = { path = "packages/ai", lang = "python", description = "LLM chat, RAG, ML signals, autonomous trading, news sentiment" }
-data = { path = "packages/data", lang = "python", description = "Real-time tick capture, WebSocket storage, audit logs" }
-historical = { path = "packages/historical", lang = "python", description = "Historical data download, merge, DuckDB/Parquet, free NSE data" }
-screener = { path = "packages/screener", lang = "python", description = "Market scanner, OI spurt, PCR, max pain, portfolio Greeks" }
-backtest-engine = { path = "packages/backtest-engine", lang = "python", description = "Event-driven simulation, vectorbt/raptorbt strategies, metrics" }
-integration = { path = "packages/integration", lang = "python", description = "TradingView, ChartInk, webhooks, Chrome extension, Excel, Amibroker" }
-automation = { path = "packages/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, post-market analysis" }
-ditto = { path = "packages/ditto", lang = "python", description = "Multi-broker, multi-account orchestration — in-process mirroring, trailing SL, margin calculator, risk manager (AlgoMirror patterns absorbed)" }
-tick-engine = { path = "packages/tick-engine", lang = "rust", description = "High-performance tick processing engine — Rust core with Python bindings via PyO3" }
-chrome-extension = { path = "packages/chrome-extension", lang = "javascript", description = "Browser extension for quick trading from any page" }
-desktop = { path = "packages/desktop", lang = "rust", description = "Tauri-based native desktop app wrapper" }
+core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }
+data = { path = "packages/core/data", lang = "python", description = "Real-time tick capture, WebSocket storage, audit logs, sandbox state" }
+historical = { path = "packages/core/historical", lang = "python", description = "Historical data download, merge, DuckDB/Parquet, free NSE data" }
+indicators = { path = "packages/core/indicators", lang = "python", description = "TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion)" }
+ticks = { path = "packages/core/ticks", lang = "rust", description = "High-performance tick processing engine — Rust core with Python bindings via PyO3" }
+design-system = { path = "packages/core/design-system", lang = "typescript", description = "Shared FlintTrade design tokens, primitives, motion helpers, and UI kit" }
+engine = { path = "packages/services/engine", lang = "python", description = "Strategy execution, order routing, safety layers, kill switches" }
+screener = { path = "packages/services/screener", lang = "python", description = "Market scanner, OI spurt, PCR, max pain, portfolio Greeks" }
+backtest = { path = "packages/services/backtest", lang = "python", description = "Event-driven simulation, vectorbt/raptorbt strategies, metrics" }
+ai = { path = "packages/services/ai", lang = "python", description = "LLM chat, RAG, ML signals, autonomous trading, news sentiment" }
+ditto = { path = "packages/services/ditto", lang = "python", description = "Multi-broker, multi-account orchestration — in-process mirroring, trailing SL, margin calculator, risk manager (AlgoMirror patterns absorbed)" }
+automation = { path = "packages/services/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw agent, post-market analysis" }
+journal = { path = "packages/services/journal", lang = "python", description = "Trade journal, trade logging, execution analytics, and P&L tracking" }
+gateway = { path = "packages/integrations/gateway", lang = "python", description = "Direct broker connections, adapter pattern, encrypted credentials, WebSocket bridge" }
+webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "TradingView, ChartInk, custom webhooks, and flow builder" }
+terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — scalper, option chain, OI analysis, DOM, charts" }
+site = { path = "packages/apps/site", lang = "nextjs", description = "Docs, marketing, and MCP reference site" }
+
+[groups]
+core = ["core", "data", "historical", "indicators", "ticks", "design-system"]
+services = ["engine", "screener", "backtest", "ai", "ditto", "automation", "journal"]
+integrations = ["gateway", "webhooks"]
+apps = ["terminal", "site"]
 
 # [infra] — external test-only dependencies, not bundled with FlintTrade.
 # OpenAlgo and OpenClaw used to be git submodules under infra/. They are
@@ -36,7 +43,7 @@ desktop = { path = "packages/desktop", lang = "rust", description = "Tauri-based
 # via scripts/setup-test-deps.sh; the directory is gitignored.
 #
 # AlgoMirror is intentionally absent: its multi-account mirroring patterns
-# are fully absorbed into packages/ditto/ (PositionMirror, TrailingSLManager,
+# are fully absorbed into packages/services/ditto/ (PositionMirror, TrailingSLManager,
 # MarginCalculator, RiskManager) and run in-process. There is no live
 # integration; the upstream repo is no longer tracked.
 [infra]
@@ -107,7 +114,7 @@ DELTA = { name = "Delta Exchange (Crypto)", hours = "24/7", products = "BTC/ETH 
 
 [brokers]
 # Full broker list supported by OpenAlgo (FlintTrade works with ALL of them).
-# Mirrors BROKER_CATALOG in packages/gateway/src/adapter.py — keep in sync
+# Mirrors BROKER_CATALOG in packages/integrations/gateway/src/adapter.py — keep in sync
 # after every .local/external/openalgo refresh.
 supported = [
   "5paisa", "5paisa-xts", "AliceBlue", "AngelOne", "Compositedge",

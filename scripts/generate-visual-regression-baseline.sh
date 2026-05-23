@@ -16,13 +16,13 @@ cleanup() {
 trap cleanup EXIT
 
 (
-  cd "$ROOT/packages/terminal"
+  cd "$ROOT/packages/apps/terminal"
   npm run dev -- --host 127.0.0.1 --port "$TERM_PORT"
 ) >/tmp/flinttrade-terminal-visual-baseline.log 2>&1 &
 TERM_PID=$!
 
 (
-  cd "$ROOT/apps/site"
+  cd "$ROOT/packages/apps/site"
   npm run dev -- --hostname 127.0.0.1 --port "$SITE_PORT"
 ) >/tmp/flinttrade-site-visual-baseline.log 2>&1 &
 SITE_PID=$!
@@ -30,7 +30,7 @@ SITE_PID=$!
 node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
-const { chromium } = require("./packages/terminal/node_modules/playwright");
+const { chromium } = require("./packages/apps/terminal/node_modules/playwright");
 
 const root = process.cwd();
 const out = process.env.OUT;

@@ -113,8 +113,8 @@ update_python_deps() {
 
 rebuild_terminal() {
     info "Rebuilding terminal..."
-    run bash -c "cd $INSTALL_DIR/packages/terminal && npm ci --prefer-offline"
-    run bash -c "cd $INSTALL_DIR/packages/terminal && npm run build"
+    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm ci --prefer-offline"
+    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm run build"
     ok "Terminal rebuilt"
 }
 

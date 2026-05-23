@@ -1,0 +1,58 @@
+# FlintTrade — screener
+
+> Market scanner, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, GEX, IV analysis, vol surface
+
+## Key Modules
+- `option_chain.py` — Option chain data fetching and processing
+- `oi_analysis.py` — Open interest analysis, PCR, OI spurts
+- `oi_profile.py` — OI profile visualization data
+- `greeks.py` — Portfolio Greeks calculation (Black-Scholes)
+- `gex.py` — Gamma exposure analysis
+- `iv_analysis.py` — Implied volatility analysis
+- `iv_smile.py` — IV smile/skew visualization
+- `vol_surface.py` — Volatility surface construction
+- `straddle_pnl.py` — Straddle P&L analysis
+- `futures_quadrant.py` — Futures OI vs price quadrant
+- `scanner.py` — Market scanner with configurable filters
+- `rrg.py` — Relative Rotation Graph
+- `stock_cache.py` / `stock_routes.py` — Stock data caching and routes
+- `analysis_routes.py` — Analysis API routes
+
+## Absorbs
+- openalgo-portfoliogreeks → Black-Scholes portfolio Greeks, lot-based, position-aware signs
+
+## Depends on: core, data
+
+## Rules
+- Read root CLAUDE.md for project-wide rules
+- Use packages/core/core/src/openalgo_client.py for ALL OpenAlgo API calls
+- Never reference specific brokers
+- Tests are in the `tests/` directory. Add new test files as needed.
+- Update root CHANGELOG.md
+- Branch: main (pre-release, all commits to main)
+
+## Additional pip libraries
+- py_vollib_vectorized — vectorized Black-Scholes Greeks (use this over hand-rolled math)
+- mibian — simple options pricing for quick calculations
+- NSE-Option-Chain-Analyzer (VarunS2002) — reference for OI trend analysis patterns
+
+## Feature scope clarification
+- screener CALCULATES: Greeks, PCR, max pain, OI analysis, support/resistance from OI
+- terminal DISPLAYS the results from screener
+- dashboard shows portfolio-level Greeks summary from screener
+
+## Multi-exchange Greeks
+- MCX options have different expiry times (11:30 PM) — affects theta calculation
+- CDS options expire at 12:30 PM — affects time decay near expiry
+- Must pass correct expiry_time to OpenAlgo's /api/v1/optiongreeks endpoint
+- MCX Greeks require commodity-specific risk-free rates
+
+## Crypto screening
+- BTC/ETH options Greeks via Delta Exchange
+- Funding rate arbitrage detection (perpetuals vs futures)
+- Cross-exchange price comparison (optional — `pip install ccxt` if needed)
+
+## Free data sources (no broker API needed)
+- nsepython — NSE option chain, FII/DII data, PCR, advance/decline
+- openchart — Free NSE/NFO historical data
+- yfinance — Free global data including MCX commodities

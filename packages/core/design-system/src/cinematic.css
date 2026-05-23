@@ -1,0 +1,25 @@
+@keyframes cinematic-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+
+@keyframes cinematic-pulse {
+  0%, 100% {
+    opacity: 0.64;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.cinematic-drift {
+  animation: cinematic-drift 8s ease-in-out infinite alternate;
+}
+
+.cinematic-pulse {
+  animation: cinematic-pulse 4s ease-in-out infinite;
+}

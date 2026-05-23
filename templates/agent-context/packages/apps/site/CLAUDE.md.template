@@ -1,0 +1,11 @@
+# FlintTrade — site
+
+This package contains the FlintTrade documentation site.
+
+## Scope
+- Next.js app routes, Fumadocs content plumbing, MCP docs endpoints, and site shell.
+- Shared UI comes from `@flinttrade/design-system`.
+- Trading terminal widgets stay in `packages/apps/terminal`.
+
+## Checks
+- Run `npm run build` in this package for site-facing changes.

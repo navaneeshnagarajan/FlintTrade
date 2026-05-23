@@ -18,6 +18,6 @@ Requires: Python 3.12 (`brew install python`), Node.js 22 (`brew install node`)
 2. `cd FlintTrade`
 3. `cp .env.example .env`
 4. `pip3 install -r requirements.txt`
-5. `python3 packages/core/src/app.py`
+5. `python3 packages/core/core/src/app.py`
 
 Note: For background-service supervision on macOS, write a launchd plist that runs `make start` from your repo root. A sample plist may be added to `infra/launchd/` in a future release; until then, the systemd unit at `infra/systemd/openalgo.service` is the closest reference.

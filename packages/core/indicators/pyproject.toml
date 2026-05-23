@@ -1,0 +1,38 @@
+[project]
+name = "flinttrade-indicators"
+version = "0.6.0-dev"
+description = "Technical analysis indicators — TA-Lib batch (150+), Numba streaming, Pine Script conversion"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26.0",
+    "pydantic>=2.0",
+    "numba>=0.59; extra == 'numba'",
+]
+
+[project.optional-dependencies]
+talib = ["TA-Lib>=0.4"]
+numba = ["numba>=0.59"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = "flinttrade_indicators"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "unit: fast, isolated unit test (default; runs on every commit)",
+    "integration: touches DB or mocked external services (PR gate)",
+    "slow: long-running test >1s (nightly or via --run-slow)",
+]

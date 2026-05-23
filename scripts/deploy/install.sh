@@ -232,8 +232,8 @@ setup_python_env() {
 
 build_terminal() {
     info "Building terminal (React)..."
-    run bash -c "cd $INSTALL_DIR/packages/terminal && npm ci --prefer-offline"
-    run bash -c "cd $INSTALL_DIR/packages/terminal && npm run build"
+    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm ci --prefer-offline"
+    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm run build"
     ok "Terminal built"
 }
 

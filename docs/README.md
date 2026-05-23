@@ -64,7 +64,7 @@ else here is reference material you reach for when a specific question arises.
 ## Where the source code lives
 
 The repository is a monorepo with 16 packages — 12 Python packages, 1 React
-application (`packages/terminal`), 1 Rust/PyO3 package (`packages/tick-engine`),
+application (`packages/apps/terminal`), 1 Rust/PyO3 package (`packages/core/ticks`),
 1 Chrome extension, and 1 Tauri desktop wrapper. See
 [ARCHITECTURE.md](ARCHITECTURE.md) for the package dependency graph and
 [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the package-by-package map.

@@ -1,0 +1,19 @@
+@utility bg-glass-l1 {
+  background: var(--glass-l1, rgb(18 24 38 / 0.72));
+}
+
+@utility bg-glass-l2 {
+  background: var(--glass-l2, rgb(22 31 49 / 0.82));
+}
+
+@utility border-glass-l1 {
+  border-color: var(--glass-border-l1, rgb(148 163 184 / 0.22));
+}
+
+@utility backdrop-glass {
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+
+@utility rounded-glass-card {
+  border-radius: var(--radius-card, 8px);
+}

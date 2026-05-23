@@ -18,20 +18,20 @@ auxiliary distribution wrappers.
 
 | Package | Language | Purpose | Tests |
 |---|---|---|---|
-| `gateway` | Python | Direct broker connections (32 brokers via OpenAlgo shims), credential store, WebSocket bridge | `packages/gateway/tests/` |
-| `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/tests/` |
-| `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/engine/tests/` |
-| `data` | Python | Tick recorder, audit logger (SEBI 5 year), trade logger, DuckDB storage | `packages/data/tests/` |
-| `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/historical/tests/` |
-| `screener` | Python | Option chain, OI analysis, PCR, max pain, futures quadrant, IV smile, payoff engine | `packages/screener/tests/` |
-| `backtest-engine` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/backtest-engine/tests/` |
-| `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/ai/tests/` |
-| `integration` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integration/tests/` |
-| `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/automation/tests/` |
-| `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/ditto/tests/` |
-| `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/indicators/tests/` |
-| `tick-engine` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/tick-engine/tests/` (cargo) |
-| `terminal` | TypeScript / React | The user-facing single-page application; Dockview workspace, 82 widgets, 12 routes | `packages/terminal/**/*.test.ts(x)` |
+| `gateway` | Python | Direct broker connections (32 brokers via OpenAlgo shims), credential store, WebSocket bridge | `packages/integrations/gateway/tests/` |
+| `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
+| `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
+| `data` | Python | Tick recorder, audit logger (SEBI 5 year), trade logger, DuckDB storage | `packages/core/data/tests/` |
+| `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
+| `screener` | Python | Option chain, OI analysis, PCR, max pain, futures quadrant, IV smile, payoff engine | `packages/services/screener/tests/` |
+| `backtest-engine` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
+| `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
+| `integration` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
+| `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
+| `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
+| `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
+| `tick-engine` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
+| `terminal` | TypeScript / React | The user-facing single-page application; Dockview workspace, 82 widgets, 12 routes | `packages/apps/terminal/**/*.test.ts(x)` |
 | `chrome-extension` | TypeScript | Browser extension for quick trading from any page | `packages/chrome-extension/tests/` |
 | `desktop` | Rust / Tauri | Native desktop wrapper that embeds the terminal | `packages/desktop/tests/` |
 
@@ -69,13 +69,13 @@ make test-fast      # stop on first failure
 make lint           # ruff check across packages/*/src/
 
 # Single file
-python -m pytest packages/core/tests/test_app.py -v
+python -m pytest packages/core/core/tests/test_app.py -v
 
 # Single test
-python -m pytest packages/core/tests/test_app.py::test_health_endpoint -v
+python -m pytest packages/core/core/tests/test_app.py::test_health_endpoint -v
 
 # Single package
-python -m pytest packages/screener/tests/
+python -m pytest packages/services/screener/tests/
 ```
 
 > `--import-mode=importlib` is required for the flat-package layout. The
@@ -83,7 +83,7 @@ python -m pytest packages/screener/tests/
 
 ### Terminal (Vitest)
 
-From `packages/terminal/`:
+From `packages/apps/terminal/`:
 
 ```bash
 npm install
@@ -97,7 +97,7 @@ npx vitest                                 # watch mode (great for TDD)
 
 ### Rust (tick-engine)
 
-From `packages/tick-engine/`:
+From `packages/core/ticks/`:
 
 ```bash
 cargo test
@@ -111,17 +111,17 @@ cargo build --release   # produces an importable Python wheel
 ### Terminal
 
 ```bash
-cd packages/terminal
+cd packages/apps/terminal
 npm run build
 ```
 
-Output lands in `packages/terminal/dist/`. The build runs `tsc --noEmit`
+Output lands in `packages/apps/terminal/dist/`. The build runs `tsc --noEmit`
 first, then `vite build` — both must pass clean.
 
 ### tick-engine
 
 ```bash
-cd packages/tick-engine
+cd packages/core/ticks
 cargo build --release
 ```
 
@@ -157,7 +157,7 @@ Dockview panel.
 ### Step-by-step
 
 1. **Pick a category.** Place the new file under
-   `packages/terminal/src/widgets/<trading|analysis|utility>/<Name>.tsx`.
+   `packages/apps/terminal/src/widgets/<trading|analysis|utility>/<Name>.tsx`.
 2. **Write the component.** Use functional components and hooks. Pull
    market data from Jotai atoms (per-instrument LTP / quote / depth),
    REST data from TanStack Query hooks, and UI state from Zustand stores
@@ -174,12 +174,12 @@ Dockview panel.
    ```
 
 3. **Register the widget.** In
-   `packages/terminal/src/layout/widgetFactory.tsx`, add an entry mapping
+   `packages/apps/terminal/src/layout/widgetFactory.tsx`, add an entry mapping
    the widget identifier to your component.
 4. **Write a test.** Co-locate as `<Name>.test.tsx`. At minimum, mount
    the component with mocked atoms and assert the rendered output.
 5. **(Optional) add to a workspace preset.** Edit
-   `packages/terminal/src/layout/workspacePresets.ts` if your widget
+   `packages/apps/terminal/src/layout/workspacePresets.ts` if your widget
    belongs in one of the 13 default presets.
 6. **Update [USER_GUIDE.md](USER_GUIDE.md)** if the widget changes the
    user-visible workspace tour.
@@ -192,7 +192,7 @@ Dockview panel.
   except for measured pixel values from observers.
 - Honour `prefers-reduced-motion` for any animation.
 - Use the **Glass Adaptive** design system tokens (CSS vars defined in
-  `packages/terminal/src/styles/`). No hardcoded colours.
+  `packages/apps/terminal/src/styles/`). No hardcoded colours.
 
 ---
 
@@ -204,25 +204,25 @@ live-runnable strategies.
 ### Backtest template
 
 For research and parameter sweeps. Lives under
-`packages/backtest-engine/src/strategies/`.
+`packages/services/backtest/src/strategies/`.
 
 1. Create `my_strategy.py` and subclass
    `backtest_engine.base.BaseBacktestStrategy`.
 2. Implement `signal(ctx)` returning a typed `Signal` object.
 3. Register the template in
-   `packages/backtest-engine/src/strategies/__init__.py`.
-4. Write a unit test in `packages/backtest-engine/tests/` with
+   `packages/services/backtest/src/strategies/__init__.py`.
+4. Write a unit test in `packages/services/backtest/tests/` with
    deterministic input data.
 
 ### Live strategy
 
 For the production engine. Lives under
-`packages/engine/src/strategies/`.
+`packages/services/engine/src/strategies/`.
 
 1. Subclass `engine.strategy.BaseStrategy`.
 2. Implement the lifecycle hooks (`on_tick`, `on_order_event`,
    `on_position_event`, `on_stop`).
-3. Register in `packages/engine/src/strategies/__init__.py`.
+3. Register in `packages/services/engine/src/strategies/__init__.py`.
 4. Write a unit test against a mocked OpenAlgo client.
 5. Update the strategy registry so the Strategy Lab UI lists it.
 
@@ -236,13 +236,13 @@ Use either as a reference implementation.
 OpenAlgo handles the heavy lifting, but FlintTrade keeps a thin shim
 layer for capability detection and broker-specific quirks.
 
-1. Add a shim under `packages/gateway/src/shims/<broker>.py` implementing
-   the `BrokerAdapter` protocol from `packages/gateway/src/adapter.py`.
+1. Add a shim under `packages/integrations/gateway/src/shims/<broker>.py` implementing
+   the `BrokerAdapter` protocol from `packages/integrations/gateway/src/adapter.py`.
 2. Add an entry to the `BROKER_CATALOG` dict in `adapter.py` with the
    broker's display name, auth flow type, and capabilities.
-3. Register in `packages/gateway/src/registry.py` so the session manager
+3. Register in `packages/integrations/gateway/src/registry.py` so the session manager
    can instantiate sessions for that broker.
-4. Add tests under `packages/gateway/tests/` — mock the OpenAlgo HTTP
+4. Add tests under `packages/integrations/gateway/tests/` — mock the OpenAlgo HTTP
    responses, assert auth, capability lookup, and error handling.
 5. Update [COMPATIBILITY.md](COMPATIBILITY.md) with the new broker.
 
@@ -266,7 +266,7 @@ layer for capability detection and broker-specific quirks.
 ### TypeScript
 
 - **Strict mode**. No `any`, no `@ts-ignore`, no `@ts-nocheck`.
-- **Path alias** `@` → `packages/terminal/src/`. Configured in
+- **Path alias** `@` → `packages/apps/terminal/src/`. Configured in
   `tsconfig.json`, `vite.config.ts`, and `vitest.config.ts`.
 - **Functional components** with hooks. No class components.
 - **lucide-react** for icons. **date-fns** for dates. **zod** for any
@@ -294,7 +294,7 @@ layer for capability detection and broker-specific quirks.
 1. **Branch off `main`.** During pre-1.0, all commits land directly on
    `main`; for non-trivial work, open a PR to give CI a chance to run.
 2. **Run the local checklist** before pushing:
-   - `npx tsc --noEmit` in `packages/terminal`
+   - `npx tsc --noEmit` in `packages/apps/terminal`
    - `npx vitest run` (full suite or affected files)
    - `python -m pytest --tb=short --import-mode=importlib`
    - `ruff check packages/*/src/`
@@ -331,7 +331,7 @@ OpenAlgo handles broker authentication (TOTP, OAuth, OTP, biometric
 flows). FlintTrade only knows about the OpenAlgo API key. Do not add
 broker-credential storage or TOTP automation to FlintTrade.
 
-### 5-layer safety system in `packages/engine/`
+### 5-layer safety system in `packages/services/engine/`
 
 Every order placed through FlintTrade passes five safety layers in
 order:
@@ -350,7 +350,7 @@ orders, add the path inside the layers, not around them.
 
 ### Vite dev proxy paths
 
-In `packages/terminal/`, the dev server proxies:
+In `packages/apps/terminal/`, the dev server proxies:
 
 | Route prefix | Target |
 |---|---|
@@ -358,7 +358,7 @@ In `packages/terminal/`, the dev server proxies:
 | `/ft-api` | `http://127.0.0.1:5100` (FlintTrade backend) |
 | `/ws` | `ws://127.0.0.1:8765` (OpenAlgo WebSocket) |
 
-In dev mode, `packages/terminal/src/api.ts` uses *relative* paths (empty
+In dev mode, `packages/apps/terminal/src/api.ts` uses *relative* paths (empty
 base URL). In production, it reads the full host from the
 `connectionStore`. Do not bypass the proxy in dev — your code will work
 locally but break on every other contributor's machine.
@@ -381,11 +381,11 @@ stores and you guarantee a bug.
 2. **`closeposition` ignores strategy.** Track positions per-strategy
    yourself.
 3. **WebSocket drops without heartbeat.** The client in
-   `packages/core/src/openalgo_client.py` implements ping/pong.
+   `packages/core/core/src/openalgo_client.py` implements ping/pong.
 4. **PNL calculation incorrect for some brokers.** Compute it locally
    from `tradebook`.
 5. **MCX symbol format inconsistency.** Normalise in
-   `packages/core/src/symbol_utils.py`.
+   `packages/core/core/src/symbol_utils.py`.
 6. **Never touch OpenAlgo's SQLite directly.** Concurrent access
    corrupts the DB. Always go through the REST API.
 
