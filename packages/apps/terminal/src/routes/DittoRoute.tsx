@@ -10,7 +10,7 @@
  * Data fetched via TanStack Query from /ft-api/api/v1/ditto/* endpoints.
  */
 
-import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, type FormEvent, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
@@ -57,15 +57,21 @@ import TabTransition from "@/components/motion/TabTransition";
 import { cn } from "@/lib/utils";
 import {
   getDittoAccounts,
+  addDittoAccount,
+  removeDittoAccount,
+  setDittoAccountEnabled,
   getDittoMirrorStatus,
   startDittoMirror,
   stopDittoMirror,
   getDittoRisk,
   dittoKillAll,
   type DittoAccount,
+  type DittoAccountCreatePayload,
   type MirrorStatus,
   type DittoRiskData,
 } from "@/services/ftApi";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -106,7 +112,20 @@ function pnlColor(value: number): string {
 
 const ACCOUNTS_LOAD_TIMEOUT_MS = 5_000;
 
+const DEFAULT_ACCOUNT_FORM = {
+  accountId: "",
+  openalgoHost: "",
+  apiKey: "",
+  name: "",
+  group: "default",
+  allocationWeight: "1",
+  maxLossDaily: "50000",
+  enabled: true,
+  isMaster: false,
+};
+
 function AccountsTab() {
+  const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["ditto", "accounts"],
     queryFn: getDittoAccounts,
@@ -114,8 +133,40 @@ function AccountsTab() {
     retry: 1,
   });
 
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [form, setForm] = useState(DEFAULT_ACCOUNT_FORM);
+  const [formError, setFormError] = useState("");
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const addMutation = useMutation({
+    mutationFn: (account: DittoAccountCreatePayload) => addDittoAccount(account),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ditto", "accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["ditto", "risk"] });
+      setIsAddDialogOpen(false);
+      setForm(DEFAULT_ACCOUNT_FORM);
+      setFormError("");
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ accountId, enabled }: { accountId: string; enabled: boolean }) =>
+      setDittoAccountEnabled(accountId, enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ditto", "accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["ditto", "risk"] });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (accountId: string) => removeDittoAccount(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ditto", "accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["ditto", "mirror"] });
+      queryClient.invalidateQueries({ queryKey: ["ditto", "risk"] });
+    },
+  });
 
   useEffect(() => {
     if (isLoading) {
@@ -131,13 +182,187 @@ function AccountsTab() {
   }, [isLoading]);
 
   const accounts = data?.accounts ?? [];
+  const actionError =
+    (addMutation.error instanceof Error ? addMutation.error.message : "") ||
+    (toggleMutation.error instanceof Error ? toggleMutation.error.message : "") ||
+    (removeMutation.error instanceof Error ? removeMutation.error.message : "");
+
+  function updateForm<K extends keyof typeof DEFAULT_ACCOUNT_FORM>(
+    key: K,
+    value: (typeof DEFAULT_ACCOUNT_FORM)[K],
+  ) {
+    setForm((current) => ({ ...current, [key]: value }));
+    setFormError("");
+  }
+
+  function handleSubmitAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const allocationWeight = Number(form.allocationWeight);
+    const maxLossDaily = Number(form.maxLossDaily);
+    const payload: DittoAccountCreatePayload = {
+      account_id: form.accountId.trim(),
+      openalgo_host: form.openalgoHost.trim(),
+      api_key: form.apiKey,
+      name: form.name.trim(),
+      group: form.group.trim() || "default",
+      allocation_weight: allocationWeight,
+      max_loss_daily: maxLossDaily,
+      enabled: form.enabled,
+      is_master: form.isMaster,
+    };
+
+    if (!payload.account_id || !payload.openalgo_host || !payload.api_key) {
+      setFormError("Account ID, OpenAlgo URL, and API key are required.");
+      return;
+    }
+    if (!Number.isFinite(allocationWeight) || allocationWeight <= 0) {
+      setFormError("Allocation weight must be a positive number.");
+      return;
+    }
+    if (!Number.isFinite(maxLossDaily) || maxLossDaily < 0) {
+      setFormError("Max daily loss must be zero or greater.");
+      return;
+    }
+
+    addMutation.mutate(payload);
+  }
+
+  const addAccountDialog = (
+    <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+      <DialogContent className="max-w-xl bg-surface-card border-border-default">
+        <form onSubmit={handleSubmitAccount} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>Add Ditto Account</DialogTitle>
+            <DialogDescription>
+              Register an OpenAlgo-compatible account for Ditto mirroring and account-level risk controls.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="ditto-account-id">Account ID</Label>
+              <Input
+                id="ditto-account-id"
+                value={form.accountId}
+                onChange={(event) => updateForm("accountId", event.target.value)}
+                placeholder="family_01"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ditto-name">Display Name</Label>
+              <Input
+                id="ditto-name"
+                value={form.name}
+                onChange={(event) => updateForm("name", event.target.value)}
+                placeholder="Family Account"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ditto-openalgo-host">OpenAlgo URL</Label>
+              <Input
+                id="ditto-openalgo-host"
+                value={form.openalgoHost}
+                onChange={(event) => updateForm("openalgoHost", event.target.value)}
+                placeholder="http://127.0.0.1:5001"
+                autoComplete="url"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ditto-api-key">API Key</Label>
+              <Input
+                id="ditto-api-key"
+                type="password"
+                value={form.apiKey}
+                onChange={(event) => updateForm("apiKey", event.target.value)}
+                placeholder="OpenAlgo API key"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ditto-group">Group</Label>
+              <Input
+                id="ditto-group"
+                value={form.group}
+                onChange={(event) => updateForm("group", event.target.value)}
+                placeholder="default"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ditto-allocation-weight">Allocation Weight</Label>
+              <Input
+                id="ditto-allocation-weight"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={form.allocationWeight}
+                onChange={(event) => updateForm("allocationWeight", event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ditto-max-loss">Max Daily Loss</Label>
+              <Input
+                id="ditto-max-loss"
+                type="number"
+                min="0"
+                step="100"
+                value={form.maxLossDaily}
+                onChange={(event) => updateForm("maxLossDaily", event.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-4 self-end rounded border border-border-default bg-surface-base px-3 py-2">
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={form.enabled}
+                  onChange={(event) => updateForm("enabled", event.target.checked)}
+                  className="size-3.5 accent-[var(--color-accent)]"
+                />
+                Enabled
+              </label>
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={form.isMaster}
+                  onChange={(event) => updateForm("isMaster", event.target.checked)}
+                  className="size-3.5 accent-[var(--color-accent)]"
+                />
+                Master
+              </label>
+            </div>
+          </div>
+
+          {(formError || addMutation.error) && (
+            <p role="alert" className="text-xs text-loss">
+              {formError || (addMutation.error instanceof Error ? addMutation.error.message : "Could not add account.")}
+            </p>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setIsAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={addMutation.isPending}>
+              {addMutation.isPending ? <RefreshCw className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+              Save Account
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 
   if (isLoading && !loadTimedOut) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <RefreshCw className="size-5 text-text-muted animate-spin" />
-        <span className="ml-2 text-sm text-text-muted">Loading accounts...</span>
-      </div>
+      <>
+        <div className="flex items-center justify-center py-20">
+          <RefreshCw className="size-5 text-text-muted animate-spin" />
+          <span className="ml-2 text-sm text-text-muted">Loading accounts...</span>
+        </div>
+        {addAccountDialog}
+      </>
     );
   }
 
@@ -146,27 +371,37 @@ function AccountsTab() {
       ? (error?.message ?? "Unknown error")
       : "Request timed out — backend may not be running.";
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <AlertTriangle className="size-8 text-text-muted" />
-        <p className="text-sm text-text-secondary text-center max-w-xs">
-          Could not load accounts.{" "}
-          <span className="text-text-muted">{message}</span>
-        </p>
-        <Button size="sm" variant="outline" onClick={() => { setLoadTimedOut(false); void refetch(); }}>
-          <RefreshCw className="size-3.5" />
-          Retry
-        </Button>
-      </div>
+      <>
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+          <AlertTriangle className="size-8 text-text-muted" />
+          <p className="text-sm text-text-secondary text-center max-w-xs">
+            Could not load accounts.{" "}
+            <span className="text-text-muted">{message}</span>
+          </p>
+          <Button size="sm" variant="outline" onClick={() => { setLoadTimedOut(false); void refetch(); }}>
+            <RefreshCw className="size-3.5" />
+            Retry
+          </Button>
+        </div>
+        {addAccountDialog}
+      </>
     );
   }
 
   if (!isLoading && accounts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-3">
-        <Users className="size-8 text-text-muted" />
-        <p className="text-sm text-text-muted">No accounts connected</p>
-        <p className="text-xs text-text-disabled">Add an account to get started.</p>
-      </div>
+      <>
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <Users className="size-8 text-text-muted" />
+          <p className="text-sm text-text-muted">No accounts connected</p>
+          <p className="text-xs text-text-disabled">Add an account to get started.</p>
+          <Button size="sm" variant="outline" onClick={() => setIsAddDialogOpen(true)}>
+            <Plus className="size-3.5" />
+            Add Account
+          </Button>
+        </div>
+        {addAccountDialog}
+      </>
     );
   }
 
@@ -192,11 +427,16 @@ function AccountsTab() {
         <h2 className="text-sm font-heading font-semibold text-text-primary">
           Managed Accounts
         </h2>
-        <Button size="sm" variant="outline" disabled>
+        <Button size="sm" variant="outline" onClick={() => setIsAddDialogOpen(true)}>
           <Plus className="size-3.5" />
           Add Account
         </Button>
       </div>
+      {actionError && (
+        <p role="alert" className="rounded border border-loss/30 bg-loss/10 px-3 py-2 text-xs text-loss">
+          {actionError}
+        </p>
+      )}
 
       {/* Accounts table */}
       <div className="rounded-lg border border-border-default overflow-hidden">
@@ -215,16 +455,38 @@ function AccountsTab() {
           </TableHeader>
           <TableBody>
             {accounts.map((account) => (
-              <AccountRow key={account.id} account={account} />
+              <AccountRow
+                key={account.id}
+                account={account}
+                isBusy={
+                  toggleMutation.isPending || removeMutation.isPending
+                }
+                onSetEnabled={(accountId, enabled) =>
+                  toggleMutation.mutate({ accountId, enabled })
+                }
+                onRemove={(accountId) => removeMutation.mutate(accountId)}
+              />
             ))}
           </TableBody>
         </Table>
       </div>
+      {addAccountDialog}
     </div>
   );
 }
 
-function AccountRow({ account }: { account: DittoAccount }) {
+function AccountRow({
+  account,
+  isBusy,
+  onSetEnabled,
+  onRemove,
+}: {
+  account: DittoAccount;
+  isBusy: boolean;
+  onSetEnabled: (accountId: string, enabled: boolean) => void;
+  onRemove: (accountId: string) => void;
+}) {
+  const isActive = account.status === "active";
   return (
     <TableRow>
       <TableCell className="font-medium">
@@ -271,13 +533,31 @@ function AccountRow({ account }: { account: DittoAccount }) {
       </TableCell>
       <TableCell className="text-center">
         <div className="flex items-center justify-center gap-1">
-          <Button size="icon-xs" variant="ghost" aria-label="Connect account" disabled>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Connect ${account.name}`}
+            disabled={isBusy || isActive}
+            onClick={() => onSetEnabled(account.id, true)}
+          >
             <Power className="size-3" aria-hidden="true" />
           </Button>
-          <Button size="icon-xs" variant="ghost" aria-label="Disconnect account" disabled>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Disconnect ${account.name}`}
+            disabled={isBusy || !isActive}
+            onClick={() => onSetEnabled(account.id, false)}
+          >
             <PowerOff className="size-3" aria-hidden="true" />
           </Button>
-          <Button size="icon-xs" variant="ghost" aria-label="Remove account" disabled>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Remove ${account.name}`}
+            disabled={isBusy}
+            onClick={() => onRemove(account.id)}
+          >
             <Trash2 className="size-3" aria-hidden="true" />
           </Button>
         </div>

@@ -13,8 +13,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # All post-restructure packages tracked under packages/{core,services,integrations,apps}/.
 # Keep this list aligned with templates/package-purposes.yml and flint.toml.
 PACKAGES = [
+    "apps/site",
+    "apps/terminal",
     "core/core",
     "core/data",
+    "core/design-system",
     "core/historical",
     "core/indicators",
     "core/ticks",
@@ -27,8 +30,6 @@ PACKAGES = [
     "services/journal",
     "integrations/gateway",
     "integrations/webhooks",
-    "apps/terminal",
-    "apps/site",
 ]
 
 # Files every fresh clone must have at the repo root for the project to make
@@ -37,18 +38,18 @@ PACKAGES = [
 # the public-repo modernisation pass and are scaffolded per-machine via
 # scripts/setup-agent-context.sh.
 REQUIRED_ROOT_FILES = [
-    "README.md",
+    "readme.md",
     "VERSION",
     "LICENSE",
-    "NOTICE",
+    "notice",
     ".gitignore",
     ".env.example",
     "flint.toml",
     "Makefile",
-    "CONTRIBUTING.md",
-    "CHANGELOG.md",
-    "CODE_OF_CONDUCT.md",
-    "SECURITY.md",
+    "contributing.md",
+    "changelog.md",
+    "code-of-conduct.md",
+    "security.md",
 ]
 
 

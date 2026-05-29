@@ -2,8 +2,8 @@
  * ConnectionStep — connection configuration step in the setup wizard.
  *
  * Two modes toggled via tabs:
- *   - "OpenAlgo Mode"  — connect to an external OpenAlgo server (host + API key)
- *   - "Direct Connect" — pick a broker, enter credentials, manage accounts
+ *   - "FlintTrade Gateway" — pick a broker, enter credentials, manage accounts
+ *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server
  *
  * Exports: ConnectionStep, ConnectionFormValues, deriveWsUrl
  */
@@ -92,7 +92,7 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
 }
 
 // ---------------------------------------------------------------------------
-// OpenAlgo sub-panel (unchanged original form)
+// OpenAlgo-compatible bridge sub-panel
 // ---------------------------------------------------------------------------
 
 interface OpenAlgoFormProps {
@@ -138,13 +138,13 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
     <form onSubmit={handleSubmit(onComplete)} className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="host" className="text-text-secondary text-xs uppercase tracking-wider">
-          OpenAlgo URL
+          OpenAlgo-Compatible URL
         </Label>
         <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
           <Input
             id="host"
             placeholder="http://localhost:5000"
-            aria-label="OpenAlgo URL"
+            aria-label="OpenAlgo-compatible URL"
             className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("host")}
           />
@@ -162,8 +162,8 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
           <Input
             id="apiKey"
             type="password"
-            placeholder="Your OpenAlgo API key"
-            aria-label="OpenAlgo API key"
+            placeholder="Your gateway API key"
+            aria-label="OpenAlgo-compatible API key"
             className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("apiKey")}
           />
@@ -242,7 +242,7 @@ function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
  * independently and the actual broker sessions live in brokerStore.
  */
 const DIRECT_CONNECT_PLACEHOLDER: ConnectionFormValues = {
-  host: "http://localhost:5000",
+  host: "http://127.0.0.1:5100",
   apiKey: "direct-connect",
   wsPort: "8765",
 };
@@ -403,7 +403,7 @@ interface ConnectionStepProps {
 }
 
 export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
-  const [mode, setMode] = useState<ConnectionMode>("openalgo");
+  const [mode, setMode] = useState<ConnectionMode>("direct");
 
   return (
     <div className="space-y-5">
@@ -414,17 +414,17 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         aria-label="Connection mode"
       >
         <TabButton active={mode === "openalgo"} onClick={() => setMode("openalgo")}>
-          OpenAlgo Mode
+          OpenAlgo Bridge
         </TabButton>
         <TabButton active={mode === "direct"} onClick={() => setMode("direct")}>
-          Direct Connect
+          FlintTrade Gateway
         </TabButton>
       </div>
 
       {/* Mode description */}
       {mode === "openalgo" ? (
         <p className="text-xs text-text-muted">
-          Connect to a running OpenAlgo server. Best for users who already have OpenAlgo set up.
+          Connect to a running OpenAlgo-compatible server if you already use one.
         </p>
       ) : (
         <p className="text-xs text-text-muted">
@@ -449,7 +449,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
           I&apos;ll connect later →
         </button>
         <p className="text-xs text-text-muted text-center">
-          You can connect your broker anytime from Settings &rarr; API Connection.
+          You can connect your broker anytime from Settings &rarr; Broker Gateway.
         </p>
       </div>
     </div>

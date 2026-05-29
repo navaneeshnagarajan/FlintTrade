@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.1.0-alpha"
+from .version import APP_VERSION, APP_VERSION_TAG
+
+__version__ = APP_VERSION
 
 from .config import FlintTradeConfig, Settings
 from .workspace import Workspace
@@ -65,6 +67,8 @@ def __getattr__(name: str) -> Any:
 __all__ = [
     # App
     "FlintTradeApp",
+    "APP_VERSION",
+    "APP_VERSION_TAG",
     # System metrics
     "SystemMetrics",
     "get_system_metrics",

@@ -6,14 +6,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockNavigate = vi.fn();
+const { mockNavigate, mockSetMode, mockSetLoggedIn } = vi.hoisted(() => ({
+  mockNavigate: vi.fn(),
+  mockSetMode: vi.fn(),
+  mockSetLoggedIn: vi.fn(),
+}));
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
@@ -25,7 +29,7 @@ vi.mock("react-router-dom", () => ({
 vi.mock("framer-motion", () => ({
   motion: {
     div: ({ children, ...props }: Record<string, unknown>) => {
-      const { initial: _i, animate: _a, exit: _e, variants: _v, transition: _t, whileHover: _w, ...rest } = props;
+      const { initial: _i, animate: _a, exit: _e, variants: _v, transition: _t, whileHover: _w, layout: _l, ...rest } = props;
       return <div {...rest}>{children as React.ReactNode}</div>;
     },
     span: ({ children, ...props }: Record<string, unknown>) => {
@@ -73,7 +77,7 @@ vi.mock("@/stores/authStore", () => ({
         status: "setup-required",
         setSetupRequired: vi.fn(),
         setLoggedOut: vi.fn(),
-        setLoggedIn: vi.fn(),
+        setLoggedIn: mockSetLoggedIn,
       }),
       setState: vi.fn(),
     },
@@ -82,7 +86,7 @@ vi.mock("@/stores/authStore", () => ({
 
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: Object.assign(() => ({}), {
-    getState: () => ({ setMode: vi.fn() }),
+    getState: () => ({ setMode: mockSetMode }),
     setState: vi.fn(),
   }),
 }));
@@ -123,7 +127,7 @@ import WelcomeRoute from "../WelcomeRoute";
 
 describe("WelcomeRoute", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders the welcome heading", () => {
@@ -137,5 +141,15 @@ describe("WelcomeRoute", () => {
 
     expect(screen.getByText("Get Started")).toBeInTheDocument();
     expect(screen.getByLabelText("Explore FlintTrade without creating an account")).toBeInTheDocument();
+  });
+
+  it("opens the separate Explore page without entering demo mode", () => {
+    render(<WelcomeRoute />);
+
+    fireEvent.click(screen.getByLabelText("Explore FlintTrade without creating an account"));
+
+    expect(mockNavigate).toHaveBeenCalledWith("/explore");
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(mockSetLoggedIn).not.toHaveBeenCalled();
   });
 });

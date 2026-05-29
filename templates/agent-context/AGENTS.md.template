@@ -7,14 +7,14 @@
 ## What This Is
 
 Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
-Built on OpenAlgo (33 broker gateway). 16 packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri), monorepo, AGPL-3.0.
-Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.5.2-dev
+FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 17 package surfaces (13 Python + 2 React apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
+Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-alpha
 
 ## Architecture
 
-- FlintTrade sits ON TOP of OpenAlgo (never modifies it)
-- OpenAlgo: broker connections (32 brokers), REST port 5000, WS port 8765
-- FlintTrade: terminal, strategies, backtest, AI, data, screener, multi-account
+- FlintTrade runs its own backend first; OpenAlgo is optional and external.
+- OpenAlgo: broker connections (32 brokers), REST port 5000, WS port 8765.
+- FlintTrade: terminal, public site, design system, strategies, backtest, AI, data, screener, journal, multi-account.
 - External test-deps (not submodules, not bundled): OpenAlgo and OpenClaw — installed separately, or cloned to `.local/external/` via `scripts/setup-test-deps.sh` for local development. AlgoMirror's mirroring patterns are absorbed in-process by `packages/services/ditto/`; the upstream repo is no longer tracked.
 
 ## Configuration
@@ -26,16 +26,15 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.5.2-dev
 
 ## Packages
 
-**Python (12):** gateway, core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, indicators
+**Python (13):** gateway, core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, journal, indicators
 **Rust/PyO3 (1):** tick-engine (high-performance tick processing, Python bindings via PyO3)
-**React (1):** terminal (5173)
-**Chrome Extension (1):** chrome-extension (quick order entry from any browser tab)
-**Desktop (1):** desktop (Tauri native shell wrapping the React terminal)
+**React apps (2):** terminal (5173), site (3000)
+**Shared UI (1):** design-system (tokens, layers, brand primitives, reusable React components)
 
-## Current State (v0.5.2-dev — SemVer release hygiene snapshot)
+## Current State (v0.6.0-alpha — alpha restructure snapshot)
 
 - ~12,062 tests collected (9,089 Python + ~2,973 terminal) — verified 2026-05-19
-- Latest stable release: v0.5.1 (security hardening + CI stability, 2026-05-20)
+- Latest stable release: none after the alpha restructure; treat all pre-1.0 releases as experimental unless the release notes say otherwise.
 - Terminal: 82 widgets (TSX), 7 tools, 12 public routes (+ DEV `/admin` + 404), 13 workspace presets, 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
 - Mode system: 3 modes (Explore/Practice/Live) with server-side order enforcement via JWT claims
 - Auth: argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry, jti revocation blocklist

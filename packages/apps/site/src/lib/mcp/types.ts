@@ -31,6 +31,8 @@ export type CommandEntry = {
 };
 
 export type DocsIndex = {
+  version: string;
+  versionTag: string;
   generatedAt: string;
   docs: DocEntry[];
   packages: PackageEntry[];

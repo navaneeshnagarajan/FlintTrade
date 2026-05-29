@@ -152,7 +152,7 @@ export default function ToolsDropdown({
     <div
       ref={ref}
       role="menu"
-      className="z-50 bg-surface-card border border-border-default rounded-lg shadow-xl py-1 w-52 animate-fade-in-scale"
+      className="z-200 bg-surface-card border border-border-default rounded-lg shadow-xl py-1 w-52 animate-fade-in-scale"
       style={positionStyle}
       onKeyDown={handleKeyDown}
     >

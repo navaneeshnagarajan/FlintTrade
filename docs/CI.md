@@ -62,7 +62,7 @@ Three mechanisms keep CI inexpensive and signal-rich:
   `github.event.pull_request.draft != true`. Open PRs as drafts while
   iterating; mark "ready for review" to trigger CI.
 - **`paths-ignore` for doc-only commits.** The matrix is skipped if a
-  commit only touches `*.md`, `docs/**`, `.local/**`, `NOTICE`,
+  commit only touches `*.md`, `docs/**`, `.local/**`, `notice`,
   `LICENSE`, `.gitignore`, `.gitattributes`, `.editorconfig`,
   `.github/ISSUE_TEMPLATE/**`, or the `claude*.yml` / `status-report.yml`
   workflows themselves.

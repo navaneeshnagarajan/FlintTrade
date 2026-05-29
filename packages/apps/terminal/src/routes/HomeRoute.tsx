@@ -5,47 +5,177 @@
  * Wire-up: registered as "/" inside AppLayout in main.tsx.
  */
 
+import { useMemo, useState } from "react";
+import type { DragEvent, PointerEvent as ReactPointerEvent } from "react";
 import { BentoGrid, BentoGridContainer } from "@/components/bento/BentoGrid";
 import { AddWidgetCard } from "@/components/bento/AddWidgetCard";
-import { useLayoutStore } from "@/stores/layoutStore";
-import { WelcomeCard } from "@/routes/home/WelcomeCard";
-import { AIPulseCard } from "@/routes/home/AIPulseCard";
-import { PositionsCard } from "@/routes/home/PositionsCard";
-import { MiniChartCard } from "@/routes/home/MiniChartCard";
-import { PortfolioCard } from "@/routes/home/PortfolioCard";
-import { WatchlistCard } from "@/routes/home/WatchlistCard";
-import { NewsCard } from "@/routes/home/NewsCard";
-import { BreadthCard } from "@/routes/home/BreadthCard";
-import { SectorCard } from "@/routes/home/SectorCard";
-import { SIPCard } from "@/routes/home/SIPCard";
-import { GlobalCard } from "@/routes/home/GlobalCard";
-import { OrdersCard } from "@/routes/home/OrdersCard";
+import { BentoCard } from "@/components/bento/BentoCard";
+import type { BentoCardSize } from "@/components/bento/BentoCard";
+import { HomeWidgetFrame } from "@/routes/home/HomeWidgetFrame";
+import { HomeWidgetPicker } from "@/routes/home/HomeWidgetPicker";
+import { HOME_WIDGET_CATALOG, HOME_WIDGET_COMPONENTS } from "@/routes/home/homeWidgetRegistry";
+import { useBentoStore } from "@/stores/bentoStore";
 import StatusBar from "@/chrome/StatusBar";
 
+function UnknownHomeWidgetCard({ componentId }: { componentId: string }) {
+  return (
+    <BentoCard size="default" label="Unavailable widget">
+      <div className="flex h-full min-h-28 flex-col justify-center gap-2 p-4">
+        <p className="text-xs font-medium text-text-primary">Unavailable widget</p>
+        <p className="text-[11px] leading-snug text-text-muted">
+          {componentId} is saved in this layout but is not registered in the home dashboard.
+        </p>
+      </div>
+    </BentoCard>
+  );
+}
+
 export default function HomeRoute() {
-  const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
+  const [isWidgetPickerOpen, setIsWidgetPickerOpen] = useState(false);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
+  const cards = useBentoStore((s) => s.cards);
+  const addCard = useBentoStore((s) => s.addCard);
+  const removeCard = useBentoStore((s) => s.removeCard);
+  const reorderCards = useBentoStore((s) => s.reorderCards);
+  const resizeCard = useBentoStore((s) => s.resizeCard);
+  const sortedCards = useMemo(
+    () => [...cards].sort((a, b) => a.order - b.order),
+    [cards],
+  );
+  const widgetLabels = useMemo(
+    () => new Map(HOME_WIDGET_CATALOG.map((widget) => [widget.componentId, widget.name])),
+    [],
+  );
+
+  function handleAddWidget(componentId: string) {
+    addCard(componentId);
+    setIsWidgetPickerOpen(false);
+  }
+
+  function handleDragStart(cardId: string, event: DragEvent<HTMLButtonElement>) {
+    setDraggedCardId(cardId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-flinttrade-home-card", cardId);
+  }
+
+  function handleDragOver(cardId: string, event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverCardId(cardId);
+  }
+
+  function handleDragLeave(cardId: string) {
+    setDragOverCardId((current) => (current === cardId ? null : current));
+  }
+
+  function reorderCard(sourceCardId: string, targetCardId: string) {
+    if (sourceCardId === targetCardId) return;
+    const nextIds = sortedCards.map((card) => card.id);
+    const sourceIndex = nextIds.indexOf(sourceCardId);
+    const targetIndex = nextIds.indexOf(targetCardId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    nextIds.splice(sourceIndex, 1);
+    nextIds.splice(targetIndex, 0, sourceCardId);
+    reorderCards(nextIds);
+  }
+
+  function handleDrop(targetCardId: string, event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const sourceCardId =
+      event.dataTransfer.getData("application/x-flinttrade-home-card") || draggedCardId;
+    setDraggedCardId(null);
+    setDragOverCardId(null);
+    if (!sourceCardId) return;
+    reorderCard(sourceCardId, targetCardId);
+  }
+
+  function handleDragEnd() {
+    setDraggedCardId(null);
+    setDragOverCardId(null);
+  }
+
+  function getPointerTargetCardId(clientX: number, clientY: number): string | null {
+    const element = document.elementFromPoint?.(clientX, clientY);
+    const frame = element?.closest?.("[data-home-card-id]") as HTMLElement | null;
+    return frame?.dataset.homeCardId ?? null;
+  }
+
+  function handlePointerDragStart(cardId: string, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    setDraggedCardId(cardId);
+
+    function clearPointerDrag() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", clearPointerDrag);
+      setDraggedCardId(null);
+      setDragOverCardId(null);
+    }
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      const targetCardId = getPointerTargetCardId(pointerEvent.clientX, pointerEvent.clientY);
+      setDragOverCardId(targetCardId);
+    }
+
+    function handlePointerUp(pointerEvent: PointerEvent) {
+      const targetCardId = getPointerTargetCardId(pointerEvent.clientX, pointerEvent.clientY);
+      clearPointerDrag();
+      if (targetCardId) reorderCard(cardId, targetCardId);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", clearPointerDrag, { once: true });
+  }
+
+  function handleResize(cardId: string, size: BentoCardSize) {
+    resizeCard(cardId, size);
+  }
+
+  function handleRemove(cardId: string) {
+    removeCard(cardId);
+  }
 
   return (
     <div className="flex flex-col h-full bg-surface-base" data-testid="home-route">
       <BentoGridContainer className="flex-1 px-3 py-3">
         <BentoGrid data-testid="home-bento-grid">
-          <WelcomeCard />
-          <AIPulseCard />
-          <PositionsCard />
-          <MiniChartCard />
-          <PortfolioCard />
-          <WatchlistCard />
-          <NewsCard />
-          <BreadthCard />
-          <SectorCard />
-          <SIPCard />
-          <GlobalCard />
-          <OrdersCard />
-          <AddWidgetCard onClick={() => setWidgetPickerOpen(true)} />
+          {sortedCards.map((card) => {
+            const Widget = HOME_WIDGET_COMPONENTS[card.componentId];
+            const label = widgetLabels.get(card.componentId) ?? card.componentId;
+            return (
+              <HomeWidgetFrame
+                key={card.id}
+                card={card}
+                label={label}
+                isDragOver={dragOverCardId === card.id && draggedCardId !== card.id}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onDragEnd={handleDragEnd}
+                onPointerDragStart={handlePointerDragStart}
+                onRemove={handleRemove}
+                onResize={handleResize}
+              >
+                {Widget ? <Widget /> : <UnknownHomeWidgetCard componentId={card.componentId} />}
+              </HomeWidgetFrame>
+            );
+          })}
+          <AddWidgetCard onClick={() => setIsWidgetPickerOpen(true)} />
         </BentoGrid>
       </BentoGridContainer>
 
-      <StatusBar cardCount={12} layoutName="Default" />
+      <StatusBar cardCount={sortedCards.length} layoutName="Default" />
+      <HomeWidgetPicker
+        isOpen={isWidgetPickerOpen}
+        onClose={() => setIsWidgetPickerOpen(false)}
+        onAdd={handleAddWidget}
+      />
     </div>
   );
 }

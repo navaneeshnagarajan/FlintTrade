@@ -15,7 +15,6 @@ interface LayoutStore {
   activeTabId: string;
   dockviewApi: DockviewApi | null;
   widgetPickerOpen: boolean;
-  toolsMenuOpen: boolean;
   presetPickerOpen: boolean;
   addTab: (name?: string) => void;
   removeTab: (id: string) => void;
@@ -25,7 +24,6 @@ interface LayoutStore {
   getTabLayout: (id: string) => Record<string, unknown> | undefined;
   setDockviewApi: (api: DockviewApi | null) => void;
   setWidgetPickerOpen: (open: boolean) => void;
-  setToolsMenuOpen: (open: boolean) => void;
   setPresetPickerOpen: (open: boolean) => void;
   applyPreset: (presetId: string) => void;
 }
@@ -41,7 +39,6 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   activeTabId: defaultTabId,
   dockviewApi: null,
   widgetPickerOpen: false,
-  toolsMenuOpen: false,
   presetPickerOpen: false,
   addTab: (name) => {
     const id = generateId();
@@ -78,7 +75,6 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   },
   setDockviewApi: (api) => set({ dockviewApi: api }),
   setWidgetPickerOpen: (open) => set({ widgetPickerOpen: open }),
-  setToolsMenuOpen: (open) => set({ toolsMenuOpen: open }),
   setPresetPickerOpen: (open) => set({ presetPickerOpen: open }),
   applyPreset: (presetId) => {
     const api = get().dockviewApi;

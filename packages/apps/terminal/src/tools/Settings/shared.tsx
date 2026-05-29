@@ -83,15 +83,23 @@ interface SelectInputProps {
   "aria-label"?: string;
 }
 
+const EMPTY_SELECT_ITEM_VALUE = "__flinttrade_empty_select_value__";
+
 export function SelectInput({ value, onChange, options, "aria-label": ariaLabel }: SelectInputProps) {
+  const hasEmptyOption = options.some((option) => option.value === "");
+  const selectValue = value === "" && hasEmptyOption ? EMPTY_SELECT_ITEM_VALUE : value;
+  const handleValueChange = (nextValue: string) => {
+    onChange(nextValue === EMPTY_SELECT_ITEM_VALUE ? "" : nextValue);
+  };
+
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select value={selectValue} onValueChange={handleValueChange}>
       <SelectTrigger className="w-full h-8 text-xs bg-surface-base border-border-default" aria-label={ariaLabel}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {options.map(({ value: v, label }) => (
-          <SelectItem key={v} value={v}>{label}</SelectItem>
+          <SelectItem key={v || EMPTY_SELECT_ITEM_VALUE} value={v || EMPTY_SELECT_ITEM_VALUE}>{label}</SelectItem>
         ))}
       </SelectContent>
     </Select>

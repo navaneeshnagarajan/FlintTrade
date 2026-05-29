@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-journal"
-version = "0.6.0-dev"
+version = "0.6.0-alpha"
 description = "Trade journal, trade logging, execution analytics, and P&L tracking"
 requires-python = ">=3.12"
 dependencies = [

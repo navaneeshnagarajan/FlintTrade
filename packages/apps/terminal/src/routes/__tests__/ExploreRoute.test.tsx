@@ -6,13 +6,27 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router-dom";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+
+const { mockNavigate, mockSetMode, mockSetLoggedIn } = vi.hoisted(() => ({
+  mockNavigate: vi.fn(),
+  mockSetMode: vi.fn(),
+  mockSetLoggedIn: vi.fn(),
+}));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 vi.mock("framer-motion", () => ({
   motion: {
@@ -48,8 +62,29 @@ vi.mock("@/stores/themeStore", () => ({
       activeThemeId: "default",
       mode: "dark",
       setMode: vi.fn(),
+      getActiveTheme: () => ({
+        shared: {
+          particles: {
+            quantity: 35,
+            sizeRange: [1, 3],
+            behavior: "drift",
+          },
+        },
+      }),
     }),
   ),
+}));
+
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: Object.assign(() => ({}), {
+    getState: () => ({ setMode: mockSetMode }),
+  }),
+}));
+
+vi.mock("@/stores/authStore", () => ({
+  useAuthStore: Object.assign(() => ({}), {
+    getState: () => ({ setLoggedIn: mockSetLoggedIn }),
+  }),
 }));
 
 vi.mock("@/components/brand/Logo", () => ({
@@ -86,10 +121,10 @@ vi.mock("@/components/aceternity/card-hover-effect", () => ({
   ),
 }));
 
-// Skip the DemoChoice overlay — pretend user has already made a choice
 vi.mock("@/components/demo/DemoChoice", () => ({
   default: () => null,
-  hasMadeDemoChoice: () => true,
+  hasMadeDemoChoice: () => false,
+  resetDemoChoice: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -115,11 +150,23 @@ describe("ExploreRoute", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the main landmark and heading", () => {
+  it("renders the explore page immediately without the demo choice interstitial", () => {
     renderExplore();
 
     expect(screen.getByRole("main", { name: /explore mode/i })).toBeInTheDocument();
     expect(screen.getByText("Explore FlintTrade")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /demo mode/i })).toBeInTheDocument();
+    expect(screen.queryByText(/how would you like to explore flinttrade/i)).not.toBeInTheDocument();
+  });
+
+  it("starts the separate demo workspace from the Demo Mode button", () => {
+    renderExplore();
+
+    fireEvent.click(screen.getByRole("button", { name: /demo mode/i }));
+
+    expect(mockSetMode).toHaveBeenCalledWith("explore");
+    expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");
+    expect(mockNavigate).toHaveBeenCalledWith("/home");
   });
 
   it("shows all six module preview cards", () => {

@@ -11,10 +11,11 @@
 | **OpenAlgo** | Broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
 | **OpenClaw** | Optional AI agent gateway (Telegram / WhatsApp) | (any) | `8c4ecf42` (2026-04-19) | [openclaw/openclaw](https://github.com/openclaw/openclaw) |
 
-**OpenAlgo minimum (v2.0.0):** required for the v2 API surface FlintTrade
-relies on — depth mode 4 (50-level book), structured `closeposition` with
-strategy id, `optionchain` greeks endpoint, and the rate-limit headers
-(`X-RateLimit-Remaining`). v1 deployments will fail FlintTrade's startup
+**OpenAlgo minimum (v2.0.0):** required only when you enable the optional
+OpenAlgo-compatible integration path. FlintTrade expects OpenAlgo's v2 API
+surface there — depth mode 4 (50-level book), structured `closeposition`
+with strategy id, `optionchain` greeks endpoint, and rate-limit headers
+(`X-RateLimit-Remaining`). v1 deployments will fail the OpenAlgo integration
 sanity check.
 
 **OpenClaw — optional:** only needed when AI-agent features are enabled
@@ -30,15 +31,16 @@ call AlgoMirror at runtime. The upstream repo is not tracked or pulled.
 | Component | Minimum | Tested | Notes |
 |---|---|---|---|
 | Python | 3.11 | 3.12.x | 3.13/3.14 partially supported (sklearn / lightgbm import issues on Windows 3.14) |
-| Node | 20 | 22.x | required for the terminal package + Playwright |
+| Node | 22 | 22.x | required for the terminal package, site package, and Playwright |
 | Operating system | Windows 11, macOS 14, Ubuntu 22.04 | same | tested matrix in CI |
 
 ## Brokers
 
-FlintTrade itself does not connect to brokers — OpenAlgo does. Whatever
-broker version OpenAlgo supports, FlintTrade supports. The 32-broker
-list lives in [`flint.toml`](../flint.toml) under `[brokers]`. The 2026-05
-sync added **IIFL Capital** as a distinct entry alongside the existing
+FlintTrade supports two broker paths: native FlintTrade adapters and an
+optional OpenAlgo-compatible bridge. For the OpenAlgo path, whatever broker
+version OpenAlgo supports is the compatibility boundary. The broker list lives
+in [`flint.toml`](../flint.toml) under `[packages]` / gateway metadata. The
+2026-05 sync added **IIFL Capital** as a distinct entry alongside the existing
 **IIFL** adapter.
 
 ### Surface added in v2.0.1.1

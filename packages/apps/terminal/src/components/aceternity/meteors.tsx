@@ -11,19 +11,30 @@ interface MeteorData {
 interface MeteorsProps {
   number?: number;
   className?: string;
+  seed?: number;
 }
 
-export function Meteors({ number = 12, className }: MeteorsProps) {
-  // Memoize so values are stable across re-renders (Math.random is side-effectful)
+function createSeededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
+    return state / 4_294_967_296;
+  };
+}
+
+export function Meteors({ number = 12, className, seed = 1_337 }: MeteorsProps) {
+  // Memoize so values are stable across re-renders and page mounts.
   const meteors = useMemo<MeteorData[]>(
-    () =>
-      Array.from({ length: number }, (_, i) => ({
+    () => {
+      const random = createSeededRandom(seed);
+      return Array.from({ length: number }, (_, i) => ({
         id: i,
-        left: `${Math.random() * 100}%`,
-        delay: `${Math.random() * 3}s`,
-        duration: `${Math.random() * 2 + 2}s`,
-      })),
-    [number],
+        left: `${random() * 100}%`,
+        delay: `${random() * 3}s`,
+        duration: `${random() * 2 + 2}s`,
+      }));
+    },
+    [number, seed],
   );
 
   return (

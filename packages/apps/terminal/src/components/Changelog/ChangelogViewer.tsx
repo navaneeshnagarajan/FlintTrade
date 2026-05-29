@@ -1,13 +1,12 @@
 /**
- * ChangelogViewer — In-app modal that renders the project CHANGELOG.md.
+ * ChangelogViewer — In-app modal that renders the project changelog.md.
  *
  * Parses the markdown into navigable sections keyed by version heading.
  * Highlights the latest version with a "New in v0.x" banner.
  * Auto-opens on the first load of a new version (compares stored vs current).
  *
  * Data source:
- *  - Dev: GET /CHANGELOG.md (served by Vite's static middleware from repo root)
- *  - Prod: inline bundled string via `import changelog from "@/assets/CHANGELOG.md?raw"`
+ *  - Dev/prod: GET /ft-api/v1/changelog from the backend.
  *
  * Since Vite externalises "marked" for the Glide Data Grid peer dep, we use
  * a minimal inline renderer instead of the marked package.
@@ -36,6 +35,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { APP_VERSION } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
 // Version storage
@@ -72,7 +72,7 @@ export interface ChangelogSection {
 }
 
 /**
- * Splits CHANGELOG.md content into per-version sections.
+ * Splits changelog.md content into per-version sections.
  * Recognises "## [Version]" and "## [Unreleased]" headings.
  */
 export function parseChangelog(content: string): ChangelogSection[] {
@@ -300,7 +300,7 @@ function SectionAccordion({ section, defaultOpen }: SectionAccordionProps) {
 
 async function fetchChangelog(): Promise<string> {
   // In development, Vite serves files from publicDir or via the dev server.
-  // CHANGELOG.md is at the repo root — we expose it via a custom endpoint.
+  // changelog.md is at the repo root — we expose it via a custom endpoint.
   const res = await fetch("/ft-api/v1/changelog");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.text();
@@ -341,14 +341,14 @@ export function useChangelogAutoOpen(currentVersion: string): {
 export interface ChangelogViewerProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Current app version string, e.g. "0.5.0-dev" */
+  /** Current app version string without the leading v, e.g. "0.6.0-alpha" */
   currentVersion?: string;
 }
 
 export default function ChangelogViewer({
   isOpen,
   onClose,
-  currentVersion = "0.5.0-dev",
+  currentVersion = APP_VERSION,
 }: ChangelogViewerProps) {
   const [content, setContent] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -452,12 +452,12 @@ export default function ChangelogViewer({
           <p className="text-xs text-text-muted">
             Full history at{" "}
             <a
-              href="https://github.com/navaneeshnagarajan/FlintTrade/blob/main/CHANGELOG.md"
+              href="https://github.com/navaneeshnagarajan/FlintTrade/blob/main/changelog.md"
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent hover:underline"
             >
-              CHANGELOG.md
+              changelog.md
             </a>
           </p>
           <Button

@@ -1,7 +1,7 @@
 # FlintTrade Architecture
 
-> Reflects `v0.5.2-dev`. 16 packages (12 Python + 1 React + 1 Rust/PyO3 +
-> 1 Chrome Extension + 1 Tauri). About 12,062 tests in total
+> Reflects `v0.6.0-alpha`. 17 package surfaces (13 Python + 2 React apps +
+> 1 shared TypeScript design-system package + 1 Rust/PyO3 tick engine). About 12,062 tests in total
 > (9,089 pytest + 2,973 Vitest, measured 2026-05-19).
 
 This document is the architectural reference for contributors. For a
@@ -15,8 +15,10 @@ WebSocket contracts, see [API.md](API.md). For repo conventions, see
 
 ```mermaid
 flowchart LR
-    subgraph Browser["Browser / Desktop wrapper"]
+    subgraph Browser["Browser / app shell"]
         T[Terminal React App]
+        SITE[Public docs site]
+        DS[Design system]
     end
 
     subgraph Backend["FlintTrade backend (Python)"]
@@ -29,6 +31,7 @@ flowchart LR
         BT[backtest-engine]
         AUT[automation]
         DIT[ditto]
+        JNL[journal]
         IND[indicators]
         ING[integration]
         GW[gateway]
@@ -36,7 +39,7 @@ flowchart LR
     end
 
     subgraph OpenAlgo["OpenAlgo · port 5000 / WS 8765 (external service)"]
-        OA[33 broker adapters]
+        OA[32 broker adapters]
     end
 
     subgraph Brokers["Brokers (live)"]
@@ -45,6 +48,8 @@ flowchart LR
 
     T -- "/api/v1/* + /ft-api/v1/* (HTTP)" --> F
     T -- "WS /ws (port 8765 via proxy)" --> OA
+    SITE -- "generated docs + read-only MCP" --> DS
+    T --> DS
     F --> E
     F --> S
     F --> AI
@@ -53,6 +58,7 @@ flowchart LR
     F --> BT
     F --> AUT
     F --> DIT
+    F --> JNL
     F --> ING
     F --> GW
     E --> TICK
@@ -80,6 +86,10 @@ flowchart TD
     terminal --> integration
     terminal --> engine
     terminal --> historical
+    terminal --> designSystem[design-system]
+
+    site --> designSystem
+    site --> docs[docs/]
 
     engine --> core
     engine --> data
@@ -95,6 +105,8 @@ flowchart TD
 
     ai --> core
     ai --> data
+    journal --> data
+    journal --> core
 
     integration --> core
     integration --> engine
@@ -113,11 +125,11 @@ flowchart TD
     gateway --> core
 ```
 
-Arrows point from dependent to dependency. The 12 Python packages plus
-the Rust/PyO3 `tick-engine` plus the `terminal` SPA add up to 14 of the
-16 packages in the repo; the remaining two are `chrome-extension` and
-`desktop`, which are deployment wrappers around the terminal rather than
-core packages.
+Arrows point from dependent to dependency. Runtime code now lives under
+`packages/{apps,core,integrations,services}`. The public site and terminal
+both consume the shared design-system package; the site also consumes
+repository docs and package READMEs to generate its pages, docs MCP, and
+llms files.
 
 ---
 
@@ -207,11 +219,11 @@ stateDiagram-v2
     }
     state Practice {
         [*] --> sandbox
-        sandbox: Orders routed to OpenAlgo's\nanalyzer (sandbox) endpoints
+        sandbox: Orders routed to FlintTrade's\nnative sandbox engine
     }
     state Live {
         [*] --> realOrders
-        realOrders: Orders routed to OpenAlgo's\nreal endpoints; safety\nlayers active
+        realOrders: Orders routed to a native broker\nadapter or OpenAlgo-compatible endpoint;\nsafety layers active
     }
 ```
 
@@ -236,16 +248,20 @@ flowchart TD
     UI2 --> Order
     Order --> Safety[5-layer safety system]
     Safety --> ModeGuard[Mode guard]
-    ModeGuard --> OpenAlgo[OpenAlgo /api/v1/placeorder]
-    OpenAlgo --> Broker[Broker]
+    ModeGuard --> Router[Broker router]
+    Router --> Sandbox[Native sandbox\npractice mode]
+    Router --> Adapter[Native adapter or\nOpenAlgo-compatible API]
+    Adapter --> Broker[Broker]
     Broker -. fill .-> Tick
 ```
 
 Ticks fan in to per-instrument Jotai atoms which power every chart and
 quote widget. REST data populates a separate query cache. Orders flow
-out through the safety layers and the mode guard before reaching
-OpenAlgo. Fills come back through the tick stream and reconcile with
-the REST cache via `packages/services/engine/src/reconciliation.py`.
+out through the safety layers and the mode guard. Practice orders stay
+inside FlintTrade's native sandbox; live orders route through a native
+broker adapter or an OpenAlgo-compatible endpoint. Fills come back through
+the tick stream and reconcile with the REST cache via
+`packages/services/engine/src/reconciliation.py`.
 
 ---
 
@@ -370,13 +386,13 @@ comes from `.env`.
 
 ```bash
 make setup      # first-time install (deps, workspace)
-make start      # start OpenAlgo (from .local/external/openalgo/ if present)
-make stop       # stop OpenAlgo
+make start      # start FlintTrade backend
+make stop       # stop FlintTrade backend
 make status     # show service and port status
 make test       # run all Python tests
 make test-fast  # stop on first failure
 make lint       # run ruff
-make dev        # start React dev server + OpenAlgo
+make dev        # start React dev server + FlintTrade backend
 make health     # health check
 make clean      # remove build artefacts
 make update     # update Python + Node deps

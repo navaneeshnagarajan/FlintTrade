@@ -391,6 +391,14 @@ kbd {
   line-height: 1.7;
 }
 
+.hero-copy p.hero-disclaimer {
+  max-width: 680px;
+  margin-top: 16px;
+  color: #f9d9a4;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;

@@ -279,6 +279,111 @@ class TestDittoMirrorStatus:
         assert data["data"]["active"] is False
 
 
+class TestDittoAccountCrud:
+    """Ditto account CRUD endpoints."""
+
+    class _FakeAccount:
+        def __init__(
+            self,
+            account_id: str,
+            name: str = "Demo",
+            openalgo_host: str = "http://127.0.0.1:5001",
+            api_key: str = "secret",
+            enabled: bool = True,
+            group: str = "default",
+            allocation_weight: float = 1.0,
+            max_loss_daily: float = 50000.0,
+            is_master: bool = False,
+        ) -> None:
+            self.account_id = account_id
+            self.name = name
+            self.openalgo_host = openalgo_host
+            self.api_key = api_key
+            self.enabled = enabled
+            self.group = group
+            self.allocation_weight = allocation_weight
+            self.max_loss_daily = max_loss_daily
+            self.is_master = is_master
+
+    class _FakeManager:
+        accounts: dict[str, "TestDittoAccountCrud._FakeAccount"] = {}
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def list_accounts(self):
+            return list(self.accounts.values())
+
+        def add_account(self, account) -> None:
+            self.accounts[account.account_id] = account
+
+        def get_account(self, account_id: str):
+            return self.accounts.get(account_id)
+
+        def enable_account(self, account_id: str) -> None:
+            self.accounts[account_id].enabled = True
+
+        def disable_account(self, account_id: str) -> None:
+            self.accounts[account_id].enabled = False
+
+        def remove_account(self, account_id: str) -> None:
+            self.accounts.pop(account_id, None)
+
+    def _patch_manager(self, monkeypatch, accounts=None):
+        import flinttrade_ditto.account_manager as account_manager
+
+        self._FakeManager.accounts = {
+            account.account_id: account
+            for account in (accounts or [])
+        }
+        monkeypatch.setattr(account_manager, "AccountManager", self._FakeManager)
+
+    def test_create_account_returns_sanitised_account(self, client, monkeypatch):
+        self._patch_manager(monkeypatch)
+        resp = client.post("/api/v1/ditto/accounts", json={
+            "account_id": "family_01",
+            "name": "Family Account",
+            "openalgo_host": "http://127.0.0.1:5001",
+            "api_key": "secret-key",
+            "group": "Family",
+            "allocation_weight": 1.25,
+            "max_loss_daily": 25000,
+            "enabled": True,
+            "is_master": False,
+        }, headers=_auth_headers())
+
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert data["data"]["account"]["id"] == "family_01"
+        assert data["data"]["account"]["name"] == "Family Account"
+        assert "api_key" not in data["data"]["account"]
+
+    def test_create_account_validates_required_fields(self, client, monkeypatch):
+        self._patch_manager(monkeypatch)
+        resp = client.post("/api/v1/ditto/accounts", json={
+            "account_id": "missing_host",
+            "api_key": "secret-key",
+        }, headers=_auth_headers())
+        assert resp.status_code == 400
+
+    def test_enable_disable_and_delete_account(self, client, monkeypatch):
+        account = self._FakeAccount("acc_1", name="Primary", enabled=True)
+        self._patch_manager(monkeypatch, [account])
+
+        disable_resp = client.post("/api/v1/ditto/accounts/acc_1/disable", headers=_auth_headers())
+        assert disable_resp.status_code == 200
+        assert disable_resp.get_json()["data"]["account"]["status"] == "disabled"
+
+        enable_resp = client.post("/api/v1/ditto/accounts/acc_1/enable", headers=_auth_headers())
+        assert enable_resp.status_code == 200
+        assert enable_resp.get_json()["data"]["account"]["status"] == "active"
+
+        delete_resp = client.delete("/api/v1/ditto/accounts/acc_1", headers=_auth_headers())
+        assert delete_resp.status_code == 200
+        assert delete_resp.get_json()["data"]["removed"] is True
+
+
 class TestDittoMirrorStart:
     """POST /api/v1/ditto/mirror/start — start position mirroring."""
 

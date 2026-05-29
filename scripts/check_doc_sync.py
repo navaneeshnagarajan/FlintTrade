@@ -18,21 +18,35 @@ REQUIRED_BY_COMMIT: dict[str, set[str]] = {
         "scripts/dump-blueprints.py",
     },
     "1": {
+        ".github/workflows/site.yml",
+        ".github/workflows/test.yml",
+        "Dockerfile",
+        "LICENSE",
         "flint.toml",
         "VERSION",
         "pyproject.toml",
         "Makefile",
-        "Dockerfile",
         "docker-compose.yml",
-        ".github/workflows/test.yml",
-        ".github/workflows/site.yml",
+        "changelog.md",
+        "code-of-conduct.md",
+        "contributing.md",
+        "licenses/agpl-3.0.txt",
+        "licenses/apache-2.0.txt",
+        "licenses/cc-by-4.0.txt",
+        "licenses/plug-in-exception.txt",
+        "notice",
+        "readme.md",
+        "security.md",
     },
 }
 
 
 def _changed(base_ref: str) -> set[str]:
-    output = subprocess.check_output(["git", "diff", "--name-only", f"{base_ref}..HEAD"], text=True)
-    return {line.strip() for line in output.splitlines() if line.strip()}
+    committed = subprocess.check_output(["git", "diff", "--name-only", f"{base_ref}..HEAD"], text=True)
+    worktree = subprocess.check_output(["git", "diff", "--name-only", base_ref], text=True)
+    untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], text=True)
+    lines = committed.splitlines() + worktree.splitlines() + untracked.splitlines()
+    return {line.strip() for line in lines if line.strip()}
 
 
 def main() -> int:

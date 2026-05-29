@@ -8,11 +8,11 @@ Whether you're fixing a typo, shipping a new broker adapter, translating the UI 
 
 Please read these first. They're short:
 
-- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — how we behave with one another.
-- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability privately.
+- [`code-of-conduct.md`](code-of-conduct.md) — how we behave with one another.
+- [`security.md`](security.md) — how to report a vulnerability privately.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the 10-minute tour of how FlintTrade fits together.
 
-If you're filing a security issue, please do **not** open a public GitHub issue. Use the channels in `SECURITY.md`.
+If you're filing a security issue, please do **not** open a public GitHub issue. Use the channels in `security.md`.
 
 ## Development setup
 
@@ -178,7 +178,7 @@ We use GitHub issue templates. Pick the one that fits:
 
 When reporting a bug, please include OS and version, Python and Node versions, the exact error message, and steps to reproduce. Please **never** include API keys, broker account names, fund balances, order IDs, personal IP addresses, or hostnames.
 
-For security vulnerabilities, follow [`SECURITY.md`](SECURITY.md) — do not open a public issue.
+For security vulnerabilities, follow [`security.md`](security.md) — do not open a public issue.
 
 ## License notice
 

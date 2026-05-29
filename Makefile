@@ -19,6 +19,7 @@ SHELL := /usr/bin/env bash
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,$(shell which python3 2>/dev/null || which python 2>/dev/null))
 NPM := $(shell which npm 2>/dev/null)
 FLINTTRADE_DIR := $(shell pwd)
+FLINTTRADE_PYTHONPATH := packages/core/core/src
 
 # Colors
 GREEN  := \033[32m
@@ -34,13 +35,14 @@ ifneq (,$(wildcard .env))
 endif
 
 OPENALGO_PORT ?= 5000
+FLINTTRADE_BACKEND_PORT ?= 5100
 ifeq ($(OS),Windows_NT)
   OPENALGO_PID := $(TEMP)/flinttrade-openalgo.pid
 else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore logs-clear
+.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast lint clean update dev docker-up docker-down docker-build version health help audit sync-check full-check install-docker install-native backup restore logs-clear
 
 # ======================================================================
 # Setup
@@ -57,39 +59,64 @@ check-python: ## Verify Python >= 3.11 (required for StrEnum)
 # Service management
 # ======================================================================
 
-start: ## Start OpenAlgo service
+start: ## Start FlintTrade backend API (standalone; OpenAlgo is optional)
 	@echo -e "$(CYAN)=== Starting FlintTrade ===$(RESET)"
-	@bash infra/scripts/openalgo/start-openalgo.sh
-	@echo -e "$(GREEN)=== FlintTrade running ===$(RESET)"
+	@echo "  Backend: http://127.0.0.1:$(FLINTTRADE_BACKEND_PORT)"
+	@echo ""
+	PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.app
 
 # --- Gateway mode (v0.2.0+) — single process, no separate OpenAlgo ---
 
-start-gateway: ## Start FlintTrade gateway backend (standalone, no OpenAlgo)
-	$(PYTHON) -m flinttrade_core.app
+start-gateway: start ## Alias for start (standalone FlintTrade backend)
 
-# Legacy mode alias — requires separate OpenAlgo instance (same as `start`)
-start-legacy: start ## Start in legacy mode (requires separate OpenAlgo instance)
+start-openalgo: ## Start optional local OpenAlgo integration service
+	@bash infra/scripts/openalgo/start-openalgo.sh
 
-stop: ## Stop OpenAlgo service
-	@bash infra/scripts/openalgo/stop-openalgo.sh
+# Legacy mode alias — requires separate OpenAlgo instance
+start-legacy: start-openalgo ## Start optional OpenAlgo integration service
 
-restart: stop start ## Restart OpenAlgo
+stop: ## Stop FlintTrade backend API if it is listening on FLINTTRADE_BACKEND_PORT
+	@if command -v lsof >/dev/null 2>&1; then \
+	  pid="$$(lsof -tiTCP:$(FLINTTRADE_BACKEND_PORT) -sTCP:LISTEN 2>/dev/null | head -1)"; \
+	  if [ -n "$$pid" ]; then \
+	    echo -e "$(YELLOW)Stopping FlintTrade backend on port $(FLINTTRADE_BACKEND_PORT) (PID $$pid)$(RESET)"; \
+	    kill "$$pid"; \
+	  else \
+	    echo -e "$(YELLOW)No FlintTrade backend listening on port $(FLINTTRADE_BACKEND_PORT).$(RESET)"; \
+	  fi; \
+	else \
+	  echo -e "$(YELLOW)lsof is not available; stop the FlintTrade backend process manually.$(RESET)"; \
+	fi
+
+restart: stop start ## Restart FlintTrade backend
 
 status: ## Show service status
 	@bash infra/scripts/status.sh
 
 health: ## Run health check
-	@bash infra/scripts/health-check.sh
+	@FLINTTRADE_HEALTH_STRICT=0 bash infra/scripts/health-check.sh
 
-dev: ## Start terminal dev server + OpenAlgo
+dev: ## Start terminal dev server + FlintTrade backend
 	@echo -e "$(CYAN)=== FlintTrade Dev Mode ===$(RESET)"
-	@echo "  Terminal:  http://localhost:5173"
-	@echo "  OpenAlgo:  http://localhost:$(OPENALGO_PORT)"
+	@echo "  Terminal:  http://127.0.0.1:5173"
+	@echo "  Backend:   http://127.0.0.1:$(FLINTTRADE_BACKEND_PORT)"
+	@echo "  OpenAlgo:  optional integration, configure in Settings when needed"
 	@echo ""
-	@if [ -n "$(NPM)" ]; then \
-	  cd packages/apps/terminal && npm run dev & \
-	fi
-	@bash infra/scripts/openalgo/start-openalgo.sh
+	@mkdir -p .local/dev-logs
+	@set -e; \
+	  PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.app > .local/dev-logs/backend.log 2>&1 & \
+	  backend_pid="$$!"; \
+	  if [ -n "$(NPM)" ]; then \
+	    (cd packages/apps/terminal && npm run dev) > "$(FLINTTRADE_DIR)/.local/dev-logs/terminal.log" 2>&1 & \
+	    terminal_pid="$$!"; \
+	  else \
+	    echo -e "$(RED)npm not found; terminal dev server was not started.$(RESET)"; \
+	    terminal_pid=""; \
+	  fi; \
+	  echo -e "$(GREEN)Started backend PID $$backend_pid and terminal PID $${terminal_pid:-none}.$(RESET)"; \
+	  echo "Logs: .local/dev-logs/backend.log and .local/dev-logs/terminal.log"; \
+	  trap 'kill "$$backend_pid" $${terminal_pid:-} 2>/dev/null || true' INT TERM EXIT; \
+	  wait
 
 # ======================================================================
 # Testing and quality

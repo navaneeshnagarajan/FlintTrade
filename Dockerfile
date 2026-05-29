@@ -60,6 +60,7 @@ RUN mkdir -p /data/flinttrade/audit \
 ENV PYTHONUNBUFFERED=1
 ENV AUDIT_LOG_DIR=/data/flinttrade/audit
 ENV FLINTTRADE_PORT=5100
+ENV PYTHONPATH=/app/packages/core/core/src:/app/packages/core/data/src:/app/packages/core/historical/src:/app/packages/core/indicators/src:/app/packages/services/backtest/src:/app/packages/services/engine/src:/app/packages/services/screener/src:/app/packages/services/journal/src:/app/packages/services/ai/src:/app/packages/services/ditto/src:/app/packages/services/automation/src:/app/packages/integrations/gateway/src:/app/packages/integrations/webhooks/src
 
 # Expose backend port
 EXPOSE 5100

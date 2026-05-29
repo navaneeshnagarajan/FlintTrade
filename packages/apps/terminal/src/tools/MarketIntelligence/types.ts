@@ -1,4 +1,4 @@
-import type React from "react";
+import type { LucideIcon } from "lucide-react";
 
 export interface SectorReturn {
   ticker: string;
@@ -121,6 +121,5 @@ export type TabId =
 export interface TabDef {
   id: TabId;
   label: string;
-  icon: React.ElementType;
+  icon: LucideIcon;
 }
-

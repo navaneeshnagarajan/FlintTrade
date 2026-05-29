@@ -1,7 +1,7 @@
 """FlintTrade core configuration.
 
 Two-tier config model:
-  .env            → infrastructure only (OpenAlgo connection, ports)
+  .env            → optional infrastructure overrides (OpenAlgo bridge, ports)
   workspace.json  → user preferences (paths, modules, LLM, Telegram, SEBI)
 """
 
@@ -17,19 +17,21 @@ from .workspace import Workspace
 logger = logging.getLogger("flinttrade.core.config")
 
 # Walk up from packages/core/core/src/ to find repo root .env
-_repo_root = Path(__file__).resolve().parents[3]
+_repo_root = Path(__file__).resolve().parents[4]
 load_dotenv(_repo_root / ".env")
 
 
 class Settings(BaseModel):
     """Validated configuration for FlintTrade core.
 
-    OpenAlgo connection settings come from .env (infrastructure).
+    OpenAlgo connection settings are optional. FlintTrade can boot without
+    a running OpenAlgo bridge; live OpenAlgo calls fail gracefully until the
+    user connects one.
     User preferences come from Workspace (workspace.json).
     """
 
-    openalgo_host: str
-    openalgo_api_key: str
+    openalgo_host: str = "http://127.0.0.1:5000"
+    openalgo_api_key: str = ""
     openalgo_port: int = 5000
     openalgo_ws_port: int = 8765
     strategy: str = "Flint"
@@ -44,24 +46,17 @@ class Settings(BaseModel):
     @field_validator("openalgo_api_key")
     @classmethod
     def key_must_not_be_placeholder(cls, v: str) -> str:
-        if not v or v == "your_openalgo_api_key_here":
+        if v == "your_openalgo_api_key_here":
             raise ValueError("openalgo_api_key must be set to a real API key")
         return v
 
     @classmethod
     def from_env(cls) -> "Settings":
         """Build Settings from environment variables (.env)."""
-        from .exceptions import ConfigError
-
-        host = os.getenv("OPENALGO_HOST", "")
+        host = os.getenv("OPENALGO_HOST", "http://127.0.0.1:5000") or "http://127.0.0.1:5000"
         key = os.getenv("OPENALGO_API_KEY", "")
         port = os.getenv("OPENALGO_PORT", "5000")
         ws_port = os.getenv("OPENALGO_WS_PORT", "8765")
-
-        if not host:
-            raise ConfigError("OPENALGO_HOST environment variable is required")
-        if not key:
-            raise ConfigError("OPENALGO_API_KEY environment variable is required")
 
         return cls(
             openalgo_host=host,

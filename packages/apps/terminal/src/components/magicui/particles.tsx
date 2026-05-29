@@ -28,7 +28,7 @@
  *   className — forwarded to canvas
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { motionConfig } from "@/lib/motion";
 import { useThemeStore } from "@/stores/themeStore";
@@ -60,7 +60,9 @@ export interface ParticlesProps {
   /** Single color, backward-compatible. Ignored when colors is provided. */
   color?: string;
   size?: number;
+  sizeRange?: readonly [number, number];
   behavior?: ParticleBehavior;
+  seed?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,20 +84,24 @@ export function Particles({
   colors,
   color = "#22c55e",
   size = 1.5,
+  sizeRange,
   behavior = "drift",
+  seed = 7_137,
 }: ParticlesProps) {
   // Reduced motion: OS/browser setting
   const osReducedMotion = motionConfig.prefersReducedMotion();
   // Reduced motion: user store override
   const storeReduceMotion = useThemeStore((s) => s.reduceMotion);
 
+  // Resolve color array
+  const colorList: string[] = useMemo(
+    () => (colors && colors.length > 0 ? colors : [color]),
+    [color, colors],
+  );
+
   if (osReducedMotion || storeReduceMotion) {
     return null;
   }
-
-  // Resolve color array
-  const colorList: string[] =
-    colors && colors.length > 0 ? colors : [color];
 
   return (
     <ParticlesCanvas
@@ -103,7 +109,9 @@ export function Particles({
       quantity={quantity}
       colors={colorList}
       size={size}
+      sizeRange={sizeRange}
       behavior={behavior}
+      seed={seed}
     />
   );
 }
@@ -117,10 +125,28 @@ interface CanvasProps {
   quantity: number;
   colors: string[];
   size: number;
+  sizeRange?: readonly [number, number];
   behavior: ParticleBehavior;
+  seed: number;
 }
 
-function ParticlesCanvas({ className, quantity, colors, size, behavior }: CanvasProps) {
+function createSeededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
+    return state / 4_294_967_296;
+  };
+}
+
+function ParticlesCanvas({
+  className,
+  quantity,
+  colors,
+  size,
+  sizeRange,
+  behavior,
+  seed,
+}: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -136,36 +162,38 @@ function ParticlesCanvas({ className, quantity, colors, size, behavior }: Canvas
       navigator.hardwareConcurrency <= LOW_END_THRESHOLD;
     const actualQuantity = isLowEnd ? Math.ceil(quantity * 0.5) : quantity;
 
-    let animationId: number;
+    let animationId: number | null = null;
     let isVisible = true;
     const dpr = window.devicePixelRatio || 1;
+    const random = createSeededRandom(seed);
 
     function resize() {
       if (!canvas) return;
-      canvas.width = canvas.offsetWidth * dpr;
-      canvas.height = canvas.offsetHeight * dpr;
-      ctx!.scale(dpr, dpr);
+      canvas.width = Math.max(1, Math.floor(canvas.offsetWidth * dpr));
+      canvas.height = Math.max(1, Math.floor(canvas.offsetHeight * dpr));
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     resize();
 
     const w = canvas.offsetWidth;
     const h = canvas.offsetHeight;
+    const [minSize, maxSize] = sizeRange ?? [size * 0.8, size * 1.2];
 
     // Initialise particles
     const particles: ParticleState[] = Array.from(
       { length: actualQuantity },
       (_, i) => ({
-        x: Math.random() * w,
-        y: behavior === "snow" ? Math.random() * h - h : Math.random() * h,
-        vx: (Math.random() - 0.5) * 0.3,
+        x: random() * w,
+        y: behavior === "snow" ? random() * h - h : random() * h,
+        vx: (random() - 0.5) * 0.3,
         vy: behavior === "snow"
-          ? 0.3 + Math.random() * 0.5
-          : (Math.random() - 0.5) * 0.3,
-        alpha: Math.random() * 0.5 + 0.2,
-        baseAlpha: Math.random() * 0.4 + 0.15,
-        phase: Math.random() * Math.PI * 2,
+          ? 0.3 + random() * 0.5
+          : (random() - 0.5) * 0.3,
+        alpha: random() * 0.5 + 0.2,
+        baseAlpha: random() * 0.4 + 0.15,
+        phase: random() * Math.PI * 2,
         colorIdx: i % colors.length,
-        size: size * (0.8 + Math.random() * 0.4),
+        size: minSize + random() * (maxSize - minSize),
       }),
     );
 
@@ -175,6 +203,7 @@ function ParticlesCanvas({ className, quantity, colors, size, behavior }: Canvas
       if (!canvas || !ctx) return;
       const dt = Math.min(now - lastTime, 50); // cap at 50ms to avoid jumps
       lastTime = now;
+      const dtScale = dt / 16.67;
       const t = now / 1000; // seconds
 
       ctx.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
@@ -182,16 +211,16 @@ function ParticlesCanvas({ className, quantity, colors, size, behavior }: Canvas
       for (const p of particles) {
         switch (behavior) {
           case "drift": {
-            p.x += p.vx;
-            p.y += p.vy;
+            p.x += p.vx * dtScale;
+            p.y += p.vy * dtScale;
             if (p.x < 0 || p.x > canvas.offsetWidth) p.vx *= -1;
             if (p.y < 0 || p.y > canvas.offsetHeight) p.vy *= -1;
             break;
           }
           case "float": {
             // Gentle sine vertical bobbing, slow lateral drift
-            p.x += p.vx;
-            p.y = p.y + Math.sin(t * 0.5 + p.phase) * 0.15;
+            p.x += p.vx * dtScale;
+            p.y += Math.sin(t * 0.5 + p.phase) * 0.15 * dtScale;
             if (p.x < 0 || p.x > canvas.offsetWidth) p.vx *= -1;
             break;
           }
@@ -204,11 +233,11 @@ function ParticlesCanvas({ className, quantity, colors, size, behavior }: Canvas
             break;
           }
           case "snow": {
-            p.x += p.vx + Math.sin(t * 0.3 + p.phase) * 0.1;
-            p.y += p.vy * (dt / 16); // normalize to ~60fps
+            p.x += (p.vx + Math.sin(t * 0.3 + p.phase) * 0.1) * dtScale;
+            p.y += p.vy * dtScale;
             if (p.y > canvas.offsetHeight + 10) {
               p.y = -10;
-              p.x = Math.random() * canvas.offsetWidth;
+              p.x = random() * canvas.offsetWidth;
             }
             if (p.x < 0 || p.x > canvas.offsetWidth) p.vx *= -1;
             break;
@@ -224,12 +253,22 @@ function ParticlesCanvas({ className, quantity, colors, size, behavior }: Canvas
 
       ctx.globalAlpha = 1;
 
-      if (isVisible) {
-        animationId = requestAnimationFrame(draw);
-      }
+      animationId = null;
+      if (isVisible) startAnimation();
     }
 
-    animationId = requestAnimationFrame(draw);
+    function startAnimation() {
+      if (animationId !== null) return;
+      animationId = requestAnimationFrame(draw);
+    }
+
+    function stopAnimation() {
+      if (animationId === null) return;
+      cancelAnimationFrame(animationId);
+      animationId = null;
+    }
+
+    startAnimation();
 
     // Pause when not visible
     const observer = new IntersectionObserver(
@@ -238,7 +277,9 @@ function ParticlesCanvas({ className, quantity, colors, size, behavior }: Canvas
         isVisible = entry.isIntersecting;
         if (isVisible) {
           lastTime = performance.now();
-          animationId = requestAnimationFrame(draw);
+          startAnimation();
+        } else {
+          stopAnimation();
         }
       },
       { threshold: 0 },
@@ -251,12 +292,12 @@ function ParticlesCanvas({ className, quantity, colors, size, behavior }: Canvas
     window.addEventListener("resize", handleResize);
 
     return () => {
-      cancelAnimationFrame(animationId);
+      stopAnimation();
       observer.disconnect();
       window.removeEventListener("resize", handleResize);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantity, colors, size, behavior]);
+  }, [quantity, colors, size, sizeRange?.[0], sizeRange?.[1], behavior, seed]);
 
   return (
     <canvas

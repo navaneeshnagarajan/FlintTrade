@@ -1,5 +1,6 @@
 // PaletteShell.tsx
 import { useCallback, type ReactNode } from "react";
+import { layerClassNames } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 
 interface PaletteShellProps {
@@ -24,7 +25,10 @@ export function PaletteShell({ isOpen, onClose, children }: PaletteShellProps) {
       aria-modal="true"
       aria-label="Command palette"
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] bg-black/50 backdrop-blur-sm animate-in fade-in duration-150"
+      className={cn(
+        "fixed inset-0 flex items-start justify-center pt-[12vh] bg-black/50 backdrop-blur-sm animate-in fade-in duration-150",
+        layerClassNames.modal,
+      )}
     >
       <div
         className={cn(

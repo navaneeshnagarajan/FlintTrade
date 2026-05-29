@@ -15,6 +15,7 @@ from datetime import datetime as _dt
 from datetime import timedelta as _td
 from datetime import timezone as _tz
 from typing import Any
+from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, jsonify, request
 
@@ -733,6 +734,29 @@ def api_news() -> tuple[Any, int]:
 # Ditto — multi-account management & position mirroring
 # ------------------------------------------------------------------
 
+def _ditto_account_response(acct: Any) -> dict[str, Any]:
+    """Return a frontend-safe Ditto account payload without credentials."""
+    return {
+        "id": acct.account_id,
+        "name": acct.name or acct.account_id,
+        "broker": "OpenAlgo",
+        "capital": 0,
+        "pnl_today": 0,
+        "status": "active" if acct.enabled else "disabled",
+        "positions": 0,
+        "group": acct.group,
+        "allocation_weight": acct.allocation_weight,
+        "is_master": acct.is_master,
+    }
+
+
+def _ditto_manager_error(exc: Exception) -> tuple[Any, int]:
+    logger.warning("Ditto account operation failed: %s", exc)
+    return jsonify({
+        "status": "error",
+        "message": "Account service unavailable",
+    }), 503
+
 @operations_bp.route("/ditto/accounts", methods=["GET"])
 def ditto_accounts() -> tuple[Any, int]:
     """List all managed accounts with status.
@@ -747,20 +771,7 @@ def ditto_accounts() -> tuple[Any, int]:
         mgr = AccountManager()
         raw = mgr.list_accounts()
         if raw:
-            accounts = []
-            for acct in raw:
-                accounts.append({
-                    "id": acct.account_id,
-                    "name": acct.name or acct.account_id,
-                    "broker": "OpenAlgo",
-                    "capital": 0,
-                    "pnl_today": 0,
-                    "status": "active" if acct.enabled else "disabled",
-                    "positions": 0,
-                    "group": acct.group,
-                    "allocation_weight": acct.allocation_weight,
-                    "is_master": acct.is_master,
-                })
+            accounts = [_ditto_account_response(acct) for acct in raw]
             return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
     except Exception as exc:
         logger.warning("Ditto account fetch failed: %s", exc)
@@ -780,6 +791,132 @@ def ditto_accounts() -> tuple[Any, int]:
         {"id": "acc_7", "name": "Demo Account 7", "broker": "broker_07", "capital": 6000000, "pnl_today": -12800, "status": "active", "positions": 9, "group": "GroupC", "allocation_weight": 1.2, "is_master": False},
     ]
     return jsonify({"status": "success", "data": {"accounts": sample_accounts}}), 200
+
+
+@operations_bp.route("/ditto/accounts", methods=["POST"])
+def ditto_account_create() -> tuple[Any, int]:
+    """Create or update a Ditto managed OpenAlgo account."""
+    data = request.get_json(silent=True) or {}
+    account_id = str(data.get("account_id", "")).strip()
+    openalgo_host = str(data.get("openalgo_host", "")).strip()
+    api_key = str(data.get("api_key", ""))
+
+    missing = [
+        label
+        for label, value in (
+            ("account_id", account_id),
+            ("openalgo_host", openalgo_host),
+            ("api_key", api_key),
+        )
+        if not value
+    ]
+    if missing:
+        return jsonify({
+            "status": "error",
+            "message": f"Missing required field(s): {', '.join(missing)}",
+        }), 400
+
+    parsed = urlparse(openalgo_host)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return jsonify({
+            "status": "error",
+            "message": "openalgo_host must be a valid http(s) URL",
+        }), 400
+
+    try:
+        allocation_weight = float(data.get("allocation_weight", 1.0))
+        max_loss_daily = float(data.get("max_loss_daily", 50000.0))
+    except (TypeError, ValueError):
+        return jsonify({
+            "status": "error",
+            "message": "allocation_weight and max_loss_daily must be numeric",
+        }), 400
+    if allocation_weight <= 0 or max_loss_daily < 0:
+        return jsonify({
+            "status": "error",
+            "message": "allocation_weight must be positive and max_loss_daily cannot be negative",
+        }), 400
+
+    try:
+        from flinttrade_ditto.account_manager import AccountManager, BrokerAccount  # noqa: PLC0415
+
+        account = BrokerAccount(
+            account_id=account_id,
+            openalgo_host=openalgo_host,
+            api_key=api_key,
+            name=str(data.get("name", "")).strip(),
+            enabled=bool(data.get("enabled", True)),
+            allocation_weight=allocation_weight,
+            group=str(data.get("group", "default")).strip() or "default",
+            max_loss_daily=max_loss_daily,
+            is_master=bool(data.get("is_master", False)),
+        )
+        mgr = AccountManager()
+        mgr.add_account(account)
+        return jsonify({
+            "status": "success",
+            "data": {"account": _ditto_account_response(account)},
+        }), 201
+    except Exception as exc:
+        return _ditto_manager_error(exc)
+
+
+@operations_bp.route("/ditto/accounts/<account_id>/enable", methods=["POST"])
+def ditto_account_enable(account_id: str) -> tuple[Any, int]:
+    """Enable a Ditto managed account."""
+    return _ditto_account_set_enabled(account_id, True)
+
+
+@operations_bp.route("/ditto/accounts/<account_id>/disable", methods=["POST"])
+def ditto_account_disable(account_id: str) -> tuple[Any, int]:
+    """Disable a Ditto managed account."""
+    return _ditto_account_set_enabled(account_id, False)
+
+
+def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int]:
+    try:
+        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
+
+        mgr = AccountManager()
+        account = mgr.get_account(account_id)
+        if account is None:
+            return jsonify({
+                "status": "error",
+                "message": f"Account '{account_id}' not found",
+            }), 404
+        if enabled:
+            mgr.enable_account(account_id)
+        else:
+            mgr.disable_account(account_id)
+        account.enabled = enabled
+        return jsonify({
+            "status": "success",
+            "data": {"account": _ditto_account_response(account)},
+        }), 200
+    except Exception as exc:
+        return _ditto_manager_error(exc)
+
+
+@operations_bp.route("/ditto/accounts/<account_id>", methods=["DELETE"])
+def ditto_account_delete(account_id: str) -> tuple[Any, int]:
+    """Remove a Ditto managed account."""
+    try:
+        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
+
+        mgr = AccountManager()
+        account = mgr.get_account(account_id)
+        if account is None:
+            return jsonify({
+                "status": "error",
+                "message": f"Account '{account_id}' not found",
+            }), 404
+        mgr.remove_account(account_id)
+        return jsonify({
+            "status": "success",
+            "data": {"id": account_id, "removed": True},
+        }), 200
+    except Exception as exc:
+        return _ditto_manager_error(exc)
 
 
 @operations_bp.route("/ditto/mirror/status", methods=["GET"])

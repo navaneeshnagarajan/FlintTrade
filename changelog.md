@@ -6,6 +6,66 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0-alpha] - 2026-05-30
+
+Tag: `v0.6.0-alpha` · Type: SemVer alpha prerelease · Status: not
+production ready.
+
+### Added
+
+- Root [disclaimer.md](disclaimer.md) covering alpha readiness, no-advice
+  boundaries, trading risk, user responsibility, and no-warranty terms.
+- Central product-version helpers for terminal, backend, and site-generated
+  metadata so Settings, docs MCP, website content, and backend startup agree
+  on `v0.6.0-alpha`.
+- Public Next.js/Fumadocs site generation for docs, package READMEs, release
+  notes, llms files, and the read-only contribution MCP.
+- Home widget picker/frame/registry surfaces with add, remove, preset,
+  drag/reorder, and resize behaviour covered by terminal tests.
+- Ditto account create, enable/disable, and delete flows in the terminal plus
+  backend route coverage.
+- Restructure regression tests that catch stale package paths, lowercase root
+  document drift, optional-OpenAlgo violations, shared UI delegation, and
+  docs/site version mismatches.
+
+### Changed
+
+- Repository layout documented as `packages/apps`, `packages/core`,
+  `packages/integrations`, and `packages/services`, with 17 package surfaces:
+  13 Python packages, 2 React apps, 1 shared TypeScript design system, and
+  1 Rust/PyO3 tick engine.
+- Makefile, systemd, cron, deployment, rollback, health, status, and reset
+  scripts now treat FlintTrade's backend as the primary runtime and OpenAlgo
+  as an optional external integration.
+- Terminal welcome, Explore/Demo, Settings, overlay stacking, home widgets,
+  Ditto, setup, connection, and version display flows were tightened to match
+  the centralised design-system and backend boundaries.
+- Public README, docs index, architecture guide, developer guide, setup
+  quickstart, API reference, CI guide, issue template, website landing page,
+  and package READMEs were updated for the alpha release.
+- Screenshot references were refreshed to current terminal screens and
+  transient broken/fixed screenshots were removed from the public docs set.
+
+### Fixed
+
+- Settings crash from empty Radix Select item values.
+- Demo mode navigation entering the terminal instead of the intended dashboard
+  route.
+- Explore route drift where the explanatory Explore page and demo entry point
+  were conflated.
+- UI layering conflicts where popover descriptions could render under app
+  sidebars.
+- Home "Add widget" and widget drag/resize wiring that existed in UI shape
+  but was not fully connected.
+
+### Notes
+
+- This is an alpha release. Users should stay in Explore or Practice mode
+  until they have reviewed the code, configured broker-side safeguards, and
+  verified their own environment.
+- OpenAlgo remains supported through the optional OpenAlgo-compatible API
+  path; it is not bundled or required for FlintTrade's core backend.
+
 ### Removed
 
 - Removed `.github/FUNDING.yml` until FlintTrade has live sponsorship accounts to link to.

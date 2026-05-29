@@ -1,6 +1,7 @@
 import { createMcpHandler } from 'mcp-handler';
 
 import { registerFlintDocsMcp } from '@/lib/mcp/registry';
+import { APP_VERSION } from '@/lib/version';
 
 const handler = createMcpHandler(
   (server) => {
@@ -9,7 +10,7 @@ const handler = createMcpHandler(
   {
     serverInfo: {
       name: 'flinttrade-docs',
-      version: '0.1.0',
+      version: APP_VERSION,
     },
   },
   {

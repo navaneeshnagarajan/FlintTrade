@@ -2,7 +2,9 @@
 
 from importlib import import_module
 
-__version__ = "0.1.0-alpha"
+from flinttrade_core.version import APP_VERSION
+
+__version__ = APP_VERSION
 
 from .activity_log import ActivityEntry, ActivityLog, LoginActivity, SessionTracker
 from .audit_logger import AuditLogger

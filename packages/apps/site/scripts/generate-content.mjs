@@ -46,14 +46,11 @@ const fallbackScreenshotFiles = [
   '08-ai.png',
   '09-ditto.png',
   '10-settings.png',
-  '11-ditto-fixed.png',
-  '12-welcome-broken.png',
-  '13-welcome-fixed.png',
-  'structure-1.png',
 ];
 
 const rootDocs = [
   ['docs/README.md', 'index', 'Docs', 'Project documentation index'],
+  ['disclaimer.md', 'disclaimer', 'Safety', 'Alpha-stage, no-advice, trading-risk, and user-responsibility notice'],
   ['docs/USER_GUIDE.md', 'user-guide', 'Docs', 'User guide for traders and investors'],
   ['docs/DEVELOPER_GUIDE.md', 'developer-guide', 'Contributing', 'Contributor setup and extension guide'],
   ['docs/ARCHITECTURE.md', 'architecture', 'Architecture', 'System architecture and package flow'],
@@ -72,6 +69,7 @@ const setupDocs = [
 ];
 
 const releaseDocs = [
+  ['docs/releases/v0.6.0-alpha.md', 'releases/v0.6.0-alpha', 'Releases', 'FlintTrade v0.6.0 alpha release notes'],
   ['docs/releases/v0.5.1.md', 'releases/v0.5.1', 'Releases', 'FlintTrade v0.5.1 release notes'],
   ['docs/releases/v0.5.2-dev.md', 'releases/v0.5.2-dev', 'Releases', 'FlintTrade v0.5.2 development notes'],
 ];
@@ -102,10 +100,11 @@ const docRouteBySourcePath = new Map(
 );
 
 const repositoryFileUrls = new Map([
-  ['CHANGELOG.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/CHANGELOG.md'],
-  ['CONTRIBUTING.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/CONTRIBUTING.md'],
+  ['changelog.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/changelog.md'],
+  ['contributing.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/contributing.md'],
+  ['disclaimer.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/disclaimer.md'],
   ['LICENSE', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/LICENSE'],
-  ['SECURITY.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/SECURITY.md'],
+  ['security.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/security.md'],
 ]);
 
 function titleFromMarkdown(markdown, fallback) {
@@ -118,6 +117,15 @@ function stripInlineMarkdown(value) {
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/[*_~]/g, '');
+}
+
+function normaliseVersion(value) {
+  return value.trim().replace(/^v/, '');
+}
+
+function tagVersion(value) {
+  const normalised = normaliseVersion(value);
+  return normalised.startsWith('v') ? normalised : `v${normalised}`;
 }
 
 function descriptionFromMarkdown(markdown, fallback) {
@@ -316,6 +324,16 @@ async function readRepositoryText(relativePath) {
     if (error?.code !== 'ENOENT') throw error;
     return fetchRepositoryText(relativePath);
   }
+}
+
+async function readVersionInfo() {
+  const raw = await readRepositoryText('VERSION').catch(() => process.env.npm_package_version || '0.0.0-dev');
+  const version = normaliseVersion(raw);
+  return {
+    version,
+    versionTag: tagVersion(version),
+    sourcePath: 'VERSION',
+  };
 }
 
 async function listRepositoryDirectories(relativePath, fallbackNames) {
@@ -517,6 +535,7 @@ async function main() {
   await fs.mkdir(contentRoot, { recursive: true });
   await fs.mkdir(generatedRoot, { recursive: true });
 
+  const versionInfo = await readVersionInfo();
   const docs = [];
 
   for (const [sourcePath, slug, area, fallbackDescription] of docsToGenerate) {
@@ -562,6 +581,7 @@ async function main() {
       title: 'FlintTrade Docs',
       pages: [
         'index',
+        'disclaimer',
         'user-guide',
         'developer-guide',
         'architecture',
@@ -590,7 +610,7 @@ async function main() {
     path.join(contentRoot, 'releases', 'meta.json'),
     JSON.stringify({
       title: 'Releases',
-      pages: ['v0.5.2-dev', 'v0.5.1'],
+      pages: ['v0.6.0-alpha', 'v0.5.2-dev', 'v0.5.1'],
     }, null, 2),
   );
 
@@ -606,6 +626,8 @@ async function main() {
   ];
 
   const docsIndex = {
+    version: versionInfo.version,
+    versionTag: versionInfo.versionTag,
     generatedAt: new Date().toISOString(),
     docs,
     packages,
@@ -614,6 +636,7 @@ async function main() {
 
   await writeFileAtomic(path.join(generatedRoot, 'docs-index.json'), JSON.stringify(docsIndex, null, 2));
   await writeFileAtomic(path.join(generatedRoot, 'packages-index.json'), JSON.stringify(packages, null, 2));
+  await writeFileAtomic(path.join(generatedRoot, 'version.json'), JSON.stringify(versionInfo, null, 2));
   await writeFileAtomic(
     path.join(generatedRoot, 'site-summary.json'),
     JSON.stringify({
@@ -629,6 +652,8 @@ async function main() {
 
   const llms = [
     '# FlintTrade',
+    '',
+    `Version: ${versionInfo.versionTag}`,
     '',
     'Open-source modular trading platform for Indian F&O, commodities, and crypto.',
     '',

@@ -5,6 +5,10 @@ The default reading order is top-to-bottom — every section builds on the one
 before it. If you already have FlintTrade running, jump to the
 [Workspace tour](#workspace-tour) or use the section list in the sidebar.
 
+> **Alpha software.** FlintTrade `v0.6.0-alpha` is not production ready and
+> does not provide financial advice. Read [disclaimer.md](../disclaimer.md)
+> before connecting a broker or switching to Live mode.
+
 > **Three personas, one app.** FlintTrade serves traders (intraday F&O),
 > investors (mutual funds, SIPs, holdings), and beginners (learning, paper
 > trading) from the same workspace. The routes are persona-shaped — pick
@@ -18,17 +22,15 @@ before it. If you already have FlintTrade running, jump to the
 FlintTrade runs on Windows, macOS, and Linux (including Raspberry Pi). The
 quickest path is `make setup` from a fresh clone — it installs Python and
 Node dependencies, creates the `~/.flinttrade/` workspace, and prepares
-OpenAlgo for connection.
+FlintTrade's backend for connection.
 
 ### Prerequisites
 
 - **Python 3.12** (3.11 also works for runtime, but contributors should use 3.12).
 - **Node.js 20+** (24 recommended for current LTS parity).
 - **Git**.
-- **An OpenAlgo instance.** OpenAlgo handles broker authentication and order
-  routing. You can either install it separately (recommended for production)
-  or run `scripts/setup-test-deps.sh` to clone a local-dev copy into
-  `.local/external/openalgo/`.
+- **Broker access.** FlintTrade can use its own broker gateway as adapters
+  mature, and it can also connect to an existing OpenAlgo-compatible server.
 
 ### Quick install (any platform)
 
@@ -36,8 +38,8 @@ OpenAlgo for connection.
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 make setup
-cp .env.example .env       # fill in OPENALGO_HOST / PORT / API_KEY
-make start                 # starts OpenAlgo if a local-dev clone is present
+cp .env.example .env       # optional; configure integrations when needed
+make start                 # starts the FlintTrade backend
 cd packages/apps/terminal && npm install && npm run dev
 ```
 
@@ -59,18 +61,17 @@ For step-by-step instructions tailored to each operating system, see:
 
 ---
 
-## 2. First broker connection (via OpenAlgo)
+## 2. First broker connection
 
-FlintTrade never speaks to your broker directly. Every order, every tick,
-every position lookup goes through OpenAlgo. OpenAlgo supports 32 brokers in
-India — see [COMPATIBILITY.md](COMPATIBILITY.md) for the full list.
+FlintTrade supports two broker paths: the native FlintTrade gateway for
+first-party adapters, and an OpenAlgo-compatible server for users who already
+run OpenAlgo.
 
 ### Steps
 
-1. **Install OpenAlgo.** If you let `scripts/setup-test-deps.sh` clone a
-   local-dev copy, it lives at `.local/external/openalgo/` and `make start`
-   will boot it on port 5000. Otherwise, follow the
-   [OpenAlgo installation docs](https://docs.openalgo.in/).
+1. **Choose a path.** Use the FlintTrade gateway as native adapters become
+   available, or install OpenAlgo separately if you want the OpenAlgo
+   integration path.
 2. **Configure your broker in OpenAlgo.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
@@ -93,10 +94,9 @@ India — see [COMPATIBILITY.md](COMPATIBILITY.md) for the full list.
 
 ### Why two layers?
 
-OpenAlgo handles every broker quirk — login flows, symbol formats, lot
-sizes, rate-limit differences. FlintTrade gets a clean, unified API surface
-and focuses on strategy logic, UI, analytics, and automation. If you ever
-switch broker, you change one screen in OpenAlgo and nothing in FlintTrade.
+The two-layer option lets existing OpenAlgo users keep their broker setup
+while FlintTrade keeps its own backend, native sandbox, analytics, automation,
+and first-party broker gateway.
 
 ---
 
@@ -108,7 +108,7 @@ FlintTrade has a three-mode system:
 | Mode | Order behaviour | Best for |
 |---|---|---|
 | **Explore** | No orders sent; demo data only | First-time visitors, screenshots, docs |
-| **Practice** | Orders simulated via OpenAlgo's sandbox / analyzer | Strategy testing, before-market practice |
+| **Practice** | Orders simulated by FlintTrade's native sandbox | Strategy testing, before-market practice |
 | **Live** | Real orders to your broker | Production trading |
 
 The current mode is shown in the top bar and is server-enforced via the JWT
@@ -131,7 +131,7 @@ claim — switching to Live requires a deliberate confirmation step.
    P&L is recorded in the **P&L Dashboard** tool.
 
 You have just exercised the full FlintTrade order path — front-end → JWT
-guard → mode guard → OpenAlgo (sandbox / analyzer) → simulated fill →
+guard → mode guard → FlintTrade sandbox → simulated fill →
 WebSocket back to the front-end. No real money moved.
 
 ![Trade workspace](screenshots/04-trade.png)
@@ -432,8 +432,8 @@ text.
 OpenAlgo is not running, or it is bound to a different port.
 
 ```bash
-make status    # shows OpenAlgo health and the port it is listening on
-make start     # boots OpenAlgo (if a local-dev clone exists at .local/external/openalgo/)
+make status          # shows FlintTrade backend health and optional OpenAlgo status
+make start-openalgo  # boots the optional local-dev OpenAlgo clone when present
 ```
 
 If you installed OpenAlgo separately, start it via its own start script
@@ -495,7 +495,7 @@ ensure the running user has write access.
 - **GitHub Discussions** — for usage questions and ideas.
 - **GitHub Issues** — for bugs and feature requests (use the templates in
   `.github/ISSUE_TEMPLATE/`).
-- **SECURITY.md** — for security issues (private disclosure via GitHub
+- **security.md** — for security issues (private disclosure via GitHub
   Security Advisories).
 
 If your issue requires a backend log, run with

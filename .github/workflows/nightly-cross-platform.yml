@@ -35,7 +35,7 @@ jobs:
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - run: pip install -r requirements.txt
-      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60
+      - run: python -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60
 
   python-tests-windows:
     runs-on: windows-latest
@@ -48,4 +48,4 @@ jobs:
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - run: pip install -r requirements.txt
-      - run: python -m pytest packages/ai/tests/ packages/automation/tests/ packages/backtest-engine/tests/ packages/core/tests/ packages/data/tests/ packages/ditto/tests/ packages/engine/tests/ packages/gateway/tests/ packages/historical/tests/ packages/indicators/tests/ packages/integration/tests/ packages/screener/tests/ packages/tick-engine/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"
+      - run: python -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"

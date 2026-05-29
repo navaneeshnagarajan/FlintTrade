@@ -67,6 +67,7 @@ export function CinematicLayout({
   className,
 }: CinematicLayoutProps) {
   const reduceMotionStore = useThemeStore((s) => s.reduceMotion);
+  const particleSettings = useThemeStore((s) => s.getActiveTheme().shared.particles);
 
   // Check all downgrade conditions
   const osReducedMotion = motionConfig.prefersReducedMotion();
@@ -113,9 +114,11 @@ export function CinematicLayout({
       {effectiveMode === "cinematic" && particleColors.length > 0 && (
         <Particles
           colors={particleColors}
-          quantity={20}
-          behavior="drift"
-          className="z-0"
+          quantity={particleSettings.quantity}
+          sizeRange={particleSettings.sizeRange}
+          behavior={particleSettings.behavior}
+          seed={19_841}
+          className="z-0 opacity-30"
         />
       )}
 

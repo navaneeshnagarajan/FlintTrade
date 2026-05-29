@@ -16,6 +16,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Eye, Code, TestTube, Zap, X } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useThemeStore } from "@/stores/themeStore";
 import { cn } from "@/lib/utils";
@@ -29,7 +30,7 @@ import { STATUS_LABELS, STATUS_COLORS } from "./types";
 
 const DISMISSED_KEY = "ft-teaser-dismissed";
 
-const STATUS_ICONS: Record<FeatureStatus, React.ElementType> = {
+const STATUS_ICONS: Record<FeatureStatus, LucideIcon> = {
   preview: Eye,
   in_dev: Code,
   testing: TestTube,

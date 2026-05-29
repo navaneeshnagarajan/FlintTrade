@@ -190,10 +190,10 @@ GET endpoints. Source: `packages/core/core/src/monitoring_routes.py`,
 | Endpoint | Purpose |
 |---|---|
 | `errors` | Front-end error reporting sink. The terminal posts unhandled errors here. |
-| `changelog` | Read the bundled CHANGELOG.md programmatically (used by the "What's new" widget). |
+| `changelog` | Read the bundled changelog.md programmatically (used by the "What's new" widget). |
 
 There are roughly 20 FlintTrade-specific endpoint families across the
-12 Python packages. The complete list of registered Flask blueprints
+13 Python packages. The complete list of registered Flask blueprints
 appears in `packages/core/core/src/app.py` — search for `register_blueprint`.
 
 ---

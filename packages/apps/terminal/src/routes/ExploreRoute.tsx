@@ -3,8 +3,8 @@
  *
  * Shows all 6 FlintTrade modules with hardcoded sample data.
  * No broker connection required. Every module card navigates to the
- * actual route and shows a contextual toast prompting the user to
- * connect OpenAlgo for live data.
+ * actual route and shows a contextual toast prompting the user to connect
+ * a broker gateway for live data.
  */
 
 import { useState, useCallback, useEffect } from "react";
@@ -32,10 +32,10 @@ import { Button } from "@/components/ui/button";
 import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { motionConfig } from "@/lib/motion";
-import DemoChoice, { hasMadeDemoChoice } from "@/components/demo/DemoChoice";
-import type { DemoChoiceValue } from "@/components/demo/DemoChoice";
-import SpotlightTour, { hasCompletedExploreTour } from "@/components/demo/ExploreTour";
+import SpotlightTour from "@/components/demo/ExploreTour";
 import type { TourStep } from "@/components/demo/ExploreTour";
+import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
 
 // Aceternity UI
 import { HoverCard } from "@/components/aceternity/card-hover-effect";
@@ -542,7 +542,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: "[aria-label='Explore navigation']",
     title: "Navigation & Setup",
     description:
-      "Use Settings to connect your OpenAlgo instance. When you're ready, click Get Started to run the setup wizard and go live.",
+      "Use Settings to connect FlintTrade's broker gateway or an OpenAlgo-compatible server. When you're ready, click Get Started to run the setup wizard.",
     placement: "bottom",
   },
   {
@@ -563,7 +563,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: ".rounded-lg.border.border-border-default.bg-surface-card",
     title: "Ready to Go Live?",
     description:
-      "Connect an existing OpenAlgo instance in Settings, or run the setup wizard to configure everything from scratch. Takes about 2 minutes.",
+      "Set up FlintTrade's broker gateway, or connect an existing OpenAlgo-compatible server. Takes about 2 minutes.",
     placement: "top",
   },
 ];
@@ -571,7 +571,6 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
 export default function ExploreRoute() {
   const navigate = useNavigate();
   const [toast, setToast] = useState<ToastState>({ visible: false, message: "" });
-  const [showDemoChoice, setShowDemoChoice] = useState(() => !hasMadeDemoChoice());
   const [showTour, setShowTour] = useState(false);
 
   const dismissToast = useCallback(() => {
@@ -582,7 +581,7 @@ export default function ExploreRoute() {
     (route: string, title: string) => {
       setToast({
         visible: true,
-        message: `Opening ${title} — connect OpenAlgo in Settings for live data.`,
+        message: `Opening ${title} - connect a broker gateway in Settings for live data.`,
       });
       setTimeout(() => {
         navigate(route);
@@ -591,6 +590,12 @@ export default function ExploreRoute() {
     [navigate],
   );
 
+  const startDemoMode = useCallback(() => {
+    useModeStore.getState().setMode("explore");
+    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    navigate("/home");
+  }, [navigate]);
+
   // Auto-dismiss toast after 4 s
   useEffect(() => {
     if (!toast.visible) return;
@@ -598,35 +603,28 @@ export default function ExploreRoute() {
     return () => clearTimeout(id);
   }, [toast.visible, dismissToast]);
 
-  function handleDemoChoice(choice: DemoChoiceValue) {
-    setShowDemoChoice(false);
-    if (choice === "tour") {
-      // Start SpotlightTour only if not already completed
-      if (!hasCompletedExploreTour()) {
-        setShowTour(true);
-      }
-    }
-    // "explore" choice = just dismiss the overlay, user explores freely
-  }
-
-  // Show DemoChoice overlay on first visit
-  if (showDemoChoice) {
-    return <DemoChoice onChoice={handleDemoChoice} />;
-  }
-
   return (
     <>
       <PublicRouteShell
         mainLabel="Explore mode"
         eyebrow="Sample workspace"
         title="Explore FlintTrade"
-        subtitle="Open every module with simulated data, then connect OpenAlgo in Settings when you are ready for live data."
+        subtitle="Open every module with simulated data, then connect FlintTrade's broker gateway when you are ready for live data."
         actions={
           <nav aria-label="Explore navigation" className="flex items-center gap-2">
             <Button
+              type="button"
               variant="ghost"
               size="sm"
               className="text-xs text-text-muted hover:text-text-primary"
+              onClick={startDemoMode}
+            >
+              Demo Mode
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="hidden text-xs text-text-muted hover:text-text-primary sm:inline-flex"
               asChild
             >
               <Link to="/settings">Settings</Link>
@@ -660,6 +658,26 @@ export default function ExploreRoute() {
               <p className="mx-auto max-w-2xl text-sm leading-relaxed text-text-secondary">
                 The preview uses the same cards, controls, and route behaviour as the app so visual checks here match what users see after setup.
               </p>
+            </div>
+            <div className="mx-auto flex flex-col items-center justify-center gap-2 sm:flex-row">
+              <Button
+                type="button"
+                size="sm"
+                className="w-full sm:w-auto"
+                onClick={startDemoMode}
+              >
+                Enter Demo Workspace
+                <ArrowRight className="size-3.5" aria-hidden="true" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full border-border-default text-text-primary hover:bg-surface-hover sm:w-auto"
+                onClick={() => setShowTour(true)}
+              >
+                Start Guided Tour
+              </Button>
             </div>
             <div className="mx-auto grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
               {STATS.map((stat) => (
@@ -712,7 +730,7 @@ export default function ExploreRoute() {
                       Ready to start?
                     </h2>
                     <p className="mt-1 text-sm text-text-muted">
-                      Set up your workspace in 2 minutes or connect an existing OpenAlgo instance.
+                      Set up your workspace in 2 minutes, then connect FlintTrade's broker gateway or an OpenAlgo-compatible server.
                     </p>
                   </div>
                 </div>
@@ -731,7 +749,7 @@ export default function ExploreRoute() {
                     asChild
                   >
                     <Link to="/settings">
-                      Already have OpenAlgo?
+                      Connect Gateway
                     </Link>
                   </Button>
                 </div>

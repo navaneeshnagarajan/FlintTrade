@@ -25,17 +25,27 @@ class MockIntersectionObserver implements IntersectionObserver {
   readonly root: Element | Document | null = null;
   readonly rootMargin: string = "0px";
   readonly thresholds: readonly number[] = [0];
+  private readonly cb: IntersectionObserverCallback;
+  private disconnected = false;
 
-  observe = observeMock;
-  disconnect = disconnectMock;
+  observe = (target: Element) => {
+    observeMock(target);
+    setTimeout(() => {
+      if (this.disconnected) return;
+      this.cb([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+    }, 0);
+  };
+
+  disconnect = () => {
+    this.disconnected = true;
+    disconnectMock();
+  };
+
   unobserve = vi.fn();
   takeRecords(): IntersectionObserverEntry[] { return []; }
 
   constructor(cb: IntersectionObserverCallback) {
-    // Immediately fire as "visible" so the canvas draws
-    setTimeout(() => {
-      cb([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
-    }, 0);
+    this.cb = cb;
   }
 }
 
@@ -68,6 +78,7 @@ const ctxMock = {
   arc: vi.fn(),
   fill: vi.fn(),
   scale: vi.fn(),
+  setTransform: vi.fn(),
   globalAlpha: 1,
   fillStyle: "",
 };
@@ -118,6 +129,8 @@ describe("Particles", () => {
     storeReduceMotion = false;
     osReduceMotion = false;
     vi.clearAllMocks();
+    rafId = 0;
+    rafCallbacks.clear();
     // Mock canvas offsetWidth/offsetHeight
     Object.defineProperty(HTMLCanvasElement.prototype, "offsetWidth", {
       configurable: true,
@@ -130,6 +143,7 @@ describe("Particles", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
   });
 
@@ -211,6 +225,14 @@ describe("Particles", () => {
     const { unmount } = render(<Particles />);
     unmount();
     expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it("keeps one animation loop when visibility observer reports visible", async () => {
+    render(<Particles />);
+
+    expect(rafCallbacks.size).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(rafCallbacks.size).toBe(1);
   });
 
   it("renders with default quantity and size without error", () => {

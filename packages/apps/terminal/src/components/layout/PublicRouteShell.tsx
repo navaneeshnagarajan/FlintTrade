@@ -1,8 +1,10 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Moon, Sun, Monitor } from "lucide-react";
 
+import { Meteors } from "@/components/aceternity/meteors";
 import { LogoIcon } from "@/components/brand/Logo";
+import { Particles } from "@/components/magicui/particles";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ColorMode } from "@/lib/cinematicThemes";
@@ -17,6 +19,14 @@ const widthClass = {
 
 interface ThemeModeButtonsProps {
   className?: string;
+}
+
+function cssVar(name: string, fallback = ""): string {
+  if (typeof window === "undefined") return fallback;
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+    fallback
+  );
 }
 
 export function ThemeModeButtons({ className }: ThemeModeButtonsProps) {
@@ -81,6 +91,17 @@ export default function PublicRouteShell({
   className,
   contentClassName,
 }: PublicRouteShellProps) {
+  const activeThemeId = useThemeStore((s) => s.activeThemeId);
+  const particleSettings = useThemeStore((s) => s.getActiveTheme().shared.particles);
+  const particleColors = useMemo(
+    () => [
+      cssVar("--particle-primary", "#22c55e"),
+      cssVar("--particle-secondary", "#86efac"),
+      cssVar("--particle-tertiary", "#38bdf8"),
+    ],
+    [activeThemeId],
+  );
+
   return (
     <main
       aria-label={mainLabel}
@@ -89,66 +110,17 @@ export default function PublicRouteShell({
         className,
       )}
     >
-      <style>{`
-        @keyframes publicMeteor {
-          0% { transform: rotate(215deg) translateX(0); opacity: 0; }
-          10% { opacity: 0.9; }
-          70% { opacity: 0.75; }
-          100% { transform: rotate(215deg) translateX(-520px); opacity: 0; }
-        }
-        @keyframes publicStarDrift {
-          from { transform: translate3d(0, 0, 0); }
-          to { transform: translate3d(-54px, 32px, 0); }
-        }
-        .public-starfield {
-          background-image:
-            radial-gradient(circle, rgba(255,255,255,0.32) 0 1px, transparent 1.4px),
-            radial-gradient(circle, rgba(34,197,94,0.32) 0 1px, transparent 1.6px);
-          background-size: 94px 94px, 138px 138px;
-          background-position: 0 0, 38px 54px;
-          animation: publicStarDrift 24s linear infinite alternate;
-        }
-        .public-meteor {
-          position: absolute;
-          top: -2rem;
-          width: 2px;
-          height: 2px;
-          border-radius: 999px;
-          background: rgb(34 197 94);
-          box-shadow: 0 0 0 1px rgba(34,197,94,0.16), 0 0 18px rgba(34,197,94,0.35);
-          animation: publicMeteor 4.8s linear infinite;
-        }
-        .public-meteor::after {
-          content: "";
-          position: absolute;
-          top: 50%;
-          right: 0;
-          width: 72px;
-          height: 1px;
-          transform: translateY(-50%);
-          background: linear-gradient(90deg, rgba(34,197,94,0.68), transparent);
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .public-starfield,
-          .public-meteor {
-            animation: none;
-          }
-        }
-      `}</style>
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(34,197,94,0.15),transparent_30rem),radial-gradient(circle_at_50%_72%,rgba(56,189,248,0.09),transparent_34rem),linear-gradient(180deg,rgba(8,13,12,0.18),transparent_42%,rgba(0,0,0,0.18))]" />
-        <div className="public-starfield absolute inset-0 opacity-35" />
-        {[12, 30, 48, 66, 84].map((left, index) => (
-          <span
-            key={left}
-            className="public-meteor"
-            style={{
-              left: `${left}%`,
-              animationDelay: `${index * 0.72}s`,
-              animationDuration: `${4.2 + index * 0.45}s`,
-            }}
-          />
-        ))}
+        <Particles
+          quantity={particleSettings.quantity}
+          colors={particleColors}
+          sizeRange={particleSettings.sizeRange}
+          behavior={particleSettings.behavior}
+          seed={19_841}
+          className="opacity-30"
+        />
+        <Meteors number={8} seed={8_021} className="opacity-70" />
         <div className="absolute left-1/2 top-1/2 h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-accent/10 shadow-[0_0_120px_rgba(34,197,94,0.11)]" />
       </div>
 
@@ -171,7 +143,7 @@ export default function PublicRouteShell({
 
           <div className="flex min-w-0 items-center gap-2">
             {actions}
-            <ThemeModeButtons />
+            <ThemeModeButtons className="hidden sm:inline-flex" />
           </div>
         </div>
       </header>

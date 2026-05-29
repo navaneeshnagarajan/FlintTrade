@@ -121,9 +121,11 @@ vi.mock("@/components/ui/badge", () => ({
 
 import { ConnectionSection } from "../ConnectionSection";
 import { AppearanceSection } from "../AppearanceSection";
+import { AboutSection } from "../AboutSection";
 import { SecuritySection } from "../SecuritySection";
 import { RiskSection } from "../RiskSection";
 import { GeneralSection } from "../GeneralSection";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
 // 1. ConnectionSection
@@ -138,8 +140,8 @@ describe("ConnectionSection", () => {
       />,
     );
 
-    expect(screen.getByText("API Connection")).toBeInTheDocument();
-    expect(screen.getByLabelText("OpenAlgo host")).toBeInTheDocument();
+    expect(screen.getByText("Broker Gateway")).toBeInTheDocument();
+    expect(screen.getByLabelText("Broker gateway URL")).toBeInTheDocument();
     expect(screen.getByLabelText("WebSocket port")).toBeInTheDocument();
     expect(screen.getByText("Test Connection")).toBeInTheDocument();
   });
@@ -217,5 +219,18 @@ describe("GeneralSection", () => {
     expect(screen.getByText("General")).toBeInTheDocument();
     expect(screen.getByText("Font Size")).toBeInTheDocument();
     expect(screen.getByText("Normal (13px)")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. AboutSection
+// ---------------------------------------------------------------------------
+
+describe("AboutSection", () => {
+  it("renders the central app version", () => {
+    render(<AboutSection />);
+
+    expect(screen.getByText(`Version ${APP_VERSION_TAG}`)).toBeInTheDocument();
+    expect(screen.getByText(APP_VERSION_TAG)).toBeInTheDocument();
   });
 });

@@ -22,18 +22,22 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
-import { Search, Maximize2, Minimize2, Settings } from "lucide-react";
+import { Search, Maximize2, Minimize2, Settings, Wrench } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useSkillContent } from "@/hooks/useSkillContent";
 import { useTimings } from "@/hooks/useMarketStatus";
 import { ping } from "@/services/api";
 import type { MarketTiming } from "@/types/api";
+import type { ToolId } from "@/types/widgets";
 import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
+import AccountSwitcher from "./AccountSwitcher";
 import QuickAccessPanel from "./QuickAccessPanel";
 import TickerMarquee from "./TickerMarquee";
 import type { TickerMode } from "./TickerMarquee";
+import ToolsDropdown from "./ToolsDropdown";
 
 // ---------------------------------------------------------------------------
 // ISTClock
@@ -282,8 +286,11 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const setStatus = useConnectionStore((s) => s.setStatus);
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
+  const { availableTools } = useSkillContent();
   const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const gearRef = useRef<HTMLButtonElement>(null);
+  const toolsRef = useRef<HTMLButtonElement>(null);
 
   // Ping OpenAlgo every 10 s to maintain connection status
   useEffect(() => {
@@ -326,6 +333,12 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     WebkitBackdropFilter: "blur(16px)",
     borderBottom: "1px solid var(--glass-chrome-border, rgba(255,255,255,0.05))",
   };
+
+  const handleSelectTool = useCallback((toolId: ToolId) => {
+    window.dispatchEvent(
+      new CustomEvent("flinttrade:open-tool", { detail: { toolId } }),
+    );
+  }, []);
 
   return (
     <div
@@ -380,8 +393,30 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         {/* Search / command palette */}
         <SearchButton />
 
+        {/* Route-aware tool menu */}
+        <Button
+          ref={toolsRef}
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
+          onClick={() => {
+            setToolsOpen((open) => !open);
+            setQuickSettingsOpen(false);
+          }}
+          aria-label="Tools"
+          aria-expanded={toolsOpen}
+          aria-haspopup="menu"
+          data-testid="tools-btn"
+        >
+          <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="text-xs hidden md:inline">Tools</span>
+        </Button>
+
         {/* Notification bell */}
         <NotificationBell />
+
+        {/* Connected broker account context */}
+        <AccountSwitcher />
 
         {/* Fullscreen toggle */}
         <FullscreenButton />
@@ -412,6 +447,14 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         </AnimatePresence>,
         document.body,
       )}
+
+      <ToolsDropdown
+        isOpen={toolsOpen}
+        onClose={() => setToolsOpen(false)}
+        onSelectTool={handleSelectTool}
+        anchorRect={toolsRef.current?.getBoundingClientRect()}
+        allowedToolIds={availableTools}
+      />
     </div>
   );
 }

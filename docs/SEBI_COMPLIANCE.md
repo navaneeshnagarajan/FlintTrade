@@ -4,6 +4,11 @@
 > Subject: Safer participation of retail investors in Algorithmic trading
 > Full circular: `.local/reference/SEBI_Circular_Feb042025_AlgoTrading.pdf` (local only)
 
+> **Alpha/legal disclaimer.** This page is a technical implementation note,
+> not legal or regulatory advice. FlintTrade `v0.6.0-alpha` is not production
+> ready; users remain responsible for broker, exchange, tax, and SEBI
+> compliance before any live use.
+
 ## Implementation Timeline
 
 | Date | Milestone | Status |

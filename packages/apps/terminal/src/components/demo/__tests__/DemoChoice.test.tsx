@@ -49,7 +49,8 @@ describe("DemoChoice", () => {
 
   it("shows Free Explore and Guided Tour options as radio buttons", () => {
     renderDemoChoice();
-    expect(screen.getByRole("radio", { name: /free explore/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /demo mode/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /guided tour/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /enter demo mode/i })).toBeInTheDocument();
   });
 });

@@ -3,9 +3,26 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { visualizer } from "rollup-plugin-visualizer";
+import fs from "fs";
 import path from "path";
 
+function readFlintTradeVersion(): string {
+  const repoRoot = path.resolve(__dirname, "../../..");
+  const versionPath = path.join(repoRoot, "VERSION");
+  try {
+    const value = fs.readFileSync(versionPath, "utf8").trim();
+    return value.startsWith("v") ? value : `v${value}`;
+  } catch {
+    return `v${process.env.npm_package_version || "0.0.0-dev"}`;
+  }
+}
+
+const flintTradeVersion = readFlintTradeVersion();
+
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -153,8 +170,13 @@ export default defineConfig({
           // only pulls in the icons it explicitly imports).
           // Framer Motion — loaded async, not needed on initial page
           if (id.includes("node_modules/framer-motion")) return "vendor-framer";
-          // d3-* — heavy math/scale/shape modules, lazy-loaded via chart widgets
-          if (id.includes("node_modules/d3-")) return "vendor-d3";
+          // d3-* plus its thin re-export/helper packages. Keeping these together
+          // avoids Rollup circular chunks between vendor-d3 and vendor-misc.
+          if (
+            id.includes("node_modules/d3-") ||
+            id.includes("node_modules/internmap/") ||
+            id.includes("node_modules/victory-vendor/")
+          ) return "vendor-d3";
           // Tremor wraps Recharts primitives, so keep them in one async chunk
           // instead of creating a Rollup circular chunk pair.
           // NOTE: @floating-ui is intentionally omitted here — it lives in

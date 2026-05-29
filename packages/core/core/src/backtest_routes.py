@@ -1,7 +1,7 @@
 """Backtest blueprint — /api/v1/backtest/run and /api/v1/strategies/* endpoints.
 
-Runs backtests via the backtest-engine package (hyphen in directory name
-requires sys.path injection) and exposes strategy lifecycle management.
+Runs backtests via the flinttrade_backtest package and exposes strategy
+lifecycle management.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request
 
 # Resolve repo root relative to this file (packages/core/core/src/backtest_routes.py)
-_REPO_ROOT = str(Path(__file__).resolve().parents[3])
+_REPO_ROOT = str(Path(__file__).resolve().parents[4])
 
 logger = logging.getLogger("flinttrade")
 
@@ -24,18 +24,17 @@ backtest_bp = Blueprint("backtest", __name__, url_prefix="/api/v1")
 
 
 def _load_backtest_engine() -> tuple[Any, Any, Any, Any]:
-    """Import backtest-engine modules via sys.path injection.
+    """Import backtest modules via sys.path injection.
 
-    The ``backtest-engine`` directory name contains a hyphen, which prevents
-    standard Python imports.  We temporarily inject the src directory onto
-    sys.path, import the required modules, then remove the injection.
+    We temporarily inject the service package's src directory onto sys.path,
+    import the required modules, then remove the injection.
 
     Returns:
         Tuple of (BacktestConfig, BacktestSimulator, BUILTIN_STRATEGIES,
         DataConnector, PerformanceMetrics) — actually 5 objects; caller unpacks
         the returned tuple.
     """
-    _be_src = str(Path(_REPO_ROOT) / "packages" / "backtest-engine" / "src")
+    _be_src = str(Path(_REPO_ROOT) / "packages" / "services" / "backtest" / "src")
     _be_src_added = _be_src not in sys.path
     if _be_src_added:
         sys.path.insert(0, _be_src)
@@ -75,9 +74,8 @@ def backtest_run() -> tuple[Any, int]:
         ``equity_curve``, and ``metrics`` on success, or ``status``
         and ``message`` on error.
     """
-    # backtest-engine has a hyphen in its directory name which prevents
-    # regular Python imports.  Inject its src dir onto sys.path temporarily
-    # so direct imports resolve, then remove it to avoid polluting the path.
+    # Inject the backtest service src dir onto sys.path temporarily so direct
+    # imports resolve, then remove it to avoid polluting the path.
     try:
         BacktestConfig, BacktestSimulator, BUILTIN_STRATEGIES, DataConnector, PerformanceMetrics = (
             _load_backtest_engine()
@@ -234,7 +232,7 @@ def backtest_portfolio() -> tuple[Any, int]:
         optionally ``comparison`` on success, or ``status`` and ``message``
         on error.
     """
-    _be_src = str(Path(_REPO_ROOT) / "packages" / "backtest-engine" / "src")
+    _be_src = str(Path(_REPO_ROOT) / "packages" / "services" / "backtest" / "src")
     _be_src_added = _be_src not in sys.path
     if _be_src_added:
         sys.path.insert(0, _be_src)

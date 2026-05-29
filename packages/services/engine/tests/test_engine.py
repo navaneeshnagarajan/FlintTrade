@@ -1306,7 +1306,9 @@ class TestPackageExports:
 
     def test_version(self):
         from flinttrade_engine import __version__
-        assert __version__ == "0.1.0-alpha"
+        from flinttrade_core.version import APP_VERSION
+
+        assert __version__ == APP_VERSION
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

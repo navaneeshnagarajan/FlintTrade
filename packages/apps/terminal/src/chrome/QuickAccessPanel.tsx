@@ -15,6 +15,7 @@ import { useEffect, useRef, useCallback, forwardRef, type KeyboardEvent } from "
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useMutation } from "@tanstack/react-query";
+import { layerClassNames } from "@flinttrade/design-system";
 import { toggleSandbox } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import {
@@ -323,7 +324,10 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
       role="dialog"
       aria-label="Quick settings"
       aria-modal="false"
-      className="z-50 w-80 rounded-xl shadow-2xl overflow-hidden"
+      className={cn(
+        layerClassNames.floatingPanel,
+        "w-80 rounded-xl shadow-2xl overflow-hidden",
+      )}
       style={{
         ...positionStyle,
         backdropFilter: "blur(24px)",

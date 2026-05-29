@@ -10,17 +10,17 @@
 
 ## Current State (updated 2026-05-19)
 
-- **Version:** v0.5.2-dev (tag `v0.5.2-dev`, 2026-05-20) — SemVer release-hygiene prerelease snapshot. Latest stable remains `v0.5.1`; see `docs/RELEASE_NOTES_v0.5.1.md` and CHANGELOG for the GA narrative.
+- **Version:** v0.6.0-alpha (tag `v0.6.0-alpha`, 2026-05-30) — alpha restructure snapshot. Not production ready; see `disclaimer.md` and CHANGELOG for release boundaries.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total — verified 2026-05-19
-- **Packages:** 16 (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri)
+- **Packages:** 17 surfaces (13 Python + 2 React apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine)
 - **Widgets:** 82 (22 trading + 38 analysis + 22 utility)
 - **AI Skills:** 30 markdown files under `packages/services/ai/skills/`
 - **Strategies:** 94 backtest templates in `packages/services/backtest/src/strategies/` + 2 live-engine strategies (`ema_crossover`, `wheel_live`)
 - **Themes:** 3 (Graphite/Midnight/Ember) × dark/light/system
 - **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV `/admin` + 404) + 13 workspace presets in Dockview v5.1 shell
 - **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types in production code.
-- **Python:** 12 Python packages + tick-engine (Rust/PyO3), 9,089 tests collected
-- **CI:** 7 per-push Ubuntu jobs (`test.yml`) + 2 nightly cross-platform (`nightly-cross-platform.yml`, weekly Sun 03:00 UTC) + 1 weekly status-report. Per-push has paths-ignore for docs, `cancel-in-progress` concurrency, draft-PR guard. Contract in `docs/CI_BUDGET_AND_QUALITY.md`.
+- **Python:** 13 Python packages + tick-engine (Rust/PyO3), 9,089 tests collected
+- **CI:** 7 per-push Ubuntu jobs (`test.yml`) + 2 nightly cross-platform (`nightly-cross-platform.yml`, weekly Sun 03:00 UTC) + 1 weekly status-report. Per-push has paths-ignore for docs, `cancel-in-progress` concurrency, draft-PR guard. Contract in `docs/CI.md`.
 - **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement via JWT claims
 - **Auth:** argon2id passwords, Fernet TOTP, JWT with jti revocation blocklist, HMAC-SHA256 webhook auth
 - **UI:** v0.3.0 "Structured Calm" base — ContentShell centering, 4-level surface hierarchy, Graphite default theme, shadcn/ui migration complete
@@ -319,7 +319,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 | # | Feature | Source Repo | Status |
 |---|---------|-------------|--------|
 | 0 | **Live Market Signals Pipeline** | packages/services/ai | ✅ Done (Wave 1-9) |
-| 1 | Chrome Extension | openalgo-chrome | ✅ Done (Wave 1-9) — packages/chrome-extension/ |
+| 1 | Chrome Extension | openalgo-chrome | Archived after v0.6.0 restructure; no active `packages/chrome-extension/` package |
 | 2 | Excel Integration | OpenAlgo-Excel | v0.6.0 |
 | 3 | WhatsApp Alerts | wabridge | ✅ Done (Wave 1-9) — whatsapp_alerts.py + routes |
 | 4 | Kotak Neo Cost Routing | — | v0.6.0 |
@@ -336,7 +336,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 | 15 | IPO Tracker | — | ✅ Done (Wave 1-9) — ipo_routes.py + IpoTab.tsx |
 | 16 | /learn route (full) | — | ✅ Done (v0.1.0-alpha) |
 | 17 | OpenClaw bridge | — | ✅ Done (Wave 1-9) — openclaw_bridge.py (ai + automation) |
-| 18 | Desktop App (Tauri) | fastscalper-tauri | ✅ Done (Wave 1-9) — packages/desktop/ scaffold |
+| 18 | Desktop App (Tauri) | fastscalper-tauri | Archived after v0.6.0 restructure; no active `packages/desktop/` package |
 | 19 | Pine Script Indicator Editor | PineTS | ✅ Done (Wave 1-9) — PineEditor.tsx + compile endpoint |
 | 20 | Multi-user Auth | openalgo-multiuser | ✅ Done (Wave 1-9) — user_manager.py + user_routes.py |
 | 21 | Blue-green Deployment | — | v0.6.0 |

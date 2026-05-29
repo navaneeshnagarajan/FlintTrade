@@ -1,36 +1,21 @@
 # One-line purpose + key entry points per FlintTrade package.
 # Drives generation of packages/<pkg>/README.md via scripts/generate-package-readmes.py.
-ai:
-  language: Python
-  purpose: "Local LLM client, RAG pipeline, multi-agent trading team, ML signal generation, and skill swarm."
+apps/site:
+  language: TypeScript + React 19
+  purpose: "Next.js + Fumadocs public website, generated documentation, contribution pages, llms files, and read-only docs MCP."
   entry_points:
-    - "src/llm_client.py — multi-provider LLM client (LM Studio / Ollama / NVIDIA / OpenAI / Anthropic / Groq)"
-    - "src/rag.py — ChromaDB-backed retrieval-augmented generation"
-    - "src/multi_agent.py — analyst chain + risk debate + ensemble selector"
-    - "src/advisor.py — production advisor surface for the AI Centre route"
-automation:
-  language: Python
-  purpose: "Cron scheduler, Telegram bot with kill switch, OpenClaw bridge, post-market analysis pipelines, voice-order intent extraction."
+    - "src/app/page.tsx — public landing page"
+    - "scripts/generate-content.mjs — docs/package/release content generator"
+    - "src/lib/mcp/capabilities.ts — docs MCP tools and prompts"
+apps/terminal:
+  language: TypeScript + React 19
+  purpose: "Single-page terminal — Dockview workspace with home widgets, tools, routes, and workspace presets."
   entry_points:
-    - "src/cron_manager.py — workspace.json-backed scheduled jobs"
-    - "src/telegram_bot.py — passive notifications + emergency kill switch"
-    - "src/voice_orders.py — speech-to-intent for hands-free order placement"
-backtest-engine:
-  language: Python
-  purpose: "Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy templates across 6 categories."
-  entry_points:
-    - "src/simulator.py — single-strategy event-driven backtest"
-    - "src/engine.py — entry point used by the Lab route and CLI"
-    - "src/portfolio_backtester.py — multi-strategy portfolio runs via VectorBT"
-    - "src/strategies/ — 94 ready-to-run templates"
-chrome-extension:
-  language: TypeScript
-  purpose: "Browser extension for quick trading from any web page (Manifest V3)."
-  entry_points:
-    - "manifest.json — extension declaration"
-    - "src/content.ts — content script injected into broker / charting pages"
-    - "src/popup/ — popup UI for one-click order placement"
-core:
+    - "src/main.tsx — entry point and route registration"
+    - "src/routes/HomeRoute.tsx — dashboard and home widget orchestration"
+    - "src/layout/workspacePresets.ts — named workspace presets"
+    - "src/services/api.ts — REST + WebSocket client"
+core/core:
   language: Python
   purpose: "Flask application, OpenAlgo client (45+ endpoints), config and workspace management, authentication service, and the WSGI prefix-stripper."
   entry_points:
@@ -38,21 +23,83 @@ core:
     - "src/openalgo_client.py — typed wrapper over OpenAlgo's REST API"
     - "src/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance"
     - "src/config.py / src/workspace.py — env + workspace.json loaders"
-data:
+core/data:
   language: Python
   purpose: "Tick recorder, audit logger (SEBI 5-year retention), trade logger, DuckDB storage, QuestDB writer, and Excel bridge."
   entry_points:
     - "src/tick_recorder.py — real-time tick capture to DuckDB / QuestDB"
-    - "src/audit_logger.py — append-only audit trail (SEBI-compliant)"
+    - "src/audit_logger.py — append-only audit trail"
     - "src/questdb_writer.py — ILP-based ingestion"
-desktop:
-  language: TypeScript + Rust
-  purpose: "Tauri-based native desktop wrapper around the terminal package (scaffolded)."
+core/design-system:
+  language: TypeScript + React 19
+  purpose: "Shared FlintTrade design tokens, brand primitives, layer scale, motion contracts, and React UI components."
   entry_points:
-    - "src-tauri/Cargo.toml — Tauri shell configuration"
-    - "src-tauri/tauri.conf.json — window + permissions"
-    - "src/ — TypeScript renderer entry"
-ditto:
+    - "src/index.ts — public design-system exports"
+    - "src/brand/index.ts — logo and brand primitives"
+    - "src/layers.ts — shared overlay stacking contract"
+    - "src/tokens.css — Tailwind v4 design tokens"
+core/historical:
+  language: Python
+  purpose: "OHLCV downloader, free-data sources (OpenChart + yfinance), DuckDB pipeline, and expiry-tracker for derivatives."
+  entry_points:
+    - "src/downloader.py — async OHLCV puller with rate-limit aware backoff"
+    - "src/openchart.py — OpenChart free-data integration"
+    - "src/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX"
+core/indicators:
+  language: Python + Numba
+  purpose: "43 indicator functions across 7 modules — TA-Lib batch indicators, Numba-accelerated streaming variants, and Pine Script conversion."
+  entry_points:
+    - "src/trend.py — SMA, EMA, MACD, ADX"
+    - "src/momentum.py — RSI, Stochastic, ROC, MFI"
+    - "src/oscillators.py — CCI, Williams %R, TRIX"
+    - "src/volatility.py — ATR, Bollinger Bands, Keltner Channels"
+    - "src/volume.py — OBV, Chaikin, VWAP"
+core/ticks:
+  language: Rust + PyO3
+  purpose: "High-performance tick-processing engine — Rust core with Python bindings."
+  entry_points:
+    - "src/lib.rs — PyO3 module entry"
+    - "src/processor.rs — tick aggregation and rollup"
+    - "Cargo.toml — crate metadata and dependencies"
+integrations/gateway:
+  language: Python
+  purpose: "Direct broker connections for 32 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge."
+  entry_points:
+    - "src/adapter.py — base adapter class + OpenAlgo resolver"
+    - "src/registry.py — 32-broker registry"
+    - "src/credentials.py — Fernet-encrypted credential storage"
+    - "src/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
+integrations/webhooks:
+  language: Python
+  purpose: "TradingView webhooks, ChartInk integration, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge."
+  entry_points:
+    - "src/webhook_receiver.py — HMAC-validated webhook intake"
+    - "src/chartink.py — ChartInk scanner integration"
+    - "src/n8n_bridge.py — n8n workflow trigger and response"
+services/ai:
+  language: Python
+  purpose: "Local LLM client, RAG pipeline, multi-agent trading team, ML signal generation, and skill swarm."
+  entry_points:
+    - "src/llm_client.py — multi-provider LLM client (LM Studio / Ollama / NVIDIA / OpenAI / Anthropic / Groq)"
+    - "src/rag.py — ChromaDB-backed retrieval-augmented generation"
+    - "src/multi_agent.py — analyst chain + risk debate + ensemble selector"
+    - "src/advisor.py — production advisor surface for the AI Centre route"
+services/automation:
+  language: Python
+  purpose: "Cron scheduler, Telegram bot with kill switch, OpenClaw bridge, post-market analysis pipelines, voice-order intent extraction."
+  entry_points:
+    - "src/cron_manager.py — workspace.json-backed scheduled jobs"
+    - "src/telegram_bot.py — passive notifications + emergency kill switch"
+    - "src/voice_orders.py — speech-to-intent for hands-free order placement"
+services/backtest:
+  language: Python
+  purpose: "Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy templates across 6 categories."
+  entry_points:
+    - "src/simulator.py — single-strategy event-driven backtest"
+    - "src/engine.py — entry point used by the Lab route and CLI"
+    - "src/portfolio_backtester.py — multi-strategy portfolio runs via VectorBT"
+    - "src/strategies/ — 94 ready-to-run templates"
+services/ditto:
   language: Python
   purpose: "Multi-account orchestration: position mirror, margin calculator, trailing stop-loss, and risk manager (AlgoMirror patterns absorbed in-process)."
   entry_points:
@@ -60,7 +107,7 @@ ditto:
     - "src/margin_calculator.py — pre-trade margin checks"
     - "src/trailing_sl.py — dynamic trailing stop-loss"
     - "src/risk_manager.py — per-account exposure + drawdown limits"
-engine:
+services/engine:
   language: Python
   purpose: "Five-layer safety system, order router, scheduler, base strategy class, AST-guarded sandbox executor, bracket-order engine, mode guard, and reconciliation."
   entry_points:
@@ -69,38 +116,14 @@ engine:
     - "src/strategy.py — base class for live strategies"
     - "src/sandbox_executor.py — user-strategy execution with AST guard"
     - "src/mode_guard.py — server-side Explore / Practice / Live enforcement"
-gateway:
+services/journal:
   language: Python
-  purpose: "Direct broker connections for 32 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge."
+  purpose: "Trade journal service for entries, trade logging, execution-quality analytics, and realised P&L tracking."
   entry_points:
-    - "src/adapter.py — base adapter class + OpenAlgo resolver"
-    - "src/registry.py — 32-broker registry"
-    - "src/credentials.py — Fernet-encrypted credential storage"
-    - "src/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
-historical:
-  language: Python
-  purpose: "OHLCV downloader, free-data sources (OpenChart + yfinance), DuckDB pipeline, and expiry-tracker for derivatives."
-  entry_points:
-    - "src/downloader.py — async OHLCV puller with rate-limit aware backoff"
-    - "src/openchart.py — OpenChart free-data integration"
-    - "src/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX"
-indicators:
-  language: Python + Numba
-  purpose: "43 indicator functions across 7 modules — TA-Lib (batch, 150+ indicators) plus Numba-accelerated streaming variants plus Pine Script conversion."
-  entry_points:
-    - "src/trend.py — SMA, EMA, MACD, ADX"
-    - "src/momentum.py — RSI, Stochastic, ROC, MFI"
-    - "src/oscillators.py — CCI, Williams %R, TRIX"
-    - "src/volatility.py — ATR, Bollinger Bands, Keltner Channels"
-    - "src/volume.py — OBV, Chaikin, VWAP"
-integration:
-  language: Python
-  purpose: "TradingView webhooks, ChartInk integration, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge."
-  entry_points:
-    - "src/webhook_receiver.py — HMAC-validated webhook intake"
-    - "src/chartink.py — ChartInk scanner integration"
-    - "src/n8n_bridge.py — n8n workflow trigger and response"
-screener:
+    - "src/entries.py — journal-entry model and storage helpers"
+    - "src/analytics.py — execution-quality analytics"
+    - "src/pnl.py — realised P&L calculations"
+services/screener:
   language: Python
   purpose: "Option chain, OI analysis, PCR, max-pain, futures quadrant, portfolio Greeks, IV smile, fundamental screener, FII / DII tracker, and RRG calculator."
   entry_points:
@@ -108,18 +131,3 @@ screener:
     - "src/max_pain.py — option max-pain calculation"
     - "src/rrg.py — Relative Rotation Graph"
     - "src/fundamental.py — Screener.in-style fundamentals"
-terminal:
-  language: TypeScript + React 19
-  purpose: "Single-page terminal — Dockview workspace with 82 widgets, 7 tools, 13 workspace presets, and 12 public routes."
-  entry_points:
-    - "src/main.tsx — entry point and route registration"
-    - "src/layout/widgetFactory.tsx — widget registry (83 entries)"
-    - "src/layout/workspacePresets.ts — 13 named presets"
-    - "src/services/api.ts — REST + WebSocket client"
-tick-engine:
-  language: Rust + PyO3
-  purpose: "High-performance tick-processing engine — Rust core with Python bindings."
-  entry_points:
-    - "src/lib.rs — PyO3 module entry"
-    - "src/processor.rs — tick aggregation and rollup"
-    - "Cargo.toml — crate metadata and dependencies"

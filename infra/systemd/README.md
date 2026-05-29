@@ -17,7 +17,7 @@ sudo systemctl enable flinttrade
 ## Usage
 
 ```bash
-sudo systemctl start flinttrade     # Start (OpenAlgo on port 5000)
+sudo systemctl start flinttrade     # Start FlintTrade backend on port 5100
 sudo systemctl stop flinttrade      # Stop
 sudo systemctl restart flinttrade   # Restart
 sudo systemctl status flinttrade    # Check status
@@ -49,6 +49,6 @@ If a bug is found during market hours:
 
 ## Service Order
 
-1. `flinttrade.service` starts OpenAlgo (port 5000) via gunicorn
-2. FlintTrade packages connect to OpenAlgo's REST API
-3. If OpenAlgo fails, the service auto-restarts after 5 seconds
+1. `flinttrade.service` starts the FlintTrade backend on port 5100.
+2. OpenAlgo is optional; install and start `openalgo.service` separately only when using the OpenAlgo integration path.
+3. If FlintTrade fails, the service auto-restarts after 5 seconds.

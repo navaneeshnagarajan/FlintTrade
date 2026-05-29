@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-core"
-version = "0.6.0-dev"
+version = "0.6.0-alpha"
 description = "Framework, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions, auth"
 requires-python = ">=3.12"
 dependencies = [

@@ -19,9 +19,8 @@
 [Unit]
 Description=FlintTrade Backend (strategy engine, screener, AI)
 Documentation=https://github.com/navaneeshnagarajan/FlintTrade
-After=network.target openalgo.service
+After=network.target
 Wants=network-online.target
-Requires=openalgo.service
 
 [Service]
 Type=simple

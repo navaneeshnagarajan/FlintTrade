@@ -56,7 +56,7 @@ The mode system (Explore / Practice / Live), the authentication layer (JWT plus 
 
 ## Recognition
 
-If you'd like to be credited, we'll add your name (or chosen handle) to the next release's `CHANGELOG.md` under a "Security" subheading. If you'd rather stay anonymous, we'll respect that — just tell us in the report.
+If you'd like to be credited, we'll add your name (or chosen handle) to the next release's `changelog.md` under a "Security" subheading. If you'd rather stay anonymous, we'll respect that — just tell us in the report.
 
 ## Safe-harbour for researchers
 

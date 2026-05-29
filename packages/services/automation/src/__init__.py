@@ -1,6 +1,8 @@
 """FlintTrade automation package — cron, Telegram, OpenClaw, post-market, n8n, flows."""
 
-__version__ = "0.1.0-alpha"
+from flinttrade_core.version import APP_VERSION
+
+__version__ = APP_VERSION
 
 from .cron_manager import CronManager, JobDefinition, JobHistory, JobStatus
 from .n8n_bridge import N8nBridge, N8nBridgeError

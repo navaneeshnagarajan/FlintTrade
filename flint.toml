@@ -4,12 +4,12 @@
 
 [project]
 name = "FlintTrade"
-version = "v0.6.0-dev"
-description = "Open-source algorithmic and manual trading platform built on OpenAlgo"
+version = "v0.6.0-alpha"
+description = "Open-source algorithmic and manual trading platform with native backend and optional OpenAlgo-compatible integration"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
 python_requires = ">=3.12,<3.14"
-node_requires = ">=20.0.0"
+node_requires = ">=22.0.0"
 
 [packages]
 core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }

@@ -6,12 +6,13 @@ import type { CSSProperties } from 'react';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
+import { flinttradeAsset } from '@/lib/site-assets';
 
 const featureCards = [
   {
     icon: TerminalSquare,
     title: 'A self-hosted trading cockpit',
-    copy: 'React, Dockview, Python services, Rust tick processing, and OpenAlgo integration in one inspectable workspace.',
+    copy: 'React, Dockview, Python services, Rust tick processing, native broker support, and optional OpenAlgo integration in one inspectable workspace.',
   },
   {
     icon: ShieldCheck,
@@ -28,7 +29,8 @@ const featureCards = [
 const docsCards = [
   { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect, explore paper mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
-  { href: '/api-reference', label: 'API Reference', copy: 'OpenAlgo passthrough, FlintTrade endpoints, auth, and WebSocket contracts.' },
+  { href: '/docs/disclaimer', label: 'Alpha Disclaimer', copy: 'Not production ready, no financial advice, and live-trading risk notes.' },
+  { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and optional OpenAlgo passthrough.' },
 ];
 
 const meteorTracks = [8, 19, 31, 44, 58, 71, 84];
@@ -83,7 +85,7 @@ export default function HomePage() {
               />
             ))}
             <div className="hero-logo-mark hero-logo-reveal">
-              <Image src="/flinttrade/logo.svg" alt="" width={86} height={86} priority />
+              <Image src={flinttradeAsset('logo.svg')} alt="" width={86} height={86} priority />
             </div>
           </div>
           <h1 aria-label="FlintTrade">
@@ -100,7 +102,10 @@ export default function HomePage() {
           </h1>
           <p>
             An open-source modular trading platform for Indian F&O, commodities, and crypto. It layers a
-            keyboard-driven terminal, analytics, automation, and AI workflows over self-hosted OpenAlgo.
+            keyboard-driven terminal, analytics, automation, and AI workflows over FlintTrade's backend with optional OpenAlgo compatibility.
+          </p>
+          <p className="hero-disclaimer">
+            v0.6.0-alpha is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
           </p>
           <div className="hero-actions">
             <Link className="button primary" href="/docs">
@@ -115,13 +120,13 @@ export default function HomePage() {
         <div className="hero-visual" aria-label="FlintTrade terminal screenshots">
           <div className="screenshot-stack">
             <figure className="screen-frame main">
-              <Image src="/flinttrade/screenshots/01-welcome.png" alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
+              <Image src={flinttradeAsset('screenshots/01-welcome.png')} alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
             </figure>
             <figure className="screen-frame side">
-              <Image src="/flinttrade/screenshots/04-trade.png" alt="FlintTrade trade canvas" fill sizes="(max-width: 900px) 46vw, 22vw" />
+              <Image src={flinttradeAsset('screenshots/04-trade.png')} alt="FlintTrade trade canvas" fill sizes="(max-width: 900px) 46vw, 22vw" />
             </figure>
             <figure className="screen-frame float">
-              <Image src="/flinttrade/screenshots/06-lab.png" alt="Strategy lab" fill sizes="(max-width: 900px) 42vw, 20vw" />
+              <Image src={flinttradeAsset('screenshots/06-lab.png')} alt="Strategy lab" fill sizes="(max-width: 900px) 42vw, 20vw" />
             </figure>
           </div>
         </div>
@@ -131,11 +136,11 @@ export default function HomePage() {
         <div className="metric-rail" aria-label="Project facts">
           <div>
             <strong>32</strong>
-            <span>OpenAlgo broker integrations documented for compatibility checks.</span>
+            <span>Native and OpenAlgo broker integrations documented for compatibility checks.</span>
           </div>
           <div>
-            <strong>16</strong>
-            <span>Packages across Python, React, Rust/PyO3, Chrome extension, and Tauri.</span>
+            <strong>17</strong>
+            <span>Package surfaces across Python, React, shared UI, and Rust/PyO3.</span>
           </div>
           <div>
             <strong>82</strong>

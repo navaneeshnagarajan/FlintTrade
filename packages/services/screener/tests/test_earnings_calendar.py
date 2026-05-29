@@ -163,6 +163,23 @@ class TestEarningsCalendar:
         with_actuals = [e for e in future_events if e.actual_eps is not None]
         assert len(with_actuals) == 0
 
+    def test_generate_three_month_window_bridges_quarter_gap(self, monkeypatch):
+        import flinttrade_screener.earnings_calendar as earnings_calendar
+
+        class FixedDate(date):
+            @classmethod
+            def today(cls):
+                return cls(2026, 5, 29)
+
+        monkeypatch.setattr(earnings_calendar, "date", FixedDate)
+
+        c = earnings_calendar.EarningsCalendar()
+        events = c.generate_sample_data(months=3)
+        today = FixedDate.today()
+
+        assert any(e.date < today and e.actual_eps is not None for e in events)
+        assert any(e.date > today and e.actual_eps is None for e in events)
+
     def test_generate_clamps_months_low(self):
         from flinttrade_screener.earnings_calendar import EarningsCalendar
 

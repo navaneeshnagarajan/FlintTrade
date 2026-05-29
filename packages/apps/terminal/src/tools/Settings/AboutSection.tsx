@@ -3,6 +3,7 @@
  */
 
 import { Settings, Github, ExternalLink } from "lucide-react";
+import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { SectionTitle } from "./shared";
 
 export function AboutSection() {
@@ -16,7 +17,7 @@ export function AboutSection() {
         </div>
         <div>
           <div className="text-sm font-semibold text-text-primary">FlintTrade</div>
-          <div className="text-xs text-text-muted">Version 0.3.0</div>
+          <div className="text-xs text-text-muted">Version {APP_VERSION_TAG}</div>
         </div>
       </div>
 
@@ -70,7 +71,7 @@ export function AboutSection() {
           <table className="w-full text-xs">
             <tbody>
               {[
-                ["Version",  "0.3.0"],
+                ["Version",  APP_VERSION_TAG],
                 ["React",    "19"          ],
                 ["Dockview", "5.1"         ],
                 ["License",  "AGPL-3.0"   ],

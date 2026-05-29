@@ -168,12 +168,9 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
   function openTradeJournal() {
     onDismiss();
     navigate("/trade");
-    // Open the trade-journal tool after navigation via the layout store.
+    // Open the trade-journal tool after navigation via the shared route event.
     // We schedule a micro-task so the route has time to render.
     setTimeout(() => {
-      // The TerminalRoute listens to toolsMenuOpen but tools are opened by
-      // setting activeTool inside TerminalRoute. We dispatch a custom event
-      // that TerminalRoute can listen to.
       window.dispatchEvent(
         new CustomEvent("flinttrade:open-tool", {
           detail: { toolId: "trade-journal" satisfies ToolId },

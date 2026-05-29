@@ -107,11 +107,13 @@ header "OpenAlgo setup"
 
 OPENALGO_DIR="$FLINTTRADE_DIR/.local/external/openalgo"
 OPENALGO_ENV_CREATED=false
+OPENALGO_DEPS_INSTALLED=false
 if [ -d "$OPENALGO_DIR" ] && [ -f "$OPENALGO_DIR/requirements.txt" ]; then
     pip3 install -r "$OPENALGO_DIR/requirements.txt" --break-system-packages -q 2>/dev/null || \
         pip3 install -r "$OPENALGO_DIR/requirements.txt" -q 2>/dev/null || \
         warn "OpenAlgo deps install failed — may need manual install"
-    ok "OpenAlgo dependencies installed"
+    OPENALGO_DEPS_INSTALLED=true
+    ok "Optional OpenAlgo dependencies installed"
 
     # gunicorn + eventlet are required for production but not in OpenAlgo's requirements.txt
     pip3 install gunicorn eventlet --break-system-packages -q 2>/dev/null || \
@@ -144,7 +146,7 @@ if [ -d "$OPENALGO_DIR" ] && [ -f "$OPENALGO_DIR/requirements.txt" ]; then
         ok "$OPENALGO_DIR/.env exists"
     fi
 else
-    warn "OpenAlgo is an external prerequisite. To get a local-dev copy for testing, run:"
+    warn "OpenAlgo is an optional external integration. To get a local-dev copy for testing, run:"
     warn "    bash scripts/setup-test-deps.sh"
     warn "Or install OpenAlgo separately and point FlintTrade at it via OPENALGO_HOST in .env."
 fi
@@ -210,8 +212,12 @@ header "Setup complete"
 echo ""
 ok "System dependencies verified"
 ok "FlintTrade Python packages installed"
-ok "OpenAlgo dependencies installed"
-ok "gunicorn + eventlet installed"
+if [ "$OPENALGO_DEPS_INSTALLED" = true ]; then
+    ok "Optional OpenAlgo dependencies installed"
+    ok "gunicorn + eventlet installed for optional OpenAlgo local-dev service"
+else
+    warn "Optional OpenAlgo local-dev dependencies skipped"
+fi
 [ "$HAS_NODE" = true ] && ok "React packages installed" || warn "React packages skipped (no Node.js)"
 ok "Workspace initialized"
 echo ""
@@ -219,8 +225,7 @@ if [ "$OPENALGO_ENV_CREATED" = true ]; then
     warn "Configure broker credentials in .local/external/openalgo/.env before trading"
 fi
 echo "Next steps:"
-echo "  1. Edit .env with your OPENALGO_API_KEY"
-echo "  2. If you don't have OpenAlgo yet: bash scripts/setup-test-deps.sh"
-echo "  3. Edit OpenAlgo's .env with broker credentials (.local/external/openalgo/.env for the local-dev clone)"
-echo "  4. Run: make start"
-echo "  5. Run: make status"
+echo "  1. Run: make start"
+echo "  2. Open the terminal app and finish setup"
+echo "  3. Configure OpenAlgo in Settings only if you want the OpenAlgo integration path"
+echo "  4. Run: make status"

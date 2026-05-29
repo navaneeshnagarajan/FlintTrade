@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-ai"
-version = "0.6.0-dev"
+version = "0.6.0-alpha"
 description = "LLM client (multi-provider), RAG (ChromaDB), signals, sentiment, MCP bridge, swarm executor"
 requires-python = ">=3.12"
 dependencies = [

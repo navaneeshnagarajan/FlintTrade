@@ -14,6 +14,8 @@ const mockBentoState = {
   presets: [],
   activePresetId: null,
   savePreset: vi.fn(),
+  loadPreset: vi.fn(),
+  deletePreset: vi.fn(),
   resetToDefault: vi.fn(),
 };
 

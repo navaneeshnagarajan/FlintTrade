@@ -21,8 +21,19 @@ import { render, cleanup } from "@testing-library/react";
 let storeReduceMotion = false;
 
 vi.mock("@/stores/themeStore", () => ({
-  useThemeStore: (selector: (s: { reduceMotion: boolean }) => unknown) => {
-    return selector({ reduceMotion: storeReduceMotion });
+  useThemeStore: (selector: (s: Record<string, unknown>) => unknown) => {
+    return selector({
+      reduceMotion: storeReduceMotion,
+      getActiveTheme: () => ({
+        shared: {
+          particles: {
+            quantity: 45,
+            sizeRange: [1, 4],
+            behavior: "float",
+          },
+        },
+      }),
+    });
   },
 }));
 
@@ -43,8 +54,25 @@ vi.mock("@/lib/motion", () => ({
 // ---------------------------------------------------------------------------
 
 vi.mock("@/components/magicui/particles", () => ({
-  Particles: ({ className }: { className?: string }) => (
-    <div data-testid="particles" className={className} aria-hidden="true" />
+  Particles: ({
+    className,
+    quantity,
+    behavior,
+    sizeRange,
+  }: {
+    className?: string;
+    quantity?: number;
+    behavior?: string;
+    sizeRange?: [number, number];
+  }) => (
+    <div
+      data-testid="particles"
+      data-quantity={quantity}
+      data-behavior={behavior}
+      data-size-range={sizeRange?.join("-")}
+      className={className}
+      aria-hidden="true"
+    />
   ),
 }));
 
@@ -104,6 +132,19 @@ describe("CinematicLayout", () => {
       </CinematicLayout>,
     );
     expect(getByTestId("particles")).toBeTruthy();
+  });
+
+  it("uses the active theme particle settings for cinematic mode", () => {
+    const { getByTestId } = render(
+      <CinematicLayout mode="cinematic">
+        <span>Content</span>
+      </CinematicLayout>,
+    );
+
+    const particles = getByTestId("particles");
+    expect(particles).toHaveAttribute("data-quantity", "45");
+    expect(particles).toHaveAttribute("data-behavior", "float");
+    expect(particles).toHaveAttribute("data-size-range", "1-4");
   });
 
   it("focused mode does not render particles", () => {

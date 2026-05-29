@@ -49,6 +49,16 @@ function entryArea(entry: DocEntry | PackageEntry): string {
   return 'area' in entry ? entry.area : 'Packages';
 }
 
+function packageRoot(entry: PackageEntry): string {
+  return entry.sourcePath.replace(/\/README\.md$/, '');
+}
+
+function findPackageForPath(cleanPath: string): PackageEntry | undefined {
+  return packageIndex
+    .filter((entry) => cleanPath === packageRoot(entry) || cleanPath.startsWith(`${packageRoot(entry)}/`))
+    .sort((a, b) => packageRoot(b).length - packageRoot(a).length)[0];
+}
+
 function snippet(content: string, queryTokens: string[]): string[] {
   const lines = content.split('\n').map((line) => line.trim()).filter(Boolean);
   const matches = lines.filter((line) => {
@@ -111,13 +121,10 @@ export function listPackages(): PackageEntry[] {
 
 export function explainRepoPath(repoPath: string): string {
   const cleanPath = repoPath.replace(/^\.?\//, '');
-  const packageMatch = cleanPath.match(/^packages\/([^/]+)/);
+  const pkg = findPackageForPath(cleanPath);
 
-  if (packageMatch) {
-    const pkg = packageIndex.find((entry) => entry.name === packageMatch[1]);
-    if (pkg) {
-      return `${cleanPath} belongs to the ${pkg.title} package. ${pkg.description} Source overview: ${pkg.sourcePath}.`;
-    }
+  if (pkg) {
+    return `${cleanPath} belongs to the ${pkg.title} package. ${pkg.description} Source overview: ${pkg.sourcePath}.`;
   }
 
   if (cleanPath.startsWith('packages/apps/site')) {
@@ -136,7 +143,7 @@ export function explainRepoPath(repoPath: string): string {
     return `${cleanPath} is operational repo infrastructure. Prefer existing Makefile targets and scripts over one-off commands.`;
   }
 
-  return `${cleanPath} is not in a known FlintTrade package boundary. Start with docs/DEVELOPER_GUIDE.md and README.md for orientation.`;
+  return `${cleanPath} is not in a known FlintTrade package boundary. Start with docs/DEVELOPER_GUIDE.md and readme.md for orientation.`;
 }
 
 export function recommendTests(changedPaths: string[]): TestRecommendation {
@@ -155,13 +162,18 @@ export function recommendTests(changedPaths: string[]): TestRecommendation {
       commands.add('cd packages/apps/terminal && npm run typecheck');
       commands.add('cd packages/apps/terminal && npm run test');
       commands.add('cd packages/apps/terminal && npm run build');
+    } else if (changedPath.startsWith('packages/core/design-system/')) {
+      reasons.add('Shared design-system package changed.');
+      commands.add('cd packages/apps/terminal && npm run typecheck');
+      commands.add('cd packages/apps/site && npm run typecheck');
     } else if (changedPath.startsWith('packages/core/ticks/')) {
       reasons.add('Rust/PyO3 tick processing changed.');
       commands.add('cd packages/core/ticks && cargo test');
     } else if (changedPath.startsWith('packages/')) {
-      const pkgName = changedPath.split('/')[1];
-      reasons.add(`Python package ${pkgName} changed.`);
-      commands.add(`python -m pytest packages/${pkgName}/tests/ -v --import-mode=importlib`);
+      const changedPackage = findPackageForPath(changedPath);
+      const packagePath = changedPackage ? packageRoot(changedPackage) : changedPath.split('/').slice(0, 3).join('/');
+      reasons.add(`Python package ${packagePath.replace(/^packages\//, '')} changed.`);
+      commands.add(`python -m pytest ${packagePath}/tests/ -v --import-mode=importlib`);
       commands.add('make lint');
     } else if (changedPath.startsWith('docs/') || changedPath.endsWith('.md')) {
       reasons.add('Documentation changed and should be reflected in the public site.');

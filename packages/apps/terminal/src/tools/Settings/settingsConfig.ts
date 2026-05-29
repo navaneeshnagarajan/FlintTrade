@@ -65,7 +65,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "general",    label: "General",           icon: Monitor      },
   { id: "appearance", label: "Appearance",         icon: Palette      },
   { id: "ticker",     label: "Ticker Bar",         icon: Rss          },
-  { id: "api",        label: "API Connection",     icon: Wifi         },
+  { id: "api",        label: "Broker Gateway",     icon: Wifi         },
   { id: "trading",    label: "Trading Defaults",   icon: TrendingUp   },
   { id: "risk",       label: "Risk Limits",        icon: ShieldAlert  },
   { id: "leverage",   label: "Leverage",           icon: Scale        },

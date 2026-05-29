@@ -5,16 +5,24 @@ on:
     branches: [main, dev]
     types: [opened, synchronize, ready_for_review, reopened]
     paths:
-      - 'apps/site/**'
+      - 'packages/apps/site/**'
+      - 'packages/core/design-system/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'docs/**'
-      - 'packages/*/README.md'
+      - 'packages/*/*/README.md'
       - '.github/workflows/site.yml'
   push:
     branches: [main, dev]
     paths:
-      - 'apps/site/**'
+      - 'packages/apps/site/**'
+      - 'packages/core/design-system/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'docs/**'
-      - 'packages/*/README.md'
+      - 'packages/*/*/README.md'
       - '.github/workflows/site.yml'
 
 concurrency:
@@ -33,9 +41,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: apps/site/package-lock.json
-      - run: cd apps/site && npm ci
-      - run: cd apps/site && npm run typecheck
-      - run: cd apps/site && npm run test
-      - run: cd apps/site && npm run build
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir packages/apps/site run typecheck
+      - run: pnpm --dir packages/apps/site run test
+      - run: pnpm --dir packages/apps/site run build

@@ -1,6 +1,8 @@
 """FlintTrade historical package — download, free data, DuckDB pipeline, expiry tracking."""
 
-__version__ = "0.1.0-alpha"
+from flinttrade_core.version import APP_VERSION
+
+__version__ = APP_VERSION
 
 from .cache import CacheEntry, CacheResult, OHLCVCache
 from .data_provider import (

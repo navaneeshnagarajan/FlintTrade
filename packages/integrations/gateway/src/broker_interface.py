@@ -496,8 +496,8 @@ class OpenAlgoBroker:
     Delegates all broker operations to ``flinttrade_core.openalgo_client``
     and normalises the responses into FlintTrade's typed models.
 
-    FlintTrade sits ON TOP of OpenAlgo — this adapter is the single integration
-    point.  It never calls broker APIs directly.
+    OpenAlgo is an optional external integration path for this adapter. Native
+    FlintTrade broker adapters can exist alongside it.
 
     Args:
         client: An initialised ``OpenAlgoClient`` instance.  Injected to

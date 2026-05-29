@@ -1,6 +1,7 @@
 import { Github } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { flinttradeAsset } from '@/lib/site-assets';
 
 const navItems = [
   { href: '/docs', label: 'Docs' },
@@ -13,7 +14,7 @@ export function SiteHeader() {
   return (
     <header className="site-header">
       <Link href="/" className="brand-link" aria-label="FlintTrade home">
-        <Image src="/flinttrade/logo.svg" alt="" width={34} height={34} />
+        <Image src={flinttradeAsset('logo.svg')} alt="" width={34} height={34} />
         <span>FlintTrade</span>
       </Link>
       <nav className="main-nav" aria-label="Primary navigation">

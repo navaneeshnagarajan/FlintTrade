@@ -1,6 +1,8 @@
 # Machine Setup Guide
 
 > Works on any Windows, macOS, or Ubuntu machine — including a new contributor's box.
+> FlintTrade `v0.6.0-alpha` is not production ready; use Explore and Practice
+> modes before connecting any live broker workflow.
 
 ## 1. Clone and Install
 
@@ -12,13 +14,13 @@ make setup
 
 `make setup` installs: Python deps, Node deps, workspace init.
 
-OpenAlgo (and OpenClaw) are no longer bundled as git submodules. They are external services FlintTrade talks to over HTTP/WebSocket. Install OpenAlgo separately, OR run the helper to clone a local-dev copy. AlgoMirror is intentionally absent — its mirroring logic is absorbed in-process by `packages/services/ditto/`, nothing external to install.
+OpenAlgo is no longer bundled as a git submodule. It is an optional external integration that FlintTrade can talk to over HTTP/WebSocket. Install OpenAlgo separately, or run the helper to clone a local-dev copy only when you want that integration path. AlgoMirror is intentionally absent — its mirroring logic is absorbed in-process by `packages/services/ditto/`, nothing external to install.
 
 ```bash
 bash scripts/setup-test-deps.sh
 ```
 
-This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo clone you can run via `make start`.
+This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo clone you can run via `make start-openalgo`.
 
 ## 2. Configure Environment
 
@@ -26,19 +28,19 @@ This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo 
 cp .env.example .env
 ```
 
-Edit `.env` — set `OPENALGO_API_KEY` (get from OpenAlgo web UI after broker login).
+Edit `.env` only if you want to preconfigure optional integrations such as OpenAlgo.
 
-## 3. Configure OpenAlgo Broker
+## 3. Configure Broker Access
 
-Edit OpenAlgo's own `.env` — for the local-dev clone, that's `.local/external/openalgo/.env` (copy from `.sample.env` if needed):
+For the native FlintTrade gateway, use the terminal setup flow. For the optional OpenAlgo path, edit OpenAlgo's own `.env` — for the local-dev clone, that's `.local/external/openalgo/.env` (copy from `.sample.env` if needed):
 - Set broker name (e.g., your broker or its sandbox variant for testing)
 - Set broker credentials (client ID, API key/secret)
 
 ## 4. Start and Verify
 
 ```bash
-make start       # Starts OpenAlgo on port 5000
-make status      # Verify API responding
+make start       # Starts FlintTrade backend on port 5100
+make status      # Verifies FlintTrade backend; reports OpenAlgo only as optional
 make test        # ~9,089 tests pass
 ```
 
@@ -51,7 +53,7 @@ npm run dev      # Terminal on http://localhost:5173
 
 ## 6. Start Building
 
-Read [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for the contribution flow, then check the [issue tracker](https://github.com/navaneeshnagarajan/FlintTrade/issues) — the `good first issue` label is a good place to land your first PR. If you use a CLAUDE-aware or AGENTS-aware coding agent (Claude Code, Cursor, Aider, Continue, Codex, etc.), run `bash scripts/setup-agent-context.sh` once to scaffold your machine-local agent context.
+Read [`contributing.md`](../../contributing.md) for the contribution flow, then check the [issue tracker](https://github.com/navaneeshnagarajan/FlintTrade/issues) — the `good first issue` label is a good place to land your first PR. If you use a CLAUDE-aware or AGENTS-aware coding agent (Claude Code, Cursor, Aider, Continue, Codex, etc.), run `bash scripts/setup-agent-context.sh` once to scaffold your machine-local agent context.
 
 ---
 
@@ -80,31 +82,14 @@ VITE_OPENALGO_HOST=http://127.0.0.1:5000
 VITE_OPENALGO_WS=ws://127.0.0.1:8765
 ```
 
-## Claude Code Skills & Plugins
+## Optional Agent Context
 
-All machines should have these installed globally:
+The public repository includes reusable agent-context templates under
+`templates/agent-context/`. If you use a coding agent, scaffold local copies
+with:
 
-**Skills:** superpowers (brainstorm/write-plan/execute-plan/TDD/debugging), frontend-design, vercel-react-best-practices, web-design-guidelines, planning-with-files, find-skills, gstack, firecrawl
-
-**Agents:** 172 agency-agents in `~/.claude/agents/` (engineering, design, testing, product, strategy, marketing, sales, etc.)
-
-**MCP Servers:** context7 (live library docs), playwright (browser testing), sequential-thinking, github, firecrawl
-
-Install agents from the `agency-agents` repo:
 ```bash
-# Copy all .md files from category folders into ~/.claude/agents/
-cp ~/agency-agents/{academic,design,engineering,game-development,marketing,paid-media,product,project-management,sales,spatial-computing,specialized,strategy,support,testing}/*.md ~/.claude/agents/
+bash scripts/setup-agent-context.sh
 ```
 
-## Reference Files (Not in Public Repo)
-
-Design references (screenshots, scraped sites, broker UI analysis) live in `.reference/` at the repo root. This directory is gitignored but should be kept in sync across machines manually or via a shared drive.
-
-```
-.reference/
-  screenshots/     # Broker UI screenshots (OiPulse, 1Cliq, Dhan, FYERS, etc.)
-  scraped/         # Scraped HTML/content from reference sites
-  notes/           # Design notes, audit findings
-```
-
-To sync across machines, copy `.reference/` via SCP, shared folder, or external drive.
+The generated files live under `.local/agent-context/` and stay gitignored.

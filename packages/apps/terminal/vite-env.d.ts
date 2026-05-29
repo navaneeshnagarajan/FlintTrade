@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_OPENALGO_HOST: string
   readonly VITE_OPENALGO_WS: string
   readonly VITE_OPENALGO_WS_PORT: string
+  readonly VITE_FLINTTRADE_VERSION: string
   readonly DEV: boolean
   readonly MODE: string
 }

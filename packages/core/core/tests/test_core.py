@@ -33,25 +33,24 @@ class TestConfig:
         assert s.openalgo_api_key == "test_key_123"
         assert s.openalgo_ws_port == 8765
 
-    def test_from_env_missing_host(self, monkeypatch):
+    def test_from_env_uses_defaults_without_openalgo(self, monkeypatch):
         monkeypatch.delenv("OPENALGO_HOST", raising=False)
         monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
 
         from flinttrade_core.config import Settings
-        from flinttrade_core.exceptions import ConfigError
 
-        with pytest.raises(ConfigError, match="OPENALGO_HOST"):
-            Settings.from_env()
+        s = Settings.from_env()
+        assert s.openalgo_host == "http://127.0.0.1:5000"
+        assert s.openalgo_api_key == ""
 
-    def test_from_env_missing_key(self, monkeypatch):
+    def test_from_env_allows_missing_openalgo_key(self, monkeypatch):
         monkeypatch.setenv("OPENALGO_HOST", "http://127.0.0.1:5000")
         monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
 
         from flinttrade_core.config import Settings
-        from flinttrade_core.exceptions import ConfigError
 
-        with pytest.raises(ConfigError, match="OPENALGO_API_KEY"):
-            Settings.from_env()
+        s = Settings.from_env()
+        assert s.openalgo_api_key == ""
 
     def test_host_must_be_url(self):
         from flinttrade_core.config import Settings
@@ -531,8 +530,9 @@ class TestPackageExports:
 
     def test_package_version(self):
         from flinttrade_core import __version__
+        from flinttrade_core.version import APP_VERSION
 
-        assert __version__ == "0.1.0-alpha"
+        assert __version__ == APP_VERSION
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

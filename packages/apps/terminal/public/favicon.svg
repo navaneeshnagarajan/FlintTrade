@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <!-- FlintTrade Favicon — Geometric "F" with green spark -->
-  <!-- Matches LogoIcon in Logo.tsx -->
+  <style>
+    .flinttrade-mark { fill: #18181b; }
+    @media (prefers-color-scheme: dark) {
+      .flinttrade-mark { fill: #f4f4f5; }
+    }
+  </style>
 
-  <!-- Vertical bar — left stem of F -->
-  <rect x="4" y="4" width="5" height="24" rx="1.5" fill="#e4e4e7" />
-  <!-- Top horizontal bar -->
-  <rect x="4" y="4" width="18" height="5" rx="1.5" fill="#e4e4e7" />
-  <!-- Middle horizontal bar -->
-  <rect x="4" y="13" width="14" height="5" rx="1.5" fill="#e4e4e7" />
-
-  <!-- Spark / flint — angular diamond pointing up-right -->
-  <path d="M23 2 L27 6 L23 10 L21 8 L24 5 L21 4 Z" fill="#22c55e" />
+  <rect class="flinttrade-mark" x="3" y="3" width="5" height="26" rx="1" />
+  <rect class="flinttrade-mark" x="3" y="3" width="20" height="5" rx="1" />
+  <rect class="flinttrade-mark" x="3" y="13" width="14" height="5" rx="1" />
+  <polygon points="24,1 29,6 24,11 21,7 24,5 21,3" fill="#22c55e" />
+  <polygon points="25,0 28,3 26,3 24,1" fill="#4ade80" opacity="0.75" />
 </svg>

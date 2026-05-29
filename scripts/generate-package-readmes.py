@@ -8,6 +8,7 @@ Idempotent — overwrites existing READMEs.
 
 from __future__ import annotations
 
+import posixpath
 import sys
 from pathlib import Path
 
@@ -25,15 +26,31 @@ PURPOSES_FILE = REPO_ROOT / "templates" / "package-purposes.yml"
 PACKAGES_DIR = REPO_ROOT / "packages"
 
 
-# Test commands per package language family.
-TEST_COMMANDS = {
-    "Python": "python -m pytest packages/{pkg}/tests/ -v",
-    "Python + Numba": "python -m pytest packages/{pkg}/tests/ -v",
-    "TypeScript": "cd packages/{pkg} && npm test",
-    "TypeScript + React 19": "cd packages/{pkg} && npx vitest run",
-    "TypeScript + Rust": "cd packages/{pkg} && npm test  # plus `cargo test` in src-tauri/",
-    "Rust + PyO3": "cd packages/{pkg} && cargo test",
-}
+def link_from_package(pkg_path: str, target: str) -> str:
+    """Return a repository-relative link target from a package README."""
+    return posixpath.relpath(target, posixpath.join("packages", pkg_path))
+
+
+def test_command(pkg_path: str, language: str) -> str:
+    if pkg_path == "apps/site":
+        return "cd packages/apps/site && npm run typecheck && npm run test && npm run build"
+    if pkg_path == "apps/terminal":
+        return "cd packages/apps/terminal && npm run test:base && npm run build"
+    if pkg_path == "core/design-system":
+        return "cd packages/core/design-system && npx tsc --noEmit"
+    if language in {"Python", "Python + Numba"}:
+        return f"python -m pytest packages/{pkg_path}/tests/ -v --import-mode=importlib"
+    if language == "Rust + PyO3":
+        return f"cd packages/{pkg_path} && cargo test"
+    return f"# See packages/{pkg_path}/ for test instructions"
+
+
+def install_command(pkg_path: str, language: str) -> str:
+    if language.startswith("TypeScript"):
+        return "pnpm install"
+    if language == "Rust + PyO3":
+        return f"uv pip install -e packages/{pkg_path}\ncd packages/{pkg_path} && cargo test"
+    return f"uv pip install -e packages/{pkg_path}"
 
 
 def render_readme(pkg_name: str, info: dict[str, object]) -> str:
@@ -46,16 +63,26 @@ def render_readme(pkg_name: str, info: dict[str, object]) -> str:
     assert isinstance(entry_points, list)
 
     # Human-friendly package title.
-    title = pkg_name.replace("-", " ").title().replace("Ai", "AI")
-    if pkg_name == "tick-engine":
+    package_leaf = pkg_name.split("/")[-1]
+    title = package_leaf.replace("-", " ").title().replace("Ai", "AI")
+    if package_leaf == "ticks":
         title = "Tick Engine"
-    if pkg_name == "backtest-engine":
+    if pkg_name == "services/backtest":
         title = "Backtest Engine"
-    if pkg_name == "chrome-extension":
-        title = "Chrome Extension"
+    if pkg_name == "apps/site":
+        title = "@flinttrade/site"
+    if pkg_name == "apps/terminal":
+        title = "Terminal"
+    if pkg_name == "core/design-system":
+        title = "@flinttrade/design-system"
 
-    test_cmd = TEST_COMMANDS.get(language, f"# See packages/{pkg_name}/ for test instructions")
-    test_cmd_rendered = test_cmd.format(pkg=pkg_name)
+    test_cmd_rendered = test_command(pkg_name, language)
+    install_cmd_rendered = install_command(pkg_name, language)
+    developer_guide = link_from_package(pkg_name, "docs/DEVELOPER_GUIDE.md")
+    architecture = link_from_package(pkg_name, "docs/ARCHITECTURE.md")
+    user_guide = link_from_package(pkg_name, "docs/USER_GUIDE.md")
+    contributing = link_from_package(pkg_name, "contributing.md")
+    license_path = link_from_package(pkg_name, "LICENSE")
 
     entry_lines = "\n".join(f"- `{ep}`" for ep in entry_points)
 
@@ -78,11 +105,12 @@ def render_readme(pkg_name: str, info: dict[str, object]) -> str:
 This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Python packages
-uv pip install -e packages/{pkg_name}
+{install_cmd_rendered}
 ```
 
-If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
@@ -90,19 +118,21 @@ If you only want to use the package in isolation, the project's `pyproject.toml`
 {test_cmd_rendered}
 ```
 
-For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../docs/DEVELOPER_GUIDE.md).
+For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]({developer_guide}).
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md]({architecture}). For end-user features it powers, see
+[docs/USER_GUIDE.md]({user_guide}).
 
 ## Contributing
 
-Contributions welcome. Please read [`CONTRIBUTING.md`](../../CONTRIBUTING.md) at the repo root before opening a pull request.
+Contributions welcome. Please read [`contributing.md`]({contributing}) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../LICENSE) for the full text.
+AGPL-3.0 — same as the parent repository. See [`LICENSE`]({license_path}) for the full text.
 """
 
 
@@ -117,7 +147,7 @@ def main() -> int:
     written = 0
     skipped = 0
     for pkg_name, info in data.items():
-        pkg_dir = PACKAGES_DIR / pkg_name
+        pkg_dir = PACKAGES_DIR / Path(pkg_name)
         if not pkg_dir.exists():
             sys.stderr.write(f"Package directory missing: {pkg_dir}\n")
             skipped += 1

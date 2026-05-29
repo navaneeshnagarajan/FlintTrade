@@ -102,6 +102,18 @@ _QUARTER_LABELS: dict[int, str] = {
 }
 
 
+def _shift_to_month_start(anchor: date, offset_months: int) -> date:
+    """Return the first day of the month offset from ``anchor``."""
+    month_index = (anchor.year * 12) + (anchor.month - 1) + offset_months
+    year, zero_based_month = divmod(month_index, 12)
+    return date(year, zero_based_month + 1, 1)
+
+
+def _month_end(anchor: date) -> date:
+    """Return the final day of ``anchor``'s calendar month."""
+    return _shift_to_month_start(anchor, 1) - timedelta(days=1)
+
+
 def _result_label(month: int, quarter: str, year: int) -> str:
     """Return the Financial Year string for a given calendar year and quarter.
 
@@ -273,8 +285,8 @@ class EarningsCalendar:
 
         today = date.today()
         half = months // 2 or 1
-        window_start = today - timedelta(days=half * 30)
-        window_end = today + timedelta(days=(months - half) * 30)
+        window_start = _shift_to_month_start(today, -half)
+        window_end = _month_end(_shift_to_month_start(today, months - half))
 
         all_events: list[EarningsEvent] = []
         symbols = list(_NIFTY50.keys())

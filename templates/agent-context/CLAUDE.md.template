@@ -36,12 +36,12 @@ gh run list --limit 1                          # check latest CI
 gh run view <id> --log-failed                  # diagnose failure
 ```
 
-See `docs/CI_BUDGET_AND_QUALITY.md` for the per-commit checklist, hosted-runner cost model, defence-in-depth layers, and runbook if the monthly minute bill spikes.
+See `docs/CI.md` for the per-commit checklist, hosted-runner cost model, defence-in-depth layers, and runbook if the monthly minute bill spikes.
 
 ## What This Is
 
 Open-source modular trading and investment platform for Indian F&O, commodities, and crypto.
-Built on OpenAlgo (33 broker gateway). 16 packages (12 Python + 1 React + 1 Rust/PyO3 + 1 Chrome Extension + 1 Desktop/Tauri), monorepo, AGPL-3.0.
+FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 17 package surfaces (13 Python + 2 React apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
 Repo: https://github.com/navaneeshnagarajan/FlintTrade
 
 Serves three personas from a single application:
@@ -53,12 +53,12 @@ One app. One port. Route-based separation. Widget-composable workspace.
 
 ## Architecture
 
-FlintTrade sits ON TOP of OpenAlgo. Never modifies it.
+FlintTrade runs its own backend first. OpenAlgo is optional and external.
 
 - **OpenAlgo:** Broker connections (32 brokers), REST API port 5000, WebSocket port 8765
 - **FlintTrade:** Single React app (Dockview workspace) + Python backend (strategy engine, backtesting, AI, data pipelines, screener, multi-account orchestration)
-- **External test-deps (not bundled, not submodules):** OpenAlgo and OpenClaw are external services FlintTrade talks to over HTTP/WS. Users install them separately as a prerequisite. Contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/{openalgo,openclaw}/` (gitignored, not shipped). AlgoMirror is intentionally absent — its mirroring patterns are absorbed into `packages/services/ditto/` and run in-process; the upstream repo is no longer tracked.
-- Every machine runs its own OpenAlgo instance for development and testing. You CANNOT write correct code without testing against a live OpenAlgo.
+- **External test-deps (not bundled, not submodules):** OpenAlgo and OpenClaw are optional external services FlintTrade can talk to over HTTP/WS. Contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/{openalgo,openclaw}/` (gitignored, not shipped). AlgoMirror is intentionally absent — its mirroring patterns are absorbed into `packages/services/ditto/` and run in-process; the upstream repo is no longer tracked.
+- OpenAlgo is needed only for the optional OpenAlgo-compatible integration path. Native backend, site, terminal, docs, design-system, and most unit tests run without it.
 
 ```
 FlintTrade (React + Python) ──── REST/WS ────> OpenAlgo (Flask, port 5000) ──> Broker API
@@ -202,14 +202,13 @@ Two-tier config. No exceptions.
 |---|---|---|
 | `terminal` | 5173 | Single React app. Dockview workspace, route-based personas, widget-composable layout. |
 
-### Additional packages (2)
+### Additional app/core packages
 
 | Package | Description |
 |---|---|
-| `chrome-extension` | Browser extension for quick trading from any page |
-| `desktop` | Tauri-based native desktop app wrapper |
-
-The `dashboard` and `backtest` stub packages were deleted. Everything is in `terminal` now.
+| `packages/apps/site` | Public Next.js/Fumadocs site, generated docs, and read-only docs MCP |
+| `packages/core/design-system` | Shared FlintTrade tokens, layers, brand primitives, and React components |
+| `packages/services/journal` | Trade journal, execution-quality analytics, and realised P&L tracking |
 
 ## Terminal — Widgets & Tools
 
@@ -222,9 +221,9 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 
 ## Current State
 
-- **Version:** 0.5.2-dev (tag `v0.5.2-dev`, 2026-05-20) — SemVer release-hygiene prerelease snapshot. Latest stable remains `v0.5.1` (security hardening + CI stability patch release, 65 commits after v0.5.0). See `docs/RELEASE_NOTES_v0.5.1.md` and `docs/RELEASE_NOTES_v0.5.2-dev.md`.
+- **Version:** 0.6.0-alpha (tag `v0.6.0-alpha`, 2026-05-30) — alpha restructure snapshot. Not production ready; see `disclaimer.md`, `changelog.md`, and `docs/releases/v0.6.0-alpha.md`.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
-- **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI_BUDGET_AND_QUALITY.md` for the contract.
+- **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI.md` for the contract.
 - **Terminal:** 82 widgets (TSX) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
 - **AI Skills:** 30 markdown files under `packages/services/ai/skills/` covering trading, analysis, execution, compliance, options, psychology domains
 - **Strategies:** 94 backtest templates in `packages/services/backtest/src/strategies/` + 2 live-engine strategies in `packages/services/engine/src/strategies/` (`ema_crossover`, `wheel_live`)
@@ -243,7 +242,7 @@ The `dashboard` and `backtest` stub packages were deleted. Everything is in `ter
 - **Routes:** 12 public (`/welcome`, `/explore`, `/setup`, `/setup-account`, `/settings`, `/home`, `/trade`, `/invest`, `/learn`, `/lab`, `/automate`, `/ai`, `/ditto`) + DEV-only `/admin` + 404 — all with Glass Adaptive styling. `/terminal` is an alias for `/trade`. Routes are lazy-loaded in `packages/apps/terminal/src/main.tsx`.
 - **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), 20 FlintTrade backend endpoints
 - **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion, OrderPad form a11y, route focus management
-- **Package structure:** 12 Python packages with pyproject.toml + hatchling, uv workspace, wheel source mappings
+- **Package structure:** 13 Python packages with pyproject.toml + hatchling, uv workspace, wheel source mappings
 - **OpenAlgo:** Tested with broker sandbox, first trade placed
 - **State:** 7 Zustand stores, Jotai market atoms, 15 TanStack Query hooks, WebSocket + REST fallback
 - **Infrastructure:** Makefile, Docker Compose, systemd templates, GitHub Actions CI

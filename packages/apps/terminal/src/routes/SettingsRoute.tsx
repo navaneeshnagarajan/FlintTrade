@@ -134,8 +134,8 @@ export default function SettingsRoute() {
     >
       {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
       <RouteBanner
-        hintId="settings-openalgo-connect"
-        text="Go to the API section to connect FlintTrade to your OpenAlgo instance and start live trading."
+        hintId="settings-broker-gateway-connect"
+        text="Go to Broker Gateway to connect FlintTrade's direct broker support or an OpenAlgo-compatible bridge."
       />
       {/* Slim header */}
       <div className="flex items-center gap-3 px-4 h-10 border-b border-glass-chrome bg-glass-chrome backdrop-blur-md shrink-0">
@@ -168,14 +168,14 @@ export default function SettingsRoute() {
       </div>
 
       {/* Body: sidebar + content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 flex-col overflow-hidden md:flex-row">
         {/* Sidebar nav */}
         <nav
           ref={tablistRef}
           role="tablist"
           aria-orientation="vertical"
           aria-label="Settings sections"
-          className="w-52 flex-none bg-glass-l1 border-r border-glass-l1 overflow-y-auto py-2 shrink-0"
+          className="flex w-full flex-none gap-1 overflow-x-auto border-b border-glass-l1 bg-glass-l1 px-2 py-2 md:w-52 md:flex-col md:gap-0 md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r md:px-0"
           onKeyDown={handleSidebarKeyDown}
         >
           {SECTIONS.map(({ id, label, icon: Icon }) => (
@@ -188,9 +188,9 @@ export default function SettingsRoute() {
               aria-controls={`settings-tabpanel-${id}`}
               tabIndex={id === activeSection ? 0 : -1}
               onClick={() => setActiveSection(id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 font-sans text-sm transition-colors text-left ${
+              className={`flex flex-none items-center gap-2.5 px-3 py-2 font-sans text-sm transition-colors text-left md:w-full ${
                 id === activeSection
-                  ? "bg-accent/10 text-accent border-r-2 border-accent"
+                  ? "bg-accent/10 text-accent md:border-r-2 md:border-accent"
                   : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
               }`}
             >
@@ -205,9 +205,9 @@ export default function SettingsRoute() {
           role="tabpanel"
           id={`settings-tabpanel-${activeSection}`}
           aria-labelledby={`settings-tab-${activeSection}`}
-          className="flex-1 overflow-y-auto"
+          className="min-w-0 flex-1 overflow-y-auto"
         >
-          <div className="max-w-2xl px-8 py-6">
+          <div className="w-full max-w-3xl px-4 py-5 pb-16 sm:px-6 lg:px-8">
             {renderContent()}
           </div>
         </div>

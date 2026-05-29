@@ -43,6 +43,10 @@ vi.mock("@/components/NotificationCentre/NotificationCentre", () => ({
   ),
 }));
 
+vi.mock("../AccountSwitcher", () => ({
+  default: () => <div data-testid="account-switcher" />,
+}));
+
 // TickerMarquee stub — renders a simple labelled region so ticker tests pass
 vi.mock("../TickerMarquee", () => ({
   default: ({ mode }: { mode?: string }) =>
@@ -88,6 +92,12 @@ vi.mock("@/hooks/useMarketStatus", () => ({
 
 vi.mock("@/services/api", () => ({
   ping: vi.fn().mockRejectedValue(new Error("not connected")),
+}));
+
+vi.mock("@/hooks/useSkillContent", () => ({
+  useSkillContent: () => ({
+    availableTools: ["trade-journal", "settings"],
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -208,9 +218,40 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("notification-bell")).toBeInTheDocument();
   });
 
+  it("renders the account switcher slot", () => {
+    renderTopBarV2();
+    expect(screen.getByTestId("account-switcher")).toBeInTheDocument();
+  });
+
   it("renders the fullscreen button", () => {
     renderTopBarV2();
     expect(screen.getByTestId("fullscreen-btn")).toBeInTheDocument();
+  });
+
+  it("opens the tools dropdown from the top bar", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByRole("button", { name: /tools/i }));
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /trade journal/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /settings/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /p&l dashboard/i })).not.toBeInTheDocument();
+  });
+
+  it("dispatches the selected trade tool from the tools dropdown", () => {
+    renderTopBarV2();
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:open-tool", listener);
+
+    fireEvent.click(screen.getByRole("button", { name: /tools/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /trade journal/i }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0]).toMatchObject({
+      detail: { toolId: "trade-journal" },
+    });
+    window.removeEventListener("flinttrade:open-tool", listener);
   });
 
   it("renders the gear/settings button", () => {

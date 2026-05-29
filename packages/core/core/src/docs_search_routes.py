@@ -4,13 +4,13 @@ Builds a simple inverted index with TF-IDF ranking on startup. Rebuilt
 automatically when the server restarts. The index is cached in memory for
 the lifetime of the process.
 
-Also serves CHANGELOG.md content for the in-app changelog viewer.
+Also serves changelog.md content for the in-app changelog viewer.
 
 Blueprint prefix: /v1/docs
 
 Endpoints:
     GET /v1/docs/search?q=<query>&limit=10   — full-text search
-    GET /v1/docs/changelog                    — raw CHANGELOG.md content
+    GET /v1/docs/changelog                    — raw changelog.md content
 """
 
 from __future__ import annotations
@@ -30,12 +30,12 @@ logger = logging.getLogger("flinttrade.docs_search")
 docs_search_bp = Blueprint("docs_search", __name__, url_prefix="/v1/docs")
 
 # ---------------------------------------------------------------------------
-# Repository root (3 levels above packages/core/core/src/)
+# Repository root (4 levels above packages/core/core/src/)
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _DOCS_DIR = _REPO_ROOT / "docs"
-_CHANGELOG_PATH = _REPO_ROOT / "CHANGELOG.md"
+_CHANGELOG_PATH = _REPO_ROOT / "changelog.md"
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -409,12 +409,12 @@ def search_docs() -> Any:
 
 @docs_search_bp.route("/changelog", methods=["GET"])
 def get_changelog() -> Any:
-    """Serve the repo CHANGELOG.md as plain text.
+    """Serve the repo changelog.md as plain text.
 
     Used by the in-app ChangelogViewer component to render version history.
 
     Returns:
-        Plain text response with CHANGELOG.md content, or 404 if not found.
+        Plain text response with changelog.md content, or 404 if not found.
     """
     if not _CHANGELOG_PATH.exists():
         return Response("", status=404, mimetype="text/plain")
@@ -422,5 +422,5 @@ def get_changelog() -> Any:
         content = _CHANGELOG_PATH.read_text(encoding="utf-8")
         return Response(content, status=200, mimetype="text/plain")
     except OSError as exc:
-        logger.error("Cannot read CHANGELOG.md: %s", exc)
+        logger.error("Cannot read changelog.md: %s", exc)
         return Response("", status=500, mimetype="text/plain")

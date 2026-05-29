@@ -51,7 +51,7 @@ describe("NoConnectionOverlay", () => {
       vi.advanceTimersByTime(5100);
     });
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
-    expect(screen.getByText("OpenAlgo Disconnected")).toBeInTheDocument();
+    expect(screen.getByText("Live Broker Data Disconnected")).toBeInTheDocument();
   });
 
   it("has a Settings button in the overlay", () => {

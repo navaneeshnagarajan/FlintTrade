@@ -36,10 +36,32 @@ import threading
 from pathlib import Path
 from typing import Any
 
-# Ensure repo root is on sys.path for cross-package imports
+# Ensure repo root is on sys.path for cross-package imports.
 _REPO_ROOT = str(Path(__file__).resolve().parents[4])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+
+# Add sibling package ``src`` directories after the stdlib/site paths.  Keeping
+# these as appends avoids local modules such as ``statistics.py`` shadowing
+# Python's standard library while still supporting non-installed source runs.
+for _package_src in [
+    "packages/core/data/src",
+    "packages/core/historical/src",
+    "packages/core/indicators/src",
+    "packages/core/ticks/python",
+    "packages/services/engine/src",
+    "packages/services/screener/src",
+    "packages/services/backtest/src",
+    "packages/services/ai/src",
+    "packages/services/ditto/src",
+    "packages/services/automation/src",
+    "packages/services/journal/src",
+    "packages/integrations/gateway/src",
+    "packages/integrations/webhooks/src",
+]:
+    _src_path = str(Path(_REPO_ROOT) / _package_src)
+    if _src_path not in sys.path:
+        sys.path.append(_src_path)
 
 import hmac  # noqa: E402
 import time  # noqa: E402
@@ -54,6 +76,7 @@ from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 
 from .config import Settings  # noqa: E402
 from .openalgo_client import OpenAlgoClient  # noqa: E402
+from .version import APP_VERSION_TAG  # noqa: E402
 from .workspace import workspace_dir as _workspace_dir  # noqa: E402
 from flinttrade_data.audit_logger import AuditLogger  # noqa: E402
 # engine imports are deferred into FlintTradeApp.__init__() to break the
@@ -65,7 +88,7 @@ from flinttrade_data.audit_logger import AuditLogger  # noqa: E402
 # Ensure the gateway src directory is on sys.path so bare gateway imports resolve.
 _GATEWAY_SRC = str(Path(_REPO_ROOT) / "packages" / "integrations" / "gateway" / "src")
 if _GATEWAY_SRC not in sys.path:
-    sys.path.insert(0, _GATEWAY_SRC)
+    sys.path.append(_GATEWAY_SRC)
 
 from flinttrade_gateway.registry import BrokerRegistry  # noqa: E402
 from flinttrade_gateway.credentials import CredentialStore  # noqa: E402
@@ -116,11 +139,8 @@ def _reconnect_saved_accounts(
 
 
 def _read_version() -> str:
-    """Read version from VERSION file at repo root."""
-    version_file = Path(_REPO_ROOT) / "VERSION"
-    if version_file.exists():
-        return version_file.read_text().strip()
-    return "0.0.0-dev"
+    """Return the central FlintTrade product version tag."""
+    return APP_VERSION_TAG
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +471,7 @@ def create_flask_app(
     # If the build output is missing we fall back to API-only mode and
     # log a clear warning.
     # ------------------------------------------------------------------
-    _dist_path = Path(_REPO_ROOT) / "packages" / "terminal" / "dist"
+    _dist_path = Path(_REPO_ROOT) / "packages" / "apps" / "terminal" / "dist"
     _dist_index = _dist_path / "index.html"
     _frontend_available = _dist_index.exists()
 
@@ -1110,13 +1130,12 @@ def create_flask_app(
     from .health_routes import health_bp  # noqa: PLC0415
     app.register_blueprint(health_bp)
 
-    # backtest-engine has a hyphen in its directory name which prevents standard
-    # `from flinttrade_backtest.X` imports — inject src/ onto sys.path
-    # the same way backtest_routes.py:_load_backtest_engine does, then import
-    # the route modules by bare name.
+    # Inject the backtest service src/ onto sys.path the same way
+    # backtest_routes.py:_load_backtest_engine does, then import the route
+    # modules by bare name.
     import importlib  # noqa: PLC0415
     from pathlib import Path as _Path  # noqa: PLC0415
-    _be_src = str(_Path(__file__).resolve().parents[3] / "packages" / "backtest-engine" / "src")
+    _be_src = str(_Path(_REPO_ROOT) / "packages" / "services" / "backtest" / "src")
     _be_src_added = _be_src not in sys.path
     if _be_src_added:
         sys.path.insert(0, _be_src)

@@ -1,6 +1,6 @@
-import type React from "react";
 import { useState, useEffect } from "react";
 import { Info, RefreshCw } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { getExpiry } from "@/services/api";
@@ -36,7 +36,7 @@ export function DataNotice({ text }: { text?: string }) {
   );
 }
 
-export function SectionLabel({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+export function SectionLabel({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   return (
     <div className="text-xs text-text-muted mb-2 flex items-center gap-1.5">
       <Icon size={11} />

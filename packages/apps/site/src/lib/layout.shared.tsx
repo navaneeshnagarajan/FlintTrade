@@ -1,6 +1,7 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 import { Github } from 'lucide-react';
 import Image from 'next/image';
+import { flinttradeAsset } from '@/lib/site-assets';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -8,7 +9,7 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: (
         <span className="inline-flex items-center gap-2 font-semibold">
-          <Image src="/flinttrade/logo.svg" alt="" width={24} height={24} />
+          <Image src={flinttradeAsset('logo.svg')} alt="" width={24} height={24} />
           FlintTrade
         </span>
       ),

@@ -12,28 +12,29 @@ contract, see [API.md](API.md). For CI behaviour, see [CI.md](CI.md).
 
 ## 1. Repository layout
 
-FlintTrade is a monorepo with 16 packages. Twelve are Python, one is a
-React application, one is Rust with Python bindings, and two are
-auxiliary distribution wrappers.
+FlintTrade is a monorepo with 17 package surfaces: 13 Python packages, 2
+React applications, 1 shared TypeScript design-system package, and 1 Rust
+package with Python bindings.
 
 | Package | Language | Purpose | Tests |
 |---|---|---|---|
-| `gateway` | Python | Direct broker connections (32 brokers via OpenAlgo shims), credential store, WebSocket bridge | `packages/integrations/gateway/tests/` |
+| `site` | TypeScript / Next.js | Public website, generated documentation, contribution pages, and read-only docs MCP | `packages/apps/site/src/**/*.test.ts` |
+| `terminal` | TypeScript / React | User-facing single-page application; Dockview workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
+| `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
 | `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
-| `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
 | `data` | Python | Tick recorder, audit logger (SEBI 5 year), trade logger, DuckDB storage | `packages/core/data/tests/` |
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
-| `screener` | Python | Option chain, OI analysis, PCR, max pain, futures quadrant, IV smile, payoff engine | `packages/services/screener/tests/` |
-| `backtest-engine` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
-| `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
-| `integration` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
-| `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
-| `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `tick-engine` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `terminal` | TypeScript / React | The user-facing single-page application; Dockview workspace, 82 widgets, 12 routes | `packages/apps/terminal/**/*.test.ts(x)` |
-| `chrome-extension` | TypeScript | Browser extension for quick trading from any page | `packages/chrome-extension/tests/` |
-| `desktop` | Rust / Tauri | Native desktop wrapper that embeds the terminal | `packages/desktop/tests/` |
+| `gateway` | Python | Direct broker connections (32 brokers via OpenAlgo shims), credential store, WebSocket bridge | `packages/integrations/gateway/tests/` |
+| `integration` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
+| `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
+| `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
+| `backtest-engine` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
+| `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
+| `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
+| `journal` | Python | Journal entries, trade logging, execution-quality analytics, and realised P&L tracking | `packages/services/journal/tests/` |
+| `screener` | Python | Option chain, OI analysis, PCR, max pain, futures quadrant, IV smile, payoff engine | `packages/services/screener/tests/` |
 
 Test counts (measured 2026-05-19): roughly 9,089 Python (pytest, 313 files)
 and 2,973 terminal (Vitest, 264 files), totalling about 12,062.
@@ -50,7 +51,7 @@ Pick the guide for your platform and follow it end-to-end:
 - [Raspberry Pi setup](setup/raspberry-pi.md)
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
-A complete dev environment includes Python 3.12, Node 20+ (24 recommended),
+A complete dev environment includes Python 3.12, Node 22+ (24 recommended),
 Rust stable (only if you build `tick-engine`), and an OpenAlgo install
 either at `.local/external/openalgo/` (via `scripts/setup-test-deps.sh`)
 or as a separate service.
@@ -128,15 +129,17 @@ cargo build --release
 The resulting `.pyd` / `.so` is imported by the Python `tick_engine` module
 exposed through PyO3 bindings.
 
-### Desktop (Tauri)
+### Site
 
 ```bash
-cd packages/desktop
-npm run tauri build
+cd packages/apps/site
+npm run typecheck
+npm run test
+npm run build
 ```
 
-Produces a native installer for your current platform. Cross-compilation
-is documented in the package README.
+The site build regenerates the docs index, package index, version metadata,
+llms files, and the read-only docs MCP content from repository source files.
 
 ---
 

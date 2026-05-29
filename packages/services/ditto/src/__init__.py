@@ -1,6 +1,8 @@
 """FlintTrade ditto package — multi-broker, multi-account orchestration."""
 
-__version__ = "0.1.0-alpha"
+from flinttrade_core.version import APP_VERSION
+
+__version__ = APP_VERSION
 
 from .account_manager import AccountHealth, AccountManager, BrokerAccount
 from .margin_calculator import (

@@ -1,0 +1,6 @@
+Creative Commons Attribution 4.0 International
+
+Documentation, examples, screenshots, or other non-code assets may use this
+licence only where explicitly noted in `notice` or the relevant file header.
+
+Full license text: https://creativecommons.org/licenses/by/4.0/legalcode

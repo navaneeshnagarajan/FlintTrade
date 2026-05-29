@@ -1,12 +1,13 @@
 # FlintTrade Documentation
 
-Welcome to the FlintTrade documentation. FlintTrade is an open-source, modular
-trading and investment platform for Indian F&O, commodities, and crypto, built
-on top of the [OpenAlgo](https://github.com/marketcalls/openalgo) broker gateway
-(32 brokers supported). One application serves three audiences from a single
-React workspace — **traders** (intraday F&O, options analysis), **investors**
-(mutual funds, SIPs, net worth), and **beginners** (guided learning, paper
-trading). FlintTrade is AGPL-3.0 licensed.
+Welcome to the FlintTrade documentation. FlintTrade is an alpha-stage,
+open-source, modular trading and investment platform for Indian F&O,
+commodities, and crypto, with its own backend, native sandbox, direct broker
+gateway, and an optional OpenAlgo-compatible bridge. One application serves
+three audiences from a single React workspace — **traders** (intraday F&O,
+options analysis), **investors** (mutual funds, SIPs, net worth), and
+**beginners** (guided learning, paper trading). FlintTrade is AGPL-3.0
+licensed and is not production ready.
 
 This folder is the single source of truth for everything outside the source
 code itself. If you are reading FlintTrade for the first time, start with the
@@ -18,11 +19,12 @@ else here is reference material you reach for when a specific question arises.
 
 | File | Audience | One-line description |
 |---|---|---|
-| [README.md](README.md) | Everyone | This landing page. |
+| [readme.md](../readme.md) | Everyone | Repository landing page. |
+| [disclaimer.md](../disclaimer.md) | Everyone | Alpha-stage, no-advice, trading-risk, and user-responsibility notice. |
 | [USER_GUIDE.md](USER_GUIDE.md) | Trader / Investor | Install, connect a broker, walk through every workspace. |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Contributor | Repo layout, dev environment, tests, build, how to add a widget / strategy / broker. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Contributor | Component diagrams, data flow, mode system, package dependency graph. |
-| [API.md](API.md) | Integrator | OpenAlgo passthrough endpoints + FlintTrade `/ft-api/v1/*` reference, WebSocket protocol, auth model. |
+| [API.md](API.md) | Integrator | FlintTrade `/ft-api/v1/*` reference, broker/OpenAlgo-compatible bridge endpoints, WebSocket protocol, auth model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Trader / Contributor | Supported brokers, exchanges, operating systems, and Python / Node versions. |
 | [SEBI_COMPLIANCE.md](SEBI_COMPLIANCE.md) | Trader / Operator | Audit logging, rate limits, retention, kill-switch design for SEBI alignment. |
 | [CI.md](CI.md) | Contributor | How the GitHub Actions pipeline runs, what each job covers, and how to read CI failures. |
@@ -36,6 +38,7 @@ else here is reference material you reach for when a specific question arises.
 ### For users (traders and investors)
 
 - **[User Guide](USER_GUIDE.md)** — installation, first broker connection, first paper trade, first live trade, workspace tour, screener / Lab / Automate / AI / Ditto walkthroughs, settings reference, troubleshooting.
+- **[Disclaimer](../disclaimer.md)** — required reading before connecting a broker, switching to Live mode, or enabling automation.
 - **[API reference](API.md)** — only relevant if you want to script against FlintTrade from outside.
 - **[Compatibility matrix](COMPATIBILITY.md)** — which broker, which exchange, which operating system, which Python and Node version.
 - **[SEBI compliance notes](SEBI_COMPLIANCE.md)** — audit retention, rate limits, kill-switch behaviour.
@@ -63,9 +66,10 @@ else here is reference material you reach for when a specific question arises.
 
 ## Where the source code lives
 
-The repository is a monorepo with 16 packages — 12 Python packages, 1 React
-application (`packages/apps/terminal`), 1 Rust/PyO3 package (`packages/core/ticks`),
-1 Chrome extension, and 1 Tauri desktop wrapper. See
+The repository is a monorepo with 17 package surfaces: 13 Python packages,
+2 React applications (`packages/apps/terminal` and `packages/apps/site`),
+1 shared TypeScript design-system package, and 1 Rust/PyO3 package
+(`packages/core/ticks`). See
 [ARCHITECTURE.md](ARCHITECTURE.md) for the package dependency graph and
 [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the package-by-package map.
 

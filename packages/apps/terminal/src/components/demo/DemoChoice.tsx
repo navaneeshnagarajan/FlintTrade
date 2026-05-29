@@ -2,7 +2,7 @@
  * DemoChoice — shown on first entry to Demo mode.
  *
  * Presents two options:
- *   - Free Explore: jump in with simulated data
+ *   - Demo Mode: jump in with simulated data
  *   - Guided Tour:  step-by-step walkthrough
  *
  * Persists the choice in sessionStorage so the prompt is only shown once
@@ -43,8 +43,8 @@ const SESSION_KEY = "flinttrade:demo-choice-shown";
 const CHOICE_CARDS: ChoiceCardConfig[] = [
   {
     id: "explore",
-    label: "Free Explore",
-    description: "Jump in with simulated data, explore at your own pace",
+    label: "Demo Mode",
+    description: "Use simulated data and explore FlintTrade at your own pace",
     icon: <Compass size={24} aria-hidden="true" />,
     borderClass: "border-border-default/70 hover:border-accent/40",
     selectedBorderClass: "border-accent/70 ring-1 ring-accent/30 shadow-[0_0_34px_rgba(34,197,94,0.14)]",
@@ -83,6 +83,15 @@ function markDemoChoiceMade(choice: DemoChoiceValue): void {
   }
 }
 
+/** Allows the Explore route to show the choice page again on demand. */
+export function resetDemoChoice(): void {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    // sessionStorage unavailable — proceed silently
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -109,7 +118,7 @@ export default function DemoChoice({ onChoice }: DemoChoiceProps) {
       maxWidth="md"
       eyebrow="Explore Mode"
       title="How would you like to explore FlintTrade?"
-      subtitle="You are in Explore mode - no real data or orders."
+      subtitle="Choose Demo Mode for a safe sample workspace, or take the guided tour before you start."
     >
       <div className="mx-auto max-w-2xl space-y-6">
         {/* Choice cards */}
@@ -155,7 +164,7 @@ export default function DemoChoice({ onChoice }: DemoChoiceProps) {
           shimmerColor="#22c55e"
           className="w-full justify-center px-6 py-3 text-sm font-semibold bg-profit/10 border-profit/45 text-profit hover:shadow-[0_0_28px_rgba(34,197,94,0.28)]"
         >
-          {selected === "tour" ? "Start Guided Tour" : "Start Exploring"}
+          {selected === "tour" ? "Start Guided Tour" : "Enter Demo Mode"}
         </ShimmerButton>
       </div>
     </PublicRouteShell>

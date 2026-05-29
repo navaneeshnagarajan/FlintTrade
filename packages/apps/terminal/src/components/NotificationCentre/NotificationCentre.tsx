@@ -14,6 +14,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { layerClassNames } from "@flinttrade/design-system";
 import {
   Bell,
   X,
@@ -26,6 +27,7 @@ import {
   Circle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useNotifications } from "./useNotifications";
 import type { Notification, NotificationCategory } from "./notificationStore";
 
@@ -383,7 +385,10 @@ export function NotificationBell({ className }: NotificationBellProps) {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
-                className="fixed inset-0 z-40 bg-black/20"
+                className={cn(
+                  "fixed inset-0 bg-black/20",
+                  layerClassNames.overlayBackdrop,
+                )}
                 onClick={handleClose}
                 aria-hidden="true"
               />
@@ -394,7 +399,10 @@ export function NotificationBell({ className }: NotificationBellProps) {
                 animate={{ x: 0 }}
                 exit={{ x: "100%" }}
                 transition={{ type: "spring", stiffness: 380, damping: 38 }}
-                className="fixed top-0 right-0 h-full w-80 max-w-full z-50 shadow-2xl"
+                className={cn(
+                  "fixed top-0 right-0 h-full w-80 max-w-full shadow-2xl",
+                  layerClassNames.floatingPanel,
+                )}
               >
                 <NotificationPanel onClose={handleClose} />
               </motion.div>

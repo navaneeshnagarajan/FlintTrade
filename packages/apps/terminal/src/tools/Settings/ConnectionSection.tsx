@@ -1,5 +1,5 @@
 /**
- * ConnectionSection — OpenAlgo host, API key, and WebSocket port settings.
+ * ConnectionSection — broker gateway URL, API key, and WebSocket port settings.
  */
 
 import { Loader2, Wifi, CheckCircle2, XCircle } from "lucide-react";
@@ -28,36 +28,36 @@ export function ConnectionSection({ settings, onChange }: ConnectionSectionProps
 
   return (
     <div className="space-y-5">
-      <SectionTitle>API Connection</SectionTitle>
+      <SectionTitle>Broker Gateway</SectionTitle>
 
       <FieldRow
-        label="OpenAlgo Host"
-        hint="Base URL of your OpenAlgo instance. Set VITE_OPENALGO_HOST in .env to override at build time."
+        label="Gateway URL"
+        hint="Base URL for the live broker bridge. Use FlintTrade's built-in gateway by default, or point this at an OpenAlgo-compatible server."
       >
         <TextInput
           value={settings.host}
           onChange={(v) => onChange("host", v)}
-          placeholder="http://127.0.0.1:5000"
-          aria-label="OpenAlgo host"
+          placeholder="http://127.0.0.1:5100"
+          aria-label="Broker gateway URL"
         />
       </FieldRow>
 
       <FieldRow
         label="API Key"
-        hint="Your OpenAlgo API key. Kept in session storage for this browser tab."
+        hint="API key for the selected broker bridge. Kept in session storage for this browser tab."
       >
         <TextInput
           value={settings.apiKey}
           onChange={(v) => onChange("apiKey", v)}
           type="password"
           placeholder="••••••••••••••••"
-          aria-label="OpenAlgo API key"
+          aria-label="Broker gateway API key"
         />
       </FieldRow>
 
       <FieldRow
         label="WebSocket Port"
-        hint="OpenAlgo WebSocket port (default 8765). Used for live tick data."
+        hint="Live-market WebSocket port. OpenAlgo-compatible gateways commonly use 8765."
       >
         <TextInput
           value={settings.wsPort}

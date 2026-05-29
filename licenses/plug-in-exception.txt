@@ -1,0 +1,11 @@
+FlintTrade Plug-in Exception
+
+FlintTrade is distributed under AGPL-3.0-or-later. Independent broker,
+data-source, automation, or UI plug-ins may communicate with FlintTrade through
+documented network APIs, CLI commands, or MCP/tool interfaces without that
+communication alone causing the plug-in to be treated as a derivative work of
+FlintTrade.
+
+This exception does not grant permission to copy, modify, link, or redistribute
+FlintTrade code under terms other than AGPL-3.0-or-later. Files copied from this
+repository remain governed by their original licence notices.

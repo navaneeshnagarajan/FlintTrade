@@ -597,9 +597,10 @@ class TestPackageExports:
             assert name in content, f"Missing export: {name}"
 
     def test_version(self):
-        init_path = os.path.join(os.path.dirname(__file__), '..', 'src', '__init__.py')
-        content = open(init_path).read()
-        assert '__version__ = "0.1.0-alpha"' in content
+        from flinttrade_backtest import __version__
+        from flinttrade_core.version import APP_VERSION
+
+        assert __version__ == APP_VERSION
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

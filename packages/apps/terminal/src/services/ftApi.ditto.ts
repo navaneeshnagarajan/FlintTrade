@@ -1,4 +1,4 @@
-import { get, isDemoAuthSession, post } from "./ftApi.helpers";
+import { del, get, isDemoAuthSession, post } from "./ftApi.helpers";
 
 export interface DittoAccount {
   id: string;
@@ -11,6 +11,18 @@ export interface DittoAccount {
   group: string;
   allocation_weight: number;
   is_master: boolean;
+}
+
+export interface DittoAccountCreatePayload {
+  account_id: string;
+  openalgo_host: string;
+  api_key: string;
+  name?: string;
+  enabled?: boolean;
+  group?: string;
+  allocation_weight?: number;
+  max_loss_daily?: number;
+  is_master?: boolean;
 }
 
 export interface MirrorStatus {
@@ -50,6 +62,17 @@ export const getDittoAccounts = () =>
   isDemoAuthSession()
     ? Promise.resolve({ accounts: [] })
     : get<{ accounts: DittoAccount[] }>("ditto/accounts");
+
+export const addDittoAccount = (account: DittoAccountCreatePayload) =>
+  post<{ account: DittoAccount }>("ditto/accounts", account).then((res) => res.account);
+
+export const setDittoAccountEnabled = (accountId: string, enabled: boolean) =>
+  post<{ account: DittoAccount }>(
+    `ditto/accounts/${encodeURIComponent(accountId)}/${enabled ? "enable" : "disable"}`,
+  ).then((res) => res.account);
+
+export const removeDittoAccount = (accountId: string) =>
+  del<{ id: string; removed: boolean }>(`ditto/accounts/${encodeURIComponent(accountId)}`);
 
 export const getDittoMirrorStatus = () =>
   isDemoAuthSession()

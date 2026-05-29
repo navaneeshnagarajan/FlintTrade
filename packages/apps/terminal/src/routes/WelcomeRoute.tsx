@@ -21,7 +21,6 @@ import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import LoginRoute from "@/routes/LoginRoute";
 import { useAuthStore } from "@/stores/authStore";
-import { useModeStore } from "@/stores/modeStore";
 import { useThemeStore } from "@/stores/themeStore";
 
 const WORDMARK = "FlintTrade";
@@ -35,6 +34,13 @@ const SLOGAN = [
   { text: "Evolve", color: "text-cyan-400" },
 ] as const;
 
+const WELCOME_FEATURES = [
+  "Native broker gateway plus optional OpenAlgo bridge",
+  "Explore, Practice, and Live safety modes",
+  "Option chain, Greeks, order flow, and depth",
+  "Strategy lab, SIP tracking, and AI context",
+] as const;
+
 const TRADING_QUOTES = [
   { text: "The stock market is a device for transferring money from the impatient to the patient.", author: "Warren Buffett" },
   { text: "In investing, what is comfortable is rarely profitable.", author: "Robert Arnott" },
@@ -45,6 +51,13 @@ const TRADING_QUOTES = [
 
 const GREETED_KEY = "flinttrade:greeted-today";
 const enterEase = [0.22, 1, 0.36, 1] as const;
+const silkyEase = [0.16, 1, 0.3, 1] as const;
+const smoothSpring = {
+  type: "spring",
+  stiffness: 120,
+  damping: 28,
+  mass: 0.9,
+} as const;
 
 type FlowStep = "cinematic" | "greeting" | "login";
 
@@ -120,10 +133,31 @@ function ThemeToggle() {
 function CinematicBackdrop({ particleColors }: { particleColors: string[] }) {
   return (
     <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-      <Particles quantity={50} colors={particleColors} size={0.5} className="opacity-20" />
-      <Particles quantity={12} color="#ffffff" size={1.8} className="opacity-10" />
-      <Meteors number={16} />
-      <div className="absolute left-1/2 top-1/2 h-[42rem] w-[42rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(34,197,94,0.12),transparent_64%)]" />
+      <Particles
+        quantity={110}
+        colors={particleColors}
+        sizeRange={[0.8, 2.2]}
+        behavior="drift"
+        seed={19_841}
+        className="opacity-45"
+      />
+      <Particles
+        quantity={36}
+        color="#ffffff"
+        sizeRange={[1.1, 2.8]}
+        behavior="pulse"
+        seed={7_721}
+        className="opacity-25"
+      />
+      <Particles
+        quantity={42}
+        colors={["#22c55e", "#38bdf8", "#a3e635"]}
+        sizeRange={[0.4, 1.3]}
+        behavior="float"
+        seed={3_109}
+        className="opacity-30"
+      />
+      <Meteors number={18} seed={8_021} />
       <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-surface-base via-surface-base/55 to-transparent" />
     </div>
   );
@@ -201,10 +235,10 @@ function LogoImpactReveal({ step }: { step: number }) {
       <AnimatePresence>
         {step >= 2 && (
           <motion.div
-            className="logo-reveal absolute grid size-32 place-items-center rounded-full border border-accent/25 bg-surface-card/35 shadow-[0_0_80px_rgba(34,197,94,0.16)] backdrop-blur-xl"
-            initial={{ opacity: 0, scale: 0.82 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.7, ease: enterEase }}
+            className="logo-reveal absolute grid size-32 place-items-center will-change-transform"
+            initial={{ opacity: 0, scale: 0.74, y: 12, filter: "blur(10px)" }}
+            animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
+            transition={smoothSpring}
           >
             <LogoIcon size={84} aria-hidden="true" />
           </motion.div>
@@ -335,9 +369,7 @@ export default function WelcomeRoute() {
   }
 
   function handleExplore() {
-    useModeStore.getState().setMode("explore");
-    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
-    navigate("/trade");
+    navigate("/explore");
   }
 
   if (authStatus === "logged-out" && flowStep === "greeting") {
@@ -386,19 +418,6 @@ export default function WelcomeRoute() {
         @keyframes debris {
           0% { opacity: 1; transform: translate(0, 0) scale(1); }
           100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0); }
-        }
-        @keyframes sparkReveal {
-          0% { filter: drop-shadow(0 0 0 rgba(34,197,94,0)) brightness(2); }
-          30% { filter: drop-shadow(0 0 30px rgba(34,197,94,0.8)) brightness(1.5); }
-          100% { filter: drop-shadow(0 0 10px rgba(34,197,94,0.25)) brightness(1); }
-        }
-        @keyframes logoPulse {
-          0%, 100% { filter: drop-shadow(0 0 12px rgba(34,197,94,0.22)); transform: scale(1); }
-          50% { filter: drop-shadow(0 0 30px rgba(34,197,94,0.48)); transform: scale(1.025); }
-        }
-        @keyframes typeChar {
-          from { opacity: 0; transform: translateY(5px); }
-          to { opacity: 1; transform: translateY(0); }
         }
         .hero-fireball {
           position: absolute;
@@ -459,26 +478,17 @@ export default function WelcomeRoute() {
           opacity: 0;
           box-shadow: 0 0 4px 1px rgba(163,230,53,0.5);
         }
-        .logo-reveal {
-          animation:
-            sparkReveal 2s ease-in-out 0.2s,
-            logoPulse 4s ease-in-out 2.2s infinite;
-        }
-        .welcome-logo-pulse { animation: logoPulse 4s ease-in-out infinite; }
         .welcome-char {
           display: inline-block;
-          opacity: 0;
-          animation: typeChar 0.08s ease-out forwards;
+          transform-origin: 50% 80%;
+          will-change: transform, opacity, filter;
         }
         @media (prefers-reduced-motion: reduce) {
-          .welcome-logo-pulse,
           .hero-fireball,
           .impact-blast,
           .shock-ring,
           .shock-ring-2,
-          .debris-particle,
-          .logo-reveal,
-          .welcome-char {
+          .debris-particle {
             animation: none;
             opacity: 1;
           }
@@ -490,50 +500,60 @@ export default function WelcomeRoute() {
       <CinematicBackdrop particleColors={particleColors} />
 
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-16 text-center">
-        <div className="flex max-w-3xl flex-col items-center gap-7">
+        <motion.div
+          className="flex max-w-3xl flex-col items-center gap-7"
+          layout
+          transition={{ layout: { duration: 0.85, ease: silkyEase } }}
+        >
           <LogoImpactReveal step={step} />
 
           <AnimatePresence>
             {step >= 3 && (
               <motion.div
                 className="space-y-3"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: 14, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.45, ease: "easeOut" }}
+                transition={{ duration: 0.78, ease: silkyEase }}
               >
                 <h2
                   className="font-heading text-5xl font-bold leading-none text-text-primary drop-shadow-[0_0_36px_rgba(34,197,94,0.16)] sm:text-7xl"
                   aria-label={WORDMARK}
                 >
                   {WORDMARK.split("").map((char, index) => (
-                    <span
+                    <motion.span
                       key={`${char}-${index}`}
+                      aria-hidden="true"
                       className="welcome-char"
-                      style={{ animationDelay: `${index * 55}ms` }}
+                      initial={{ opacity: 0, y: 18, scale: 0.98, filter: "blur(5px)" }}
+                      animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+                      transition={{ duration: 0.52, ease: silkyEase, delay: 0.08 + index * 0.045 }}
                     >
                       {char}
-                    </span>
+                    </motion.span>
                   ))}
                 </h2>
 
                 {step >= 4 && (
                   <motion.div
                     className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.45, ease: "easeOut" }}
+                    initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
+                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                    transition={{ duration: 0.68, ease: silkyEase }}
                   >
                     {SLOGAN.map((word, index) => (
-                      <span
+                      <motion.span
                         key={word.text}
                         className={cn("font-sans text-sm font-medium tracking-wide sm:text-lg", word.color)}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, ease: silkyEase, delay: index * 0.055 }}
                       >
                         {word.text}
                         {index < SLOGAN.length - 1 && (
                           <span className="ml-2 text-text-muted">.</span>
                         )}
-                      </span>
+                      </motion.span>
                     ))}
                   </motion.div>
                 )}
@@ -545,70 +565,78 @@ export default function WelcomeRoute() {
             {step >= 5 && (
               <motion.div
                 className="mx-auto max-w-2xl space-y-5"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: 20, scale: 0.985, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
                 exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.6, ease: "easeOut" }}
+                transition={{ duration: 0.82, ease: silkyEase }}
               >
-                <p className="mx-auto max-w-xl text-sm leading-relaxed text-text-secondary sm:text-base">
+                <motion.p
+                  className="mx-auto max-w-xl text-sm leading-relaxed text-text-secondary sm:text-base"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.62, ease: silkyEase, delay: 0.08 }}
+                >
                   Open-source trading platform for Indian markets, with learning, investing,
                   trading, automation, and AI research orbiting one centre.
-                </p>
+                </motion.p>
                 <div className="mx-auto grid max-w-xl gap-2 text-left sm:grid-cols-2">
-                  {[
-                    "30+ brokers through OpenAlgo",
-                    "Explore, Practice, and Live safety modes",
-                    "Option chain, Greeks, order flow, and depth",
-                    "Strategy lab, SIP tracking, and AI context",
-                  ].map((item) => (
-                    <div
+                  {WELCOME_FEATURES.map((item, index) => (
+                    <motion.div
                       key={item}
                       className="rounded-lg border border-border-default/70 bg-surface-card/55 px-3 py-2 text-xs text-text-secondary shadow-lg shadow-black/10 backdrop-blur-xl"
+                      initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ duration: 0.58, ease: silkyEase, delay: 0.2 + index * 0.07 }}
                     >
                       <span className="mr-2 text-accent" aria-hidden="true">•</span>
                       {item}
-                    </div>
+                    </motion.div>
                   ))}
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
 
-          <motion.div
-            className="flex flex-col items-center gap-3"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: step >= 5 ? 1 : 0, y: step >= 5 ? 0 : 10 }}
-            transition={{ duration: 0.55, ease: "easeOut" }}
-          >
-            {showSetupActions ? (
-              <>
-                <ShimmerButton
-                  onClick={() => navigate("/setup-account")}
-                  shimmerColor="#22c55e"
-                  className="px-10 py-3.5 text-base font-semibold bg-profit/10 border-profit/45 text-profit hover:shadow-[0_0_34px_rgba(34,197,94,0.36)]"
-                >
-                  Get Started
-                </ShimmerButton>
-                <button
-                  type="button"
-                  onClick={handleExplore}
-                  className="rounded px-2 py-1 text-sm text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  aria-label="Explore FlintTrade without creating an account"
-                >
-                  Explore FlintTrade →
-                </button>
-              </>
-            ) : (
-              <Button type="button" variant="ghost" onClick={skipToEnd}>
-                Checking workspace...
-              </Button>
-            )}
+          <AnimatePresence>
+            {step >= 5 && (
+              <motion.div
+                className="flex flex-col items-center gap-3"
+                initial={{ opacity: 0, y: 18, scale: 0.985, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.78, ease: silkyEase, delay: 0.22 }}
+              >
+                {showSetupActions ? (
+                  <>
+                    <ShimmerButton
+                      onClick={() => navigate("/setup-account")}
+                      shimmerColor="#22c55e"
+                      className="px-10 py-3.5 text-base font-semibold bg-profit/10 border-profit/45 text-profit hover:shadow-[0_0_34px_rgba(34,197,94,0.36)]"
+                    >
+                      Get Started
+                    </ShimmerButton>
+                    <button
+                      type="button"
+                      onClick={handleExplore}
+                      className="rounded px-2 py-1 text-sm text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      aria-label="Explore FlintTrade without creating an account"
+                    >
+                      Explore FlintTrade →
+                    </button>
+                  </>
+                ) : (
+                  <Button type="button" variant="ghost" onClick={skipToEnd}>
+                    Checking workspace...
+                  </Button>
+                )}
 
-            {(authStatus === "logged-out" || authStatus === "pin-required") && (
-              <p className="text-xs text-text-muted">Redirecting to login...</p>
+                {(authStatus === "logged-out" || authStatus === "pin-required") && (
+                  <p className="text-xs text-text-muted">Redirecting to login...</p>
+                )}
+              </motion.div>
             )}
-          </motion.div>
-        </div>
+          </AnimatePresence>
+        </motion.div>
       </div>
     </main>
   );

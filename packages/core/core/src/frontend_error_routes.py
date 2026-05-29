@@ -5,7 +5,7 @@ in app.py rewrites to /v1/* before Flask dispatch):
 
 - ``POST /ft-api/v1/errors``    — ingest frontend runtime errors into
   ``ErrorLog`` for post-mortem debugging. Fire-and-forget from the client.
-- ``GET  /ft-api/v1/changelog`` — serve the repo CHANGELOG.md as plain
+- ``GET  /ft-api/v1/changelog`` — serve the repo changelog.md as plain
   markdown so the in-app Changelog viewer renders the same source of
   truth as GitHub.
 
@@ -30,8 +30,8 @@ frontend_errors_bp = Blueprint(
 )
 
 # Repo root — four parents up from this file (packages/core/core/src/<file>.py).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_CHANGELOG_PATH = _REPO_ROOT / "CHANGELOG.md"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_CHANGELOG_PATH = _REPO_ROOT / "changelog.md"
 
 # Cap frontend error payloads so a runaway client can't flood the DB.
 _MAX_MESSAGE_CHARS = 2_000
@@ -90,14 +90,14 @@ def report_frontend_error() -> tuple[Response, int]:
 
 @frontend_errors_bp.route("/changelog", methods=["GET"])
 def get_changelog() -> tuple[Response, int]:
-    """Serve the repo CHANGELOG.md as markdown for the in-app viewer.
+    """Serve the repo changelog.md as markdown for the in-app viewer.
 
     Uses a filesystem read (not a git lookup) so the frontend always
     reflects what is on disk in the current deployment.
     """
     try:
         if not _CHANGELOG_PATH.exists():
-            return jsonify({"status": "error", "message": "CHANGELOG.md not found"}), 404
+            return jsonify({"status": "error", "message": "changelog.md not found"}), 404
         text = _CHANGELOG_PATH.read_text(encoding="utf-8")
         # Content-Type is markdown; the viewer renders it client-side.
         resp = current_app.response_class(
@@ -106,5 +106,5 @@ def get_changelog() -> tuple[Response, int]:
         resp.headers["Cache-Control"] = "no-cache"
         return resp, 200
     except Exception as exc:
-        logger.exception("Failed to serve CHANGELOG.md: %s", exc)
+        logger.exception("Failed to serve changelog.md: %s", exc)
         return jsonify({"status": "error", "message": "read failed"}), 500

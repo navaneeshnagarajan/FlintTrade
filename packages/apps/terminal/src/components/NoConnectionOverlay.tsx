@@ -1,5 +1,5 @@
 /**
- * NoConnectionOverlay — global overlay shown after 5s of OpenAlgo disconnection.
+ * NoConnectionOverlay — global overlay shown after 5s without live broker data.
  *
  * Avoids flashing on startup by waiting 5 seconds before becoming visible.
  * Clears immediately when connection is restored.
@@ -15,13 +15,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { WifiOff, Settings, RefreshCw } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { layerClassNames } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useConnectionStore } from "@/stores/connectionStore";
 
 const DELAY_MS = 5000;
 
 /**
- * Routes where a live OpenAlgo connection is not required.
+ * Routes where a live broker data connection is not required.
  * The overlay is suppressed on these paths so users can configure
  * settings or explore demo data without being interrupted.
  */
@@ -121,7 +123,10 @@ export function NoConnectionOverlay() {
       aria-labelledby="no-connection-title"
       aria-describedby="no-connection-desc"
       onKeyDown={handleKeyDown}
-      className="fixed inset-0 z-50 bg-surface-base/80 backdrop-blur-sm flex items-center justify-center"
+      className={cn(
+        "fixed inset-0 bg-surface-base/80 backdrop-blur-sm flex items-center justify-center",
+        layerClassNames.modal,
+      )}
     >
       <div className="bg-surface-card border border-border-default rounded-xl p-8 max-w-md w-full mx-4 text-center space-y-4 shadow-2xl">
         <div className="flex justify-center">
@@ -135,14 +140,14 @@ export function NoConnectionOverlay() {
             id="no-connection-title"
             className="text-lg font-heading font-semibold text-text-primary"
           >
-            OpenAlgo Disconnected
+            Live Broker Data Disconnected
           </h2>
           <p
             id="no-connection-desc"
             className="text-sm text-text-secondary leading-relaxed"
           >
-            Cannot reach the OpenAlgo server. Check your connection settings or
-            start OpenAlgo, then retry.
+            Cannot reach the configured broker gateway. Check FlintTrade's
+            direct broker settings or your optional OpenAlgo bridge, then retry.
           </p>
         </div>
 

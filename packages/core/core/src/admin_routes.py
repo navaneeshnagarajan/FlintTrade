@@ -22,8 +22,8 @@ logger = logging.getLogger("flinttrade.admin")
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/v1/admin")
 
-# Repo root — 3 levels up from packages/core/core/src/
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+# Repo root — 4 levels up from packages/core/core/src/
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _STATUS_FILE = _REPO_ROOT / ".local" / "reference" / "absorption-status.json"
 
 
@@ -111,17 +111,18 @@ def _introspect_packages() -> list[dict[str, object]]:
     root = str(_REPO_ROOT)
     packages: list[dict[str, object]] = []
 
-    pkg_dirs = sorted(_glob.glob(os.path.join(root, "packages", "*")))
+    package_root = os.path.join(root, "packages")
+    pkg_dirs = sorted(_glob.glob(os.path.join(package_root, "*", "*")))
     for pkg_dir in pkg_dirs:
         if not os.path.isdir(pkg_dir):
             continue
-        name = os.path.basename(pkg_dir)
+        name = os.path.relpath(pkg_dir, package_root).replace(os.sep, "/")
 
-        if name == "terminal":
+        if name == "apps/terminal":
             pkg_type = "react"
             test_files = _glob.glob(os.path.join(pkg_dir, "src", "**", "*.test.ts"), recursive=True)
             test_files += _glob.glob(os.path.join(pkg_dir, "src", "**", "*.test.tsx"), recursive=True)
-        elif name == "tick-engine":
+        elif name == "core/ticks":
             pkg_type = "rust"
             test_files = _glob.glob(os.path.join(pkg_dir, "tests", "*.py"))
         else:

@@ -24,6 +24,9 @@ vi.mock("@/lib/motion", () => ({
 // Mock the ftApi module
 vi.mock("@/services/ftApi", () => ({
   getDittoAccounts: vi.fn(),
+  addDittoAccount: vi.fn(),
+  removeDittoAccount: vi.fn(),
+  setDittoAccountEnabled: vi.fn(),
   getDittoMirrorStatus: vi.fn(),
   startDittoMirror: vi.fn(),
   stopDittoMirror: vi.fn(),
@@ -33,12 +36,18 @@ vi.mock("@/services/ftApi", () => ({
 
 import DittoRoute from "../DittoRoute";
 import {
+  addDittoAccount,
   getDittoAccounts,
   getDittoMirrorStatus,
   getDittoRisk,
+  removeDittoAccount,
+  setDittoAccountEnabled,
 } from "@/services/ftApi";
 
 const mockGetAccounts = getDittoAccounts as ReturnType<typeof vi.fn>;
+const mockAddAccount = addDittoAccount as ReturnType<typeof vi.fn>;
+const mockRemoveAccount = removeDittoAccount as ReturnType<typeof vi.fn>;
+const mockSetAccountEnabled = setDittoAccountEnabled as ReturnType<typeof vi.fn>;
 const mockGetMirrorStatus = getDittoMirrorStatus as ReturnType<typeof vi.fn>;
 const mockGetRisk = getDittoRisk as ReturnType<typeof vi.fn>;
 
@@ -122,6 +131,9 @@ const sampleRisk = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetAccounts.mockResolvedValue(sampleAccounts);
+  mockAddAccount.mockResolvedValue(sampleAccounts.accounts[0]);
+  mockRemoveAccount.mockResolvedValue({ id: "acc_2", removed: true });
+  mockSetAccountEnabled.mockResolvedValue(sampleAccounts.accounts[0]);
   mockGetMirrorStatus.mockResolvedValue(sampleMirrorStatus);
   mockGetRisk.mockResolvedValue(sampleRisk);
 });
@@ -187,12 +199,60 @@ describe("DittoRoute", () => {
     }, { timeout: 6000 });
   });
 
-  it("shows Add Account button (disabled)", async () => {
+  it("opens Add Account and submits a managed account", async () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
     await waitFor(() => {
-      const addButton = screen.getByText("Add Account");
-      expect(addButton).toBeInTheDocument();
-      expect(addButton.closest("button")).toBeDisabled();
+      expect(screen.getByText("Managed Accounts")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
+
+    fireEvent.change(screen.getByLabelText("Account ID"), {
+      target: { value: "family_01" },
+    });
+    fireEvent.change(screen.getByLabelText("OpenAlgo URL"), {
+      target: { value: "http://127.0.0.1:5001" },
+    });
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "secret-key" },
+    });
+    fireEvent.change(screen.getByLabelText("Display Name"), {
+      target: { value: "Family Account" },
+    });
+    fireEvent.change(screen.getByLabelText("Group"), {
+      target: { value: "Family" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Account" }));
+
+    await waitFor(() => {
+      expect(mockAddAccount).toHaveBeenCalledWith({
+        account_id: "family_01",
+        openalgo_host: "http://127.0.0.1:5001",
+        api_key: "secret-key",
+        name: "Family Account",
+        group: "Family",
+        allocation_weight: 1,
+        max_loss_daily: 50000,
+        enabled: true,
+        is_master: false,
+      });
+    });
+  });
+
+  it("enables, disables, and removes managed accounts", async () => {
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.getByText("Client: Rajesh Mehta")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect Client: Rajesh Mehta" }));
+    await waitFor(() => {
+      expect(mockSetAccountEnabled).toHaveBeenCalledWith("acc_1", false);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Client: Priya Sharma" }));
+    await waitFor(() => {
+      expect(mockRemoveAccount).toHaveBeenCalledWith("acc_2");
     });
   });
 

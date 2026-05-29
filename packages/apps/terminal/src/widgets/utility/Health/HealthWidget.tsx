@@ -34,6 +34,7 @@ import {
   HardDrive,
   Lock,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ping } from "@/services/api";
@@ -119,7 +120,7 @@ function relativeTime(ts: number | null): string {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function SectionHeading({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+function SectionHeading({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   return (
     <div className="flex items-center gap-1.5 mb-2">
       <Icon size={12} className="text-text-muted" />

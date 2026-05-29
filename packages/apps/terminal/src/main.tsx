@@ -1,13 +1,13 @@
 import React, { lazy, Suspense } from "react";
 import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
-import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import { Provider as JotaiProvider } from "jotai";
 import { MotionConfig } from "framer-motion";
 import { QueryProvider } from "./providers/QueryProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
+import { renderReactRoot } from "./lib/reactRoot";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import { useAuthGuard } from "./hooks/useAuthGuard";
@@ -127,7 +127,8 @@ const router = createBrowserRouter([
   },
 ]);
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+renderReactRoot(
+  document.getElementById("root")!,
   <React.StrictMode>
     <ErrorBoundary>
       <JotaiProvider>
@@ -138,5 +139,5 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         </MotionConfig>
       </JotaiProvider>
     </ErrorBoundary>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

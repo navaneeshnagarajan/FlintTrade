@@ -2,12 +2,12 @@
 # FlintTrade Target — starts all FlintTrade services together
 # =============================================================================
 #
-# Groups OpenAlgo and FlintTrade backend into a single manageable unit.
+# Groups FlintTrade backend services into a single manageable unit.
 #
 # USAGE:
 #   sudo systemctl enable flinttrade.target
-#   sudo systemctl start flinttrade.target     # starts OpenAlgo + FlintTrade
-#   sudo systemctl stop flinttrade.target      # stops both services
+#   sudo systemctl start flinttrade.target     # starts FlintTrade backend
+#   sudo systemctl stop flinttrade.target      # stops FlintTrade backend
 #   sudo systemctl status flinttrade.target    # check grouped status
 #
 # INSTALL:
@@ -16,10 +16,10 @@
 # =============================================================================
 
 [Unit]
-Description=FlintTrade Platform (OpenAlgo + FlintTrade Backend)
+Description=FlintTrade Platform
 Documentation=https://github.com/navaneeshnagarajan/FlintTrade
 After=network.target
-Wants=openalgo.service flinttrade.service
+Wants=flinttrade.service
 
 [Install]
 WantedBy=multi-user.target

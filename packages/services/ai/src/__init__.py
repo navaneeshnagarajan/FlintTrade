@@ -1,6 +1,8 @@
 """FlintTrade AI package — LLM, RAG, ML signals, sentiment, MCP, advisor, memory."""
 
-__version__ = "0.1.0-alpha"
+from flinttrade_core.version import APP_VERSION
+
+__version__ = APP_VERSION
 
 from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRanking
 from .analyst_chain import AnalysisState, AnalystChain
