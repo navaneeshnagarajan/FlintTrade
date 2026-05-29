@@ -104,6 +104,7 @@ const repositoryFileUrls = new Map([
   ['contributing.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/contributing.md'],
   ['disclaimer.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/disclaimer.md'],
   ['LICENSE', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/LICENSE'],
+  ['readme.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/readme.md'],
   ['security.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/security.md'],
 ]);
 

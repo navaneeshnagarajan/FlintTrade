@@ -8,7 +8,7 @@ export function SiteFooter() {
         <Link href="/docs">Docs</Link>
         <Link href="/mcp">MCP</Link>
         <Link href="/contribute">Contribute</Link>
-        <Link href="/llms.txt">llms.txt</Link>
+        <a href="/llms.txt">llms.txt</a>
       </div>
     </footer>
   );
