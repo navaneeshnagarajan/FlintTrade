@@ -102,7 +102,12 @@ const docRouteBySourcePath = new Map(
 const repositoryFileUrls = new Map([
   ['changelog.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/changelog.md'],
   ['contributing.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/contributing.md'],
+  ['docs/releases/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/releases'],
+  ['docs/screenshots/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/screenshots'],
+  ['docs/setup/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/setup'],
+  ['docs/superpowers/specs/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/superpowers/specs'],
   ['disclaimer.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/disclaimer.md'],
+  ['flint.toml', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/flint.toml'],
   ['LICENSE', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/LICENSE'],
   ['readme.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/readme.md'],
   ['security.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/security.md'],
