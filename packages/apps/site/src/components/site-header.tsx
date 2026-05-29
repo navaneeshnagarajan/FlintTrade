@@ -1,7 +1,6 @@
+import { LogoIcon } from '@flinttrade/design-system/brand';
 import { Github } from 'lucide-react';
-import Image from 'next/image';
 import Link from 'next/link';
-import { flinttradeAsset } from '@/lib/site-assets';
 
 const navItems = [
   { href: '/docs', label: 'Docs' },
@@ -14,7 +13,7 @@ export function SiteHeader() {
   return (
     <header className="site-header">
       <Link href="/" className="brand-link" aria-label="FlintTrade home">
-        <Image src={flinttradeAsset('logo.svg')} alt="" width={34} height={34} />
+        <LogoIcon size={24} aria-hidden="true" />
         <span>FlintTrade</span>
       </Link>
       <nav className="main-nav" aria-label="Primary navigation">

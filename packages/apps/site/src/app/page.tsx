@@ -1,3 +1,4 @@
+import { LogoIcon } from '@flinttrade/design-system/brand';
 import { ArrowRight, Bot, Cable, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -85,7 +86,7 @@ export default function HomePage() {
               />
             ))}
             <div className="hero-logo-mark hero-logo-reveal">
-              <Image src={flinttradeAsset('logo.svg')} alt="" width={86} height={86} priority />
+              <LogoIcon size={86} aria-hidden="true" />
             </div>
           </div>
           <h1 aria-label="FlintTrade">

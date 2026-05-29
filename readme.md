@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://flinttrade.vercel.app/flinttrade/logo.svg?v=20260529" alt="FlintTrade logo" width="120" />
+  <img src="https://flinttrade.vercel.app/flinttrade/logo.svg?v=20260530" alt="FlintTrade logo" width="120" />
 </p>
 
 # FlintTrade
@@ -16,12 +16,12 @@
 A self-hosted trading workspace that turns native broker sessions, optional OpenAlgo-compatible integrations, real-time tick streams, and a strategy engine into one keyboard-driven cockpit you actually own.
 
 <p align="center">
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260529"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260529" alt="Cinematic welcome screen on first launch" width="48%" /></a>
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260529"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260529" alt="Trade canvas with Dockview widget-composable workspace" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260530" alt="Cinematic welcome screen on first launch" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/04-trade.png?v=20260530" alt="Trade canvas with Dockview widget-composable workspace" width="48%" /></a>
 </p>
 <p align="center">
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260529"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260529" alt="AI Centre with chat, signals, sentiment, and RAG panels" width="48%" /></a>
-  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260529"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260529" alt="Strategy Lab for backtest, forward test, and walk-forward optimisation" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/08-ai.png?v=20260530" alt="AI Centre with chat, signals, sentiment, and RAG panels" width="48%" /></a>
+  <a href="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/06-lab.png?v=20260530" alt="Strategy Lab for backtest, forward test, and walk-forward optimisation" width="48%" /></a>
 </p>
 
 ## Alpha disclaimer
