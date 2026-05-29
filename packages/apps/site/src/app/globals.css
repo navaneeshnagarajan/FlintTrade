@@ -24,11 +24,14 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 body {
   min-height: 100vh;
   margin: 0;
+  overflow: visible;
   background:
     radial-gradient(circle at 50% 22%, rgba(52, 211, 153, 0.16), transparent 31rem),
     radial-gradient(circle at 50% 58%, rgba(56, 189, 248, 0.08), transparent 35rem),
@@ -52,7 +55,8 @@ kbd {
 .site-shell {
   position: relative;
   min-height: 100vh;
-  overflow: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 .site-shell::before {
