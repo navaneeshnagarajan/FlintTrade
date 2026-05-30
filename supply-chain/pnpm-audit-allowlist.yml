@@ -1,1 +1,13 @@
+# pnpm-audit suppression allowlist (sub-spec §5.3).
+#
+# scripts/pnpm-audit-with-allowlist.py reads this. Entries expire on `expires`
+# (ISO date); expired entries stop suppressing the advisory.
+#
+# Example:
+#   allowlist:
+#     - advisory: "GHSA-xxxx-xxxx-xxxx"
+#       package: "some-node-dep"
+#       reason: "dev-only tooling; not shipped to the browser bundle"
+#       accepted_by: "navaneesh"
+#       expires: "2026-08-23"
 allowlist: []

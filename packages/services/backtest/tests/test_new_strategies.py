@@ -98,7 +98,7 @@ def _run_strategy(strategy: Any, bars: list[Any], **kwargs: Any) -> list[Any]:
 # ===========================================================================
 
 def test_mtf_rsi_trend_instantiates_and_runs() -> None:
-    from strategies.mtf_rsi_trend import MTFRSITrend
+    from flinttrade_backtest.strategies.mtf_rsi_trend import MTFRSITrend
     s = MTFRSITrend(symbol="NIFTY")
     bars = _make_bars(60)
     orders = _run_strategy(s, bars)
@@ -107,7 +107,7 @@ def test_mtf_rsi_trend_instantiates_and_runs() -> None:
 
 
 def test_mtf_rsi_trend_with_htf() -> None:
-    from strategies.mtf_rsi_trend import MTFRSITrend
+    from flinttrade_backtest.strategies.mtf_rsi_trend import MTFRSITrend
     s = MTFRSITrend(symbol="NIFTY")
     bars = _make_bars(60)
     htf = _make_bars(60, start=100.0, seed=99)
@@ -118,7 +118,7 @@ def test_mtf_rsi_trend_with_htf() -> None:
 
 
 def test_mtf_ema_breakout_instantiates_and_runs() -> None:
-    from strategies.mtf_ema_breakout import MTFEMABreakout
+    from flinttrade_backtest.strategies.mtf_ema_breakout import MTFEMABreakout
     s = MTFEMABreakout(symbol="BANKNIFTY")
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -126,7 +126,7 @@ def test_mtf_ema_breakout_instantiates_and_runs() -> None:
 
 
 def test_mtf_vwap_scalp_instantiates_and_runs() -> None:
-    from strategies.mtf_vwap_scalp import MTFVWAPScalp
+    from flinttrade_backtest.strategies.mtf_vwap_scalp import MTFVWAPScalp
     s = MTFVWAPScalp(symbol="NIFTY")
     bars = _intraday_bars(60)
     orders = _run_strategy(s, bars)
@@ -134,7 +134,7 @@ def test_mtf_vwap_scalp_instantiates_and_runs() -> None:
 
 
 def test_mtf_supertrend_confluence_instantiates_and_runs() -> None:
-    from strategies.mtf_supertrend_confluence import MTFSupertrendConfluence
+    from flinttrade_backtest.strategies.mtf_supertrend_confluence import MTFSupertrendConfluence
     s = MTFSupertrendConfluence(symbol="NIFTY")
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -142,7 +142,7 @@ def test_mtf_supertrend_confluence_instantiates_and_runs() -> None:
 
 
 def test_mtf_macd_momentum_instantiates_and_runs() -> None:
-    from strategies.mtf_macd_momentum import MTFMACDMomentum
+    from flinttrade_backtest.strategies.mtf_macd_momentum import MTFMACDMomentum
     s = MTFMACDMomentum(symbol="NIFTY")
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -154,7 +154,7 @@ def test_mtf_macd_momentum_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_pairs_ratio_reversion_instantiates_and_runs() -> None:
-    from strategies.pairs_ratio_reversion import PairsRatioReversion
+    from flinttrade_backtest.strategies.pairs_ratio_reversion import PairsRatioReversion
     s = PairsRatioReversion(symbol="HDFCBANK", symbol_b="ICICIBANK")
     bars_a = _make_bars(100)
     bars_b = _make_bars(100, start=105.0, seed=77)
@@ -165,7 +165,7 @@ def test_pairs_ratio_reversion_instantiates_and_runs() -> None:
 
 
 def test_pairs_cointegration_instantiates_and_runs() -> None:
-    from strategies.pairs_cointegration import PairsCointegration
+    from flinttrade_backtest.strategies.pairs_cointegration import PairsCointegration
     s = PairsCointegration(symbol="RELIANCE")
     bars_a = _make_bars(100)
     bars_b = _make_bars(100, start=200.0, seed=55)
@@ -176,7 +176,7 @@ def test_pairs_cointegration_instantiates_and_runs() -> None:
 
 
 def test_stat_regime_hmm_instantiates_and_runs() -> None:
-    from strategies.stat_regime_hmm import StatRegimeHMM
+    from flinttrade_backtest.strategies.stat_regime_hmm import StatRegimeHMM
     s = StatRegimeHMM(symbol="NIFTY", warmup=30, lookback=50)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -184,7 +184,7 @@ def test_stat_regime_hmm_instantiates_and_runs() -> None:
 
 
 def test_stat_kalman_filter_instantiates_and_runs() -> None:
-    from strategies.stat_kalman_filter import StatKalmanFilter
+    from flinttrade_backtest.strategies.stat_kalman_filter import StatKalmanFilter
     s = StatKalmanFilter(symbol="NIFTY")
     bars_a = _make_bars(80)
     bars_b = _make_bars(80, start=105.0, seed=33)
@@ -199,7 +199,7 @@ def test_stat_kalman_filter_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_intraday_orb_atr_instantiates_and_runs() -> None:
-    from strategies.intraday_orb_atr import IntradayORBATR
+    from flinttrade_backtest.strategies.intraday_orb_atr import IntradayORBATR
     s = IntradayORBATR(symbol="NIFTY", orb_minutes=3)
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -207,7 +207,7 @@ def test_intraday_orb_atr_instantiates_and_runs() -> None:
 
 
 def test_intraday_gap_fill_instantiates_and_runs() -> None:
-    from strategies.intraday_gap_fill import IntradayGapFill
+    from flinttrade_backtest.strategies.intraday_gap_fill import IntradayGapFill
     s = IntradayGapFill(symbol="NIFTY")
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -215,7 +215,7 @@ def test_intraday_gap_fill_instantiates_and_runs() -> None:
 
 
 def test_intraday_first_candle_instantiates_and_runs() -> None:
-    from strategies.intraday_first_candle import IntradayFirstCandle
+    from flinttrade_backtest.strategies.intraday_first_candle import IntradayFirstCandle
     s = IntradayFirstCandle(symbol="NIFTY")
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -223,7 +223,7 @@ def test_intraday_first_candle_instantiates_and_runs() -> None:
 
 
 def test_intraday_vwap_bounce_instantiates_and_runs() -> None:
-    from strategies.intraday_vwap_bounce import IntradayVWAPBounce
+    from flinttrade_backtest.strategies.intraday_vwap_bounce import IntradayVWAPBounce
     s = IntradayVWAPBounce(symbol="NIFTY")
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -231,7 +231,7 @@ def test_intraday_vwap_bounce_instantiates_and_runs() -> None:
 
 
 def test_intraday_expiry_day_instantiates_and_runs() -> None:
-    from strategies.intraday_expiry_day import IntradayExpiryDay
+    from flinttrade_backtest.strategies.intraday_expiry_day import IntradayExpiryDay
     s = IntradayExpiryDay(symbol="NIFTY")
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -239,7 +239,7 @@ def test_intraday_expiry_day_instantiates_and_runs() -> None:
 
 
 def test_intraday_pre_market_instantiates_and_runs() -> None:
-    from strategies.intraday_pre_market import IntradayPreMarket
+    from flinttrade_backtest.strategies.intraday_pre_market import IntradayPreMarket
     s = IntradayPreMarket(symbol="NIFTY")
     s.set_premarket_data(oi_change_pct=8.0, delivery_pct=60.0)
     bars = _intraday_bars(80)
@@ -252,7 +252,7 @@ def test_intraday_pre_market_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_options_jade_lizard_instantiates_and_runs() -> None:
-    from strategies.options_jade_lizard import OptionsJadeLizard
+    from flinttrade_backtest.strategies.options_jade_lizard import OptionsJadeLizard
     s = OptionsJadeLizard(symbol="NIFTY25JAN19500CE")
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -260,7 +260,7 @@ def test_options_jade_lizard_instantiates_and_runs() -> None:
 
 
 def test_options_ratio_spread_instantiates_and_runs() -> None:
-    from strategies.options_ratio_spread import OptionsRatioSpread
+    from flinttrade_backtest.strategies.options_ratio_spread import OptionsRatioSpread
     s = OptionsRatioSpread(symbol="NIFTY_RATIO")
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -268,7 +268,7 @@ def test_options_ratio_spread_instantiates_and_runs() -> None:
 
 
 def test_options_calendar_spread_instantiates_and_runs() -> None:
-    from strategies.options_calendar_spread import OptionsCalendarSpread
+    from flinttrade_backtest.strategies.options_calendar_spread import OptionsCalendarSpread
     s = OptionsCalendarSpread(symbol="NIFTY_CAL")
     bars = _intraday_bars(80)
     orders = _run_strategy(s, bars)
@@ -276,7 +276,7 @@ def test_options_calendar_spread_instantiates_and_runs() -> None:
 
 
 def test_options_butterfly_instantiates_and_runs() -> None:
-    from strategies.options_butterfly import OptionsButterfly, OptionsIronButterfly
+    from flinttrade_backtest.strategies.options_butterfly import OptionsButterfly, OptionsIronButterfly
     s1 = OptionsButterfly(symbol="NIFTY_BFLY")
     s2 = OptionsIronButterfly(symbol="NIFTY_IBFLY")
     bars = _intraday_bars(80)
@@ -287,7 +287,7 @@ def test_options_butterfly_instantiates_and_runs() -> None:
 
 
 def test_options_collar_instantiates_and_runs() -> None:
-    from strategies.options_collar import OptionsCollar
+    from flinttrade_backtest.strategies.options_collar import OptionsCollar
     s = OptionsCollar(symbol="RELIANCE")
     bars = _intraday_bars(60)
     orders = _run_strategy(s, bars)
@@ -299,7 +299,7 @@ def test_options_collar_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_event_earnings_instantiates_and_runs() -> None:
-    from strategies.event_earnings import EventEarnings
+    from flinttrade_backtest.strategies.event_earnings import EventEarnings
     s = EventEarnings(symbol="TCS")
     bars = _make_bars(60)
     s.set_event_date(bar_index=40)
@@ -308,7 +308,7 @@ def test_event_earnings_instantiates_and_runs() -> None:
 
 
 def test_event_rbi_policy_instantiates_and_runs() -> None:
-    from strategies.event_rbi_policy import EventRBIPolicy
+    from flinttrade_backtest.strategies.event_rbi_policy import EventRBIPolicy
     s = EventRBIPolicy(symbol="NIFTY")
     bars = _make_bars(60)
     s.set_event(bar_index=30, rate_bias=1)
@@ -317,7 +317,7 @@ def test_event_rbi_policy_instantiates_and_runs() -> None:
 
 
 def test_event_expiry_oi_instantiates_and_runs() -> None:
-    from strategies.event_expiry_oi import EventExpiryOI
+    from flinttrade_backtest.strategies.event_expiry_oi import EventExpiryOI
     s = EventExpiryOI(symbol="NIFTY")
     bars = _make_bars(60)
     s.set_max_pain(max_pain_level=105.0, expiry_bar_idx=55)
@@ -326,7 +326,7 @@ def test_event_expiry_oi_instantiates_and_runs() -> None:
 
 
 def test_event_fii_flow_instantiates_and_runs() -> None:
-    from strategies.event_fii_flow import EventFIIFlow
+    from flinttrade_backtest.strategies.event_fii_flow import EventFIIFlow
     s = EventFIIFlow(symbol="NIFTY")
     s.set_flow_data(fii_net_cr=1200.0, dii_net_cr=300.0)
     bars = _intraday_bars(60)
@@ -339,7 +339,7 @@ def test_event_fii_flow_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_crypto_funding_arb_instantiates_and_runs() -> None:
-    from strategies.crypto_funding_arb import CryptoFundingArb
+    from flinttrade_backtest.strategies.crypto_funding_arb import CryptoFundingArb
     s = CryptoFundingArb(symbol="BTCUSDT-PERP")
     bars = _make_bars(60)
     for i, bar in enumerate(bars):
@@ -350,7 +350,7 @@ def test_crypto_funding_arb_instantiates_and_runs() -> None:
 
 
 def test_crypto_grid_instantiates_and_runs() -> None:
-    from strategies.crypto_grid import CryptoGrid
+    from flinttrade_backtest.strategies.crypto_grid import CryptoGrid
     s = CryptoGrid(symbol="ETHUSDT", grid_levels=3, recalc_bars=10)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -358,7 +358,7 @@ def test_crypto_grid_instantiates_and_runs() -> None:
 
 
 def test_crypto_dca_momentum_instantiates_and_runs() -> None:
-    from strategies.crypto_dca_momentum import CryptoDCAMomentum
+    from flinttrade_backtest.strategies.crypto_dca_momentum import CryptoDCAMomentum
     s = CryptoDCAMomentum(symbol="BTCUSDT", dca_interval=10)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -366,7 +366,7 @@ def test_crypto_dca_momentum_instantiates_and_runs() -> None:
 
 
 def test_crypto_breakout_volume_instantiates_and_runs() -> None:
-    from strategies.crypto_breakout_volume import CryptoBreakoutVolume
+    from flinttrade_backtest.strategies.crypto_breakout_volume import CryptoBreakoutVolume
     s = CryptoBreakoutVolume(symbol="SOLUSDT", period=10, obv_ema_period=5)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -378,7 +378,7 @@ def test_crypto_breakout_volume_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_commodity_seasonal_instantiates_and_runs() -> None:
-    from strategies.commodity_seasonal import CommoditySeasonal
+    from flinttrade_backtest.strategies.commodity_seasonal import CommoditySeasonal
     s = CommoditySeasonal(symbol="GOLD", bullish_months={10, 11, 12, 1, 2})
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -386,7 +386,7 @@ def test_commodity_seasonal_instantiates_and_runs() -> None:
 
 
 def test_commodity_seasonal_with_seasonal_data() -> None:
-    from strategies.commodity_seasonal import CommoditySeasonal
+    from flinttrade_backtest.strategies.commodity_seasonal import CommoditySeasonal
     seasonal = {1: 1, 2: 1, 3: 0, 4: -1, 5: -1, 6: 0,
                 7: 1, 8: 1, 9: 0, 10: 1, 11: 1, 12: 1}
     s = CommoditySeasonal(symbol="CRUDEOIL", seasonal_data=seasonal)
@@ -396,7 +396,7 @@ def test_commodity_seasonal_with_seasonal_data() -> None:
 
 
 def test_commodity_spread_instantiates_and_runs() -> None:
-    from strategies.commodity_spread import CommoditySpread
+    from flinttrade_backtest.strategies.commodity_spread import CommoditySpread
     s = CommoditySpread(symbol="CRUDEOIL-NEAR")
     bars_near = _make_bars(80)
     bars_far = _make_bars(80, start=102.0, seed=66)
@@ -407,7 +407,7 @@ def test_commodity_spread_instantiates_and_runs() -> None:
 
 
 def test_commodity_inventory_instantiates_and_runs() -> None:
-    from strategies.commodity_inventory import CommodityInventory
+    from flinttrade_backtest.strategies.commodity_inventory import CommodityInventory
     s = CommodityInventory(symbol="CRUDEOIL")
     bars = _make_bars(60)
     s.set_inventory_data(actual_mbbl=-2.5, expected_mbbl=1.0, event_bar_idx=20)
@@ -420,7 +420,7 @@ def test_commodity_inventory_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_ml_feature_signal_instantiates_and_runs() -> None:
-    from strategies.ml_feature_signal import MLFeatureSignal
+    from flinttrade_backtest.strategies.ml_feature_signal import MLFeatureSignal
     s = MLFeatureSignal(symbol="NIFTY", warmup=30)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -428,13 +428,13 @@ def test_ml_feature_signal_instantiates_and_runs() -> None:
 
 
 def test_ml_feature_signal_name() -> None:
-    from strategies.ml_feature_signal import MLFeatureSignal
+    from flinttrade_backtest.strategies.ml_feature_signal import MLFeatureSignal
     s = MLFeatureSignal()
     assert "LightGBM" in s.name or "ML" in s.name
 
 
 def test_ml_regime_classifier_instantiates_and_runs() -> None:
-    from strategies.ml_regime_classifier import MLRegimeClassifier
+    from flinttrade_backtest.strategies.ml_regime_classifier import MLRegimeClassifier
     s = MLRegimeClassifier(symbol="NIFTY", warmup=30, retrain_interval=30)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -442,7 +442,7 @@ def test_ml_regime_classifier_instantiates_and_runs() -> None:
 
 
 def test_ml_ensemble_voter_instantiates_and_runs() -> None:
-    from strategies.ml_ensemble_voter import MLEnsembleVoter
+    from flinttrade_backtest.strategies.ml_ensemble_voter import MLEnsembleVoter
     s = MLEnsembleVoter(symbol="NIFTY", vote_threshold=2)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -450,7 +450,7 @@ def test_ml_ensemble_voter_instantiates_and_runs() -> None:
 
 
 def test_ml_adaptive_params_instantiates_and_runs() -> None:
-    from strategies.ml_adaptive_params import MLAdaptiveParams
+    from flinttrade_backtest.strategies.ml_adaptive_params import MLAdaptiveParams
     s = MLAdaptiveParams(symbol="NIFTY", adapt_interval=30)
     bars = _make_bars(80)
     orders = _run_strategy(s, bars)
@@ -462,7 +462,7 @@ def test_ml_adaptive_params_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_portfolio_equal_weight_instantiates_and_runs() -> None:
-    from strategies.portfolio_equal_weight import PortfolioEqualWeight
+    from flinttrade_backtest.strategies.portfolio_equal_weight import PortfolioEqualWeight
     s = PortfolioEqualWeight(symbol="NIFTY", rebalance_bars=10)
     bars = _make_bars(60)
     orders = _run_strategy(s, bars)
@@ -471,7 +471,7 @@ def test_portfolio_equal_weight_instantiates_and_runs() -> None:
 
 
 def test_portfolio_risk_parity_instantiates_and_runs() -> None:
-    from strategies.portfolio_risk_parity import PortfolioRiskParity
+    from flinttrade_backtest.strategies.portfolio_risk_parity import PortfolioRiskParity
     s = PortfolioRiskParity(symbol="NIFTY", rebalance_bars=10)
     bars = _make_bars(60)
     orders = _run_strategy(s, bars)
@@ -479,7 +479,7 @@ def test_portfolio_risk_parity_instantiates_and_runs() -> None:
 
 
 def test_portfolio_momentum_rotation_instantiates_and_runs() -> None:
-    from strategies.portfolio_momentum_rotation import PortfolioMomentumRotation
+    from flinttrade_backtest.strategies.portfolio_momentum_rotation import PortfolioMomentumRotation
     s = PortfolioMomentumRotation(symbol="NIFTY", rebalance_bars=10, momentum_period=10)
     bars = _make_bars(60)
     orders = _run_strategy(s, bars)
@@ -487,7 +487,7 @@ def test_portfolio_momentum_rotation_instantiates_and_runs() -> None:
 
 
 def test_portfolio_min_variance_instantiates_and_runs() -> None:
-    from strategies.portfolio_min_variance import PortfolioMinVariance
+    from flinttrade_backtest.strategies.portfolio_min_variance import PortfolioMinVariance
     s = PortfolioMinVariance(symbol="NIFTY", rebalance_bars=10)
     bars = _make_bars(60)
     orders = _run_strategy(s, bars)
@@ -499,7 +499,7 @@ def test_portfolio_min_variance_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_scalp_tape_reading_instantiates_and_runs() -> None:
-    from strategies.scalp_tape_reading import ScalpTapeReading
+    from flinttrade_backtest.strategies.scalp_tape_reading import ScalpTapeReading
     s = ScalpTapeReading(symbol="NIFTY", lookback=3)
     bars = _intraday_bars(60)
     orders = _run_strategy(s, bars)
@@ -507,7 +507,7 @@ def test_scalp_tape_reading_instantiates_and_runs() -> None:
 
 
 def test_scalp_level2_squeeze_instantiates_and_runs() -> None:
-    from strategies.scalp_level2_squeeze import ScalpLevel2Squeeze
+    from flinttrade_backtest.strategies.scalp_level2_squeeze import ScalpLevel2Squeeze
     s = ScalpLevel2Squeeze(symbol="NIFTY", atr_period=5)
     bars = _intraday_bars(60)
     orders = _run_strategy(s, bars)
@@ -515,7 +515,7 @@ def test_scalp_level2_squeeze_instantiates_and_runs() -> None:
 
 
 def test_scalp_tick_momentum_instantiates_and_runs() -> None:
-    from strategies.scalp_tick_momentum import ScalpTickMomentum
+    from flinttrade_backtest.strategies.scalp_tick_momentum import ScalpTickMomentum
     s = ScalpTickMomentum(symbol="NIFTY", consec_bars=2)
     bars = _intraday_bars(60)
     orders = _run_strategy(s, bars)
@@ -523,7 +523,7 @@ def test_scalp_tick_momentum_instantiates_and_runs() -> None:
 
 
 def test_scalp_spread_capture_instantiates_and_runs() -> None:
-    from strategies.scalp_spread_capture import ScalpSpreadCapture
+    from flinttrade_backtest.strategies.scalp_spread_capture import ScalpSpreadCapture
     s = ScalpSpreadCapture(symbol="NIFTY", mid_period=3, atr_period=5)
     bars = _intraday_bars(60)
     orders = _run_strategy(s, bars)
@@ -535,7 +535,7 @@ def test_scalp_spread_capture_instantiates_and_runs() -> None:
 # ===========================================================================
 
 def test_all_strategies_registry_contains_new_batch() -> None:
-    from strategies import ALL_STRATEGIES
+    from flinttrade_backtest.strategies import ALL_STRATEGIES
     expected_keys = [
         "MTFRSITrend", "MTFEMABreakout", "MTFVWAPScalp",
         "MTFSupertrendConfluence", "MTFMACDMomentum",
@@ -564,7 +564,7 @@ def test_all_strategies_registry_contains_new_batch() -> None:
 
 def test_all_new_strategies_instantiate() -> None:
     """Instantiate every new strategy via the registry with default params."""
-    from strategies import ALL_STRATEGIES
+    from flinttrade_backtest.strategies import ALL_STRATEGIES
     new_keys = [
         "MTFRSITrend", "MTFEMABreakout", "MTFVWAPScalp",
         "MTFSupertrendConfluence", "MTFMACDMomentum",
@@ -592,7 +592,7 @@ def test_all_new_strategies_instantiate() -> None:
 def test_all_new_strategies_on_bar_no_exception() -> None:
     """Call on_bar() on every new strategy with a synthetic bar."""
     from flinttrade_core.models import OHLCV
-    from strategies import ALL_STRATEGIES
+    from flinttrade_backtest.strategies import ALL_STRATEGIES
     new_keys = [
         "MTFRSITrend", "MTFEMABreakout", "MTFVWAPScalp",
         "MTFSupertrendConfluence", "MTFMACDMomentum",

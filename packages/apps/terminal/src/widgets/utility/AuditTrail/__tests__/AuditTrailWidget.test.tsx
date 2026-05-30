@@ -47,9 +47,9 @@ describe("AuditTrailWidget", () => {
     expect(screen.getByText("Audit Trail")).toBeTruthy();
   });
 
-  it("renders SEBI badge", () => {
+  it("renders audit-log badge", () => {
     render(<AuditTrailWidget />, { wrapper });
-    expect(screen.getByText("SEBI 5yr")).toBeTruthy();
+    expect(screen.getByText("Audit log")).toBeTruthy();
   });
 
   it("renders table column headers", () => {

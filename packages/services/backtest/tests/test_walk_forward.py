@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from walk_forward import (
+from flinttrade_backtest.walk_forward import (
     WalkForwardConfig,
     WalkForwardResult,
     WalkForwardAnalyser,

@@ -218,7 +218,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "earningscalendar", name: "Earnings Calendar", icon: "CalendarDays", category: "Utility", description: "Upcoming earnings announcements and results calendar for NSE stocks" },
   { id: "globalindices", name: "Global Indices", icon: "Globe", category: "Utility", description: "Live prices for major global indices: SGX Nifty, Dow, S&P, Nasdaq, etc." },
   { id: "strategytemplates", name: "Strategy Templates", icon: "BookOpen", category: "Utility", description: "Library of pre-built option strategy templates to launch from one click" },
-  { id: "audittrail", name: "Audit Trail", icon: "ScrollText", category: "Utility", description: "SEBI-compliant immutable audit log of all orders and account events" },
+  { id: "audittrail", name: "Audit Trail", icon: "ScrollText", category: "Utility", description: "Append-only audit log of all orders and account events" },
   { id: "economiccalendar", name: "Economic Calendar", icon: "CalendarClock", category: "Utility", description: "Macro economic event calendar with market impact ratings" },
   { id: "profittarget", name: "Profit Target Calc", icon: "Target", category: "Utility", description: "Position-aware profit target and stop-loss calculator with R:R ratio" },
   { id: "expirycountdown", name: "Expiry Countdown", icon: "Timer", category: "Utility", description: "Countdown timers to weekly and monthly expiry across all segments" },

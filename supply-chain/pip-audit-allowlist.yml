@@ -1,1 +1,16 @@
+# pip-audit suppression allowlist (sub-spec §3.3).
+#
+# Every entry MUST carry all five fields; scripts/pip-audit-with-allowlist.py skips
+# (with a warning) any entry missing one. Entries expire on `expires` (ISO date,
+# 90-day max from acceptance); expired entries stop suppressing — the underlying
+# finding re-fails so risk acceptance is reviewed quarterly, never silently renewed.
+#
+# Example:
+#   allowlist:
+#     - vuln_id: "GHSA-xxxx-xxxx-xxxx"
+#       package: "some-transitive-dep"
+#       affected_version: "1.2.3"
+#       reason: "vuln only triggers when feature X is enabled; flinttrade never enables it"
+#       accepted_by: "navaneesh"
+#       expires: "2026-08-23"
 allowlist: []

@@ -121,7 +121,7 @@ const BASICS_SECTIONS: BasicsSection[] = [
     readingTime: 2,
     difficulty: "Beginner",
     content:
-      "SEBI (Securities and Exchange Board of India) regulates Indian markets. Key rules: maximum 10 orders per second for algo trading, mandatory 5-year audit trail, static IP required for API trading. FlintTrade is designed to comply with all SEBI regulations automatically.",
+      "SEBI (Securities and Exchange Board of India) regulates Indian markets. For personal algo trading the practical requirements are a static IP for API access and your broker's order-rate limit (around 10 orders/second). FlintTrade is personal-use software that respects these operational limits — it makes no regulatory-compliance guarantee; you remain responsible for your own trading.",
   },
 ];
 

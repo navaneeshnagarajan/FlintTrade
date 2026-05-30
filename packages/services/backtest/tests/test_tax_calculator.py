@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:  # forward-ref for `-> "IndianTaxCalculator"` annotation
-    from tax_calculator import IndianTaxCalculator
+    from flinttrade_backtest.tax_calculator import IndianTaxCalculator
 
 
 # ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ if TYPE_CHECKING:  # forward-ref for `-> "IndianTaxCalculator"` annotation
 
 
 def _calc(instrument_type: str = "fo", brokerage: float = 20.0) -> "IndianTaxCalculator":
-    from tax_calculator import IndianTaxCalculator, Exchange
+    from flinttrade_backtest.tax_calculator import IndianTaxCalculator, Exchange
     exchange_map = {
         "fo": "NSE_FO",
         "equity_delivery": "NSE",
@@ -45,7 +45,7 @@ class TestSTT:
 
     def test_delivery_buy_stt(self):
         """Delivery buy: 0.1% STT."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_delivery", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=True)
         # 0.1% of 100,000 = 100
@@ -53,21 +53,21 @@ class TestSTT:
 
     def test_delivery_sell_stt(self):
         """Delivery sell: 0.1% STT."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_delivery", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=False)
         assert bd.stt == Decimal("100.00")
 
     def test_intraday_buy_no_stt(self):
         """Intraday buy: no STT."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_intraday", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.INTRADAY, is_buy=True)
         assert bd.stt == Decimal("0")
 
     def test_intraday_sell_stt(self):
         """Intraday sell: 0.025% STT."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_intraday", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.INTRADAY, is_buy=False)
         # 0.025% of 100,000 = 25
@@ -75,21 +75,21 @@ class TestSTT:
 
     def test_fo_buy_no_stt(self):
         """F&O buy: no STT on buy side."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         assert bd.stt == Decimal("0")
 
     def test_fo_sell_stt(self):
         """F&O sell: 0.05% STT (updated April 2026 per Finance Act)."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=False)
         # 0.05% of 100,000 = 50.00
         assert bd.stt == Decimal("50.00")
 
     def test_stt_zero_for_small_fo_buy(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("500"), TradeType.FO, is_buy=True)
         assert bd.stt == Decimal("0")
@@ -105,7 +105,7 @@ class TestStampDuty:
 
     def test_delivery_buy_stamp_duty(self):
         """Delivery buy stamp duty: 0.015%."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_delivery", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=True)
         # 0.015% of 100,000 = 15
@@ -113,7 +113,7 @@ class TestStampDuty:
 
     def test_intraday_buy_stamp_duty(self):
         """Intraday buy stamp duty: 0.003%."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_intraday", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.INTRADAY, is_buy=True)
         # 0.003% of 100,000 = 3
@@ -121,7 +121,7 @@ class TestStampDuty:
 
     def test_fo_buy_stamp_duty(self):
         """F&O buy stamp duty: 0.002%."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         # 0.002% of 100,000 = 2
@@ -129,7 +129,7 @@ class TestStampDuty:
 
     def test_no_stamp_duty_on_sell(self):
         """All sell legs: stamp duty = 0."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_delivery", brokerage=0)
         for tt in (TradeType.DELIVERY, TradeType.INTRADAY, TradeType.FO):
             bd = calc.calculate(Decimal("100000"), tt, is_buy=False)
@@ -146,7 +146,7 @@ class TestExchangeCharges:
 
     def test_nse_charge_rate(self):
         """NSE: 0.00325% = 3.25 per 100,000."""
-        from tax_calculator import IndianTaxCalculator, Exchange, TradeType
+        from flinttrade_backtest.tax_calculator import IndianTaxCalculator, Exchange, TradeType
         calc = IndianTaxCalculator(
             instrument_type="equity_delivery",
             exchange=Exchange.NSE,
@@ -158,7 +158,7 @@ class TestExchangeCharges:
 
     def test_bse_charge_rate(self):
         """BSE: 0.00375% = 3.75 per 100,000."""
-        from tax_calculator import IndianTaxCalculator, Exchange, TradeType
+        from flinttrade_backtest.tax_calculator import IndianTaxCalculator, Exchange, TradeType
         calc = IndianTaxCalculator(
             instrument_type="equity_delivery",
             exchange=Exchange.BSE,
@@ -169,7 +169,7 @@ class TestExchangeCharges:
 
     def test_nse_fo_charge_rate(self):
         """NSE F&O: 0.005% = 5 per 100,000."""
-        from tax_calculator import IndianTaxCalculator, Exchange, TradeType
+        from flinttrade_backtest.tax_calculator import IndianTaxCalculator, Exchange, TradeType
         calc = IndianTaxCalculator(
             instrument_type="fo",
             exchange=Exchange.NSE_FO,
@@ -189,20 +189,20 @@ class TestSEBIFee:
 
     def test_sebi_fee_on_100k(self):
         """0.0001% of 100,000 = 0.10."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         assert bd.sebi_fee == Decimal("0.10")
 
     def test_sebi_fee_on_1m(self):
         """0.0001% of 1,000,000 = 1.00."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("1000000"), TradeType.FO, is_buy=False)
         assert bd.sebi_fee == Decimal("1.00")
 
     def test_sebi_fee_scales_linearly(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd1 = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         bd2 = calc.calculate(Decimal("200000"), TradeType.FO, is_buy=True)
@@ -219,7 +219,7 @@ class TestGST:
 
     def test_gst_on_brokerage_only(self):
         """With zero exchange charges and SEBI fee, GST = 18% of brokerage."""
-        from tax_calculator import IndianTaxCalculator, Exchange, TradeType
+        from flinttrade_backtest.tax_calculator import IndianTaxCalculator, Exchange, TradeType
         # Use tiny trade value so exchange charges ≈ 0
         calc = IndianTaxCalculator(
             instrument_type="fo",
@@ -231,7 +231,7 @@ class TestGST:
         assert bd.gst == pytest.approx(18.0, abs=0.5)
 
     def test_gst_rate_correct(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         # GST = 18% of (exchange_charges + sebi_fee)
@@ -241,7 +241,7 @@ class TestGST:
 
     def test_gst_not_on_stt_or_stamp_duty(self):
         """STT and stamp duty are government taxes — GST must not apply to them."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_delivery", brokerage=0)
         bd = calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=True)
         # Verify by checking that brokerage + exchange + sebi_fee gives correct GST
@@ -259,14 +259,14 @@ class TestTotalCharges:
     """Total charge = sum of all components."""
 
     def test_total_is_sum_of_components(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         bd = calc.calculate(Decimal("500000"), TradeType.FO, is_buy=False)
         expected = bd.brokerage + bd.stt + bd.stamp_duty + bd.exchange_charges + bd.sebi_fee + bd.gst
         assert bd.total_charges == expected.quantize(Decimal("0.01"))
 
     def test_round_trip_total_sum_of_legs(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         entry_bd, exit_bd, total = calc.calculate_round_trip(
             Decimal("500000"), Decimal("520000"), TradeType.FO
@@ -274,7 +274,7 @@ class TestTotalCharges:
         assert total == entry_bd.total_charges + exit_bd.total_charges
 
     def test_net_pnl_deducts_charges(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         gross = Decimal("5000")
         net = calc.net_pnl(gross, Decimal("500000"), Decimal("505000"), TradeType.FO)
@@ -282,14 +282,14 @@ class TestTotalCharges:
         assert isinstance(net, Decimal)
 
     def test_net_pnl_can_be_negative_on_small_profit(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         # Very small profit on large trade value — charges exceed profit
         net = calc.net_pnl(Decimal("10"), Decimal("10000000"), Decimal("10000010"), TradeType.FO)
         assert net < Decimal("10")
 
     def test_charges_are_always_positive(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         for tt in (TradeType.DELIVERY, TradeType.INTRADAY, TradeType.FO):
             for is_buy in (True, False):
@@ -306,7 +306,7 @@ class TestTaxSummary:
     """Running summary across multiple trades."""
 
     def test_summary_accumulates_charges(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         for _ in range(5):
             calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
@@ -316,7 +316,7 @@ class TestTaxSummary:
         assert summary.total_charges > Decimal("0")
 
     def test_summary_trade_type_counts(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_delivery", brokerage=0)
         calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=True)
         calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=False)
@@ -326,7 +326,7 @@ class TestTaxSummary:
         assert summary.intraday_trades == 1
 
     def test_summary_reset_clears_totals(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         calc.reset()
@@ -335,7 +335,7 @@ class TestTaxSummary:
         assert summary.fo_trades == 0
 
     def test_effective_charge_rate(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         calc.calculate(Decimal("1000000"), TradeType.FO, is_buy=True)
         summary = calc.get_summary()
@@ -346,7 +346,7 @@ class TestTaxSummary:
         assert rate < Decimal("1")  # Should be well under 1%
 
     def test_total_trade_value_accumulated(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=0)
         calc.calculate(Decimal("500000"), TradeType.FO, is_buy=True)
         calc.calculate(Decimal("500000"), TradeType.FO, is_buy=False)
@@ -362,7 +362,7 @@ class TestTaxBreakdownDict:
     """TaxBreakdown.as_dict() utility."""
 
     def test_as_dict_has_all_keys(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo")
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         d = bd.as_dict()
@@ -371,7 +371,7 @@ class TestTaxBreakdownDict:
             assert key in d, f"Missing key: {key}"
 
     def test_as_dict_values_are_strings(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo")
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=True)
         for k, v in bd.as_dict().items():
@@ -387,25 +387,25 @@ class TestFactoryFunctions:
     """make_equity_calculator, make_intraday_calculator, make_fo_calculator."""
 
     def test_equity_calc_zero_brokerage(self):
-        from tax_calculator import make_equity_calculator, TradeType
+        from flinttrade_backtest.tax_calculator import make_equity_calculator, TradeType
         calc = make_equity_calculator()
         bd = calc.calculate(Decimal("100000"), TradeType.DELIVERY, is_buy=True)
         assert bd.brokerage == Decimal("0")
 
     def test_intraday_calc_default_brokerage(self):
-        from tax_calculator import make_intraday_calculator, TradeType
+        from flinttrade_backtest.tax_calculator import make_intraday_calculator, TradeType
         calc = make_intraday_calculator()
         bd = calc.calculate(Decimal("100000"), TradeType.INTRADAY, is_buy=True)
         assert bd.brokerage == Decimal("20")
 
     def test_fo_calc_default_brokerage(self):
-        from tax_calculator import make_fo_calculator, TradeType
+        from flinttrade_backtest.tax_calculator import make_fo_calculator, TradeType
         calc = make_fo_calculator()
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=False)
         assert bd.brokerage == Decimal("20")
 
     def test_fo_calc_stt_on_sell(self):
-        from tax_calculator import make_fo_calculator, TradeType
+        from flinttrade_backtest.tax_calculator import make_fo_calculator, TradeType
         calc = make_fo_calculator()
         bd = calc.calculate(Decimal("100000"), TradeType.FO, is_buy=False)
         # 0.05% of 100,000 = 50.00 (updated April 2026 per Finance Act)
@@ -421,7 +421,7 @@ class TestEdgeCasesAndPrecision:
     """Zero trade value, large trade value, Decimal precision."""
 
     def test_zero_trade_value_charges_are_brokerage_only(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         bd = calc.calculate(Decimal("0"), TradeType.FO, is_buy=True)
         # All percentage-based charges = 0; only brokerage + GST on brokerage
@@ -433,7 +433,7 @@ class TestEdgeCasesAndPrecision:
 
     def test_large_trade_value_precision(self):
         """Rs 10 crore trade — all charges should be Decimal with 2dp."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo", brokerage=20)
         bd = calc.calculate(Decimal("100000000"), TradeType.FO, is_buy=False)
         # Verify it's 2dp
@@ -441,7 +441,7 @@ class TestEdgeCasesAndPrecision:
         assert bd.stt == bd.stt.quantize(Decimal("0.01"))
 
     def test_charges_are_decimal_type(self):
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("fo")
         bd = calc.calculate(Decimal("500000"), TradeType.FO, is_buy=True)
         assert isinstance(bd.stt, Decimal)
@@ -450,7 +450,7 @@ class TestEdgeCasesAndPrecision:
 
     def test_no_float_in_charges(self):
         """Verify no floating-point numbers sneak in."""
-        from tax_calculator import TradeType
+        from flinttrade_backtest.tax_calculator import TradeType
         calc = _calc("equity_delivery", brokerage=20)
         bd = calc.calculate(Decimal("333333"), TradeType.DELIVERY, is_buy=True)
         for attr in ("brokerage", "stt", "stamp_duty", "exchange_charges", "sebi_fee", "gst", "total_charges"):

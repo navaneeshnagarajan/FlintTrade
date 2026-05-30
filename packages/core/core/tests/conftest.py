@@ -45,13 +45,54 @@ for _rel_path in _PY_PACKAGE_SRCS:
         sys.path.append(_src)
 
 
+# DBs whose on-disk engine changed DuckDB→SQLite (activity_log, security_tracker).
+# A persistent test workspace reused across the migration may still hold the
+# legacy DuckDB file, which open_sqlite cannot read. Remove these scratch files
+# so the SQLite code recreates them fresh. Only touches the pytest workspace.
+_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db")
+
+
+def _clean_legacy_scratch_dbs(base: Path) -> None:
+    for name in _MIGRATED_SCRATCH_DBS:
+        for path in (base / name, base / f"{name}-wal", base / f"{name}-shm"):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+
+def _seed_test_master_password(base: Path) -> None:
+    # Master password no longer auto-generates (locked #13: getpass/fd only).
+    # Seed a file so app-creating tests don't block on a TTY prompt.
+    pw_file = base / "master_password"
+    try:
+        if not pw_file.exists():
+            pw_file.write_text("pytest-master-password")
+    except OSError:
+        pass
+
+
 def _isolate_workspace() -> None:
-    if os.environ.get("FLINTTRADE_WORKSPACE_DIR"):
+    # Under xdist, each worker MUST get its own workspace dir even when the
+    # controller already exported FLINTTRADE_WORKSPACE_DIR (workers inherit it),
+    # else all workers share one dir and collide on the still-DuckDB engine
+    # SandboxEngine / traffic / error logs. PYTEST_XDIST_WORKER is set per worker
+    # (gw0, gw1, …) and absent in the controller / serial runs.
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
+    if worker:
+        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / worker
+    elif existing:
+        _clean_legacy_scratch_dbs(Path(existing))
         return
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / worker
+    else:
+        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main"
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
+    _clean_legacy_scratch_dbs(base)
+    _seed_test_master_password(base)
 
 
 _isolate_workspace()

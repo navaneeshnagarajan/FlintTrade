@@ -66,7 +66,7 @@ def returns2():
 
 class TestOptimiserConfig:
     def test_defaults(self):
-        from portfolio_optimiser import OptimiserConfig
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig
         cfg = OptimiserConfig()
         assert cfg.method == "markowitz"
         assert math.isclose(cfg.risk_free_rate, 0.065)
@@ -76,28 +76,28 @@ class TestOptimiserConfig:
         assert cfg.target_return is None
 
     def test_custom_values(self):
-        from portfolio_optimiser import OptimiserConfig
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig
         cfg = OptimiserConfig(method="risk_parity", risk_free_rate=0.07, max_weight=0.5)
         assert cfg.method == "risk_parity"
         assert math.isclose(cfg.risk_free_rate, 0.07)
 
     def test_invalid_method(self):
-        from portfolio_optimiser import OptimiserConfig
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig
         with pytest.raises(Exception):
             OptimiserConfig(method="invalid_method")
 
     def test_min_gt_max_raises(self):
-        from portfolio_optimiser import OptimiserConfig
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig
         with pytest.raises(Exception):
             OptimiserConfig(min_weight=0.5, max_weight=0.2)
 
     def test_rfr_out_of_range_raises(self):
-        from portfolio_optimiser import OptimiserConfig
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig
         with pytest.raises(Exception):
             OptimiserConfig(risk_free_rate=1.5)
 
     def test_equal_min_max_allowed(self):
-        from portfolio_optimiser import OptimiserConfig
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig
         # e.g. equal weight forced by setting min=max=0.25 for 4 assets
         cfg = OptimiserConfig(min_weight=0.25, max_weight=0.25)
         assert cfg.min_weight == cfg.max_weight
@@ -110,7 +110,7 @@ class TestOptimiserConfig:
 
 class TestPortfolioResult:
     def test_schema(self):
-        from portfolio_optimiser import PortfolioResult
+        from flinttrade_backtest.portfolio_optimiser import PortfolioResult
         r = PortfolioResult(
             weights={"A": 0.5, "B": 0.5},
             expected_return=0.12,
@@ -122,7 +122,7 @@ class TestPortfolioResult:
         assert r.expected_return == 0.12
 
     def test_model_dump(self):
-        from portfolio_optimiser import PortfolioResult
+        from flinttrade_backtest.portfolio_optimiser import PortfolioResult
         r = PortfolioResult(
             weights={"X": 1.0},
             expected_return=0.1,
@@ -143,14 +143,14 @@ class TestPortfolioResult:
 class TestValidation:
     def test_empty_dataframe_raises(self):
         import pandas as pd
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         optimiser = PortfolioOptimiser(OptimiserConfig())
         with pytest.raises(ValueError, match="empty"):
             optimiser.optimise(pd.DataFrame())
 
     def test_single_asset_raises(self):
         import pandas as pd
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         df = pd.DataFrame({"NIFTY": [0.01, 0.02, -0.01]})
         optimiser = PortfolioOptimiser(OptimiserConfig())
         with pytest.raises(ValueError, match="2 assets"):
@@ -158,7 +158,7 @@ class TestValidation:
 
     def test_all_nan_raises(self):
         import pandas as pd
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         df = pd.DataFrame({"A": [float("nan")] * 10, "B": [float("nan")] * 10})
         optimiser = PortfolioOptimiser(OptimiserConfig())
         with pytest.raises(ValueError, match="NaN"):
@@ -172,52 +172,52 @@ class TestValidation:
 
 class TestMarkowitz:
     def test_weights_sum_to_one(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         cfg = OptimiserConfig(method="markowitz")
         result = PortfolioOptimiser(cfg).optimise(returns4)
         assert abs(sum(result.weights.values()) - 1.0) < 1e-6
 
     def test_all_assets_present(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig()).optimise(returns4)
         assert set(result.weights.keys()) == set(returns4.columns)
 
     def test_weights_within_bounds(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         cfg = OptimiserConfig(max_weight=0.4)
         result = PortfolioOptimiser(cfg).optimise(returns4)
         for w in result.weights.values():
             assert -1e-6 <= w <= 0.4 + 1e-6
 
     def test_expected_return_finite(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig()).optimise(returns4)
         assert math.isfinite(result.expected_return)
 
     def test_expected_volatility_positive(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig()).optimise(returns4)
         assert result.expected_volatility > 0
 
     def test_sharpe_ratio_finite(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig()).optimise(returns4)
         assert math.isfinite(result.sharpe_ratio)
 
     def test_diversification_ratio_gte_1(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig()).optimise(returns4)
         # For long-only portfolios, diversification ratio >= 1
         assert result.diversification_ratio >= 0.99
 
     def test_max_sharpe_alias(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         r1 = PortfolioOptimiser(OptimiserConfig(method="markowitz")).optimise(returns4)
         r2 = PortfolioOptimiser(OptimiserConfig(method="max_sharpe")).optimise(returns4)
         assert r1.sharpe_ratio == pytest.approx(r2.sharpe_ratio, abs=1e-4)
 
     def test_two_asset(self, returns2):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig()).optimise(returns2)
         assert abs(sum(result.weights.values()) - 1.0) < 1e-6
 
@@ -229,12 +229,12 @@ class TestMarkowitz:
 
 class TestMinVariance:
     def test_weights_sum_to_one(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig(method="min_variance")).optimise(returns4)
         assert abs(sum(result.weights.values()) - 1.0) < 1e-6
 
     def test_lower_vol_than_equal_weight(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         mv = PortfolioOptimiser(OptimiserConfig(method="min_variance")).optimise(returns4)
         ew = PortfolioOptimiser(OptimiserConfig(method="equal_weight")).optimise(returns4)
         # Min-variance should not exceed equal-weight volatility
@@ -248,19 +248,19 @@ class TestMinVariance:
 
 class TestRiskParity:
     def test_weights_sum_to_one(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig(method="risk_parity")).optimise(returns4)
         assert abs(sum(result.weights.values()) - 1.0) < 1e-6
 
     def test_weights_non_negative(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig(method="risk_parity")).optimise(returns4)
         for w in result.weights.values():
             assert w >= -1e-6
 
     def test_approximately_equal_risk_contributions(self, returns4):
         import numpy as np
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
 
         result = PortfolioOptimiser(OptimiserConfig(method="risk_parity")).optimise(returns4)
         returns4.mean().values * 252
@@ -283,7 +283,7 @@ class TestRiskParity:
 
 class TestEqualWeight:
     def test_equal_weights(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         result = PortfolioOptimiser(OptimiserConfig(method="equal_weight")).optimise(returns4)
         weights = list(result.weights.values())
         expected = 1.0 / len(weights)
@@ -298,7 +298,7 @@ class TestEqualWeight:
 
 class TestBlackLitterman:
     def test_weights_sum_to_one(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         optimiser = PortfolioOptimiser(OptimiserConfig())
         views = {"ASSET0": 0.20, "ASSET1": 0.10}
         conf = {"ASSET0": 0.8, "ASSET1": 0.6}
@@ -306,13 +306,13 @@ class TestBlackLitterman:
         assert abs(sum(result.weights.values()) - 1.0) < 1e-6
 
     def test_unknown_ticker_raises(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         optimiser = PortfolioOptimiser(OptimiserConfig())
         with pytest.raises(ValueError, match="not in returns columns"):
             optimiser.black_litterman(returns4, {"UNKNOWN": 0.2}, {"UNKNOWN": 0.5})
 
     def test_no_views_falls_back_to_markowitz(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         optimiser = PortfolioOptimiser(OptimiserConfig())
         result_bl = optimiser.black_litterman(returns4, {}, {})
         result_mv = optimiser.markowitz(returns4)
@@ -322,7 +322,7 @@ class TestBlackLitterman:
 
     def test_high_confidence_shifts_weight(self, returns2):
         """View with high confidence should shift weight toward that asset."""
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         optimiser = PortfolioOptimiser(OptimiserConfig(max_weight=1.0))
         # Strongly bullish on NIFTY
         result = optimiser.black_litterman(returns2, {"NIFTY": 0.50}, {"NIFTY": 0.99})
@@ -336,33 +336,33 @@ class TestBlackLitterman:
 
 class TestEfficientFrontier:
     def test_returns_list(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         frontier = PortfolioOptimiser(OptimiserConfig()).efficient_frontier(returns4, n_points=10)
         assert isinstance(frontier, list)
         assert len(frontier) > 0
 
     def test_each_result_weights_sum_to_one(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         frontier = PortfolioOptimiser(OptimiserConfig()).efficient_frontier(returns4, n_points=10)
         for pt in frontier:
             assert abs(sum(pt.weights.values()) - 1.0) < 1e-5
 
     def test_returns_non_decreasing(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         frontier = PortfolioOptimiser(OptimiserConfig()).efficient_frontier(returns4, n_points=20)
         rets = [pt.expected_return for pt in frontier]
         for i in range(1, len(rets)):
             assert rets[i] >= rets[i - 1] - 1e-4
 
     def test_n_points_requested_reasonable_count(self, returns4):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         frontier = PortfolioOptimiser(OptimiserConfig()).efficient_frontier(returns4, n_points=15)
         # With per-asset weight constraints (max_weight=0.4) many target-return levels
         # are infeasible; we only assert that at least some points are returned.
         assert len(frontier) >= 1
 
     def test_two_asset_frontier(self, returns2):
-        from portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
+        from flinttrade_backtest.portfolio_optimiser import OptimiserConfig, PortfolioOptimiser
         # Relax max_weight so the full return range is feasible for two assets
         cfg = OptimiserConfig(max_weight=1.0)
         frontier = PortfolioOptimiser(cfg).efficient_frontier(returns2, n_points=5)
@@ -376,7 +376,7 @@ class TestEfficientFrontier:
 
 class TestInternalHelpers:
     def test_annual_stats_shape(self, returns4):
-        from portfolio_optimiser import _annual_stats
+        from flinttrade_backtest.portfolio_optimiser import _annual_stats
         mu, cov = _annual_stats(returns4)
         n = returns4.shape[1]
         assert mu.shape == (n,)
@@ -384,7 +384,7 @@ class TestInternalHelpers:
 
     def test_portfolio_stats_known_values(self):
         import numpy as np
-        from portfolio_optimiser import _portfolio_stats
+        from flinttrade_backtest.portfolio_optimiser import _portfolio_stats
         # Two equal assets, fully correlated with themselves
         mu = np.array([0.10, 0.20])
         cov = np.diag([0.04, 0.09])  # vol = 0.2, 0.3
@@ -396,7 +396,7 @@ class TestInternalHelpers:
 
     def test_diversification_ratio_uncorrelated(self):
         import numpy as np
-        from portfolio_optimiser import _diversification_ratio
+        from flinttrade_backtest.portfolio_optimiser import _diversification_ratio
         # Uncorrelated assets — DR > 1
         cov = np.diag([0.04, 0.09, 0.01])
         w = np.array([1 / 3, 1 / 3, 1 / 3])
@@ -405,7 +405,7 @@ class TestInternalHelpers:
 
     def test_build_result_keys(self, returns2):
         import numpy as np
-        from portfolio_optimiser import _annual_stats, _build_result
+        from flinttrade_backtest.portfolio_optimiser import _annual_stats, _build_result
         mu, cov = _annual_stats(returns2)
         w = np.array([0.6, 0.4])
         result = _build_result(list(returns2.columns), w, mu, cov, rfr=0.065)
@@ -433,7 +433,7 @@ def flask_client():
     from flask import Flask
 
     try:
-        from optimiser_routes import optimiser_bp
+        from flinttrade_backtest.optimiser_routes import optimiser_bp
     except ImportError:
         from flinttrade_backtest.optimiser_routes import optimiser_bp
 

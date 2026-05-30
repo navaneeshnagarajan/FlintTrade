@@ -11,8 +11,8 @@ import pandas as pd
 import pytest
 
 
-from rl_environment import EnvironmentConfig, TradingEnvironment
-from rl_features import (
+from flinttrade_backtest.rl_environment import EnvironmentConfig, TradingEnvironment
+from flinttrade_backtest.rl_features import (
     DEFAULT_FEATURES,
     MINIMAL_FEATURES,
     RewardState,
@@ -22,7 +22,7 @@ from rl_features import (
     compute_reward,
     normalise_features,
 )
-from rl_trainer import DEFAULT_PARAMS, RLAlgorithm, RLTrainer, TrainingResult
+from flinttrade_backtest.rl_trainer import DEFAULT_PARAMS, RLAlgorithm, RLTrainer, TrainingResult
 
 
 # ======================================================================

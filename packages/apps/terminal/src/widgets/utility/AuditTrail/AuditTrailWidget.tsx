@@ -1,12 +1,12 @@
 /**
- * AuditTrailWidget — SEBI-compliant user action audit log for FlintTrade.
+ * AuditTrailWidget — Append-only user-action audit log for FlintTrade.
  *
  * Features:
  *   - Scrollable table of user actions: orders, position changes, settings, logins
  *   - Columns: timestamp (IST), action type, details, user, IP
  *   - Filter by action type and date range
  *   - Export to CSV
- *   - 5-year SEBI retention requirement enforced at the backend
+ *   - retention is operator-controlled (kept on disk under ~/.flinttrade)
  *   - Sample data in explore mode; live data via ft-api in connected mode
  */
 
@@ -195,7 +195,7 @@ function AuditTrailWidget() {
         <ScrollText size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Audit Trail</span>
         <span className="text-xxs text-text-muted px-1.5 py-px rounded bg-surface-hover border border-border-subtle">
-          SEBI 5yr
+          Audit log
         </span>
         <div className="flex-1" />
         <Button

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
-import optimiser_routes as mod  # noqa: E402 — conftest adds src/ to sys.path
+import flinttrade_backtest.optimiser_routes as mod  # noqa: E402 — conftest adds src/ to sys.path
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ def _mock_optimiser(result=None, frontier=None):
 def test_optimise_ok(client):
     """200 with weights on valid input."""
     with patch(
-        "optimiser_routes.PortfolioOptimiser",
+        "flinttrade_backtest.optimiser_routes.PortfolioOptimiser",
         return_value=_mock_optimiser(),
     ):
         resp = client.post(
@@ -93,7 +93,7 @@ def test_optimise_single_asset(client):
 def test_optimise_invalid_config(client):
     """400 for an invalid config dict."""
     with patch(
-        "optimiser_routes.PortfolioOptimiser",
+        "flinttrade_backtest.optimiser_routes.PortfolioOptimiser",
         return_value=_mock_optimiser(),
     ):
         resp = client.post(
@@ -115,7 +115,7 @@ def test_optimise_invalid_config(client):
 def test_frontier_ok(client):
     """200 with list of frontier points."""
     with patch(
-        "optimiser_routes.PortfolioOptimiser",
+        "flinttrade_backtest.optimiser_routes.PortfolioOptimiser",
         return_value=_mock_optimiser(),
     ):
         resp = client.post(
@@ -137,7 +137,7 @@ def test_frontier_missing_returns(client):
 def test_frontier_bad_n_points(client):
     """400 when n_points is out of range."""
     with patch(
-        "optimiser_routes.PortfolioOptimiser",
+        "flinttrade_backtest.optimiser_routes.PortfolioOptimiser",
         return_value=_mock_optimiser(),
     ):
         resp = client.post(

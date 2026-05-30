@@ -103,19 +103,19 @@ class TestIndicators:
     """Verify the _indicators.py module works independently."""
 
     def test_ema_basic(self):
-        from strategies._indicators import ema
+        from flinttrade_backtest.strategies._indicators import ema
         vals = list(range(1, 21))  # 1..20
         result = ema(vals, 5)
         assert len(result) == 20
         assert result[-1] > result[0]
 
     def test_sma_period_larger_than_data(self):
-        from strategies._indicators import sma
+        from flinttrade_backtest.strategies._indicators import sma
         result = sma([1.0, 2.0], 10)
         assert result == [0.0, 0.0]
 
     def test_rsi_range(self):
-        from strategies._indicators import rsi
+        from flinttrade_backtest.strategies._indicators import rsi
         import random
         random.seed(1)
         closes = [100.0 + random.uniform(-2, 2) for _ in range(50)]
@@ -123,7 +123,7 @@ class TestIndicators:
         assert all(0 <= v <= 100 for v in result)
 
     def test_bollinger_bands_upper_above_lower(self):
-        from strategies._indicators import bollinger_bands
+        from flinttrade_backtest.strategies._indicators import bollinger_bands
         import random
         random.seed(2)
         closes = [50.0 + random.uniform(-1, 1) for _ in range(40)]
@@ -132,7 +132,7 @@ class TestIndicators:
             assert u >= m >= lo
 
     def test_macd_histogram_zero_cross(self):
-        from strategies._indicators import macd
+        from flinttrade_backtest.strategies._indicators import macd
         # Rising then falling prices produce MACD sign change
         closes = [float(i) for i in range(1, 80)] + [float(80 - i) for i in range(40)]
         _, _, hist = macd(closes, 12, 26, 9)
@@ -140,7 +140,7 @@ class TestIndicators:
         assert 1 in signs and -1 in signs  # both positive and negative histogram
 
     def test_supertrend_returns_correct_length(self):
-        from strategies._indicators import supertrend
+        from flinttrade_backtest.strategies._indicators import supertrend
         bars = _make_bars(50)
         highs = [b["high"] for b in bars]
         lows = [b["low"] for b in bars]
@@ -161,12 +161,12 @@ class TestTrendStrategies:
 
     def test_sma_crossover_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.trend_sma_crossover import SMACrossover
+        from flinttrade_backtest.strategies.trend_sma_crossover import SMACrossover
         s = SMACrossover(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_sma_crossover_generates_orders_on_volatile_data(self):
-        from strategies.trend_sma_crossover import SMACrossover
+        from flinttrade_backtest.strategies.trend_sma_crossover import SMACrossover
         # Oscillating data guarantees fast/slow crossovers
         import math
         bars = []
@@ -184,7 +184,7 @@ class TestTrendStrategies:
         assert len(orders) > 0
 
     def test_sma_crossover_no_orders_without_warmup(self):
-        from strategies.trend_sma_crossover import SMACrossover
+        from flinttrade_backtest.strategies.trend_sma_crossover import SMACrossover
         bars = _make_bars(10)  # fewer than slow_period=50
         s = SMACrossover(fast_period=20, slow_period=50, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -192,19 +192,19 @@ class TestTrendStrategies:
 
     def test_macd_signal_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.trend_macd_signal import MACDSignal
+        from flinttrade_backtest.strategies.trend_macd_signal import MACDSignal
         s = MACDSignal(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_macd_signal_generates_orders(self):
-        from strategies.trend_macd_signal import MACDSignal
+        from flinttrade_backtest.strategies.trend_macd_signal import MACDSignal
         bars = _make_bars(200, trend=0.3, vol=0.5)
         s = MACDSignal(fast=12, slow=26, signal=9, symbol="TEST")
         orders = _run_strategy(s, bars)
         assert len(orders) > 0
 
     def test_double_supertrend_requires_both_uptrend(self):
-        from strategies.trend_supertrend import DoubleSupertrend
+        from flinttrade_backtest.strategies.trend_supertrend import DoubleSupertrend
         bars = _make_bars(100, trend=0.5, vol=0.1)
         s = DoubleSupertrend(fast_period=7, fast_mult=3.0, slow_period=14, slow_mult=5.0, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -215,12 +215,12 @@ class TestTrendStrategies:
 
     def test_parabolic_sar_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.trend_parabolic_sar import ParabolicSAR
+        from flinttrade_backtest.strategies.trend_parabolic_sar import ParabolicSAR
         s = ParabolicSAR(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_parabolic_sar_generates_orders(self):
-        from strategies.trend_parabolic_sar import ParabolicSAR
+        from flinttrade_backtest.strategies.trend_parabolic_sar import ParabolicSAR
         bars = _make_bars(100, trend=0.2)
         s = ParabolicSAR(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -228,12 +228,12 @@ class TestTrendStrategies:
 
     def test_ichimoku_cloud_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.trend_ichimoku import IchimokuCloud
+        from flinttrade_backtest.strategies.trend_ichimoku import IchimokuCloud
         s = IchimokuCloud(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_ichimoku_cloud_needs_warmup(self):
-        from strategies.trend_ichimoku import IchimokuCloud
+        from flinttrade_backtest.strategies.trend_ichimoku import IchimokuCloud
         bars = _make_bars(30)  # Less than senkou_b=52+displacement=26
         s = IchimokuCloud(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -241,19 +241,19 @@ class TestTrendStrategies:
 
     def test_hull_ma_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.trend_hull_ma import HullMA
+        from flinttrade_backtest.strategies.trend_hull_ma import HullMA
         s = HullMA(period=20, symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_hull_ma_generates_orders_on_trend(self):
-        from strategies.trend_hull_ma import HullMA
+        from flinttrade_backtest.strategies.trend_hull_ma import HullMA
         bars = _make_bars(150, trend=0.4, vol=0.1)
         s = HullMA(period=16, symbol="TEST")
         orders = _run_strategy(s, bars)
         assert len(orders) >= 0  # structural
 
     def test_trend_ema_crossover_confirmation(self):
-        from strategies.trend_ema_crossover import TrendEMACrossover
+        from flinttrade_backtest.strategies.trend_ema_crossover import TrendEMACrossover
         bars = _make_bars(150, trend=0.5, vol=0.1)
         s = TrendEMACrossover(fast_period=9, slow_period=21, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -270,12 +270,12 @@ class TestMomentumStrategies:
 
     def test_rsi_momentum_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_rsi import RSIMomentum
+        from flinttrade_backtest.strategies.momentum_rsi import RSIMomentum
         s = RSIMomentum(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_rsi_momentum_generates_orders(self):
-        from strategies.momentum_rsi import RSIMomentum
+        from flinttrade_backtest.strategies.momentum_rsi import RSIMomentum
         import random
         random.seed(99)
         bars = []
@@ -296,18 +296,18 @@ class TestMomentumStrategies:
 
     def test_rsi_divergence_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_rsi import RSIDivergence
+        from flinttrade_backtest.strategies.momentum_rsi import RSIDivergence
         s = RSIDivergence(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_stochastic_crossover_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_stochastic import StochasticCrossover
+        from flinttrade_backtest.strategies.momentum_stochastic import StochasticCrossover
         s = StochasticCrossover(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_stochastic_crossover_runs_without_error(self):
-        from strategies.momentum_stochastic import StochasticCrossover
+        from flinttrade_backtest.strategies.momentum_stochastic import StochasticCrossover
         bars = _make_bars(150)
         s = StochasticCrossover(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -315,12 +315,12 @@ class TestMomentumStrategies:
 
     def test_cci_strategy_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_cci import CCIStrategy
+        from flinttrade_backtest.strategies.momentum_cci import CCIStrategy
         s = CCIStrategy(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_cci_generates_orders(self):
-        from strategies.momentum_cci import CCIStrategy
+        from flinttrade_backtest.strategies.momentum_cci import CCIStrategy
         bars = _make_bars(100, trend=0.5)
         s = CCIStrategy(period=20, upper=100, lower=-100, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -328,12 +328,12 @@ class TestMomentumStrategies:
 
     def test_williams_r_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_williams_r import WilliamsR
+        from flinttrade_backtest.strategies.momentum_williams_r import WilliamsR
         s = WilliamsR(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_williams_r_generates_orders(self):
-        from strategies.momentum_williams_r import WilliamsR
+        from flinttrade_backtest.strategies.momentum_williams_r import WilliamsR
         bars = _make_bars(100)
         s = WilliamsR(period=14, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -341,12 +341,12 @@ class TestMomentumStrategies:
 
     def test_roc_momentum_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_roc import ROCMomentum
+        from flinttrade_backtest.strategies.momentum_roc import ROCMomentum
         s = ROCMomentum(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_roc_generates_orders_on_trend(self):
-        from strategies.momentum_roc import ROCMomentum
+        from flinttrade_backtest.strategies.momentum_roc import ROCMomentum
         # Oscillating prices force ROC to cross above/below threshold
         import math
         bars = []
@@ -364,7 +364,7 @@ class TestMomentumStrategies:
         assert len(orders) > 0
 
     def test_rsi_momentum_order_actions_valid(self):
-        from strategies.momentum_rsi import RSIMomentum
+        from flinttrade_backtest.strategies.momentum_rsi import RSIMomentum
         bars = _make_bars(200)
         s = RSIMomentum(period=14, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -382,12 +382,12 @@ class TestMeanReversionStrategies:
 
     def test_vwap_reversion_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.mean_reversion_vwap import VWAPReversion
+        from flinttrade_backtest.strategies.mean_reversion_vwap import VWAPReversion
         s = VWAPReversion(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_vwap_reversion_runs_on_intraday_bars(self):
-        from strategies.mean_reversion_vwap import VWAPReversion
+        from flinttrade_backtest.strategies.mean_reversion_vwap import VWAPReversion
         bars = _intraday_bars(100)
         s = VWAPReversion(std_mult=1.5, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -395,12 +395,12 @@ class TestMeanReversionStrategies:
 
     def test_rsi_mean_revert_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.mean_reversion_rsi import RSIMeanRevert
+        from flinttrade_backtest.strategies.mean_reversion_rsi import RSIMeanRevert
         s = RSIMeanRevert(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_rsi_mean_revert_generates_orders(self):
-        from strategies.mean_reversion_rsi import RSIMeanRevert
+        from flinttrade_backtest.strategies.mean_reversion_rsi import RSIMeanRevert
         bars = _make_bars(100)
         s = RSIMeanRevert(period=5, oversold=20, overbought=80, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -408,12 +408,12 @@ class TestMeanReversionStrategies:
 
     def test_keltner_reversion_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.mean_reversion_keltner import KeltnerChannelReversion
+        from flinttrade_backtest.strategies.mean_reversion_keltner import KeltnerChannelReversion
         s = KeltnerChannelReversion(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_keltner_reversion_needs_warmup(self):
-        from strategies.mean_reversion_keltner import KeltnerChannelReversion
+        from flinttrade_backtest.strategies.mean_reversion_keltner import KeltnerChannelReversion
         bars = _make_bars(5)
         s = KeltnerChannelReversion(ema_period=20, atr_period=14, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -421,12 +421,12 @@ class TestMeanReversionStrategies:
 
     def test_ma_envelope_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.mean_reversion_ma_envelope import MAEnvelope
+        from flinttrade_backtest.strategies.mean_reversion_ma_envelope import MAEnvelope
         s = MAEnvelope(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_ma_envelope_generates_orders(self):
-        from strategies.mean_reversion_ma_envelope import MAEnvelope
+        from flinttrade_backtest.strategies.mean_reversion_ma_envelope import MAEnvelope
         bars = _make_bars(100)
         s = MAEnvelope(period=20, envelope_pct=2.0, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -443,12 +443,12 @@ class TestVolatilityStrategies:
 
     def test_atr_breakout_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volatility_atr_breakout import ATRBreakout
+        from flinttrade_backtest.strategies.volatility_atr_breakout import ATRBreakout
         s = ATRBreakout(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_atr_breakout_generates_orders_on_strong_move(self):
-        from strategies.volatility_atr_breakout import ATRBreakout
+        from flinttrade_backtest.strategies.volatility_atr_breakout import ATRBreakout
         bars = _make_bars(100, trend=2.0, vol=0.1)  # strong uptrend
         s = ATRBreakout(atr_period=14, atr_mult=1.0, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -456,12 +456,12 @@ class TestVolatilityStrategies:
 
     def test_bollinger_squeeze_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volatility_bollinger_squeeze import BollingerSqueeze
+        from flinttrade_backtest.strategies.volatility_bollinger_squeeze import BollingerSqueeze
         s = BollingerSqueeze(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_bollinger_squeeze_runs_without_error(self):
-        from strategies.volatility_bollinger_squeeze import BollingerSqueeze
+        from flinttrade_backtest.strategies.volatility_bollinger_squeeze import BollingerSqueeze
         bars = _make_bars(150)
         s = BollingerSqueeze(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -469,12 +469,12 @@ class TestVolatilityStrategies:
 
     def test_donchian_breakout_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volatility_donchian_breakout import DonchianBreakout
+        from flinttrade_backtest.strategies.volatility_donchian_breakout import DonchianBreakout
         s = DonchianBreakout(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_donchian_breakout_generates_orders(self):
-        from strategies.volatility_donchian_breakout import DonchianBreakout
+        from flinttrade_backtest.strategies.volatility_donchian_breakout import DonchianBreakout
         bars = _make_bars(150, trend=0.3)
         s = DonchianBreakout(entry_period=20, exit_period=10, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -482,18 +482,18 @@ class TestVolatilityStrategies:
 
     def test_vix_regime_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volatility_vix_based import VIXRegime
+        from flinttrade_backtest.strategies.volatility_vix_based import VIXRegime
         s = VIXRegime(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_range_expansion_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volatility_range_expansion import RangeExpansion
+        from flinttrade_backtest.strategies.volatility_range_expansion import RangeExpansion
         s = RangeExpansion(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_range_expansion_detects_wide_bars(self):
-        from strategies.volatility_range_expansion import RangeExpansion
+        from flinttrade_backtest.strategies.volatility_range_expansion import RangeExpansion
         # Build bars where range is always tiny except for two clearly huge bars
         bars = []
         price = 100.0
@@ -524,12 +524,12 @@ class TestVolumeStrategies:
 
     def test_obv_divergence_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volume_obv_divergence import OBVDivergence
+        from flinttrade_backtest.strategies.volume_obv_divergence import OBVDivergence
         s = OBVDivergence(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_obv_divergence_runs_without_error(self):
-        from strategies.volume_obv_divergence import OBVDivergence
+        from flinttrade_backtest.strategies.volume_obv_divergence import OBVDivergence
         bars = _make_bars(100)
         s = OBVDivergence(lookback=10, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -537,12 +537,12 @@ class TestVolumeStrategies:
 
     def test_vwap_cross_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volume_vwap_cross import VWAPCross
+        from flinttrade_backtest.strategies.volume_vwap_cross import VWAPCross
         s = VWAPCross(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_vwap_cross_generates_orders_on_intraday(self):
-        from strategies.volume_vwap_cross import VWAPCross
+        from flinttrade_backtest.strategies.volume_vwap_cross import VWAPCross
         bars = _intraday_bars(100)
         s = VWAPCross(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -550,12 +550,12 @@ class TestVolumeStrategies:
 
     def test_volume_breakout_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volume_breakout import VolumeBreakout
+        from flinttrade_backtest.strategies.volume_breakout import VolumeBreakout
         s = VolumeBreakout(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_volume_breakout_generates_orders_on_spike(self):
-        from strategies.volume_breakout import VolumeBreakout
+        from flinttrade_backtest.strategies.volume_breakout import VolumeBreakout
         import random
         random.seed(88)
         bars = []
@@ -587,12 +587,12 @@ class TestOptionsStrategies:
 
     def test_atm_straddle_sell_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.options_straddle_strangle import ATMStraddleSell
+        from flinttrade_backtest.strategies.options_straddle_strangle import ATMStraddleSell
         s = ATMStraddleSell(symbol="TEST_CE_PE")
         assert isinstance(s, BaseStrategy)
 
     def test_atm_straddle_sell_exits_at_eod(self):
-        from strategies.options_straddle_strangle import ATMStraddleSell
+        from flinttrade_backtest.strategies.options_straddle_strangle import ATMStraddleSell
         bars = [
             {
                 "timestamp": f"2025-01-01 09:{m:02d}:00",
@@ -611,18 +611,18 @@ class TestOptionsStrategies:
 
     def test_otm_strangle_sell_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.options_straddle_strangle import OTMStrangleSell
+        from flinttrade_backtest.strategies.options_straddle_strangle import OTMStrangleSell
         s = OTMStrangleSell(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_iron_condor_strategy_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.options_iron_condor import IronCondorStrategy
+        from flinttrade_backtest.strategies.options_iron_condor import IronCondorStrategy
         s = IronCondorStrategy(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_iron_condor_exits_on_sl(self):
-        from strategies.options_iron_condor import IronCondorStrategy
+        from flinttrade_backtest.strategies.options_iron_condor import IronCondorStrategy
         # Premium expands to trigger SL
         bars = [
             {
@@ -639,12 +639,12 @@ class TestOptionsStrategies:
 
     def test_wheel_strategy_inherits_base(self):
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.options_wheel import WheelStrategy
+        from flinttrade_backtest.strategies.options_wheel import WheelStrategy
         s = WheelStrategy(symbol="NIFTY")
         assert isinstance(s, BaseStrategy)
 
     def test_wheel_strategy_csp_phase_entry(self):
-        from strategies.options_wheel import WheelStrategy
+        from flinttrade_backtest.strategies.options_wheel import WheelStrategy
         bars = [
             {
                 "timestamp": f"2025-01-01 09:{m:02d}:00",
@@ -669,16 +669,16 @@ class TestAllStrategiesRegistered:
     """Verify the ALL_STRATEGIES registry contains all 28 new strategies."""
 
     def test_all_strategies_dict_exists(self):
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         assert isinstance(ALL_STRATEGIES, dict)
 
     def test_new_strategy_count(self):
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         # 12 legacy + at least 28 new
         assert len(ALL_STRATEGIES) >= 28 + 12
 
     def test_all_entries_are_base_strategy_subclasses(self):
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         for name, cls in ALL_STRATEGIES.items():
             # New strategies (non-legacy) must subclass the canonical BaseStrategy.
             # Legacy classes loaded via importlib may have a different identity;
@@ -687,7 +687,7 @@ class TestAllStrategiesRegistered:
             assert "BaseStrategy" in mro_names, f"{name} does not have BaseStrategy in MRO"
 
     def test_category_keys_present(self):
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         required = [
             # Trend
             "TrendEMACrossover", "SMACrossover", "MACDSignal",
@@ -709,7 +709,7 @@ class TestAllStrategiesRegistered:
             assert key in ALL_STRATEGIES, f"Missing strategy: {key}"
 
     def test_all_strategies_instantiable(self):
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         for name, cls in ALL_STRATEGIES.items():
             try:
                 instance = cls(symbol="TEST")
@@ -718,7 +718,7 @@ class TestAllStrategiesRegistered:
                 pytest.fail(f"Strategy {name} failed to instantiate or start: {e}")
 
     def test_legacy_strategies_still_present(self):
-        from strategies import (
+        from flinttrade_backtest.strategies import (
             BearCallSpread,
             BollingerMeanReversion,
             BullPutSpread,

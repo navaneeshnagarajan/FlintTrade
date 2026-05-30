@@ -622,5 +622,5 @@ class TestPackageExports:
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        assert os.path.exists(os.path.join(pkg_dir, "src", "__init__.py"))
+        assert os.path.exists(os.path.join(pkg_dir, "src", "flinttrade_ai", "__init__.py"))
         assert os.path.exists(os.path.join(pkg_dir, "README.md"))

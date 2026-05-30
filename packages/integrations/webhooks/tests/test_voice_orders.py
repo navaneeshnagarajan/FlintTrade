@@ -25,7 +25,7 @@ import pytest
 # Direct module load — bypasses packages/integrations/webhooks/src/__init__.py
 # ---------------------------------------------------------------------------
 
-_MODULE_PATH = Path(__file__).parent.parent / "src" / "voice_orders.py"
+_MODULE_PATH = Path(__file__).parent.parent / "src" / "flinttrade_webhooks" / "voice_orders.py"
 
 
 def _load_voice_orders():

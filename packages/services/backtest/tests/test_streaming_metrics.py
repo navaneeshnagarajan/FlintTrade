@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-from metrics import StreamingMetrics
+from flinttrade_backtest.metrics import StreamingMetrics
 
 
 class TestStreamingMetricsEquity:

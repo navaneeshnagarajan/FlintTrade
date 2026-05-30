@@ -1,10 +1,58 @@
-"""Compatibility package for the post-restructure import name."""
+"""FlintTrade ditto package — multi-broker, multi-account orchestration."""
 
-from pathlib import Path
+from flinttrade_core.version import APP_VERSION
 
-_SRC_ROOT = Path(__file__).resolve().parent.parent
-__path__ = [str(_SRC_ROOT)]
+__version__ = APP_VERSION
 
-_legacy_init = _SRC_ROOT / "__init__.py"
-if _legacy_init.exists():
-    exec(compile(_legacy_init.read_text(encoding="utf-8"), str(_legacy_init), "exec"), globals())
+from .account_manager import AccountHealth, AccountManager, BrokerAccount
+from .margin_calculator import (
+    MarginCalculator,
+    MarginInfo,
+    MultiLegMarginResult,
+    OrderMarginEstimate,
+)
+from .mirror import AllocationMode, MirrorResult, PositionMirror
+from .risk_manager import (
+    AccountRiskState,
+    RiskCheckResult,
+    RiskConfig,
+    RiskManager,
+    RiskStatus,
+    TradeGrade,
+    TradeQuality,
+)
+from .trailing_sl import (
+    SLAdjustment,
+    SLTracker,
+    TrailingMode,
+    TrailingSLManager,
+)
+
+__all__ = [
+    # Accounts
+    "AccountManager",
+    "BrokerAccount",
+    "AccountHealth",
+    # Mirror
+    "PositionMirror",
+    "AllocationMode",
+    "MirrorResult",
+    # Margin
+    "MarginCalculator",
+    "MarginInfo",
+    "OrderMarginEstimate",
+    "MultiLegMarginResult",
+    # Trailing SL
+    "TrailingSLManager",
+    "SLTracker",
+    "SLAdjustment",
+    "TrailingMode",
+    # Risk
+    "RiskManager",
+    "RiskConfig",
+    "RiskStatus",
+    "RiskCheckResult",
+    "AccountRiskState",
+    "TradeGrade",
+    "TradeQuality",
+]

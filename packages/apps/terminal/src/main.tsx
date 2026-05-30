@@ -46,6 +46,7 @@ const AIRoute = lazy(() => import("./routes/AIRoute"));
 const SettingsRoute = lazy(() => import("./routes/SettingsRoute"));
 const DittoRoute = lazy(() => import("./routes/DittoRoute"));
 const AdminRoute = lazy(() => import("./routes/AdminRoute"));
+const ObservabilityDashboard = lazy(() => import("./admin/observability"));
 const NotFoundRoute = lazy(() => import("./routes/NotFoundRoute"));
 
 function Loading() {
@@ -116,7 +117,10 @@ const router = createBrowserRouter([
           { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Ditto"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           ...(import.meta.env.DEV
-            ? [{ path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<Loading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> }]
+            ? [
+                { path: "admin", element: <ProtectedRoute><RouteErrorBoundary routeName="Admin"><Suspense fallback={<Loading />}><AdminRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+                { path: "admin/observability", element: <ProtectedRoute><RouteErrorBoundary routeName="Observability"><Suspense fallback={<Loading />}><ObservabilityDashboard /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+              ]
             : []),
         ],
       },

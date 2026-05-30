@@ -61,7 +61,7 @@ def _make_strategy(
     initial_mode: str = "immediate",
     qty: int = 1,
 ):
-    from strategies.grid_equity import GridConfig, GridEquityStrategy
+    from flinttrade_backtest.strategies.grid_equity import GridConfig, GridEquityStrategy
     cfg = GridConfig(lower_bound=lower, upper_bound=upper, n_grids=n_grids, initial_mode=initial_mode)
     strat = GridEquityStrategy(config=cfg, symbol=symbol, exchange="NSE", product="MIS", qty_per_grid=qty)
     strat.start()
@@ -75,44 +75,44 @@ def _make_strategy(
 
 class TestGridConfig:
     def test_levels_count(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         cfg = GridConfig(lower_bound=1000, upper_bound=1200, n_grids=10)
         assert len(cfg.levels) == 11  # n_grids + 1
 
     def test_levels_values(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         cfg = GridConfig(lower_bound=1000, upper_bound=1200, n_grids=4)
         expected = [1000.0, 1050.0, 1100.0, 1150.0, 1200.0]
         for actual, exp in zip(cfg.levels, expected):
             assert abs(actual - exp) < 0.01
 
     def test_grid_spacing(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         cfg = GridConfig(lower_bound=1000, upper_bound=1200, n_grids=10)
         assert abs(cfg.grid_spacing - 20.0) < 0.001
 
     def test_stop_loss_one_spacing_below_lower(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         cfg = GridConfig(lower_bound=1000, upper_bound=1200, n_grids=10)
         assert abs(cfg.stop_loss - 980.0) < 0.001
 
     def test_take_profit_one_spacing_above_upper(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         cfg = GridConfig(lower_bound=1000, upper_bound=1200, n_grids=10)
         assert abs(cfg.take_profit - 1220.0) < 0.001
 
     def test_invalid_lower_gte_upper_raises(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         with pytest.raises(ValueError, match="lower_bound"):
             GridConfig(lower_bound=1200, upper_bound=1000, n_grids=10)
 
     def test_invalid_n_grids_raises(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         with pytest.raises(ValueError, match="n_grids"):
             GridConfig(lower_bound=1000, upper_bound=1200, n_grids=1)
 
     def test_invalid_initial_mode_raises(self):
-        from strategies.grid_equity import GridConfig
+        from flinttrade_backtest.strategies.grid_equity import GridConfig
         with pytest.raises(ValueError, match="initial_mode"):
             GridConfig(lower_bound=1000, upper_bound=1200, n_grids=5, initial_mode="bad")
 
@@ -125,7 +125,7 @@ class TestGridConfig:
 class TestGridEquityInit:
     def test_strategy_starts_active(self):
         strat = _make_strategy()
-        from strategy import StrategyState
+        from flinttrade_engine.strategy import StrategyState
         assert strat.state == StrategyState.ACTIVE
 
     def test_name_includes_symbol(self):
@@ -333,5 +333,5 @@ class TestGridEquityState:
 
 
 def test_registered_in_all_strategies():
-    from strategies import ALL_STRATEGIES
+    from flinttrade_backtest.strategies import ALL_STRATEGIES
     assert "GridEquityStrategy" in ALL_STRATEGIES

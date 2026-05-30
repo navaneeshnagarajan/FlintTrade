@@ -428,30 +428,13 @@ class TestGetPrimaryNoneRaises:
 
 
 # ---------------------------------------------------------------------------
-# 12. delegated place_order
+# 12. delegated READ operations
+#     (write methods removed — S7 / contract §12; writes go through
+#      gate_order() → BrokerRouter.place_order())
 # ---------------------------------------------------------------------------
 
 
-class TestDelegatedPlaceOrder:
-    def test_delegated_place_order_calls_session(self) -> None:
-        """place_order() must delegate to session.place_order() with order_data."""
-        mock_session = _make_mock_session()
-        expected: dict[str, Any] = {"order_id": "ORD001", "status": "placed"}
-        mock_session.place_order.return_value = expected
-        registry, _ = _registry_with_account("AB1234", mock_session=mock_session)
-
-        order_data = {"symbol": "NIFTY25JUN21000CE", "qty": 50, "price": 120.0}
-        result = registry.place_order("AB1234", order_data)
-
-        mock_session.place_order.assert_called_once_with(order_data)
-        assert result == expected
-
-    def test_delegated_place_order_unknown_account_raises(self) -> None:
-        """place_order() for an unregistered account must raise BrokerNotFoundError."""
-        registry = BrokerRegistry()
-        with pytest.raises(BrokerNotFoundError):
-            registry.place_order("GHOST", {"symbol": "NIFTY"})
-
+class TestDelegatedReads:
     def test_delegated_get_positions_calls_session(self) -> None:
         """get_positions() must delegate to session.get_positions()."""
         mock_session = _make_mock_session()

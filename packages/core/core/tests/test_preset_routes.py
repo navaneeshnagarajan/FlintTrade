@@ -52,7 +52,7 @@ def flask_app(monkeypatch_module, tmp_flinttrade_home):
     from pathlib import Path
     from flask import Flask
 
-    _src = Path(__file__).resolve().parents[2] / "core" / "src" / "preset_routes.py"
+    _src = Path(__file__).resolve().parents[2] / "core" / "src" / "flinttrade_core" / "preset_routes.py"
     spec = importlib.util.spec_from_file_location("preset_routes_isolated", _src)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
-import permutation_routes as mod  # noqa: E402 — conftest adds src/ to sys.path
+import flinttrade_backtest.permutation_routes as mod  # noqa: E402 — conftest adds src/ to sys.path
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ def client(app):
 def test_permutation_ok(client):
     """200 for valid returns-mode request."""
     with patch(
-        "permutation_routes.PermutationTester"
+        "flinttrade_backtest.permutation_routes.PermutationTester"
     ) as MockTester:
         instance = MagicMock()
         instance.test_returns.return_value = _mock_perm_result()
@@ -117,7 +117,7 @@ _BARS = [{"close": 18500.0 + i * 10} for i in range(30)]
 def test_walkforward_ok(client):
     """200 for valid bars input."""
     with patch(
-        "permutation_routes.WalkForwardAnalyser"
+        "flinttrade_backtest.permutation_routes.WalkForwardAnalyser"
     ) as MockWF:
         instance = MagicMock()
         instance.analyse.return_value = _mock_wf_result()

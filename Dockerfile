@@ -16,9 +16,12 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Install dependencies first (layer cache optimisation)
-COPY requirements.txt .
-RUN uv pip install --system --no-cache -r requirements.txt
+# Install dependencies first (layer cache optimisation).
+# SC-07: hash-verified install only — requirements.lock is the uv-exported,
+# fully-hashed runtime lockfile; --require-hashes refuses any unpinned/tampered
+# wheel. (requirements.txt is the loose dev input, never installed in prod.)
+COPY requirements.lock .
+RUN uv pip install --system --no-cache --require-hashes -r requirements.lock
 
 # ---------------------------------------------------------------------------
 # Stage 2: Runtime — minimal image with only what we need

@@ -44,6 +44,37 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # §14.3 CI env allowlist — activates tests/test_no_broker_creds_in_ci.py (gate #19) and
+  # explicitly empties every broker credential var so a leaked higher-scope secret cannot
+  # inherit into the test run. Default-mock (Identity H9) is enforced in tests/mocks/.
+  FLINTTRADE_CI: "1"
+  DHAN_ACCESS_TOKEN: ""
+  DHAN_API_KEY: ""
+  DHAN_API_SECRET: ""
+  DHAN_CLIENT_ID: ""
+  DHAN_TOKEN: ""
+  UPSTOX_API_KEY: ""
+  UPSTOX_API_SECRET: ""
+  UPSTOX_ACCESS_TOKEN: ""
+  UPSTOX_REFRESH_TOKEN: ""
+  UPSTOX_TOKEN: ""
+  KOTAK_NEO_CONSUMER_KEY: ""
+  KOTAK_NEO_CONSUMER_SECRET: ""
+  KOTAK_NEO_MPIN: ""
+  KOTAK_NEO_TOTP: ""
+  KOTAK_NEO_TOTP_SECRET: ""
+  KOTAK_NEO_ACCESS_TOKEN: ""
+  KOTAK_NEO_SESSION_TOKEN: ""
+  KOTAK_NEO_TOKEN: ""
+  INDMONEY_API_KEY: ""
+  INDMONEY_API_SECRET: ""
+  INDMONEY_ACCESS_TOKEN: ""
+  INDMONEY_TOKEN: ""
+  KITE_API_KEY: ""
+  KITE_API_SECRET: ""
+  KITE_ACCESS_TOKEN: ""
+  ZERODHA_API_KEY: ""
+  ZERODHA_ACCESS_TOKEN: ""
 
 # Skip the whole matrix on draft PRs — cuts noise while a PR is in
 # active development. A PR-author opens the PR as draft, pushes
@@ -53,14 +84,13 @@ jobs:
   # ----------------------------------------------------------------------
   # Python tests
   #
-  # Parallel execution with pytest-xdist (-n auto) works locally and is
-  # the long-term goal, but several pre-existing tests share module-level
-  # state (singleton DBs in app.py beyond the ones already migrated to
-  # workspace_dir(), various global mocks, etc.). A dedicated
-  # test-isolation sprint is needed before we can flip xdist on for CI.
-  # Keeping CI serial for now; --timeout=60 catches hangs; pytest-randomly
-  # (auto-loaded from requirements.txt) randomises order to surface
-  # order-dependent flakes early so they get fixed before we go parallel.
+  # Parallel execution with pytest-xdist (-n auto). The test-isolation work
+  # is done: every conftest (root + core/core + core/data) gives each xdist
+  # worker its own FLINTTRADE_WORKSPACE_DIR keyed on PYTEST_XDIST_WORKER, so
+  # the per-worker SQLite/DuckDB files never collide (this fixed the
+  # _duckdb.IOException that previously forced serial runs). --timeout=60
+  # catches hangs; pytest-randomly randomises order to surface
+  # order-dependent flakes early.
   # ----------------------------------------------------------------------
   python-tests:
     # Skip the matrix on draft PRs — open as draft, push iteratively without
@@ -71,10 +101,13 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
-      - run: pip install -r requirements.txt
+      - uses: astral-sh/setup-uv@v6
+      # SC-07: hash-verified install only. uv sync --frozen installs the locked
+      # workspace + dev group from uv.lock — never an unhashed requirements.txt.
+      - run: uv sync --frozen
       - name: Verify pre-restructure baseline artefacts
         run: |
-          python - <<'PY'
+          uv run python - <<'PY'
           import json
           import pathlib
           import sys
@@ -91,8 +124,8 @@ jobs:
           PY
       - name: Workspace migration round-trip test
         run: |
-          python -m pytest packages/core/core/tests/test_workspace_migrations.py -v --import-mode=importlib
-          python - <<'PY'
+          uv run python -m pytest packages/core/core/tests/test_workspace_migrations.py -v --import-mode=importlib
+          uv run python - <<'PY'
           import json
           import sys
           import tempfile
@@ -116,8 +149,8 @@ jobs:
       # 6-hour runner timeout. Watchdog method works regardless. See the
       # PositionWatcher fix in packages/services/ditto/src/mirror.py for the original
       # hang vector.
-      - run: python -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
-      - run: ruff check packages/*/*/src/ --output-format=github
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
+      - run: uv run ruff check packages/*/*/src/ --output-format=github
 
   # NOTE: macOS and Windows cross-platform checks used to run on every push +
   # PR with `continue-on-error: true` (cosmetic — never gated anything). On

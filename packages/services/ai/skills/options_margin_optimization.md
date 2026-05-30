@@ -81,4 +81,4 @@ MIS margin: ₹1,50,000 × 0.45 = ₹67,500
 
 ## Peak Margin Rule (SEBI 2021)
 
-SEBI requires peak margin to be monitored across the day, not just at end of day. You must maintain margin at the highest intraday point. Your broker will block peak margin automatically — ensure your account has enough before entering multiple positions in rapid succession.
+Under SEBI's peak-margin framework, margin is monitored across the day, not just at end of day, so you need to maintain margin at the highest intraday point. Your broker enforces peak margin automatically — ensure your account has enough before entering multiple positions in rapid succession.

@@ -41,7 +41,7 @@ import pytest
 def _make_app(tmp_path: Path):
     """Create a Flask app with auth service and rate limiter active."""
     os.environ["OPENALGO_API_KEY"] = "rate-limit-test-key"
-    os.environ.setdefault("MASTER_PASSWORD", "test-master-pw")
+    # master password comes from the seeded hardened file (root conftest), not env
 
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.auth_service import AuthService

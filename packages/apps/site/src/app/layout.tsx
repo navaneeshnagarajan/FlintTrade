@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { GeistMono, GeistSans } from 'geist/font';
 import { RootProvider } from 'fumadocs-ui/provider/next';
+import { headers } from 'next/headers';
 import type { ReactNode } from 'react';
 
 import './globals.css';
@@ -17,16 +18,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // DS-CSP-03: read the per-request nonce the middleware set so every inline script we
+  // (or next-themes, via fumadocs RootProvider) emit carries it. Framework scripts get
+  // the nonce automatically via `experimental.nonce` in next.config.mjs.
+  const nonce = (await headers()).get('x-csp-nonce') ?? '';
+
   return (
     <html
       lang="en"
       className={`${GeistSans.variable} ${GeistMono.variable}`}
       data-scroll-behavior="smooth"
+      data-density="comfortable"
       suppressHydrationWarning
     >
       <body>
-        <RootProvider>{children}</RootProvider>
+        <RootProvider theme={{ nonce }}>{children}</RootProvider>
       </body>
     </html>
   );

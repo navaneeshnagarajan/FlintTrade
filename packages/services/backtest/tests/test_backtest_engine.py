@@ -67,8 +67,8 @@ class TestSimulator:
     """Test backtest simulator with EMA crossover."""
 
     def test_run_ema_crossover(self):
-        from simulator import BacktestConfig, BacktestSimulator
-        from strategies import EMACrossover
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_uptrend_bars(200)
         config = BacktestConfig(
@@ -86,8 +86,8 @@ class TestSimulator:
         assert len(result.equity_curve) == 200
 
     def test_run_produces_trades(self):
-        from simulator import BacktestConfig, BacktestSimulator
-        from strategies import EMACrossover
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_bars(200, trend=0.2)
         config = BacktestConfig(symbol="TEST", initial_capital=100000)
@@ -97,8 +97,8 @@ class TestSimulator:
         assert len(result.trades) > 0
 
     def test_run_empty_bars(self):
-        from simulator import BacktestConfig, BacktestSimulator
-        from strategies import EMACrossover
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+        from flinttrade_backtest.strategies import EMACrossover
 
         config = BacktestConfig(symbol="TEST", initial_capital=100000)
         strategy = EMACrossover(name="EMA", symbol="TEST")
@@ -108,8 +108,8 @@ class TestSimulator:
         assert result.total_bars == 0
 
     def test_equity_curve_starts_at_capital(self):
-        from simulator import BacktestConfig, BacktestSimulator
-        from strategies import EMACrossover
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_bars(50)
         config = BacktestConfig(symbol="TEST", initial_capital=500000)
@@ -120,8 +120,8 @@ class TestSimulator:
         assert abs(result.equity_curve[0].equity - 500000) < 500000 * 0.1
 
     def test_slippage_applied(self):
-        from simulator import BacktestConfig, BacktestSimulator
-        from strategies import EMACrossover
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_bars(100, trend=0.5)
         config_no_slip = BacktestConfig(symbol="TEST", initial_capital=100000, slippage_pct=0)
@@ -138,8 +138,8 @@ class TestSimulator:
             assert r1.final_equity != r2.final_equity
 
     def test_total_return_pct(self):
-        from simulator import BacktestConfig, BacktestSimulator
-        from strategies import EMACrossover
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_uptrend_bars(100)
         config = BacktestConfig(symbol="TEST", initial_capital=100000)
@@ -157,8 +157,8 @@ class TestMetrics:
     """Test performance metrics calculations."""
 
     def _make_result(self, n_bars: int = 200):
-        from simulator import BacktestConfig, BacktestSimulator
-        from strategies import EMACrossover
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_bars(n_bars, trend=0.2)
         config = BacktestConfig(symbol="TEST", initial_capital=100000)
@@ -166,50 +166,50 @@ class TestMetrics:
         return BacktestSimulator(config).run(strategy, bars)
 
     def test_sharpe_ratio(self):
-        from metrics import PerformanceMetrics
+        from flinttrade_backtest.metrics import PerformanceMetrics
 
         result = self._make_result()
         report = PerformanceMetrics.compute(result)
         assert isinstance(report.sharpe_ratio, float)
 
     def test_sortino_ratio(self):
-        from metrics import PerformanceMetrics
+        from flinttrade_backtest.metrics import PerformanceMetrics
 
         result = self._make_result()
         report = PerformanceMetrics.compute(result)
         assert isinstance(report.sortino_ratio, float)
 
     def test_max_drawdown(self):
-        from metrics import PerformanceMetrics
+        from flinttrade_backtest.metrics import PerformanceMetrics
 
         result = self._make_result()
         report = PerformanceMetrics.compute(result)
         assert report.drawdown.max_drawdown_pct >= 0
 
     def test_win_rate(self):
-        from metrics import PerformanceMetrics
+        from flinttrade_backtest.metrics import PerformanceMetrics
 
         result = self._make_result()
         report = PerformanceMetrics.compute(result)
         assert 0 <= report.trade_stats.win_rate <= 100
 
     def test_profit_factor(self):
-        from metrics import PerformanceMetrics
+        from flinttrade_backtest.metrics import PerformanceMetrics
 
         result = self._make_result()
         report = PerformanceMetrics.compute(result)
         assert report.trade_stats.profit_factor >= 0
 
     def test_cagr(self):
-        from metrics import compute_cagr
+        from flinttrade_backtest.metrics import compute_cagr
 
         assert compute_cagr(100000, 200000, 252) == pytest.approx(100.0, abs=5)
         assert compute_cagr(100000, 100000, 252) == pytest.approx(0.0)
         assert compute_cagr(0, 100000, 252) == 0.0
 
     def test_compute_returns(self):
-        from metrics import compute_returns
-        from simulator import EquityPoint
+        from flinttrade_backtest.metrics import compute_returns
+        from flinttrade_backtest.simulator import EquityPoint
 
         curve = [
             EquityPoint(timestamp="d1", equity=100, cash=100, positions_value=0),
@@ -222,18 +222,18 @@ class TestMetrics:
         assert returns[1] < 0
 
     def test_sharpe_flat_returns(self):
-        from metrics import compute_sharpe
+        from flinttrade_backtest.metrics import compute_sharpe
         # All same return → zero std → sharpe = 0
         assert compute_sharpe([0.01, 0.01, 0.01]) == 0.0
 
     def test_trade_stats_empty(self):
-        from metrics import compute_trade_stats
+        from flinttrade_backtest.metrics import compute_trade_stats
         stats = compute_trade_stats([])
         assert stats.total_trades == 0
         assert stats.win_rate == 0
 
     def test_var_basic(self):
-        from metrics import compute_var
+        from flinttrade_backtest.metrics import compute_var
 
         returns = [-0.05, -0.03, -0.01, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08]
         var, cvar = compute_var(returns, 0.95)
@@ -241,8 +241,8 @@ class TestMetrics:
         assert cvar >= var  # CVaR >= VaR
 
     def test_monthly_returns(self):
-        from metrics import compute_monthly_returns
-        from simulator import EquityPoint
+        from flinttrade_backtest.metrics import compute_monthly_returns
+        from flinttrade_backtest.simulator import EquityPoint
 
         curve = [
             EquityPoint(timestamp="2025-01-01", equity=100, cash=100, positions_value=0),
@@ -253,14 +253,14 @@ class TestMetrics:
         assert len(monthly) >= 1
 
     def test_pnl_histogram(self):
-        from metrics import PerformanceMetrics
+        from flinttrade_backtest.metrics import PerformanceMetrics
 
         result = self._make_result()
         report = PerformanceMetrics.compute(result)
         assert isinstance(report.pnl_histogram, list)
 
     def test_calmar_ratio(self):
-        from metrics import PerformanceMetrics
+        from flinttrade_backtest.metrics import PerformanceMetrics
 
         result = self._make_result()
         report = PerformanceMetrics.compute(result)
@@ -276,7 +276,7 @@ class TestWalkForward:
     """Test walk-forward optimization split logic."""
 
     def test_split_basic(self):
-        from optimizer import walk_forward_splits
+        from flinttrade_backtest.optimizer import walk_forward_splits
 
         windows = walk_forward_splits(total_bars=1000, in_sample_pct=0.7, num_windows=3)
         assert len(windows) > 0
@@ -285,17 +285,17 @@ class TestWalkForward:
             assert w.out_sample_end >= w.out_sample_start
 
     def test_split_too_few_bars(self):
-        from optimizer import walk_forward_splits
+        from flinttrade_backtest.optimizer import walk_forward_splits
         windows = walk_forward_splits(total_bars=5, in_sample_pct=0.7, num_windows=3)
         assert len(windows) == 0
 
     def test_split_single_window(self):
-        from optimizer import walk_forward_splits
+        from flinttrade_backtest.optimizer import walk_forward_splits
         windows = walk_forward_splits(total_bars=100, in_sample_pct=0.7, num_windows=1)
         assert len(windows) >= 0  # May produce 1 or 0 depending on rounding
 
     def test_param_grid_combinations(self):
-        from optimizer import ParamGrid
+        from flinttrade_backtest.optimizer import ParamGrid
         grid = ParamGrid()
         grid.add("fast", [5, 10, 15])
         grid.add("slow", [20, 50])
@@ -305,14 +305,14 @@ class TestWalkForward:
         assert {"fast": 5, "slow": 20} in combos
 
     def test_param_grid_empty(self):
-        from optimizer import ParamGrid
+        from flinttrade_backtest.optimizer import ParamGrid
         grid = ParamGrid()
         assert grid.combinations() == [{}]
 
     def test_optimizer_runs(self):
-        from optimizer import ParamGrid, WalkForwardOptimizer
-        from simulator import BacktestConfig
-        from strategies import EMACrossover
+        from flinttrade_backtest.optimizer import ParamGrid, WalkForwardOptimizer
+        from flinttrade_backtest.simulator import BacktestConfig
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_bars(200, trend=0.2)
         config = BacktestConfig(symbol="TEST", initial_capital=100000)
@@ -333,9 +333,9 @@ class TestWalkForward:
         assert len(result.in_sample_results) == 4  # 2x2 grid
 
     def test_optimizer_robustness_score(self):
-        from optimizer import ParamGrid, WalkForwardOptimizer
-        from simulator import BacktestConfig
-        from strategies import EMACrossover
+        from flinttrade_backtest.optimizer import ParamGrid, WalkForwardOptimizer
+        from flinttrade_backtest.simulator import BacktestConfig
+        from flinttrade_backtest.strategies import EMACrossover
 
         bars = _make_uptrend_bars(200)
         config = BacktestConfig(symbol="TEST", initial_capital=100000)
@@ -359,8 +359,8 @@ class TestMonteCarlo:
     """Test Monte Carlo simulation."""
 
     def test_monte_carlo_basic(self):
-        from optimizer import WalkForwardOptimizer
-        from simulator import SimTrade
+        from flinttrade_backtest.optimizer import WalkForwardOptimizer
+        from flinttrade_backtest.simulator import SimTrade
 
         trades = [
             SimTrade(entry_timestamp="t1", exit_timestamp="t2", symbol="X", side="BUY",
@@ -377,13 +377,13 @@ class TestMonteCarlo:
         assert result.percentile_5 <= result.percentile_95
 
     def test_monte_carlo_empty_trades(self):
-        from optimizer import WalkForwardOptimizer
+        from flinttrade_backtest.optimizer import WalkForwardOptimizer
         result = WalkForwardOptimizer.monte_carlo([], initial_capital=100000)
         assert result.mean_return == 0
 
     def test_monte_carlo_percentiles_ordered(self):
-        from optimizer import WalkForwardOptimizer
-        from simulator import SimTrade
+        from flinttrade_backtest.optimizer import WalkForwardOptimizer
+        from flinttrade_backtest.simulator import SimTrade
 
         trades = [
             SimTrade(entry_timestamp="", exit_timestamp="", symbol="X", side="BUY",
@@ -408,7 +408,7 @@ class TestDataConnector:
     """Test data connector normalization and validation."""
 
     def test_normalize_bar(self):
-        from data_connector import normalize_bar
+        from flinttrade_backtest.data_connector import normalize_bar
         raw = {"timestamp": "2025-01-01", "Open": 100, "High": 110, "Low": 90, "Close": 105, "Volume": 5000}
         bar = normalize_bar(raw)
         assert bar["open"] == 100.0
@@ -417,36 +417,36 @@ class TestDataConnector:
         assert bar["oi"] == 0
 
     def test_normalize_bar_lowercase(self):
-        from data_connector import normalize_bar
+        from flinttrade_backtest.data_connector import normalize_bar
         raw = {"timestamp": "2025-01-01", "open": 100, "high": 110, "low": 90, "close": 105, "volume": 5000}
         bar = normalize_bar(raw)
         assert bar["open"] == 100.0
 
     def test_validate_bars_valid(self):
-        from data_connector import validate_bars
+        from flinttrade_backtest.data_connector import validate_bars
         bars = _make_bars(10)
         issues = validate_bars(bars)
         assert len(issues) == 0
 
     def test_validate_bars_empty(self):
-        from data_connector import validate_bars
+        from flinttrade_backtest.data_connector import validate_bars
         issues = validate_bars([])
         assert "No bars" in issues[0]
 
     def test_validate_bars_bad_ohlc(self):
-        from data_connector import validate_bars
+        from flinttrade_backtest.data_connector import validate_bars
         bars = [{"timestamp": "2025-01-01", "open": 0, "high": 100, "low": 90, "close": 95, "volume": 100}]
         issues = validate_bars(bars)
         assert any("open" in i for i in issues)
 
     def test_validate_bars_high_less_than_low(self):
-        from data_connector import validate_bars
+        from flinttrade_backtest.data_connector import validate_bars
         bars = [{"timestamp": "2025-01-01", "open": 100, "high": 90, "low": 100, "close": 95, "volume": 100}]
         issues = validate_bars(bars)
         assert any("high" in i.lower() for i in issues)
 
     def test_detect_gaps(self):
-        from data_connector import detect_gaps
+        from flinttrade_backtest.data_connector import detect_gaps
         bars = [
             {"timestamp": "2025-01-01 09:15:00"},
             {"timestamp": "2025-01-01 09:20:00"},
@@ -457,7 +457,7 @@ class TestDataConnector:
         assert gaps[0].missing_bars > 0
 
     def test_detect_no_gaps(self):
-        from data_connector import detect_gaps
+        from flinttrade_backtest.data_connector import detect_gaps
         bars = [
             {"timestamp": "2025-01-01 09:15:00"},
             {"timestamp": "2025-01-01 09:20:00"},
@@ -467,7 +467,7 @@ class TestDataConnector:
         assert len(gaps) == 0
 
     def test_csv_connector(self):
-        from data_connector import CSVConnector
+        from flinttrade_backtest.data_connector import CSVConnector
         csv_str = "timestamp,open,high,low,close,volume\n2025-01-01,100,110,90,105,5000\n2025-01-02,105,115,95,110,6000"
         result = CSVConnector.load_string(csv_str)
         assert result.success
@@ -475,7 +475,7 @@ class TestDataConnector:
         assert result.bars[0]["open"] == 100.0
 
     def test_json_connector(self):
-        from data_connector import JSONConnector
+        from flinttrade_backtest.data_connector import JSONConnector
         data = [
             {"timestamp": "2025-01-01", "open": 100, "high": 110, "low": 90, "close": 105, "volume": 5000},
             {"timestamp": "2025-01-02", "open": 105, "high": 115, "low": 95, "close": 110, "volume": 6000},
@@ -485,13 +485,13 @@ class TestDataConnector:
         assert result.total_bars == 2
 
     def test_json_connector_invalid(self):
-        from data_connector import JSONConnector
+        from flinttrade_backtest.data_connector import JSONConnector
         result = JSONConnector.load_string("not json")
         assert not result.success
         assert result.error
 
     def test_data_result_properties(self):
-        from data_connector import DataResult
+        from flinttrade_backtest.data_connector import DataResult
         r = DataResult(bars=[{"timestamp": "t1"}], source="test")
         assert r.total_bars == 1
         assert r.success
@@ -508,7 +508,7 @@ class TestStrategies:
     """Test built-in strategy catalog."""
 
     def test_all_12_strategies_exist(self):
-        from strategies import BUILTIN_STRATEGIES
+        from flinttrade_backtest.strategies import BUILTIN_STRATEGIES
         assert len(BUILTIN_STRATEGIES) == 12
         assert "EMACrossover" in BUILTIN_STRATEGIES
         assert "Supertrend" in BUILTIN_STRATEGIES
@@ -525,7 +525,7 @@ class TestStrategies:
 
     def test_ema_crossover_generates_orders(self):
         from flinttrade_core.models import OHLCV
-        from strategies import EMACrossover
+        from flinttrade_backtest.strategies import EMACrossover
 
         s = EMACrossover(name="test", fast_period=3, slow_period=10, symbol="TEST")
         s.start()
@@ -541,34 +541,34 @@ class TestStrategies:
         assert isinstance(orders, list)
 
     def test_all_strategies_inherit_base(self):
-        from strategies import BUILTIN_STRATEGIES
+        from flinttrade_backtest.strategies import BUILTIN_STRATEGIES
         for name, cls in BUILTIN_STRATEGIES.items():
             base_names = [b.__name__ for b in cls.__mro__]
             assert "BaseStrategy" in base_names, f"{name} must inherit BaseStrategy"
 
     def test_indicator_ema(self):
-        from strategies import ema
+        from flinttrade_backtest.strategies import ema
         values = [1.0, 2.0, 3.0, 4.0, 5.0]
         result = ema(values, 3)
         assert len(result) == 5
         assert result[-1] > result[0]
 
     def test_indicator_sma(self):
-        from strategies import sma
+        from flinttrade_backtest.strategies import sma
         values = [10.0, 20.0, 30.0, 40.0, 50.0]
         result = sma(values, 3)
         assert len(result) == 5
         assert result[2] == pytest.approx(20.0)  # (10+20+30)/3
 
     def test_indicator_rsi(self):
-        from strategies import rsi
+        from flinttrade_backtest.strategies import rsi
         # Steady uptrend → RSI should be high
         values = [float(i) for i in range(1, 31)]
         result = rsi(values, 14)
         assert result[-1] > 50
 
     def test_indicator_bollinger(self):
-        from strategies import bollinger_bands
+        from flinttrade_backtest.strategies import bollinger_bands
         values = [100.0 + i * 0.1 for i in range(30)]
         upper, mid, lower = bollinger_bands(values, 20)
         assert len(upper) == 30
@@ -586,7 +586,7 @@ class TestPackageExports:
     def test_all_exports(self):
         # __init__.py uses relative imports so can't be imported directly.
         # Read the file and check __all__ is defined with expected names.
-        init_path = os.path.join(os.path.dirname(__file__), '..', 'src', '__init__.py')
+        init_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'flinttrade_backtest', '__init__.py')
         content = open(init_path).read()
         expected = [
             "BacktestSimulator", "PerformanceMetrics", "WalkForwardOptimizer",
@@ -604,5 +604,5 @@ class TestPackageExports:
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        assert os.path.exists(os.path.join(pkg_dir, "src", "__init__.py"))
+        assert os.path.exists(os.path.join(pkg_dir, "src", "flinttrade_backtest", "__init__.py"))
         assert os.path.exists(os.path.join(pkg_dir, "README.md"))

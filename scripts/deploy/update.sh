@@ -107,14 +107,14 @@ git_pull() {
 
 update_python_deps() {
     info "Updating Python dependencies..."
-    run bash -c "cd $INSTALL_DIR && .venv/bin/python -m uv sync 2>/dev/null || .venv/bin/pip install -r requirements.txt 2>/dev/null || true"
+    run bash -c "cd $INSTALL_DIR && .venv/bin/python -m uv sync --frozen 2>/dev/null || .venv/bin/pip install --require-hashes -r requirements.lock 2>/dev/null || true"
     ok "Python dependencies updated"
 }
 
 rebuild_terminal() {
     info "Rebuilding terminal..."
-    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm ci --prefer-offline"
-    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm run build"
+    run bash -c "cd $INSTALL_DIR && corepack enable && pnpm install --frozen-lockfile"
+    run bash -c "cd $INSTALL_DIR && pnpm --dir packages/apps/terminal run build"
     ok "Terminal rebuilt"
 }
 

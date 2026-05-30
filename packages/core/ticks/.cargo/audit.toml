@@ -1,0 +1,8 @@
+# cargo-audit configuration (sub-spec §4.3). HIGH/CRITICAL advisories block merge;
+# to suppress one, uncomment a RUSTSEC id below and commit it WITH a PR explaining why.
+# Informational warnings are never silenced.
+[advisories]
+ignore = [
+  # "RUSTSEC-YYYY-NNNN",   # uncomment + commit with PR explaining why
+]
+informational_warnings = []   # never silence

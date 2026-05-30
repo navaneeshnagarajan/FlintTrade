@@ -1,4 +1,4 @@
-"""Tests for packages/core/data/src/audit_routes.py — SEBI audit trail endpoints."""
+"""Tests for packages/core/data/src/audit_routes.py — local audit-trail endpoints."""
 
 from __future__ import annotations
 

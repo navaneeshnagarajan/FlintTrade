@@ -73,7 +73,7 @@ class AlwaysBuyStrategy:
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def on_bar(self, bar: Any) -> None:
-        from engine import EngineOrder, OrderSide, OrderType
+        from flinttrade_backtest.engine import EngineOrder, OrderSide, OrderType
         self.bar += 1
         if self.bar == 2:
             self._orders.append(EngineOrder(
@@ -103,7 +103,7 @@ class BuyThenSellStrategy:
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def on_bar(self, bar: Any) -> None:
-        from engine import EngineOrder, OrderSide, OrderType
+        from flinttrade_backtest.engine import EngineOrder, OrderSide, OrderType
         self.bar += 1
         if self.bar == 2:
             self._orders.append(EngineOrder(
@@ -136,7 +136,7 @@ class LimitOrderStrategy:
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def on_bar(self, bar: Any) -> None:
-        from engine import EngineOrder, OrderSide, OrderType
+        from flinttrade_backtest.engine import EngineOrder, OrderSide, OrderType
         self.bar += 1
         if self.bar == 1:
             # Limit price well above market low — should fill quickly
@@ -167,7 +167,7 @@ class StopOrderStrategy:
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def on_bar(self, bar: Any) -> None:
-        from engine import EngineOrder, OrderSide, OrderType
+        from flinttrade_backtest.engine import EngineOrder, OrderSide, OrderType
         self.bar += 1
         if self.bar == 1:
             # First place a long entry
@@ -213,7 +213,7 @@ class TestEngineLifecycle:
     """Test the basic backtest lifecycle."""
 
     def _make_engine(self, capital: float = 100_000.0, tax_enabled: bool = False) -> Any:
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
         config = EngineConfig(
             symbol="TEST",
             initial_capital=Decimal(str(capital)),
@@ -224,7 +224,7 @@ class TestEngineLifecycle:
         return BacktestEngine(config)
 
     def test_no_bars_returns_error(self):
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
         config = EngineConfig(symbol="TEST", tax_enabled=False)
         engine = BacktestEngine(config)
         engine.set_strategy(NeverTradesStrategy())
@@ -233,7 +233,7 @@ class TestEngineLifecycle:
         assert result.total_bars == 0
 
     def test_no_strategy_returns_error(self):
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
         config = EngineConfig(symbol="TEST", tax_enabled=False)
         engine = BacktestEngine(config)
         result = engine.run(_make_flat_bars(10))
@@ -272,7 +272,7 @@ class TestOrderFills:
     """Test order type fill mechanics."""
 
     def _engine(self, capital: float = 200_000.0) -> Any:
-        from engine import BacktestEngine, EngineConfig, FillMode
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig, FillMode
         config = EngineConfig(
             symbol="TEST",
             initial_capital=Decimal(str(capital)),
@@ -334,7 +334,7 @@ class TestOrderFills:
         assert len(filled) >= 1
 
     def test_rejected_order_on_insufficient_cash(self):
-        from engine import BacktestEngine, EngineConfig, EngineOrder, OrderSide, OrderType
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig, EngineOrder, OrderSide, OrderType
 
         config = EngineConfig(
             symbol="TEST",
@@ -368,7 +368,7 @@ class TestOrderFills:
         assert len(rejected) >= 1
 
     def test_order_cancel_removes_from_pending(self):
-        from engine import BacktestEngine, EngineConfig, EngineOrder, OrderSide, OrderType
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig, EngineOrder, OrderSide, OrderType
 
         config = EngineConfig(symbol="TEST", initial_capital=Decimal("100000"), tax_enabled=False)
         engine = BacktestEngine(config)
@@ -393,7 +393,7 @@ class TestPositionTracking:
     """Test position management across fills."""
 
     def _engine(self) -> Any:
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
         config = EngineConfig(
             symbol="TEST",
             initial_capital=Decimal("500000"),
@@ -416,7 +416,7 @@ class TestPositionTracking:
             def stop(self): ...
             def set_engine(self, e): self.engine_ref = e
             def on_bar(self, bar):
-                from engine import EngineOrder, OrderSide, OrderType
+                from flinttrade_backtest.engine import EngineOrder, OrderSide, OrderType
                 self.bar += 1
                 if self.bar == 2:
                     self._orders.append(EngineOrder(
@@ -475,7 +475,7 @@ class TestPositionTracking:
 
     def test_multiple_trades_accumulated(self):
         """Run a strategy that generates many trades and verify all are recorded."""
-        from engine import BacktestEngine, EngineConfig, EngineOrder, OrderSide, OrderType
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig, EngineOrder, OrderSide, OrderType
 
         class AlternatingStrategy:
             name = "Alt"
@@ -521,7 +521,7 @@ class TestSlippageAndCommission:
     """Test slippage and commission impact on fills."""
 
     def test_slippage_reduces_pnl(self):
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
 
         config_no_slip = EngineConfig(
             symbol="TEST", initial_capital=Decimal("200000"),
@@ -550,7 +550,7 @@ class TestSlippageAndCommission:
             assert pnl1 >= pnl2
 
     def test_commission_appears_in_charges(self):
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
 
         config = EngineConfig(
             symbol="TEST", initial_capital=Decimal("200000"),
@@ -565,7 +565,7 @@ class TestSlippageAndCommission:
             assert total_charges >= 100.0  # At least one commission charged
 
     def test_fill_mode_next_open(self):
-        from engine import BacktestEngine, EngineConfig, FillMode
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig, FillMode
 
         config = EngineConfig(
             symbol="TEST", initial_capital=Decimal("200000"),
@@ -577,7 +577,7 @@ class TestSlippageAndCommission:
         assert result.total_bars == 20
 
     def test_fill_mode_current_close(self):
-        from engine import BacktestEngine, EngineConfig, FillMode
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig, FillMode
 
         config = EngineConfig(
             symbol="TEST", initial_capital=Decimal("200000"),
@@ -593,7 +593,7 @@ class TestEngineResult:
     """Test result structure and computed properties."""
 
     def _run(self) -> Any:
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
         config = EngineConfig(
             symbol="TEST", initial_capital=Decimal("200000"),
             slippage_bps=Decimal("0"), commission_per_order=Decimal("0"),
@@ -623,7 +623,7 @@ class TestEngineResult:
 
     def test_trade_intraday_flag(self):
         """Trades on same-day bars should be marked intraday."""
-        from engine import BacktestEngine, EngineConfig
+        from flinttrade_backtest.engine import BacktestEngine, EngineConfig
 
         config = EngineConfig(
             symbol="TEST", initial_capital=Decimal("200000"),

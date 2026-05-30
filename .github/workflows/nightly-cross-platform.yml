@@ -34,8 +34,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
-      - run: pip install -r requirements.txt
-      - run: python -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen          # SC-07: hash-verified install
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60
 
   python-tests-windows:
     runs-on: windows-latest
@@ -47,5 +48,6 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
-      - run: pip install -r requirements.txt
-      - run: python -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen          # SC-07: hash-verified install
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"

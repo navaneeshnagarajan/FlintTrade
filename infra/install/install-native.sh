@@ -125,18 +125,19 @@ if [ ! -d "$VENV_DIR" ]; then
     python3.12 -m venv "$VENV_DIR"
 fi
 
-# Activate and install dependencies
+# Activate and install dependencies — SC-07: hash-verified install only
 "$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel -q
-"$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
+"$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock" -q
 
 ok "Python dependencies installed"
 
 # ── Step 4: Build React terminal ───────────────────────────────────────
 log "Building React terminal..."
 
-cd "$INSTALL_DIR/packages/apps/terminal"
-npm install --production=false
-npm run build
+cd "$INSTALL_DIR"
+corepack enable
+pnpm install --frozen-lockfile
+pnpm --dir packages/apps/terminal run build
 
 ok "Terminal built"
 

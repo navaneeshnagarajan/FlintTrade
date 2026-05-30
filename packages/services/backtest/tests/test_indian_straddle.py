@@ -19,7 +19,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _import_strategy():
-    from strategies.options_short_straddle_indian import (
+    from flinttrade_backtest.strategies.options_short_straddle_indian import (
         IndianShortStraddle,
         LOT_SIZES,
         STRIKE_INTERVALS,
@@ -666,7 +666,7 @@ class TestATRIndicator:
     """Verify the atr() function in _indicators.py."""
 
     def test_atr_basic_length(self):
-        from strategies._indicators import atr
+        from flinttrade_backtest.strategies._indicators import atr
         n = 30
         highs = [float(i + 2) for i in range(n)]
         lows = [float(i) for i in range(n)]
@@ -675,7 +675,7 @@ class TestATRIndicator:
         assert len(result) == n
 
     def test_atr_leading_zeros(self):
-        from strategies._indicators import atr
+        from flinttrade_backtest.strategies._indicators import atr
         n = 20
         highs = [float(i + 2) for i in range(n)]
         lows = [float(i) for i in range(n)]
@@ -686,7 +686,7 @@ class TestATRIndicator:
             assert v == 0.0
 
     def test_atr_positive_after_warmup(self):
-        from strategies._indicators import atr
+        from flinttrade_backtest.strategies._indicators import atr
         import random
         random.seed(123)
         n = 50
@@ -698,11 +698,11 @@ class TestATRIndicator:
             assert v > 0.0
 
     def test_atr_empty_input(self):
-        from strategies._indicators import atr
+        from flinttrade_backtest.strategies._indicators import atr
         assert atr([], [], [], period=14) == []
 
     def test_atr_in_all_exports(self):
-        from strategies._indicators import __all__ as indicator_all
+        from flinttrade_backtest.strategies._indicators import __all__ as indicator_all
         assert "atr" in indicator_all
 
 
@@ -906,10 +906,10 @@ class TestRegistry:
     """Verify IndianShortStraddle is accessible from the strategies package."""
 
     def test_in_all_strategies(self):
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         assert "IndianShortStraddle" in ALL_STRATEGIES
 
     def test_class_matches(self):
-        from strategies import ALL_STRATEGIES
-        from strategies.options_short_straddle_indian import IndianShortStraddle
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies.options_short_straddle_indian import IndianShortStraddle
         assert ALL_STRATEGIES["IndianShortStraddle"] is IndianShortStraddle

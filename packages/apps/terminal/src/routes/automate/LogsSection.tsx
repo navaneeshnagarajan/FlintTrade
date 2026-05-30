@@ -1,5 +1,5 @@
 /**
- * LogsSection — SEBI-compliant audit log viewer.
+ * LogsSection — Local audit log viewer.
  * Paginated by date, with load-more for large days.
  */
 
@@ -69,7 +69,7 @@ export default function LogsSection() {
           <div>
             <h3 className="font-heading font-semibold text-lg text-text-primary">Execution Logs</h3>
             <p className="text-sm text-text-secondary mt-0.5">
-              SEBI-compliant audit trail. Every trigger, condition, and order action is recorded.
+              Append-only audit trail. Every trigger, condition, and order action is recorded.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">

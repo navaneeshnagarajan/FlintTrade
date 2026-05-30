@@ -28,9 +28,9 @@ cd $REPO_DIR
 echo "Pulling latest from main..."
 git pull origin main
 
-# 3. Install Python deps
+# 3. Install Python deps — SC-07: hash-verified install only
 echo "Installing Python dependencies..."
-pip install --break-system-packages -r requirements.txt -q
+pip install --break-system-packages --require-hashes -r requirements.lock -q
 
 # 4. Install systemd service if not present
 if [ ! -f /etc/systemd/system/flinttrade.service ]; then

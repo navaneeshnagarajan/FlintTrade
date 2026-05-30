@@ -21,7 +21,7 @@ def prefs(tmp_path):
 
     spec = importlib.util.spec_from_file_location(
         "chart_prefs",
-        pathlib.Path(__file__).parent.parent / "src" / "chart_prefs.py",
+        pathlib.Path(__file__).parent.parent / "src" / "flinttrade_core" / "chart_prefs.py",
     )
     module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(module)  # type: ignore[union-attr]

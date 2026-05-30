@@ -1,0 +1,8 @@
+[toolchain]
+channel = "1.83.0"                          # match founder's local rustup; bump in lockstep with CI matrix
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc",
+           "x86_64-unknown-linux-gnu",
+           "x86_64-apple-darwin",
+           "aarch64-apple-darwin"]
+profile = "default"

@@ -104,16 +104,16 @@ class TestExceptions:
         assert "400" in str(exc)
 
     def test_rate_limit_error(self):
-        from flinttrade_core.exceptions import RateLimitError
+        from flinttrade_core.exceptions import OpenAlgoRateLimitError
 
-        exc = RateLimitError("/placeorder", retry_after=2.0)
+        exc = OpenAlgoRateLimitError("/placeorder", retry_after=2.0)
         assert exc.status_code == 429
         assert exc.retry_after == 2.0
 
     def test_auth_error(self):
-        from flinttrade_core.exceptions import AuthError
+        from flinttrade_core.exceptions import OpenAlgoAuthError
 
-        exc = AuthError("/funds")
+        exc = OpenAlgoAuthError("/funds")
         assert exc.status_code == 401
 
     def test_config_error(self):
@@ -125,14 +125,14 @@ class TestExceptions:
     def test_inheritance_chain(self):
         from flinttrade_core.exceptions import (
             APIError,
-            AuthError,
+            OpenAlgoAuthError,
             FlintTradeError,
-            RateLimitError,
+            OpenAlgoRateLimitError,
         )
 
         assert issubclass(APIError, FlintTradeError)
-        assert issubclass(RateLimitError, APIError)
-        assert issubclass(AuthError, APIError)
+        assert issubclass(OpenAlgoRateLimitError, APIError)
+        assert issubclass(OpenAlgoAuthError, APIError)
 
 
 # ======================================================================
@@ -442,7 +442,7 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_auth_error_on_401(self):
-        from flinttrade_core.exceptions import AuthError
+        from flinttrade_core.exceptions import OpenAlgoAuthError
 
         client = self._make_client()
         mock_resp = MagicMock()
@@ -451,12 +451,12 @@ class TestErrorHandling:
         mock_resp.json.return_value = {"message": "Invalid API key"}
 
         client._http.post = AsyncMock(return_value=mock_resp)
-        with pytest.raises(AuthError):
+        with pytest.raises(OpenAlgoAuthError):
             await client.ping()
 
     @pytest.mark.asyncio
     async def test_rate_limit_error_on_429(self):
-        from flinttrade_core.exceptions import RateLimitError
+        from flinttrade_core.exceptions import OpenAlgoRateLimitError
 
         client = self._make_client()
         mock_resp = MagicMock()
@@ -464,7 +464,7 @@ class TestErrorHandling:
         mock_resp.headers = {"Retry-After": "1"}
 
         client._http.post = AsyncMock(return_value=mock_resp)
-        with pytest.raises(RateLimitError):
+        with pytest.raises(OpenAlgoRateLimitError):
             await client.ping()
 
     @pytest.mark.asyncio
@@ -536,5 +536,5 @@ class TestPackageExports:
 
     def test_package_exists(self):
         pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        assert os.path.exists(os.path.join(pkg_dir, "src", "__init__.py"))
+        assert os.path.exists(os.path.join(pkg_dir, "src", "flinttrade_core", "__init__.py"))
         assert os.path.exists(os.path.join(pkg_dir, "README.md"))

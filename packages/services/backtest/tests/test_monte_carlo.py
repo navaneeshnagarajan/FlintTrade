@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from monte_carlo import (
+from flinttrade_backtest.monte_carlo import (
     MonteCarloConfig,
     MonteCarloResult,
     MonteCarloSimulator,

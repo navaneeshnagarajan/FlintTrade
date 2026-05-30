@@ -1,0 +1,15 @@
+# Supply-chain audit tooling — kept SEPARATE from the runtime requirements.lock so
+# the audit gates can `pip install --require-hashes -r supply-chain/audit-tooling.lock`
+# without dragging audit-only tools into the application dependency graph (sub-spec §12.2).
+#
+# Regenerate the hashed lock after editing this file:
+#   uv pip compile --generate-hashes supply-chain/audit-tooling.in \
+#       -o supply-chain/audit-tooling.lock
+#
+# pyyaml is pinned to the SAME version the runtime lock carries so the two
+# hash-verified install steps in broker-sdk-licences / transitive-licences /
+# notice-drift never disagree on a shared transitive hash.
+pip-audit
+pip-licenses
+tomli-w
+pyyaml==6.0.3

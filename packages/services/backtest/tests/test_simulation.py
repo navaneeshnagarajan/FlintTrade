@@ -20,9 +20,9 @@ from typing import Any
 
 import pytest
 
-from engine import BacktestEngine, EngineConfig  # noqa: E402
-from base_strategy import BaseBacktestStrategy  # noqa: E402
-from simulation import (  # noqa: E402
+from flinttrade_backtest.engine import BacktestEngine, EngineConfig  # noqa: E402
+from flinttrade_backtest.base_strategy import BaseBacktestStrategy  # noqa: E402
+from flinttrade_backtest.simulation import (  # noqa: E402
     MarketEvent,
     SCENARIOS,
     SimulationEngine,

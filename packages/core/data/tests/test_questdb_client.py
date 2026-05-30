@@ -75,7 +75,7 @@ class TestConnectWithoutPsycopg2:
             import os
 
             path = os.path.join(
-                os.path.dirname(__file__), "..", "src", "questdb_client.py"
+                os.path.dirname(__file__), "..", "src", "flinttrade_data", "questdb_client.py"
             )
             spec = importlib.util.spec_from_file_location(mod_key, path)
             mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]

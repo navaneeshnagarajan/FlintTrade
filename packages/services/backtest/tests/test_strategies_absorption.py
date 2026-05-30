@@ -135,7 +135,7 @@ class TestNewIndicators:
 
     def test_laguerre_rsi_bounded(self) -> None:
         """All LaRSI values must be in [0, 1]."""
-        from strategies._indicators import laguerre_rsi
+        from flinttrade_backtest.strategies._indicators import laguerre_rsi
         random.seed(99)
         closes = [100.0 + random.uniform(-3, 3) for _ in range(80)]
         result = laguerre_rsi(closes, gamma=0.5)
@@ -144,7 +144,7 @@ class TestNewIndicators:
 
     def test_laguerre_rsi_rising_series(self) -> None:
         """Monotonically rising price should push LaRSI toward 1."""
-        from strategies._indicators import laguerre_rsi
+        from flinttrade_backtest.strategies._indicators import laguerre_rsi
         closes = [float(i) for i in range(1, 51)]
         result = laguerre_rsi(closes, gamma=0.3)
         # Final value should be substantially above 0.5
@@ -152,14 +152,14 @@ class TestNewIndicators:
 
     def test_laguerre_rsi_falling_series(self) -> None:
         """Monotonically falling price should push LaRSI toward 0."""
-        from strategies._indicators import laguerre_rsi
+        from flinttrade_backtest.strategies._indicators import laguerre_rsi
         closes = [float(50 - i) for i in range(50)]
         result = laguerre_rsi(closes, gamma=0.3)
         assert result[-1] < 0.3
 
     def test_laguerre_rsi_gamma_effect(self) -> None:
         """Higher gamma produces a smoother (less extreme) final value."""
-        from strategies._indicators import laguerre_rsi
+        from flinttrade_backtest.strategies._indicators import laguerre_rsi
         closes = [100.0 + math.sin(i * 0.5) * 10 for i in range(60)]
         high_gamma = laguerre_rsi(closes, gamma=0.9)
         low_gamma = laguerre_rsi(closes, gamma=0.1)
@@ -168,7 +168,7 @@ class TestNewIndicators:
 
     def test_laguerre_rsi_short_series(self) -> None:
         """Should not crash on very short input."""
-        from strategies._indicators import laguerre_rsi
+        from flinttrade_backtest.strategies._indicators import laguerre_rsi
         result = laguerre_rsi([100.0], gamma=0.5)
         assert len(result) == 1
 
@@ -176,19 +176,19 @@ class TestNewIndicators:
 
     def test_pivot_points_basic_values(self) -> None:
         """R1 > P > S1, R2 > R1, S2 < S1."""
-        from strategies._indicators import pivot_points
+        from flinttrade_backtest.strategies._indicators import pivot_points
         p, r1, s1, r2, s2 = pivot_points([110.0], [90.0], [100.0])
         assert r2 > r1 > p > s1 > s2
 
     def test_pivot_points_symmetry(self) -> None:
         """With H=110 L=90 C=100, P should equal (110+90+100)/3 = 100."""
-        from strategies._indicators import pivot_points
+        from flinttrade_backtest.strategies._indicators import pivot_points
         p, r1, s1, r2, s2 = pivot_points([110.0], [90.0], [100.0])
         assert abs(p - 100.0) < 1e-9
 
     def test_pivot_points_empty_returns_zeros(self) -> None:
         """Empty input should return all zeros without crashing."""
-        from strategies._indicators import pivot_points
+        from flinttrade_backtest.strategies._indicators import pivot_points
         result = pivot_points([], [], [])
         assert result == (0.0, 0.0, 0.0, 0.0, 0.0)
 
@@ -196,7 +196,7 @@ class TestNewIndicators:
 
     def test_heikin_ashi_length_preserved(self) -> None:
         """Output length must equal input length."""
-        from strategies._indicators import heikin_ashi
+        from flinttrade_backtest.strategies._indicators import heikin_ashi
         bars = _make_bars(50)
         opens = [b["open"] for b in bars]
         highs = [b["high"] for b in bars]
@@ -207,7 +207,7 @@ class TestNewIndicators:
 
     def test_heikin_ashi_high_above_low(self) -> None:
         """HA high must always be >= HA low."""
-        from strategies._indicators import heikin_ashi
+        from flinttrade_backtest.strategies._indicators import heikin_ashi
         bars = _make_bars(80)
         opens = [b["open"] for b in bars]
         highs = [b["high"] for b in bars]
@@ -219,7 +219,7 @@ class TestNewIndicators:
 
     def test_heikin_ashi_empty_input(self) -> None:
         """Empty input should return four empty lists."""
-        from strategies._indicators import heikin_ashi
+        from flinttrade_backtest.strategies._indicators import heikin_ashi
         ha_o, ha_h, ha_l, ha_c = heikin_ashi([], [], [], [])
         assert ha_o == ha_h == ha_l == ha_c == []
 
@@ -234,12 +234,12 @@ class TestLaguerreRSIStrategy:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_laguerre_rsi import LaguerreRSI
+        from flinttrade_backtest.strategies.momentum_laguerre_rsi import LaguerreRSI
         s = LaguerreRSI(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_on_insufficient_bars(self) -> None:
-        from strategies.momentum_laguerre_rsi import LaguerreRSI
+        from flinttrade_backtest.strategies.momentum_laguerre_rsi import LaguerreRSI
         bars = _make_bars(2)  # below warmup threshold
         s = LaguerreRSI(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -247,14 +247,14 @@ class TestLaguerreRSIStrategy:
 
     def test_generates_orders_on_oscillating_data(self) -> None:
         """Oscillating price forces LaRSI to repeatedly cross 0.2 and 0.8."""
-        from strategies.momentum_laguerre_rsi import LaguerreRSI
+        from flinttrade_backtest.strategies.momentum_laguerre_rsi import LaguerreRSI
         bars = _oscillating_bars(300, amplitude=30.0)
         s = LaguerreRSI(symbol="TEST", gamma=0.2, oversold=0.2, overbought=0.8)
         orders = _run_strategy(s, bars)
         assert len(orders) > 0
 
     def test_orders_are_buy_or_sell(self) -> None:
-        from strategies.momentum_laguerre_rsi import LaguerreRSI
+        from flinttrade_backtest.strategies.momentum_laguerre_rsi import LaguerreRSI
         bars = _make_bars(200, vol=5.0)
         s = LaguerreRSI(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -262,7 +262,7 @@ class TestLaguerreRSIStrategy:
             assert o.action in ("BUY", "SELL")
 
     def test_generate_orders_clears_pending(self) -> None:
-        from strategies.momentum_laguerre_rsi import LaguerreRSI
+        from flinttrade_backtest.strategies.momentum_laguerre_rsi import LaguerreRSI
         bars = _oscillating_bars(200)
         s = LaguerreRSI(symbol="TEST", gamma=0.1)
         _run_strategy(s, bars)
@@ -280,19 +280,19 @@ class TestElderImpulse:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.momentum_elder_impulse import ElderImpulse
+        from flinttrade_backtest.strategies.momentum_elder_impulse import ElderImpulse
         s = ElderImpulse(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.momentum_elder_impulse import ElderImpulse
+        from flinttrade_backtest.strategies.momentum_elder_impulse import ElderImpulse
         bars = _make_bars(20)  # below macd_slow + signal warmup
         s = ElderImpulse(symbol="TEST")
         orders = _run_strategy(s, bars)
         assert len(orders) == 0
 
     def test_generates_orders_on_oscillating_data(self) -> None:
-        from strategies.momentum_elder_impulse import ElderImpulse
+        from flinttrade_backtest.strategies.momentum_elder_impulse import ElderImpulse
         bars = _oscillating_bars(300)
         s = ElderImpulse(symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -300,7 +300,7 @@ class TestElderImpulse:
 
     def test_trending_up_produces_buy(self) -> None:
         """Oscillating data with upward bias produces at least one BUY signal."""
-        from strategies.momentum_elder_impulse import ElderImpulse
+        from flinttrade_backtest.strategies.momentum_elder_impulse import ElderImpulse
         # Oscillating bars guarantee both EMA and MACD histogram direction changes
         bars = _oscillating_bars(400, amplitude=20.0)
         s = ElderImpulse(symbol="TEST", ema_period=13, macd_fast=12, macd_slow=26, macd_signal=9)
@@ -319,12 +319,12 @@ class TestVCPBreakout:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volatility_vcp import VCPBreakout
+        from flinttrade_backtest.strategies.volatility_vcp import VCPBreakout
         s = VCPBreakout(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.volatility_vcp import VCPBreakout
+        from flinttrade_backtest.strategies.volatility_vcp import VCPBreakout
         bars = _make_bars(10)  # below atr_period + ma_period
         s = VCPBreakout(atr_period=14, ma_period=20, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -332,7 +332,7 @@ class TestVCPBreakout:
 
     def test_generates_buy_on_contracting_then_breakout(self) -> None:
         """Contracting ATR followed by rising price above MA triggers BUY."""
-        from strategies.volatility_vcp import VCPBreakout
+        from flinttrade_backtest.strategies.volatility_vcp import VCPBreakout
         bars = _contracting_bars(150)
         s = VCPBreakout(
             atr_period=10,
@@ -347,7 +347,7 @@ class TestVCPBreakout:
 
     def test_contraction_count_resets_on_expansion(self) -> None:
         """ATR expansion should reset the contraction streak to zero."""
-        from strategies.volatility_vcp import VCPBreakout
+        from flinttrade_backtest.strategies.volatility_vcp import VCPBreakout
         s = VCPBreakout(symbol="TEST")
         s.start()
         s._contraction_count = 5
@@ -372,12 +372,12 @@ class TestZScoreMeanReversion:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.mean_reversion_zscore import ZScoreMeanReversion
+        from flinttrade_backtest.strategies.mean_reversion_zscore import ZScoreMeanReversion
         s = ZScoreMeanReversion(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.mean_reversion_zscore import ZScoreMeanReversion
+        from flinttrade_backtest.strategies.mean_reversion_zscore import ZScoreMeanReversion
         bars = _make_bars(15)
         s = ZScoreMeanReversion(period=20, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -385,7 +385,7 @@ class TestZScoreMeanReversion:
 
     def test_generates_orders_on_high_vol_data(self) -> None:
         """Large price swings must push z beyond ±2 and trigger entries."""
-        from strategies.mean_reversion_zscore import ZScoreMeanReversion
+        from flinttrade_backtest.strategies.mean_reversion_zscore import ZScoreMeanReversion
         bars = _oscillating_bars(200, amplitude=50.0)
         s = ZScoreMeanReversion(period=20, z_entry=1.5, z_exit=0.3, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -393,14 +393,14 @@ class TestZScoreMeanReversion:
 
     def test_zscore_helper_values(self) -> None:
         """Z-Score of a constant series should be 0."""
-        from strategies.mean_reversion_zscore import _zscore
+        from flinttrade_backtest.strategies.mean_reversion_zscore import _zscore
         closes = [100.0] * 30
         z = _zscore(closes, 20)
         assert all(v == 0.0 for v in z[19:])
 
     def test_buy_and_sell_both_appear(self) -> None:
         """Both BUY and SELL actions should appear over oscillating data."""
-        from strategies.mean_reversion_zscore import ZScoreMeanReversion
+        from flinttrade_backtest.strategies.mean_reversion_zscore import ZScoreMeanReversion
         bars = _oscillating_bars(300, amplitude=40.0)
         s = ZScoreMeanReversion(period=15, z_entry=1.0, z_exit=0.2, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -418,12 +418,12 @@ class TestEngulfingPattern:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.pattern_engulfing import EngulfingPattern
+        from flinttrade_backtest.strategies.pattern_engulfing import EngulfingPattern
         s = EngulfingPattern(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.pattern_engulfing import EngulfingPattern
+        from flinttrade_backtest.strategies.pattern_engulfing import EngulfingPattern
         bars = _make_bars(10)
         s = EngulfingPattern(sma_period=20, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -432,7 +432,7 @@ class TestEngulfingPattern:
     def test_bullish_engulf_detected_below_sma(self) -> None:
         """Manually craft a bullish engulfing bar below SMA and check BUY fires."""
         from flinttrade_core.models import OHLCV
-        from strategies.pattern_engulfing import EngulfingPattern
+        from flinttrade_backtest.strategies.pattern_engulfing import EngulfingPattern
 
         s = EngulfingPattern(sma_period=10, hold_bars=5, symbol="TEST")
         s.start()
@@ -469,7 +469,7 @@ class TestEngulfingPattern:
 
     def test_time_based_exit_fires(self) -> None:
         """After hold_bars candles in a position the strategy exits."""
-        from strategies.pattern_engulfing import EngulfingPattern
+        from flinttrade_backtest.strategies.pattern_engulfing import EngulfingPattern
         bars = _make_bars(200, vol=5.0, seed=55)
         s = EngulfingPattern(sma_period=20, hold_bars=3, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -489,12 +489,12 @@ class TestHammerShootingStar:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.pattern_hammer import HammerShootingStar
+        from flinttrade_backtest.strategies.pattern_hammer import HammerShootingStar
         s = HammerShootingStar(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.pattern_hammer import HammerShootingStar
+        from flinttrade_backtest.strategies.pattern_hammer import HammerShootingStar
         bars = _make_bars(8)
         s = HammerShootingStar(sma_period=20, vol_period=10, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -503,7 +503,7 @@ class TestHammerShootingStar:
     def test_hammer_detected_on_crafted_bar(self) -> None:
         """Craft a textbook hammer bar and verify BUY fires."""
         from flinttrade_core.models import OHLCV
-        from strategies.pattern_hammer import HammerShootingStar
+        from flinttrade_backtest.strategies.pattern_hammer import HammerShootingStar
 
         s = HammerShootingStar(
             sma_period=10, wick_mult=2.0, max_body_ratio=0.35,
@@ -538,7 +538,7 @@ class TestHammerShootingStar:
     def test_no_crash_on_zero_range_bar(self) -> None:
         """A doji bar (zero range) must not crash the strategy."""
         from flinttrade_core.models import OHLCV
-        from strategies.pattern_hammer import HammerShootingStar
+        from flinttrade_backtest.strategies.pattern_hammer import HammerShootingStar
 
         s = HammerShootingStar(symbol="TEST")
         s.start()
@@ -562,19 +562,19 @@ class TestVWMACrossover:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volume_vwma import VWMACrossover
+        from flinttrade_backtest.strategies.volume_vwma import VWMACrossover
         s = VWMACrossover(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.volume_vwma import VWMACrossover
+        from flinttrade_backtest.strategies.volume_vwma import VWMACrossover
         bars = _make_bars(10)
         s = VWMACrossover(period=20, symbol="TEST")
         orders = _run_strategy(s, bars)
         assert len(orders) == 0
 
     def test_generates_orders_on_oscillating_data(self) -> None:
-        from strategies.volume_vwma import VWMACrossover
+        from flinttrade_backtest.strategies.volume_vwma import VWMACrossover
         bars = _oscillating_bars(300)
         s = VWMACrossover(period=10, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -582,7 +582,7 @@ class TestVWMACrossover:
 
     def test_vwma_helper_basic(self) -> None:
         """VWMA with equal volumes should equal SMA."""
-        from strategies.volume_vwma import vwma
+        from flinttrade_backtest.strategies.volume_vwma import vwma
         prices = [10.0, 20.0, 30.0, 40.0, 50.0]
         volumes = [100] * 5
         result = vwma(prices, volumes, 3)
@@ -593,7 +593,7 @@ class TestVWMACrossover:
 
     def test_vwma_weights_high_volume_bars(self) -> None:
         """When the last bar has double volume, VWMA should skew toward it."""
-        from strategies.volume_vwma import vwma
+        from flinttrade_backtest.strategies.volume_vwma import vwma
         prices = [100.0, 100.0, 200.0]
         volumes = [1, 1, 100]
         result = vwma(prices, volumes, 3)
@@ -611,12 +611,12 @@ class TestTripleMA:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.trend_triple_ma import TripleMA
+        from flinttrade_backtest.strategies.trend_triple_ma import TripleMA
         s = TripleMA(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.trend_triple_ma import TripleMA
+        from flinttrade_backtest.strategies.trend_triple_ma import TripleMA
         bars = _make_bars(30)  # below slow_period=50
         s = TripleMA(fast_period=10, mid_period=20, slow_period=50, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -624,7 +624,7 @@ class TestTripleMA:
 
     def test_bull_stack_produces_buy(self) -> None:
         """A strong uptrend should trigger BUY via the bull stack condition."""
-        from strategies.trend_triple_ma import TripleMA
+        from flinttrade_backtest.strategies.trend_triple_ma import TripleMA
         bars = _trending_bars(200, per_bar=2.0)
         s = TripleMA(fast_period=5, mid_period=10, slow_period=20, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -633,7 +633,7 @@ class TestTripleMA:
 
     def test_oscillating_data_produces_both_signals(self) -> None:
         """Sine-wave price should produce both BUY and SELL signals."""
-        from strategies.trend_triple_ma import TripleMA
+        from flinttrade_backtest.strategies.trend_triple_ma import TripleMA
         bars = _oscillating_bars(400, amplitude=30.0)
         s = TripleMA(fast_period=5, mid_period=10, slow_period=20, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -651,12 +651,12 @@ class TestIndiaVIXRegime:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.volatility_india_vix import IndiaVIXRegime
+        from flinttrade_backtest.strategies.volatility_india_vix import IndiaVIXRegime
         s = IndiaVIXRegime(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.volatility_india_vix import IndiaVIXRegime
+        from flinttrade_backtest.strategies.volatility_india_vix import IndiaVIXRegime
         bars = _make_bars(15)
         s = IndiaVIXRegime(atr_period=14, sma_period=20, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -664,7 +664,7 @@ class TestIndiaVIXRegime:
 
     def test_generates_orders_on_volatile_data(self) -> None:
         """High-vol oscillating bars should trigger VIX-regime signals."""
-        from strategies.volatility_india_vix import IndiaVIXRegime
+        from flinttrade_backtest.strategies.volatility_india_vix import IndiaVIXRegime
         bars = _make_bars(200, vol=10.0, seed=77)
         s = IndiaVIXRegime(atr_period=10, vix_ema_period=3, sma_period=15, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -673,7 +673,7 @@ class TestIndiaVIXRegime:
     def test_no_crash_on_constant_prices(self) -> None:
         """Constant prices (zero ATR) must not crash the strategy."""
         from flinttrade_core.models import OHLCV
-        from strategies.volatility_india_vix import IndiaVIXRegime
+        from flinttrade_backtest.strategies.volatility_india_vix import IndiaVIXRegime
         s = IndiaVIXRegime(symbol="TEST")
         s.start()
         for i in range(50):
@@ -696,12 +696,12 @@ class TestPivotPointReversion:
 
     def test_inherits_base_strategy(self) -> None:
         from flinttrade_engine.strategy import BaseStrategy
-        from strategies.mean_reversion_pivot_point import PivotPointReversion
+        from flinttrade_backtest.strategies.mean_reversion_pivot_point import PivotPointReversion
         s = PivotPointReversion(symbol="TEST")
         assert isinstance(s, BaseStrategy)
 
     def test_no_orders_below_warmup(self) -> None:
-        from strategies.mean_reversion_pivot_point import PivotPointReversion
+        from flinttrade_backtest.strategies.mean_reversion_pivot_point import PivotPointReversion
         bars = _make_bars(2)
         s = PivotPointReversion(pivot_lookback=1, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -709,7 +709,7 @@ class TestPivotPointReversion:
 
     def test_no_crash_on_real_data(self) -> None:
         """Strategy must survive 200 bars of noisy data without exceptions."""
-        from strategies.mean_reversion_pivot_point import PivotPointReversion
+        from flinttrade_backtest.strategies.mean_reversion_pivot_point import PivotPointReversion
         bars = _make_bars(200, vol=5.0, seed=42)
         orders = _run_strategy(PivotPointReversion(pivot_lookback=1, symbol="TEST"), bars)
         assert isinstance(orders, list)
@@ -737,7 +737,7 @@ class TestPivotPointReversion:
         BEHAVIOURAL VALIDATION: confirm position stays 0 when no signal fires
         and generate_orders() always returns a list.
         """
-        from strategies.mean_reversion_pivot_point import PivotPointReversion
+        from flinttrade_backtest.strategies.mean_reversion_pivot_point import PivotPointReversion
         bars = _make_bars(150, vol=2.0, seed=11)
         s = PivotPointReversion(pivot_lookback=1, symbol="TEST")
         orders = _run_strategy(s, bars)
@@ -748,7 +748,7 @@ class TestPivotPointReversion:
 
     def test_pivot_levels_correct_formula(self) -> None:
         """Verify P/R1/S1 match the textbook formula for known H/L/C."""
-        from strategies._indicators import pivot_points
+        from flinttrade_backtest.strategies._indicators import pivot_points
         # H=120, L=80, C=100 → P=100, R1=120, S1=80
         p, r1, s1, r2, s2 = pivot_points([120.0], [80.0], [100.0])
         assert abs(p - 100.0) < 1e-9
@@ -765,7 +765,7 @@ class TestAllStrategiesInRegistry:
     """Verify all 10 new strategies appear in ALL_STRATEGIES."""
 
     def test_all_10_new_strategies_registered(self) -> None:
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         expected = [
             "LaguerreRSI",
             "ElderImpulse",
@@ -783,7 +783,7 @@ class TestAllStrategiesInRegistry:
 
     def test_all_registered_strategies_are_instantiable(self) -> None:
         """Every new strategy class must instantiate without errors."""
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         new_keys = [
             "LaguerreRSI", "ElderImpulse", "ZScoreMeanReversion",
             "PivotPointReversion", "VCPBreakout", "IndiaVIXRegime",
@@ -797,5 +797,5 @@ class TestAllStrategiesInRegistry:
 
     def test_total_strategy_count_grew(self) -> None:
         """Registry should have at least 50 strategies after the absorption."""
-        from strategies import ALL_STRATEGIES
+        from flinttrade_backtest.strategies import ALL_STRATEGIES
         assert len(ALL_STRATEGIES) >= 50

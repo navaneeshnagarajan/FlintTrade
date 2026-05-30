@@ -1,0 +1,48 @@
+name: Refresh vuln snapshot
+
+# Security M8: maintain the offline OSV fallback used by
+# scripts/pip-audit-with-allowlist.py. Runs pip-audit ONLINE against requirements.lock,
+# saves the JSON report as supply-chain/vuln-snapshot-YYYY-MM-DD.json, prunes older
+# snapshots, and opens a PR for the founder to merge. Weekly cadence keeps the snapshot
+# inside the 14-day freshness window the wrapper enforces.
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"      # Sunday 04:00 UTC = 09:30 IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-vuln-snapshot
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12.8" }
+      - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
+      - name: Capture fresh OSV-backed report
+        run: |
+          DATE="$(date -u +%Y-%m-%d)"
+          pip-audit --require-hashes -r requirements.lock \
+            --format json --vulnerability-service osv \
+            --output "supply-chain/vuln-snapshot-${DATE}.json" || true
+          # prune all but the newest two snapshots
+          ls -1 supply-chain/vuln-snapshot-*.json | sort | head -n -2 | xargs -r git rm -f
+      - name: Open PR with refreshed snapshot
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(supply-chain): refresh OSV vuln snapshot"
+          title: "chore(supply-chain): refresh OSV vuln snapshot"
+          body: |
+            Automated weekly refresh of the Security M8 offline vuln snapshot.
+            Review the diff, confirm no new HIGH/CRITICAL findings, then merge.
+          branch: chore/refresh-vuln-snapshot
+          add-paths: |
+            supply-chain/vuln-snapshot-*.json

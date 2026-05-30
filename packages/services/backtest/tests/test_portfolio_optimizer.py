@@ -66,7 +66,7 @@ def _weights_sum(result) -> float:
 
 def _import_mod():
     try:
-        import portfolio_optimizer as m
+        import flinttrade_backtest.portfolio_optimizer as m
     except ImportError:
         from flinttrade_backtest import portfolio_optimizer as m
     return m

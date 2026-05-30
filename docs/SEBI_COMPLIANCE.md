@@ -1,13 +1,19 @@
-# SEBI Algo Trading Compliance
+# SEBI Algo-Trading Rules — Informational Notes (personal use)
 
 > Reference: SEBI Circular SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013 (February 4, 2025)
 > Subject: Safer participation of retail investors in Algorithmic trading
 > Full circular: `.local/reference/SEBI_Circular_Feb042025_AlgoTrading.pdf` (local only)
 
-> **Alpha/legal disclaimer.** This page is a technical implementation note,
-> not legal or regulatory advice. FlintTrade `v0.6.0-alpha` is not production
-> ready; users remain responsible for broker, exchange, tax, and SEBI
-> compliance before any live use.
+> **This is NOT a compliance attestation.** FlintTrade is personal-use software and
+> makes **no** claim of SEBI compliance. These are informational notes on what the SEBI
+> retail-algo rules *are*. For a personal trader using a broker's API, the one operational
+> requirement that touches FlintTrade is a **static IP** for API access (registered with
+> your broker); the regulatory obligations (registration of algo products, audit
+> record-keeping, surveillance) rest with **your broker and the exchanges**, not with this
+> tool. FlintTrade `v0.6.0-alpha` is not production-ready; you remain solely responsible
+> for your own broker, exchange, tax, and regulatory obligations before any live use. The
+> "status" column below describes whether a rule is *relevant to FlintTrade's operation* —
+> it is **not** an assertion that you, or FlintTrade, are compliant.
 
 ## Implementation Timeline
 

@@ -16,10 +16,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
-
-[tool.hatch.build.targets.wheel.sources]
-"src" = "flinttrade_webhooks"
+packages = ["src/flinttrade_webhooks"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

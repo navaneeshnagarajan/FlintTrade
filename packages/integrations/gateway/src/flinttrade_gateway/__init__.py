@@ -1,10 +1,33 @@
-"""Compatibility package for the post-restructure import name."""
+"""FlintTrade gateway package — broker connections, adapters, registry, credentials, WebSocket bridge."""
 
-from pathlib import Path
+from .broker_interface import (
+    AuthResult,
+    BrokerCredentials,
+    BrokerInterface,
+    BrokerRegistry,
+    FundsInfo,
+    Holding,
+    OpenAlgoBroker,
+    Order,
+    OrderRequest,
+    OrderResponse,
+    Position,
+    Quote,
+)
 
-_SRC_ROOT = Path(__file__).resolve().parent.parent
-__path__ = [str(_SRC_ROOT)]
-
-_legacy_init = _SRC_ROOT / "__init__.py"
-if _legacy_init.exists():
-    exec(compile(_legacy_init.read_text(encoding="utf-8"), str(_legacy_init), "exec"), globals())
+__all__ = [
+    # Protocol + models
+    "BrokerInterface",
+    "BrokerCredentials",
+    "AuthResult",
+    "OrderRequest",
+    "OrderResponse",
+    "Position",
+    "Order",
+    "Holding",
+    "FundsInfo",
+    "Quote",
+    # Registry + concrete implementation
+    "BrokerRegistry",
+    "OpenAlgoBroker",
+]

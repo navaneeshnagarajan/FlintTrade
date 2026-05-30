@@ -81,17 +81,19 @@ if [ "$MODE" = "native" ]; then
         PIP="pip3"
     fi
 
-    $PIP install -r "$REPO_ROOT/requirements.txt" --upgrade -q 2>/dev/null || \
-        $PIP install -r "$REPO_ROOT/requirements.txt" --upgrade --break-system-packages -q
+    # SC-07: hash-verified install only (requirements.lock is fully pinned)
+    $PIP install --require-hashes -r "$REPO_ROOT/requirements.lock" -q 2>/dev/null || \
+        $PIP install --require-hashes -r "$REPO_ROOT/requirements.lock" --break-system-packages -q
 
     ok "Python dependencies updated"
 
     # ── Step 3: Build React terminal ───────────────────────────────────
     log "Building React terminal..."
 
-    cd "$REPO_ROOT/packages/apps/terminal"
-    npm install
-    npm run build
+    cd "$REPO_ROOT"
+    corepack enable
+    pnpm install --frozen-lockfile
+    pnpm --dir packages/apps/terminal run build
 
     ok "Terminal built"
 

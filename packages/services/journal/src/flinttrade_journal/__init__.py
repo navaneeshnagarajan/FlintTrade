@@ -1,10 +1,16 @@
-"""Compatibility package for the post-restructure import name."""
+"""FlintTrade journal service package."""
 
-from pathlib import Path
+from .pnl_tracker import PnLPoint, PnLTracker
+from .trade_journal import JournalEntry, JournalFilters, JournalStats, TradeJournal
+from .trade_logger import TradeLogger, TradeSummary
 
-_SRC_ROOT = Path(__file__).resolve().parent.parent
-__path__ = [str(_SRC_ROOT)]
-
-_legacy_init = _SRC_ROOT / "__init__.py"
-if _legacy_init.exists():
-    exec(compile(_legacy_init.read_text(encoding="utf-8"), str(_legacy_init), "exec"), globals())
+__all__ = [
+    "JournalEntry",
+    "JournalFilters",
+    "JournalStats",
+    "PnLPoint",
+    "PnLTracker",
+    "TradeJournal",
+    "TradeLogger",
+    "TradeSummary",
+]

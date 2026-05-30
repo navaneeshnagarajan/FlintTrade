@@ -11,7 +11,7 @@ import random
 
 import pytest
 
-from strategies.stat_pairs_trading import (
+from flinttrade_backtest.strategies.stat_pairs_trading import (
     PairsTradingConfig,
     StatPairsTrading,
     _adf_test,

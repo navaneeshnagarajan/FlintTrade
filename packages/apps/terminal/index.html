@@ -3,9 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- CSP: connect-src allows any protocol because OpenAlgo host is user-configurable (localhost, VPN, remote) -->
-    <!-- Note: frame-ancestors is only valid via HTTP header, not meta tag — omitted here -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ws: wss: http: https:; img-src 'self' data:; base-uri 'self'; form-action 'self';" />
+    <!-- CSP is delivered as a per-request HTTP header by the FlintTrade gateway
+         (flinttrade_core.csp / app.py _add_security_headers), NOT a <meta> tag.
+         A per-render nonce is required so inline scripts are forbidden without an
+         'unsafe-inline' allowance (DS-CSP-01), and only an HTTP header can carry a fresh
+         nonce per response — a static <meta> cannot. The gateway weaves the nonce into
+         both the policy and this file's <script> tags when it serves the built bundle.
+         In `vite dev` there is no gateway and therefore no CSP; that is local-dev only,
+         never the shipped app. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- Preload critical fonts to eliminate FOIT -->
     <link rel="preload" href="/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />

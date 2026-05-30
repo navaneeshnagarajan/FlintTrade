@@ -222,7 +222,7 @@ setup_python_env() {
     run python3.12 -m venv "$INSTALL_DIR/.venv"
     run "$INSTALL_DIR/.venv/bin/pip" install --upgrade pip wheel
     run "$INSTALL_DIR/.venv/bin/pip" install uv
-    run bash -c "cd $INSTALL_DIR && .venv/bin/python -m uv sync 2>/dev/null || .venv/bin/pip install -r requirements.txt 2>/dev/null || true"
+    run bash -c "cd $INSTALL_DIR && .venv/bin/python -m uv sync --frozen 2>/dev/null || .venv/bin/pip install --require-hashes -r requirements.lock 2>/dev/null || true"
     ok "Python environment ready"
 }
 
@@ -232,8 +232,8 @@ setup_python_env() {
 
 build_terminal() {
     info "Building terminal (React)..."
-    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm ci --prefer-offline"
-    run bash -c "cd $INSTALL_DIR/packages/apps/terminal && npm run build"
+    run bash -c "cd $INSTALL_DIR && corepack enable && pnpm install --frozen-lockfile"
+    run bash -c "cd $INSTALL_DIR && pnpm --dir packages/apps/terminal run build"
     ok "Terminal built"
 }
 

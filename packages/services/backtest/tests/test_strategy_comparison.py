@@ -63,7 +63,7 @@ def _make_result(
 
 
 def _make_comparator(weights=None):
-    from strategy_comparison import StrategyComparator
+    from flinttrade_backtest.strategy_comparison import StrategyComparator
     return StrategyComparator(metric_weights=weights)
 
 
@@ -434,7 +434,7 @@ class TestBacktestCompareEndpoint:
     @pytest.fixture()
     def client(self):
         from flask import Flask
-        from strategy_comparison import strategy_comparison_bp
+        from flinttrade_backtest.strategy_comparison import strategy_comparison_bp
 
         app = Flask(__name__)
         app.register_blueprint(strategy_comparison_bp, url_prefix="/v1")

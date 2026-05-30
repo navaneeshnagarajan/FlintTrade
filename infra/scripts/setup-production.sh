@@ -22,9 +22,9 @@ fi
 
 cd "$INSTALL_DIR"
 
-# Python dependencies
+# Python dependencies — SC-07: hash-verified install only
 echo "Installing Python dependencies..."
-pip install --break-system-packages -r requirements.txt
+pip install --break-system-packages --require-hashes -r requirements.lock
 
 # Create .env if not present
 if [ ! -f .env ]; then

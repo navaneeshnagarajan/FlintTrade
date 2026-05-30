@@ -200,12 +200,6 @@ class TestAuthenticateFailure:
 
 
 class TestEnsureConnected:
-    def test_place_order_when_disconnected_raises_session_error(self) -> None:
-        """place_order() must raise SessionError when the session is DISCONNECTED."""
-        session = _make_session()
-        with pytest.raises(SessionError):
-            session.place_order({"symbol": "NIFTY"})
-
     def test_get_positions_when_disconnected_raises_session_error(self) -> None:
         """get_positions() must raise SessionError when not connected."""
         session = _make_session()
@@ -224,30 +218,6 @@ class TestEnsureConnected:
         with pytest.raises(SessionError):
             session.get_quotes(["NIFTY"])
 
-    def test_modify_order_when_disconnected_raises_session_error(self) -> None:
-        """modify_order() must raise SessionError when not connected."""
-        session = _make_session()
-        with pytest.raises(SessionError):
-            session.modify_order({"order_id": "1"})
-
-    def test_cancel_order_when_disconnected_raises_session_error(self) -> None:
-        """cancel_order() must raise SessionError when not connected."""
-        session = _make_session()
-        with pytest.raises(SessionError):
-            session.cancel_order({"order_id": "1"})
-
-    def test_cancel_all_orders_when_disconnected_raises_session_error(self) -> None:
-        """cancel_all_orders() must raise SessionError when not connected."""
-        session = _make_session()
-        with pytest.raises(SessionError):
-            session.cancel_all_orders()
-
-    def test_close_position_when_disconnected_raises_session_error(self) -> None:
-        """close_position() must raise SessionError when not connected."""
-        session = _make_session()
-        with pytest.raises(SessionError):
-            session.close_position({"symbol": "NIFTY"})
-
     def test_get_funds_when_disconnected_raises_session_error(self) -> None:
         """get_funds() must raise SessionError when not connected."""
         session = _make_session()
@@ -256,85 +226,15 @@ class TestEnsureConnected:
 
 
 # ---------------------------------------------------------------------------
-# 6. place_order delegates to adapter
+# 6. order write methods REMOVED (S7 / contract §12)
+#
+# place_order / modify_order / cancel_order / cancel_all_orders /
+# close_position / place_options_order bypassed the SafetyContext/gate/mode
+# check, so they were deleted from BrokerSession. Writes now flow through
+# flinttrade_engine.safety.gate_order() → BrokerRouter.place_order(), covered
+# by test_router.py + test_gate_order.py. The §8.1 grep guard
+# test_session_exposes_no_write_methods asserts the methods stay gone.
 # ---------------------------------------------------------------------------
-
-
-class TestPlaceOrderDelegation:
-    def test_place_order_delegates_to_adapter(self) -> None:
-        """place_order() must call adapter.place_order with order_data and token."""
-        mock_adapter = MagicMock()
-        mock_adapter.authenticate.return_value = (_TOKEN, None)
-        expected_response: dict[str, Any] = {"order_id": "ORD001", "status": "placed"}
-        mock_adapter.place_order.return_value = expected_response
-        session = _make_session()
-        order_data = {"symbol": "NIFTY25JUN21000CE", "qty": 50, "price": 120.0}
-        with patch(_PATCH_TARGET, return_value=mock_adapter):
-            session.authenticate({"api_key": "key"})
-            result = session.place_order(order_data)
-        mock_adapter.place_order.assert_called_once_with(order_data, _TOKEN)
-        assert result == expected_response
-
-    def test_modify_order_delegates_to_adapter(self) -> None:
-        """modify_order() must call adapter.modify_order with order_data and token."""
-        mock_adapter = MagicMock()
-        mock_adapter.authenticate.return_value = (_TOKEN, None)
-        mock_adapter.modify_order.return_value = {"status": "modified"}
-        session = _make_session()
-        order_data = {"order_id": "ORD001", "price": 125.0}
-        with patch(_PATCH_TARGET, return_value=mock_adapter):
-            session.authenticate({"api_key": "key"})
-            result = session.modify_order(order_data)
-        mock_adapter.modify_order.assert_called_once_with(order_data, _TOKEN)
-        assert result == {"status": "modified"}
-
-    def test_cancel_order_delegates_to_adapter(self) -> None:
-        """cancel_order() must call adapter.cancel_order with order_data and token."""
-        mock_adapter = MagicMock()
-        mock_adapter.authenticate.return_value = (_TOKEN, None)
-        mock_adapter.cancel_order.return_value = {"status": "cancelled"}
-        session = _make_session()
-        order_data = {"order_id": "ORD001"}
-        with patch(_PATCH_TARGET, return_value=mock_adapter):
-            session.authenticate({"api_key": "key"})
-            session.cancel_order(order_data)
-        mock_adapter.cancel_order.assert_called_once_with(order_data, _TOKEN)
-
-    def test_cancel_all_orders_delegates_to_adapter(self) -> None:
-        """cancel_all_orders() must call adapter.cancel_all_orders with token only."""
-        mock_adapter = MagicMock()
-        mock_adapter.authenticate.return_value = (_TOKEN, None)
-        mock_adapter.cancel_all_orders.return_value = {"cancelled": 3}
-        session = _make_session()
-        with patch(_PATCH_TARGET, return_value=mock_adapter):
-            session.authenticate({"api_key": "key"})
-            result = session.cancel_all_orders()
-        mock_adapter.cancel_all_orders.assert_called_once_with(_TOKEN)
-        assert result == {"cancelled": 3}
-
-    def test_close_position_delegates_to_adapter(self) -> None:
-        """close_position() must delegate with position_data and token."""
-        mock_adapter = MagicMock()
-        mock_adapter.authenticate.return_value = (_TOKEN, None)
-        mock_adapter.close_position.return_value = {"status": "closed"}
-        session = _make_session()
-        pos_data = {"symbol": "NIFTY", "exchange": "NSE"}
-        with patch(_PATCH_TARGET, return_value=mock_adapter):
-            session.authenticate({"api_key": "key"})
-            session.close_position(pos_data)
-        mock_adapter.close_position.assert_called_once_with(pos_data, _TOKEN)
-
-    def test_place_options_order_delegates_to_adapter(self) -> None:
-        """place_options_order() must delegate with order_data and token."""
-        mock_adapter = MagicMock()
-        mock_adapter.authenticate.return_value = (_TOKEN, None)
-        mock_adapter.place_options_order.return_value = {"order_id": "OPT001"}
-        session = _make_session()
-        order_data = {"symbol": "NIFTY25JUN21000CE", "qty": 50}
-        with patch(_PATCH_TARGET, return_value=mock_adapter):
-            session.authenticate({"api_key": "key"})
-            session.place_options_order(order_data)
-        mock_adapter.place_options_order.assert_called_once_with(order_data, _TOKEN)
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +267,7 @@ class TestDisconnect:
         assert session.info.connected_at is None
 
     def test_disconnect_prevents_api_calls(self) -> None:
-        """After disconnect(), place_order() must raise SessionError again."""
+        """After disconnect(), a read call must raise SessionError again."""
         mock_adapter = MagicMock()
         mock_adapter.authenticate.return_value = (_TOKEN, None)
         session = _make_session()
@@ -375,7 +275,7 @@ class TestDisconnect:
             session.authenticate({"api_key": "key"})
             session.disconnect()
         with pytest.raises(SessionError):
-            session.place_order({"symbol": "NIFTY"})
+            session.get_positions()
 
 
 # ---------------------------------------------------------------------------

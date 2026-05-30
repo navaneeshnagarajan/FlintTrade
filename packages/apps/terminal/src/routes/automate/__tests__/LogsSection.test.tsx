@@ -68,10 +68,10 @@ describe("LogsSection", () => {
     expect(screen.getByText("Execution Logs")).toBeInTheDocument();
   });
 
-  it("shows SEBI-compliance description", () => {
+  it("shows audit-trail description", () => {
     render(<LogsSection />, { wrapper: createWrapper() });
     expect(
-      screen.getByText(/SEBI-compliant audit trail/),
+      screen.getByText(/Append-only audit trail/),
     ).toBeInTheDocument();
   });
 

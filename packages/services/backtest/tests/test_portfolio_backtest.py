@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from portfolio_backtest import (  # noqa: E402
+from flinttrade_backtest.portfolio_backtest import (  # noqa: E402
     BenchmarkComparison,
     PortfolioBacktester,
     PortfolioResult,

@@ -11,7 +11,7 @@ import random
 
 import pytest
 
-from walk_forward_analysis import (
+from flinttrade_backtest.walk_forward_analysis import (
     WFAConfig,
     WFAFold,
     WFAnalysis,

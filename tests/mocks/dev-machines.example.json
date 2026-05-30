@@ -1,0 +1,4 @@
+{
+  "hostnames": ["nitro", "mac-mini-test", "mac-studio-dev"],
+  "comment": "EXAMPLE ONLY. Copy to ~/.flinttrade/dev-machines.json on a machine where the founder has approved real-broker pytest sessions. Every entry here is a hostname (socket.gethostname()) authorised for FLINTTRADE_REAL_BROKERS=1. CI runners never carry this file, so CI always mocks (Identity H9)."
+}

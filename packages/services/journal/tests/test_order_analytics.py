@@ -51,7 +51,7 @@ def _order(
 
 
 def _make_analytics(orders):
-    from order_analytics import OrderAnalytics
+    from flinttrade_journal.order_analytics import OrderAnalytics
     return OrderAnalytics(orders)
 
 
@@ -406,7 +406,7 @@ class TestBySymbol:
 
 class TestSummary:
     def test_empty_summary(self):
-        from order_analytics import OrderExecutionSummary
+        from flinttrade_journal.order_analytics import OrderExecutionSummary
 
         a = _make_analytics([])
         s = a.summary()
@@ -415,7 +415,7 @@ class TestSummary:
         assert s.fill_rate_pct == 0.0
 
     def test_summary_types(self):
-        from order_analytics import OrderExecutionSummary
+        from flinttrade_journal.order_analytics import OrderExecutionSummary
 
         orders = [_order() for _ in range(10)]
         a = _make_analytics(orders)
@@ -490,7 +490,7 @@ class TestExecutionAnalyticsEndpoint:
     @pytest.fixture()
     def client(self):
         from flask import Flask
-        from order_analytics import order_analytics_bp
+        from flinttrade_journal.order_analytics import order_analytics_bp
 
         app = Flask(__name__)
         app.register_blueprint(order_analytics_bp, url_prefix="/v1")

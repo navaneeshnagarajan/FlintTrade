@@ -53,19 +53,67 @@ _PY_PACKAGE_SRCS = [
 
 
 def _install_local_package_paths() -> None:
+    # Repo root first so `import tests.mocks` (the Identity H9 default-mock package,
+    # sub-spec §14.2) resolves consistently under --import-mode=importlib.
+    root = str(_REPO_ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
     for rel_path in _PY_PACKAGE_SRCS:
         src = str(_REPO_ROOT / rel_path)
         if src not in sys.path:
             sys.path.append(src)
 
 
+# DBs whose on-disk engine changed DuckDB→SQLite. A persistent test workspace
+# reused across the migration may still hold the legacy DuckDB file, which
+# open_sqlite cannot read — wipe these scratch files so the SQLite code recreates
+# them. Only ever touches the throw-away pytest workspace.
+_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db")
+
+# Master password no longer auto-generates (locked decision #13: getpass/fd only).
+# Seed a hardened-equivalent file so app-creating tests don't block on a TTY prompt.
+_TEST_MASTER_PASSWORD = "pytest-master-password"
+
+
+def _clean_legacy_scratch_dbs(base: Path) -> None:
+    for name in _MIGRATED_SCRATCH_DBS:
+        for path in (base / name, base / f"{name}-wal", base / f"{name}-shm"):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+
+def _seed_test_master_password(base: Path) -> None:
+    pw_file = base / "master_password"
+    try:
+        if not pw_file.exists():
+            pw_file.write_text(_TEST_MASTER_PASSWORD)
+    except OSError:
+        pass
+
+
 def _isolate_workspace() -> None:
-    if os.environ.get("FLINTTRADE_WORKSPACE_DIR"):
-        return
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / worker
+    # Under xdist each worker MUST get its own dir even when the controller
+    # already exported FLINTTRADE_WORKSPACE_DIR (workers inherit it) — otherwise
+    # all workers share one dir and collide on the still-DuckDB engine
+    # SandboxEngine / traffic / error logs. PYTEST_XDIST_WORKER is set per worker
+    # (gw0, gw1, …) and absent in the controller / serial runs. A user-supplied
+    # FLINTTRADE_WORKSPACE_DIR (no xdist) is still respected.
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
+    if worker:
+        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / worker
+    elif existing:
+        base = Path(existing)
+    else:
+        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main"
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
+    _clean_legacy_scratch_dbs(base)
+    _seed_test_master_password(base)
 
 
 _isolate_workspace()

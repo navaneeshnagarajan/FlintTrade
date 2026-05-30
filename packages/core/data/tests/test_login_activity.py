@@ -317,18 +317,19 @@ class TestSecurityTracker:
     def test_ban_expiry_logic(self):
         """An expired ban (in the past) must NOT count as active."""
         skt = _make_security_tracker()
-        # DuckDB stores TIMESTAMP as naive; insert naive datetimes to match
+        # Post-migration storage is unix-epoch REAL; inject epoch floats to match
         # what production code writes and what is_banned reads.
         import secrets as _sec
-        from datetime import timezone as _tz
+        import time as _time
 
         ban_id = _sec.token_hex(8)
-        now_naive = datetime.now(_tz.utc).replace(tzinfo=None)
-        past_naive = now_naive - timedelta(hours=2)
-        expires_past_naive = now_naive - timedelta(hours=1)
+        now = _time.time()
+        banned_past = now - 2 * 3600
+        expires_past = now - 1 * 3600
         skt._conn.execute(
-            "INSERT INTO security_ip_bans VALUES (?, ?, ?, ?, ?, NULL)",
-            [ban_id, "6.6.6.6", "expired ban", past_naive, expires_past_naive],
+            "INSERT INTO security_ip_bans (ban_id, ip, reason, banned_at, expires_at, lifted_at) "
+            "VALUES (?, ?, ?, ?, ?, NULL)",
+            [ban_id, "6.6.6.6", "expired ban", banned_past, expires_past],
         )
         assert skt.is_banned("6.6.6.6") is False
         skt.close()

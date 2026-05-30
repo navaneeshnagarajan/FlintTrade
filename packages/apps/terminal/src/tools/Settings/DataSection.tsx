@@ -39,7 +39,7 @@ export function DataSection({ settings, onChange }: DataSectionProps) {
 
       <FieldRow
         label="Archive Storage Path"
-        hint="Long-term OHLCV history and SEBI audit logs (5-year retention required). Can be a slower disk."
+        hint="Long-term OHLCV history and local audit logs (operator-controlled retention). Can be a slower disk."
         tooltip="Path for historical OHLCV data and audit logs. Can be slower storage. Default: ~/.flinttrade/archive/"
       >
         <TextInput

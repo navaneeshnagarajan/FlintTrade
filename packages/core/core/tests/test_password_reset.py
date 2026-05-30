@@ -135,7 +135,7 @@ def app_with_auth(tmp_path: Path):
     """Create a Flask test app with auth service and optionally mocked mail."""
     import os
     os.environ.setdefault("OPENALGO_API_KEY", "test-key-123")
-    os.environ.setdefault("MASTER_PASSWORD", "test-master-pw")
+    # master password comes from the seeded hardened file (root conftest), not env
 
     from flinttrade_core.app import create_flask_app
 

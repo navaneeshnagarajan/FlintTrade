@@ -120,6 +120,7 @@ class TestListAccounts:
         for acc in accounts:
             assert set(acc.keys()) == {
                 "account_id",
+                "adapter_id",
                 "broker",
                 "label",
                 "is_primary",

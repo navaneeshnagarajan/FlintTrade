@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from permutation_test import (
+from flinttrade_backtest.permutation_test import (
     PermutationConfig,
     PermutationResult,
     PermutationTester,

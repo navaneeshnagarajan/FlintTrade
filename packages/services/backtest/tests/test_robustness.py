@@ -12,7 +12,7 @@ import random
 
 import pytest
 
-from robustness import (
+from flinttrade_backtest.robustness import (
     CrossSymbolResult,
     DelayTestResult,
     MCShuffleResult,

@@ -17,7 +17,7 @@ import pytest
 # Availability markers
 # ---------------------------------------------------------------------------
 
-from vectorbt_runner import VectorBTNotAvailableError, VectorBTRunner, is_available
+from flinttrade_backtest.vectorbt_runner import VectorBTNotAvailableError, VectorBTRunner, is_available
 
 _VBT = pytest.mark.skipif(
     not is_available(), reason="vectorbt not installed on this machine"
@@ -148,8 +148,8 @@ class TestParameterSweepValidation:
         import pandas as pd
 
         # Patch _VBT_AVAILABLE so the close-column check is reached
-        with patch("vectorbt_runner._VBT_AVAILABLE", True), patch(
-            "vectorbt_runner.vbt", MagicMock()
+        with patch("flinttrade_backtest.vectorbt_runner._VBT_AVAILABLE", True), patch(
+            "flinttrade_backtest.vectorbt_runner.vbt", MagicMock()
         ):
             runner = VectorBTRunner()
             bad_data = pd.DataFrame({"open": [1.0, 2.0], "volume": [100, 200]})
@@ -254,7 +254,7 @@ class TestGenerateTearsheet:
         assert isinstance(result, dict)
 
     def test_all_metric_keys_present(self) -> None:
-        from vectorbt_runner import _METRIC_KEYS
+        from flinttrade_backtest.vectorbt_runner import _METRIC_KEYS
 
         runner = VectorBTRunner()
         pf = self._build_portfolio()

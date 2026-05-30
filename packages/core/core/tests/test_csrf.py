@@ -33,7 +33,7 @@ _TEST_API_KEY = "csrf-test-api-key"
 def app():
     """Create a Flask test app with auth middleware active."""
     os.environ["OPENALGO_API_KEY"] = _TEST_API_KEY
-    os.environ.setdefault("MASTER_PASSWORD", "test-master-pw")
+    # master password comes from the seeded hardened file (root conftest), not env
 
     from flinttrade_core.app import create_flask_app
 

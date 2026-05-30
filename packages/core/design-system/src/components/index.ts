@@ -1,3 +1,8 @@
+export {
+  DensityContext,
+  DesignSystemProvider,
+  type Density,
+} from "./Provider"
 export { Button, buttonVariants } from "../ui/button"
 export {
   Card,

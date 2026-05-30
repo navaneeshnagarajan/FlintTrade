@@ -155,7 +155,7 @@ class TestDojiReversal:
     """Tests for DojiReversal strategy."""
 
     def _strat(self, **kw: Any) -> Any:
-        from strategies.pattern_doji import DojiReversal
+        from flinttrade_backtest.strategies.pattern_doji import DojiReversal
 
         return DojiReversal(symbol="TEST", **kw)
 
@@ -265,7 +265,7 @@ class TestMorningStar:
     """Tests for MorningStar strategy."""
 
     def _strat(self, **kw: Any) -> Any:
-        from strategies.pattern_morning_star import MorningStar
+        from flinttrade_backtest.strategies.pattern_morning_star import MorningStar
 
         return MorningStar(symbol="TEST", **kw)
 
@@ -425,7 +425,7 @@ class TestEveningStar:
     """Tests for EveningStar strategy."""
 
     def _strat(self, **kw: Any) -> Any:
-        from strategies.pattern_evening_star import EveningStar
+        from flinttrade_backtest.strategies.pattern_evening_star import EveningStar
 
         return EveningStar(symbol="TEST", **kw)
 
@@ -543,7 +543,7 @@ class TestThreeWhiteSoldiers:
     """Tests for ThreeWhiteSoldiers (+ Three Black Crows) strategy."""
 
     def _strat(self, **kw: Any) -> Any:
-        from strategies.pattern_three_soldiers import ThreeWhiteSoldiers
+        from flinttrade_backtest.strategies.pattern_three_soldiers import ThreeWhiteSoldiers
 
         return ThreeWhiteSoldiers(symbol="TEST", **kw)
 
@@ -674,7 +674,7 @@ class TestMACDDivergence:
     """Tests for MACDDivergence strategy."""
 
     def _strat(self, **kw: Any) -> Any:
-        from strategies.momentum_macd_divergence import MACDDivergence
+        from flinttrade_backtest.strategies.momentum_macd_divergence import MACDDivergence
 
         return MACDDivergence(symbol="TEST", **kw)
 
@@ -776,7 +776,7 @@ class TestNewIndicators:
     # ---- donchian_channel ----
 
     def test_donchian_channel_length(self) -> None:
-        from strategies._indicators import donchian_channel
+        from flinttrade_backtest.strategies._indicators import donchian_channel
 
         highs = list(range(1, 31))
         lows = [float(h) - 0.5 for h in highs]
@@ -784,7 +784,7 @@ class TestNewIndicators:
         assert len(upper) == len(mid) == len(lower) == 30
 
     def test_donchian_channel_leading_zeros(self) -> None:
-        from strategies._indicators import donchian_channel
+        from flinttrade_backtest.strategies._indicators import donchian_channel
 
         highs = [100.0] * 10
         lows = [90.0] * 10
@@ -793,7 +793,7 @@ class TestNewIndicators:
         assert upper[:4] == [0.0, 0.0, 0.0, 0.0]
 
     def test_donchian_channel_correct_values(self) -> None:
-        from strategies._indicators import donchian_channel
+        from flinttrade_backtest.strategies._indicators import donchian_channel
 
         highs = [10.0, 12.0, 11.0, 13.0, 14.0]
         lows = [9.0, 10.0, 10.0, 11.0, 12.0]
@@ -804,7 +804,7 @@ class TestNewIndicators:
         assert mid[4] == pytest.approx(12.0)
 
     def test_donchian_channel_single_period(self) -> None:
-        from strategies._indicators import donchian_channel
+        from flinttrade_backtest.strategies._indicators import donchian_channel
 
         highs = [5.0, 10.0, 15.0]
         lows = [3.0, 8.0, 12.0]
@@ -815,7 +815,7 @@ class TestNewIndicators:
     # ---- ichimoku ----
 
     def test_ichimoku_output_lengths(self) -> None:
-        from strategies._indicators import ichimoku
+        from flinttrade_backtest.strategies._indicators import ichimoku
 
         n = 120
         highs = [float(i) + 1 for i in range(n)]
@@ -826,7 +826,7 @@ class TestNewIndicators:
 
     def test_ichimoku_tenkan_correct(self) -> None:
         """Tenkan at index 8 (period=9) = (max H[0:9] + min L[0:9]) / 2."""
-        from strategies._indicators import ichimoku
+        from flinttrade_backtest.strategies._indicators import ichimoku
 
         highs = [float(i + 2) for i in range(100)]
         lows = [float(i) for i in range(100)]
@@ -837,7 +837,7 @@ class TestNewIndicators:
 
     def test_ichimoku_chikou_alignment(self) -> None:
         """Chikou at index i should equal closes[i - displacement]."""
-        from strategies._indicators import ichimoku
+        from flinttrade_backtest.strategies._indicators import ichimoku
 
         n = 80
         closes = [float(i) * 1.1 for i in range(n)]
@@ -848,7 +848,7 @@ class TestNewIndicators:
         assert chikou[15] == pytest.approx(closes[5])
 
     def test_ichimoku_leading_zeros(self) -> None:
-        from strategies._indicators import ichimoku
+        from flinttrade_backtest.strategies._indicators import ichimoku
 
         n = 60
         closes = [100.0] * n
@@ -861,11 +861,11 @@ class TestNewIndicators:
         assert tenkan[8] != 0.0
 
     def test_donchian_channel_exported_in_all(self) -> None:
-        import strategies._indicators as ind
+        import flinttrade_backtest.strategies._indicators as ind
 
         assert "donchian_channel" in ind.__all__
 
     def test_ichimoku_exported_in_all(self) -> None:
-        import strategies._indicators as ind
+        import flinttrade_backtest.strategies._indicators as ind
 
         assert "ichimoku" in ind.__all__

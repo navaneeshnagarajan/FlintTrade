@@ -20,9 +20,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync --frozen          # SC-07: hash-verified install
 
       - name: Generate status report
         run: |
@@ -31,7 +32,7 @@ jobs:
           if [ ! -f .local/reference/absorption-status.json ]; then
             echo '[]' > .local/reference/absorption-status.json
           fi
-          python scripts/audit_repos.py --format markdown > .local/STATUS.md
+          uv run python scripts/audit_repos.py --format markdown > .local/STATUS.md
 
       - uses: actions/upload-artifact@v4
         with:

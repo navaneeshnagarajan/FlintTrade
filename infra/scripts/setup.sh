@@ -156,29 +156,24 @@ fi
 # ------------------------------------------------------------------
 header "FlintTrade Python packages"
 
-pip3 install -r "$FLINTTRADE_DIR/requirements.txt" --break-system-packages -q 2>/dev/null || \
-    pip3 install -r "$FLINTTRADE_DIR/requirements.txt" -q
+# SC-07: hash-verified install only (requirements.lock is fully pinned)
+pip3 install --require-hashes -r "$FLINTTRADE_DIR/requirements.lock" --break-system-packages -q 2>/dev/null || \
+    pip3 install --require-hashes -r "$FLINTTRADE_DIR/requirements.lock" -q
 ok "Root requirements installed"
 
-for req in "$FLINTTRADE_DIR"/packages/*/requirements.txt; do
-    [ -f "$req" ] || continue
-    pkg=$(basename "$(dirname "$req")")
-    pip3 install -r "$req" --break-system-packages -q 2>/dev/null || \
-        pip3 install -r "$req" -q 2>/dev/null || true
-    ok "packages/$pkg dependencies"
-done
+# SC-07: per-package requirements.txt installs removed — requirements.lock is a
+# uv export across the whole workspace, so it already pins every package's
+# transitive third-party deps (hash-verified above). No unhashed per-package loop.
 
 # ------------------------------------------------------------------
 # 7. Node dependencies (optional)
 # ------------------------------------------------------------------
 if [ "$HAS_NODE" = true ]; then
     header "FlintTrade Node packages"
-    for pkg_dir in "$FLINTTRADE_DIR"/packages/apps/terminal "$FLINTTRADE_DIR"/packages/dashboard "$FLINTTRADE_DIR"/packages/backtest; do
-        [ -f "$pkg_dir/package.json" ] || continue
-        pkg=$(basename "$pkg_dir")
-        (cd "$pkg_dir" && npm install --silent 2>/dev/null)
-        ok "packages/$pkg node_modules"
-    done
+    # pnpm workspace: a single frozen install at the repo root links every workspace
+    # package (terminal, site, design-system) from the committed pnpm-lock.yaml.
+    (cd "$FLINTTRADE_DIR" && corepack enable && pnpm install --frozen-lockfile)
+    ok "workspace node_modules (pnpm --frozen-lockfile)"
 fi
 
 # ------------------------------------------------------------------
