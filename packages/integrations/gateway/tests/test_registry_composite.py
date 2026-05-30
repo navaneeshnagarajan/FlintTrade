@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from registry import BrokerRegistry
-from exceptions import BrokerNotFoundError
+from flinttrade_gateway.registry import BrokerRegistry
+from flinttrade_gateway.exceptions import BrokerNotFoundError
 
 
 def test_put_and_get_session_for_round_trip() -> None:

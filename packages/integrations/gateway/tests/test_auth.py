@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from auth import gateway_bp
-from models import BrokerAccountInfo, AccountStatus
-from exceptions import BrokerNotFoundError, CredentialError
+from flinttrade_gateway.auth import gateway_bp
+from flinttrade_gateway.models import BrokerAccountInfo, AccountStatus
+from flinttrade_gateway.exceptions import BrokerNotFoundError, CredentialError
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ class MockRegistry:
         label: str,
         credentials: dict[str, Any],
     ) -> BrokerAccountInfo:
-        from adapter import BROKER_CATALOG
+        from flinttrade_gateway.adapter import BROKER_CATALOG
         if broker not in BROKER_CATALOG:
             raise BrokerNotFoundError(f"Broker '{broker}' not found in catalog.")
         info = BrokerAccountInfo(

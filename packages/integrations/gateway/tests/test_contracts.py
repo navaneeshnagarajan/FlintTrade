@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from contracts import ContractManager
-from exceptions import ContractError
+from flinttrade_gateway.contracts import ContractManager
+from flinttrade_gateway.exceptions import ContractError
 
 
 # ---------------------------------------------------------------------------

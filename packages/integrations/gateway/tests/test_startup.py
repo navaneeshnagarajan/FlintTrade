@@ -37,12 +37,12 @@ if _GATEWAY_SRC not in sys.path:
 # Deferred imports — after sys.path is ready
 # ---------------------------------------------------------------------------
 
-from registry import BrokerRegistry  # noqa: E402
-from credentials import CredentialStore  # noqa: E402
-from adapter import BROKER_CATALOG  # noqa: E402
-from auth import gateway_bp  # noqa: E402
-from contracts import ContractManager  # noqa: E402
-from exceptions import AuthFlowError  # noqa: E402
+from flinttrade_gateway.registry import BrokerRegistry  # noqa: E402
+from flinttrade_gateway.credentials import CredentialStore  # noqa: E402
+from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: E402
+from flinttrade_gateway.auth import gateway_bp  # noqa: E402
+from flinttrade_gateway.contracts import ContractManager  # noqa: E402
+from flinttrade_gateway.exceptions import AuthFlowError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 
-from models import AuthFlowType, AccountStatus, BrokerInfo, BrokerAccountInfo
+from flinttrade_gateway.models import AuthFlowType, AccountStatus, BrokerInfo, BrokerAccountInfo
 
 
 # ---------------------------------------------------------------------------

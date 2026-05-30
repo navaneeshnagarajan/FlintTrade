@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
-from credentials import CredentialError, CredentialStore
+from flinttrade_gateway.credentials import CredentialError, CredentialStore
 
 
 # ---------------------------------------------------------------------------

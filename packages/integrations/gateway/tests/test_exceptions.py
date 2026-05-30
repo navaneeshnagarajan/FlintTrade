@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from exceptions import (
+from flinttrade_gateway.exceptions import (
     GatewayError,
     BrokerNotFoundError,
     AuthFlowError,

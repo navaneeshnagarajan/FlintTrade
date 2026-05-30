@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio  # noqa: F401 — registers the pytest-asyncio plugin
 
 from ws_bridge import TickDispatcher
-from ticker import BrokerTicker
+from flinttrade_gateway.ticker import BrokerTicker
 
 
 # ---------------------------------------------------------------------------

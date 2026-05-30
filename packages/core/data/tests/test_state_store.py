@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from flinttrade_data.state_store import StateStore, ensure_schema, reset
+from flinttrade_data.state_store import StateStore, reset
 
 
 def _load_sandbox_migrator():

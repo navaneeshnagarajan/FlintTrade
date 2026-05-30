@@ -19,10 +19,9 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  // DS-CSP-03: read the per-request nonce the middleware set so every inline script we
-  // (or next-themes, via fumadocs RootProvider) emit carries it. Framework scripts get
-  // the nonce automatically via `experimental.nonce` in next.config.mjs.
-  const nonce = (await headers()).get('x-csp-nonce') ?? '';
+  // DS-CSP-03: read the per-request nonce the proxy set so RootProvider's
+  // theme bootstrap and framework scripts can run without 'unsafe-inline'.
+  const nonce = (await headers()).get('x-nonce') ?? '';
 
   return (
     <html

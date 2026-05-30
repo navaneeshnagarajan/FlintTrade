@@ -14,7 +14,7 @@ import sqlite3
 
 import pytest
 
-from credentials import CredentialStore, CredentialError
+from flinttrade_gateway.credentials import CredentialStore, CredentialError
 
 _MP = "test-master-password-123"
 _CREDS = {"api_key": "k", "api_secret": "s"}

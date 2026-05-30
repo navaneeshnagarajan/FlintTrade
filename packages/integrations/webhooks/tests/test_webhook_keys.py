@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
-
 import pytest
 from cryptography.exceptions import InvalidTag
 

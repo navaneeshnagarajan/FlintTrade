@@ -14,7 +14,7 @@ Covers:
 from __future__ import annotations
 
 
-from capabilities import BrokerCapabilities, CapabilityRegistry, REGISTRY
+from flinttrade_gateway.capabilities import BrokerCapabilities, CapabilityRegistry, REGISTRY
 
 
 # ---------------------------------------------------------------------------

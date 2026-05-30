@@ -9,14 +9,13 @@ default.
 from __future__ import annotations
 
 import threading
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from registry import BrokerRegistry
-from models import BrokerAccountInfo, AccountStatus
-from exceptions import BrokerNotFoundError, SessionError
+from flinttrade_gateway.registry import BrokerRegistry
+from flinttrade_gateway.models import BrokerAccountInfo, AccountStatus
+from flinttrade_gateway.exceptions import BrokerNotFoundError, SessionError
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +31,7 @@ _TOKEN = "tok_abc123"
 _CREDS: dict[str, str] = {"api_key": "key", "totp": "123456"}
 
 # Patch target: BrokerSession as imported inside registry.py
-_SESSION_PATCH = "registry.BrokerSession"
+_SESSION_PATCH = "flinttrade_gateway.registry.BrokerSession"
 
 
 # ---------------------------------------------------------------------------

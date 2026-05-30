@@ -28,6 +28,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
         pass
 
 import asyncio
+import json
 import logging
 import os
 import secrets

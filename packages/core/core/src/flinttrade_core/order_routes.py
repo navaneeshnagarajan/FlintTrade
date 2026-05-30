@@ -598,7 +598,7 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
             "status": "error",
             "message": f"Broker '{broker}' (account '{account_id}') is not connected.",
         }), 503
-    except Exception as exc:
+    except Exception:
         logger.exception("Routed order dispatch failed | broker=%s account=%s", broker, account_id)
         return jsonify({"status": "error", "message": "Order dispatch failed"}), 500
 

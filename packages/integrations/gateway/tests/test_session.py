@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from session import BrokerSession
-from models import AccountStatus, BrokerAccountInfo
-from exceptions import SessionError, AuthFlowError
+from flinttrade_gateway.session import BrokerSession
+from flinttrade_gateway.models import AccountStatus, BrokerAccountInfo
+from flinttrade_gateway.exceptions import SessionError, AuthFlowError
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ _TOKEN = "tok_abc123"
 # Patch target: the loader function *inside* the adapter module that
 # session.py imported from.  We patch the name as it appears in session.py's
 # namespace so every internal call goes through the mock.
-_PATCH_TARGET = "session.load_broker_adapter"
+_PATCH_TARGET = "flinttrade_gateway.session.load_broker_adapter"
 
 
 def _make_session() -> BrokerSession:

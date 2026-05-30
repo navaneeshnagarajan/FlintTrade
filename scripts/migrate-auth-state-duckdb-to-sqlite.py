@@ -33,7 +33,7 @@ import sys
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
 
 from flinttrade_core.db import open_sqlite
 
