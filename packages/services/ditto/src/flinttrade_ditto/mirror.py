@@ -599,6 +599,7 @@ class PositionMirror:
         mirror_config: MirrorConfig | None = None,
         broker_router: Any | None = None,
         actor_id: str = "ditto",
+        allow_ungated_fallback: bool = False,
     ) -> None:
         self._accounts = accounts or []
         self._mode = mode
@@ -612,6 +613,11 @@ class PositionMirror:
         # for each openalgo:<account_id> the mirror targets.
         self._broker_router = broker_router
         self._actor_id = actor_id
+        # The raw-httpx fallback (no router) is UNGATED — no SafetyContext, ACL,
+        # or one-shot consume. It fails closed by default; an operator must opt in
+        # explicitly (allow_ungated_fallback=True) to use it. Production wiring
+        # always injects a broker_router, so this fallback is test/transitional.
+        self._allow_ungated_fallback = allow_ungated_fallback
 
     @property
     def history(self) -> list[MirrorResult]:
@@ -737,6 +743,17 @@ class PositionMirror:
 
         if self._broker_router is not None:
             return self._place_via_router(order, account, quantity, result)
+
+        if not self._allow_ungated_fallback:
+            result.error = (
+                "ungated mirroring is disabled — inject a broker_router for the gated "
+                "path, or set allow_ungated_fallback=True for the transitional forward"
+            )
+            logger.error(
+                "Mirror to %s refused — no broker_router and ungated fallback disabled",
+                account.account_id,
+            )
+            return result
 
         action = order.action.value if hasattr(order.action, "value") else str(order.action)
         exchange = order.exchange.value if hasattr(order.exchange, "value") else str(order.exchange)

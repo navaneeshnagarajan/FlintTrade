@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -238,6 +239,409 @@ def _forward_to_openalgo(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]
     return jsonify(data), response.status_code
 
 
+def _body_to_order(body: dict[str, Any]) -> Any:
+    """Build a typed :class:`Order` from a decoded request body for the SafetySystem.
+
+    The legacy path forwarded the raw dict; the 5-layer ``SafetySystem.check_order``
+    needs the typed model to validate symbol, quantity, price, exchange, and market
+    hours. Enum coercion (action/exchange/product/pricetype) raises ``ValueError`` on
+    a bad value, which the caller maps to HTTP 400 rather than letting it 500.
+    """
+    from flinttrade_core.models import (  # noqa: PLC0415
+        Action,
+        Exchange,
+        Order,
+        PriceType,
+        Product,
+    )
+
+    # Quantity is an OpenAlgo string field but must be a whole number of units —
+    # validate up-front so a fat-finger "10.5"/"abc" is a clean 400, not a 500
+    # from the int(...) coercion inside SafetySystem.check_order.
+    quantity = str(body.get("quantity", "1"))
+    try:
+        if int(quantity) < 0:
+            raise ValueError("must be non-negative")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"quantity must be a whole number of units, got {quantity!r}") from exc
+
+    return Order(
+        symbol=str(body.get("symbol") or ""),
+        action=Action(str(body.get("action", "BUY")).upper()),
+        exchange=Exchange(str(body.get("exchange", "NSE")).upper()),
+        pricetype=PriceType(
+            str(body.get("pricetype") or body.get("order_type") or "MARKET").upper()
+        ),
+        product=Product(str(body.get("product", "MIS")).upper()),
+        quantity=quantity,
+        price=str(body.get("price", "0")),
+        trigger_price=str(body.get("trigger_price", "0")),
+        disclosed_quantity=str(body.get("disclosed_quantity", "0")),
+        strategy=str(body.get("strategy") or "Flint"),
+        market_protection=body.get("market_protection"),
+    )
+
+
+def _live_kill_switch_block() -> Any | None:
+    """Return the failing L5 kill-switch result, or ``None`` if trading is allowed.
+
+    The minimum guard applied to every NON-place live action (modify/cancel/etc.)
+    that cannot yet route through the gated :class:`BrokerRouter` — a halted
+    account must not be able to push any live order even on the direct-forward path.
+    """
+    from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
+
+    safety = current_app.config.get("SAFETY")
+    if safety is None:
+        safety = SafetySystem(SafetyConfig())
+    result = safety.l5_kill.validate()
+    return None if result.passed else result
+
+
+def _dispatch_live_order(
+    ft_action: str,
+    body: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    adapter_id: str = "openalgo",
+) -> tuple[Any, int]:
+    """The single enforced execution channel for a live order placement (C1).
+
+    Runs the 5-layer ``SafetySystem`` (L1-L5 risk validation), then mints a
+    one-shot selector-bound ``SafetyContext`` via ``gate_order`` and dispatches
+    through the app's :class:`BrokerRouter` — which ACL-checks the ``(actor,
+    account)`` and re-verifies the gate before any broker write. Used by BOTH the
+    legacy ``/place`` live branch (``adapter_id="openalgo"``) and the
+    ``/<broker>/place`` routed endpoint, so live placement has exactly one gated
+    path. Fails CLOSED with an actionable message on every misconfiguration — it
+    never forwards an ungated order.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
+    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        SafetyConfig,
+        SafetySystem,
+        gate_order,
+    )
+    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
+    from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
+
+    account_id = str(body.get("account_id") or "default")
+
+    router = current_app.config.get("BROKER_ROUTER")
+    if router is None:
+        logger.error(
+            "Live order rejected — BROKER_ROUTER unavailable | action=%s adapter=%s",
+            ft_action, adapter_id,
+        )
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Order routing unavailable — workspace.json brokers configuration is "
+                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
+            ),
+        }), 503
+
+    request_ctx = RequestContext(
+        jti=str(payload.get("jti") or ""),
+        actor_type="human",
+        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
+        mode=_MODE_LIVE,
+        selector=f"{adapter_id}:{account_id}",
+    )
+
+    # --- 5-layer SafetySystem (L1 order, L2 positions, L3 greeks, L4 P&L, L5 kill) ---
+    safety = current_app.config.get("SAFETY")
+    if safety is None:
+        safety = SafetySystem(SafetyConfig())
+    try:
+        typed_order = _body_to_order(body)
+        # check_order coerces quantity via int(...); a non-integer quantity must
+        # surface as a clean 400, not an uncaught ValueError -> 500.
+        safety_results = safety.check_order(typed_order)
+    except (ValueError, ValidationError) as exc:
+        logger.warning(
+            "Live order rejected by order-model/safety validation | action=%s adapter=%s: %s",
+            ft_action, adapter_id, exc,
+        )
+        return jsonify({"status": "error", "message": f"Order validation failed: {exc}"}), 400
+
+    blocked = next((r for r in safety_results if not r.passed), None)
+    if blocked is not None:
+        logger.warning(
+            "Live order blocked by safety layer %s | action=%s adapter=%s symbol=%s: %s",
+            blocked.layer, ft_action, adapter_id, body.get("symbol", "?"), blocked.reason,
+        )
+        return jsonify({
+            "status": "error",
+            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+        }), 403
+
+    # --- gate + ACL + one-shot dispatch through the BrokerRouter ---
+    # Dispatch the TYPED Order (not the raw dict): the broker adapters and the
+    # OpenAlgoClient read typed attributes (order.symbol, order.action.value, …),
+    # so a dict would AttributeError at the broker boundary. gate_order mints and
+    # the router re-verifies over the SAME typed_order object, keeping the
+    # order-binding fingerprint consistent end-to-end.
+    try:
+        safety_ctx = gate_order(typed_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
+        result = asyncio.run(
+            router.place_order(
+                request_ctx,
+                order=typed_order,
+                safety_ctx=safety_ctx,
+                hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
+            )
+        )
+    except SafetyBypassError as exc:
+        logger.warning(
+            "Live order refused by safety gate | action=%s adapter=%s account=%s: %s",
+            ft_action, adapter_id, account_id, exc,
+        )
+        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 403
+    except (BrokerNotFoundError, KeyError) as exc:
+        logger.warning(
+            "Live order — broker not connected | action=%s adapter=%s account=%s: %s",
+            ft_action, adapter_id, account_id, exc,
+        )
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
+            ),
+        }), 503
+    except Exception:
+        logger.exception(
+            "Live order dispatch failed | action=%s adapter=%s account=%s",
+            ft_action, adapter_id, account_id,
+        )
+        return jsonify({"status": "error", "message": "Order dispatch failed"}), 500
+
+    # Audit trail (best-effort — never break the order path).
+    try:
+        audit = current_app.config.get("AUDIT")
+        if audit is not None:
+            audit.log_event(
+                "ORDER_PLACED",
+                adapter_id=adapter_id,
+                account_id=account_id,
+                actor_id=request_ctx.actor_id,
+                symbol=body.get("symbol"),
+                action=ft_action,
+            )
+    except Exception:  # pragma: no cover — audit must never break the order path
+        logger.debug("audit stamp failed for live order", exc_info=True)
+
+    logger.info(
+        "Live order dispatched | action=%s adapter=%s account=%s symbol=%s",
+        ft_action, adapter_id, account_id, body.get("symbol", "?"),
+    )
+    # Return both keys: ``orderid`` (legacy OpenAlgo response shape the UI reads)
+    # and ``data`` (the routed-path shape) so the frontend works either way.
+    return jsonify({"status": "success", "orderid": result, "data": result}), 200
+
+
+def _audit_write_event(
+    event_type: str, adapter_id: str, account_id: str, actor_id: str, order_id: str
+) -> None:
+    """Best-effort audit stamp for a gated broker write (never breaks the order path)."""
+    try:
+        audit = current_app.config.get("AUDIT")
+        if audit is not None:
+            audit.log_event(
+                event_type,
+                adapter_id=adapter_id,
+                account_id=account_id,
+                actor_id=actor_id,
+                order_id=order_id,
+            )
+    except Exception:  # pragma: no cover — audit must never break the order path
+        logger.debug("audit stamp failed for %s", event_type, exc_info=True)
+
+
+def _gated_write_dispatch(
+    op: str,
+    canonical_order: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    adapter_id: str,
+    account_id: str,
+    order_id: str,
+    dispatch: Callable[[Any, Any, Any], Any],
+    audit_event: str,
+    fail_message: str,
+) -> tuple[Any, int]:
+    """Shared gate -> ACL -> one-shot dispatch + fail-closed mapping for modify/cancel.
+
+    ``canonical_order`` is the fingerprint ``gate_order`` signs and the router
+    re-verifies; ``dispatch(router, request_ctx, safety_ctx)`` returns the broker
+    coroutine. Mirrors the ``place`` path's fail-closed matrix
+    (503/403/503/500) and echoes ``order_id`` on success.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
+    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
+    from flinttrade_engine.safety import gate_order  # noqa: PLC0415
+    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
+
+    router = current_app.config.get("BROKER_ROUTER")
+    if router is None:
+        logger.error("Live %s rejected — BROKER_ROUTER unavailable | adapter=%s", op, adapter_id)
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Order routing unavailable — workspace.json brokers configuration is "
+                "missing or invalid. Check the startup logs, fix workspace.json, then restart."
+            ),
+        }), 503
+
+    request_ctx = RequestContext(
+        jti=str(payload.get("jti") or ""),
+        actor_type="human",
+        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
+        mode=_MODE_LIVE,
+        selector=f"{adapter_id}:{account_id}",
+    )
+
+    try:
+        safety_ctx = gate_order(canonical_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
+        asyncio.run(dispatch(router, request_ctx, safety_ctx))
+    except SafetyBypassError as exc:
+        logger.warning("Live %s refused by safety gate | order=%s: %s", op, order_id, exc)
+        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 403
+    except (BrokerNotFoundError, KeyError) as exc:
+        logger.warning("Live %s — broker not connected | adapter=%s account=%s: %s", op, adapter_id, account_id, exc)
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Broker '{adapter_id}' (account '{account_id}') is not connected. Add the "
+                "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
+            ),
+        }), 503
+    except Exception:
+        logger.exception("Live %s dispatch failed | order=%s adapter=%s", op, order_id, adapter_id)
+        return jsonify({"status": "error", "message": fail_message}), 500
+
+    _audit_write_event(audit_event, adapter_id, account_id, request_ctx.actor_id, order_id)
+    logger.info("Live %s dispatched | order=%s adapter=%s account=%s", op, order_id, adapter_id, account_id)
+    return jsonify({"status": "success", "orderid": order_id}), 200
+
+
+def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
+    """Build the ``ModifyOrder`` field dict (minus orderid) from a request body.
+
+    Only the fields the OpenAlgo ``ModifyOrder`` model accepts — extra body keys
+    (apikey, account_id, …) are dropped so the typed-model construction in the
+    adapter cannot fail on an unexpected field.
+    """
+    return {
+        "symbol": str(body.get("symbol") or ""),
+        "exchange": str(body.get("exchange", "NSE")).upper(),
+        "action": str(body.get("action", "BUY")).upper(),
+        "pricetype": str(body.get("pricetype") or body.get("order_type") or "LIMIT").upper(),
+        "product": str(body.get("product", "MIS")).upper(),
+        "quantity": str(body.get("quantity", "1")),
+        "price": str(body.get("price", "0")),
+        "strategy": str(body.get("strategy") or "Flint"),
+    }
+
+
+def _dispatch_live_modify(
+    body: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    adapter_id: str = "openalgo",
+) -> tuple[Any, int]:
+    """Gate a live order MODIFY through the BrokerRouter (one-shot gate + ACL).
+
+    A modify is not a fresh placement, so it does not run the full SafetySystem
+    order pipeline — but it IS gated behind the L5 kill switch (a modify can
+    increase risk) plus the one-shot SafetyContext + per-account ACL.
+    """
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    from flinttrade_core.models import ModifyOrder  # noqa: PLC0415
+    from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
+
+    account_id = str(body.get("account_id") or "default")
+    order_id = str(body.get("orderid") or "").strip()
+    if not order_id:
+        return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
+
+    blocked = _live_kill_switch_block()
+    if blocked is not None:
+        logger.warning("Live modify blocked by kill switch | order=%s: %s", order_id, blocked.reason)
+        return jsonify({
+            "status": "error",
+            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+        }), 403
+
+    changes = _modify_changes(body)
+    try:
+        ModifyOrder(orderid=order_id, **changes)  # validate up-front; no gate consumed on bad input
+    except (ValueError, ValidationError) as exc:
+        logger.warning("Live modify rejected by order-model validation | order=%s: %s", order_id, exc)
+        return jsonify({"status": "error", "message": f"Modify validation failed: {exc}"}), 400
+
+    canonical = {"_op": "modify", "order_id": order_id, **changes}
+    hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
+    return _gated_write_dispatch(
+        "modify",
+        canonical,
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        order_id=order_id,
+        dispatch=lambda router, ctx, sctx: router.modify_order(
+            ctx, order=canonical, order_id=order_id, changes=changes, safety_ctx=sctx, hint=hint
+        ),
+        audit_event="ORDER_MODIFIED",
+        fail_message="Order modify failed",
+    )
+
+
+def _dispatch_live_cancel(
+    body: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    adapter_id: str = "openalgo",
+) -> tuple[Any, int]:
+    """Gate a live order CANCEL through the BrokerRouter (one-shot gate + ACL).
+
+    Cancel reduces exposure, so it is intentionally NOT blocked by the kill
+    switch — a halted account must still be able to cancel a working order. It is
+    gated by the one-shot SafetyContext + per-account ACL.
+    """
+    from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
+
+    account_id = str(body.get("account_id") or "default")
+    order_id = str(body.get("orderid") or "").strip()
+    if not order_id:
+        return jsonify({"status": "error", "message": "Cancel requires an 'orderid'"}), 400
+
+    canonical = {"_op": "cancel", "order_id": order_id}
+    hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
+    return _gated_write_dispatch(
+        "cancel",
+        canonical,
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        order_id=order_id,
+        dispatch=lambda router, ctx, sctx: router.cancel_order(
+            ctx, order=canonical, order_id=order_id, safety_ctx=sctx, hint=hint
+        ),
+        audit_event="ORDER_CANCELLED",
+        fail_message="Order cancel failed",
+    )
+
+
 def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     """Core dispatch logic shared by all order endpoint handlers.
 
@@ -339,7 +743,15 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return jsonify(result), 200
 
     # ------------------------------------------------------------------
-    # Live mode — verify PIN-unlocked JWT before forwarding to OpenAlgo
+    # Live mode — single gated, selector-bound execution channel (C1).
+    #
+    # ``place`` runs the full SafetySystem (L1-L5) + one-shot HMAC gate +
+    # per-account ACL via the BrokerRouter; ``modify`` and ``cancel`` run the same
+    # one-shot gate + ACL (modify also behind the L5 kill switch). The remaining
+    # live actions (smart/options/gtt/cancel-all/close/open) have no BrokerRouter
+    # dispatch method yet, so they stay on the direct forward — still gated behind
+    # the L5 kill switch so a halted account cannot push ANY live order. Gating
+    # those is a scoped follow-up (needs BrokerRouter.place_smart_order, etc.).
     # ------------------------------------------------------------------
     if not _is_live_mode_unlocked():
         logger.warning(
@@ -352,8 +764,35 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             "message": "Live mode not unlocked — verify PIN first",
         }), 403
 
+    live_payload = _decode_request_payload()
+    if live_payload is None:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication required — JWT could not be decoded",
+        }), 401
+
+    if ft_action == "place":
+        return _dispatch_live_order(ft_action, body, live_payload, adapter_id="openalgo")
+    if ft_action == "modify":
+        return _dispatch_live_modify(body, live_payload, adapter_id="openalgo")
+    if ft_action == "cancel":
+        return _dispatch_live_cancel(body, live_payload, adapter_id="openalgo")
+
+    # Remaining live action (smart/options/gtt/cancel-all/close/open): no
+    # BrokerRouter dispatch yet, so forward directly — gated behind the kill switch.
+    blocked = _live_kill_switch_block()
+    if blocked is not None:
+        logger.warning(
+            "Live %s blocked by kill switch | symbol=%s: %s",
+            ft_action, body.get("symbol", "?"), blocked.reason,
+        )
+        return jsonify({
+            "status": "error",
+            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+        }), 403
+
     logger.info(
-        "Live order | action=%s symbol=%s exchange=%s qty=%s",
+        "Live order | action=%s symbol=%s exchange=%s qty=%s (forward; kill-switch checked)",
         ft_action,
         body.get("symbol", "?"),
         body.get("exchange", "?"),
@@ -529,14 +968,6 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
         actor not authorised / verification failed), 503 (routing unavailable or
         the broker is not connected yet).
     """
-    import asyncio  # noqa: PLC0415
-
-    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
-    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
-    from flinttrade_engine.safety import gate_order  # noqa: PLC0415
-    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
-    from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
-
     payload = _decode_request_payload()
     if not payload:
         return jsonify({
@@ -544,8 +975,7 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
             "message": "Authentication required — provide a valid JWT",
         }), 401
 
-    mode = payload.get("mode")
-    if mode != _MODE_LIVE:
+    if payload.get("mode") != _MODE_LIVE:
         return jsonify({
             "status": "error",
             "message": (
@@ -561,62 +991,7 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
         }), 403
 
     body = request.get_json(silent=True) or {}
-    account_id = str(body.get("account_id") or "default")
-
-    request_ctx = RequestContext(
-        jti=str(payload.get("jti") or ""),
-        actor_type="human",
-        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
-        mode=_MODE_LIVE,
-        selector=f"{broker}:{account_id}",
-    )
-
-    router = current_app.config.get("BROKER_ROUTER")
-    if router is None:
-        logger.error("Routed order rejected — BROKER_ROUTER unavailable (bad brokers config?)")
-        return jsonify({
-            "status": "error",
-            "message": "Order routing unavailable — check workspace.json brokers configuration.",
-        }), 503
-
-    try:
-        safety_ctx = gate_order(body, request_ctx, adapter_id=broker, account_id=account_id)
-        result = asyncio.run(
-            router.place_order(
-                request_ctx,
-                order=body,
-                safety_ctx=safety_ctx,
-                hint=RoutingHint(adapter_id=broker, account_id=account_id),
-            )
-        )
-    except SafetyBypassError as exc:
-        logger.warning("Routed order refused by safety gate | broker=%s account=%s: %s", broker, account_id, exc)
-        return jsonify({"status": "error", "message": f"Order refused: {exc}"}), 403
-    except (BrokerNotFoundError, KeyError) as exc:
-        logger.warning("Routed order — broker not connected | broker=%s account=%s: %s", broker, account_id, exc)
-        return jsonify({
-            "status": "error",
-            "message": f"Broker '{broker}' (account '{account_id}') is not connected.",
-        }), 503
-    except Exception:
-        logger.exception("Routed order dispatch failed | broker=%s account=%s", broker, account_id)
-        return jsonify({"status": "error", "message": "Order dispatch failed"}), 500
-
-    # Stamp the audit trail with the resolved selector (best-effort).
-    try:
-        audit = current_app.config.get("AUDIT")
-        if audit is not None:
-            audit.log_event(
-                "ORDER_PLACED",
-                adapter_id=broker,
-                account_id=account_id,
-                actor_id=request_ctx.actor_id,
-                symbol=body.get("symbol"),
-            )
-    except Exception:  # pragma: no cover — audit must never break the order path
-        logger.debug("audit stamp failed for routed order", exc_info=True)
-
-    return jsonify({"status": "success", "data": result}), 200
+    return _dispatch_live_order("place", body, payload, adapter_id=broker)
 
 
 @orders_bp.route("/place-smart", methods=["POST"])

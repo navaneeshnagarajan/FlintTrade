@@ -319,3 +319,39 @@ class TestGatedMirrorFailureIsolation:
         succeeded = {r.account_id for r in result.results if r.success}
         assert errored == {"bad_acct"}
         assert succeeded == {"good_acct"}
+
+
+class TestUngatedFallbackGuard:
+    """The raw-httpx fallback (no router) fails closed unless explicitly opted in."""
+
+    def test_no_router_no_optin_fails_closed(self, _explode_httpx: None) -> None:
+        """Without a broker_router and without opt-in, no order is placed.
+
+        ``_explode_httpx`` would raise if the fallback POST were reached; the guard
+        returns first, so each account fails with the disabled-fallback message.
+        """
+        accounts = [_make_account("acc_a"), _make_account("acc_b")]
+        mirror = PositionMirror(accounts, mode=AllocationMode.EQUAL)  # no router, no opt-in
+
+        result = mirror.execute(_make_order(qty="2"))
+
+        assert result.total_accounts == 2
+        assert result.successful == 0
+        assert result.failed == 2
+        assert all("ungated" in (r.error or "").lower() for r in result.results)
+
+    def test_optin_bypasses_guard_and_reaches_forward(self, _explode_httpx: None) -> None:
+        """allow_ungated_fallback=True re-enables the transitional forward path.
+
+        With the guard bypassed the fallback reaches httpx (exploded here), so the
+        per-account error is the httpx failure, NOT the disabled-fallback message.
+        """
+        accounts = [_make_account("acc_a")]
+        mirror = PositionMirror(
+            accounts, mode=AllocationMode.EQUAL, allow_ungated_fallback=True
+        )
+
+        result = mirror.execute(_make_order(qty="1"))
+
+        assert result.failed == 1
+        assert "ungated" not in (result.results[0].error or "").lower()

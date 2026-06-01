@@ -214,6 +214,17 @@ class RoutingConfig:
         )
 
         account_acls = brokers.get("account_acls") or {}
+        if not isinstance(account_acls, dict):
+            raise RoutingConfigError(
+                "brokers.account_acls must be a mapping of "
+                "{adapter_id: {account_id: [actor_id, ...]}}"
+            )
+        for adapter_id, per_adapter in account_acls.items():
+            if not isinstance(per_adapter, dict):
+                raise RoutingConfigError(
+                    f"brokers.account_acls[{adapter_id!r}] must be a mapping of "
+                    "{account_id: [actor_id, ...]}"
+                )
 
         cfg = cls(
             registered=registered,

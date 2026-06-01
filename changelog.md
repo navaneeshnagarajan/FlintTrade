@@ -57,6 +57,50 @@ production ready.
   sidebars.
 - Home "Add widget" and widget drag/resize wiring that existed in UI shape
   but was not fully connected.
+- Credentials store: the `adapter_id` backfill and `set_primary` updates are now
+  atomic under SQLite autocommit (no permanently-stranded legacy accounts after a
+  crash mid-migration, and no transient zero-primary window); a duplicate-column
+  migration race is tolerated; the broker rollback snapshot is written atomically.
+- A malformed `brokers.account_acls` block now raises a typed `RoutingConfigError`
+  at parse time instead of surfacing a late `AttributeError`.
+
+### Security
+
+- **Selector-bound principal + gated execution** (the v0.6.0-alpha namesake,
+  previously absent from this changelog). Live orders bind to a canonical
+  `adapter_id:account_id` selector and are authorised per `(actor, account)`:
+  `gate_order` mints a one-shot, HMAC-signed `SafetyContext` (binding the order,
+  mode, caller, adapter, and account); the `BrokerRouter` verifies and consumes
+  it before any broker write; an `AuthenticatingSessionProvider` enforces
+  `workspace.json` `brokers.account_acls`. The credentials store gained an
+  `adapter_id` column with an additive, self-healing backfill migration.
+- The live order endpoint `POST /api/v1/orders/place` — the path the terminal
+  actually calls — now runs through the 5-layer SafetySystem, the one-shot gate,
+  and the per-account ACL instead of forwarding straight to OpenAlgo. It can no
+  longer place an unvalidated, unbound order, and fails closed with an actionable
+  message when the gate, ACL, or routing is not configured. Live `/modify` and
+  `/cancel` now run the same one-shot gate + per-account ACL (via new
+  `BrokerRouter.modify_order`/`cancel_order`; modify is also kill-switch-guarded,
+  cancel is always permitted so a halted account can still reduce exposure). The
+  remaining live actions (smart/options/GTT/cancel-all/close/open) stay
+  kill-switch-guarded pending their own `BrokerRouter` write methods.
+- The first operator to log in is **auto-authorised** for the default execution
+  account (trust-on-first-use): their actor id (JWT `sub`) is added to the running
+  router's ACL so gated `/place`, `/modify`, and `/cancel` work without a manual
+  `workspace.json` edit. This is in-memory and re-established by an actual
+  authenticated login each process — non-human actors (Ditto, ChartInk, agents)
+  and additional human users must still be listed explicitly in
+  `brokers.account_acls`.
+- The dedicated safety-gate HMAC secret is now generated and bound at startup
+  (hardened `~/.flinttrade/safety_gate_secret`), so the gated path is functional
+  rather than refusing every order.
+- Ditto's multi-account mirror now **fails closed by default**: without an injected
+  `BrokerRouter`, the transitional ungated raw-OpenAlgo forward is refused unless
+  the operator explicitly opts in (`allow_ungated_fallback=True`). The gated
+  mirror path (account-bound HMAC + ACL + one-shot consume) is the only enabled
+  route otherwise.
+- Operational log streams (`/v1/logs/stream`, `/v1/logs/recent`) now also redact
+  IPv6 addresses and bare high-entropy tokens.
 
 ### Notes
 

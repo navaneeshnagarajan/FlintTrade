@@ -121,6 +121,94 @@ class BrokerRouter:
         self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
         return await self._adapters[adapter_id].place_order(session, order, _router_token=_ROUTER_TOKEN)
 
+    async def modify_order(
+        self,
+        request_ctx: RequestContext,
+        *,
+        order: Any,
+        order_id: str,
+        changes: dict[str, Any],
+        safety_ctx: SafetyContext,
+        adapter_id: str | None = None,
+        account_id: str | None = None,
+        hint: RoutingHint | None = None,
+        routing_key: str = "execution",
+    ) -> Any:
+        """Modify a live order through the same verify-then-consume gate as place.
+
+        ``order`` is the canonical modify fingerprint that ``gate_order`` signed;
+        ``order_id`` + ``changes`` are the dispatch payload forwarded to the
+        adapter. Resolution, ACL, read-only, SafetyContext verification, and
+        one-shot gate consumption are identical to :meth:`place_order`.
+        """
+        if hint is not None or adapter_id is None:
+            adapter_id, account_id = self._resolve(routing_key, order, hint)
+        session = self._session_provider(request_ctx, adapter_id, account_id)
+        if session.is_read_only:
+            raise SafetyBypassError(f"session {account_id!r} is read-only")
+        self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+        return await self._adapters[adapter_id].modify_order(
+            session, order_id, changes, _router_token=_ROUTER_TOKEN
+        )
+
+    async def cancel_order(
+        self,
+        request_ctx: RequestContext,
+        *,
+        order: Any,
+        order_id: str,
+        safety_ctx: SafetyContext,
+        adapter_id: str | None = None,
+        account_id: str | None = None,
+        hint: RoutingHint | None = None,
+        routing_key: str = "execution",
+    ) -> Any:
+        """Cancel a live order through the same verify-then-consume gate as place.
+
+        ``order`` is the canonical cancel fingerprint that ``gate_order`` signed;
+        ``order_id`` is the dispatch payload. Resolution, ACL, read-only,
+        SafetyContext verification, and one-shot gate consumption mirror
+        :meth:`place_order`.
+        """
+        if hint is not None or adapter_id is None:
+            adapter_id, account_id = self._resolve(routing_key, order, hint)
+        session = self._session_provider(request_ctx, adapter_id, account_id)
+        if session.is_read_only:
+            raise SafetyBypassError(f"session {account_id!r} is read-only")
+        self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+        return await self._adapters[adapter_id].cancel_order(
+            session, order_id, _router_token=_ROUTER_TOKEN
+        )
+
+    # ------------------------------------------------------------------
+    # Operator onboarding (trust-on-first-use)
+    # ------------------------------------------------------------------
+
+    def authorise_default_actor(self, actor_id: str) -> tuple[str, str] | None:
+        """TOFU-authorise ``actor_id`` for the default execution selector if unclaimed.
+
+        Returns the claimed ``(adapter_id, account_id)``, or ``None`` if the
+        selector is already authorised, or there is no config/default, or the
+        session provider does not support trust-on-first-use. Lets a freshly
+        authenticated human operator place gated orders without a manual
+        ``account_acls`` edit; non-human actors must still be listed explicitly.
+        """
+        if self._config is None:
+            return None
+        selector = self._config.execution.default
+        if not selector:
+            return None
+        try:
+            adapter_id, account_id = parse_selector(selector)
+        except ValueError:
+            return None
+        claim = getattr(self._session_provider, "authorise_if_unclaimed", None)
+        if claim is None:
+            return None
+        if claim(adapter_id, account_id, actor_id):
+            return adapter_id, account_id
+        return None
+
     # ------------------------------------------------------------------
     # Read path
     # ------------------------------------------------------------------

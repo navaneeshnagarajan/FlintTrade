@@ -43,14 +43,14 @@ FlintTrade is:
 
 | SEBI Requirement | Circular Section | FlintTrade Status | Implementation |
 |---|---|---|---|
-| **OPS threshold** | I.c | **Compliant** | Engine rate limiter: 10 OPS hard limit (`packages/services/engine/src/safety.py` Layer 1). Below threshold = no Exchange registration required |
+| **OPS threshold** | I.c | **Compliant** | Engine rate limiter: 10 OPS hard limit (`packages/services/engine/src/flinttrade_engine/safety.py` Layer 1). Below threshold = no Exchange registration required |
 | **Family use allowed** | I.c | **Compliant** | Ditto package supports multi-account for family members |
 | **Static IP whitelisting** | I.d | **Compliant** | Configured at broker dashboard level. ER605 router provides static IP. Not FlintTrade's responsibility — broker enforces |
 | **No open APIs** | I.d | **Compliant** | Uses OpenAlgo's API key authentication, not open APIs |
 | **OAuth authentication** | I.d | **Compliant** | Broker handles OAuth flow. OpenAlgo passes through broker's OAuth |
 | **Two-factor authentication** | I.d | **Compliant** | Broker login requires 2FA. OpenAlgo uses broker's 2FA mechanism |
-| **Kill switch** | IV.a.iii | **Compliant** | 5-layer safety system (`packages/services/engine/src/safety.py`). Layer 5 = kill switch. Triggers: Telegram `/kill`, UI button, auto P&L breach. Actions: cancel all orders → close all positions → stop all strategies → audit log |
-| **Audit trail** | II.b | **Compliant** | `packages/core/data/src/audit_logger.py` — append-only JSONL, daily rotation, gzip compression, 5-year retention. Events: ORDER_PLACED, ORDER_MODIFIED, ORDER_CANCELLED, SAFETY_CHECK, LOGIN, LOGOUT, KILL_SWITCH_ACTIVATED |
+| **Kill switch** | IV.a.iii | **Compliant** | 5-layer safety system (`packages/services/engine/src/flinttrade_engine/safety.py`). Layer 5 = kill switch. Triggers: Telegram `/kill`, UI button, auto P&L breach. Actions: cancel all orders → close all positions → stop all strategies → audit log |
+| **Audit trail** | II.b | **Compliant** | `packages/core/data/src/flinttrade_data/audit_logger.py` — append-only JSONL, daily rotation, gzip compression, 5-year retention. Events: ORDER_PLACED, ORDER_MODIFIED, ORDER_CANCELLED, SAFETY_CHECK, LOGIN, LOGOUT, KILL_SWITCH_ACTIVATED |
 | **White Box classification** | V.a.i | **Compliant** | Open-source AGPL-3.0. All logic disclosed, replicable, auditable on GitHub |
 | **Algo registration** | II.a | **Not required** | Only required if crossing OPS threshold. FlintTrade enforces <10 OPS |
 | **Empanelment as Algo Provider** | III.a | **Not applicable** | FlintTrade is personal use, not a commercial algo provider |

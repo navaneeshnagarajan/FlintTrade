@@ -158,6 +158,7 @@ def _read_version() -> str:
 
 _MASTER_PASSWORD: str | None = None
 _API_KEY_PEPPER: str | None = None
+_SAFETY_GATE_SECRET: bytes | None = None
 
 
 def _get_api_key_pepper() -> str:
@@ -217,6 +218,58 @@ def _get_api_key_pepper() -> str:
     _API_KEY_PEPPER = new_pepper
     os.environ["API_KEY_PEPPER"] = new_pepper  # in-process OpenAlgo transport
     return _API_KEY_PEPPER
+
+
+def _get_safety_gate_secret_bytes() -> bytes:
+    """Get or generate the dedicated safety-gate HMAC secret (contract §8.0b).
+
+    Source of truth (NO environment variable — secrets out of env):
+      1. Persisted hardened secret at ``<workspace>/safety_gate_secret`` (hex).
+      2. Generate a fresh 32 random bytes, persist it hex-encoded and hardened.
+
+    This MUST be a SEPARATE key from jwt_secret / webhook_hmac_secret /
+    api_key_pepper: it signs every one-shot :class:`SafetyContext`, so reusing
+    another subsystem's secret would let a leak there forge order-gate tickets.
+    Like the pepper it is app-generated random (not operator material), so
+    auto-generating on first run is safe; an ephemeral fallback is acceptable
+    because the short SafetyContext TTL drains in-flight tickets across a restart.
+    """
+    global _SAFETY_GATE_SECRET
+    if _SAFETY_GATE_SECRET is not None:
+        return _SAFETY_GATE_SECRET
+
+    secret_file = _workspace_dir() / "safety_gate_secret"
+    try:
+        if secret_file.exists():
+            stored = secret_file.read_text().strip()
+            if stored:
+                candidate = bytes.fromhex(stored)
+                if len(candidate) >= 32:
+                    _SAFETY_GATE_SECRET = candidate
+                    return _SAFETY_GATE_SECRET
+                logger.warning(
+                    "safety_gate_secret at %s is too short (<32 bytes) — regenerating",
+                    secret_file,
+                )
+    except (OSError, ValueError):
+        # Unreadable or non-hex file — regenerate rather than fail closed forever.
+        logger.warning("safety_gate_secret at %s unreadable/invalid — regenerating", secret_file)
+
+    new_secret = secrets.token_bytes(32)
+    try:
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        secret_file.write_text(new_secret.hex())
+        _harden_secret(secret_file)  # SC-04: icacls/0600 owner-only
+        logger.info("Generated new safety-gate secret (hardened) at %s", secret_file)
+    except OSError as exc:
+        logger.warning(
+            "Could not persist safety_gate_secret to %s: %s — using ephemeral value",
+            secret_file,
+            exc,
+        )
+
+    _SAFETY_GATE_SECRET = new_secret
+    return _SAFETY_GATE_SECRET
 
 
 def set_master_password(password: str) -> None:
@@ -460,10 +513,18 @@ def _read_workspace_brokers() -> dict[str, Any] | None:
 
 
 def _snapshot_brokers_bak(brokers_config: dict[str, Any]) -> None:
-    """Write the last-known-good brokers config to ``workspace.brokers.bak.json``."""
+    """Write the last-known-good brokers config to ``workspace.brokers.bak.json``.
+
+    Atomic (tmp -> fsync -> os.replace, with the same Windows retry as the
+    workspace writer) so a crash mid-write can never leave a torn rollback
+    artefact: the file is always either the previous-complete or the
+    new-complete config — which is exactly when the operator needs it
+    (contract §13.3).
+    """
+    from .workspace_migrations import _atomic_write  # noqa: PLC0415
+
     bak = _workspace_dir() / "workspace.brokers.bak.json"
-    with open(bak, "w", encoding="utf-8") as f:
-        json.dump(brokers_config, f, indent=2)
+    _atomic_write(bak, json.dumps(brokers_config, indent=2))
 
 
 def build_broker_router(
@@ -814,6 +875,13 @@ def create_flask_app(
     # ``utils.config.API_KEY_PEPPER`` is captured at import time, so a
     # later os.environ tweak is too late.
     _get_api_key_pepper()
+
+    # Bind the dedicated safety-gate HMAC secret (contract §8.0b) BEFORE the
+    # broker router is built and before any SafetyContext can be minted/verified.
+    # Without it gate_order() fails closed and every live routed order would 403.
+    from flinttrade_engine.safety import set_safety_gate_secret  # noqa: PLC0415
+
+    set_safety_gate_secret(_get_safety_gate_secret_bytes())
 
     if credential_store is None:
         flinttrade_dir = _workspace_dir()

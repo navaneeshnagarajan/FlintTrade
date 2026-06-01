@@ -472,6 +472,32 @@ def auth_setup_regenerate_2fa() -> tuple[Any, int]:
     }), 200
 
 
+def _tofu_authorise_login_actor(actor_id: str) -> None:
+    """Authorise a freshly authenticated operator for the default execution account.
+
+    Trust-on-first-use: the first human to log in claims the
+    ``brokers.execution.default`` selector so gated live orders work without a
+    manual ``workspace.json`` ``account_acls`` edit. In-memory only (the running
+    BrokerRouter; re-established each process by an actual login) and never raises
+    into the login path. Non-human actors (agents, external_intent) must be
+    authorised explicitly in config.
+    """
+    try:
+        router = current_app.config.get("BROKER_ROUTER")
+        claim = getattr(router, "authorise_default_actor", None)
+        if claim is None:
+            return
+        claimed = claim(actor_id)
+        if claimed is not None:
+            logger.info(
+                "Auto-authorised operator %r for %s:%s (trust-on-first-use; add "
+                "other actors explicitly in workspace.json brokers.account_acls)",
+                actor_id, claimed[0], claimed[1],
+            )
+    except Exception:  # pragma: no cover — must never break login
+        logger.debug("TOFU actor authorisation skipped", exc_info=True)
+
+
 @auth_bp.route("/login", methods=["POST"])
 @_rate_limit("5 per minute")
 def auth_login() -> tuple[Any, int]:
@@ -499,7 +525,9 @@ def auth_login() -> tuple[Any, int]:
             return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
 
     profile = svc.get_profile()
-    token = _create_token(profile.get("username", "user"))
+    username = str(profile.get("username") or "user")
+    token = _create_token(username)
+    _tofu_authorise_login_actor(username)
 
     return jsonify({
         "status": "success",

@@ -32,12 +32,26 @@ class _FakeAdapter:
 
     def __init__(self) -> None:
         self.placed: list[object] = []
+        self.modified: list[tuple] = []
+        self.cancelled: list[str] = []
 
     async def place_order(self, session, order, *, _router_token=None):
         if _router_token is not _ROUTER_TOKEN:
             raise SafetyBypassError("adapter write method called outside BrokerRouter")
         self.placed.append(order)
         return "BROKER-OID-1"
+
+    async def modify_order(self, session, order_id, changes, *, _router_token=None):
+        if _router_token is not _ROUTER_TOKEN:
+            raise SafetyBypassError("adapter write method called outside BrokerRouter")
+        self.modified.append((order_id, changes))
+        return None
+
+    async def cancel_order(self, session, order_id, *, _router_token=None):
+        if _router_token is not _ROUTER_TOKEN:
+            raise SafetyBypassError("adapter write method called outside BrokerRouter")
+        self.cancelled.append(order_id)
+        return None
 
 
 def _session(read_only: bool = False) -> Session:
@@ -146,3 +160,76 @@ async def test_gate_consumed_exactly_once() -> None:
             _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx
         )
     assert adapter.placed == [order]
+
+
+# ---------------------------------------------------------------------------
+# modify_order / cancel_order — same verify-then-consume gate as place_order
+# ---------------------------------------------------------------------------
+
+
+async def test_modify_order_dispatches_with_valid_context() -> None:
+    adapter = _FakeAdapter()
+    router = _router(adapter)
+    order = {"_op": "modify", "order_id": "OID-1", "price": "100"}
+    ctx = _mint(order)
+    await router.modify_order(
+        _request_ctx(),
+        adapter_id="dhan",
+        account_id="acct-1",
+        order=order,
+        order_id="OID-1",
+        changes={"price": "100"},
+        safety_ctx=ctx,
+    )
+    assert adapter.modified == [("OID-1", {"price": "100"})]
+
+
+async def test_modify_order_rejects_consumed_gate() -> None:
+    adapter = _FakeAdapter()
+    router = _router(adapter, consume_gate=lambda _gate_id: False)
+    order = {"_op": "modify", "order_id": "OID-1"}
+    ctx = _mint(order)
+    with pytest.raises(SafetyBypassError, match="already consumed"):
+        await router.modify_order(
+            _request_ctx(),
+            adapter_id="dhan",
+            account_id="acct-1",
+            order=order,
+            order_id="OID-1",
+            changes={},
+            safety_ctx=ctx,
+        )
+    assert adapter.modified == []
+
+
+async def test_cancel_order_dispatches_with_valid_context() -> None:
+    adapter = _FakeAdapter()
+    router = _router(adapter)
+    order = {"_op": "cancel", "order_id": "OID-9"}
+    ctx = _mint(order)
+    await router.cancel_order(
+        _request_ctx(),
+        adapter_id="dhan",
+        account_id="acct-1",
+        order=order,
+        order_id="OID-9",
+        safety_ctx=ctx,
+    )
+    assert adapter.cancelled == ["OID-9"]
+
+
+async def test_cancel_order_rejects_read_only_session() -> None:
+    adapter = _FakeAdapter()
+    router = _router(adapter, read_only=True)
+    order = {"_op": "cancel", "order_id": "OID-9"}
+    ctx = _mint(order)
+    with pytest.raises(SafetyBypassError, match="read-only"):
+        await router.cancel_order(
+            _request_ctx(),
+            adapter_id="dhan",
+            account_id="acct-1",
+            order=order,
+            order_id="OID-9",
+            safety_ctx=ctx,
+        )
+    assert adapter.cancelled == []

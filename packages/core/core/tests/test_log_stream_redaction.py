@@ -54,6 +54,54 @@ def test_hashes_ipv4() -> None:
     assert "ip:" in out
 
 
+def test_hashes_ipv6_compressed() -> None:
+    out = redact_identity("request from 2001:db8::ff00:42:8329 accepted")
+    assert "2001:db8::ff00:42:8329" not in out
+    assert "ip:" in out
+
+
+def test_hashes_ipv6_link_local() -> None:
+    out = redact_identity("peer fe80::1ff:fe23:4567:890a connected")
+    assert "fe80::1ff:fe23:4567:890a" not in out
+    assert "ip:" in out
+
+
+def test_hashes_ipv6_loopback() -> None:
+    out = redact_identity("bound to ::1 ok")
+    assert "::1 " not in out
+    assert "ip:" in out
+
+
+def test_ipv6_does_not_match_ordinary_colon_fragment() -> None:
+    # An ordinary ``key:value`` log fragment (one colon, no ``::``) must survive.
+    text = "level:info status:ok elapsed:42ms"
+    assert redact_identity(text) == text
+
+
+def test_redacts_bare_high_entropy_token() -> None:
+    # A 40-char standalone base64-ish token that mixes letters and digits.
+    token = "aB3kZ9qWmN7pXr2sT5vY8cF1dG4hJ6lQ0oP2eU7w"
+    assert len(token) >= 32
+    out = redact_identity(f"resumed session {token} now")
+    assert token not in out
+    assert "<BROKER_ACCESS_TOKEN>" in out
+
+
+def test_does_not_redact_ordinary_prose() -> None:
+    text = "the quick brown fox jumps over the lazy dog repeatedly today"
+    assert redact_identity(text) == text
+
+
+def test_does_not_redact_short_word() -> None:
+    assert redact_identity("orderid abc123 placed") == "orderid abc123 placed"
+
+
+def test_does_not_redact_numeric_id() -> None:
+    # A typical long numeric id (digits only, no letters) is not a secret.
+    text = "order 123456789012345678901234567890123456 filled"
+    assert redact_identity(text) == text
+
+
 def test_redact_handles_empty() -> None:
     assert redact_identity(None) is None
     assert redact_identity("") == ""

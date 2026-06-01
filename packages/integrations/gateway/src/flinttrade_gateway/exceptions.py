@@ -19,7 +19,7 @@ class GatewayError(Exception):
 
 
 class BrokerNotFoundError(GatewayError):
-    """Raised when a broker name is not present in the catalog.
+    """Raised when a broker name is not present in the catalogue.
 
     Args:
         message: Description identifying which broker name was missing.

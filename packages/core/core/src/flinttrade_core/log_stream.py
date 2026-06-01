@@ -57,18 +57,56 @@ _TOKEN_KV_RE = re.compile(
     r"[A-Za-z0-9._\-+/=]+"
 )
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# IPv6: match either a ``::``-compressed form (the common case for ``::1``,
+# ``fe80::1ff:fe23:4567:890a``, ``2001:db8::ff00:42:8329``) or an uncompressed
+# 8-group form. Requiring ``::`` or seven colons keeps ordinary ``key:value``
+# log fragments (one colon, no ``::``) out of the redaction net.
+_IPV6_RE = re.compile(
+    r"(?<![0-9A-Fa-f:])"
+    r"(?:"
+    # compressed: hex groups on at most one side of a ``::``, >=2 groups total
+    r"(?:[0-9A-Fa-f]{1,4}:){1,7}:"
+    r"|:(?::[0-9A-Fa-f]{1,4}){1,7}"
+    r"|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}"
+    r"|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}"
+    r"|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}"
+    r"|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}"
+    r"|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}"
+    r"|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}"
+    # uncompressed: exactly 8 hex groups
+    r"|(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}"
+    r")"
+    r"(?![0-9A-Fa-f:])"
+)
+# Conservative bare high-entropy token: a standalone base64/hex-ish run of at
+# least 32 chars that mixes letters and digits. The mixed-class requirement
+# keeps plain prose, plain numbers, short ids, and file paths out of the net —
+# when unsure we do not redact, because a false positive corrupts operator logs.
+_BARE_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])")
 
 
 def _hash_ip(match: re.Match[str]) -> str:
     return "ip:" + hashlib.sha256(match.group(0).encode("utf-8")).hexdigest()[:8]
 
 
+def _redact_bare_token(match: re.Match[str]) -> str:
+    """Redact a long high-entropy run only if it mixes letters and digits."""
+    token = match.group(0)
+    has_letter = any(c.isalpha() for c in token)
+    has_digit = any(c.isdigit() for c in token)
+    if has_letter and has_digit:
+        return "<BROKER_ACCESS_TOKEN>"
+    return token
+
+
 def redact_identity(text: str | None) -> str | None:
     """Redact JWTs, broker tokens, and IPs from an operational log message (§5.4).
 
     Order matters: JWTs and token-bearing websocket URLs are collapsed whole
-    before the narrower Bearer / key=value substitutions, then bare IPv4
-    addresses are hashed.
+    before the narrower Bearer / key=value substitutions, then bare IPv4 and
+    IPv6 addresses are hashed. A conservative bare high-entropy token sweep runs
+    last so it only catches secrets the structured rules above did not already
+    redact.
     """
     if not text:
         return text
@@ -77,6 +115,8 @@ def redact_identity(text: str | None) -> str | None:
     text = _BEARER_RE.sub(r"\1<BROKER_ACCESS_TOKEN>", text)
     text = _TOKEN_KV_RE.sub(r"\1<BROKER_ACCESS_TOKEN>", text)
     text = _IPV4_RE.sub(_hash_ip, text)
+    text = _IPV6_RE.sub(_hash_ip, text)
+    text = _BARE_TOKEN_RE.sub(_redact_bare_token, text)
     return text
 
 

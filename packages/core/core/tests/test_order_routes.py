@@ -138,6 +138,42 @@ def _auth_headers(
 
 
 # ---------------------------------------------------------------------------
+# 0. H1 — startup binds the dedicated safety-gate HMAC secret
+# ---------------------------------------------------------------------------
+
+
+def test_get_safety_gate_secret_bytes_generates_and_caches(tmp_path, monkeypatch):
+    """H1: the gate-secret helper generates a >=32-byte key, persists it, caches it.
+
+    Pure unit test of the loader — no create_flask_app (a second app would open a
+    second DuckDB sandbox connection and dead-lock the file under xdist).
+    """
+    import flinttrade_core.app as app_mod
+
+    monkeypatch.setattr(app_mod, "_workspace_dir", lambda: tmp_path)
+    monkeypatch.setattr(app_mod, "_SAFETY_GATE_SECRET", None, raising=False)
+
+    secret = app_mod._get_safety_gate_secret_bytes()
+    assert isinstance(secret, bytes)
+    assert len(secret) >= 32
+    assert (tmp_path / "safety_gate_secret").exists()
+    # Cached: a second call returns the identical object, no regeneration.
+    assert app_mod._get_safety_gate_secret_bytes() is secret
+
+
+def test_app_startup_binds_safety_gate_secret(flask_app):
+    """H1 regression: building the app binds the dedicated safety-gate HMAC secret.
+
+    Without it, gate_order() fails closed and every live routed order 403s. Uses
+    the existing module-scoped fixture (no extra create_flask_app / DuckDB).
+    """
+    import flinttrade_engine.safety as safety_mod
+
+    assert safety_mod._SAFETY_GATE_SECRET is not None
+    assert len(safety_mod._SAFETY_GATE_SECRET) >= 32
+
+
+# ---------------------------------------------------------------------------
 # 1. Mode enforcement — Explore mode blocks all orders
 # ---------------------------------------------------------------------------
 
@@ -453,10 +489,21 @@ class TestPracticeMode:
 
 
 class TestLiveModeForwarding:
-    """Live mode must forward requests to OpenAlgo with the API key."""
+    """Live mode dispatch: ``place`` is gated; other live actions forward.
+
+    After the C1 fix, ``/api/v1/orders/place`` live runs through the SafetySystem
+    + one-shot gate + per-account ACL BrokerRouter and NEVER hits the raw OpenAlgo
+    forward. The remaining live actions (place-smart/modify/cancel/...) have no
+    BrokerRouter dispatch yet, so they stay on the direct forward (gated behind
+    the L5 kill switch) — those tests exercise the forward contract via
+    ``place-smart``.
+    """
 
     @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_place_order_forwards_correctly(self, mock_client_cls, client):
+    def test_live_smart_order_forwards_correctly(self, mock_client_cls, client):
+        # place-smart has no BrokerRouter dispatch yet, so it stays on the direct
+        # forward (gated behind the L5 kill switch) and exercises the forward
+        # payload contract (apikey injection) that /place no longer uses.
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "status": "success",
@@ -470,7 +517,7 @@ class TestLiveModeForwarding:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/api/v1/orders/place",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -485,8 +532,56 @@ class TestLiveModeForwarding:
         assert forwarded_body["symbol"] == "NIFTY"
 
     @patch("flinttrade_core.order_routes.httpx.Client")
+    def test_live_place_order_is_gated_not_forwarded(self, mock_client_cls, client):
+        """C1 regression: live /place must NEVER reach the raw OpenAlgo forward.
+
+        It now routes through the SafetySystem + one-shot gate + per-account ACL
+        BrokerRouter. With the default workspace (empty account_acls) the
+        unauthorised actor is refused — but the decisive assertion is that the raw
+        httpx forward is never called, so an order cannot escape ungated.
+        """
+        mock_http = MagicMock()
+        mock_http.__enter__ = MagicMock(return_value=mock_http)
+        mock_http.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_http
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="live", include_live_token=True),
+        )
+        # The ungated raw forward must never be reached on the live /place path.
+        mock_http.post.assert_not_called()
+        # Fails closed (safety layer or ACL refusal), never a silent 200 forward.
+        assert resp.status_code == 403
+
+    @pytest.mark.parametrize("endpoint", ["/api/v1/orders/modify", "/api/v1/orders/cancel"])
+    @patch("flinttrade_core.order_routes.httpx.Client")
+    def test_live_modify_cancel_are_gated_not_forwarded(self, mock_client_cls, endpoint, client):
+        """modify/cancel live now route through the gated BrokerRouter, never the raw forward."""
+        mock_http = MagicMock()
+        mock_http.__enter__ = MagicMock(return_value=mock_http)
+        mock_http.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_http
+
+        body = {**_SAMPLE_ORDER_BODY, "orderid": "OA-1"}
+        resp = client.post(
+            endpoint,
+            json=body,
+            headers=_auth_headers(mode="live", include_live_token=True),
+        )
+        # No raw httpx forward; fails closed at the ACL with the default empty acls.
+        mock_http.post.assert_not_called()
+        assert resp.status_code == 403
+
+    @patch("flinttrade_core.order_routes.httpx.Client")
     def test_live_forwards_to_correct_openalgo_endpoint(self, mock_client_cls, client):
-        """Each FlintTrade route should map to the correct OpenAlgo endpoint."""
+        """Each non-place live route should map to the correct OpenAlgo endpoint.
+
+        ``/api/v1/orders/place`` is intentionally absent — it is now gated through
+        the BrokerRouter and no longer forwards (see
+        ``test_live_place_order_is_gated_not_forwarded``).
+        """
         mock_response = MagicMock()
         mock_response.json.return_value = {"status": "success"}
         mock_response.status_code = 200
@@ -496,11 +591,10 @@ class TestLiveModeForwarding:
         mock_http.post.return_value = mock_response
         mock_client_cls.return_value = mock_http
 
+        # place/modify/cancel are gated through the BrokerRouter and no longer
+        # forward; only these remaining live actions still use the direct forward.
         endpoint_map = {
-            "/api/v1/orders/place": "placeorder",
             "/api/v1/orders/place-smart": "placesmartorder",
-            "/api/v1/orders/modify": "modifyorder",
-            "/api/v1/orders/cancel": "cancelorder",
             "/api/v1/orders/cancel-all": "cancelallorder",
             "/api/v1/orders/close-position": "closeposition",
             "/api/v1/orders/open-position": "openposition",
@@ -523,7 +617,7 @@ class TestLiveModeForwarding:
 
     @patch("flinttrade_core.order_routes.httpx.Client")
     def test_live_propagates_openalgo_error_status(self, mock_client_cls, client):
-        """If OpenAlgo returns an error status, propagate it."""
+        """If OpenAlgo returns an error status on a forwarded action, propagate it."""
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "status": "error",
@@ -537,7 +631,7 @@ class TestLiveModeForwarding:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/api/v1/orders/place",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -559,11 +653,14 @@ class TestLiveModeForwarding:
 
 # ---------------------------------------------------------------------------
 # 5. Error handling — connection errors, timeouts, missing API key
+#
+# These exercise _forward_to_openalgo, which (post-C1) is reached only by the
+# non-place live actions, so they target /place-smart.
 # ---------------------------------------------------------------------------
 
 
 class TestLiveModeErrors:
-    """Error handling when forwarding to OpenAlgo fails."""
+    """Error handling when forwarding a non-place live action to OpenAlgo fails."""
 
     @patch("flinttrade_core.order_routes.httpx.Client")
     def test_openalgo_unreachable_returns_502(self, mock_client_cls, client):
@@ -575,7 +672,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/api/v1/orders/place",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -593,7 +690,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/api/v1/orders/place",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -611,7 +708,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/api/v1/orders/place",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -626,7 +723,7 @@ class TestLiveModeErrors:
         patched helper and returns 503.
         """
         resp = client.post(
-            "/api/v1/orders/place",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
@@ -647,7 +744,7 @@ class TestLiveModeErrors:
         mock_client_cls.return_value = mock_http
 
         resp = client.post(
-            "/api/v1/orders/place",
+            "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="live", include_live_token=True),
         )

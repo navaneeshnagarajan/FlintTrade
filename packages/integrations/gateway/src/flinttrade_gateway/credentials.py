@@ -157,14 +157,41 @@ class CredentialStore:
         best-effort default; the operator re-saves an account to correct it if
         the routing adapter differs from the broker name (e.g. an OpenAlgo-routed
         account whose selector adapter is ``"openalgo"``).
+
+        The connection runs in SQLite autocommit mode (``isolation_level=None``),
+        so the ALTER and the backfill are wrapped in one explicit
+        ``BEGIN IMMEDIATE`` ... ``COMMIT`` transaction. Without it a crash between
+        the two statements would strand legacy rows at ``adapter_id = ''``
+        permanently, because the ``"adapter_id" not in columns`` guard would never
+        re-run the backfill. The backfill ``UPDATE`` is also run on **every** open,
+        even when the column already exists, so any rows left blank by an earlier
+        partial migration are self-healed.
         """
         columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
-        if "adapter_id" not in columns:
-            conn.execute("ALTER TABLE accounts ADD COLUMN adapter_id TEXT NOT NULL DEFAULT ''")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if "adapter_id" not in columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE accounts ADD COLUMN adapter_id TEXT NOT NULL DEFAULT ''"
+                    )
+                except sqlite3.OperationalError as exc:
+                    # Tolerate a cross-process race where another connection added
+                    # the column first — treat "duplicate column" as already
+                    # migrated and fall through to the self-healing backfill.
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+            # Self-healing backfill: idempotent, runs on every open so a crash
+            # mid-migration (or a row inserted with a blank adapter_id) recovers.
             conn.execute(
                 "UPDATE accounts SET adapter_id = broker "
                 "WHERE adapter_id IS NULL OR adapter_id = ''"
             )
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
 
     def _derive_key(self, salt: bytes) -> Fernet:
         """Derive a Fernet symmetric key from the master password and salt.
@@ -396,12 +423,16 @@ class CredentialStore:
                 raise CredentialError(
                     f"Cannot set primary — account not found: {account_id!r}"
                 )
-            conn.execute("UPDATE accounts SET is_primary = 0")
+            # One atomic statement: under SQLite autocommit
+            # (``isolation_level=None``) two separate UPDATEs would leave a
+            # transient window in which no row is primary, and the trailing
+            # ``conn.commit()`` is a no-op. A single CASE expression sets the
+            # chosen account and clears every other in the same write.
             conn.execute(
-                "UPDATE accounts SET is_primary = 1 WHERE account_id = ?",
+                "UPDATE accounts SET is_primary = "
+                "CASE WHEN account_id = ? THEN 1 ELSE 0 END",
                 (account_id,),
             )
-            conn.commit()
 
     def account_exists(self, account_id: str) -> bool:
         """Check whether an account is stored in the database.

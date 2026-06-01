@@ -50,11 +50,11 @@ class BrokerRegistry:
         self._lock: threading.Lock = threading.Lock()
 
     # ------------------------------------------------------------------
-    # Catalog queries (read-only, no lock needed)
+    # Catalogue queries (read-only, no lock needed)
     # ------------------------------------------------------------------
 
     def get_supported_brokers(self) -> list[BrokerInfo]:
-        """Return all non-sandbox broker entries from the catalog.
+        """Return all non-sandbox broker entries from the catalogue.
 
         Returns:
             A list of :class:`~models.BrokerInfo` objects where
@@ -92,7 +92,7 @@ class BrokerRegistry:
             authentication.
 
         Raises:
-            BrokerNotFoundError: If ``broker_name`` is not in the catalog.
+            BrokerNotFoundError: If ``broker_name`` is not in the catalogue.
             AuthFlowError: If the broker rejects the credentials.
         """
         if broker_name not in BROKER_CATALOG:
@@ -131,6 +131,13 @@ class BrokerRegistry:
                 )
             session.disconnect()
             del self._sessions[account_id]
+            # Also evict any composite (adapter_id, account_id) entries for this
+            # account so the adapter-session store does not leave orphans behind.
+            orphans = [
+                key for key in self._adapter_sessions if key[1] == account_id
+            ]
+            for key in orphans:
+                del self._adapter_sessions[key]
             if self._primary == account_id:
                 self._primary = None
             logger.info("Account %r removed from registry", account_id)
@@ -269,6 +276,22 @@ class BrokerRegistry:
                 f"No session registered for selector {adapter_id!r}:{account_id!r}."
             )
         return session
+
+    def remove_session_for(self, adapter_id: str, account_id: str) -> None:
+        """Evict an adapter-layer session under its composite selector key.
+
+        Idempotent: if no session is registered for that selector this is a
+        silent no-op (no error is raised when the key is absent).
+
+        Args:
+            adapter_id: The bare adapter name.
+            account_id: The account within that adapter.
+        """
+        with self._lock:
+            if self._adapter_sessions.pop((adapter_id, account_id), None) is not None:
+                logger.info(
+                    "Session evicted for selector %s:%s", adapter_id, account_id
+                )
 
     def get_primary_session(self) -> BrokerSession:
         """Return the session designated as primary.

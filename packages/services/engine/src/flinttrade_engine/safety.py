@@ -22,6 +22,7 @@ import secrets
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, time as dt_time, timedelta, timezone
 from enum import StrEnum
@@ -77,10 +78,19 @@ def _canonical_order_hash(order: object) -> str:
     The same order hashed at mint time and at verify time MUST yield the same
     digest; any field change flips the hash and the context fails to verify,
     closing the order-substitution replay vector.
+
+    The routed-order path feeds a plain ``dict`` body straight through
+    ``gate_order`` (see ``order_routes.py``), so a :class:`~collections.abc.Mapping`
+    MUST be canonicalised directly — ``sort_keys`` makes the digest independent
+    of dict-key *insertion* order, keeping mint and verify consistent. Ordinary
+    objects are canonicalised via their ``__dict__``; only a genuinely
+    un-serialisable non-mapping falls back to ``repr``.
     """
-    data = getattr(order, "__dict__", None)
-    if not isinstance(data, dict):
-        data = {"_repr": repr(order)}
+    if isinstance(order, Mapping):
+        data: object = order
+    else:
+        attrs = getattr(order, "__dict__", None)
+        data = attrs if isinstance(attrs, dict) else {"_repr": repr(order)}
     payload = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -292,7 +302,30 @@ class SafetyContext:
 
         Failover never re-mints; both gates MUST pass. The distinct reasons keep
         the operator forensic trail unambiguous.
+
+        Contract (the caller MUST honour all of these):
+
+        - ``failover_allowed_adapters`` are BARE adapter ids (e.g. ``"upstox"``),
+          NOT ``adapter:account`` selectors. Only the candidate *adapter* is
+          re-checked here.
+        - The PRIMARY account binding (``self.account_id``) carries over to the
+          candidate unchanged. This method neither re-binds nor re-resolves the
+          candidate account; the candidate leg executes against the same
+          ``account_id`` that was signed into the primary gate.
+        - The ``gate_id`` is one-shot. This method does NOT consume a gate. The
+          CALLER MUST consume a DISTINCT one-shot gate per dispatched leg and
+          MUST NEVER reuse this context's ``gate_id`` across legs (primary +
+          each failover candidate), or the one-shot replay guard is defeated.
+
+        Status: failover *dispatch* is NOT yet wired — no caller in ``router.py``
+        invokes this path today (the routed-order flow uses :meth:`verify`). This
+        method exists as the signed-and-checked contract a future failover
+        dispatcher MUST satisfy; the §11.5 multi-leg wiring is deferred.
         """
+        # NOT-YET-WIRED (see docstring): no router caller exercises this path
+        # yet; it only re-verifies authenticity + allowlist membership and does
+        # NOT consume a gate or re-bind the candidate account. The future
+        # failover dispatcher owns per-leg gate consumption.
         if not self.verify(order, request_ctx, self.adapter_id, self.account_id):
             raise SafetyBypassError(
                 "verify_for_failover: signature_mismatch — context did not verify "

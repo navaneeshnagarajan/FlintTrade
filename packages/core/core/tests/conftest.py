@@ -108,3 +108,32 @@ def _isolated_auth_state(tmp_path_factory):
     auth_state_mod.get_auth_state(db_path=db_dir / "auth_state.duckdb")
     yield
     auth_state_mod.reset_singleton_for_tests()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _per_module_workspace(request):
+    """Give each test module its OWN workspace subdirectory.
+
+    ``_isolate_workspace`` gives each xdist worker its own workspace, but every
+    module-scoped ``flask_app`` fixture running in that worker shares the one
+    ``engine-sandbox/default.duckdb`` under it. DuckDB refuses a second open of a
+    file already held open by another connection, so two such modules landing in
+    the same worker collide ("IO Error: ... file is already open"). Scoping the
+    workspace per module gives each module-scoped app a distinct sandbox DuckDB
+    path, so they never contend — independent of any single test's logic.
+
+    Runs as an autouse module fixture so it sets the env BEFORE a module's own
+    ``flask_app`` fixture builds its app.
+    """
+    prev = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
+    base = Path(prev) if prev else (Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main")
+    mod_dir = base / Path(request.module.__file__).stem
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    _clean_legacy_scratch_dbs(mod_dir)
+    _seed_test_master_password(mod_dir)
+    os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(mod_dir)
+    yield
+    if prev is not None:
+        os.environ["FLINTTRADE_WORKSPACE_DIR"] = prev
+    else:
+        os.environ.pop("FLINTTRADE_WORKSPACE_DIR", None)

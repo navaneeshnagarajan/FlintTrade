@@ -158,6 +158,25 @@ def test_unauthorised_account_warns_not_raises() -> None:
     assert cfg.execution.default == "openalgo:default"
 
 
+def test_non_dict_account_acls_raises_routing_config_error() -> None:
+    # A list-valued top-level account_acls would later blow up in resolve()/
+    # _validate() with a raw AttributeError ('list' has no attribute 'get').
+    # We must fail loud at parse time with RoutingConfigError instead (§13.3).
+    brokers = _valid_brokers()
+    brokers["account_acls"] = ["dhan", "upstox"]  # a list, not a mapping
+    with pytest.raises(RoutingConfigError, match="account_acls"):
+        RoutingConfig.from_workspace(brokers)
+
+
+def test_non_dict_per_adapter_account_acls_entry_raises() -> None:
+    # A list-valued per-adapter entry would blow up in the inner .get() with a
+    # raw AttributeError; parse-time validation must raise RoutingConfigError.
+    brokers = _valid_brokers()
+    brokers["account_acls"]["dhan"] = ["personal"]  # list, not a mapping
+    with pytest.raises(RoutingConfigError, match="account_acls"):
+        RoutingConfig.from_workspace(brokers)
+
+
 # --- defaults round-trip + RoutingHint -----------------------------------
 
 

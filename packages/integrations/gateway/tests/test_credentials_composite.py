@@ -70,3 +70,44 @@ def test_legacy_db_backfills_adapter_id_from_broker(tmp_path) -> None:
     assert migrated.retrieve_for("zerodha", "AB1234") == _CREDS
     rows = {a["account_id"]: a for a in migrated.list_accounts()}
     assert rows["AB1234"]["adapter_id"] == "zerodha"
+
+
+def test_blank_adapter_id_is_self_healed_on_next_open(tmp_path) -> None:
+    """A row stranded with ``adapter_id = ''`` (e.g. a crash mid-migration)
+    is self-healed from its ``broker`` on the next open, and ``retrieve_for``
+    then resolves it.
+    """
+    db = tmp_path / "stranded.db"
+    store = CredentialStore(db, _MP)
+    store.store("CD5678", "upstox", "U", _CREDS, adapter_id="upstox")
+    # Simulate a row left blank by an interrupted backfill.
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE accounts SET adapter_id = '' WHERE account_id = ?", ("CD5678",))
+        conn.commit()
+    # Re-open -> the idempotent self-healing backfill runs even though the
+    # column already exists.
+    healed = CredentialStore(db, _MP)
+    rows = {a["account_id"]: a for a in healed.list_accounts()}
+    assert rows["CD5678"]["adapter_id"] == "upstox"
+    assert healed.retrieve_for("upstox", "CD5678") == _CREDS
+
+
+def test_set_primary_leaves_exactly_one_primary(tmp_path) -> None:
+    """After :meth:`set_primary` exactly one row carries ``is_primary = 1``."""
+    db = tmp_path / "primary.db"
+    store = CredentialStore(db, _MP)
+    store.store("a1", "dhan", "A1", _CREDS, adapter_id="dhan", is_primary=True)
+    store.store("a2", "dhan", "A2", _CREDS, adapter_id="dhan")
+    store.store("a3", "zerodha", "A3", _CREDS, adapter_id="zerodha")
+
+    store.set_primary("a2")
+
+    with sqlite3.connect(db) as conn:
+        primary_count = conn.execute(
+            "SELECT COUNT(*) FROM accounts WHERE is_primary = 1"
+        ).fetchone()[0]
+        primary_id = conn.execute(
+            "SELECT account_id FROM accounts WHERE is_primary = 1"
+        ).fetchone()[0]
+    assert primary_count == 1
+    assert primary_id == "a2"

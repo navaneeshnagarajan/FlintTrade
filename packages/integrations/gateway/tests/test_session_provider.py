@@ -46,3 +46,38 @@ def test_same_gate_guards_reads_and_writes() -> None:
     # Session here, so an intruder is refused on either path identically.
     with pytest.raises(SafetyBypassError, match="not authorised"):
         _provider(object())(_ctx(actor_id="intruder"), "dhan", "personal")
+
+
+# ---------------------------------------------------------------------------
+# Trust-on-first-use (authorise_if_unclaimed) — operator onboarding
+# ---------------------------------------------------------------------------
+
+
+def test_authorise_if_unclaimed_claims_empty_selector() -> None:
+    reg = BrokerRegistry()
+    reg.put_session("openalgo", "default", object())
+    provider = AuthenticatingSessionProvider(reg, {})  # empty acls
+    # Unauthorised before the claim.
+    with pytest.raises(SafetyBypassError, match="not authorised"):
+        provider(_ctx(actor_id="nava"), "openalgo", "default")
+    assert provider.authorise_if_unclaimed("openalgo", "default", "nava") is True
+    # Authorised after the claim — same session is returned.
+    assert provider(_ctx(actor_id="nava"), "openalgo", "default") is not None
+
+
+def test_authorise_if_unclaimed_noop_when_already_claimed() -> None:
+    reg = BrokerRegistry()
+    provider = AuthenticatingSessionProvider(reg, {"openalgo": {"default": ["first"]}})
+    # Already claimed -> a different actor is NOT auto-added.
+    assert provider.authorise_if_unclaimed("openalgo", "default", "second") is False
+    with pytest.raises(SafetyBypassError, match="not authorised"):
+        provider(_ctx(actor_id="second"), "openalgo", "default")
+
+
+def test_authorise_if_unclaimed_respects_explicit_empty_deny_list() -> None:
+    # An explicit empty list is a deliberate deny-all — TOFU must NOT widen it.
+    reg = BrokerRegistry()
+    provider = AuthenticatingSessionProvider(reg, {"openalgo": {"default": []}})
+    assert provider.authorise_if_unclaimed("openalgo", "default", "nava") is False
+    with pytest.raises(SafetyBypassError, match="not authorised"):
+        provider(_ctx(actor_id="nava"), "openalgo", "default")

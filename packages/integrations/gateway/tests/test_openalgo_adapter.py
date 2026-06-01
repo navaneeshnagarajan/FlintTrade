@@ -90,6 +90,25 @@ async def test_place_order_requires_router_token() -> None:
         await a.place_order(_session(), _order())  # no token
 
 
+async def test_modify_order_requires_router_token() -> None:
+    # The §8 guard must reject a tokenless modify before any OpenAlgo request,
+    # so the FakeClient records nothing (mirrors place_order's rejection arm).
+    client = _FakeClient()
+    a = _adapter(client)
+    with pytest.raises(SafetyBypassError, match="outside BrokerRouter"):
+        await a.modify_order(_session(), "OID-1", {"price": 1.0})  # no token
+    assert client.calls == []  # the guard short-circuits ahead of the client
+
+
+async def test_cancel_order_requires_router_token() -> None:
+    # As above for cancel: a tokenless cancel must raise before the client runs.
+    client = _FakeClient()
+    a = _adapter(client)
+    with pytest.raises(SafetyBypassError, match="outside BrokerRouter"):
+        await a.cancel_order(_session(), "OID-9")  # no token
+    assert client.calls == []  # the guard short-circuits ahead of the client
+
+
 async def test_place_order_forwards_and_returns_id() -> None:
     client = _FakeClient()
     a = _adapter(client)
