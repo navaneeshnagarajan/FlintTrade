@@ -230,15 +230,11 @@ export default defineConfig({
     // https://vitest.dev/guide/common-errors#segfaults-and-native-code-errors
     // and https://vitest.dev/guide/improving-performance#pool).
     pool: "forks",
-    poolOptions: {
-      forks: {
-        // Keep the default conservative for jsdom-heavy suites on CI and
-        // newer Node runtimes; override locally with VITEST_MAX_FORKS.
-        maxForks: Number(process.env.VITEST_MAX_FORKS ?? 1),
-        minForks: 1,
-        isolate: true,
-      },
-    },
+    // Keep the default conservative for jsdom-heavy suites on CI and newer
+    // Node runtimes; override locally with VITEST_MAX_WORKERS. The
+    // VITEST_MAX_FORKS fallback keeps old local scripts working.
+    maxWorkers: Number(process.env.VITEST_MAX_WORKERS ?? process.env.VITEST_MAX_FORKS ?? 1),
+    isolate: true,
     // Per-test wall-clock cap. Most tests finish in <100 ms; 10 s catches
     // hangs (e.g. a stub fetch that never resolves) before the whole suite
     // times out.

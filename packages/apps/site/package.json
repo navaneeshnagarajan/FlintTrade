@@ -39,9 +39,7 @@
     "tailwindcss": "^4.1.18",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
-  },
-  "overrides": {
-    "postcss": "8.5.15"
+    "vite": "^7.0.0",
+    "vitest": "^4.1.0"
   }
 }

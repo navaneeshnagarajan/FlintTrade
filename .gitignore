@@ -103,5 +103,6 @@ progress.md
 *.tar.gz
 .worktrees/
 qa-*.png
+/apps/
 packages/tick-engine/target/
 packages/desktop/src-tauri/target/
