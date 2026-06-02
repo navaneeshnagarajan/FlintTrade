@@ -19,6 +19,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { FlintStackedBarChart, type FlintStackedBarSeries } from "@flinttrade/design-system";
 import {
   AlertCircle,
   Building2,
@@ -130,78 +131,14 @@ const DEMO_RESPONSE: ShareholdingResponse = {
 const HOLDING_META: {
   key: keyof ShareholdingData;
   label: string;
-  colour: string;
+  color: string;
 }[] = [
-  { key: "promoter_pct", label: "Promoter", colour: "#6366f1" },
-  { key: "fii_pct", label: "FII", colour: "#22d3ee" },
-  { key: "dii_pct", label: "DII", colour: "#34d399" },
-  { key: "public_pct", label: "Public", colour: "#a78bfa" },
-  { key: "government_pct", label: "Govt", colour: "#fb923c" },
+  { key: "promoter_pct", label: "Promoter", color: "#6366f1" },
+  { key: "fii_pct", label: "FII", color: "#22d3ee" },
+  { key: "dii_pct", label: "DII", color: "#34d399" },
+  { key: "public_pct", label: "Public", color: "#a78bfa" },
+  { key: "government_pct", label: "Govt", color: "#fb923c" },
 ];
-
-// ─── Stacked bar chart (SVG-free, CSS-based) ──────────────────────────────────
-
-interface StackedBarProps {
-  quarters: string[];
-  data: { label: string; colour: string; values: number[] }[];
-}
-
-function StackedBarChart({ quarters, data }: StackedBarProps) {
-  return (
-    <div className="space-y-2" role="img" aria-label="Shareholding trend — stacked bar chart">
-      {/* Legend */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {data.map((series) => (
-          <div key={series.label} className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
-              style={{ backgroundColor: series.colour }}
-              aria-hidden="true"
-            />
-            <span className="text-xs text-text-secondary">{series.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Bars — one per quarter */}
-      <div className="space-y-2">
-        {quarters.map((q, qi) => {
-          // Build segments: [{label, colour, pct}]
-          const segments = data
-            .filter((s) => s.values[qi] !== undefined && s.values[qi] > 0)
-            .map((s) => ({ label: s.label, colour: s.colour, pct: s.values[qi] }));
-
-          return (
-            <div key={q} className="flex items-center gap-3">
-              <span className="text-xs text-text-muted w-20 shrink-0 text-right">{q}</span>
-              <div className="flex-1 flex h-6 rounded overflow-hidden">
-                {segments.map((seg) => (
-                  <div
-                    key={seg.label}
-                    className="h-full flex items-center justify-center overflow-hidden transition-all duration-300"
-                    style={{
-                      width: `${seg.pct}%`,
-                      backgroundColor: seg.colour,
-                      minWidth: seg.pct > 2 ? "1.5rem" : undefined,
-                    }}
-                    aria-label={`${seg.label}: ${seg.pct.toFixed(1)}%`}
-                    title={`${seg.label}: ${seg.pct.toFixed(1)}%`}
-                  >
-                    {seg.pct > 6 && (
-                      <span className="text-xxs font-mono text-white font-semibold truncate px-1">
-                        {seg.pct.toFixed(1)}%
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // ─── Financial summary cards ──────────────────────────────────────────────────
 
@@ -330,7 +267,7 @@ export function ShareholdingTab() {
   const displayData: ShareholdingResponse = data ?? DEMO_RESPONSE;
 
   // Build chart series from history (align on quarters from promoter_history)
-  const { quarters, chartSeries } = useMemo(() => {
+  const { quarters, chartSeries } = useMemo<{ quarters: string[]; chartSeries: FlintStackedBarSeries[] }>(() => {
     const shp = displayData.shareholding;
     const qs = shp.promoter_history.map((h) => h.quarter);
 
@@ -345,7 +282,7 @@ export function ShareholdingTab() {
         const history = (shp[histKey] ?? []) as { quarter: string; percentage: number }[];
         return {
           label: m.label,
-          colour: m.colour,
+          color: m.color,
           values: buildValues(history),
         };
       })
@@ -468,7 +405,11 @@ export function ShareholdingTab() {
               </p>
             </div>
             {quarters.length > 0 ? (
-              <StackedBarChart quarters={quarters} data={chartSeries} />
+              <FlintStackedBarChart
+                labels={quarters}
+                series={chartSeries}
+                ariaLabel="Shareholding trend — stacked bar chart"
+              />
             ) : (
               <p className="text-xs text-text-muted">No quarterly history available.</p>
             )}

@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { isDemoSessionActive } from "@/lib/demoSession";
 import { useAuthStore } from "@/stores/authStore";
 import { AuthStatusSchema } from "@/lib/schemas/ftApi";
 
@@ -17,6 +18,12 @@ export function useAuthGuard(): { isAuthenticated: boolean; isLoading: boolean }
 
   useEffect(() => {
     if (status === "unknown") {
+      if (isDemoSessionActive()) {
+        useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+        setIsLoading(false);
+        return;
+      }
+
       // Check backend for setup status
       fetch("/ft-api/v1/auth/status")
         .then((r) => {

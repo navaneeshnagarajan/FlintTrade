@@ -19,10 +19,15 @@
  */
 
 import { useEffect, useRef, useCallback } from "react";
-import { HistogramSeries } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
+import {
+  createFlintChartIndicatorPaneOptions,
+  createFlintChartOIOverlaySeriesOptions,
+  createFlintChartOIProfileBarData,
+  getFlintChartIndicatorPaneSpec,
+} from "@flinttrade/design-system";
+import { lightweightHistogramRuntime } from "@/lib/lightweightChartRuntime";
 import { getFtOIProfile } from "@/services/ftApi";
-import type { OIProfileData } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,36 +66,6 @@ function getNearestExpiry(): string {
   return lastThursday.toISOString().slice(0, 10);
 }
 
-/**
- * Converts an OI profile into a single histogram bar placed at `latestTime`.
- *
- * OI profile data is strike-based, not time-series, so we aggregate CE vs PE
- * total OI into a single bar on the chart's most recent candle timestamp.
- * Value is the absolute net imbalance normalised to [0, 100].
- * Colour convention: red = CE-heavy (bearish pressure), green = PE-heavy.
- */
-function buildOIBar(
-  profile: OIProfileData,
-  latestTime: Time,
-): { time: Time; value: number; color: string } | null {
-  const { total_ce_oi, total_pe_oi } = profile;
-  const absMax = Math.max(total_ce_oi, total_pe_oi);
-  if (absMax === 0) return null;
-
-  const net = total_ce_oi - total_pe_oi;
-  const normValue = Math.abs(net / absMax) * 100;
-  const color =
-    net >= 0
-      ? "rgba(239,68,68,0.55)"   // CE > PE — bearish
-      : "rgba(34,197,94,0.55)";  // PE > CE — bullish
-
-  return { time: latestTime, value: normValue, color };
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
 export function useOIOverlay({
   chartRef,
   symbol,
@@ -116,16 +91,14 @@ export function useOIOverlay({
     // Clean up previous series first
     removeOI();
 
-    const oiSeries = chart.addSeries(HistogramSeries, {
-      color: "rgba(99,102,241,0.5)",
-      priceFormat: { type: "volume" },
-      priceScaleId: "oi",
-    });
+    const oiSeries = lightweightHistogramRuntime.addHistogramSeries(chart, createFlintChartOIOverlaySeriesOptions());
 
-    chart.priceScale("oi").applyOptions({
-      scaleMargins: { top: 0.75, bottom: 0 },
-      borderVisible: false,
-    });
+    const paneSpec = getFlintChartIndicatorPaneSpec("oi");
+    chart.priceScale("oi").applyOptions(
+      paneSpec
+        ? createFlintChartIndicatorPaneOptions(paneSpec)
+        : { scaleMargins: { top: 0.75, bottom: 0 }, borderVisible: false },
+    );
 
     oiSeriesRef.current = oiSeries;
 
@@ -155,7 +128,11 @@ export function useOIOverlay({
       // Guard: series may have been removed while awaiting the fetch
       if (!oiSeriesRef.current) return;
 
-      const bar = buildOIBar(profile, latestTime);
+      const bar = createFlintChartOIProfileBarData<Time>({
+        latestTime,
+        totalCeOi: profile.total_ce_oi,
+        totalPeOi: profile.total_pe_oi,
+      });
       if (bar) {
         oiSeries.setData([bar]);
       }

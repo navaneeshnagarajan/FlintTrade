@@ -1,0 +1,209 @@
+/* ---------- Global resets ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default) transparent;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-default); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); }
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+/* ---------- Density modes ---------- */
+html, html.density-comfortable {
+  --table-cell-px: 12px;
+  --table-cell-py: 10px;
+  --card-padding: 16px;
+  --widget-padding: 16px;
+  --input-height: 36px;
+  --button-height: 36px;
+}
+
+html.density-compact {
+  --table-cell-px: 8px;
+  --table-cell-py: 6px;
+  --card-padding: 12px;
+  --widget-padding: 12px;
+  --input-height: 32px;
+  --button-height: 32px;
+}
+
+/* ---------- Slide-in animation (welcome card) ---------- */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@utility animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out both;
+}
+
+/* ---------- Global micro-animations ---------- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-scale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+@utility animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out both;
+}
+
+@utility animate-fade-in-scale {
+  animation: fade-in-scale 0.3s ease-out both;
+}
+
+/* ---------- Option chain cell flash animations ---------- */
+@keyframes cell-flash-up {
+  0% { background-color: rgba(34, 197, 94, 0.3); }
+  100% { background-color: transparent; }
+}
+@keyframes cell-flash-down {
+  0% { background-color: rgba(239, 68, 68, 0.3); }
+  100% { background-color: transparent; }
+}
+.cell-flash-up { animation: cell-flash-up 0.3s ease-out; }
+.cell-flash-down { animation: cell-flash-down 0.3s ease-out; }
+
+/* ---------- Dockview theme overrides — compact, content-first ---------- */
+.dockview-theme-dark,
+.dockview-theme-light {
+  /* Slim tab bar — less chrome, more content */
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tab-font-size: 11px;
+
+  /* Tab colors — subtle, not attention-grabbing */
+  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+
+  /* Clean separators */
+  --dv-separator-border: var(--color-border-subtle);
+  --dv-paneview-header-border-color: var(--color-border-subtle);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--color-border-strong);
+
+  /* Backgrounds */
+  --dv-background-color: var(--color-surface-base);
+  --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* Hide close buttons on tabs — less visual noise */
+.dockview-theme-dark .dv-default-tab-action,
+.dockview-theme-light .dv-default-tab-action {
+  display: none;
+}
+
+/* Show close button only on hover of active tab */
+.dockview-theme-dark .dv-tab.dv-active-tab:hover .dv-default-tab-action,
+.dockview-theme-light .dv-tab.dv-active-tab:hover .dv-default-tab-action {
+  display: flex;
+}
+
+/* ---------- Dockview light theme overrides ---------- */
+html.theme-light .dockview-theme-light,
+html.theme-light .dockview-theme-dark {
+  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  --dv-separator-border: var(--color-border-default);
+  --dv-paneview-header-border-color: var(--color-border-default);
+  --dv-background-color: var(--color-surface-base);
+  --dv-group-view-background-color: var(--color-surface-base);
+}
+
+/* ---------- react-resizable-panels separator (sash) styling ---------- */
+/* The Separator component renders a div with data-separator attribute.
+   These rules give visual feedback on hover/drag without relying on inline
+   Tailwind classes that might be purged in production builds. */
+[data-separator] {
+  background-color: var(--color-border-default);
+  transition: background-color 150ms ease;
+  position: relative;
+  z-index: 10;
+  /* Widen the interactive hit area beyond the visual 1px/4px rule */
+  flex-shrink: 0;
+}
+[data-separator]:hover,
+[data-separator]:focus-visible {
+  background-color: var(--color-primary);
+  opacity: 0.5;
+}
+[data-separator][data-resize-handle-state="drag"] {
+  background-color: var(--color-primary);
+  opacity: 0.8;
+}
+/* Reduce motion: skip transitions on the drag handle */
+@media (prefers-reduced-motion: reduce) {
+  [data-separator] {
+    transition: none;
+  }
+}
+
+/* ---------- Focus ring animation (WCAG 2.4.7) ---------- */
+@keyframes ring-scale-in {
+  from { outline-width: 0; outline-offset: 4px; }
+  to { outline-width: 3px; outline-offset: 2px; }
+}
+
+*:focus-visible {
+  animation: ring-scale-in 200ms ease-out forwards;
+  outline-color: var(--color-accent);
+  outline-style: solid;
+}
+
+/* ---------- Reduced motion respect (WCAG 2.3.3) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

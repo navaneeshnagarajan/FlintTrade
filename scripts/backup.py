@@ -4,6 +4,7 @@ Usage::
 
     python -m scripts.backup create --output ~/flint-backup.tar.gz
     python -m scripts.backup create --output ~/flint-backup.tar.gz --include-ticks
+    python -m scripts.backup create --output ~/flint-backup.tar.gz --include-credentials
     python -m scripts.backup restore --input ~/flint-backup.tar.gz
     python -m scripts.backup restore --input ~/flint-backup.tar.gz --target /tmp/restore --force
     python -m scripts.backup list --dir ~/flint-backups/
@@ -24,7 +25,11 @@ def _cmd_create(args: argparse.Namespace) -> None:
     bk = WorkspaceBackup()
     output = Path(args.output).expanduser()
     try:
-        created = bk.create_backup(output, include_ticks=args.include_ticks)
+        created = bk.create_backup(
+            output,
+            include_ticks=args.include_ticks,
+            include_credentials=args.include_credentials,
+        )
         size_mb = round(created.stat().st_size / (1024 * 1024), 3)
         print(f"Backup created: {created} ({size_mb} MB)")
     except BackupError as exc:
@@ -98,6 +103,15 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Include tick data directories (can be very large)",
+    )
+    create_p.add_argument(
+        "--include-credentials",
+        action="store_true",
+        default=False,
+        help=(
+            "Include credential database files. Plain-text secret seed files "
+            "are still excluded; store this archive only in an encrypted location."
+        ),
     )
 
     # restore

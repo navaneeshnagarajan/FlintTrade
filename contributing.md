@@ -1,6 +1,6 @@
 # Contributing to FlintTrade
 
-FlintTrade is an open-source Indian fintech project — a modular trading and investment platform for F&O, commodities, and crypto, built on top of the [OpenAlgo](https://github.com/marketcalls/openalgo) broker gateway and licensed under AGPL-3.0. We're building it in the open because Indian retail traders deserve serious, transparent tooling, and because every contributor makes the platform sharper.
+FlintTrade is an open-source Indian fintech project — a modular trading and investment platform for F&O, commodities, and crypto, with a native broker gateway contract plus optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations, licensed under AGPL-3.0. We're building it in the open because Indian retail traders deserve serious, transparent tooling, and because every contributor makes the platform sharper.
 
 Whether you're fixing a typo, shipping a new broker adapter, translating the UI into Hindi, or rewriting an entire widget — you're welcome here. This guide tells you everything you need to start.
 
@@ -29,17 +29,17 @@ One-line summary for the impatient:
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git && cd FlintTrade && cp .env.example .env && make setup
 ```
 
-You'll also need an OpenAlgo instance running locally — see [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) for the recommended way to clone a local-dev copy.
+OpenAlgo is optional for local development. See [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) for the helper that clones a local-dev OpenAlgo copy only when you want the OpenAlgo-compatible integration path.
 
 ## How to run tests
 
-FlintTrade has roughly 12,000 tests across Python and TypeScript. Run them with:
+FlintTrade has a large Python and TypeScript test suite. Run it with:
 
 ```bash
-make test                                        # all pytest tests (~9,089)
+make test                                        # all pytest tests
 make test-fast                                   # stop on first failure
 python -m pytest packages/core/core/tests/ -v         # single package
-cd packages/apps/terminal && npx vitest run           # all Vitest (~2,973)
+cd packages/apps/terminal && npx vitest run           # all Vitest tests
 ```
 
 To run a single file or a single test by name:

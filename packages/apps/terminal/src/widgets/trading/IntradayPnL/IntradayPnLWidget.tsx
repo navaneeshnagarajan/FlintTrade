@@ -8,7 +8,7 @@
  * Data source:
  *   - Polls getPositionbook() every 5 seconds during market hours (60s off-hours)
  *   - Tracks P&L snapshots for the equity curve using local state + setInterval
- *   - Lightweight Charts line series for the curve
+ *   - Shared Flint baseline sparkline for the compact curve
  *
  * Architecture:
  *   - Local state for the equity curve snapshot history (no global atom needed)
@@ -25,6 +25,7 @@ import {
   memo,
 } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { FlintBaselineSparkline } from "@flinttrade/design-system";
 import { getPositionbook } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
 import type { Position } from "@/types/api";
@@ -116,7 +117,7 @@ function buildStrategyPnL(positions: Position[]): StrategyPnL[] {
 }
 
 // ---------------------------------------------------------------------------
-// Mini equity curve (canvas-drawn SVG)
+// Mini equity curve
 // ---------------------------------------------------------------------------
 
 interface EquityCurveProps {
@@ -132,64 +133,17 @@ function EquityCurve({ snapshots }: EquityCurveProps) {
     );
   }
 
-  const W = 400;
-  const H = 80;
   const values = snapshots.map((s) => s.value);
-  const min  = Math.min(...values, 0);
-  const max  = Math.max(...values, 0);
-  const range = max - min || 1;
-
-  const pts = snapshots.map((snap, i) => {
-    const x = (i / (snapshots.length - 1)) * W;
-    const y = H - ((snap.value - min) / range) * H;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-
   const lastVal = values[values.length - 1] ?? 0;
-  const lineColor = lastVal >= 0 ? "#22c55e" : "#ef4444";
-
-  // Zero line
-  const zeroY = H - ((0 - min) / range) * H;
 
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="w-full flex-1"
-      role="img"
-      aria-label="Intraday P&L equity curve"
-    >
-      {/* Zero baseline */}
-      <line
-        x1="0"
-        y1={zeroY.toFixed(1)}
-        x2={W}
-        y2={zeroY.toFixed(1)}
-        stroke="currentColor"
-        strokeWidth="0.5"
-        strokeDasharray="4 4"
-        className="text-border-default"
-      />
-      {/* Area fill */}
-      <polyline
-        points={[
-          `0,${H}`,
-          ...pts,
-          `${W},${H}`,
-        ].join(" ")}
-        fill={lastVal >= 0 ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)"}
-        stroke="none"
-      />
-      {/* Line */}
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke={lineColor}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <FlintBaselineSparkline
+      points={values}
+      baseline={0}
+      positive={lastVal >= 0}
+      ariaLabel="Intraday P&L equity curve"
+      className="h-full flex-1"
+    />
   );
 }
 

@@ -1,9 +1,68 @@
-import { useState, useEffect, useRef, useCallback, memo } from "react";
-import { z } from "zod";
+import { useState, useEffect, useRef, useCallback, memo, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  FLINT_CHART_VIEW_STATE_STORAGE_KEY,
+  FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY,
+  FLINT_CHART_INDICATOR_SETTINGS_STORAGE_KEY,
+  FLINT_CHART_TWO_CLICK_TOOLS,
+  FLINT_CHART_THREE_CLICK_TOOLS,
+  FlintChartDrawStatus,
+  FlintChartDrawingInspector,
+  FlintChartDrawingList,
+  FlintChartDrawingToolbar,
+  FlintChartIntervalPills,
+  FlintChartLegend,
+  advanceFlintChartDrawingDraft,
+  applyFlintCandlestickTheme,
+  createFlintChartDisplaySettingsOptions,
+  createFlintChartDrawingsStorageKey,
+  encodeFlintChartDisplaySettings,
+  encodeFlintChartDrawings,
+  encodeFlintChartIndicatorSettings,
+  encodeFlintChartViewState,
+  getFlintChartActiveIndicatorCount,
+  createFlintChartIndicatorPaneControls,
+  getFlintChartDrawingStyle,
+  getFlintChartKeyboardAction,
+  getFlintChartSelectedDrawing,
+  getFlintChartWorkspaceLayout,
+  moveFlintChartDrawingByDelta,
+  moveFlintChartDrawingHandleByDelta,
+  parseFlintChartDisplaySettings,
+  parseFlintChartDrawings,
+  parseFlintChartIndicatorSettings,
+  parseFlintChartViewState,
+  removeFlintChartDrawingById,
+  removeFlintChartUnlockedDrawings,
+  resizeFlintChartIndicatorPaneStretchFactors,
+  updateFlintChartDrawingStateById,
+  updateFlintChartDrawingStyle,
+  updateFlintChartDrawingsHidden,
+  updateFlintChartDrawingsLocked,
+} from "@flinttrade/design-system";
+import type {
+  FlintChartDrawingHandleId,
+  FlintChartDrawingMoveDelta,
+  FlintChartDrawingStyleInput,
+  FlintChartIndicatorColor,
+  FlintChartIndicatorKey,
+  FlintChartIndicatorLineStyle,
+  FlintChartIndicatorPaneSize,
+  FlintChartIndicatorPaneStretchFactors,
+  FlintChartIndicatorPaneControl,
+  FlintChartLegendState as LegendState,
+  FlintChartOhlcvBar as OhlcvBar,
+  FlintChartVisibleLogicalRange,
+} from "@flinttrade/design-system";
+import {
+  FLINT_CHART_INDICATOR_PANE_SIZE_LABELS,
+  FLINT_CHART_INDICATOR_PANE_SIZE_OPTIONS,
+  FLINT_CHART_INDICATOR_PANE_SIZE_SHORT_LABELS,
+  FLINT_CHART_INDICATOR_PANE_STRETCH_FACTORS,
+} from "@flinttrade/design-system";
 import { safeParse, ohlcvCacheSchema } from "@/lib/safeParse";
 import { isMarketHours } from "@/lib/market";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import type { Time } from "lightweight-charts";
+import type { LogicalRange, Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import {
   Search,
@@ -14,6 +73,7 @@ import {
   Trash2,
   History,
   Settings2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,16 +89,12 @@ import { searchSymbol, getHistory, getQuotes, getIntervals } from "@/services/ap
 
 // Local modules
 import { IndicatorSettingsModal } from "./IndicatorSettingsModal";
-import { DrawingToolbar } from "./DrawingToolbar";
-import { ChartLegend } from "./ChartLegend";
-import type { LegendState } from "./ChartLegend";
 import { useChartInit } from "./useChartInit";
 import { useDrawingTools } from "./useDrawingTools";
 import { useIndicators } from "./useIndicators";
 import { useChartReplay } from "./useChartReplay";
 import { useOIOverlay } from "./useOIOverlay";
 import { ReplayBar } from "./ReplayBar";
-import type { OhlcvBar } from "./indicators";
 import type {
   SymbolSearchResult,
   IntervalOption,
@@ -57,16 +113,6 @@ import type {
 const DEFAULT_SYMBOL = "NIFTY";
 const DEFAULT_EXCHANGE = "NSE_INDEX";
 
-// Minimal schema — validates that each drawing has required identity fields.
-// Full shape validation would couple this tightly to every Drawing variant;
-// the goal here is catching corrupt blobs (missing kind/id) not strict shape checking.
-// The double cast through unknown is intentional: the schema validates the structural
-// minimum required at runtime; the Drawing discriminated union is enforced at write time.
-const _drawingArraySchemaRaw = z.array(
-  z.object({ kind: z.string(), id: z.string() }).passthrough(),
-);
-const drawingArraySchema = _drawingArraySchemaRaw as unknown as z.ZodType<Drawing[]>;
-
 const STATIC_INTERVALS: IntervalOption[] = [
   { label: "1m",  value: "1m"  },
   { label: "3m",  value: "3m"  },
@@ -84,22 +130,17 @@ const LOOKBACK_DAYS: Record<string, number> = {
   "1h": 60, "4h": 120, "1D": 365, "1W": 730,
 };
 
-const DEFAULT_INDICATORS: IndicatorState = {
-  showEMA20: false, showEMA50: false, showSMA: false, showWMA: false,
-  showBB: false, showSupertrend: false, showVWAP: false, showIchimoku: false,
-  showPivot: false, showVolume: true,
-  showRSI: false, showMACD: false, showStoch: false, showATR: false, showADX: false,
-  showWilliamsR: false, showCCI: false, showDEMA: false, showHullMA: false,
-  showParabolicSAR: false, showOBV: false, showKeltner: false, showVWMA: false,
-  showOI: false,
-};
+function loadSavedChartView() {
+  return parseFlintChartViewState(localStorage.getItem(FLINT_CHART_VIEW_STATE_STORAGE_KEY));
+}
 
-const DEFAULT_PERIODS: IndicatorPeriods = {
-  ema1: 20, ema2: 50, sma: 20, wma: 20,
-  bbPeriod: 20, bbMult: 2, stPeriod: 10, stFactor: 3,
-  rsi: 14, cci: 20, dema: 20, hull: 20, wr: 14,
-  keltner: 20, keltnerMult: 2.0, vwma: 20, atr: 14, adx: 14,
-};
+function loadSavedIndicatorSettings() {
+  return parseFlintChartIndicatorSettings(localStorage.getItem(FLINT_CHART_INDICATOR_SETTINGS_STORAGE_KEY));
+}
+
+function loadSavedDisplaySettings() {
+  return parseFlintChartDisplaySettings(localStorage.getItem(FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -187,7 +228,7 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
 
   return (
     <div className="relative flex items-center">
-      <div className="flex items-center gap-1 h-8 bg-surface-card border border-border-default rounded-md px-2 py-1 w-52 focus-within:border-accent transition-colors">
+      <div className="flex items-center gap-1 h-8 bg-surface-card border border-border-default rounded-md px-2 py-1 w-40 focus-within:border-accent transition-colors">
         <Search size={12} className="text-text-muted shrink-0" />
         <Input
           ref={inputRef}
@@ -231,25 +272,6 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
   );
 }
 
-interface IntervalPillsProps { intervals: IntervalOption[]; active: string; onSelect: (value: string) => void }
-
-function IntervalPills({ intervals, active, onSelect }: IntervalPillsProps) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {intervals.map((iv) => (
-        <Button
-          key={iv.value}
-          variant="ghost"
-          onClick={() => onSelect(iv.value)}
-          className={`px-2 py-1 h-auto text-xs font-mono rounded transition-colors ${active === iv.value ? "bg-accent/15 text-accent border border-accent/40" : "text-text-muted hover:text-text-primary hover:bg-surface-hover"}`}
-        >
-          {iv.label}
-        </Button>
-      ))}
-    </div>
-  );
-}
-
 interface TextInputOverlayProps { onConfirm: (text: string) => void; onCancel: () => void }
 
 function TextInputOverlay({ onConfirm, onCancel }: TextInputOverlayProps) {
@@ -287,6 +309,63 @@ function PeriodInput({ value, onChange }: { value: number; onChange: (v: number)
   );
 }
 
+interface IndicatorPaneResizeOverlayProps {
+  panes: readonly FlintChartIndicatorPaneControl[];
+  onResizeStart: (scaleId: string, event: ReactPointerEvent<HTMLDivElement>) => void;
+  onResizeNudge: (scaleId: string, deltaPixels: number) => void;
+}
+
+function IndicatorPaneResizeOverlay({
+  panes,
+  onResizeStart,
+  onResizeNudge,
+}: IndicatorPaneResizeOverlayProps) {
+  if (panes.length === 0) return null;
+
+  const totalStretchFactor = 4 + panes.reduce((sum, pane) => sum + pane.stretchFactor, 0);
+  let accumulatedStretchFactor = 4;
+  const handles = panes.map((pane) => {
+    const topPercent = (accumulatedStretchFactor / totalStretchFactor) * 100;
+    accumulatedStretchFactor += pane.stretchFactor;
+    return { pane, topPercent };
+  });
+
+  return (
+    <div
+      aria-label="Indicator pane resize controls"
+      className="pointer-events-none absolute inset-0 z-20"
+    >
+      {handles.map(({ pane, topPercent }) => (
+        <div
+          key={pane.scaleId}
+          role="separator"
+          aria-label={`Resize ${pane.label} pane`}
+          aria-orientation="horizontal"
+          aria-valuemin={0.5}
+          aria-valuemax={2.5}
+          aria-valuenow={pane.stretchFactor}
+          tabIndex={0}
+          title={`Drag to resize ${pane.label} pane`}
+          className="group pointer-events-auto absolute left-2 right-2 h-5 -translate-y-1/2 cursor-row-resize outline-none"
+          style={{ top: `${topPercent}%` }}
+          onPointerDown={(event) => onResizeStart(pane.scaleId, event)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+            event.preventDefault();
+            const step = event.shiftKey ? 40 : 20;
+            onResizeNudge(pane.scaleId, event.key === "ArrowUp" ? -step : step);
+          }}
+        >
+          <span className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 rounded bg-accent/30 opacity-30 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-accent/30 bg-surface-card/95 px-1.5 py-0.5 text-[10px] font-mono leading-none text-accent opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+            {pane.label} {pane.stretchFactor.toFixed(2)}x
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -294,11 +373,17 @@ function PeriodInput({ value, onChange }: { value: number; onChange: (v: number)
 function ChartWidget() {
   const track = useTrackBehavior();
   useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
 
-  const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
-  const [exchange, setExchange] = useState(DEFAULT_EXCHANGE);
-  const [interval, setInterval] = useState("5m");
+  const [initialChartView] = useState(() => loadSavedChartView());
+  const [symbol, setSymbol] = useState(() => initialChartView?.symbol ?? DEFAULT_SYMBOL);
+  const [exchange, setExchange] = useState(() => initialChartView?.exchange ?? DEFAULT_EXCHANGE);
+  const [interval, setInterval] = useState(() => initialChartView?.interval ?? "5m");
   const [intervals, setIntervals] = useState<IntervalOption[]>(STATIC_INTERVALS);
+  const [visibleLogicalRange, setVisibleLogicalRange] = useState<FlintChartVisibleLogicalRange | null>(
+    () => initialChartView?.visibleLogicalRange ?? null,
+  );
 
   const [ltp, setLtp] = useState<number | null>(null);
   const [change, setChange] = useState<number | null>(null);
@@ -307,31 +392,133 @@ function ChartWidget() {
 
   const [drawMode, setDrawMode] = useState<DrawToolType | null>(null);
 
-  // Task B: Drawing persistence — load from localStorage keyed by symbol+exchange
-  const drawingsStorageKey = `flinttrade:drawings:${symbol}:${exchange}`;
+  // Drawing persistence is keyed by symbol+exchange and versioned by the core
+  // chart storage contract. The parser still accepts the old raw-array format.
+  const drawingsStorageKey = createFlintChartDrawingsStorageKey({ symbol, exchange });
   const [drawings, setDrawings] = useState<Drawing[]>(() => {
-    const saved = localStorage.getItem(`flinttrade:drawings:${DEFAULT_SYMBOL}:${DEFAULT_EXCHANGE}`);
-    return safeParse(saved, drawingArraySchema) ?? [];
+    const initialSymbol = initialChartView?.symbol ?? DEFAULT_SYMBOL;
+    const initialExchange = initialChartView?.exchange ?? DEFAULT_EXCHANGE;
+    const initialKey = createFlintChartDrawingsStorageKey({
+      symbol: initialSymbol,
+      exchange: initialExchange,
+    });
+    return parseFlintChartDrawings<Time>(localStorage.getItem(initialKey));
   });
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [pendingPoint, setPendingPoint] = useState<DrawingPoint | null>(null);
+  const [pendingPoints, setPendingPoints] = useState<DrawingPoint[]>([]);
   const [awaitingText, setAwaitingText] = useState<DrawingPoint | null>(null);
+  const visibleLogicalRangeRef = useRef<FlintChartVisibleLogicalRange | null>(
+    initialChartView?.visibleLogicalRange ?? null,
+  );
 
-  const [indicators, setIndicators] = useState<IndicatorState>(DEFAULT_INDICATORS);
-  const [periods, setPeriods] = useState<IndicatorPeriods>(DEFAULT_PERIODS);
+  useEffect(() => {
+    const node = workspaceRef.current;
+    if (!node) return;
 
-  // Task B: Persist drawings to localStorage whenever they change
+    const updateWidth = (width?: number) => {
+      const nextWidth = width ?? node.getBoundingClientRect().width;
+      if (Number.isFinite(nextWidth)) {
+        setWorkspaceWidth((current) =>
+          Math.abs(current - nextWidth) < 1 ? current : nextWidth,
+        );
+      }
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => updateWidth();
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      updateWidth(entry?.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const [initialIndicatorSettings] = useState(() => loadSavedIndicatorSettings());
+  const [chartDisplaySettings, setChartDisplaySettings] = useState(() => loadSavedDisplaySettings());
+  const [indicators, setIndicators] = useState<IndicatorState>(() => ({ ...initialIndicatorSettings.indicators }));
+  const [periods, setPeriods] = useState<IndicatorPeriods>(() => ({ ...initialIndicatorSettings.periods }));
+  const [indicatorColors, setIndicatorColors] = useState<Record<FlintChartIndicatorKey, FlintChartIndicatorColor>>(
+    () => ({ ...initialIndicatorSettings.colors }),
+  );
+  const [indicatorLineStyles, setIndicatorLineStyles] = useState<Record<FlintChartIndicatorKey, FlintChartIndicatorLineStyle>>(
+    () => ({ ...initialIndicatorSettings.lineStyles }),
+  );
+  const [indicatorPaneSizes, setIndicatorPaneSizes] = useState<Record<string, FlintChartIndicatorPaneSize>>(
+    () => ({ ...initialIndicatorSettings.paneSizes }),
+  );
+  const [indicatorPaneStretchFactors, setIndicatorPaneStretchFactors] = useState<FlintChartIndicatorPaneStretchFactors>(
+    () => ({ ...initialIndicatorSettings.paneStretchFactors }),
+  );
+
+  // Persist drawings to localStorage whenever they change.
   useEffect(() => {
     try {
-      localStorage.setItem(drawingsStorageKey, JSON.stringify(drawings));
+      localStorage.setItem(drawingsStorageKey, encodeFlintChartDrawings(drawings));
     } catch { /* localStorage quota exceeded — ignore */ }
   }, [drawings, drawingsStorageKey]);
 
-  // Task B: Reload drawings from localStorage when symbol/exchange changes
+  // Reload drawings from localStorage when symbol/exchange changes.
   useEffect(() => {
-    setDrawings(safeParse(localStorage.getItem(drawingsStorageKey), drawingArraySchema) ?? []);
+    setDrawings(parseFlintChartDrawings<Time>(localStorage.getItem(drawingsStorageKey)));
+    setSelectedDrawingId(null);
+    setPendingPoint(null);
+    setPendingPoints([]);
+    setAwaitingText(null);
   // drawingsStorageKey encodes symbol+exchange — run only when the key changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawingsStorageKey]);
+
+  useEffect(() => {
+    setSelectedDrawingId((current) =>
+      getFlintChartSelectedDrawing(drawings, current) ? current : null,
+    );
+  }, [drawings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        FLINT_CHART_VIEW_STATE_STORAGE_KEY,
+        encodeFlintChartViewState({
+          symbol,
+          exchange,
+          interval,
+          ...(visibleLogicalRange ? { visibleLogicalRange } : {}),
+        }),
+      );
+    } catch { /* localStorage quota exceeded — ignore */ }
+  }, [symbol, exchange, interval, visibleLogicalRange]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        FLINT_CHART_INDICATOR_SETTINGS_STORAGE_KEY,
+        encodeFlintChartIndicatorSettings({
+          indicators,
+          periods,
+          colors: indicatorColors,
+          lineStyles: indicatorLineStyles,
+          paneSizes: indicatorPaneSizes,
+          paneStretchFactors: indicatorPaneStretchFactors,
+        }),
+      );
+    } catch { /* localStorage quota exceeded — ignore */ }
+  }, [indicatorColors, indicatorLineStyles, indicatorPaneSizes, indicatorPaneStretchFactors, indicators, periods]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY,
+        encodeFlintChartDisplaySettings(chartDisplaySettings),
+      );
+    } catch { /* localStorage quota exceeded — ignore */ }
+  }, [chartDisplaySettings]);
 
   const barsRef = useRef<OhlcvBar[]>([]);
   const timesRef = useRef<Time[]>([]);
@@ -343,33 +530,228 @@ function ChartWidget() {
   const { containerRef, chartRef, candleRef, volumeRef, markersPluginRef, indRef } =
     useChartInit(setLegend);
 
+  useEffect(() => {
+    visibleLogicalRangeRef.current = visibleLogicalRange;
+  }, [visibleLogicalRange]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const timeScale = chart.timeScale();
+    const handleVisibleLogicalRangeChange = (range: LogicalRange | null) => {
+      if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to) || range.to <= range.from) {
+        return;
+      }
+      setVisibleLogicalRange((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.from - range.from) < 0.001 &&
+          Math.abs(prev.to - range.to) < 0.001
+        ) {
+          return prev;
+        }
+        return { from: range.from, to: range.to };
+      });
+    };
+    timeScale.subscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
+    return () => timeScale.unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
+  }, [chartRef]);
+
   // Apply theme from CSS vars whenever the active theme changes
   const chartTheme = useLightweightChartTheme();
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
-    const { candle: _candle, ...chartOptions } = chartTheme;
-    chart.applyOptions(chartOptions);
-    if (candleRef.current) {
-      candleRef.current.applyOptions(chartTheme.candle);
-    }
-  }, [chartTheme, chartRef, candleRef]);
+    const candle = candleRef.current;
+    if (!chart || !candle) return;
+    applyFlintCandlestickTheme(
+      chart,
+      candle,
+      chartTheme,
+      createFlintChartDisplaySettingsOptions(chartDisplaySettings),
+    );
+  }, [chartDisplaySettings, chartTheme, chartRef, candleRef]);
+
+  const handleDrawingCreated = useCallback((drawingId: string) => {
+    setSelectedDrawingId(drawingId);
+    setDrawMode(null);
+    setPendingPoint(null);
+    setPendingPoints([]);
+    setAwaitingText(null);
+  }, []);
+
+  const handleCanvasDrawingHit = useCallback((drawingId: string | null) => {
+    setSelectedDrawingId(drawingId);
+    setDrawMode(null);
+    setPendingPoint(null);
+    setPendingPoints([]);
+    setAwaitingText(null);
+  }, []);
+
+  const handleCanvasDrawingMove = useCallback((drawingId: string, delta: FlintChartDrawingMoveDelta) => {
+    setSelectedDrawingId(drawingId);
+    setDrawings((prev) => moveFlintChartDrawingByDelta(prev, drawingId, delta));
+  }, []);
+
+  const handleCanvasDrawingHandleMove = useCallback((
+    drawingId: string,
+    handle: FlintChartDrawingHandleId,
+    delta: FlintChartDrawingMoveDelta,
+  ) => {
+    setSelectedDrawingId(drawingId);
+    setDrawings((prev) => moveFlintChartDrawingHandleByDelta(prev, drawingId, handle, delta));
+  }, []);
 
   // Drawing tools
-  const { toggleDrawMode, clearAllDrawings, undoLastDrawing } = useDrawingTools({
-    chartRef, candleRef, markersPluginRef,
+  const { toggleDrawMode, undoLastDrawing } = useDrawingTools({
+    containerRef, chartRef, candleRef, markersPluginRef,
     drawMode, setDrawMode,
     drawings, setDrawings,
+    selectedDrawingId,
+    onDrawingCreated: handleDrawingCreated,
+    onDrawingHit: handleCanvasDrawingHit,
+    onDrawingMove: handleCanvasDrawingMove,
+    onDrawingHandleMove: handleCanvasDrawingHandleMove,
     pendingPoint, setPendingPoint,
+    pendingPoints, setPendingPoints,
     setAwaitingText,
   });
 
+  const cancelDrawingInteraction = useCallback(() => {
+    setDrawMode(null);
+    setPendingPoint(null);
+    setPendingPoints([]);
+    setAwaitingText(null);
+  }, []);
+
+  const handleSelectDrawing = useCallback((drawingId: string) => {
+    setSelectedDrawingId(drawingId);
+    setDrawMode(null);
+    setPendingPoint(null);
+    setPendingPoints([]);
+    setAwaitingText(null);
+  }, []);
+
+  const deleteDrawingById = useCallback((drawingId: string) => {
+    setDrawings((prev) => {
+      const next = removeFlintChartDrawingById(prev, drawingId);
+      if (next !== prev) {
+        setSelectedDrawingId((current) => current === drawingId ? null : current);
+      }
+      return next;
+    });
+    setPendingPoint(null);
+    setPendingPoints([]);
+    setAwaitingText(null);
+  }, []);
+
+  const handleDrawingStyleChange = useCallback((style: FlintChartDrawingStyleInput) => {
+    if (!selectedDrawingId) return;
+    setDrawings((prev) => updateFlintChartDrawingStyle(prev, selectedDrawingId, style));
+  }, [selectedDrawingId]);
+
+  const handleSelectedDrawingHiddenChange = useCallback((drawingId: string, hidden: boolean) => {
+    setSelectedDrawingId(drawingId);
+    setDrawings((prev) => updateFlintChartDrawingStateById(prev, drawingId, { hidden }));
+  }, []);
+
+  const handleSelectedDrawingLockedChange = useCallback((drawingId: string, locked: boolean) => {
+    setSelectedDrawingId(drawingId);
+    setDrawings((prev) => updateFlintChartDrawingStateById(prev, drawingId, { locked }));
+  }, []);
+
+  const deleteSelectedDrawing = useCallback(() => {
+    if (!getFlintChartSelectedDrawing(drawings, selectedDrawingId)) return false;
+    deleteDrawingById(selectedDrawingId as string);
+    return true;
+  }, [deleteDrawingById, drawings, selectedDrawingId]);
+
+  const handleUndoLastDrawing = useCallback(() => {
+    undoLastDrawing();
+    setSelectedDrawingId(null);
+    setPendingPoint(null);
+    setPendingPoints([]);
+  }, [undoLastDrawing]);
+
+  const handleClearAllDrawings = useCallback(() => {
+    setDrawings((prev) => removeFlintChartUnlockedDrawings(prev));
+    setSelectedDrawingId(null);
+    setPendingPoint(null);
+    setPendingPoints([]);
+  }, []);
+
+  const drawingsHidden = drawings.length > 0 && drawings.every((drawing) => drawing.hidden === true);
+  const drawingsLocked = drawings.length > 0 && drawings.every((drawing) => drawing.locked === true);
+
+  const handleToggleAllDrawingsHidden = useCallback(() => {
+    setDrawings((prev) => {
+      if (prev.length === 0) return prev;
+      const nextHidden = !prev.every((drawing) => drawing.hidden === true);
+      return updateFlintChartDrawingsHidden(prev, nextHidden);
+    });
+  }, []);
+
+  const handleToggleAllDrawingsLocked = useCallback(() => {
+    setDrawings((prev) => {
+      if (prev.length === 0) return prev;
+      const nextLocked = !prev.every((drawing) => drawing.locked === true);
+      return updateFlintChartDrawingsLocked(prev, nextLocked);
+    });
+  }, []);
+
+  const handleChartKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const action = getFlintChartKeyboardAction(event.nativeEvent);
+    if (!action) return;
+    event.preventDefault();
+
+    if (action.kind === "set-tool") {
+      if (action.tool === "cursor") {
+        cancelDrawingInteraction();
+        return;
+      }
+      toggleDrawMode(action.tool as DrawToolType);
+      return;
+    }
+
+    if (action.kind === "cancel-drawing") {
+      cancelDrawingInteraction();
+      return;
+    }
+
+    if (action.kind === "undo-drawing") {
+      handleUndoLastDrawing();
+      return;
+    }
+
+    if (action.kind === "delete-last-drawing") {
+      if (!deleteSelectedDrawing()) {
+        handleUndoLastDrawing();
+      }
+      setPendingPoint(null);
+      setPendingPoints([]);
+      return;
+    }
+
+    if (action.kind === "clear-all-drawings") {
+      handleClearAllDrawings();
+    }
+  }, [cancelDrawingInteraction, deleteSelectedDrawing, handleClearAllDrawings, handleUndoLastDrawing, toggleDrawMode]);
+
+  const refreshIndicatorsRef = useRef<(() => void) | null>(null);
+
   // Indicator series lifecycle
-  useIndicators({
+  const { refresh: refreshIndicators } = useIndicators({
     chartRef, candleRef, volumeRef, indRef,
     barsRef, timesRef,
     indicators, periods,
+    indicatorColors,
+    indicatorLineStyles,
+    indicatorPaneSizes,
+    indicatorPaneStretchFactors,
   });
+
+  useEffect(() => {
+    refreshIndicatorsRef.current = refreshIndicators;
+  }, [refreshIndicators]);
 
   // OI overlay — histogram on separate "oi" price scale, driven by indicators.showOI
   useOIOverlay({ chartRef, symbol, exchange, isVisible: indicators.showOI });
@@ -408,6 +790,7 @@ function ChartWidget() {
       try {
         candleRef.current.setData(candles);
         volumeRef.current.setData(volumes);
+        refreshIndicatorsRef.current?.();
         chartRef.current?.timeScale().fitContent();
       } catch { /* ignore */ }
     }
@@ -465,7 +848,14 @@ function ChartWidget() {
       }));
       candleSeries.setData(candles);
       volumeSeries.setData(volumes);
-      chartRef.current?.timeScale().fitContent();
+      const timeScale = chartRef.current?.timeScale();
+      const savedRange = visibleLogicalRangeRef.current;
+      if (savedRange) {
+        timeScale?.setVisibleLogicalRange(savedRange);
+      } else {
+        timeScale?.fitContent();
+      }
+      refreshIndicatorsRef.current?.();
     }
 
     (async () => {
@@ -520,8 +910,10 @@ function ChartWidget() {
   const handleSymbolSelect = useCallback((item: SymbolSearchResult) => {
     setSymbol(item.symbol);
     setExchange(item.exchange);
+    visibleLogicalRangeRef.current = null;
+    setVisibleLogicalRange(null);
     setLtp(null); setChange(null); setChangePct(null); setLegend(null);
-    setDrawings([]); setPendingPoint(null);
+    setDrawings([]); setSelectedDrawingId(null); setPendingPoint(null);
     const chart = chartRef.current;
     if (chart) {
       const ind = indRef.current;
@@ -531,13 +923,25 @@ function ChartWidget() {
     }
   }, [chartRef, indRef]);
 
-  const handleIntervalChange = useCallback((v: string) => { setInterval(v); }, []);
+  const handleIntervalChange = useCallback((v: string) => {
+    visibleLogicalRangeRef.current = null;
+    setVisibleLogicalRange(null);
+    setInterval(v);
+  }, []);
 
   const handleTextConfirm = useCallback((text: string) => {
     if (!awaitingText) return;
-    setDrawings((prev) => [...prev, { kind: "text", id: Math.random().toString(36).slice(2, 10), point: awaitingText, label: text }]);
+    const creation = advanceFlintChartDrawingDraft<Time>({
+      tool: drawMode === "callout" ? "callout" : "text",
+      point: awaitingText,
+      label: text,
+    });
+    if (!creation.drawing) return;
+    setDrawings((prev) => [...prev, creation.drawing as Drawing]);
+    setSelectedDrawingId(creation.drawing.id);
+    setDrawMode(null);
     setAwaitingText(null);
-  }, [awaitingText]);
+  }, [awaitingText, drawMode]);
 
   const handleTextCancel = useCallback(() => { setAwaitingText(null); }, []);
 
@@ -545,13 +949,28 @@ function ChartWidget() {
     setIndicators((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  const setIndicatorPaneSize = useCallback((scaleId: string, size: FlintChartIndicatorPaneSize) => {
+    setIndicatorPaneSizes((prev) => ({ ...prev, [scaleId]: size }));
+    setIndicatorPaneStretchFactors((prev) => ({
+      ...prev,
+      [scaleId]: FLINT_CHART_INDICATOR_PANE_STRETCH_FACTORS[size],
+    }));
+  }, []);
+
   // Indicator settings modal
   const [indicatorModalOpen, setIndicatorModalOpen] = useState(false);
 
   const handleIndicatorApply = useCallback(
-    (newIndicators: IndicatorState, newPeriods: IndicatorPeriods) => {
+    (
+      newIndicators: IndicatorState,
+      newPeriods: IndicatorPeriods,
+      newColors: Record<FlintChartIndicatorKey, FlintChartIndicatorColor>,
+      newLineStyles: Record<FlintChartIndicatorKey, FlintChartIndicatorLineStyle>,
+    ) => {
       setIndicators(newIndicators);
       setPeriods(newPeriods);
+      setIndicatorColors(newColors);
+      setIndicatorLineStyles(newLineStyles);
     },
     [],
   );
@@ -559,24 +978,85 @@ function ChartWidget() {
   // Derived display values
   const isPositive = change == null ? null : change >= 0;
   const changeColor = change == null ? "text-text-secondary" : isPositive ? "text-profit" : "text-loss";
-  const activeIndicatorCount = (Object.keys(indicators) as (keyof IndicatorState)[])
-    .filter((k) => k !== "showVolume" && indicators[k]).length;
+  const activeIndicatorCount = getFlintChartActiveIndicatorCount(indicators);
+  const activePaneControls = createFlintChartIndicatorPaneControls(
+    indicators,
+    indicatorPaneSizes,
+    indicatorPaneStretchFactors,
+  );
   const drawingCount = drawings.length;
-  const twoClickTools: DrawToolType[] = ["trendline", "ray", "fib", "rect"];
-  const isTwoClickMode = drawMode !== null && twoClickTools.includes(drawMode);
+  const selectedDrawing = getFlintChartSelectedDrawing(drawings, selectedDrawingId);
+  const selectedDrawingStyle = selectedDrawing ? getFlintChartDrawingStyle(selectedDrawing) : null;
+  const workspaceLayout = getFlintChartWorkspaceLayout(workspaceWidth);
+
+  const updateIndicatorPaneStretchFactor = useCallback((
+    scaleId: string,
+    startStretchFactor: number,
+    deltaPixels: number,
+  ) => {
+    setIndicatorPaneStretchFactors((prev) =>
+      resizeFlintChartIndicatorPaneStretchFactors({
+        paneStretchFactors: prev,
+        scaleId,
+        startStretchFactor,
+        deltaPixels,
+      }),
+    );
+  }, []);
+
+  const handleIndicatorPaneResizeStart = useCallback((
+    scaleId: string,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const pane = activePaneControls.find((candidate) => candidate.scaleId === scaleId);
+    if (!pane) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startY = event.clientY;
+    const startStretchFactor = pane.stretchFactor;
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      updateIndicatorPaneStretchFactor(
+        scaleId,
+        startStretchFactor,
+        moveEvent.clientY - startY,
+      );
+    };
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }, [activePaneControls, updateIndicatorPaneStretchFactor]);
+
+  const handleIndicatorPaneResizeNudge = useCallback((scaleId: string, deltaPixels: number) => {
+    const pane = activePaneControls.find((candidate) => candidate.scaleId === scaleId);
+    if (!pane) return;
+    updateIndicatorPaneStretchFactor(scaleId, pane.stretchFactor, deltaPixels);
+  }, [activePaneControls, updateIndicatorPaneStretchFactor]);
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex flex-col h-full w-full bg-surface-base overflow-hidden" data-tour-target="chart">
+    <div
+      ref={workspaceRef}
+      className="flex flex-col h-full w-full bg-surface-base overflow-hidden focus:outline-none focus:ring-1 focus:ring-accent/30"
+      data-tour-target="chart"
+      data-chart-layout={workspaceLayout.compact ? "compact" : "standard"}
+      tabIndex={0}
+      onKeyDown={handleChartKeyDown}
+      aria-label="Interactive chart workspace"
+    >
 
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 bg-surface-base border-b border-border-default shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex flex-col gap-1 px-2 py-1 bg-surface-base border-b border-border-default shrink-0">
+        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
           <SymbolSearch onSelect={handleSymbolSelect} />
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">{symbol}</span>
             <span className="text-xs text-text-muted whitespace-nowrap">{exchange}</span>
             {ltp != null && <span className="text-lg font-mono font-bold text-text-primary leading-none whitespace-nowrap">{formatPrice(ltp)}</span>}
@@ -588,9 +1068,14 @@ function ChartWidget() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
-          {legend && <ChartLegend legend={legend} />}
-          <IntervalPills intervals={intervals} active={interval} onSelect={handleIntervalChange} />
+        <div className="flex min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden pb-0.5">
+          {legend && <FlintChartLegend legend={legend} />}
+          <FlintChartIntervalPills
+            intervals={intervals}
+            active={interval}
+            onSelect={handleIntervalChange}
+            className="shrink-0"
+          />
         </div>
       </div>
 
@@ -606,7 +1091,7 @@ function ChartWidget() {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56 bg-surface-card border-border-default text-text-primary">
+          <DropdownMenuContent align="start" className="max-h-[var(--radix-dropdown-menu-content-available-height)] w-56 overflow-y-auto overscroll-contain bg-surface-card border-border-default text-text-primary">
             <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">Overlays</DropdownMenuLabel>
             <DropdownMenuCheckboxItem checked={indicators.showEMA20} onCheckedChange={(v) => toggleIndicator("showEMA20", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />EMA
@@ -702,6 +1187,94 @@ function ChartWidget() {
               <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />CCI
               <PeriodInput value={periods.cci} onChange={(v) => setPeriods((p) => ({ ...p, cci: v }))} />
             </DropdownMenuCheckboxItem>
+            {activePaneControls.length > 0 && (
+              <>
+                <DropdownMenuSeparator className="bg-border-default" />
+                <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">Pane size</DropdownMenuLabel>
+                <div className="space-y-1 px-2 pb-1" role="group" aria-label="Indicator pane size controls">
+                  {activePaneControls.map((pane) => (
+                    <div key={pane.scaleId} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-xs text-text-secondary">{pane.label}</span>
+                      <div className="grid grid-cols-3 rounded border border-border-default bg-surface-base p-0.5" role="group" aria-label={`${pane.label} pane size`}>
+                        {FLINT_CHART_INDICATOR_PANE_SIZE_OPTIONS.map((size) => {
+                          const active = pane.size === size;
+                          return (
+                            <button
+                              key={size}
+                              type="button"
+                              aria-label={`Set ${pane.label} pane to ${FLINT_CHART_INDICATOR_PANE_SIZE_LABELS[size]}`}
+                              aria-pressed={active}
+                              title={FLINT_CHART_INDICATOR_PANE_SIZE_LABELS[size]}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setIndicatorPaneSize(pane.scaleId, size);
+                              }}
+                              className={`h-5 w-6 rounded text-[10px] font-semibold leading-none transition-colors ${
+                                active
+                                  ? "bg-accent text-white"
+                                  : "text-text-muted hover:bg-surface-hover hover:text-text-primary"
+                              }`}
+                            >
+                              {FLINT_CHART_INDICATOR_PANE_SIZE_SHORT_LABELS[size]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Chart display settings"
+              className="flex items-center justify-center w-6 h-6 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+              aria-label="Open chart display settings"
+            >
+              <SlidersHorizontal size={12} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-44 bg-surface-card border-border-default text-text-primary">
+            <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">Chart display</DropdownMenuLabel>
+            <DropdownMenuCheckboxItem
+              checked={chartDisplaySettings.gridVisible}
+              onCheckedChange={(checked) => setChartDisplaySettings((prev) => ({ ...prev, gridVisible: checked === true }))}
+              onSelect={(event) => event.preventDefault()}
+              className="text-xs gap-2"
+            >
+              Grid
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={chartDisplaySettings.crosshairVisible}
+              onCheckedChange={(checked) => setChartDisplaySettings((prev) => ({ ...prev, crosshairVisible: checked === true }))}
+              onSelect={(event) => event.preventDefault()}
+              className="text-xs gap-2"
+            >
+              Crosshair
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={chartDisplaySettings.wheelZoom}
+              onCheckedChange={(checked) => setChartDisplaySettings((prev) => ({ ...prev, wheelZoom: checked === true }))}
+              onSelect={(event) => event.preventDefault()}
+              className="text-xs gap-2"
+            >
+              Wheel zoom
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={chartDisplaySettings.dragScroll}
+              onCheckedChange={(checked) => setChartDisplaySettings((prev) => ({ ...prev, dragScroll: checked === true }))}
+              onSelect={(event) => event.preventDefault()}
+              className="text-xs gap-2"
+            >
+              Drag scroll
+            </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -738,36 +1311,75 @@ function ChartWidget() {
         {/* Drawing count + undo/clear in the header */}
         {drawingCount > 0 && (
           <>
-            <Button variant="ghost" onClick={undoLastDrawing} title="Undo last drawing" className="flex items-center gap-1 px-2 py-1 h-auto rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
+            <Button variant="ghost" onClick={handleUndoLastDrawing} title="Undo last drawing" className="flex items-center gap-1 px-2 py-1 h-auto rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
               <X size={10} /><span>Undo</span>
             </Button>
             {drawingCount > 1 && (
-              <Button variant="ghost" onClick={clearAllDrawings} title="Clear all drawings" className="flex items-center gap-1 px-2 py-1 h-auto rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
+              <Button variant="ghost" onClick={handleClearAllDrawings} title="Clear all drawings" className="flex items-center gap-1 px-2 py-1 h-auto rounded text-xs text-text-secondary hover:text-loss hover:bg-surface-hover transition-colors">
                 <Trash2 size={10} /><span>Clear</span>
               </Button>
             )}
-            <span className="text-xxs text-text-muted">{drawingCount} drawing{drawingCount !== 1 ? "s" : ""}</span>
           </>
         )}
 
-        {drawMode !== null && !isTwoClickMode && <span className="text-xxs text-accent ml-1 animate-pulse">Click chart to place</span>}
-        {isTwoClickMode && pendingPoint === null && <span className="text-xxs text-accent ml-1 animate-pulse">Click first point</span>}
-        {isTwoClickMode && pendingPoint !== null && <span className="text-xxs text-accent ml-1 animate-pulse">Click second point</span>}
-        {drawMode === "text" && awaitingText !== null && <span className="text-xxs text-accent ml-1 animate-pulse">Type text below</span>}
+        <FlintChartDrawStatus<DrawToolType>
+          drawMode={drawMode}
+          drawingCount={drawingCount}
+          pendingPoint={pendingPoint}
+          pendingPoints={pendingPoints}
+          awaitingText={awaitingText}
+          twoClickTools={FLINT_CHART_TWO_CLICK_TOOLS}
+          threeClickTools={FLINT_CHART_THREE_CLICK_TOOLS}
+          className="ml-1"
+        />
+
+        {selectedDrawing && selectedDrawingStyle && (
+          <FlintChartDrawingInspector<Time>
+            drawing={selectedDrawing}
+            value={selectedDrawingStyle}
+            onStyleChange={handleDrawingStyleChange}
+            onToggleHidden={handleSelectedDrawingHiddenChange}
+            onToggleLocked={handleSelectedDrawingLockedChange}
+            onDeleteDrawing={deleteDrawingById}
+            className="ml-auto"
+          />
+        )}
+
+        <FlintChartDrawingList<Time>
+          drawings={drawings}
+          selectedDrawingId={selectedDrawingId}
+          onSelectDrawing={handleSelectDrawing}
+          onDeleteDrawing={deleteDrawingById}
+          className={selectedDrawing ? "max-w-full flex-1" : "ml-auto max-w-full flex-1"}
+        />
       </div>
 
       {/* Chart area — DrawingToolbar on left, canvas on right */}
-      <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
-        <DrawingToolbar
+      <div
+        className={`flex flex-1 min-h-0 overflow-hidden ${
+          workspaceLayout.compact ? "flex-col" : "flex-row"
+        }`}
+      >
+        <FlintChartDrawingToolbar<DrawToolType>
           drawMode={drawMode}
           onToggle={toggleDrawMode}
-          onClearAll={clearAllDrawings}
+          onClearAll={handleClearAllDrawings}
+          onHideAll={handleToggleAllDrawingsHidden}
+          onLockAll={handleToggleAllDrawingsLocked}
+          drawingsHidden={drawingsHidden}
+          drawingsLocked={drawingsLocked}
+          orientation={workspaceLayout.toolbarOrientation}
         />
         <div className="relative flex-1 min-w-0">
           <div
             ref={containerRef}
             className="w-full h-full"
             style={{ cursor: drawMode !== null ? "crosshair" : "default" }}
+          />
+          <IndicatorPaneResizeOverlay
+            panes={activePaneControls}
+            onResizeStart={handleIndicatorPaneResizeStart}
+            onResizeNudge={handleIndicatorPaneResizeNudge}
           />
           {awaitingText !== null && (
             <TextInputOverlay onConfirm={handleTextConfirm} onCancel={handleTextCancel} />
@@ -797,6 +1409,8 @@ function ChartWidget() {
         onClose={() => setIndicatorModalOpen(false)}
         indicators={indicators}
         periods={periods}
+        colors={indicatorColors}
+        lineStyles={indicatorLineStyles}
         onApply={handleIndicatorApply}
       />
     </div>

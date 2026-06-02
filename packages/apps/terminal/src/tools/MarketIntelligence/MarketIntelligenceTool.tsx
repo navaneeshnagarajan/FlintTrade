@@ -8,6 +8,7 @@ import { BarChart3, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useModeStore } from "@/stores/modeStore";
 import { SAMPLE_DATA_TABS, TABS } from "./data";
 import type { TabId } from "./types";
 import { MarketBreadthTab } from "./tabs/MarketBreadthTab";
@@ -60,8 +61,10 @@ const TAB_CONTENT: Record<TabId, () => React.ReactNode> = {
 
 export default function MarketIntelligenceTool({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("breadth");
+  const isExploreMode = useModeStore((s) => s.mode === "explore");
 
   const currentTab = TABS.find((t) => t.id === activeTab);
+  const isSampleData = isExploreMode || SAMPLE_DATA_TABS.includes(activeTab);
 
   return (
     <div className="h-full flex flex-col bg-surface-base">
@@ -76,7 +79,7 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
               <span className="text-xs text-text-secondary">{currentTab.label}</span>
             </>
           )}
-          {activeTab && SAMPLE_DATA_TABS.includes(activeTab) ? (
+          {isSampleData ? (
             <Badge className="text-xs h-4 px-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30">
               Sample Data
             </Badge>

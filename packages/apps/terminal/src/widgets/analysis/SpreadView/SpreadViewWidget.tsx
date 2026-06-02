@@ -11,6 +11,7 @@
 
 import { useState, useMemo, memo, useCallback } from "react";
 import { ArrowUpDown, ChevronDown } from "lucide-react";
+import { FlintPayoffChart } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -110,14 +111,6 @@ function computeMetrics(type: SpreadType, inputs: SpreadInputs): SpreadMetrics {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Payoff diagram SVG
-// ---------------------------------------------------------------------------
-
-const PO_W = 500;
-const PO_H = 140;
-const PO_PAD = { top: 12, right: 16, bottom: 28, left: 52 };
-
 interface PayoffPoint {
   price: number;
   pnl: number;
@@ -157,140 +150,23 @@ function buildPayoff(type: SpreadType, inputs: SpreadInputs): PayoffPoint[] {
   });
 }
 
-interface PayoffChartProps {
-  points: PayoffPoint[];
-  breakeven: number;
-}
-
-function PayoffChart({ points, breakeven }: PayoffChartProps) {
-  const chartW = PO_W - PO_PAD.left - PO_PAD.right;
-  const chartH = PO_H - PO_PAD.top - PO_PAD.bottom;
-
+function buildPayoffChart(points: PayoffPoint[]) {
   const minPrice = points[0]?.price ?? 0;
   const maxPrice = points[points.length - 1]?.price ?? 1;
   const allPnls = points.map((p) => p.pnl);
-  const minPnl = Math.min(...allPnls);
-  const maxPnl = Math.max(...allPnls);
-  const pnlRange = maxPnl - minPnl || 1;
-  const priceRange = maxPrice - minPrice || 1;
+  const minPnl = allPnls.length > 0 ? Math.min(...allPnls) : 0;
+  const maxPnl = allPnls.length > 0 ? Math.max(...allPnls) : 1;
+  const midPrice = (minPrice + maxPrice) / 2;
 
-  const xOf = (price: number) => ((price - minPrice) / priceRange) * chartW;
-  const yOf = (pnl: number) => chartH - ((pnl - minPnl) / pnlRange) * chartH;
-
-  const linePoints = points
-    .map((p) => `${xOf(p.price).toFixed(1)},${yOf(p.pnl).toFixed(1)}`)
-    .join(" ");
-
-  const zeroY = yOf(0);
-  const beX = xOf(breakeven);
-
-  // Colour: profit = green, loss = red; split at zero
-  const profitPoints = points
-    .map((p) => ({ ...p, pnl: Math.max(p.pnl, 0) }));
-  const lossPoints = points
-    .map((p) => ({ ...p, pnl: Math.min(p.pnl, 0) }));
-
-  const buildArea = (pts: PayoffPoint[], clamp: "top" | "bottom") => {
-    const filtered = pts.filter((p) => (clamp === "top" ? p.pnl > 0 : p.pnl < 0));
-    if (filtered.length < 2) return "";
-    const baseY = clamp === "top" ? zeroY : zeroY;
-    const pathPts = pts
-      .map((p) => `${xOf(p.price).toFixed(1)},${yOf(p.pnl).toFixed(1)}`)
-      .join(" L ");
-    return `M ${xOf(pts[0].price).toFixed(1)},${baseY.toFixed(1)} L ${pathPts} L ${xOf(pts[pts.length - 1].price).toFixed(1)},${baseY.toFixed(1)} Z`;
+  return {
+    points: points.map((point) => ({
+      x: point.price,
+      y: point.pnl,
+      label: `${point.price.toLocaleString("en-IN")} ${point.pnl.toFixed(0)}`,
+    })),
+    xTicks: [minPrice, midPrice, maxPrice],
+    yTicks: [minPnl, 0, maxPnl],
   };
-
-  return (
-    <svg
-      viewBox={`0 0 ${PO_W} ${PO_H}`}
-      className="w-full"
-      style={{ height: PO_H }}
-      aria-label="Spread payoff diagram"
-      role="img"
-    >
-      <defs>
-        <clipPath id="poClip">
-          <rect x={0} y={0} width={chartW} height={chartH} />
-        </clipPath>
-      </defs>
-
-      <g transform={`translate(${PO_PAD.left},${PO_PAD.top})`}>
-        {/* Zero P&L line */}
-        <line
-          x1={0}
-          y1={zeroY}
-          x2={chartW}
-          y2={zeroY}
-          stroke="rgba(156,163,175,0.4)"
-          strokeWidth={0.75}
-          strokeDasharray="3,2"
-        />
-
-        {/* Profit area fill */}
-        <path
-          d={buildArea(profitPoints, "top")}
-          fill="rgba(34,197,94,0.15)"
-          clipPath="url(#poClip)"
-        />
-
-        {/* Loss area fill */}
-        <path
-          d={buildArea(lossPoints, "bottom")}
-          fill="rgba(239,68,68,0.15)"
-          clipPath="url(#poClip)"
-        />
-
-        {/* Main payoff line */}
-        <polyline
-          points={linePoints}
-          fill="none"
-          stroke="rgba(99,102,241,0.85)"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          clipPath="url(#poClip)"
-        />
-
-        {/* Breakeven vertical line */}
-        {beX >= 0 && beX <= chartW && (
-          <line
-            x1={beX}
-            y1={0}
-            x2={beX}
-            y2={chartH}
-            stroke="rgba(245,158,11,0.6)"
-            strokeWidth={1}
-            strokeDasharray="4,2"
-          />
-        )}
-
-        {/* Y axis ticks */}
-        {[minPnl, 0, maxPnl].map((v) => (
-          <g key={v}>
-            <line x1={-4} x2={0} y1={yOf(v)} y2={yOf(v)} stroke="var(--color-border-default,#2a2a3a)" />
-            <text x={-6} y={yOf(v) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted,#666)">
-              {v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v >= 0 ? `+${v.toFixed(0)}` : `${v.toFixed(0)}`}
-            </text>
-          </g>
-        ))}
-
-        {/* X axis strike labels */}
-        <text x={xOf(minPrice)} y={chartH + 16} textAnchor="start" fontSize={8} fill="var(--color-text-muted,#666)">
-          {minPrice.toLocaleString("en-IN")}
-        </text>
-        <text x={xOf((minPrice + maxPrice) / 2)} y={chartH + 16} textAnchor="middle" fontSize={8} fill="var(--color-text-muted,#666)">
-          {((minPrice + maxPrice) / 2).toLocaleString("en-IN")}
-        </text>
-        <text x={xOf(maxPrice)} y={chartH + 16} textAnchor="end" fontSize={8} fill="var(--color-text-muted,#666)">
-          {maxPrice.toLocaleString("en-IN")}
-        </text>
-
-        {/* Axes */}
-        <line x1={0} y1={chartH} x2={chartW} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={0} x2={0} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-      </g>
-    </svg>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +301,7 @@ function SpreadViewWidget() {
   const metrics = useMemo(() => computeMetrics(spreadType, inputs), [spreadType, inputs]);
 
   const payoff = useMemo(() => buildPayoff(spreadType, inputs), [spreadType, inputs]);
+  const payoffChart = useMemo(() => buildPayoffChart(payoff), [payoff]);
 
   const spreadInfo = SPREAD_TYPES.find((s) => s.id === spreadType);
 
@@ -537,7 +414,19 @@ function SpreadViewWidget() {
           <p id="payoff-label" className="text-xxs font-medium text-text-muted mb-1 uppercase tracking-wide">
             Payoff at Expiry
           </p>
-          <PayoffChart points={payoff} breakeven={metrics.breakeven} />
+          <FlintPayoffChart
+            ariaLabel="Spread payoff diagram"
+            points={payoffChart.points}
+            breakeven={metrics.breakeven}
+            xTicks={payoffChart.xTicks}
+            yTicks={payoffChart.yTicks}
+            xFormatter={(value) => value.toLocaleString("en-IN")}
+            yFormatter={(value) => (
+              value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value >= 0 ? `+${value.toFixed(0)}` : `${value.toFixed(0)}`
+            )}
+            width={500}
+            height={140}
+          />
           <div className="flex items-center gap-3 mt-1 flex-wrap text-xxs">
             <div className="flex items-center gap-1">
               <span className="inline-block w-6 h-px bg-profit/60" />

@@ -12,7 +12,7 @@ import {
   BarChart3,
   Minus,
 } from "lucide-react";
-import { SparkAreaChart, Tracker } from "@tremor/react";
+import { FlintMiniSparkline, FlintSegmentTracker } from "@flinttrade/design-system";
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
 import { useOrders } from "@/hooks/useOrders";
@@ -95,13 +95,7 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
   const vixHigh = isVix && ltp > 20;
 
   // Build a 5-point OHLC sparkline from the available tick data
-  const sparkData = [
-    { t: "Open", v: open },
-    { t: "Low", v: low },
-    { t: "Mid", v: (open + ltp) / 2 },
-    { t: "High", v: high },
-    { t: "LTP", v: ltp },
-  ];
+  const sparkData = [open, low, (open + ltp) / 2, high, ltp];
 
   return (
     <div
@@ -131,12 +125,11 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
         </span>
       </div>
       {ltp > 0 && (
-        <SparkAreaChart
-          data={sparkData}
-          categories={["v"]}
-          index="t"
-          colors={[up ? "emerald" : "red"]}
-          className="h-8 mt-2"
+        <FlintMiniSparkline
+          ariaLabel={`${name} OHLC sparkline`}
+          points={sparkData}
+          positive={up}
+          className="mt-2 h-8"
         />
       )}
     </div>
@@ -237,13 +230,14 @@ function DashboardWidget(_props: WidgetProps) {
         </div>
       </div>
 
-      {/* Position status tracker — Tremor Tracker */}
+      {/* Position status tracker */}
       {positions.length > 0 && (() => {
         const trackerData = positions.map((p) => {
           const pnl = parseFloat(String(p.pnl ?? 0));
           return {
-            color: pnl > 0 ? ("emerald" as const) : pnl < 0 ? ("red" as const) : ("gray" as const),
-            tooltip: `${p.symbol}: ${pnl >= 0 ? "+" : ""}₹${Math.abs(pnl).toFixed(0)}`,
+            key: p.symbol,
+            label: `${p.symbol}: ${pnl >= 0 ? "+" : ""}₹${Math.abs(pnl).toFixed(0)}`,
+            tone: pnl > 0 ? ("profit" as const) : pnl < 0 ? ("loss" as const) : ("neutral" as const),
           };
         });
         return (
@@ -251,7 +245,10 @@ function DashboardWidget(_props: WidgetProps) {
             <div className="text-xxs uppercase tracking-wider text-text-muted font-sans mb-2">
               Position Status
             </div>
-            <Tracker data={trackerData} className="h-5" />
+            <FlintSegmentTracker
+              ariaLabel="Position status tracker"
+              segments={trackerData}
+            />
             <div className="flex gap-4 mt-1.5 text-xxs text-text-muted">
               <span className="text-emerald-400">{positions.filter((p) => parseFloat(String(p.pnl ?? 0)) > 0).length} profit</span>
               <span className="text-red-400">{positions.filter((p) => parseFloat(String(p.pnl ?? 0)) < 0).length} loss</span>

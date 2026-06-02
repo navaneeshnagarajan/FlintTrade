@@ -11,6 +11,7 @@
  */
 
 import { useMemo, memo } from "react";
+import { FlintCategoricalBarChart, FlintThresholdLineChart } from "@flinttrade/design-system";
 import { Trophy } from "lucide-react";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -181,92 +182,44 @@ function computeMetrics(trades: TradeRecord[]): PerformanceMetrics {
 }
 
 // ---------------------------------------------------------------------------
-// Equity curve SVG
+// Equity curve
 // ---------------------------------------------------------------------------
 
-const EQ_W = 480;
-const EQ_H = 100;
-const EQ_PAD = { top: 8, right: 10, bottom: 20, left: 50 };
+function formatAxisAmount(value: number) {
+  const sign = value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  if (abs >= 1000) return `${sign}${(abs / 1000).toFixed(0)}k`;
+  return `${sign}${abs.toFixed(0)}`;
+}
 
 function EquityCurve({ equity }: { equity: number[] }) {
-  const chartW = EQ_W - EQ_PAD.left - EQ_PAD.right;
-  const chartH = EQ_H - EQ_PAD.top - EQ_PAD.bottom;
-
-  const minV = Math.min(...equity);
-  const maxV = Math.max(...equity);
-  const range = maxV - minV || 1;
-
-  const xOf = (i: number) =>
-    equity.length > 1 ? (i / (equity.length - 1)) * chartW : 0;
-  const yOf = (v: number) => chartH - ((v - minV) / range) * chartH;
-
-  const linePoints = equity
-    .map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`)
-    .join(" ");
-
-  const areaPath = [
-    `M ${xOf(0).toFixed(1)},${yOf(equity[0]).toFixed(1)}`,
-    ...equity.slice(1).map((v, i) => `L ${xOf(i + 1).toFixed(1)},${yOf(v).toFixed(1)}`),
-    `L ${xOf(equity.length - 1).toFixed(1)},${chartH.toFixed(1)}`,
-    `L 0,${chartH.toFixed(1)}`,
-    "Z",
-  ].join(" ");
-
-  const isProfit = equity[equity.length - 1] >= 0;
-  const lineColour = isProfit ? "rgba(34,197,94,0.85)" : "rgba(239,68,68,0.85)";
-  const fillColour = isProfit ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
-
-  // Zero line
-  const zeroY = yOf(0);
-  const showZeroLine = zeroY > 0 && zeroY < chartH;
-
-  const yTicks = [minV, 0, maxV].filter((v, i, arr) => arr.indexOf(v) === i);
+  const values = equity.length > 0 ? equity : [0];
+  const minValue = Math.min(...values, 0);
+  const maxValue = Math.max(...values, 1);
+  const isProfit = values[values.length - 1] >= 0;
+  const yTicks = Array.from(new Set([minValue, 0, maxValue])).sort((a, b) => a - b);
+  const points = values.map((value, index) => ({
+    label: index === 0 ? "Start" : index === values.length - 1 ? "Now" : `${index}`,
+    value,
+  }));
 
   return (
-    <svg
-      viewBox={`0 0 ${EQ_W} ${EQ_H}`}
-      className="w-full"
-      style={{ height: EQ_H }}
-      aria-label="Equity curve chart"
-      role="img"
-    >
-      <g transform={`translate(${EQ_PAD.left},${EQ_PAD.top})`}>
-        {showZeroLine && (
-          <line
-            x1={0}
-            y1={zeroY}
-            x2={chartW}
-            y2={zeroY}
-            stroke="rgba(156,163,175,0.3)"
-            strokeWidth={0.75}
-            strokeDasharray="3,2"
-          />
-        )}
-
-        <path d={areaPath} fill={fillColour} />
-        <polyline
-          points={linePoints}
-          fill="none"
-          stroke={lineColour}
-          strokeWidth={1.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {/* Y ticks */}
-        {yTicks.map((v) => (
-          <g key={v}>
-            <line x1={-4} x2={0} y1={yOf(v)} y2={yOf(v)} stroke="var(--color-border-default,#2a2a3a)" />
-            <text x={-6} y={yOf(v) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted,#666)">
-              {v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0)}
-            </text>
-          </g>
-        ))}
-
-        <line x1={0} y1={chartH} x2={chartW} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={0} x2={0} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-      </g>
-    </svg>
+    <FlintThresholdLineChart
+      ariaLabel="Equity curve chart"
+      points={points}
+      minValue={minValue}
+      maxValue={maxValue}
+      thresholds={[
+        { value: 0, color: "rgba(156,163,175,0.3)", dash: "3,2", label: "Flat" },
+      ]}
+      yTicks={yTicks}
+      xLabelIndices={[0, values.length - 1]}
+      yFormatter={formatAxisAmount}
+      lineColor={isProfit ? "rgba(34,197,94,0.85)" : "rgba(239,68,68,0.85)"}
+      fillColor={isProfit ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)"}
+      width={480}
+      height={100}
+    />
   );
 }
 
@@ -318,44 +271,17 @@ function MonthlyHeatmap({ returns }: { returns: Record<string, number> }) {
 // ---------------------------------------------------------------------------
 
 function DayDistribution({ distribution }: { distribution: Record<string, number> }) {
-  const maxCount = Math.max(...DAYS.map((d) => distribution[d] ?? 0), 1);
-  const BAR_H = 40;
-
   return (
-    <svg
-      viewBox={`0 0 ${DAYS.length * 40} ${BAR_H + 20}`}
-      className="w-full"
-      style={{ height: BAR_H + 20 }}
-      aria-label="Trade distribution by day of week"
-      role="img"
-    >
-      {DAYS.map((day, i) => {
-        const count = distribution[day] ?? 0;
-        const barH = (count / maxCount) * BAR_H;
-        const x = i * 40 + 4;
-        const barW = 32;
-        return (
-          <g key={day}>
-            <rect
-              x={x}
-              y={BAR_H - barH}
-              width={barW}
-              height={barH}
-              fill="rgba(99,102,241,0.55)"
-              rx={2}
-            />
-            <text x={x + barW / 2} y={BAR_H + 14} textAnchor="middle" fontSize={9} fill="var(--color-text-muted,#666)">
-              {day}
-            </text>
-            {count > 0 && (
-              <text x={x + barW / 2} y={BAR_H - barH - 3} textAnchor="middle" fontSize={8} fill="var(--color-text-secondary,#999)">
-                {count}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+    <FlintCategoricalBarChart
+      ariaLabel="Trade distribution by day of week"
+      entries={DAYS.map((day) => ({
+        label: day,
+        value: distribution[day] ?? 0,
+        color: "rgba(99,102,241,0.55)",
+      }))}
+      width={DAYS.length * 40}
+      height={60}
+    />
   );
 }
 

@@ -100,7 +100,7 @@ FlintTrade Backend (port 5001)
     │ checks session mode
     │
     ├── mode = "explore" ──→ REJECT 403
-    ├── mode = "practice" ──→ SandboxEngine (DuckDB)
+    ├── mode = "practice" ──→ SandboxEngine (SQLite state.sqlite)
     └── mode = "live"    ──→ OpenAlgo (real broker)
 ```
 

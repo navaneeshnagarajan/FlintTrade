@@ -11,6 +11,7 @@
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { ArrowLeftRight, RefreshCw, AlertTriangle } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import {
   Select,
   SelectContent,
@@ -78,7 +79,7 @@ function formatConverted(value: number, currency: Currency): string {
 }
 
 // ---------------------------------------------------------------------------
-// Sparkline — 30-day sample rate history (inline SVG, no deps)
+// Sparkline — deterministic 30-day sample rate history rendered through core.
 // ---------------------------------------------------------------------------
 
 /** Generate deterministic 30-day rate history from base rate. */
@@ -93,44 +94,21 @@ function generateHistory(from: Currency, to: Currency): number[] {
 
 interface SparklineProps {
   data: number[];
-  width?: number;
-  height?: number;
 }
 
-function Sparkline({ data, width = 160, height = 32 }: SparklineProps) {
+function Sparkline({ data }: SparklineProps) {
   if (data.length < 2) return null;
-
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 0.0001;
-
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - ((v - min) / range) * (height - 4) - 2;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
 
   const first = data[0];
   const last = data[data.length - 1];
-  const colour = last >= first ? "#22c55e" : "#ef4444";
 
   return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      aria-label="30-day rate history sparkline"
-      role="img"
-    >
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke={colour}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={data}
+      positive={last >= first}
+      ariaLabel="30-day rate history sparkline"
+      className="h-8 w-40"
+    />
   );
 }
 

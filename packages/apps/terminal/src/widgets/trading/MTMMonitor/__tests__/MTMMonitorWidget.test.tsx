@@ -13,21 +13,73 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+const chartMocks = vi.hoisted(() => {
+  const areaSeriesOptions: unknown[] = [];
+  const localSeriesOptions: unknown[] = [];
+
+  const createPriceLine = vi.fn(() => ({}));
+  const removePriceLine = vi.fn();
+  const setData = vi.fn();
+  const applySeriesOptions = vi.fn();
+
+  const createSeries = () => ({
+    setData,
+    applyOptions: applySeriesOptions,
+    createPriceLine,
+    removePriceLine,
+  });
+
+  const chart = {
+    addSeries: vi.fn((_seriesType: unknown, options: unknown) => {
+      localSeriesOptions.push(options);
+      return createSeries();
+    }),
+    timeScale: vi.fn(() => ({ fitContent: vi.fn() })),
+    applyOptions: vi.fn(),
+    priceScale: vi.fn(() => ({ applyOptions: vi.fn() })),
+    remove: vi.fn(),
+  };
+
+  const shellRuntime = {
+    createChart: vi.fn(() => chart),
+  };
+
+  const areaRuntime = {
+    createChart: shellRuntime.createChart,
+    addAreaSeries: vi.fn((_chart: unknown, options: unknown) => {
+      areaSeriesOptions.push(options);
+      return createSeries();
+    }),
+  };
+
+  return {
+    areaRuntime,
+    areaSeriesOptions,
+    chart,
+    localSeriesOptions,
+    shellRuntime,
+    reset() {
+      areaSeriesOptions.length = 0;
+      localSeriesOptions.length = 0;
+      createPriceLine.mockClear();
+      removePriceLine.mockClear();
+      setData.mockClear();
+      applySeriesOptions.mockClear();
+    },
+  };
+});
+
 // Mock lightweight-charts (canvas-based, does not work in jsdom)
 vi.mock("lightweight-charts", () => ({
   AreaSeries: {},
   ColorType: { Solid: "solid" },
   CrosshairMode: { Normal: 0 },
-  createChart: vi.fn(() => ({
-    addSeries: vi.fn(() => ({
-      setData: vi.fn(),
-      createPriceLine: vi.fn(() => ({})),
-      removePriceLine: vi.fn(),
-    })),
-    timeScale: vi.fn(() => ({ fitContent: vi.fn() })),
-    applyOptions: vi.fn(),
-    remove: vi.fn(),
-  })),
+  createChart: chartMocks.shellRuntime.createChart,
+}));
+
+vi.mock("@/lib/lightweightChartRuntime", () => ({
+  lightweightChartShellRuntime: chartMocks.shellRuntime,
+  lightweightAreaRuntime: chartMocks.areaRuntime,
 }));
 
 // Mock usePositions and useFunds
@@ -75,6 +127,7 @@ beforeAll(() => {
 describe("MTMMonitorWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    chartMocks.reset();
   });
 
   it("renders without crashing", () => {
@@ -126,5 +179,31 @@ describe("MTMMonitorWidget", () => {
 
     expect(screen.getByText("MTM PnL")).toBeInTheDocument();
     expect(screen.getByText("Drawdown")).toBeInTheDocument();
+  });
+
+  it("routes MTM area series through the shared Flint area runtime", () => {
+    mockUsePositions.mockReturnValue({
+      data: [{ pnl: 1200 }, { pnl: -300 }],
+    });
+    render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+
+    expect(chartMocks.areaRuntime.addAreaSeries).toHaveBeenCalledTimes(2);
+    expect(chartMocks.chart.addSeries).not.toHaveBeenCalled();
+    expect(chartMocks.areaSeriesOptions).toEqual([
+      expect.objectContaining({
+        lineColor: "#7C3AED",
+        topColor: "rgba(124,58,237,0.35)",
+        bottomColor: "rgba(124,58,237,0.02)",
+        lineWidth: 2,
+        priceScaleId: "right",
+      }),
+      expect.objectContaining({
+        lineColor: "#EF4444",
+        topColor: "rgba(239,68,68,0.0)",
+        bottomColor: "rgba(239,68,68,0.25)",
+        lineWidth: 1,
+        priceScaleId: "right",
+      }),
+    ]);
   });
 });

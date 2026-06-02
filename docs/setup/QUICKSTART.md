@@ -41,7 +41,7 @@ For the native FlintTrade gateway, use the terminal setup flow. For the optional
 ```bash
 make start       # Starts FlintTrade backend on port 5100
 make status      # Verifies FlintTrade backend; reports OpenAlgo only as optional
-make test        # ~9,089 tests pass
+make test        # full pytest suite passes
 ```
 
 ## 5. Run Terminal
@@ -64,7 +64,8 @@ Read [`contributing.md`](../../contributing.md) for the contribution flow, then 
 3. Select broker (use sandbox variant for testing)
 4. Login to broker via OAuth redirect
 5. Go to API Key section, generate key
-6. Put key in FlintTrade `.env` as `OPENALGO_API_KEY`
+6. Put key in FlintTrade `.env` as `OPENALGO_API_KEY` only when using the
+   OpenAlgo-compatible bridge.
 
 Sessions expire at ~3:30 AM IST. Re-login daily when using live broker.
 
@@ -75,9 +76,10 @@ Sessions expire at ~3:30 AM IST. Re-login daily when using live broker.
 ```
 # Only the host/WS endpoints are configurable from VITE_* env vars.
 # DO NOT put the API key here — Vite inlines VITE_* at build time, leaking
-# the key into the production JS bundle. Configure OPENALGO_API_KEY in the
-# in-app Settings → Connection flow (it persists to ~/.flinttrade/workspace.json,
-# server-side only) or in the repo-root .env which the FlintTrade backend reads.
+# the key into the production JS bundle. Configure OPENALGO_API_KEY only for
+# the OpenAlgo-compatible bridge, either in the in-app Settings → Connection
+# flow (it persists to ~/.flinttrade/workspace.json, server-side only) or in
+# the repo-root .env which the FlintTrade backend reads.
 VITE_OPENALGO_HOST=http://127.0.0.1:5000
 VITE_OPENALGO_WS=ws://127.0.0.1:8765
 ```

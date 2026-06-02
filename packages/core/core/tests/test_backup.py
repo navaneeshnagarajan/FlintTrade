@@ -32,6 +32,11 @@ def _populate_workspace(ws: Path) -> None:
     (audit / "audit_2026-04-15.jsonl").write_text(
         '{"ts":"2026-04-15","event_type":"LOGIN"}\n', encoding="utf-8"
     )
+    (ws / "master_password").write_text("secret", encoding="utf-8")
+    (ws / "api_key_pepper").write_text("pepper", encoding="utf-8")
+    (ws / "jwt_secret").write_text("jwt", encoding="utf-8")
+    (ws / "totp_install_key").write_text("totp", encoding="utf-8")
+    (ws / "credentials.db").write_bytes(b"credential-store")
     ticks = ws / "ticks"
     ticks.mkdir()
     (ticks / "tick_data.bin").write_bytes(b"\xff" * 32)
@@ -79,6 +84,34 @@ class TestCreateBackup:
         with tarfile.open(out, "r:gz") as tar:
             names = tar.getnames()
         assert any("ticks" in n for n in names)
+
+    def test_create_excludes_secrets_and_credentials_by_default(self, tmp_path: Path) -> None:
+        ws = tmp_path / ".flinttrade"
+        _populate_workspace(ws)
+        bk = WorkspaceBackup(workspace_dir=ws)
+        out = tmp_path / "backup.tar.gz"
+        bk.create_backup(out)
+        with tarfile.open(out, "r:gz") as tar:
+            names = tar.getnames()
+        forbidden = {
+            ".flinttrade/master_password",
+            ".flinttrade/api_key_pepper",
+            ".flinttrade/jwt_secret",
+            ".flinttrade/totp_install_key",
+            ".flinttrade/credentials.db",
+        }
+        assert forbidden.isdisjoint(names)
+
+    def test_create_can_include_credential_store_with_explicit_opt_in(self, tmp_path: Path) -> None:
+        ws = tmp_path / ".flinttrade"
+        _populate_workspace(ws)
+        bk = WorkspaceBackup(workspace_dir=ws)
+        out = tmp_path / "backup.tar.gz"
+        bk.create_backup(out, include_credentials=True)
+        with tarfile.open(out, "r:gz") as tar:
+            names = set(tar.getnames())
+        assert ".flinttrade/credentials.db" in names
+        assert ".flinttrade/master_password" not in names
 
     def test_create_embeds_manifest(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"

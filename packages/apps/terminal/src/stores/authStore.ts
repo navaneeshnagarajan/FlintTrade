@@ -5,6 +5,7 @@
  * Session expires at 08:00 IST daily (enforced via startExpiryTimer).
  */
 import { create } from "zustand";
+import { clearDemoSession } from "@/lib/demoSession";
 
 type AuthStatus = "unknown" | "logged-in" | "logged-out" | "pin-required" | "setup-required";
 
@@ -89,6 +90,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Clear expiry timer on any logout path
     const existing = get()._expiryTimerId;
     if (existing !== null) clearTimeout(existing);
+    clearDemoSession();
     set({ status: "logged-out", token: null, username: null, expiresAt: null, _expiryTimerId: null });
   },
 

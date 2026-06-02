@@ -51,6 +51,7 @@ import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
 import ModeSelectRoute from "@/routes/ModeSelectRoute";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
+import { AccountSetupError, setupFlintTradeAccount } from "@/lib/setupAccountApi";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -245,38 +246,35 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
     setServerError("");
     setAccountExists(false);
     try {
-      const resp = await fetch("/ft-api/v1/auth/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: values.username,
-          email: values.email,
-          password: values.password,
-          pin: values.pin || "",
-        }),
+      const result = await setupFlintTradeAccount({
+        username: values.username,
+        email: values.email,
+        password: values.password,
+        pin: values.pin || "",
       });
-      const data = await resp.json();
-      if (resp.ok && data.data) {
-        // Server now has an account but no session yet. Reflect this in the
-        // store so any subsequent route decisions (e.g. /welcome redirect,
-        // the setup-required reconcile in this component) see truth, not
-        // the stale "setup-required" value from before the POST.
-        setLoggedOut();
-        onComplete(values, data.data.totp_uri ?? "", data.data.backup_codes ?? []);
-      } else if (resp.status === 409) {
+      // Server now has an account but no session yet. Reflect this in the
+      // store so any subsequent route decisions (e.g. /welcome redirect,
+      // the setup-required reconcile in this component) see truth, not
+      // the stale "setup-required" value from before the POST.
+      setLoggedOut();
+      onComplete(values, result.totpUri, result.backupCodes);
+    } catch (error) {
+      if (error instanceof AccountSetupError && error.kind === "account-exists") {
         // Account already exists — don't wedge. Route the user to login,
         // which is the only sensible next step. Clear any stale progress
         // so the next /setup-account entry won't try to re-submit.
         clearProgress();
         setAccountExists(true);
         setServerError(
-          data.message || "An account already exists on this machine. Sign in to continue.",
+          error.message || "An account already exists on this machine. Sign in to continue.",
         );
-      } else {
-        setServerError(data.message || `Setup failed (HTTP ${resp.status}). Please try again.`);
+        return;
       }
-    } catch {
-      setServerError("Cannot reach server. Is the FlintTrade backend running?");
+      setServerError(
+        error instanceof Error
+          ? error.message
+          : "Setup failed. Please try again.",
+      );
     } finally {
       setIsLoading(false);
     }

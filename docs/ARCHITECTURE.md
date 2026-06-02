@@ -1,8 +1,8 @@
 # FlintTrade Architecture
 
 > Reflects `v0.6.0-alpha`. 17 package surfaces (13 Python + 2 React apps +
-> 1 shared TypeScript design-system package + 1 Rust/PyO3 tick engine). About 12,062 tests in total
-> (9,089 pytest + 2,973 Vitest, measured 2026-05-19).
+> 1 shared TypeScript design-system package + 1 Rust/PyO3 tick engine).
+> Run `make test` and terminal Vitest locally for the current test counts.
 
 This document is the architectural reference for contributors. For a
 user-facing overview, see [USER_GUIDE.md](USER_GUIDE.md). For HTTP /
@@ -38,7 +38,12 @@ flowchart LR
         TICK[tick-engine · Rust/PyO3]
     end
 
-    subgraph OpenAlgo["OpenAlgo · port 5000 / WS 8765 (external service)"]
+    subgraph NativeGateway["Native gateway · alpha"]
+        NGA[adapter contract + routing]
+        DHAN[Dhan scaffold gated]
+    end
+
+    subgraph OpenAlgo["OpenAlgo · port 5000 / WS 8765 (optional external service)"]
         OA[32 broker adapters]
     end
 
@@ -64,13 +69,17 @@ flowchart LR
     E --> TICK
     BT --> TICK
     IND --> TICK
+    F --> NGA
+    NGA --> DHAN
     F -- "REST" --> OA
     OA --> B1
 ```
 
-The terminal speaks to two HTTP origins (OpenAlgo on 5000, FlintTrade on
-5100) and one WebSocket (OpenAlgo on 8765). All three are proxied
-through Vite in development.
+The terminal always talks to FlintTrade on port 5100 through `/ft-api`.
+OpenAlgo on 5000 and its WebSocket on 8765 are optional external integration
+origins, proxied through Vite only when that bridge is enabled. The native
+gateway contract and routing are present, while direct Dhan live SDK calls are
+still gated pending SDK attestation.
 
 ---
 
@@ -138,8 +147,8 @@ llms files.
 The terminal is a single React 19 + TypeScript application built with
 Vite 6. Layout is managed by [Dockview v5.1](https://dockview.dev/),
 which provides drag-and-drop panels, tabs, floating windows, and
-serialisable layouts. Users compose their workspace from 82 widgets
-(22 trading + 38 analysis + 22 utility) split across 12 routes.
+serialisable layouts. Users compose their workspace from 83 widgets
+(22 trading + 39 analysis + 22 utility) split across 12 routes.
 
 ### State architecture
 
@@ -172,12 +181,59 @@ duplicated:
 | CSS | Tailwind CSS v4 | `@tailwindcss/vite` plugin, no `tailwind.config.js` for tokens. |
 | Components | shadcn/ui | Copy-paste ownership, Radix accessibility primitives. |
 | Layout | Dockview v5.1 | Floating, tabs, popout, JSON-serialisable. |
-| Charts | Lightweight Charts v5 | 35 KB, multi-pane, plugin-able. |
+| Charts | Flint chart core over Lightweight Charts v5 | Runtime adapter, shared theme, drawing, indicator, and mini-chart contracts. |
 | Streaming grid | Glide Data Grid | Canvas-rendered, 100K updates/sec. |
 | Static grid | TanStack Table v8 | Headless, sortable, filterable. |
 | State | Zustand v5 + Jotai + TanStack Query v5 | Separation of concerns by boundary. |
 | Forms | react-hook-form + zod | Runtime validation, type inference. |
 | Router | react-router-dom | Lazy-loaded route modules. |
+
+### Chart ownership boundary
+
+The terminal app does not create chart engines directly. Runtime value imports
+from `lightweight-charts` are isolated to
+`packages/apps/terminal/src/lib/lightweightChartRuntime.ts`, the runtime adapter
+that bridges vendor APIs into Flint-owned chart contracts. The shared chart
+surface lives in `packages/core/design-system/src/charts/`:
+
+- `lightweight.ts` owns chart factories, theme application, canvas labelling,
+  series registration contracts, and reusable layout constants such as
+  `FLINT_TRANSPARENT_CHART_LAYOUT`.
+- `theme.ts` owns the Flint market-chart palette derived from design-system
+  tokens.
+- `drawings.ts` owns drawing persistence, draft progression, hit-testing,
+  movement, handles, render specs, and the drawing render-plan contract
+  (`createFlintChartDrawingRenderPlan`) that maps drawings to line series,
+  price lines, and markers. It also owns render-plan lifecycle diffing through
+  `createFlintChartDrawingRenderPlanDiff`, so terminal hooks reconcile
+  added, updated, unchanged, and removed drawing artefacts from core specs
+  instead of rebuilding unchanged chart series.
+- `indicators.ts` owns indicator defaults, periods, panes, colours,
+  serialisation, static indicator line/histogram render specs, pane-aware
+  series option contracts through `createFlintChartIndicatorSeriesRenderPlan`,
+  series lifecycle diffing through
+  `createFlintChartIndicatorSeriesRenderPlanDiff`, and OI overlay render
+  semantics such as `createFlintChartOIProfileBarData`.
+- `plotly.ts` owns `createFlintPlotlyTheme`, the shared default Plotly config,
+  and layout merging for advanced charts that cannot use Lightweight Charts.
+- `components.tsx` owns React-visible chart primitives such as legend rows,
+  mini sparklines, donut breakdowns, and ranked bars.
+
+Application widgets may pass data and user intent into these contracts, but
+they should not call `createChart`, `chart.addSeries`, `createSeriesMarkers`,
+or import Lightweight Charts runtime values directly. Terminal hooks may attach
+or remove series through `lightweightChartRuntime.ts`, but render decisions must
+come from the core contracts. The terminal regression test
+`src/hooks/__tests__/flintChartCore.test.ts` enforces this boundary so new chart
+work remains built on the core rather than around it.
+
+Plotly is the explicit runtime exception for heavy 3D analysis surfaces that
+Lightweight Charts cannot represent well, such as volatility surfaces. The
+shared theme, modebar defaults, and axis/layout merge policy live in core via
+`createFlintPlotlyTheme`, `FLINT_PLOTLY_DEFAULT_CONFIG`, and
+`mergeFlintPlotlyLayout`. The terminal keeps only the heavy Plotly runtime
+wrapper in `src/components/charts/PlotlyChart.tsx`, so Plotly stays lazy-loaded,
+documented, and limited to analysis modules.
 
 ---
 
@@ -297,10 +353,13 @@ Two tiers. No exceptions.
 
 ### Tier 1: `.env` — infrastructure only
 
-Lives in the repo root, never committed. Four variables:
+Lives in the repo root, never committed. FlintTrade can run locally without
+OpenAlgo; OpenAlgo variables are used only for the optional OpenAlgo-compatible
+bridge/live passthrough path.
 
 | Variable | Purpose |
 |---|---|
+| `FLINTTRADE_API_KEY` | Optional backend API key. If absent, loopback-only local requests are allowed for fresh desktop/dev installs. |
 | `OPENALGO_HOST` | OpenAlgo server URL. |
 | `OPENALGO_PORT` | OpenAlgo server port. |
 | `OPENALGO_API_KEY` | OpenAlgo API key (not your broker's key). |

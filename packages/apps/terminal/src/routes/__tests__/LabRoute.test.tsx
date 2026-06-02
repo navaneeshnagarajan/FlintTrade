@@ -2,7 +2,7 @@
  * LabRoute.test.tsx
  *
  * Smoke tests for the /lab Strategy Lab page.
- * Mocks stores, hooks, framer-motion, Tremor charts, and API services.
+ * Mocks stores, hooks, framer-motion, and API services.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -72,11 +72,6 @@ vi.mock("@/components/ui/GlassCard", () => ({
   GlassCard: ({ children, ...props }: Record<string, unknown>) => (
     <div {...props}>{children as React.ReactNode}</div>
   ),
-}));
-
-vi.mock("@tremor/react", () => ({
-  AreaChart: () => <div data-testid="area-chart" />,
-  BarChart: () => <div data-testid="bar-chart" />,
 }));
 
 vi.mock("@/routes/lab/PineEditor", () => ({

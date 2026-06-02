@@ -2,6 +2,13 @@
 // Import from here rather than re-declaring across files.
 
 import type { ISeriesApi, IPriceLine, Time } from "lightweight-charts";
+import type {
+  FlintChartDrawing,
+  FlintChartDrawingPoint,
+  FlintChartDrawToolId,
+  FlintChartIndicatorPeriods,
+  FlintChartIndicatorState,
+} from "@flinttrade/design-system";
 
 // ---------------------------------------------------------------------------
 // Symbol / interval
@@ -23,95 +30,17 @@ export interface IntervalOption {
 // Drawing tools
 // ---------------------------------------------------------------------------
 
-export type DrawToolType =
-  // Cursor
-  | "cursor" | "eraser"
-  // Lines
-  | "hline" | "vline" | "trendline" | "ray" | "extended_line" | "parallel_channel"
-  // Fibonacci
-  | "fib" | "fib_extension"
-  // Shapes
-  | "rect" | "circle" | "brush"
-  // Text
-  | "text" | "callout" | "price_label"
-  // Patterns
-  | "elliott_impulse" | "elliott_correction"
-  // Prediction
-  | "long_position" | "short_position" | "measure";
+export type DrawToolType = FlintChartDrawToolId;
 
-export interface DrawingPoint {
-  time: Time;
-  price: number;
-}
-
-export interface HLineDrawing  { kind: "hline";     id: string; price: number }
-export interface VLineDrawing  { kind: "vline";     id: string; time: Time }
-export interface TrendLineDrawing { kind: "trendline"; id: string; p1: DrawingPoint; p2: DrawingPoint }
-export interface RayDrawing    { kind: "ray";       id: string; p1: DrawingPoint; p2: DrawingPoint }
-export interface FibDrawing    { kind: "fib";       id: string; p1: DrawingPoint; p2: DrawingPoint }
-export interface RectDrawing   { kind: "rect";      id: string; p1: DrawingPoint; p2: DrawingPoint }
-export interface TextDrawing   { kind: "text";      id: string; point: DrawingPoint; label: string }
-
-export type Drawing =
-  | HLineDrawing
-  | VLineDrawing
-  | TrendLineDrawing
-  | RayDrawing
-  | FibDrawing
-  | RectDrawing
-  | TextDrawing;
+export type DrawingPoint = FlintChartDrawingPoint<Time>;
+export type Drawing = FlintChartDrawing<Time>;
 
 // ---------------------------------------------------------------------------
 // Indicator toggles and periods
 // ---------------------------------------------------------------------------
 
-export interface IndicatorState {
-  showEMA20: boolean;
-  showEMA50: boolean;
-  showSMA: boolean;
-  showWMA: boolean;
-  showBB: boolean;
-  showSupertrend: boolean;
-  showVWAP: boolean;
-  showIchimoku: boolean;
-  showPivot: boolean;
-  showVolume: boolean;
-  showRSI: boolean;
-  showMACD: boolean;
-  showStoch: boolean;
-  showATR: boolean;
-  showADX: boolean;
-  showWilliamsR: boolean;
-  showCCI: boolean;
-  showDEMA: boolean;
-  showHullMA: boolean;
-  showParabolicSAR: boolean;
-  showOBV: boolean;
-  showKeltner: boolean;
-  showVWMA: boolean;
-  showOI: boolean;
-}
-
-export interface IndicatorPeriods {
-  ema1: number;
-  ema2: number;
-  sma: number;
-  wma: number;
-  bbPeriod: number;
-  bbMult: number;
-  stPeriod: number;
-  stFactor: number;
-  rsi: number;
-  cci: number;
-  dema: number;
-  hull: number;
-  wr: number;
-  keltner: number;
-  keltnerMult: number;
-  vwma: number;
-  atr: number;
-  adx: number;
-}
+export type IndicatorState = FlintChartIndicatorState;
+export type IndicatorPeriods = FlintChartIndicatorPeriods;
 
 // ---------------------------------------------------------------------------
 // Chart series refs
@@ -156,6 +85,7 @@ export interface IndicatorSeriesRefs {
 }
 
 export interface HlineRef {
+  _key: string;
   _priceLine: IPriceLine;
   _series: ISeriesApi<"Candlestick">;
 }
@@ -165,4 +95,4 @@ export interface PivotRefs {
   series: ISeriesApi<"Candlestick"> | null;
 }
 
-export type DrawingSeriesMap = Map<string, ISeriesApi<"Line">[]>;
+export type DrawingSeriesMap = Map<string, ISeriesApi<"Line">>;

@@ -247,7 +247,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
         className="gap-0"
         tabListClassName="mx-4 mt-2"
         tabPanelClassName=""
-        keepMounted={false}
+        keepMounted
       />
 
       {/* Footer */}

@@ -1,8 +1,12 @@
 import { useEffect, useRef } from "react";
-import { createChart, CandlestickSeries, HistogramSeries } from "lightweight-charts";
 import type { IChartApi, ISeriesApi } from "lightweight-charts";
+import {
+  applyFlintCandlestickTheme,
+  createFlintCandlestickChart,
+} from "@flinttrade/design-system";
 import { getHistory } from "../services/api";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightCandlestickRuntime } from "@/lib/lightweightChartRuntime";
 
 interface ChartProps {
   symbol?: string;
@@ -33,50 +37,33 @@ export default function Chart({
   // Create chart
   useEffect(() => {
     if (!containerRef.current) return;
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height,
-      layout: chartTheme.layout,
-      grid: chartTheme.grid,
-      crosshair: chartTheme.crosshair,
-      rightPriceScale: chartTheme.rightPriceScale,
-      timeScale: chartTheme.timeScale,
-    });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, chartTheme.candle);
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "vol",
-    });
-    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+    const flintChart = createFlintCandlestickChart(
+      lightweightCandlestickRuntime,
+      containerRef.current,
+      chartTheme,
+      {
+        ariaLabel: `${symbol} price chart`,
+        height,
+      },
+    );
+    const { chart, candleSeries, volumeSeries } = flintChart;
 
     chartRef.current = chart;
     candleRef.current = candleSeries;
     volumeRef.current = volumeSeries;
 
-    const handleResize = () => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
-    };
-    window.addEventListener("resize", handleResize);
-
     return () => {
-      window.removeEventListener("resize", handleResize);
-      chart.remove();
+      flintChart.remove();
+      chartRef.current = null;
+      candleRef.current = null;
+      volumeRef.current = null;
     };
-  }, [height]);
+  }, [height, symbol]);
 
   // Re-apply theme whenever it changes (without recreating the chart)
   useEffect(() => {
     if (!chartRef.current || !candleRef.current) return;
-    chartRef.current.applyOptions({
-      layout: chartTheme.layout,
-      grid: chartTheme.grid,
-      crosshair: chartTheme.crosshair,
-      rightPriceScale: chartTheme.rightPriceScale,
-      timeScale: chartTheme.timeScale,
-    });
-    candleRef.current.applyOptions(chartTheme.candle);
+    applyFlintCandlestickTheme(chartRef.current, candleRef.current, chartTheme);
   }, [chartTheme]);
 
   // Fetch historical data

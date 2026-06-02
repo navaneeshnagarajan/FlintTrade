@@ -80,6 +80,22 @@ describe("VWAPBandsWidget", () => {
     expect(screen.getByText("± 3σ")).toBeTruthy();
   });
 
+  it("renders VWAP through the shared Flint banded-line primitive", () => {
+    mockConnected.mockReturnValue(false);
+    render(<VWAPBandsWidget />);
+    const chart = screen.getByRole("img", { name: /vwap bands chart/i });
+    expect(chart).toHaveAttribute("data-flint-chart", "banded-line");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelectorAll("[data-banded-line-band]").length).toBe(3);
+    expect(chart.querySelectorAll("[data-banded-line-series]").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders band legend swatches without local SVG", () => {
+    mockConnected.mockReturnValue(false);
+    const { container } = render(<VWAPBandsWidget />);
+    expect(container.querySelector('svg[width="16"][height="8"]')).not.toBeInTheDocument();
+  });
+
   it("refresh button is disabled when broker disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Activity, Flame } from "lucide-react";
+import { FlintDivergingBarList } from "@flinttrade/design-system";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
@@ -25,6 +26,20 @@ export function GexTab() {
     if (!data?.length) return 1;
     return Math.max(...data.map((d) => Math.abs(d.net_gamma)), 1);
   }, [data]);
+  const gexEntries = useMemo(() => {
+    if (!data?.length) return [];
+    return data.map((row) => {
+      const isPos = row.net_gamma >= 0;
+      const formatted = `${isPos ? "+" : ""}${row.net_gamma.toFixed(2)}`;
+      return {
+        label: row.strike.toLocaleString("en-IN"),
+        leftValue: isPos ? 0 : Math.abs(row.net_gamma),
+        rightValue: isPos ? row.net_gamma : 0,
+        leftLabel: isPos ? "" : formatted,
+        rightLabel: isPos ? formatted : "",
+      };
+    });
+  }, [data]);
 
   return (
     <ScrollArea className="h-full">
@@ -45,38 +60,13 @@ export function GexTab() {
           <>
             <div>
               <SectionLabel icon={Flame} label="Net Gamma Exposure by Strike" />
-              <div className="space-y-px">
-                {data.map((row) => {
-                  const barPct = (Math.abs(row.net_gamma) / maxAbsGamma) * 100;
-                  const isPos = row.net_gamma >= 0;
-                  return (
-                    <div key={row.strike} className="flex items-center gap-2 group">
-                      <span className="font-mono text-xs text-text-muted w-16 text-right shrink-0">
-                        {row.strike.toLocaleString("en-IN")}
-                      </span>
-                      <div className="flex-1 relative h-5 flex items-center">
-                        <div className="absolute inset-0 flex items-center">
-                          <div className="w-full h-px bg-border-default" />
-                        </div>
-                        {isPos ? (
-                          <div
-                            className="absolute left-1/2 h-4 rounded-r"
-                            style={{ width: `${barPct / 2}%`, backgroundColor: "#10b981", opacity: 0.75 }}
-                          />
-                        ) : (
-                          <div
-                            className="absolute right-1/2 h-4 rounded-l"
-                            style={{ width: `${barPct / 2}%`, backgroundColor: "#ef4444", opacity: 0.75 }}
-                          />
-                        )}
-                      </div>
-                      <span className={`font-mono text-xs w-20 shrink-0 ${isPos ? "text-profit" : "text-loss"}`}>
-                        {isPos ? "+" : ""}{row.net_gamma.toFixed(2)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <FlintDivergingBarList
+                ariaLabel="Net gamma exposure by strike"
+                entries={gexEntries}
+                maxValue={maxAbsGamma}
+                leftHeading="Short gamma"
+                rightHeading="Long gamma"
+              />
               <div className="flex justify-between text-xs text-text-muted mt-1 px-2">
                 <span className="text-loss">Short Gamma (bearish amplifier)</span>
                 <span className="text-profit">Long Gamma (market stabiliser)</span>

@@ -47,6 +47,7 @@ def create_backup_blueprint(
 
         Request body (JSON, all optional):
             include_ticks (bool): Include tick data directories.
+            include_credentials (bool): Include credential database files.
             output_path (str): Override destination path.
 
         Returns:
@@ -54,6 +55,7 @@ def create_backup_blueprint(
         """
         body = request.get_json(silent=True) or {}
         include_ticks: bool = bool(body.get("include_ticks", False))
+        include_credentials: bool = bool(body.get("include_credentials", False))
         output_str: str | None = body.get("output_path")
 
         if output_str:
@@ -65,7 +67,11 @@ def create_backup_blueprint(
             output_path = Path(tempfile.gettempdir()) / f"flint_backup_{ts}.tar.gz"
 
         try:
-            created = bk.create_backup(output_path, include_ticks=include_ticks)
+            created = bk.create_backup(
+                output_path,
+                include_ticks=include_ticks,
+                include_credentials=include_credentials,
+            )
             size_mb = round(created.stat().st_size / (1024 * 1024), 3)
             return jsonify(  # type: ignore[return-value]
                 {

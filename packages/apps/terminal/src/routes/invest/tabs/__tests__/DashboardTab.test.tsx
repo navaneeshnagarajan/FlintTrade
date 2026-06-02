@@ -43,15 +43,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@tremor/react", () => ({
-  DonutChart: () => <div data-testid="donut-chart" />,
-  BarList: () => <div data-testid="bar-list" />,
-}));
-
-vi.mock("@/hooks/useTremorTheme", () => ({
-  useTremorTheme: () => ["blue", "emerald", "amber"],
-}));
-
 vi.mock("@/lib/xirr", () => ({
   xirr: () => 0.15,
 }));
@@ -117,5 +108,12 @@ describe("DashboardTab", () => {
     expect(screen.getByText("Available Funds")).toBeInTheDocument();
     expect(screen.getByText("Invested Value")).toBeInTheDocument();
     expect(screen.getByText("Portfolio Allocation")).toBeInTheDocument();
+  });
+
+  it("renders allocation through Flint primitives", () => {
+    render(<DashboardTab />);
+
+    expect(screen.getByRole("img", { name: "Portfolio allocation donut" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Portfolio allocation values" })).toBeInTheDocument();
   });
 });

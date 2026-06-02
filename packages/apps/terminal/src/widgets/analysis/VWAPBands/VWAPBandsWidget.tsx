@@ -11,6 +11,7 @@
 
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
 import { Waves, RefreshCw, ChevronDown } from "lucide-react";
+import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -119,104 +120,73 @@ const BASE_PRICES: Record<string, number> = {
   INFY: 1_410,
 };
 
-// ---------------------------------------------------------------------------
-// SVG chart
-// ---------------------------------------------------------------------------
-
-interface VWAPChartProps {
-  points: VWAPPoint[];
-}
-
-function VWAPChart({ points }: VWAPChartProps) {
-  if (points.length < 2) {
-    return (
-      <div className="flex items-center justify-center h-full text-xxs text-text-muted">
-        No data
-      </div>
-    );
+function buildVWAPChart(points: VWAPPoint[]) {
+  if (points.length === 0) {
+    return {
+      bands: [],
+      series: [],
+      xDomain: [0, 1] as const,
+      yDomain: [0, 1] as const,
+      xTicks: [],
+      yTicks: [],
+    };
   }
-
-  const W = 360;
-  const H = 160;
-  const PAD = { top: 8, right: 8, bottom: 20, left: 48 };
-  const cw = W - PAD.left - PAD.right;
-  const ch = H - PAD.top - PAD.bottom;
 
   const allPrices = points.flatMap((p) => [p.lower3, p.upper3, p.price]);
   const minP = Math.min(...allPrices);
   const maxP = Math.max(...allPrices);
   const range = maxP - minP || 1;
-
-  const xOf = (i: number) => PAD.left + (i / (points.length - 1)) * cw;
-  const yOf = (v: number) => PAD.top + ch - ((v - minP) / range) * ch;
-
-  const lineD = (getter: (p: VWAPPoint) => number) =>
-    points
-      .map((p, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(getter(p)).toFixed(1)}`)
-      .join(" ");
-
-  const bandArea = (upper: (p: VWAPPoint) => number, lower: (p: VWAPPoint) => number) => {
-    const top = points.map((p, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(upper(p)).toFixed(1)}`).join(" ");
-    const bot = [...points].reverse().map((p, i) => `L${xOf(points.length - 1 - i).toFixed(1)},${yOf(lower(p)).toFixed(1)}`).join(" ");
-    return `${top} ${bot} Z`;
-  };
-
-  // X-axis labels: every 4 bars
-  const xLabels = points.filter((_, i) => i % 4 === 0 || i === points.length - 1);
-
-  return (
-    <svg
-      width="100%"
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      aria-label="VWAP bands chart"
-      role="img"
-    >
-      {/* Band fills */}
-      <path d={bandArea((p) => p.upper3, (p) => p.lower3)} fill="#6366f1" fillOpacity={0.06} />
-      <path d={bandArea((p) => p.upper2, (p) => p.lower2)} fill="#6366f1" fillOpacity={0.09} />
-      <path d={bandArea((p) => p.upper1, (p) => p.lower1)} fill="#6366f1" fillOpacity={0.14} />
-
-      {/* Band edge lines */}
-      <path d={lineD((p) => p.upper3)} fill="none" stroke="#6366f1" strokeWidth={0.8} strokeDasharray="3 3" opacity={0.5} />
-      <path d={lineD((p) => p.lower3)} fill="none" stroke="#6366f1" strokeWidth={0.8} strokeDasharray="3 3" opacity={0.5} />
-      <path d={lineD((p) => p.upper2)} fill="none" stroke="#8b5cf6" strokeWidth={0.8} strokeDasharray="4 2" opacity={0.6} />
-      <path d={lineD((p) => p.lower2)} fill="none" stroke="#8b5cf6" strokeWidth={0.8} strokeDasharray="4 2" opacity={0.6} />
-      <path d={lineD((p) => p.upper1)} fill="none" stroke="#a78bfa" strokeWidth={1} opacity={0.7} />
-      <path d={lineD((p) => p.lower1)} fill="none" stroke="#a78bfa" strokeWidth={1} opacity={0.7} />
-
-      {/* VWAP line */}
-      <path d={lineD((p) => p.vwap)} fill="none" stroke="#f59e0b" strokeWidth={1.8} />
-
-      {/* Price line */}
-      <path d={lineD((p) => p.price)} fill="none" stroke="#22c55e" strokeWidth={1.4} />
-
-      {/* X-axis ticks */}
-      {xLabels.map((p) => {
-        const i = points.indexOf(p);
-        const x = xOf(i);
-        return (
-          <text key={p.time} x={x} y={H - 4} textAnchor="middle" fontSize={8} fill="#6b7280">
-            {p.time}
-          </text>
-        );
-      })}
-
-      {/* Y-axis ticks — 4 levels */}
-      {[0, 0.33, 0.67, 1].map((frac) => {
-        const val = minP + frac * range;
-        const y = yOf(val);
-        return (
-          <g key={frac}>
-            <line x1={PAD.left - 3} y1={y} x2={PAD.left} y2={y} stroke="#374151" strokeWidth={0.5} />
-            <text x={PAD.left - 5} y={y + 3} textAnchor="end" fontSize={7.5} fill="#6b7280">
-              {val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val.toFixed(0)}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+  const pointFor = (point: VWAPPoint, value: number, index: number) => ({
+    x: index,
+    y: value,
+    label: `${point.time} ${value.toFixed(2)}`,
+  });
+  const lineFor = (getter: (point: VWAPPoint) => number) => (
+    points.map((point, index) => pointFor(point, getter(point), index))
   );
+  const xTicks = points
+    .map((_, index) => index)
+    .filter((index) => index % 4 === 0 || index === points.length - 1);
+
+  return {
+    bands: [
+      {
+        id: "sigma-3",
+        label: "Three standard deviation VWAP band",
+        color: "rgba(99,102,241,0.06)",
+        upper: lineFor((point) => point.upper3),
+        lower: lineFor((point) => point.lower3),
+      },
+      {
+        id: "sigma-2",
+        label: "Two standard deviation VWAP band",
+        color: "rgba(99,102,241,0.09)",
+        upper: lineFor((point) => point.upper2),
+        lower: lineFor((point) => point.lower2),
+      },
+      {
+        id: "sigma-1",
+        label: "One standard deviation VWAP band",
+        color: "rgba(99,102,241,0.14)",
+        upper: lineFor((point) => point.upper1),
+        lower: lineFor((point) => point.lower1),
+      },
+    ],
+    series: [
+      { id: "upper3", label: "Upper 3 sigma", color: "#6366f1", dash: "3 3", strokeWidth: 0.8, points: lineFor((point) => point.upper3) },
+      { id: "lower3", label: "Lower 3 sigma", color: "#6366f1", dash: "3 3", strokeWidth: 0.8, points: lineFor((point) => point.lower3) },
+      { id: "upper2", label: "Upper 2 sigma", color: "#8b5cf6", dash: "4 2", strokeWidth: 0.8, points: lineFor((point) => point.upper2) },
+      { id: "lower2", label: "Lower 2 sigma", color: "#8b5cf6", dash: "4 2", strokeWidth: 0.8, points: lineFor((point) => point.lower2) },
+      { id: "upper1", label: "Upper 1 sigma", color: "#a78bfa", strokeWidth: 1, points: lineFor((point) => point.upper1) },
+      { id: "lower1", label: "Lower 1 sigma", color: "#a78bfa", strokeWidth: 1, points: lineFor((point) => point.lower1) },
+      { id: "vwap", label: "VWAP", color: "#f59e0b", strokeWidth: 1.8, points: lineFor((point) => point.vwap) },
+      { id: "price", label: "Price", color: "#22c55e", strokeWidth: 1.4, points: lineFor((point) => point.price) },
+    ],
+    xDomain: [0, Math.max(points.length - 1, 1)] as const,
+    yDomain: [minP, maxP] as const,
+    xTicks,
+    yTicks: [0, 0.33, 0.67, 1].map((fraction) => minP + fraction * range),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +204,7 @@ function VWAPBandsWidget() {
 
   const bars = useMemo(() => buildSampleBars(BASE_PRICES[symbol] ?? 22500), [symbol]);
   const points = useMemo(() => computeVWAP(bars), [bars]);
+  const vwapChart = useMemo(() => buildVWAPChart(points), [points]);
 
   const latestPoint = points[points.length - 1];
   const priceVsVWAP = latestPoint
@@ -347,7 +318,25 @@ function VWAPBandsWidget() {
 
         {/* Chart */}
         <div className="bg-surface-card border border-border-default rounded p-2">
-          <VWAPChart points={points} />
+          {points.length < 2 ? (
+            <div className="flex items-center justify-center h-full text-xxs text-text-muted">
+              No data
+            </div>
+          ) : (
+            <FlintBandedLineChart
+              ariaLabel="VWAP bands chart"
+              bands={vwapChart.bands}
+              series={vwapChart.series}
+              xDomain={vwapChart.xDomain}
+              yDomain={vwapChart.yDomain}
+              xTicks={vwapChart.xTicks}
+              yTicks={vwapChart.yTicks}
+              xFormatter={(value) => points[value]?.time ?? String(value)}
+              yFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value.toFixed(0)}
+              width={360}
+              height={160}
+            />
+          )}
         </div>
 
         {/* Band legend */}
@@ -362,14 +351,15 @@ function VWAPBandsWidget() {
               { label: "± 3σ", colour: "#6366f1", dash: true },
             ].map(({ label, colour, dash }) => (
               <div key={label} className="flex items-center gap-1.5 text-xxs text-text-secondary">
-                <svg width={16} height={8} aria-hidden="true">
-                  <line
-                    x1={0} y1={4} x2={16} y2={4}
-                    stroke={colour}
-                    strokeWidth={dash ? 1 : 1.5}
-                    strokeDasharray={dash ? "3 2" : undefined}
-                  />
-                </svg>
+                <span
+                  className="inline-block w-4 border-t"
+                  style={{
+                    borderColor: colour,
+                    borderTopStyle: dash ? "dashed" : "solid",
+                    borderTopWidth: dash ? 1 : 1.5,
+                  }}
+                  aria-hidden="true"
+                />
                 {label}
               </div>
             ))}

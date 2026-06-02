@@ -7,8 +7,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { createChart, LineSeries } from "lightweight-charts";
-import type { IChartApi } from "lightweight-charts";
+import type { Time } from "lightweight-charts";
+import { FlintBaselineSparkline, createFlintLineChart } from "@flinttrade/design-system";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -37,6 +37,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightLineRuntime } from "@/lib/lightweightChartRuntime";
 import {
   Table,
   TableBody,
@@ -247,34 +249,23 @@ function MetricCard({ metric }: { metric: BacktestMetric }) {
 
 // ---------------------------------------------------------------------------
 // EquityCurveChart — real Lightweight Charts line chart for equity curve data.
-// Falls back to SVG placeholder when no data points are provided.
+// Falls back to a shared core sparkline poster when no data points are provided.
 // ---------------------------------------------------------------------------
 
 function EquityCurvePlaceholder() {
   const points = [0, 2, 5, 3, 8, 6, 12, 10, 15, 13, 18, 22, 20, 25, 24];
-  const w = 600;
-  const h = 120;
-  const maxV = Math.max(...points);
-  const coords = points
-    .map((v, i) => `${(i / (points.length - 1)) * w},${h - (v / maxV) * (h - 10)}`)
-    .join(" ");
 
   return (
     <div className="relative w-full h-35 bg-surface-base rounded-md border border-border-default flex items-center justify-center overflow-hidden">
-      <svg
-        className="absolute inset-0 w-full h-full opacity-40"
-        viewBox={`0 0 ${w} ${h}`}
-        preserveAspectRatio="none"
-      >
-        <defs>
-          <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#34d399" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#34d399" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polyline points={coords} fill="none" stroke="#34d399" strokeWidth="2" />
-        <polygon points={`0,${h} ${coords} ${w},${h}`} fill="url(#eqGrad)" />
-      </svg>
+      <div className="absolute inset-0 opacity-40">
+        <FlintBaselineSparkline
+          points={points}
+          baseline={0}
+          positive
+          ariaLabel="Backtest placeholder equity curve"
+          className="h-full w-full"
+        />
+      </div>
       <div className="relative text-xs text-text-muted text-center">
         <BarChart2 size={20} className="mx-auto mb-1 opacity-40" />
         Equity curve renders here when backtest-engine API is connected
@@ -285,57 +276,50 @@ function EquityCurvePlaceholder() {
 
 function EquityCurveChart({ data }: { data: EquityPoint[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
+  const chartTheme = useLightweightChartTheme();
 
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
 
-    const bg = getComputedStyle(document.documentElement).getPropertyValue("--color-base").trim() || "#0a0a0f";
-    const gridColor = getComputedStyle(document.documentElement).getPropertyValue("--color-border").trim() || "#2a2a3a";
-    const textColor = getComputedStyle(document.documentElement).getPropertyValue("--color-text-muted").trim() || "#6b7280";
-
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height: 140,
-      layout: { background: { color: bg }, textColor },
-      grid: { vertLines: { color: gridColor }, horzLines: { color: gridColor } },
-      crosshair: { vertLine: { visible: true }, horzLine: { visible: true } },
-      rightPriceScale: { borderColor: gridColor },
-      timeScale: { borderColor: gridColor, timeVisible: true },
-      handleScroll: false,
-      handleScale: false,
-    });
-
-    const series = chart.addSeries(LineSeries, {
-      color: "#34d399",
-      lineWidth: 2,
-      priceFormat: { type: "price", precision: 0, minMove: 1 },
-    });
+    const flintChart = createFlintLineChart(
+      lightweightLineRuntime,
+      containerRef.current,
+      chartTheme,
+      {
+        ariaLabel: "Backtest equity curve chart",
+        height: 140,
+        crosshair: { vertLine: { visible: true }, horzLine: { visible: true } },
+        handleScroll: false,
+        handleScale: false,
+        series: [
+          {
+            id: "equity",
+            options: {
+              color: "#34d399",
+              lineWidth: 2,
+              priceFormat: { type: "price", precision: 0, minMove: 1 },
+            },
+          },
+        ],
+      },
+    );
+    const { chart } = flintChart;
+    const series = flintChart.seriesById.equity;
 
     // Lightweight Charts v5 expects UTCTimestamp (seconds) for time
     series.setData(
       data.map((p) => ({
-        time: p.time as unknown as import("lightweight-charts").Time,
+        time: p.time as unknown as Time,
         value: p.value,
       }))
     );
 
     chart.timeScale().fitContent();
-    chartRef.current = chart;
-
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener("resize", handleResize);
 
     return () => {
-      window.removeEventListener("resize", handleResize);
-      chart.remove();
-      chartRef.current = null;
+      flintChart.remove();
     };
-  }, [data]);
+  }, [data, chartTheme]);
 
   if (data.length === 0) return <EquityCurvePlaceholder />;
 
@@ -593,7 +577,7 @@ function ResultsTab({ hasRun, equityCurve }: { hasRun: boolean; equityCurve: Equ
           </p>
         </div>
 
-        {/* Equity curve — real Lightweight Charts line chart, falls back to SVG if empty */}
+        {/* Equity curve — real Lightweight Charts line chart, falls back to core poster if empty */}
         <div>
           <div className="text-xs text-text-muted mb-2 flex items-center gap-1">
             <TrendingUp size={12} />

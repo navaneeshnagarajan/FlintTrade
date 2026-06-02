@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Activity, Target } from "lucide-react";
+import { FlintStackedBarChart, type FlintStackedBarSeries } from "@flinttrade/design-system";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -26,6 +27,28 @@ export function MaxPainTab() {
   const maxTotalPain = useMemo(() => {
     if (!data?.strikes?.length) return 1;
     return Math.max(...data.strikes.map((s) => s.total_pain), 1);
+  }, [data]);
+  const painLabels = useMemo(() => {
+    if (!data?.strikes?.length) return [];
+    return data.strikes.map((row) => {
+      const strike = row.strike.toLocaleString("en-IN");
+      return row.strike === data.max_pain_strike ? `${strike} MAX` : strike;
+    });
+  }, [data]);
+  const painSeries = useMemo<FlintStackedBarSeries[]>(() => {
+    if (!data?.strikes?.length) return [];
+    return [
+      {
+        label: "Call Pain",
+        color: "rgba(16, 185, 129, 0.72)",
+        values: data.strikes.map((row) => row.call_pain),
+      },
+      {
+        label: "Put Pain",
+        color: "rgba(239, 68, 68, 0.72)",
+        values: data.strikes.map((row) => row.put_pain),
+      },
+    ];
   }, [data]);
 
   return (
@@ -74,53 +97,14 @@ export function MaxPainTab() {
             {data.strikes.length > 0 && (
               <div>
                 <SectionLabel icon={Target} label="Pain Distribution Across Strikes" />
-                <div className="flex items-center gap-4 mb-2 text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-2 rounded bg-emerald-600 inline-block" />
-                    <span className="text-text-muted">Call Pain</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-2 rounded bg-red-600 inline-block" />
-                    <span className="text-text-muted">Put Pain</span>
-                  </div>
-                </div>
-                <div className="space-y-px">
-                  {data.strikes.map((row) => {
-                    const isMaxPain = row.strike === data.max_pain_strike;
-                    const totalPct = (row.total_pain / maxTotalPain) * 100;
-                    const callPct = row.total_pain > 0 ? (row.call_pain / row.total_pain) * totalPct : 0;
-                    const putPct = totalPct - callPct;
-                    return (
-                      <div
-                        key={row.strike}
-                        className={[
-                          "flex items-center gap-2 px-1 py-0.5 rounded",
-                          isMaxPain ? "bg-primary/10 border border-primary/30" : "",
-                        ].join(" ")}
-                      >
-                        <span className="font-mono text-xs w-16 text-right shrink-0 text-text-muted">
-                          {row.strike.toLocaleString("en-IN")}
-                          {isMaxPain && <span className="ml-1 text-primary text-xxs">MAX</span>}
-                        </span>
-                        <div className="flex-1 flex h-4 rounded overflow-hidden bg-surface-elevated">
-                          <div
-                            className="h-full bg-emerald-600/70"
-                            style={{ width: `${callPct}%` }}
-                            title={`Call Pain: ${row.call_pain.toFixed(0)}`}
-                          />
-                          <div
-                            className="h-full bg-red-600/70"
-                            style={{ width: `${putPct}%` }}
-                            title={`Put Pain: ${row.put_pain.toFixed(0)}`}
-                          />
-                        </div>
-                        <span className="font-mono text-xs w-20 text-right shrink-0 text-text-secondary">
-                          {formatOINum(row.total_pain)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+                <FlintStackedBarChart
+                  ariaLabel="Max pain distribution across strikes"
+                  labels={painLabels}
+                  series={painSeries}
+                  maxValue={maxTotalPain}
+                  valueFormatter={formatOINum}
+                  className="mt-2"
+                />
               </div>
             )}
 

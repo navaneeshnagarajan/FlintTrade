@@ -37,15 +37,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@tremor/react", () => ({
-  DonutChart: () => <div data-testid="donut-chart" />,
-  BarList: () => <div data-testid="bar-list" />,
-}));
-
-vi.mock("@/hooks/useTremorTheme", () => ({
-  useTremorTheme: () => ["blue", "emerald", "amber"],
-}));
-
 vi.mock("@/components/motion/StaggeredList", () => ({
   StaggeredList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
@@ -103,5 +94,12 @@ describe("NetWorthTab", () => {
     expect(screen.getByText("Mutual Funds")).toBeInTheDocument();
     expect(screen.getByText("Gold")).toBeInTheDocument();
     expect(screen.getByText("Fixed Deposits")).toBeInTheDocument();
+  });
+
+  it("renders live asset visuals through Flint primitives", () => {
+    render(<NetWorthTab />);
+
+    expect(screen.getByRole("img", { name: "Live asset allocation donut" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Invested versus current values" })).toBeInTheDocument();
   });
 });

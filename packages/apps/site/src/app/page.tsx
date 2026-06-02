@@ -13,7 +13,7 @@ const featureCards = [
   {
     icon: TerminalSquare,
     title: 'A self-hosted trading cockpit',
-    copy: 'React, Dockview, Python services, Rust tick processing, native broker support, and optional OpenAlgo integration in one inspectable workspace.',
+    copy: 'React, Dockview, Python services, Rust tick processing, a native broker gateway contract, and optional OpenAlgo integration in one inspectable workspace.',
   },
   {
     icon: ShieldCheck,
@@ -136,15 +136,15 @@ export default function HomePage() {
       <section className="section">
         <div className="metric-rail" aria-label="Project facts">
           <div>
-            <strong>32</strong>
-            <span>Native and OpenAlgo broker integrations documented for compatibility checks.</span>
+            <strong>Gateway</strong>
+            <span>Native broker contract and routing are scaffolded; Dhan direct adapter is gated pending SDK attestation.</span>
           </div>
           <div>
             <strong>17</strong>
             <span>Package surfaces across Python, React, shared UI, and Rust/PyO3.</span>
           </div>
           <div>
-            <strong>82</strong>
+            <strong>83</strong>
             <span>Terminal widgets described by the public contributor documentation.</span>
           </div>
           <div>

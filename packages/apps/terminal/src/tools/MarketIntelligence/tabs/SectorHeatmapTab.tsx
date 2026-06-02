@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Map as MapIcon } from "lucide-react";
+import { FlintWeightedHeatmap } from "@flinttrade/design-system";
 import { INDIA_SECTORS } from "../data";
 import { DataNotice, TfButton } from "../shared";
 import { formatReturn, getReturnValue, getThemeColor } from "../utils";
@@ -31,7 +32,21 @@ export function SectorHeatmapTab() {
     []
   );
 
-  const totalCap = sorted.reduce((a, b) => a + b.market_cap_cr, 0);
+  const heatmapEntries = useMemo(() => (
+    sorted.map((sector) => {
+      const ret = getReturnValue(sector, selectedTf);
+
+      return {
+        id: sector.ticker,
+        label: sector.name,
+        valueLabel: formatReturn(ret),
+        detailLabel: `${(sector.market_cap_cr / 100000).toFixed(1)}L Cr`,
+        weight: sector.market_cap_cr,
+        color: getCellColor(ret),
+        textColor: getTextColor(ret),
+      };
+    })
+  ), [selectedTf, sorted]);
 
   return (
     <div className="p-4">
@@ -42,42 +57,10 @@ export function SectorHeatmapTab() {
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {sorted.map((sector) => {
-          const ret = getReturnValue(sector, selectedTf);
-          const capWeight = (sector.market_cap_cr / totalCap) * 100;
-          const widthPct = Math.max(12, Math.min(28, capWeight * 0.8));
-          const heightPx = capWeight >= 10 ? 84 : capWeight >= 6 ? 72 : 62;
-
-          return (
-            <div
-              key={sector.ticker}
-              className="rounded-md flex flex-col justify-between p-2.5 cursor-default transition-opacity hover:opacity-90 shrink-0"
-              style={{
-                backgroundColor: getCellColor(ret),
-                width: `calc(${widthPct}% - 6px)`,
-                height: `${heightPx}px`,
-              }}
-              title={`${sector.name}: ${formatReturn(ret)}`}
-            >
-              <div className="text-xs text-white/75 leading-tight font-medium truncate">
-                {sector.name}
-              </div>
-              <div className="flex items-end justify-between gap-1">
-                <div
-                  className="text-sm font-mono font-bold"
-                  style={{ color: getTextColor(ret) }}
-                >
-                  {formatReturn(ret)}
-                </div>
-                <div className="text-xxs text-white/40 font-mono">
-                  {(sector.market_cap_cr / 100000).toFixed(1)}L Cr
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <FlintWeightedHeatmap
+        ariaLabel={`Sector heatmap by ${selectedTf} return and market cap`}
+        entries={heatmapEntries}
+      />
 
       <div className="flex flex-wrap items-center gap-3 mt-4 text-xs text-text-muted">
         <MapIcon size={10} />

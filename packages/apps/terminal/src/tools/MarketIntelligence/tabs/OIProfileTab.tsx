@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Activity, Layers } from "lucide-react";
+import { FlintDivergingBarList } from "@flinttrade/design-system";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -52,6 +53,20 @@ export function OIProfileTab() {
     if (!data?.length) return 1;
     return Math.max(...data.map((d) => d.oi), 1);
   }, [data]);
+  const oiProfileEntries = useMemo(() => {
+    return strikes.map((strike) => {
+      const entry = strikeMap.get(strike)!;
+      const ceOI = entry.ce?.oi ?? 0;
+      const peOI = entry.pe?.oi ?? 0;
+      return {
+        label: strike.toLocaleString("en-IN"),
+        leftValue: peOI,
+        rightValue: ceOI,
+        leftLabel: peOI > 0 ? formatOINum(peOI) : "",
+        rightLabel: ceOI > 0 ? formatOINum(ceOI) : "",
+      };
+    });
+  }, [strikeMap, strikes]);
 
   return (
     <ScrollArea className="h-full">
@@ -72,41 +87,13 @@ export function OIProfileTab() {
           <>
             <div>
               <SectionLabel icon={Layers} label="OI Profile — CE (right) vs PE (left)" />
-              <div className="flex justify-between text-xs text-text-muted mb-2 px-1">
-                <span className="text-loss">PE OI</span>
-                <span className="text-text-muted">Strike</span>
-                <span className="text-profit">CE OI</span>
-              </div>
-              <div className="space-y-px">
-                {strikes.map((strike) => {
-                  const entry = strikeMap.get(strike)!;
-                  const ceOI = entry.ce?.oi ?? 0;
-                  const peOI = entry.pe?.oi ?? 0;
-                  const cePct = (ceOI / maxOI) * 45;
-                  const pePct = (peOI / maxOI) * 45;
-                  return (
-                    <div key={strike} className="flex items-center gap-1 h-5">
-                      <div className="flex-1 flex justify-end">
-                        <div
-                          className="h-4 rounded-l bg-red-500/60"
-                          style={{ width: `${pePct}%`, minWidth: peOI > 0 ? "2px" : "0" }}
-                          title={`PE OI: ${formatOINum(peOI)}`}
-                        />
-                      </div>
-                      <div className="w-20 text-center font-mono text-xs text-text-muted shrink-0">
-                        {strike.toLocaleString("en-IN")}
-                      </div>
-                      <div className="flex-1 flex justify-start">
-                        <div
-                          className="h-4 rounded-r bg-emerald-500/60"
-                          style={{ width: `${cePct}%`, minWidth: ceOI > 0 ? "2px" : "0" }}
-                          title={`CE OI: ${formatOINum(ceOI)}`}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <FlintDivergingBarList
+                ariaLabel="OI profile by strike"
+                entries={oiProfileEntries}
+                maxValue={maxOI}
+                leftHeading="PE OI"
+                rightHeading="CE OI"
+              />
             </div>
 
             <div>

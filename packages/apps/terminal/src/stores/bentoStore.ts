@@ -33,7 +33,7 @@ interface BentoStore {
   activePresetId: string | null;
 
   // Card operations
-  addCard: (componentId: string, size?: BentoCardSize) => void;
+  addCard: (componentId: string, size?: BentoCardSize) => string;
   removeCard: (id: string) => void;
   resizeCard: (id: string, size: BentoCardSize) => void;
   reorderCards: (ids: string[]) => void;
@@ -87,6 +87,7 @@ const storeImpl: StateCreator<
     set((state) => ({
       cards: [...state.cards, { id, componentId, size, order }],
     }));
+    return id;
   },
 
   removeCard: (id) => {

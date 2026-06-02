@@ -22,6 +22,10 @@
       "paths": ["flinttrade-design/baselines/test-count-2026-05-23.sha256"]
     },
     {
+      "id": "baseline-tag-allowed-signers",
+      "paths": ["flinttrade-design/baselines/pre-restructure-baseline.allowed-signers"]
+    },
+    {
       "id": "build-perf",
       "paths": ["flinttrade-design/baselines/build-perf-2026-05-23.json"]
     },
@@ -34,15 +38,30 @@
       "paths": ["flinttrade-design/baselines/visual-regression"]
     },
     {
+      "id": "visual-regression-capture-script",
+      "paths": ["scripts/generate-visual-regression-baseline.sh"]
+    },
+    {
+      "id": "visual-regression-validator",
+      "paths": ["scripts/verify-visual-regression-capture.py"]
+    },
+    {
+      "id": "visual-regression-policy",
+      "paths": ["flinttrade-design/baselines/visual-regression-policy.md"]
+    },
+    {
       "id": "migration-runner",
       "paths": [
-        "packages/core/src/workspace_migrations.py",
-        "packages/core/core/src/workspace_migrations.py"
+        "packages/core/core/src/flinttrade_core/workspace_migrations.py"
       ]
     },
     {
       "id": "rollback-runbook",
-      "paths": [".local/specs/flinttrade-design/2026-05-24-baselines.md"]
+      "paths": ["flinttrade-design/baselines/rollback-runbook-2026-05-24.md"]
+    },
+    {
+      "id": "rollback-rehearsal-script",
+      "paths": ["scripts/rehearse-baseline-rollback.py"]
     }
   ]
 }

@@ -6,8 +6,9 @@ auth_state.duckdb,flinttrade_core,duckdb,yes,"no move; add audit_chain_head, con
 totp_auth.duckdb,flinttrade_core,duckdb,yes (multi-user only),no move
 traffic_log.duckdb,flinttrade_data,duckdb,no - recreatable,rotate over 30 days; add route_classification for drained migration
 error_log.duckdb,flinttrade_data,duckdb,no,no move
-activity.db,flinttrade_data,duckdb,yes,"no move; add gateway.credential.*, auth.dek_rotated actions as needed"
-security.db,flinttrade_data,duckdb,no,no move
+activity.db,flinttrade_data,sqlite WAL,yes,"migrated from DuckDB; add gateway.credential.*, auth.dek_rotated actions as needed"
+security.db,flinttrade_data,sqlite WAL,no,migrated from DuckDB; no move
+sandbox/state.sqlite,flinttrade_data,sqlite WAL,yes - fail loud if locked,"canonical native sandbox state; migrate legacy sandbox.duckdb via scripts/migrate-sandbox-duckdb-to-sqlite.py"
 latency_log.duckdb,flinttrade_data,duckdb,no,rotate
 api_analyzer.duckdb,flinttrade_data,duckdb,no,drop and recreate on opt-in
 archive/audit/*.jsonl,flinttrade_data,jsonl,n/a - append-only,add prev_hash and event_hash chaining

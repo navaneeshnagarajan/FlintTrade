@@ -1,12 +1,12 @@
 import { useMemo } from "react";
 import { BarChart2, Trophy } from "lucide-react";
+import { FlintRankedBarList, FlintSignedCategoricalBarChart } from "@flinttrade/design-system";
 import { formatCurrencyCompact } from "@/lib/formatters";
 import { computeAnalytics } from "@/lib/journalAnalytics";
 import { type JournalTrade } from "@/services/ftApi";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatCard } from "./StatCard";
-import { pnlColor } from "./utils";
 
 export function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
   const a = useMemo(() => computeAnalytics(trades), [trades]);
@@ -20,8 +20,16 @@ export function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
     );
   }
 
-  const maxDowAbs = Math.max(...a.byDayOfWeek.map((d) => Math.abs(d.pnl)), 1);
-  const maxSymAbs = Math.max(...a.bySymbol.map((s) => Math.abs(s.pnl)), 1);
+  const dayOfWeekEntries = a.byDayOfWeek.map(({ day, pnl }) => ({
+    label: day,
+    value: pnl,
+    color: pnl >= 0 ? "var(--color-profit, #22c55e)" : "var(--color-loss, #ef4444)",
+  }));
+  const symbolPnlEntries = a.bySymbol.map(({ symbol, pnl }) => ({
+    label: symbol,
+    value: pnl,
+    color: pnl >= 0 ? "var(--color-profit, #22c55e)" : "var(--color-loss, #ef4444)",
+  }));
 
   return (
     <ScrollArea className="flex-1 px-3 py-2">
@@ -100,27 +108,18 @@ export function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-3 pt-1">
-            <div className="flex items-end gap-2 h-16">
-              {a.byDayOfWeek.map(({ day, pnl, count }) => {
-                const h = maxDowAbs > 0 ? Math.abs(pnl) / maxDowAbs : 0;
-                return (
-                  <div key={day} className="flex flex-col items-center gap-1 flex-1">
-                    <div
-                      className="w-full flex items-end justify-center"
-                      style={{ height: "44px" }}
-                    >
-                      <div
-                        className={`w-full rounded-sm transition-[height] ${
-                          pnl >= 0 ? "bg-emerald-600/60" : "bg-red-600/60"
-                        }`}
-                        style={{ height: `${Math.max(2, h * 44)}px` }}
-                        title={`${day}: ${formatCurrencyCompact(pnl)} (${count} trades)`}
-                      />
-                    </div>
-                    <span className="text-xxs text-text-muted">{day}</span>
-                  </div>
-                );
-              })}
+            <FlintSignedCategoricalBarChart
+              ariaLabel="Trade journal P&L by day of week"
+              entries={dayOfWeekEntries}
+              valueFormatter={formatCurrencyCompact}
+              className="text-text-primary"
+            />
+            <div className="mt-2 grid grid-cols-5 gap-1 text-center">
+              {a.byDayOfWeek.map(({ day, count }) => (
+                <div key={day} className="text-xxs text-text-muted">
+                  {count}t
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -133,34 +132,20 @@ export function AnalyticsTab({ trades }: { trades: JournalTrade[] }) {
                 P&L by Symbol
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-3 pt-1 space-y-1.5">
-              {a.bySymbol.map(({ symbol, pnl, trades }) => {
-                const w =
-                  maxSymAbs > 0 ? (Math.abs(pnl) / maxSymAbs) * 100 : 0;
-                return (
-                  <div key={symbol} className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-text-primary w-24 shrink-0 truncate">
-                      {symbol}
-                    </span>
-                    <div className="flex-1 h-4 bg-surface-base rounded overflow-hidden">
-                      <div
-                        className={`h-full rounded transition-[width] ${
-                          pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"
-                        }`}
-                        style={{ width: `${w}%` }}
-                      />
-                    </div>
-                    <span
-                      className={`text-xs font-mono w-20 text-right shrink-0 ${pnlColor(pnl)}`}
-                    >
-                      {formatCurrencyCompact(pnl)}
-                    </span>
-                    <span className="text-xs text-text-muted w-14 text-right shrink-0">
-                      {trades}t
-                    </span>
+            <CardContent className="p-3 pt-1">
+              <FlintRankedBarList
+                ariaLabel="Trade journal P&L by symbol"
+                entries={symbolPnlEntries}
+                valueFormatter={formatCurrencyCompact}
+              />
+              <div className="mt-2 space-y-1">
+                {a.bySymbol.map(({ symbol, trades }) => (
+                  <div key={symbol} className="flex justify-between gap-2 text-xs text-text-muted">
+                    <span className="truncate font-mono text-text-secondary">{symbol}</span>
+                    <span className="shrink-0">{trades}t</span>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

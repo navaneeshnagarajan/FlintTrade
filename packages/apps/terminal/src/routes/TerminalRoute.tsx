@@ -2,9 +2,18 @@ import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } fro
 import { useNavigate } from "react-router-dom";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
-import type { DockviewReadyEvent } from "dockview-react";
+import type { DockviewReadyEvent, IDockviewPanelProps } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
-import { LayoutGrid, Layers, ShieldOff } from "lucide-react";
+import {
+  CandlestickChart,
+  FileEdit,
+  LayoutDashboard,
+  LayoutGrid,
+  Layers,
+  ShieldOff,
+  Star,
+  Table2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -14,7 +23,7 @@ import { useModeStore } from "@/stores/modeStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import PresetPicker from "@/chrome/PresetPicker";
-import { widgetComponents } from "@/layout/widgetFactory";
+import { widgetCatalog, widgetComponents } from "@/layout/widgetFactory";
 import { applyPreset } from "@/layout/workspacePresets";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillContent } from "@/hooks/useSkillContent";
@@ -177,10 +186,144 @@ const tools: Omit<Record<ToolId, React.LazyExoticComponent<React.ComponentType<{
   "market-intelligence": lazy(() => import("../tools/MarketIntelligence/MarketIntelligenceTool")),
 };
 
+const COMPACT_TRADE_BREAKPOINT = 768;
+
+function isCompactTradeViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.innerWidth < COMPACT_TRADE_BREAKPOINT;
+}
+
+function useCompactTradeWorkspace(): boolean {
+  const [isCompact, setIsCompact] = useState(isCompactTradeViewport);
+
+  useEffect(() => {
+    function handleResize() {
+      setIsCompact(isCompactTradeViewport());
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  return isCompact;
+}
+
+type CompactTradeWidgetId = "chart" | "watchlist" | "orderpad" | "positions" | "dashboard";
+
+const COMPACT_TRADE_WIDGETS: Array<{
+  id: CompactTradeWidgetId;
+  label: string;
+  Icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+}> = [
+  { id: "chart", label: "Chart", Icon: CandlestickChart },
+  { id: "watchlist", label: "Watchlist", Icon: Star },
+  { id: "orderpad", label: "Order Pad", Icon: FileEdit },
+  { id: "positions", label: "Positions", Icon: Table2 },
+  { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+];
+
+function TradeCompactWorkspace({
+  onOpenWidgetPicker,
+  onOpenPresetPicker,
+}: {
+  onOpenWidgetPicker: () => void;
+  onOpenPresetPicker: () => void;
+}) {
+  const [activeWidgetId, setActiveWidgetId] = useState<CompactTradeWidgetId>("chart");
+  const activeWidget = COMPACT_TRADE_WIDGETS.find((widget) => widget.id === activeWidgetId) ?? COMPACT_TRADE_WIDGETS[0];
+  const ActiveWidgetPanel = widgetComponents[activeWidget.id];
+  const panelProps = {} as IDockviewPanelProps;
+
+  return (
+    <section
+      aria-label="Compact trade workspace"
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base"
+      data-testid="trade-compact-workspace"
+      data-tour-target="workspace"
+    >
+      <div className="shrink-0 border-b border-border-default bg-surface-elevated/90">
+        <div
+          role="tablist"
+          aria-label="Trade workspace panels"
+          className="flex min-w-0 items-center gap-1 overflow-x-auto px-2 py-2"
+        >
+          {COMPACT_TRADE_WIDGETS.map(({ id, label, Icon }) => {
+            const isActive = activeWidgetId === id;
+            return (
+              <button
+                key={id}
+                id={`trade-compact-tab-${id}`}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`trade-compact-panel-${id}`}
+                tabIndex={isActive ? 0 : -1}
+                onClick={() => setActiveWidgetId(id)}
+                className={[
+                  "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors",
+                  isActive
+                    ? "border-profit/40 bg-profit/15 text-profit shadow-[0_0_18px_rgba(34,197,94,0.12)]"
+                    : "border-border-default bg-surface-card text-text-secondary hover:border-profit/25 hover:text-text-primary",
+                ].join(" ")}
+              >
+                <Icon className="h-3.5 w-3.5" aria-hidden />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div
+        id={`trade-compact-panel-${activeWidget.id}`}
+        role="tabpanel"
+        aria-labelledby={`trade-compact-tab-${activeWidget.id}`}
+        className="min-h-0 flex-1 overflow-hidden"
+      >
+        {ActiveWidgetPanel ? (
+          <ActiveWidgetPanel {...panelProps} />
+        ) : (
+          <div role="status" className="flex h-full items-center justify-center text-xs text-text-muted">
+            {activeWidget.label} is unavailable.
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border-default bg-surface-elevated/90 px-3 py-2">
+        <span className="min-w-0 truncate text-xs text-text-muted">
+          Compact workspace
+        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 border-border-default px-2.5 text-xs text-text-secondary hover:text-text-primary"
+            onClick={onOpenWidgetPicker}
+          >
+            <LayoutGrid className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Add
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 bg-profit px-2.5 text-xs text-black hover:bg-profit/90"
+            onClick={onOpenPresetPicker}
+          >
+            <Layers className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Templates
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function TerminalRoute() {
   const navigate = useNavigate();
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
   const [panelCount, setPanelCount] = useState<number | null>(null);
+  const isCompactWorkspace = useCompactTradeWorkspace();
   // d1/d2/d4 — subscriptions created inside onDockviewReady; cleaned up on unmount.
   const readyDisposablesRef = useRef<Array<{ dispose(): void }>>([]);
   // d3 — auto-save subscription managed by its own useEffect.
@@ -380,6 +523,39 @@ export default function TerminalRoute() {
     return () => window.removeEventListener("flinttrade:open-tool", onOpenTool);
   }, [navigate]);
 
+  // Command palette widget actions dispatch this event; keep it here so widgets
+  // can be opened without requiring the modal picker to already be visible.
+  useEffect(() => {
+    function onAddWidget(e: Event) {
+      const detail = (e as CustomEvent<{
+        widgetId?: string;
+        props?: Record<string, unknown>;
+        title?: string;
+      }>).detail;
+      const widgetId = detail?.widgetId;
+      if (!widgetId || !(widgetId in widgetComponents)) return;
+
+      const api = useLayoutStore.getState().dockviewApi;
+      if (!api) return;
+
+      const meta = widgetCatalog.find((widget) => widget.id === widgetId);
+      const panelOptions: Parameters<typeof api.addPanel>[0] = {
+        id: `${widgetId}-${Date.now()}`,
+        component: widgetId,
+        title: detail.title ?? meta?.name ?? widgetId,
+      };
+
+      if (detail.props) {
+        panelOptions.params = detail.props;
+      }
+
+      api.addPanel(panelOptions);
+    }
+
+    window.addEventListener("flinttrade:addWidget", onAddWidget);
+    return () => window.removeEventListener("flinttrade:addWidget", onAddWidget);
+  }, []);
+
   // activeTool is never "settings" (navigate handles it), so the cast is safe.
   const ToolComponent = activeTool
     ? (tools as Record<string, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>)[activeTool]
@@ -409,6 +585,14 @@ export default function TerminalRoute() {
           </Suspense>
         </div>
       ) : (
+        isCompactWorkspace ? (
+          <div className="flex-1 min-h-0">
+            <TradeCompactWorkspace
+              onOpenWidgetPicker={() => setWidgetPickerOpen(true)}
+              onOpenPresetPicker={() => setPresetPickerOpen(true)}
+            />
+          </div>
+        ) : (
         /* ------------------------------------------------------------------ *
          * Resizable panel shell — vertical outer split + horizontal inner split
          * Bottom panel is collapsed by default (collapsedSize={0}).
@@ -497,12 +681,15 @@ export default function TerminalRoute() {
                 id="trade-right"
                 panelRef={rightPanelRef}
                 defaultSize={0}
-                minSize={14}
+                minSize={0}
                 maxSize={30}
                 collapsible
                 collapsedSize={0}
               >
-                <div className="h-full overflow-y-auto bg-surface-card border-l border-border-default p-3">
+                <div
+                  data-testid="trade-right-panel-shell"
+                  className="box-border h-full w-full min-w-0 overflow-x-hidden overflow-y-auto bg-surface-card border-l border-border-default p-3"
+                >
                   <SectionHeader title="Order Pad" as="h3" className="mb-2" />
                   <p className="text-xs text-text-muted">
                     Add the Order Pad widget from the widget picker.
@@ -530,6 +717,7 @@ export default function TerminalRoute() {
             <TradeBottomPanel />
           </Panel>
         </Group>
+        )
       )}
 
       {/* Widget picker dialog — filtered to skill-appropriate widgets */}

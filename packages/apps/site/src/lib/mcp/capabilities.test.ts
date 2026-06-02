@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import {
   DOCS_MCP_TOOL_NAMES,
@@ -22,6 +24,42 @@ describe('docs index generation', () => {
   it('includes the central app version in generated docs metadata', () => {
     expect(docsIndex.version).toBe(APP_VERSION);
     expect(docsIndex.versionTag).toBe(APP_VERSION_TAG);
+  });
+
+  it('publishes the chart ownership boundary through generated architecture docs', () => {
+    const architectureDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/ARCHITECTURE.md');
+
+    expect(architectureDoc?.content).toContain('Chart ownership boundary');
+    expect(architectureDoc?.content).toContain('src/lib/lightweightChartRuntime.ts');
+    expect(architectureDoc?.content).toContain('Plotly');
+    expect(architectureDoc?.content).toContain('createFlintPlotlyTheme');
+    expect(architectureDoc?.content).toContain('createFlintChartDrawingRenderPlan');
+    expect(architectureDoc?.content).toContain('createFlintChartDrawingRenderPlanDiff');
+    expect(architectureDoc?.content).toContain('createFlintChartIndicatorSeriesRenderPlan');
+    expect(architectureDoc?.content).toContain('createFlintChartIndicatorSeriesRenderPlanDiff');
+    expect(architectureDoc?.content).toContain('createFlintChartOIProfileBarData');
+    expect(architectureDoc?.content).toContain('runtime adapter');
+  });
+
+  it('publishes the current terminal widget catalogue count', () => {
+    const architectureDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/ARCHITECTURE.md');
+    const userGuideDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/USER_GUIDE.md');
+
+    expect(architectureDoc?.content).toContain('83 widgets');
+    expect(architectureDoc?.content).toContain('22 trading + 39 analysis + 22 utility');
+    expect(userGuideDoc?.content).toContain('The 83 widgets');
+    expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`82 ${'widgets'}`);
+    expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`38 ${'analysis'}`);
+  });
+
+  it('keeps homepage facts aligned with the audited gateway and widget state', () => {
+    const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+
+    expect(pageSource).toContain('<strong>83</strong>');
+    expect(pageSource).toContain('Native broker contract and routing are scaffolded');
+    expect(pageSource).toContain('Dhan direct adapter is gated');
+    expect(pageSource).not.toContain('<strong>82</strong>');
+    expect(pageSource).not.toContain('Native and OpenAlgo broker integrations documented');
   });
 });
 

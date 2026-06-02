@@ -26,7 +26,7 @@ workflow YAML should read this once.
 `test.yml` splits the Python and TypeScript test suites across seven
 parallel jobs to keep wall-clock time low:
 
-1. `python-tests` — full pytest suite (~9,089 tests).
+1. `python-tests` — full pytest suite.
 2. `node-core-tests` — Vitest for non-widget terminal code.
 3. `node-widget-tests-1` — Vitest for the first widget shard.
 4. `node-widget-tests-2a` — second widget shard, half A.

@@ -37,17 +37,15 @@ export default defineConfig({
         ]
       : []),
   ],
-  optimizeDeps: {
-    exclude: ["react-plotly.js"],
-  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
-      "@flinttrade/design-system": path.resolve(__dirname, "../../core/design-system/src/index.ts"),
       "@flinttrade/design-system/tokens.css": path.resolve(__dirname, "../../core/design-system/src/tokens.css"),
-      // react-plotly.js imports "plotly.js/dist/plotly" but we only ship
-      // plotly.js-dist-min (smaller, same API). Redirect both specifiers so
-      // the bare import does not leak into the built bundle.
+      "@flinttrade/design-system/glass.css": path.resolve(__dirname, "../../core/design-system/src/glass.css"),
+      "@flinttrade/design-system/cinematic.css": path.resolve(__dirname, "../../core/design-system/src/cinematic.css"),
+      "@flinttrade/design-system": path.resolve(__dirname, "../../core/design-system/src/index.ts"),
+      // Plotly widgets render through plotly.js-dist-min directly. Redirect
+      // legacy Plotly specifiers so old imports do not leak the full bundle.
       "plotly.js/dist/plotly": "plotly.js-dist-min",
       "plotly.js": "plotly.js-dist-min",
     },

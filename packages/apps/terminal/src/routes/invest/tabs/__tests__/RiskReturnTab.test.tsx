@@ -83,11 +83,11 @@ describe("RiskReturnTab", () => {
     expect(screen.getByText("Best Sharpe")).toBeInTheDocument();
   });
 
-  it("renders the SVG scatter plot with aria-label", () => {
+  it("renders the scatter plot through the shared Flint scatter primitive", () => {
     render(<RiskReturnTab />);
-    expect(
-      screen.getByRole("img", { name: /risk-return scatter/i }),
-    ).toBeInTheDocument();
+    const chart = screen.getByRole("img", { name: /risk-return scatter/i });
+    expect(chart).toHaveAttribute("data-flint-chart", "scatter");
+    expect(chart.querySelectorAll("[data-scatter-point]").length).toBeGreaterThan(0);
   });
 
   it("renders category legend items", () => {

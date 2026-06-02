@@ -64,10 +64,26 @@ describe("IVSkewWidget", () => {
     expect(screen.getByText("25Δ Skew")).toBeTruthy();
   });
 
-  it("renders the SVG chart with aria label", () => {
+  it("renders the chart with aria label", () => {
     mockConnected.mockReturnValue(false);
     render(<IVSkewWidget />);
     expect(screen.getByLabelText("IV Skew chart")).toBeTruthy();
+  });
+
+  it("renders skew curves through the shared Flint banded-line primitive", () => {
+    mockConnected.mockReturnValue(false);
+    render(<IVSkewWidget />);
+    const chart = screen.getByRole("img", { name: "IV Skew chart" });
+    expect(chart).toHaveAttribute("data-flint-chart", "banded-line");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelectorAll("[data-banded-line-series]").length).toBeGreaterThanOrEqual(4);
+    expect(chart.querySelectorAll("[data-banded-line-marker]").length).toBeGreaterThan(0);
+  });
+
+  it("renders CE and PE legend swatches without local SVG", () => {
+    mockConnected.mockReturnValue(false);
+    const { container } = render(<IVSkewWidget />);
+    expect(container.querySelector('svg[width="12"][height="4"]')).not.toBeInTheDocument();
   });
 
   it("symbol selector includes NIFTY", () => {

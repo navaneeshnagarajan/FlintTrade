@@ -45,9 +45,18 @@ describe("VolatilityConeWidget", () => {
     expect(screen.queryByText("Sample")).toBeNull();
   });
 
-  it("renders the SVG cone chart", () => {
+  it("renders the cone chart", () => {
     render(<VolatilityConeWidget />);
     expect(screen.getByRole("img", { name: /volatility cone chart/i })).toBeTruthy();
+  });
+
+  it("renders the cone through the shared Flint banded-line primitive", () => {
+    render(<VolatilityConeWidget />);
+    const chart = screen.getByRole("img", { name: /volatility cone chart/i });
+    expect(chart).toHaveAttribute("data-flint-chart", "banded-line");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelectorAll("[data-banded-line-band]").length).toBe(3);
+    expect(chart.querySelectorAll("[data-banded-line-marker]").length).toBeGreaterThan(0);
   });
 
   it("renders period labels in summary row", () => {

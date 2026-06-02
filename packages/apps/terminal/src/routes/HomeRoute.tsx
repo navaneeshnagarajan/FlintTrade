@@ -5,7 +5,7 @@
  * Wire-up: registered as "/" inside AppLayout in main.tsx.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { DragEvent, PointerEvent as ReactPointerEvent } from "react";
 import { BentoGrid, BentoGridContainer } from "@/components/bento/BentoGrid";
 import { AddWidgetCard } from "@/components/bento/AddWidgetCard";
@@ -34,6 +34,7 @@ export default function HomeRoute() {
   const [isWidgetPickerOpen, setIsWidgetPickerOpen] = useState(false);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
+  const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
   const cards = useBentoStore((s) => s.cards);
   const addCard = useBentoStore((s) => s.addCard);
   const removeCard = useBentoStore((s) => s.removeCard);
@@ -48,9 +49,28 @@ export default function HomeRoute() {
     [],
   );
 
+  useEffect(() => {
+    if (!highlightedCardId) return undefined;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const frame = document.querySelector<HTMLElement>(
+        `[data-home-card-id="${highlightedCardId}"]`,
+      );
+      frame?.scrollIntoView({ block: "center", behavior: "smooth" });
+      frame?.focus({ preventScroll: true });
+    });
+    const timeout = window.setTimeout(() => setHighlightedCardId(null), 1800);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(timeout);
+    };
+  }, [highlightedCardId]);
+
   function handleAddWidget(componentId: string) {
-    addCard(componentId);
+    const cardId = addCard(componentId);
     setIsWidgetPickerOpen(false);
+    setHighlightedCardId(cardId);
   }
 
   function handleDragStart(cardId: string, event: DragEvent<HTMLButtonElement>) {
@@ -141,8 +161,8 @@ export default function HomeRoute() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-surface-base" data-testid="home-route">
-      <BentoGridContainer className="flex-1 px-3 py-3">
+    <div className="flex h-full min-h-0 flex-col bg-surface-base" data-testid="home-route">
+      <BentoGridContainer className="min-h-0 flex-1 px-3 pb-20 pt-3">
         <BentoGrid data-testid="home-bento-grid">
           {sortedCards.map((card) => {
             const Widget = HOME_WIDGET_COMPONENTS[card.componentId];
@@ -153,6 +173,7 @@ export default function HomeRoute() {
                 card={card}
                 label={label}
                 isDragOver={dragOverCardId === card.id && draggedCardId !== card.id}
+                isHighlighted={highlightedCardId === card.id}
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}

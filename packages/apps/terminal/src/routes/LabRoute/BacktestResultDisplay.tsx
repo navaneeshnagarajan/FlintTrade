@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { motion } from "framer-motion";
-import { BarChart } from "@tremor/react";
+import type { Time } from "lightweight-charts";
+import { createFlintHistogramChart } from "@flinttrade/design-system";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -11,6 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightHistogramRuntime } from "@/lib/lightweightChartRuntime";
 import { motionConfig } from "@/lib/motion";
 import { type BacktestResult } from "@/services/ftApi";
 import { fmtInr, fmtPct, fmtNum } from "./formatters";
@@ -19,6 +22,78 @@ import { EquityCurve } from "./EquityCurve";
 
 export interface BacktestResultDisplayProps {
   result: BacktestResult;
+}
+
+interface MonthlyPnlPoint {
+  month: string;
+  pnl: number;
+}
+
+function monthToUtcTimestamp(month: string): Time {
+  return Math.floor(new Date(`${month}-01T00:00:00.000Z`).getTime() / 1000) as unknown as Time;
+}
+
+function MonthlyPnlChart({ data }: { data: MonthlyPnlPoint[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartTheme = useLightweightChartTheme();
+
+  const histogramData = useMemo(
+    () =>
+      data.map((point) => ({
+        time: monthToUtcTimestamp(point.month),
+        value: point.pnl,
+        color: point.pnl >= 0 ? "#34d399" : "#f87171",
+      })),
+    [data],
+  );
+
+  useEffect(() => {
+    if (!containerRef.current || histogramData.length === 0) return;
+
+    const flintChart = createFlintHistogramChart(
+      lightweightHistogramRuntime,
+      containerRef.current,
+      chartTheme,
+      {
+        ariaLabel: "Monthly P&L chart",
+        height: 144,
+        crosshair: { vertLine: { visible: true }, horzLine: { visible: true } },
+        handleScroll: false,
+        handleScale: false,
+        defaultSeriesOptions: {
+          color: "#34d399",
+          priceFormat: { type: "price", precision: 0, minMove: 1 },
+          priceScaleId: "right",
+          priceLineVisible: false,
+          lastValueVisible: true,
+        },
+        series: [{ id: "monthly-pnl" }],
+      },
+    );
+
+    flintChart.seriesById["monthly-pnl"].setData(histogramData);
+    flintChart.chart.timeScale().fitContent();
+
+    return () => {
+      flintChart.remove();
+    };
+  }, [chartTheme, histogramData]);
+
+  if (data.length === 0) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={motionConfig.transitions.fade}
+    >
+      <div
+        ref={containerRef}
+        className="h-36 min-h-36 w-full overflow-hidden rounded-md border border-border-default bg-surface-card"
+        style={{ height: 144 }}
+      />
+    </motion.div>
+  );
 }
 
 export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
@@ -35,7 +110,7 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
     });
     return Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, pnl]) => ({ month, "P&L": pnl }));
+      .map(([month, pnl]) => ({ month, pnl }));
   }, [trades]);
 
   return (
@@ -115,24 +190,7 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
           <h4 className="font-heading font-semibold text-sm text-text-primary">
             Monthly P&L
           </h4>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={motionConfig.transitions.fade}
-          >
-            <BarChart
-              data={monthlyPnl}
-              index="month"
-              categories={["P&L"]}
-              colors={["emerald"]}
-              valueFormatter={(v: number) => fmtInr(v)}
-              showLegend={false}
-              showYAxis={true}
-              showXAxis={true}
-              showGridLines={false}
-              className="h-36 text-xs"
-            />
-          </motion.div>
+          <MonthlyPnlChart data={monthlyPnl} />
         </GlassCard>
       )}
 

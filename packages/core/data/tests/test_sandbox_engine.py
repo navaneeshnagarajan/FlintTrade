@@ -7,6 +7,8 @@ Run with:
 from __future__ import annotations
 
 import json
+import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +30,37 @@ def engine() -> SandboxEngine:
 
 class TestInitialCapital:
     """Engine starts with correct default capital."""
+
+    def test_engine_uses_sqlite_even_when_duckdb_is_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import flinttrade_data.sandbox_engine as sandbox_mod
+
+        monkeypatch.setattr(sandbox_mod, "_DUCKDB_AVAILABLE", False, raising=False)
+        try:
+            eng = SandboxEngine(db_path=":memory:")
+        except ImportError as exc:
+            pytest.fail(f"SandboxEngine should use SQLite state.sqlite, not DuckDB: {exc}")
+        finally:
+            if "eng" in locals():
+                eng.close()
+
+    def test_file_backed_engine_creates_canonical_state_sqlite_schema(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "sandbox" / "state.sqlite"
+        eng = SandboxEngine(db_path=str(db_path))
+        try:
+            eng.place_order("RELIANCE", "NSE", "BUY", 1, 2800.0)
+        finally:
+            eng.close()
+
+        assert db_path.exists()
+        with sqlite3.connect(db_path) as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        assert {"capital", "orders", "positions", "pnl", "mtm"} <= tables
+        assert {"sandbox_capital", "sandbox_orders", "sandbox_positions"}.isdisjoint(tables)
 
     def test_initial_capital_is_one_million(self, engine: SandboxEngine) -> None:
         cap = engine.get_capital()

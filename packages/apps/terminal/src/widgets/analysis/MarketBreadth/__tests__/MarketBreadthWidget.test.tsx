@@ -56,6 +56,23 @@ describe("MarketBreadthWidget", () => {
     expect(screen.getByText("A/D Ratio")).toBeTruthy();
   });
 
+  it("renders breadth sparklines through shared Flint primitives", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    render(<MarketBreadthWidget />);
+
+    const sparklines = [
+      screen.getByRole("img", { name: "Market breadth advances sparkline" }),
+      screen.getByRole("img", { name: "Market breadth declines sparkline" }),
+      screen.getByRole("img", { name: "Market breadth net sparkline" }),
+    ];
+
+    for (const sparkline of sparklines) {
+      expect(sparkline).toHaveAttribute("viewBox", "0 0 160 42");
+      expect(sparkline.querySelector("polyline")).not.toBeInTheDocument();
+      expect(sparkline.querySelectorAll("path").length).toBeGreaterThan(0);
+    }
+  });
+
   it("renders McClellan Oscillator and Breadth Thrust sections", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<MarketBreadthWidget />);

@@ -25,6 +25,7 @@
     "./themes/cinematic": "./src/themes/cinematic.ts",
     "./themes/dark-only": "./src/themes/dark-only.ts",
     "./brand": "./src/brand/index.ts",
+    "./charts": "./src/charts/index.ts",
     "./hooks/*": "./src/hooks/*.ts",
     "./forms": "./src/forms/index.ts",
     "./chart-theme": "./src/chart-theme/index.ts"

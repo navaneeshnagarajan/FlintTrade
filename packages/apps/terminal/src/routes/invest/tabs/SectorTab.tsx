@@ -3,7 +3,7 @@
  *
  * Real sector allocation view — replaces the old FeatureLockCard placeholder.
  *
- * Data flow: InvestContext holdings → getSectorBreakdown() → DonutChart + Table.
+ * Data flow: InvestContext holdings → getSectorBreakdown() → Flint donut + Table.
  *
  * Design absorbed from:
  * - etftracker Dashboard4_IndiaSectors: side-by-side donut + sortable sector rows
@@ -16,7 +16,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { DonutChart } from "@tremor/react";
+import { FlintDonutBreakdown } from "@flinttrade/design-system";
 import { RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import {
@@ -162,9 +162,6 @@ export function SectorTab() {
     }
   }
 
-  // Tremor DonutChart needs hex colours, not Tailwind names
-  const donutColors = breakdown.map((_, i) => paletteFor(i).hex);
-
   if (isLoading) {
     return (
       <div
@@ -200,14 +197,14 @@ export function SectorTab() {
             Allocation by sector
           </div>
           <div className="relative w-40 h-40 flex items-center justify-center">
-            <DonutChart
-              data={breakdown.map((s) => ({ name: s.sector, value: s.value }))}
-              category="value"
-              index="name"
-              valueFormatter={(v: number) => formatINRCompact(v)}
-              colors={donutColors}
-              className="h-40"
-              showLabel={false}
+            <FlintDonutBreakdown
+              ariaLabel="Sector allocation donut"
+              slices={breakdown.map((s, index) => ({
+                label: s.sector,
+                value: s.value,
+                color: paletteFor(index).hex,
+              }))}
+              className="size-40"
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="text-xxs text-text-muted">sectors</span>

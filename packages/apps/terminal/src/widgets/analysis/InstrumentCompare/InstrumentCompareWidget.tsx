@@ -12,6 +12,7 @@
 
 import { useState, useMemo, useCallback, memo } from "react";
 import { GitCompare, X, Plus } from "lucide-react";
+import { FlintMultiLineChart } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -85,142 +86,38 @@ function normalise(points: SeriesPoint[]): { session: number; pct: number }[] {
   }));
 }
 
-// ---------------------------------------------------------------------------
-// SVG chart
-// ---------------------------------------------------------------------------
-
-const SVG_W = 520;
-const SVG_H = 180;
-const PAD = { top: 12, right: 16, bottom: 28, left: 42 };
-
-interface CompareChartProps {
-  series: { symbol: string; normalised: { session: number; pct: number }[]; colour: string }[];
-}
-
-function CompareChart({ series }: CompareChartProps) {
-  const chartW = SVG_W - PAD.left - PAD.right;
-  const chartH = SVG_H - PAD.top - PAD.bottom;
-
-  const allPcts = series.flatMap((s) => s.normalised.map((p) => p.pct));
+function buildComparisonChart(series: { symbol: string; normalised: { session: number; pct: number }[]; colour: string }[]) {
+  const allPcts = series.flatMap((entry) => entry.normalised.map((point) => point.pct));
   const minPct = allPcts.length > 0 ? Math.min(...allPcts) : -5;
   const maxPct = allPcts.length > 0 ? Math.max(...allPcts) : 5;
-
-  // Add 10% padding top/bottom
   const pctRange = maxPct - minPct || 1;
-  const minV = minPct - pctRange * 0.1;
-  const maxV = maxPct + pctRange * 0.1;
-
-  const maxSessions = series.reduce(
-    (m, s) => Math.max(m, s.normalised.length),
-    0,
-  );
-
-  const xOf = (session: number) =>
-    maxSessions > 1 ? (session / (maxSessions - 1)) * chartW : chartW / 2;
-  const yOf = (pct: number) => chartH - ((pct - minV) / (maxV - minV)) * chartH;
-
-  // Zero line
-  const zeroY = yOf(0);
-
-  const yTicks: number[] = [];
+  const minValue = minPct - pctRange * 0.1;
+  const maxValue = maxPct + pctRange * 0.1;
+  const maxSessions = series.reduce((max, entry) => Math.max(max, entry.normalised.length), 0);
+  const maxSessionIndex = Math.max(maxSessions - 1, 1);
   const step = pctRange > 10 ? 5 : pctRange > 4 ? 2 : 1;
-  const start = Math.ceil(minV / step) * step;
-  for (let v = start; v <= maxV; v += step) {
-    yTicks.push(v);
+  const yTicks: number[] = [];
+  const start = Math.ceil(minValue / step) * step;
+
+  for (let value = start; value <= maxValue; value += step) {
+    yTicks.push(value);
   }
 
-  return (
-    <svg
-      viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-      className="w-full"
-      style={{ height: SVG_H }}
-      aria-label="Instrument comparison chart"
-      role="img"
-    >
-      <defs>
-        <clipPath id="compareClip">
-          <rect x={0} y={0} width={chartW} height={chartH} />
-        </clipPath>
-      </defs>
-
-      <g transform={`translate(${PAD.left},${PAD.top})`}>
-        {/* Zero line */}
-        <line
-          x1={0}
-          y1={zeroY}
-          x2={chartW}
-          y2={zeroY}
-          stroke="rgba(156,163,175,0.35)"
-          strokeWidth={0.75}
-          strokeDasharray="4,2"
-        />
-
-        {/* Y grid lines */}
-        {yTicks.filter((v) => v !== 0).map((v) => (
-          <line
-            key={v}
-            x1={0}
-            y1={yOf(v)}
-            x2={chartW}
-            y2={yOf(v)}
-            stroke="rgba(42,42,58,0.5)"
-            strokeWidth={0.5}
-          />
-        ))}
-
-        {/* Series lines */}
-        {series.map((s) => {
-          if (s.normalised.length < 2) return null;
-          const pts = s.normalised
-            .map((p) => `${xOf(p.session).toFixed(1)},${yOf(p.pct).toFixed(1)}`)
-            .join(" ");
-          return (
-            <polyline
-              key={s.symbol}
-              points={pts}
-              fill="none"
-              stroke={s.colour}
-              strokeWidth={1.75}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              clipPath="url(#compareClip)"
-            />
-          );
-        })}
-
-        {/* Last point dots */}
-        {series.map((s) => {
-          const last = s.normalised[s.normalised.length - 1];
-          if (!last) return null;
-          return (
-            <circle
-              key={s.symbol}
-              cx={xOf(last.session)}
-              cy={yOf(last.pct)}
-              r={3.5}
-              fill={s.colour}
-              stroke="var(--color-surface-base,#0a0a0f)"
-              strokeWidth={1.5}
-            />
-          );
-        })}
-
-        {/* Y axis labels */}
-        {yTicks.map((v) => (
-          <g key={v}>
-            <line x1={-4} x2={0} y1={yOf(v)} y2={yOf(v)} stroke="var(--color-border-default,#2a2a3a)" />
-            <text x={-6} y={yOf(v) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted,#666)">
-              {v > 0 ? `+${v.toFixed(0)}` : `${v.toFixed(0)}`}%
-            </text>
-          </g>
-        ))}
-
-        {/* Axes */}
-        <line x1={0} y1={chartH} x2={chartW} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={0} x2={0} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-      </g>
-    </svg>
-  );
+  return {
+    series: series.map((entry) => ({
+      id: entry.symbol,
+      label: entry.symbol,
+      color: entry.colour,
+      points: entry.normalised.map((point) => ({
+        x: point.session,
+        y: point.pct,
+        label: `${entry.symbol} ${point.pct.toFixed(2)}%`,
+      })),
+    })),
+    xDomain: [0, maxSessionIndex] as const,
+    yDomain: [minValue, maxValue] as const,
+    yTicks,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +239,7 @@ function InstrumentCompareWidget() {
       .filter((s): s is NonNullable<typeof s> => s !== null);
   }, [symbols]);
 
+  const comparisonChart = useMemo(() => buildComparisonChart(activeSeries), [activeSeries]);
   const activeCount = symbols.filter(Boolean).length;
 
   return (
@@ -384,7 +282,17 @@ function InstrumentCompareWidget() {
       {/* Chart */}
       <div className="flex-1 min-h-0 overflow-hidden px-1 pt-1">
         {activeSeries.length >= 1 ? (
-          <CompareChart series={activeSeries} />
+          <FlintMultiLineChart
+            ariaLabel="Instrument comparison chart"
+            series={comparisonChart.series}
+            xDomain={comparisonChart.xDomain}
+            yDomain={comparisonChart.yDomain}
+            yTicks={comparisonChart.yTicks}
+            yFormatter={(value) => `${value > 0 ? "+" : ""}${value.toFixed(0)}%`}
+            referenceLines={[{ axis: "y", value: 0, dash: "4,2" }]}
+            width={520}
+            height={180}
+          />
         ) : (
           <div className="flex items-center justify-center h-full text-xs text-text-muted">
             Enter at least one symbol above

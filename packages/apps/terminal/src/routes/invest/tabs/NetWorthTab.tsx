@@ -10,7 +10,7 @@
  */
 
 import { useMemo } from "react";
-import { DonutChart, BarList } from "@tremor/react";
+import { FlintDonutBreakdown, FlintRankedBarList } from "@flinttrade/design-system";
 import {
   TrendingUp,
   Wallet,
@@ -22,7 +22,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
-import { useTremorTheme } from "@/hooks/useTremorTheme";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
 import { DisabledActionButton } from "../DisabledActionButton";
@@ -62,7 +61,6 @@ function buildComparison(totalInvested: number, currentValue: number): Compariso
 export function NetWorthTab() {
   const { summary, isLoading } = useInvest();
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
-  const tremorColors = useTremorTheme();
 
   const knownTotal = currentValue + availableCash;
   const comparison = useMemo(
@@ -178,10 +176,14 @@ export function NetWorthTab() {
               <div className="text-xxs text-text-muted mb-2 uppercase tracking-wider">
                 Invested vs Current
               </div>
-              <BarList
-                data={comparison}
+              <FlintRankedBarList
+                ariaLabel="Invested versus current values"
+                entries={comparison.map((entry, index) => ({
+                  label: entry.name,
+                  value: entry.value,
+                  color: ["#60a5fa", "#34d399", totalPnl >= 0 ? "#34d399" : "#f87171"][index],
+                }))}
                 valueFormatter={(v: number) => formatINRCompact(v)}
-                color={tremorColors[1] ?? "emerald"}
                 className="text-xs"
               />
             </div>
@@ -196,14 +198,14 @@ export function NetWorthTab() {
           {knownCategories.length > 0 ? (
             <>
               <div className="relative w-36 h-36 shrink-0 flex items-center justify-center">
-                <DonutChart
-                  data={knownCategories.map((c) => ({ name: c.label, value: c.value ?? 0 }))}
-                  category="value"
-                  index="name"
-                  valueFormatter={(v: number) => formatINRCompact(v)}
-                  colors={tremorColors as string[]}
-                  className="h-36"
-                  showLabel={false}
+                <FlintDonutBreakdown
+                  ariaLabel="Live asset allocation donut"
+                  slices={knownCategories.map((c) => ({
+                    label: c.label,
+                    value: c.value ?? 0,
+                    color: c.hexColor,
+                  }))}
+                  className="size-36"
                 />
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-xxs text-text-muted">tracked</span>

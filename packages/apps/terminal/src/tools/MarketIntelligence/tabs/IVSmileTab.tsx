@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Activity, LineChart } from "lucide-react";
+import { FlintMultiLineChart } from "@flinttrade/design-system";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -33,6 +34,48 @@ export function IVSmileTab() {
     if (!data?.length) return 1;
     return Math.max(...data.map((d) => Math.max(d.call_iv, d.put_iv)), 1);
   }, [data]);
+
+  const chartState = useMemo(() => {
+    if (!data?.length) return null;
+
+    const strikes = data.map((row) => row.strike);
+    const strikeMin = Math.min(...strikes);
+    const strikeMax = Math.max(...strikes);
+    const yMax = Math.max(maxIV * 1.12, 1);
+    const tickEvery = Math.max(1, Math.ceil(data.length / 5));
+    const xTicks = data
+      .filter((_, index) => index % tickEvery === 0)
+      .map((row) => row.strike);
+
+    return {
+      xDomain: [strikeMin, strikeMax] as const,
+      yDomain: [0, yMax] as const,
+      xTicks,
+      yTicks: [0, Math.round(yMax / 2), Math.round(yMax)],
+      series: [
+        {
+          id: "call-iv",
+          label: "Call IV",
+          color: "#0ea5e9",
+          points: data.map((row) => ({
+            x: row.strike,
+            y: row.call_iv,
+            label: `${row.strike.toLocaleString("en-IN")} call IV ${row.call_iv.toFixed(2)}%`,
+          })),
+        },
+        {
+          id: "put-iv",
+          label: "Put IV",
+          color: "#f59e0b",
+          points: data.map((row) => ({
+            x: row.strike,
+            y: row.put_iv,
+            label: `${row.strike.toLocaleString("en-IN")} put IV ${row.put_iv.toFixed(2)}%`,
+          })),
+        },
+      ],
+    };
+  }, [data, maxIV]);
 
   return (
     <ScrollArea className="h-full">
@@ -69,45 +112,27 @@ export function IVSmileTab() {
                   </div>
                 )}
               </div>
-              <div className="space-y-1">
-                {data.map((row) => {
-                  const isAtm = row.strike === atmStrike;
-                  const callPct = (row.call_iv / maxIV) * 100;
-                  const putPct = (row.put_iv / maxIV) * 100;
-                  return (
-                    <div
-                      key={row.strike}
-                      className={[
-                        "flex items-center gap-2 px-1 rounded",
-                        isAtm ? "bg-primary/5 border border-primary/20" : "",
-                      ].join(" ")}
-                    >
-                      <span className="font-mono text-xs w-16 text-right text-text-muted shrink-0">
-                        {row.strike.toLocaleString("en-IN")}
-                        {isAtm && <span className="ml-1 text-primary text-xxs">ATM</span>}
-                      </span>
-                      <div className="flex-1 flex flex-col gap-0.5 py-1">
-                        <div
-                          className="h-2 rounded"
-                          style={{ width: `${callPct}%`, backgroundColor: "#0ea5e9", opacity: 0.8 }}
-                          title={`Call IV: ${row.call_iv.toFixed(2)}%`}
-                        />
-                        <div
-                          className="h-2 rounded"
-                          style={{ width: `${putPct}%`, backgroundColor: "#f59e0b", opacity: 0.8 }}
-                          title={`Put IV: ${row.put_iv.toFixed(2)}%`}
-                        />
-                      </div>
-                      <span className="font-mono text-xs w-12 text-right text-sky-400 shrink-0">
-                        {row.call_iv.toFixed(1)}%
-                      </span>
-                      <span className="font-mono text-xs w-12 text-right text-amber-400 shrink-0">
-                        {row.put_iv.toFixed(1)}%
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              {chartState && (
+                <div className="rounded-md border border-border-default bg-surface-card/40 p-2">
+                  <FlintMultiLineChart
+                    ariaLabel="IV Smile call and put volatility by strike"
+                    series={chartState.series}
+                    xDomain={chartState.xDomain}
+                    yDomain={chartState.yDomain}
+                    xTicks={chartState.xTicks}
+                    yTicks={chartState.yTicks}
+                    xFormatter={(value) => value.toLocaleString("en-IN")}
+                    yFormatter={(value) => `${value.toFixed(0)}%`}
+                    xAxisLabel="Strike"
+                    yAxisLabel="IV"
+                    referenceLines={atmStrike !== null
+                      ? [{ axis: "x", value: atmStrike, color: "var(--color-primary, #818cf8)", dash: "4,3" }]
+                      : []}
+                    width={560}
+                    height={220}
+                  />
+                </div>
+              )}
             </div>
 
             <div>

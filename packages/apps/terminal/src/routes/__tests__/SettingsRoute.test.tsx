@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -64,6 +64,9 @@ vi.mock("@/tools/Settings/LLMSection", () => ({
 vi.mock("@/tools/Settings/TelegramSection", () => ({
   TelegramSection: () => <div data-testid="telegram-section">Telegram</div>,
 }));
+vi.mock("@/tools/Settings/WhatsAppSection", () => ({
+  WhatsAppSection: () => <div data-testid="whatsapp-section">WhatsApp</div>,
+}));
 vi.mock("@/tools/Settings/DataSection", () => ({
   DataSection: () => <div data-testid="data-section">Data</div>,
 }));
@@ -85,6 +88,9 @@ vi.mock("@/tools/Settings/MonitoringSection", () => ({
 vi.mock("@/tools/Settings/SkillSection", () => ({
   SkillSection: () => <div data-testid="skill-section">Skill Level</div>,
 }));
+vi.mock("@/tools/Settings/PresetSection", () => ({
+  PresetSection: () => <div data-testid="preset-section">Workspace Presets</div>,
+}));
 
 vi.mock("@/hooks/useSettingsState", () => ({
   useSettingsState: () => ({
@@ -93,6 +99,7 @@ vi.mock("@/hooks/useSettingsState", () => ({
     risk: {},
     llm: {},
     telegram: {},
+    whatsapp: {},
     dataPaths: {},
     connection: {},
     restarting: false,
@@ -101,6 +108,7 @@ vi.mock("@/hooks/useSettingsState", () => ({
     updateRiskLimits: vi.fn(),
     updateLLM: vi.fn(),
     updateTelegram: vi.fn(),
+    updateWhatsApp: vi.fn(),
     updateDataPaths: vi.fn(),
     updateConnection: vi.fn(),
     handleRestart: vi.fn(),
@@ -120,6 +128,7 @@ import SettingsRoute from "../SettingsRoute";
 describe("SettingsRoute", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/settings");
   });
 
   it("renders the Settings heading", () => {
@@ -146,5 +155,20 @@ describe("SettingsRoute", () => {
     expect(screen.getByRole("region", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByTestId("settings-layout")).toHaveClass("h-full");
     expect(screen.getByTestId("settings-layout")).not.toHaveClass("fixed");
+  });
+
+  it("syncs the active section when the settings hash changes", () => {
+    window.history.replaceState(null, "", "/settings#about");
+
+    render(<SettingsRoute />);
+
+    expect(screen.getByTestId("about-section")).toBeInTheDocument();
+
+    act(() => {
+      window.location.hash = "#monitoring";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+
+    expect(screen.getByTestId("monitoring-section")).toBeInTheDocument();
   });
 });

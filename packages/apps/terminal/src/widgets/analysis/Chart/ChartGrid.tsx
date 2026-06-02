@@ -15,6 +15,15 @@
  */
 
 import { useState, useRef, useEffect, useCallback, memo } from "react";
+import {
+  FlintChartIntervalPills,
+  FlintChartLegend,
+  applyFlintCandlestickTheme,
+} from "@flinttrade/design-system";
+import type {
+  FlintChartLegendState,
+  FlintChartOhlcvBar as OhlcvBar,
+} from "@flinttrade/design-system";
 import { LayoutGrid, Columns2, Rows2, Square } from "lucide-react";
 import { isMarketHours } from "@/lib/market";
 import { searchSymbol, getHistory, getIntervals } from "@/services/api";
@@ -24,7 +33,6 @@ import { Search, X } from "lucide-react";
 import { useChartInit } from "./useChartInit";
 import { useChartReplay } from "./useChartReplay";
 import { ReplayBar } from "./ReplayBar";
-import type { OhlcvBar } from "./indicators";
 import type { SymbolSearchResult, IntervalOption } from "./types";
 import type { Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
@@ -199,37 +207,6 @@ function CellSymbolSearch({ onSelect }: CellSymbolSearchProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Interval pills (compact)
-// ---------------------------------------------------------------------------
-
-interface CellIntervalPillsProps {
-  intervals: IntervalOption[];
-  active: string;
-  onSelect: (v: string) => void;
-}
-
-function CellIntervalPills({ intervals, active, onSelect }: CellIntervalPillsProps) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {intervals.slice(0, 6).map((iv) => (
-        <Button
-          key={iv.value}
-          variant="ghost"
-          onClick={() => onSelect(iv.value)}
-          className={`px-1.5 py-0.5 h-auto text-xxs font-mono rounded transition-colors ${
-            active === iv.value
-              ? "bg-accent/15 text-accent border border-accent/40"
-              : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
-          }`}
-        >
-          {iv.label}
-        </Button>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Chart cell — self-contained chart with header
 // ---------------------------------------------------------------------------
 
@@ -245,20 +222,20 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
   const [exchange, setExchange] = useState(config.exchange);
   const [interval, setInterval] = useState(config.interval);
   const [intervals, setIntervals] = useState<IntervalOption[]>(STATIC_INTERVALS);
+  const [legend, setLegend] = useState<FlintChartLegendState | null>(null);
 
   const barsRef = useRef<OhlcvBar[]>([]);
   const timesRef = useRef<Time[]>([]);
   const isReplayingRef = useRef(false);
 
-  const { containerRef, chartRef, candleRef, volumeRef, indRef } = useChartInit(() => {});
+  const { containerRef, chartRef, candleRef, volumeRef, indRef } = useChartInit(setLegend);
 
   const chartTheme = useLightweightChartTheme();
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
-    const { candle: _candle, ...chartOptions } = chartTheme;
-    chart.applyOptions(chartOptions);
-    if (candleRef.current) candleRef.current.applyOptions(chartTheme.candle);
+    const candle = candleRef.current;
+    if (!chart || !candle) return;
+    applyFlintCandlestickTheme(chart, candle, chartTheme);
   }, [chartTheme, chartRef, candleRef]);
 
   const {
@@ -397,8 +374,20 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
           {symbol}
         </span>
         <span className="text-xxs text-text-muted">{exchange}</span>
+        {legend && (
+          <FlintChartLegend
+            legend={legend}
+            className="min-w-0 shrink"
+          />
+        )}
         <div className="flex-1" />
-        <CellIntervalPills intervals={intervals} active={interval} onSelect={setInterval} />
+        <FlintChartIntervalPills
+          intervals={intervals}
+          active={interval}
+          onSelect={setInterval}
+          maxVisible={6}
+          size="compact"
+        />
       </div>
 
       {/* Canvas */}

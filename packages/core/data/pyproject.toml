@@ -1,7 +1,7 @@
 [project]
 name = "flinttrade-data"
 version = "0.6.0-alpha"
-description = "Tick recorder, append-only audit logger, trade logger, DuckDB storage, order analytics"
+description = "Tick recorder, append-only audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage, order analytics"
 requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",

@@ -65,6 +65,15 @@ describe("SpreadViewWidget", () => {
     expect(screen.getByRole("img", { name: /spread payoff diagram/i })).toBeTruthy();
   });
 
+  it("renders payoff through the shared Flint payoff chart primitive", () => {
+    render(<SpreadViewWidget />);
+    const chart = screen.getByRole("img", { name: /spread payoff diagram/i });
+    expect(chart).toHaveAttribute("data-flint-chart", "payoff");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelector("[data-payoff-zone='profit']")).toBeInTheDocument();
+    expect(chart.querySelector("[data-payoff-zone='loss']")).toBeInTheDocument();
+  });
+
   it("renders execute button disabled when disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<SpreadViewWidget />);

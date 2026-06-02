@@ -26,6 +26,7 @@ import {
   RefreshCw,
   TrendingUp,
   TrendingDown,
+  Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -756,9 +757,7 @@ function MirrorTab() {
                     )}
                   >
                     {targetAccounts.has(a.id) && (
-                      <svg className="size-3 text-white" viewBox="0 0 12 12" fill="none">
-                        <path d="M3 6l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      <Check className="size-3 text-white" aria-hidden="true" strokeWidth={2} />
                     )}
                   </div>
                   <div>

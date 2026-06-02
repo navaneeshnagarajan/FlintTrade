@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { getTradeJournal } from "@/services/ftApi";
+import { useModeStore } from "@/stores/modeStore";
 import { type Props } from "./types";
 import { todayISO, sevenDaysAgoISO } from "./utils";
 import { TradeLogTab } from "./TradeLogTab";
@@ -28,8 +29,10 @@ import { AnalyticsTab } from "./AnalyticsTab";
 import { DeepAnalyticsTab } from "./DeepAnalyticsTab";
 import { NotesTab } from "./NotesTab";
 import { CoachTab } from "./CoachTab";
+import { getSampleJournalTrades } from "./sampleJournal";
 
 export default function TradeJournalTool({ onClose }: Props) {
+  const isExploreMode = useModeStore((s) => s.mode === "explore");
   const [startDate, setStartDate] = useState(sevenDaysAgoISO);
   const [endDate, setEndDate] = useState(todayISO);
   const [strategy, setStrategy] = useState("");
@@ -48,10 +51,19 @@ export default function TradeJournalTool({ onClose }: Props) {
     queryKey: ["tradeJournal", queryStart, queryEnd, queryStrategy],
     queryFn: () =>
       getTradeJournal(queryStart, queryEnd, queryStrategy || undefined, 200),
-    enabled: !!queryStart,
+    enabled: !!queryStart && !isExploreMode,
   });
 
-  const trades = data?.trades ?? [];
+  const sampleTrades = useMemo(
+    () =>
+      isExploreMode
+        ? getSampleJournalTrades(queryStart, queryEnd, queryStrategy, 200)
+        : [],
+    [isExploreMode, queryStart, queryEnd, queryStrategy],
+  );
+  const trades = isExploreMode ? sampleTrades : data?.trades ?? [];
+  const effectiveIsLoading = isExploreMode ? false : isLoading;
+  const effectiveIsError = isExploreMode ? false : isError;
   const analytics = useMemo(() => computeAnalytics(trades), [trades]);
 
   function handleSearch() {
@@ -117,19 +129,27 @@ export default function TradeJournalTool({ onClose }: Props) {
 
         {/* Status badges */}
         <div className="flex items-center gap-2 shrink-0">
-          {isLoading && (
+          {isExploreMode && !effectiveIsLoading && !effectiveIsError && (
+            <Badge
+              variant="outline"
+              className="text-xxs border-amber-500/40 bg-amber-500/10 text-amber-300 font-normal"
+            >
+              Sample Data
+            </Badge>
+          )}
+          {effectiveIsLoading && (
             <span className="text-xs text-text-muted flex items-center gap-1">
               <RefreshCw size={11} className="animate-spin" />
               Loading...
             </span>
           )}
-          {isError && (
+          {effectiveIsError && (
             <span className="text-xs text-loss flex items-center gap-1">
               <AlertCircle size={11} />
               Error
             </span>
           )}
-          {!isLoading && !isError && (
+          {!effectiveIsLoading && !effectiveIsError && (
             <Badge
               variant="outline"
               className="text-xxs border-border-default text-text-muted font-normal"
@@ -190,8 +210,8 @@ export default function TradeJournalTool({ onClose }: Props) {
           <TradeLogTab
             trades={trades}
             analytics={analytics}
-            isLoading={isLoading}
-            isError={isError}
+            isLoading={effectiveIsLoading}
+            isError={effectiveIsError}
             onRetry={() => refetch()}
           />
         </TabsContent>

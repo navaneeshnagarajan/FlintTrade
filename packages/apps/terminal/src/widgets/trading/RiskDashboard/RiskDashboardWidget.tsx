@@ -18,6 +18,7 @@
 
 import { useMemo, useEffect, memo } from "react";
 import { ShieldAlert } from "lucide-react";
+import { FlintRadialGauge } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
@@ -90,10 +91,6 @@ export const SAMPLE_RISK_DATA: RiskDashboardData = {
   timestamp: "15:23 IST",
 };
 
-// ---------------------------------------------------------------------------
-// Radial gauge (SVG)
-// ---------------------------------------------------------------------------
-
 const GAUGE_COLOURS: Record<TrafficLight, { stroke: string; bg: string; text: string }> = {
   green: { stroke: "#22c55e", bg: "rgba(34,197,94,0.12)", text: "text-profit" },
   amber: { stroke: "#f59e0b", bg: "rgba(245,158,11,0.12)", text: "text-warning" },
@@ -105,47 +102,6 @@ const BADGE_CLASSES: Record<TrafficLight, string> = {
   amber: "bg-atm-bg text-warning border-atm-border",
   red:   "bg-bearish-bg text-loss border-bearish-border",
 };
-
-interface GaugeProps {
-  usagePct: number;
-  level: TrafficLight;
-  size?: number;
-}
-
-function RadialGauge({ usagePct, level, size = 56 }: GaugeProps) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const r = (size - 8) / 2;
-  const circumference = 2 * Math.PI * r;
-  const filled = (usagePct / 100) * circumference;
-  const colours = GAUGE_COLOURS[level];
-
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      aria-hidden="true"
-      style={{ transform: "rotate(-90deg)" }}
-    >
-      <circle
-        cx={cx} cy={cy} r={r}
-        fill="none"
-        stroke="var(--color-surface-hover,#1e1e2e)"
-        strokeWidth={5}
-      />
-      <circle
-        cx={cx} cy={cy} r={r}
-        fill="none"
-        stroke={colours.stroke}
-        strokeWidth={5}
-        strokeDasharray={`${filled} ${circumference}`}
-        strokeLinecap="round"
-        style={{ transition: "stroke-dasharray 0.6s ease" }}
-      />
-    </svg>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Metric card
@@ -162,7 +118,12 @@ function MetricCard({ metric }: { metric: RiskMetric }) {
     >
       {/* Gauge */}
       <div className="relative shrink-0">
-        <RadialGauge usagePct={metric.usagePct} level={metric.level} />
+        <FlintRadialGauge
+          value={metric.usagePct}
+          color={colours.stroke}
+          size={56}
+          decorative
+        />
         {/* Pct label inside gauge */}
         <div
           className={cn(

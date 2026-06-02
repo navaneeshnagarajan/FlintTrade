@@ -107,6 +107,14 @@ describe("SipTab", () => {
     expect(screen.getByText(/wealth ratio/i)).toBeInTheDocument();
   });
 
+  it("renders the 10% wealth mix using the shared stacked bar primitive", () => {
+    render(<SipTab />);
+    expect(screen.getByRole("img", { name: /sip wealth breakdown/i })).toHaveAttribute(
+      "data-flint-chart",
+      "stacked-bar",
+    );
+  });
+
   it("step-up hint appears when step-up is set > 0", () => {
     render(<SipTab />);
     const stepUpInput = screen.getByLabelText(/annual step-up/i);

@@ -13,7 +13,32 @@ import csv
 from pathlib import Path
 import sys
 
-APP_PY = Path("packages/core/core/src/app.py")
+APP_PACKAGE_DIR = Path("packages/core/core/src/flinttrade_core")
+APP_PY = APP_PACKAGE_DIR / "app.py"
+PACKAGE_ROOTS = {
+    "flinttrade_ai": Path("packages/services/ai/src/flinttrade_ai"),
+    "flinttrade_automation": Path("packages/services/automation/src/flinttrade_automation"),
+    "flinttrade_backtest": Path("packages/services/backtest/src/flinttrade_backtest"),
+    "flinttrade_core": APP_PACKAGE_DIR,
+    "flinttrade_data": Path("packages/core/data/src/flinttrade_data"),
+    "flinttrade_engine": Path("packages/services/engine/src/flinttrade_engine"),
+    "flinttrade_gateway": Path("packages/integrations/gateway/src/flinttrade_gateway"),
+    "flinttrade_historical": Path("packages/core/historical/src/flinttrade_historical"),
+    "flinttrade_screener": Path("packages/services/screener/src/flinttrade_screener"),
+    "flinttrade_webhooks": Path("packages/integrations/webhooks/src/flinttrade_webhooks"),
+}
+OWNER_BY_IMPORT_ROOT = {
+    "flinttrade_ai": "ai",
+    "flinttrade_automation": "automation",
+    "flinttrade_backtest": "backtest",
+    "flinttrade_core": "core",
+    "flinttrade_data": "data",
+    "flinttrade_engine": "engine",
+    "flinttrade_gateway": "gateway",
+    "flinttrade_historical": "historical",
+    "flinttrade_screener": "screener",
+    "flinttrade_webhooks": "webhooks",
+}
 DUPLICATE_PREFIXES: set[str] = {
     "/api/v1/health",
     "/api/v1/errors",
@@ -54,6 +79,8 @@ def _owner_package(bp_name: str, imports: dict[str, str]) -> str:
     parts = module.lstrip(".").split(".")
     if module.startswith("."):
         return "core"
+    if parts and parts[0] in OWNER_BY_IMPORT_ROOT:
+        return OWNER_BY_IMPORT_ROOT[parts[0]]
     if len(parts) >= 2 and parts[0] == "packages":
         return parts[1]
     return parts[0] if parts and parts[0] else "?"
@@ -61,8 +88,10 @@ def _owner_package(bp_name: str, imports: dict[str, str]) -> str:
 
 def _module_path(module: str) -> Path | None:
     if module.startswith("."):
-        return Path("packages/core/core/src") / f"{module.lstrip('.').replace('.', '/')}.py"
+        return APP_PACKAGE_DIR / f"{module.lstrip('.').replace('.', '/')}.py"
     parts = module.split(".")
+    if parts and parts[0] in PACKAGE_ROOTS:
+        return PACKAGE_ROOTS[parts[0]] / f"{'/'.join(parts[1:])}.py"
     if len(parts) >= 3 and parts[0] == "packages":
         return Path(*parts).with_suffix(".py")
     return None
@@ -207,7 +236,7 @@ def main() -> int:
             }
         )
 
-    writer = csv.DictWriter(sys.stdout, fieldnames=FIELDNAMES)
+    writer = csv.DictWriter(sys.stdout, fieldnames=FIELDNAMES, lineterminator="\n")
     writer.writeheader()
     for row in sorted(rows, key=lambda item: int(item["line_number"])):
         writer.writerow(row)

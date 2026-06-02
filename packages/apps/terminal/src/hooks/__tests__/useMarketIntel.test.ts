@@ -45,6 +45,7 @@ vi.mock("@/lib/market", () => ({
 // ---------------------------------------------------------------------------
 
 import { useGex, useIVSmile, useMaxPain, useOIProfile } from "../useMarketIntel";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Wrapper
@@ -61,6 +62,7 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useModeStore.setState({ mode: "live" });
 });
 
 // ---------------------------------------------------------------------------
@@ -90,6 +92,19 @@ describe("useGex", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(gexData);
     expect(mockGetGex).toHaveBeenCalledWith("NIFTY", "NFO", "2026-04-03");
+  });
+
+  it("returns sample GEX data in explore mode without calling the API", async () => {
+    useModeStore.setState({ mode: "explore" });
+
+    const { result } = renderHook(() => useGex("NIFTY", "NFO"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.length).toBeGreaterThan(0);
+    expect(result.current.data?.[0]).toHaveProperty("net_gamma");
+    expect(mockGetGex).not.toHaveBeenCalled();
   });
 });
 
@@ -124,6 +139,19 @@ describe("useIVSmile", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
   });
+
+  it("returns sample IV Smile data in explore mode without calling the API", async () => {
+    useModeStore.setState({ mode: "explore" });
+
+    const { result } = renderHook(() => useIVSmile("NIFTY", "NFO"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.length).toBeGreaterThan(0);
+    expect(result.current.data?.[0]).toHaveProperty("call_iv");
+    expect(mockGetIVSmile).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -146,6 +174,19 @@ describe("useMaxPain", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(maxPainData);
+  });
+
+  it("returns sample max pain data in explore mode without calling the API", async () => {
+    useModeStore.setState({ mode: "explore" });
+
+    const { result } = renderHook(() => useMaxPain("NIFTY", "NFO"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.strikes.length).toBeGreaterThan(0);
+    expect(result.current.data?.max_pain_strike).toBeGreaterThan(0);
+    expect(mockGetMaxPain).not.toHaveBeenCalled();
   });
 });
 
@@ -180,5 +221,18 @@ describe("useOIProfile", () => {
 
     await waitFor(() => expect(mockGetOIProfile).toHaveBeenCalled());
     expect(mockGetOIProfile).toHaveBeenCalledWith("NIFTY", "NFO", "2026-04-03");
+  });
+
+  it("returns sample OI profile data in explore mode without calling the API", async () => {
+    useModeStore.setState({ mode: "explore" });
+
+    const { result } = renderHook(() => useOIProfile("NIFTY", "NFO"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.length).toBeGreaterThan(0);
+    expect(result.current.data?.[0]).toHaveProperty("type");
+    expect(mockGetOIProfile).not.toHaveBeenCalled();
   });
 });

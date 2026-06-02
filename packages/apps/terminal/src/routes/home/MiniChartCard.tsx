@@ -1,35 +1,14 @@
 /**
- * MiniChartCard — NIFTY sparkline SVG with timeframe pills.
- *
- * Uses a simple inline SVG sparkline. Real chart data would come from
- * the history API via TanStack Query, but we render a static placeholder
- * until the data layer is wired in Phase 2.
+ * MiniChartCard — NIFTY core mini sparkline with timeframe pills.
  */
 
 import { useState } from "react";
 import { BentoCard } from "@/components/bento/BentoCard";
 import { TrendingUp } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 
 type Timeframe = "1D" | "1W" | "1M" | "3M";
 const TIMEFRAMES: Timeframe[] = ["1D", "1W", "1M", "3M"];
-
-/**
- * Normalise an array of values to fit within [0, height] for SVG rendering.
- */
-function normalise(values: number[], height: number): number[] {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  return values.map((v) => height - ((v - min) / range) * height);
-}
-
-/**
- * Build an SVG polyline points string from y-values.
- */
-function buildPoints(ys: number[], width: number): string {
-  const step = width / (ys.length - 1);
-  return ys.map((y, i) => `${i * step},${y}`).join(" ");
-}
 
 // Placeholder sparkline data — will be replaced by real API data in Phase 2
 const PLACEHOLDER: Record<Timeframe, number[]> = {
@@ -48,12 +27,6 @@ export function MiniChartCard() {
   const change = lastValue - firstValue;
   const changePct = ((change / firstValue) * 100).toFixed(2);
   const positive = change >= 0;
-
-  const svgWidth = 300;
-  const svgHeight = 60;
-  const ys = normalise(data, svgHeight - 4);
-  const points = buildPoints(ys, svgWidth);
-  const strokeColor = positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)";
 
   return (
     <BentoCard size="wide" label="NIFTY Chart" data-testid="mini-chart-card">
@@ -81,30 +54,12 @@ export function MiniChartCard() {
 
         {/* Sparkline */}
         <div className="flex-1 relative">
-          <svg
-            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-            preserveAspectRatio="none"
-            width="100%"
-            height="100%"
-            aria-label={`NIFTY 50 ${timeframe} sparkline`}
-            role="img"
-          >
-            <polyline
-              points={points}
-              fill="none"
-              stroke={strokeColor}
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity="0.9"
-            />
-            {/* Area fill */}
-            <polyline
-              points={`0,${svgHeight} ${points} ${svgWidth},${svgHeight}`}
-              fill={strokeColor}
-              opacity="0.06"
-            />
-          </svg>
+          <FlintMiniSparkline
+            points={data}
+            positive={positive}
+            ariaLabel={`NIFTY 50 ${timeframe} sparkline`}
+            className="h-full w-full"
+          />
         </div>
 
         {/* Timeframe pills */}

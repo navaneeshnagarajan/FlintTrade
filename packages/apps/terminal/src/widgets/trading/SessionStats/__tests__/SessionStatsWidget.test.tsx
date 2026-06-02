@@ -56,10 +56,14 @@ describe("SessionStatsWidget", () => {
     expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("renders session equity chart with aria label", () => {
+  it("renders session equity chart through the shared Flint primitive", () => {
     mockConnected.mockReturnValue(false);
     render(<SessionStatsWidget />);
-    expect(screen.getByLabelText("Session equity curve")).toBeTruthy();
+    const chart = screen.getByRole("img", { name: "Session equity curve" });
+    expect(chart).toHaveAttribute("viewBox", "0 0 160 42");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelector("line")).toBeInTheDocument();
+    expect(chart.querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
   it("renders orders section with counts", () => {

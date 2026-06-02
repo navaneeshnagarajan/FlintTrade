@@ -6,21 +6,29 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
+const tradeJournalMocks = vi.hoisted(() => ({
+  queryOptions: undefined as { enabled?: boolean } | undefined,
+  refetch: vi.fn(),
+}));
+
 // Mock TanStack Query
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({
-    data: undefined,
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-  }),
+  useQuery: (options: { enabled?: boolean }) => {
+    tradeJournalMocks.queryOptions = options;
+    return {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      refetch: tradeJournalMocks.refetch,
+    };
+  },
 }));
 
 // Mock ft API
@@ -32,18 +40,19 @@ vi.mock("@/services/ftApi", () => ({
 vi.mock("@/lib/journalAnalytics", () => ({
   computeAnalytics: () => ({
     totalTrades: 0,
-    winners: 0,
-    losers: 0,
+    wins: 0,
+    losses: 0,
+    netPnl: 0,
     winRate: 0,
     avgWin: 0,
     avgLoss: 0,
-    expectancy: 0,
     profitFactor: 0,
-    totalPnl: 0,
-    maxWin: 0,
-    maxLoss: 0,
-    avgRR: 0,
-    dayOfWeekPnl: [],
+    bestTrade: 0,
+    worstTrade: 0,
+    byDayOfWeek: [],
+    bySymbol: [],
+    currentStreak: 0,
+    streakType: "none",
   }),
   computeWeeklyWinRate: () => [],
   computeMonthlyWinRate: () => [],
@@ -62,6 +71,7 @@ vi.mock("@/lib/journalAnalytics", () => ({
 // Mock formatters
 vi.mock("@/lib/formatters", () => ({
   formatCurrencyCompact: (v: number) => `₹${v}`,
+  formatNumber: (v: number, digits = 0) => v.toFixed(digits),
 }));
 
 // ---------------------------------------------------------------------------
@@ -69,6 +79,7 @@ vi.mock("@/lib/formatters", () => ({
 // ---------------------------------------------------------------------------
 
 import TradeJournalTool from "../TradeJournalTool";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -76,7 +87,9 @@ import TradeJournalTool from "../TradeJournalTool";
 
 describe("TradeJournalTool", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    tradeJournalMocks.queryOptions = undefined;
+    useModeStore.setState({ mode: "live" });
   });
 
   it("renders without crashing", () => {
@@ -93,5 +106,36 @@ describe("TradeJournalTool", () => {
     render(<TradeJournalTool />);
     const dateInputs = screen.getAllByPlaceholderText("YYYY-MM-DD");
     expect(dateInputs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps the backend journal query enabled outside explore mode", () => {
+    render(<TradeJournalTool />);
+
+    expect(tradeJournalMocks.queryOptions?.enabled).toBe(true);
+    expect(screen.queryByText("Sample Data")).not.toBeInTheDocument();
+  });
+
+  it("renders sample trades in explore mode without enabling the backend query", () => {
+    useModeStore.setState({ mode: "explore" });
+
+    render(<TradeJournalTool />);
+
+    expect(tradeJournalMocks.queryOptions?.enabled).toBe(false);
+    expect(screen.getByText("Sample Data")).toBeInTheDocument();
+    expect(screen.getAllByText("NIFTY").length).toBeGreaterThan(0);
+  });
+
+  it("filters explore sample trades through the strategy search", () => {
+    useModeStore.setState({ mode: "explore" });
+
+    render(<TradeJournalTool />);
+    fireEvent.change(screen.getByLabelText("Strategy filter"), {
+      target: { value: "VWAP" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(screen.getByText("Sample Data")).toBeInTheDocument();
+    expect(screen.getAllByText("VWAP Reclaim").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Gap Fade")).not.toBeInTheDocument();
   });
 });

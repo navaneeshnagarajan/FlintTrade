@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
@@ -27,31 +27,42 @@ beforeAll(() => {
 // Mocks — declared before the component import
 // ---------------------------------------------------------------------------
 
-const mockTimeScaleSubscribe = vi.fn();
-const mockSetVisibleRange = vi.fn();
-const mockFitContent = vi.fn();
+const threePanelMocks = vi.hoisted(() => ({
+  timeScaleSubscribe: vi.fn(),
+  setVisibleRange: vi.fn(),
+  fitContent: vi.fn(),
+  crosshairCallbacks: [] as Array<(param: unknown) => void>,
+  series: [] as Array<{ setData: ReturnType<typeof vi.fn>; applyOptions: ReturnType<typeof vi.fn> }>,
+}));
 
 vi.mock("lightweight-charts", () => ({
   createChart: () => ({
     // LWC v5 uses addSeries(SeriesType, options)
-    addSeries: () => ({
-      setData: vi.fn(),
-      applyOptions: vi.fn(),
-    }),
+    addSeries: () => {
+      const series = {
+        setData: vi.fn(),
+        applyOptions: vi.fn(),
+      };
+      threePanelMocks.series.push(series);
+      return series;
+    },
     timeScale: () => ({
-      fitContent: mockFitContent,
-      subscribeVisibleTimeRangeChange: mockTimeScaleSubscribe,
-      setVisibleRange: mockSetVisibleRange,
+      fitContent: threePanelMocks.fitContent,
+      subscribeVisibleTimeRangeChange: threePanelMocks.timeScaleSubscribe,
+      setVisibleRange: threePanelMocks.setVisibleRange,
     }),
     priceScale: () => ({
       applyOptions: vi.fn(),
     }),
-    subscribeCrosshairMove: vi.fn(),
+    subscribeCrosshairMove: (callback: (param: unknown) => void) => {
+      threePanelMocks.crosshairCallbacks.push(callback);
+    },
     applyOptions: vi.fn(),
     remove: vi.fn(),
   }),
   CandlestickSeries: "CandlestickSeries",
   HistogramSeries: "HistogramSeries",
+  createSeriesMarkers: vi.fn(() => ({ setMarkers: vi.fn() })),
   CrosshairMode: { Normal: 0 },
   LineStyle: { Solid: 0, Dashed: 1, Dotted: 2 },
   ColorType: { Solid: "solid" },
@@ -90,9 +101,11 @@ import ThreePanelWidget from "../ThreePanelWidget";
 describe("ThreePanelWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockTimeScaleSubscribe.mockReset();
-    mockSetVisibleRange.mockReset();
-    mockFitContent.mockReset();
+    threePanelMocks.timeScaleSubscribe.mockReset();
+    threePanelMocks.setVisibleRange.mockReset();
+    threePanelMocks.fitContent.mockReset();
+    threePanelMocks.crosshairCallbacks = [];
+    threePanelMocks.series = [];
   });
 
   it("renders without crashing", () => {
@@ -162,5 +175,29 @@ describe("ThreePanelWidget", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "BANKNIFTY");
     expect(input.value).toBe("BANKNIFTY");
+  });
+
+  it("shows the shared OHLCV readout when a panel crosshair moves", () => {
+    render(<ThreePanelWidget />);
+
+    const candleSeries = threePanelMocks.series[0];
+    const volumeSeries = threePanelMocks.series[1];
+    const callback = threePanelMocks.crosshairCallbacks[0];
+
+    act(() => {
+      callback?.({
+        time: "2026-06-01",
+        seriesData: new Map([
+          [candleSeries, { open: 24100, high: 24180, low: 24080, close: 24155 }],
+          [volumeSeries, { value: 125000 }],
+        ]),
+      });
+    });
+
+    expect(screen.getByText("24,100.00")).toBeInTheDocument();
+    expect(screen.getByText("24,180.00")).toBeInTheDocument();
+    expect(screen.getByText("24,080.00")).toBeInTheDocument();
+    expect(screen.getByText("24,155.00")).toBeInTheDocument();
+    expect(screen.getByText("1.25L")).toBeInTheDocument();
   });
 });

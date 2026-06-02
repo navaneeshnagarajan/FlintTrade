@@ -3,7 +3,7 @@
 > **Date:** 2026-05-20
 > **Status:** Approved (brainstorming gate passed)
 > **Author:** Claude Code (Opus 4.7) with Navaneesh V N
-> **Prior context:** Repo flipped public AGPL-3.0 on 2026-05-19. Current version `v0.5.2-dev`. Tests ~12,062. Tracking ~34 dev-internal `.md` files (CLAUDE.md / AGENTS.md / PLAN.md across root + 16 packages) plus stale docs/ subfolders.
+> **Prior context:** Repo flipped public AGPL-3.0 on 2026-05-19. Current version then was `v0.5.2-dev`. Test counts and package counts in this historical design note are a point-in-time planning baseline; use the root README and live test commands for current numbers.
 
 ## 1. Goal
 

@@ -14,6 +14,7 @@
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { Activity, RefreshCw } from "lucide-react";
+import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { cn } from "@/lib/utils";
@@ -106,14 +107,8 @@ const SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
 type XMode = "Strike" | "Moneyness";
 
 // ---------------------------------------------------------------------------
-// SVG chart
+// Core chart adapter
 // ---------------------------------------------------------------------------
-
-const W = 320;
-const H = 160;
-const PAD = { top: 14, right: 14, bottom: 32, left: 44 };
-const cw = W - PAD.left - PAD.right;
-const ch = H - PAD.top - PAD.bottom;
 
 interface ChartPoint { x: number; iv: number }
 interface CurveOverlay {
@@ -146,145 +141,66 @@ function buildOverlays(data: IVSkewData, xMode: XMode): CurveOverlay[] {
   });
 }
 
-interface IVSkewChartProps {
-  data: IVSkewData;
-  xMode: XMode;
-}
-
-function IVSkewChart({ data, xMode }: IVSkewChartProps) {
-  const overlays = useMemo(() => buildOverlays(data, xMode), [data, xMode]);
-
+function buildIVSkewChart(overlays: CurveOverlay[], xMode: XMode) {
   const allX = overlays.flatMap((o) => [...o.cePoints, ...o.pePoints].map((p) => p.x));
   const allY = overlays.flatMap((o) => [...o.cePoints, ...o.pePoints].map((p) => p.iv));
-  const minX = Math.min(...allX);
-  const maxX = Math.max(...allX);
-  const minY = Math.min(0, ...allY);
-  const maxY = Math.max(...allY) * 1.08;
-  const rangeX = maxX - minX || 1;
-  const rangeY = maxY - minY || 1;
-
-  const sx = (x: number) => ((x - minX) / rangeX) * cw;
-  const sy = (y: number) => ch - ((y - minY) / rangeY) * ch;
-
-  const toPolyline = (pts: ChartPoint[]) =>
-    pts.map((p) => `${sx(p.x).toFixed(1)},${sy(p.iv).toFixed(1)}`).join(" ");
-
-  // Y-axis ticks (approx 4)
-  const yTicks = useMemo(() => {
-    const step = Math.ceil((maxY - minY) / 4);
-    const ticks: number[] = [];
-    for (let v = Math.ceil(minY / step) * step; v <= maxY; v += step) ticks.push(v);
-    return ticks;
-  }, [minY, maxY]);
-
-  const xLabel = xMode === "Moneyness" ? "Moneyness" : "Strike";
+  const minX = allX.length > 0 ? Math.min(...allX) : 0;
+  const maxX = allX.length > 0 ? Math.max(...allX) : 1;
+  const minY = Math.min(0, ...(allY.length > 0 ? allY : [0]));
+  const maxY = Math.max(...(allY.length > 0 ? allY : [1])) * 1.08;
+  const safeMaxY = maxY > minY ? maxY : minY + 1;
   const firstOverlay = overlays[0];
 
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      className="w-full"
-      style={{ height: H }}
-      role="img"
-      aria-label="IV Skew chart"
-    >
-      <g transform={`translate(${PAD.left},${PAD.top})`}>
-        {/* Grid lines */}
-        {yTicks.map((v) => (
-          <line
-            key={v}
-            x1={0} y1={sy(v)} x2={cw} y2={sy(v)}
-            stroke="rgba(255,255,255,0.06)"
-            strokeDasharray="3,2"
-          />
-        ))}
+  const series = overlays.flatMap((overlay) => [
+    {
+      id: `${overlay.label}-ce`,
+      label: `${overlay.label} CE`,
+      color: overlay.color,
+      strokeWidth: 1.5,
+      points: overlay.cePoints.map((point) => ({
+        x: point.x,
+        y: point.iv,
+        label: `${overlay.label} CE ${point.iv.toFixed(1)}%`,
+      })),
+    },
+    {
+      id: `${overlay.label}-pe`,
+      label: `${overlay.label} PE`,
+      color: overlay.color,
+      dash: "4,2",
+      strokeWidth: 1.5,
+      points: overlay.pePoints.map((point) => ({
+        x: point.x,
+        y: point.iv,
+        label: `${overlay.label} PE ${point.iv.toFixed(1)}%`,
+      })),
+    },
+  ]);
+  const markers = overlays.map((overlay) => ({
+    id: `${overlay.label}-atm`,
+    label: `${overlay.label} ATM ${overlay.atmIV.toFixed(1)}%`,
+    x: overlay.atmX,
+    y: overlay.atmIV,
+    color: overlay.color,
+    radius: 3,
+  }));
+  const yStep = Math.ceil((safeMaxY - minY) / 4) || 1;
+  const yTicks: number[] = [];
+  for (let value = Math.ceil(minY / yStep) * yStep; value <= safeMaxY; value += yStep) {
+    yTicks.push(value);
+  }
 
-        {/* ATM vertical line (first curve only) */}
-        {firstOverlay && (
-          <line
-            x1={sx(firstOverlay.atmX)} y1={0}
-            x2={sx(firstOverlay.atmX)} y2={ch}
-            stroke="#6366f1"
-            strokeWidth={1}
-            strokeDasharray="3,2"
-            opacity={0.7}
-          />
-        )}
-
-        {/* Curves */}
-        {overlays.map((o) => (
-          <g key={o.label}>
-            {o.cePoints.length > 1 && (
-              <polyline
-                points={toPolyline(o.cePoints)}
-                fill="none"
-                stroke={o.color}
-                strokeWidth={1.5}
-                strokeLinejoin="round"
-              />
-            )}
-            {o.pePoints.length > 1 && (
-              <polyline
-                points={toPolyline(o.pePoints)}
-                fill="none"
-                stroke={o.color}
-                strokeWidth={1.5}
-                strokeLinejoin="round"
-                strokeDasharray="4,2"
-              />
-            )}
-            {/* ATM dot */}
-            <circle
-              cx={sx(o.atmX)}
-              cy={sy(o.atmIV)}
-              r={3}
-              fill={o.color}
-            />
-          </g>
-        ))}
-
-        {/* Axes */}
-        <line x1={0} y1={ch} x2={cw} y2={ch} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={0} x2={0} y2={ch} stroke="var(--color-border-default,#2a2a3a)" />
-
-        {/* Y ticks */}
-        {yTicks.map((v) => (
-          <text
-            key={v}
-            x={-4} y={sy(v) + 3}
-            textAnchor="end"
-            fontSize={8}
-            fill="var(--color-text-muted,#666)"
-          >
-            {v.toFixed(0)}%
-          </text>
-        ))}
-
-        {/* X axis label */}
-        <text
-          x={cw / 2} y={ch + 22}
-          textAnchor="middle"
-          fontSize={8}
-          fill="var(--color-text-muted,#666)"
-        >
-          {xLabel}
-        </text>
-
-        {/* ATM label */}
-        {firstOverlay && (
-          <text
-            x={sx(firstOverlay.atmX)}
-            y={-3}
-            textAnchor="middle"
-            fontSize={7}
-            fill="#6366f1"
-          >
-            ATM
-          </text>
-        )}
-      </g>
-    </svg>
-  );
+  return {
+    series,
+    markers,
+    xDomain: [minX, maxX > minX ? maxX : minX + 1] as const,
+    yDomain: [minY, safeMaxY] as const,
+    yTicks,
+    referenceLines: firstOverlay
+      ? [{ axis: "x" as const, value: firstOverlay.atmX, color: "#6366f1", dash: "3,2" }]
+      : [],
+    xAxisLabel: xMode === "Moneyness" ? "Moneyness" : "Strike",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -305,15 +221,11 @@ function ChartLegend({ overlays }: LegendProps) {
         </span>
       ))}
       <span className="flex items-center gap-1">
-        <svg width={12} height={4} aria-hidden="true">
-          <line x1={0} y1={2} x2={12} y2={2} stroke="#888" strokeWidth={1.5} />
-        </svg>
+        <span className="inline-block w-3 border-t border-[#888]" aria-hidden="true" style={{ borderTopWidth: 1.5 }} />
         CE
       </span>
       <span className="flex items-center gap-1">
-        <svg width={12} height={4} aria-hidden="true">
-          <line x1={0} y1={2} x2={12} y2={2} stroke="#888" strokeWidth={1.5} strokeDasharray="3,2" />
-        </svg>
+        <span className="inline-block w-3 border-t border-dashed border-[#888]" aria-hidden="true" style={{ borderTopWidth: 1.5 }} />
         PE
       </span>
     </div>
@@ -339,6 +251,7 @@ function IVSkewWidget() {
   const atmIV = firstCurve?.atm_iv ?? null;
 
   const overlays = useMemo(() => buildOverlays(data, xMode), [data, xMode]);
+  const skewChart = useMemo(() => buildIVSkewChart(overlays, xMode), [overlays, xMode]);
 
   useEffect(() => {
     track("trade", "widget_view_iv_skew");
@@ -448,7 +361,20 @@ function IVSkewWidget() {
 
       {/* Chart */}
       <div className="flex-1 min-h-0 overflow-hidden px-1 pt-1">
-        <IVSkewChart data={data} xMode={xMode} />
+        <FlintBandedLineChart
+          ariaLabel="IV Skew chart"
+          bands={[]}
+          series={skewChart.series}
+          markers={skewChart.markers}
+          xDomain={skewChart.xDomain}
+          yDomain={skewChart.yDomain}
+          yTicks={skewChart.yTicks}
+          yFormatter={(value) => `${value.toFixed(0)}%`}
+          xAxisLabel={skewChart.xAxisLabel}
+          referenceLines={skewChart.referenceLines}
+          width={320}
+          height={160}
+        />
       </div>
 
       {/* Legend */}

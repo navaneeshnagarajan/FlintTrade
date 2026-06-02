@@ -12,6 +12,7 @@
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { BarChart4, RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { BreadthResponseSchema } from "@/lib/schemas/ftApi";
@@ -86,28 +87,26 @@ function breadthThrustLabel(value: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Mini SVG line chart
+// Mini line chart
 // ---------------------------------------------------------------------------
 
 interface SparklineProps {
   points: number[];
-  width: number;
-  height: number;
-  colour: string;
+  tone: "profit" | "loss" | "accent";
+  ariaLabel: string;
 }
 
-function Sparkline({ points, width, height, colour }: SparklineProps) {
+function Sparkline({ points, tone, ariaLabel }: SparklineProps) {
   if (points.length < 2) return null;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-  const xs = points.map((_, i) => (i / (points.length - 1)) * width);
-  const ys = points.map((v) => height - ((v - min) / range) * height);
-  const d = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+  const toneClass = tone === "profit" ? "text-profit" : tone === "loss" ? "text-loss" : "text-accent";
+
   return (
-    <svg width={width} height={height} aria-hidden="true" className="overflow-visible">
-      <path d={d} fill="none" stroke={colour} strokeWidth={1.5} />
-    </svg>
+    <FlintMiniSparkline
+      points={points}
+      positive={tone !== "loss"}
+      ariaLabel={ariaLabel}
+      className={`h-8 w-full ${toneClass}`}
+    />
   );
 }
 
@@ -279,21 +278,33 @@ function MarketBreadthWidget() {
                 <span className="inline-block w-3 h-px bg-profit" />
                 Advances
               </div>
-              <Sparkline points={advanceSeries} width={120} height={32} colour="#22c55e" />
+              <Sparkline
+                points={advanceSeries}
+                tone="profit"
+                ariaLabel="Market breadth advances sparkline"
+              />
             </div>
             <div className="flex-1 space-y-1">
               <div className="flex items-center gap-1 text-xxs text-loss">
                 <span className="inline-block w-3 h-px bg-loss" />
                 Declines
               </div>
-              <Sparkline points={declineSeries} width={120} height={32} colour="#ef4444" />
+              <Sparkline
+                points={declineSeries}
+                tone="loss"
+                ariaLabel="Market breadth declines sparkline"
+              />
             </div>
             <div className="flex-1 space-y-1">
               <div className="flex items-center gap-1 text-xxs text-accent">
                 <span className="inline-block w-3 h-px bg-accent" />
                 Net
               </div>
-              <Sparkline points={netSeries} width={120} height={32} colour="#6366f1" />
+              <Sparkline
+                points={netSeries}
+                tone="accent"
+                ariaLabel="Market breadth net sparkline"
+              />
             </div>
           </div>
         </div>

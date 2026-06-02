@@ -44,16 +44,22 @@ export default function SettingsRoute() {
   const navigate = useNavigate();
 
   // Read hash fragment to allow deep-linking: /settings#api
-  const initialSection = (): SectionId => {
+  const sectionFromHash = (): SectionId => {
     const hash = window.location.hash.replace("#", "") as SectionId;
     return SECTIONS.some((s) => s.id === hash) ? hash : "general";
   };
 
-  const [activeSection, setActiveSection] = useState<SectionId>(initialSection);
+  const [activeSection, setActiveSection] = useState<SectionId>(sectionFromHash);
   const [toastMsg, setToastMsg]           = useState<string | null>(null);
   const dismissToast                      = useCallback(() => setToastMsg(null), []);
 
   const tablistRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const syncSectionFromHash = () => setActiveSection(sectionFromHash());
+    window.addEventListener("hashchange", syncSectionFromHash);
+    return () => window.removeEventListener("hashchange", syncSectionFromHash);
+  }, []);
 
   const handleSidebarKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLElement>) => {

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -38,15 +38,22 @@ vi.mock("lightweight-charts", () => ({
   ColorType: { Solid: "solid" },
 }));
 
+const chartGridMocks = vi.hoisted(() => ({
+  legendCallbacks: [] as Array<(state: unknown) => void>,
+}));
+
 vi.mock("../useChartInit", () => ({
-  useChartInit: () => ({
-    containerRef: { current: document.createElement("div") },
-    chartRef: { current: null },
-    candleRef: { current: null },
-    volumeRef: { current: null },
-    markersPluginRef: { current: null },
-    indRef: { current: {} },
-  }),
+  useChartInit: (setLegend: (state: unknown) => void) => {
+    chartGridMocks.legendCallbacks.push(setLegend);
+    return {
+      containerRef: { current: document.createElement("div") },
+      chartRef: { current: null },
+      candleRef: { current: null },
+      volumeRef: { current: null },
+      markersPluginRef: { current: null },
+      indRef: { current: {} },
+    };
+  },
 }));
 
 vi.mock("../useChartReplay", () => ({
@@ -102,6 +109,7 @@ import ChartGrid from "../ChartGrid";
 describe("ChartGrid", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    chartGridMocks.legendCallbacks = [];
     localStorage.clear();
   });
 
@@ -184,5 +192,26 @@ describe("ChartGrid", () => {
     // In 2H mode, cells 0 and 1 have NIFTY and BANKNIFTY by default
     expect(screen.getByText("NIFTY")).toBeInTheDocument();
     expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
+  });
+
+  it("shows the shared OHLCV readout for a chart cell when the crosshair updates", () => {
+    render(<ChartGrid />);
+
+    act(() => {
+      chartGridMocks.legendCallbacks[0]?.({
+        open: 24100,
+        high: 24180,
+        low: 24080,
+        close: 24155,
+        volume: 125000,
+        bull: true,
+      });
+    });
+
+    expect(screen.getByText("24,100.00")).toBeInTheDocument();
+    expect(screen.getByText("24,180.00")).toBeInTheDocument();
+    expect(screen.getByText("24,080.00")).toBeInTheDocument();
+    expect(screen.getByText("24,155.00")).toBeInTheDocument();
+    expect(screen.getByText("1.25L")).toBeInTheDocument();
   });
 });

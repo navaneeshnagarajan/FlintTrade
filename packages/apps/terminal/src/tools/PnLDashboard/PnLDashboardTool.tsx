@@ -3,17 +3,20 @@
 //   tier1-core/openalgo/frontend/src/pages/PnLTracker.tsx — daily/weekly/monthly summary cards, drawdown calc
 //   trading-journal/frontend/app/dashboard/analytics/page.tsx — symbol breakdown bar chart pattern
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { PieChart, X, TrendingUp, TrendingDown, AlertCircle, Calendar, BarChart2, Wallet } from "lucide-react";
+import { createFlintAreaChart, FlintDonutBreakdown, FlintRankedBarList } from "@flinttrade/design-system";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AreaChart, DonutChart, BarList } from "@tremor/react";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import { usePositions } from "@/hooks/usePositions";
 import { useFunds } from "@/hooks/useFunds";
 import { useTradebook } from "@/hooks/useTradebook";
+import { lightweightAreaRuntime } from "@/lib/lightweightChartRuntime";
 import type { Position, Trade } from "@/types/api";
+import type { Time } from "lightweight-charts";
 
 interface Props {
   onClose?: () => void;
@@ -129,6 +132,122 @@ function computeDrawdown(daily: DailyPnl[]): { drawdowns: { date: string; dd: nu
   return { drawdowns, maxDrawdown };
 }
 
+function PnlAreaChart({
+  ariaLabel,
+  className,
+  data,
+  tone,
+}: {
+  ariaLabel: string;
+  className: string;
+  data: { date: string; value: number }[];
+  tone: "profit" | "loss";
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const theme = useLightweightChartTheme();
+  const lineColor = tone === "profit" ? "#34d399" : "#f87171";
+  const topColor = tone === "profit" ? "rgba(52, 211, 153, 0.32)" : "rgba(248, 113, 113, 0.28)";
+  const bottomColor = tone === "profit" ? "rgba(52, 211, 153, 0.04)" : "rgba(248, 113, 113, 0.04)";
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const flintChart = createFlintAreaChart(
+      lightweightAreaRuntime,
+      container,
+      theme,
+      {
+        ariaLabel,
+        height: container.clientHeight || 144,
+        resize: "observer",
+        rightPriceScale: { borderVisible: false },
+        timeScale: { borderVisible: false },
+        series: [
+          {
+            id: "pnl",
+            options: {
+              bottomColor,
+              lastValueVisible: false,
+              lineColor,
+              lineWidth: 2,
+              priceLineVisible: false,
+              priceScaleId: "right",
+              topColor,
+            },
+          },
+        ],
+      },
+    );
+
+    flintChart.seriesById.pnl.setData(
+      data.map(({ date, value }) => ({
+        time: date as unknown as Time,
+        value,
+      })),
+    );
+
+    return () => {
+      flintChart.remove();
+    };
+  }, [ariaLabel, bottomColor, data, lineColor, theme, topColor]);
+
+  return <div ref={containerRef} className={className} />;
+}
+
+function PnlBreakdownDonut({ data }: { data: { name: string; value: number }[] }) {
+  const colours = ["#34d399", "#60a5fa", "#a78bfa", "#fbbf24", "#fb7185", "#22d3ee"];
+  const slices = data.slice(0, 6).map((item, index) => ({
+    label: item.name,
+    value: item.value,
+    color: colours[index % colours.length],
+  }));
+
+  return (
+    <div className="flex w-full items-center justify-center gap-5">
+      <FlintDonutBreakdown
+        ariaLabel="P&L breakdown by symbol"
+        slices={slices}
+        className="size-32"
+      />
+      <div className="min-w-0 space-y-1">
+        {slices.map((slice) => (
+          <div key={slice.label} className="flex items-center gap-2 text-xs">
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: slice.color }}
+            />
+            <span className="min-w-20 text-text-secondary">{slice.label}</span>
+            <span className="font-mono text-text-primary">{formatINR(slice.value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PnlBarList({
+  data,
+  tone,
+  ariaLabel,
+  valueFormatter = formatINR,
+}: {
+  data: { name: string; value: number }[];
+  tone: "profit" | "loss";
+  ariaLabel: string;
+  valueFormatter?: (value: number) => string;
+}) {
+  const color = tone === "profit" ? "var(--color-profit, #34d399)" : "var(--color-loss, #f87171)";
+
+  return (
+    <FlintRankedBarList
+      ariaLabel={ariaLabel}
+      entries={data.map((item) => ({ label: item.name, value: item.value, color }))}
+      valueFormatter={valueFormatter}
+    />
+  );
+}
+
 // ---- Sub-tabs ----
 
 function SummaryTab({ positions, funds }: { positions: Position[]; funds: { availableCash: number; usedMargin: number; totalBalance: number } | undefined }) {
@@ -165,7 +284,7 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
         </Card>
       </div>
 
-      {/* Symbol P&L donut — Tremor DonutChart */}
+      {/* Symbol P&L donut */}
       {positions.length > 0 && (() => {
         const donutData = computeSymbolBreakdown(positions)
           .filter((s) => s.pnl !== 0)
@@ -176,15 +295,7 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
               <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">P&L Breakdown</CardTitle>
             </CardHeader>
             <CardContent className="p-3 pt-1 flex items-center justify-center">
-              <DonutChart
-                data={donutData}
-                category="value"
-                index="name"
-                valueFormatter={(v: number) => formatINR(v)}
-                colors={["emerald", "blue", "violet", "amber", "rose", "cyan"]}
-                className="h-36"
-                showLabel={false}
-              />
+              <PnlBreakdownDonut data={donutData} />
             </CardContent>
           </Card>
         ) : null;
@@ -232,7 +343,7 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
         </CardContent>
       </Card>
 
-      {/* Instrument P&L breakdown — Tremor BarList */}
+      {/* Instrument P&L breakdown */}
       {positions.length > 0 && (() => {
         const breakdown = computeSymbolBreakdown(positions);
         const winners = breakdown.filter((s) => s.pnl >= 0).map((s) => ({ name: s.symbol, value: s.pnl }));
@@ -245,12 +356,7 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
                   <CardTitle className="font-heading font-semibold text-xs text-profit uppercase tracking-wider">Top Winners</CardTitle>
                 </CardHeader>
                 <CardContent className="p-3 pt-1">
-                  <BarList
-                    data={winners}
-                    valueFormatter={(v: number) => formatINR(v)}
-                    color="emerald"
-                    className="text-xs"
-                  />
+                  <PnlBarList data={winners} tone="profit" ariaLabel="Top winners P&L" />
                 </CardContent>
               </Card>
             )}
@@ -260,11 +366,11 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
                   <CardTitle className="font-heading font-semibold text-xs text-loss uppercase tracking-wider">Top Losers</CardTitle>
                 </CardHeader>
                 <CardContent className="p-3 pt-1">
-                  <BarList
+                  <PnlBarList
                     data={losers}
+                    tone="loss"
+                    ariaLabel="Top losers P&L"
                     valueFormatter={(v: number) => `-${formatINR(v)}`}
-                    color="red"
-                    className="text-xs"
                   />
                 </CardContent>
               </Card>
@@ -388,6 +494,14 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
     let cum = 0;
     return daily.map(({ date, pnl }) => { cum += pnl; return { date, cum }; });
   }, [daily]);
+  const equityChartData = useMemo(
+    () => cumulativeSeries.map(({ date, cum }) => ({ date, value: cum })),
+    [cumulativeSeries],
+  );
+  const drawdownChartData = useMemo(
+    () => drawdowns.map(({ date, dd }) => ({ date, value: dd })),
+    [drawdowns],
+  );
 
   if (daily.length === 0) {
     return (
@@ -419,46 +533,32 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
         </Card>
       </div>
 
-      {/* Equity curve — Tremor AreaChart */}
+      {/* Equity curve */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
           <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Equity Curve</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
-          <AreaChart
-            data={cumulativeSeries.map(({ date, cum }) => ({ date, "Cumulative P&L": cum }))}
-            index="date"
-            categories={["Cumulative P&L"]}
-            colors={[cumulativeSeries[cumulativeSeries.length - 1]?.cum >= 0 ? "emerald" : "red"]}
-            valueFormatter={(v: number) => formatINR(v)}
-            showLegend={false}
-            showYAxis={true}
-            showXAxis={true}
-            showGridLines={false}
-            className="h-36 text-xs"
-            curveType="monotone"
+          <PnlAreaChart
+            ariaLabel="P&L dashboard equity curve chart"
+            className="h-36 min-h-32 w-full"
+            data={equityChartData}
+            tone={cumulativeSeries[cumulativeSeries.length - 1]?.cum >= 0 ? "profit" : "loss"}
           />
         </CardContent>
       </Card>
 
-      {/* Drawdown chart — Tremor AreaChart */}
+      {/* Drawdown chart */}
       <Card className="bg-surface-card border-border-default">
         <CardHeader className="p-3 pb-1">
           <CardTitle className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">Drawdown (%)</CardTitle>
         </CardHeader>
         <CardContent className="p-3 pt-1">
-          <AreaChart
-            data={drawdowns.map(({ date, dd }) => ({ date, "Drawdown %": dd }))}
-            index="date"
-            categories={["Drawdown %"]}
-            colors={["red"]}
-            valueFormatter={(v: number) => `${v.toFixed(2)}%`}
-            showLegend={false}
-            showYAxis={true}
-            showXAxis={false}
-            showGridLines={false}
-            className="h-24 text-xs"
-            curveType="monotone"
+          <PnlAreaChart
+            ariaLabel="P&L dashboard drawdown chart"
+            className="h-24 min-h-24 w-full"
+            data={drawdownChartData}
+            tone="loss"
           />
         </CardContent>
       </Card>

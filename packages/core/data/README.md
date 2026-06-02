@@ -1,6 +1,6 @@
 # Data
 
-> Tick recorder, append-only audit logger, trade logger, DuckDB storage, QuestDB writer, and Excel bridge.
+> Tick recorder, append-only audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage, QuestDB writer, and Excel bridge.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 
@@ -9,6 +9,7 @@
 ## Public surface
 
 - `src/tick_recorder.py — real-time tick capture to DuckDB / QuestDB`
+- `src/sandbox_engine.py — practice-mode paper trading backed by SQLite state.sqlite`
 - `src/audit_logger.py — append-only local audit trail (operator-controlled retention)`
 - `src/questdb_writer.py — ILP-based ingestion`
 

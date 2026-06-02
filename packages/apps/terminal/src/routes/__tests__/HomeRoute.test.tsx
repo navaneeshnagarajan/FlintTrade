@@ -193,6 +193,13 @@ describe("HomeRoute", () => {
     expect(screen.getByTestId("home-bento-grid")).toBeInTheDocument();
   });
 
+  it("reserves scroll room so dashboard cards do not sit under the status bar", () => {
+    const { container } = renderHomeRoute();
+
+    expect(screen.getByTestId("home-route")).toHaveClass("min-h-0");
+    expect(container.querySelector(".bento-scroll-container")).toHaveClass("min-h-0", "pb-20");
+  });
+
   it("renders WelcomeCard", () => {
     renderHomeRoute();
     expect(screen.getByTestId("welcome-card")).toBeInTheDocument();
@@ -272,6 +279,7 @@ describe("HomeRoute", () => {
 
     expect(screen.queryByRole("dialog", { name: /add dashboard widget/i })).not.toBeInTheDocument();
     expect(screen.getAllByTestId("ai-pulse-card")).toHaveLength(2);
+    expect(document.querySelector('[data-home-component-id="AIPulseCard"][data-new-widget="true"]')).toBeInTheDocument();
     expect(screen.getByTestId("status-bar-card-count")).toHaveTextContent("13");
   });
 

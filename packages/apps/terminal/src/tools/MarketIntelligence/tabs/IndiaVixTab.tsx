@@ -1,4 +1,5 @@
 import { ShieldAlert } from "lucide-react";
+import { FlintLinearMeter } from "@flinttrade/design-system";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -21,7 +22,6 @@ export function IndiaVixTab() {
   const zone = getVixZone(vixValue);
   const vix52wLow = 10.84;
   const vix52wHigh = 28.42;
-  const vixRangePct = ((vixValue - vix52wLow) / (vix52wHigh - vix52wLow)) * 100;
 
   return (
     <ScrollArea className="h-full">
@@ -53,16 +53,14 @@ export function IndiaVixTab() {
         <Card className="bg-surface-card border-border-default">
           <CardContent className="pt-4 pb-4 px-5">
             <div className="text-xs text-text-muted mb-3">52-Week Range</div>
-            <div className="relative h-2 bg-surface-elevated rounded-full">
-              <div
-                className="absolute top-0 left-0 h-full bg-gradient-to-r from-emerald-600 to-red-600 rounded-full"
-                style={{ width: `${vixRangePct}%` }}
-              />
-              <div
-                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white border-2 border-primary shadow"
-                style={{ left: `calc(${vixRangePct}% - 6px)` }}
-              />
-            </div>
+            <FlintLinearMeter
+              ariaLabel="India VIX 52-week range"
+              value={vixValue}
+              minValue={vix52wLow}
+              maxValue={vix52wHigh}
+              fillColor="linear-gradient(90deg, #10b981, #f59e0b, #ef4444)"
+              marker
+            />
             <div className="flex justify-between mt-2 text-xs font-mono">
               <span className="text-profit">{vix52wLow.toFixed(2)} (52W Low)</span>
               <span className="text-loss">{vix52wHigh.toFixed(2)} (52W High)</span>

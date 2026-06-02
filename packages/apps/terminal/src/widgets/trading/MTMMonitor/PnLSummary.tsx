@@ -9,6 +9,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, AlertTriangle } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import {
   getPnLSummary,
   getPnLTracker,
@@ -53,47 +54,23 @@ function MetricRow({
 }
 
 // ---------------------------------------------------------------------------
-// Sparkline (SVG) — minimal realized PnL chart from tracker entries
+// Sparkline — realized P&L chart from tracker entries
 // ---------------------------------------------------------------------------
 
 function Sparkline({ entries }: { entries: PnLTrackerEntry[] }) {
   if (entries.length < 2) return null;
 
-  const width  = 120;
-  const height = 28;
   const values = entries.map((e) => e.total_pnl);
-  const min    = Math.min(...values);
-  const max    = Math.max(...values);
-  const range  = max - min || 1;
-
-  const points = values
-    .map((v, i) => {
-      const x = (i / (values.length - 1)) * width;
-      const y = height - ((v - min) / range) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-
   const lastVal  = values[values.length - 1];
   const positive = lastVal >= 0;
 
   return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      className="overflow-visible"
-      aria-hidden="true"
-    >
-      <polyline
-        points={points}
-        fill="none"
-        stroke={positive ? "var(--color-profit, #22C55E)" : "var(--color-loss, #EF4444)"}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={values}
+      positive={positive}
+      ariaLabel="Realized P&L tracker trend"
+      className="h-7 w-[120px]"
+    />
   );
 }
 

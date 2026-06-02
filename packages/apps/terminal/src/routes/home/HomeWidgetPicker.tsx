@@ -1,6 +1,7 @@
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -20,9 +21,9 @@ export function HomeWidgetPicker({ isOpen, onClose, onAdd }: HomeWidgetPickerPro
           <DialogTitle className="text-sm font-semibold text-text-primary tracking-wide">
             Add dashboard widget
           </DialogTitle>
-          <p className="text-xs text-text-muted">
+          <DialogDescription className="text-xs text-text-muted">
             Choose a bento card to add to your home dashboard.
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <div className="overflow-y-auto p-6 flex-1 min-h-0">

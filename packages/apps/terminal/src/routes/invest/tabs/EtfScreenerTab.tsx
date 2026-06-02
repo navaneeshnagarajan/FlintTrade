@@ -47,6 +47,7 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,38 +196,18 @@ type Category = "All" | EtfScreenerRow["category"];
 
 const CATEGORIES: Category[] = ["All", "Equity", "Gold", "Debt", "International", "Sector"];
 
-// ─── Sparkline SVG ────────────────────────────────────────────────────────────
+// ─── Sparkline ────────────────────────────────────────────────────────────────
 
 function Sparkline({ prices, positive }: { prices: number[]; positive: boolean }) {
   if (!prices || prices.length < 2) return null;
-  const W = 64;
-  const H = 24;
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
-  const range = max - min || 1;
-  const pts = prices.map((v, i) => {
-    const x = (i / (prices.length - 1)) * W;
-    const y = H - ((v - min) / range) * H;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const colour = positive ? "var(--color-profit, #22c55e)" : "var(--color-loss, #ef4444)";
+
   return (
-    <svg
-      width={W}
-      height={H}
-      aria-hidden="true"
-      className="shrink-0"
-      style={{ display: "block" }}
-    >
-      <polyline
-        fill="none"
-        stroke={colour}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={pts.join(" ")}
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={prices}
+      positive={positive}
+      ariaLabel="ETF 30-day trend sparkline"
+      className="h-6 w-16 shrink-0"
+    />
   );
 }
 

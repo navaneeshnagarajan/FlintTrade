@@ -15,6 +15,7 @@
 
 import { useMemo, useEffect, memo } from "react";
 import { Clock } from "lucide-react";
+import { FlintBaselineSparkline } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -159,12 +160,6 @@ function StatTile({ label, value, sub, colour = "text-text-primary" }: StatTileP
 // ---------------------------------------------------------------------------
 
 function MiniEquity({ trades }: { trades: SessionTrade[] }) {
-  const W = 280;
-  const H = 52;
-  const PAD = { top: 6, right: 8, bottom: 16, left: 40 };
-  const cw = W - PAD.left - PAD.right;
-  const ch = H - PAD.top - PAD.bottom;
-
   const equity = useMemo(() => {
     let cum = 0;
     return [0, ...trades.map((t) => { cum += t.pnl; return cum; })];
@@ -172,49 +167,21 @@ function MiniEquity({ trades }: { trades: SessionTrade[] }) {
 
   if (equity.length < 2) return null;
 
-  const minV = Math.min(...equity);
-  const maxV = Math.max(...equity);
-  const range = maxV - minV || 1;
-  const xOf = (i: number) => (i / (equity.length - 1)) * cw;
-  const yOf = (v: number) => ch - ((v - minV) / range) * ch;
-
-  const pts = equity.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
   const isProfit = equity[equity.length - 1] >= 0;
-  const colour = isProfit ? "rgba(34,197,94,0.85)" : "rgba(239,68,68,0.85)";
-  const fill = isProfit ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)";
-  const lastX = xOf(equity.length - 1);
-  const area = [
-    `M 0,${yOf(equity[0]).toFixed(1)}`,
-    ...equity.slice(1).map((v, i) => `L ${xOf(i + 1).toFixed(1)},${yOf(v).toFixed(1)}`),
-    `L ${lastX.toFixed(1)},${ch.toFixed(1)}`,
-    `L 0,${ch.toFixed(1)} Z`,
-  ].join(" ");
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} aria-label="Session equity curve" role="img">
-      <g transform={`translate(${PAD.left},${PAD.top})`}>
-        {/* Zero line */}
-        {minV < 0 && maxV > 0 && (
-          <line x1={0} y1={yOf(0)} x2={cw} y2={yOf(0)} stroke="rgba(156,163,175,0.25)" strokeDasharray="3,2" />
-        )}
-        <path d={area} fill={fill} />
-        <polyline points={pts} fill="none" stroke={colour} strokeWidth={1.5} strokeLinejoin="round" />
-        {/* Axes */}
-        <line x1={0} y1={ch} x2={cw} y2={ch} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={0}  x2={0}  y2={ch} stroke="var(--color-border-default,#2a2a3a)" />
-        {[minV, maxV].map((v) => (
-          <text key={v} x={-4} y={yOf(v) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted,#666)">
-            {v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)}
-          </text>
-        ))}
-        {/* Trade count x-axis */}
-        {equity.length > 2 && (
-          <text x={cw / 2} y={ch + 13} textAnchor="middle" fontSize={8} fill="var(--color-text-muted,#666)">
-            {trades.length} trades
-          </text>
-        )}
-      </g>
-    </svg>
+    <div className="space-y-1">
+      <FlintBaselineSparkline
+        points={equity}
+        baseline={0}
+        positive={isProfit}
+        ariaLabel="Session equity curve"
+        className="h-10 w-full"
+      />
+      {equity.length > 2 && (
+        <p className="text-center text-xxs text-text-muted">{trades.length} trades</p>
+      )}
+    </div>
   );
 }
 

@@ -48,9 +48,17 @@ describe("PortfolioAllocationWidget", () => {
     expect(screen.getByText("sample data")).toBeTruthy();
   });
 
-  it("renders the donut SVG chart", () => {
+  it("renders the donut chart", () => {
     render(<PortfolioAllocationWidget />, { wrapper });
     expect(screen.getByRole("img", { name: "Portfolio allocation donut chart" })).toBeTruthy();
+  });
+
+  it("renders allocation through the shared Flint donut primitive", () => {
+    render(<PortfolioAllocationWidget />, { wrapper });
+    const chart = screen.getByRole("img", { name: "Portfolio allocation donut chart" });
+    expect(chart).toHaveAttribute("data-flint-chart", "donut");
+    expect(chart.getAttribute("style")).toContain("conic-gradient");
+    expect(chart.querySelector("svg")).not.toBeInTheDocument();
   });
 
   it("renders Asset Class and Sector view tabs", () => {

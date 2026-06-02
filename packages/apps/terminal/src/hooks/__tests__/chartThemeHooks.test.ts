@@ -1,10 +1,9 @@
 /**
  * chartThemeHooks.test.ts
  *
- * Tests for the 5 chart-theme hooks:
+ * Tests for the chart-theme hooks:
  *   - useLightweightChartTheme
  *   - usePlotlyTheme
- *   - useTremorTheme
  *   - useGlideTheme
  *   - useDockviewTheme
  *
@@ -73,7 +72,6 @@ vi.mock("@/stores/themeStore", () => ({
 
 import { useLightweightChartTheme } from "../useChartTheme";
 import { usePlotlyTheme } from "../usePlotlyTheme";
-import { useTremorTheme } from "../useTremorTheme";
 import { useGlideTheme } from "../useGlideTheme";
 import { useDockviewTheme } from "../useDockviewTheme";
 
@@ -124,6 +122,33 @@ describe("useLightweightChartTheme", () => {
     const { result } = renderHook(() => useLightweightChartTheme());
     expect(theme(result).timeScale?.timeVisible).toBe(true);
   });
+
+  it("uses the core chart interaction contract", () => {
+    const { result } = renderHook(() => useLightweightChartTheme());
+    expect(theme(result).handleScale).toMatchObject({
+      mouseWheel: true,
+      pinch: true,
+      axisPressedMouseMove: { time: true, price: true },
+      axisDoubleClickReset: { time: true, price: true },
+    });
+    expect(theme(result).handleScroll).toMatchObject({
+      mouseWheel: true,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+    });
+    expect(theme(result).kineticScroll).toMatchObject({ touch: true, mouse: true });
+  });
+
+  it("uses labelled crosshair and stable scale defaults", () => {
+    const { result } = renderHook(() => useLightweightChartTheme());
+    expect(theme(result).crosshair?.vertLine?.labelVisible).toBe(true);
+    expect(theme(result).crosshair?.horzLine?.labelVisible).toBe(true);
+    expect(theme(result).rightPriceScale?.minimumWidth).toBeGreaterThan(0);
+    expect(theme(result).rightPriceScale?.ticksVisible).toBe(true);
+    expect(theme(result).timeScale?.rightOffset).toBeGreaterThan(0);
+    expect(theme(result).timeScale?.lockVisibleTimeRangeOnResize).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -168,45 +193,6 @@ describe("usePlotlyTheme", () => {
     expect(cw).toContain("#6366f1"); // accent
     expect(cw).toContain("#22c55e"); // profit
     expect(cw).toContain("#ef4444"); // loss
-  });
-});
-
-// ---------------------------------------------------------------------------
-// useTremorTheme
-// ---------------------------------------------------------------------------
-
-describe("useTremorTheme", () => {
-  it("returns an array", () => {
-    const { result } = renderHook(() => useTremorTheme());
-    expect(Array.isArray(result.current)).toBe(true);
-  });
-
-  it("returns exactly 6 colors", () => {
-    const { result } = renderHook(() => useTremorTheme());
-    expect(result.current).toHaveLength(6);
-  });
-
-  it("all entries are non-empty strings", () => {
-    const { result } = renderHook(() => useTremorTheme());
-    for (const color of result.current) {
-      expect(typeof color).toBe("string");
-      expect(color.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("first entry is the accent color", () => {
-    const { result } = renderHook(() => useTremorTheme());
-    expect(result.current[0]).toBe("#6366f1");
-  });
-
-  it("second entry is the profit (green) color", () => {
-    const { result } = renderHook(() => useTremorTheme());
-    expect(result.current[1]).toBe("#22c55e");
-  });
-
-  it("third entry is the loss (red) color", () => {
-    const { result } = renderHook(() => useTremorTheme());
-    expect(result.current[2]).toBe("#ef4444");
   });
 });
 

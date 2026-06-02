@@ -1,6 +1,6 @@
 # Terminal
 
-> Single-page terminal — Dockview workspace with 82 widgets, 7 tools, 13 workspace presets, and 12 public routes.
+> Single-page terminal — Dockview workspace with 83 widgets, 7 tools, 13 workspace presets, and 12 public routes.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 

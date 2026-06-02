@@ -14,7 +14,7 @@
 2. **100% open source** — every component MIT, Apache, AGPL, or BSD. No BSL/SSPL.
 3. **Deploy anywhere** — NAS, Raspberry Pi, cloud VM, bare metal, Docker
 4. **Single-user first** — no Kubernetes, no Elasticsearch, no Redis. Lightweight.
-5. **5-minute setup** — `git clone --recursive && make setup && make start`
+5. **5-minute setup** — `git clone && make setup && make start` (current v0.6.0-alpha flow; OpenAlgo is optional)
 6. **Zero vendor lock-in** — self-hosted everything, user owns all data
 
 ---
@@ -311,17 +311,17 @@ services:
 
 ```bash
 # 1. Install
-git clone --recursive https://github.com/navaneeshnagarajan/FlintTrade.git /opt/flinttrade
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git /opt/flinttrade
 cd /opt/flinttrade && make setup
 
 # 2. Configure
 cp .env.example .env && nano .env
 
 # 3. Install services
-sudo make install-services  # copies systemd units, nginx config, certbot
+sudo make install-native  # installs current FlintTrade service scripts
 
 # 4. Start
-sudo systemctl start openalgo flinttrade nginx
+make start  # starts the FlintTrade backend; start OpenAlgo separately only if enabled
 ```
 
 ### Pattern C: Home Server + VPN
@@ -336,17 +336,17 @@ Same as Pattern A or B, plus:
 ## 6. Setup Flow — git clone to running
 
 ```
-1. git clone --recursive https://github.com/navaneeshnagarajan/FlintTrade.git
+1. git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 2. cd FlintTrade
 3. make setup                    # installs Python + Node deps, builds React
-4. cp .env.example .env          # configure OpenAlgo API key
-5. make start                    # starts OpenAlgo + FlintTrade + Nginx
-6. open https://localhost        # or https://your-domain.com
+4. cp .env.example .env          # configure optional integrations only when needed
+5. make start                    # starts the FlintTrade backend
+6. make start-openalgo           # optional: start a local-dev OpenAlgo clone when present
 ```
 
 For Docker:
 ```
-1. git clone --recursive ...
+1. git clone ...
 2. cp .env.example .env
 3. docker compose up -d
 4. open https://localhost
@@ -415,7 +415,7 @@ For Docker:
 - `packages/apps/terminal/src/main.tsx` — add Sentry.init()
 - `requirements.txt` — add structlog, flask-cors, flask-limiter, sentry-sdk
 - `packages/apps/terminal/package.json` — add @sentry/react
-- `Makefile` — add install-services, update, backup targets
+- `Makefile` — add install-native, update, backup targets
 - `.env.example` — add GLITCHTIP_DSN, BACKUP_TARGET, DOMAIN, VICTORIALOGS_URL
 
 ---

@@ -27,6 +27,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { FlintScatterChart } from "@flinttrade/design-system";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -80,14 +81,13 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
   );
 }
 
-// ─── SVG scatter plot ─────────────────────────────────────────────────────────
+// ─── Scatter plot ─────────────────────────────────────────────────────────────
 
 const SVG_W = 560;
 const SVG_H = 360;
-const PAD = { top: 24, right: 24, bottom: 48, left: 56 };
 
 function ScatterPlot({ points }: { points: RiskReturnPoint[] }) {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
 
   const { xMin, xMax, yMin, yMax, maxSharpe } = useMemo(() => {
     const xs = points.map((p) => p.annualised_volatility);
@@ -102,15 +102,6 @@ function ScatterPlot({ points }: { points: RiskReturnPoint[] }) {
     };
   }, [points]);
 
-  const plotW = SVG_W - PAD.left - PAD.right;
-  const plotH = SVG_H - PAD.top - PAD.bottom;
-
-  function toX(v: number) {
-    return PAD.left + ((v - xMin) / (xMax - xMin)) * plotW;
-  }
-  function toY(v: number) {
-    return PAD.top + ((yMax - v) / (yMax - yMin)) * plotH;
-  }
   function toR(sharpe: number) {
     const norm = Math.abs(sharpe) / Math.max(maxSharpe, 1);
     return 5 + norm * 14;
@@ -127,133 +118,57 @@ function ScatterPlot({ points }: { points: RiskReturnPoint[] }) {
     return Array.from({ length: 6 }, (_, i) => Math.round(yMin + i * step));
   }, [yMin, yMax]);
 
+  const hoveredPoint = hoveredSymbol ? points.find((point) => point.symbol === hoveredSymbol) ?? null : null;
+
   return (
     <div className="relative">
-      <svg
-        viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-        className="w-full"
-        role="img"
-        aria-label="Risk-Return scatter plot: X axis = annualised volatility, Y axis = annualised return. Bubble size proportional to Sharpe ratio."
-      >
-        {/* Grid lines */}
-        {xTicks.map((t) => (
-          <line
-            key={`gx-${t}`}
-            x1={toX(t)}
-            y1={PAD.top}
-            x2={toX(t)}
-            y2={PAD.top + plotH}
-            stroke="#2a2a3a"
-            strokeWidth={1}
-          />
-        ))}
-        {yTicks.map((t) => (
-          <line
-            key={`gy-${t}`}
-            x1={PAD.left}
-            y1={toY(t)}
-            x2={PAD.left + plotW}
-            y2={toY(t)}
-            stroke="#2a2a3a"
-            strokeWidth={1}
-          />
-        ))}
-
-        {/* Axes */}
-        <line x1={PAD.left} y1={PAD.top + plotH} x2={PAD.left + plotW} y2={PAD.top + plotH} stroke="#2a2a3a" strokeWidth={1.5} />
-        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + plotH} stroke="#2a2a3a" strokeWidth={1.5} />
-
-        {/* X axis ticks */}
-        {xTicks.map((t) => (
-          <text key={`xt-${t}`} x={toX(t)} y={SVG_H - 8} textAnchor="middle" fontSize={10} fill="#6b6b8a">
-            {t}%
-          </text>
-        ))}
-        {/* X axis label */}
-        <text x={PAD.left + plotW / 2} y={SVG_H - 2} textAnchor="middle" fontSize={10} fill="#6b6b8a">
-          Annualised Volatility
-        </text>
-
-        {/* Y axis ticks */}
-        {yTicks.map((t) => (
-          <text key={`yt-${t}`} x={PAD.left - 6} y={toY(t) + 4} textAnchor="end" fontSize={10} fill="#6b6b8a">
-            {t}%
-          </text>
-        ))}
-        {/* Y axis label */}
-        <text
-          transform={`translate(14, ${PAD.top + plotH / 2}) rotate(-90)`}
-          textAnchor="middle"
-          fontSize={10}
-          fill="#6b6b8a"
-        >
-          Annualised Return
-        </text>
-
-        {/* Data bubbles */}
-        {points.map((p, i) => {
-          const cx = toX(p.annualised_volatility);
-          const cy = toY(p.annualised_return);
-          const r = toR(p.sharpe_ratio);
-          const col = colourFor(p.category);
-          const isHovered = hoveredIdx === i;
-
-          return (
-            <g
-              key={p.symbol}
-              onMouseEnter={() => setHoveredIdx(i)}
-              onMouseLeave={() => setHoveredIdx(null)}
-              style={{ cursor: "pointer" }}
-            >
-              <title>{`${p.symbol} — ${p.name}\nReturn: ${formatPercent(p.annualised_return)}\nVolatility: ${formatPercent(p.annualised_volatility)}\nSharpe: ${p.sharpe_ratio.toFixed(2)}`}</title>
-              <circle
-                cx={cx}
-                cy={cy}
-                r={isHovered ? r + 2 : r}
-                fill={col.fill}
-                fillOpacity={isHovered ? 0.9 : 0.65}
-                stroke={col.stroke}
-                strokeWidth={isHovered ? 2 : 1}
-                style={{ transition: "r 0.15s ease, fill-opacity 0.15s ease" }}
-              />
-              {/* Symbol label — only show for hovered or if non-overlapping large bubble */}
-              {(isHovered || r >= 14) && (
-                <text
-                  x={cx}
-                  y={cy - r - 4}
-                  textAnchor="middle"
-                  fontSize={9}
-                  fill="#e2e2f0"
-                  fontFamily="monospace"
-                  fontWeight="bold"
-                >
-                  {p.symbol}
-                </text>
-              )}
-            </g>
-          );
+      <FlintScatterChart
+        ariaLabel="Risk-Return scatter plot: X axis = annualised volatility, Y axis = annualised return. Bubble size proportional to Sharpe ratio."
+        points={points.map((point) => {
+          const col = colourFor(point.category);
+          return {
+            id: point.symbol,
+            label: `${point.symbol} — ${point.name}. Return: ${formatPercent(point.annualised_return)}. Volatility: ${formatPercent(point.annualised_volatility)}. Sharpe: ${point.sharpe_ratio.toFixed(2)}.`,
+            x: point.annualised_volatility,
+            y: point.annualised_return,
+            radius: toR(point.sharpe_ratio),
+            color: col.fill,
+            strokeColor: col.stroke,
+          };
         })}
-      </svg>
+        xDomain={[xMin, xMax]}
+        yDomain={[yMin, yMax]}
+        xTicks={xTicks}
+        yTicks={yTicks}
+        xFormatter={(value) => `${value}%`}
+        yFormatter={(value) => `${value}%`}
+        xAxisLabel="Annualised Volatility"
+        yAxisLabel="Annualised Return"
+        width={SVG_W}
+        height={SVG_H}
+        activePointId={hoveredSymbol}
+        onPointHover={(point) => setHoveredSymbol(point?.id ?? null)}
+      />
 
       {/* Tooltip overlay */}
-      {hoveredIdx !== null && (
+      {hoveredPoint && (
         <div className="absolute top-2 right-2 bg-surface-card border border-border-default rounded-lg p-3 text-xs shadow-lg pointer-events-none">
-          <div className="font-mono font-bold text-text-primary">{points[hoveredIdx].symbol}</div>
-          <div className="text-text-muted leading-tight">{points[hoveredIdx].name}</div>
+          <div className="font-mono font-bold text-text-primary">{hoveredPoint.symbol}</div>
+          <div className="text-text-muted leading-tight">{hoveredPoint.name}</div>
           <div className="mt-2 space-y-0.5">
             <div className="flex justify-between gap-4">
               <span className="text-text-muted">Return</span>
-              <span className={cn("font-mono font-semibold", points[hoveredIdx].annualised_return >= 0 ? "text-profit" : "text-loss")}>
-                {formatPercent(points[hoveredIdx].annualised_return)}
+              <span className={cn("font-mono font-semibold", hoveredPoint.annualised_return >= 0 ? "text-profit" : "text-loss")}>
+                {formatPercent(hoveredPoint.annualised_return)}
               </span>
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-text-muted">Volatility</span>
-              <span className="font-mono text-text-primary">{formatPercent(points[hoveredIdx].annualised_volatility)}</span>
+              <span className="font-mono text-text-primary">{formatPercent(hoveredPoint.annualised_volatility)}</span>
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-text-muted">Sharpe</span>
-              <span className="font-mono text-text-primary">{points[hoveredIdx].sharpe_ratio.toFixed(2)}</span>
+              <span className="font-mono text-text-primary">{hoveredPoint.sharpe_ratio.toFixed(2)}</span>
             </div>
           </div>
         </div>

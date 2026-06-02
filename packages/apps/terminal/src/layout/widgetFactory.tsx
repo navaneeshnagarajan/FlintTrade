@@ -243,12 +243,14 @@ function WidgetSkeleton() {
   );
 }
 
-function WidgetError({ name, onRetry }: { name: string; onRetry: () => void }) {
+function WidgetError({ name, message, onRetry }: { name: string; message?: string; onRetry: () => void }) {
   const handleRetry = useCallback(() => onRetry(), [onRetry]);
   return (
     <div className="flex flex-col items-center justify-center h-full gap-3">
       <span className="text-loss text-sm">Failed to load &quot;{name}&quot;</span>
-      <span className="text-text-muted text-xs">Check console for errors</span>
+      <span className="text-text-muted text-xs">
+        {message ? `Error: ${message}` : "Check console for errors"}
+      </span>
       <button
         type="button"
         onClick={handleRetry}
@@ -270,6 +272,7 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   hasError: boolean;
+  message?: string;
 }
 
 class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -279,8 +282,8 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
     this.handleRetry = this.handleRetry.bind(this);
   }
 
-  static getDerivedStateFromError(): ErrorBoundaryState {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, message: error.message };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
@@ -288,12 +291,18 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   handleRetry(): void {
-    this.setState({ hasError: false });
+    this.setState({ hasError: false, message: undefined });
   }
 
   render(): ReactNode {
     if (this.state.hasError) {
-      return <WidgetError name={this.props.name} onRetry={this.handleRetry} />;
+      return (
+        <WidgetError
+          name={this.props.name}
+          message={this.state.message}
+          onRetry={this.handleRetry}
+        />
+      );
     }
     return this.props.children;
   }

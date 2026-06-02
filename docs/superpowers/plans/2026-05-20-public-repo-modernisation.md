@@ -267,7 +267,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 > **Required structure (in order):**
 >
 > 1. **H1 title + 12-word tagline** — name "FlintTrade", short pitch like "Open-source modular trading platform for Indian F&O, commodities, and crypto"
-> 2. **Badges row** — License (AGPL-3.0, shields.io), version (from VERSION file, dynamic), CI status (`test.yml` workflow), tests count (~12,062 hard-coded), GitHub stars, last-commit. Use shields.io URLs.
+> 2. **Badges row** — License (AGPL-3.0, shields.io), version (from VERSION file, dynamic), CI status (`test.yml` workflow), current verification summary, GitHub stars, last-commit. Use shields.io URLs.
 > 3. **Hero screenshots** — 4 images using existing files under `docs/screenshots/`. Pick the strongest 4 from the repo (welcome, trade canvas, options chain / IV smile, and an analysis tool). Use HTML `<picture>` or markdown image grid, centred.
 > 4. **What it does** — 6-8 trader-facing bullets (intraday F&O scalping, multi-broker support, options analysis, paper trading mode, AI-assisted signals, custom strategies, automation flows, multi-account orchestration).
 > 5. **Supported brokers** — one-liner "32 brokers via the OpenAlgo gateway — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the full list".
@@ -275,7 +275,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 >    ```bash
 >    git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 >    cd FlintTrade
->    cp .env.example .env   # set OPENALGO_API_KEY
+>    cp .env.example .env   # optional: set FLINTTRADE_API_KEY / OpenAlgo bridge settings
 >    docker-compose up
 >    ```
 >    Then "Open http://localhost:5173 and follow the welcome wizard." Brief sentence that OpenAlgo must also be running (one-line install link).
@@ -398,7 +398,7 @@ The next four parcels write or rewrite documentation. They are independent (diff
 >    - Open the current `docs/ARCHITECTURE.md` and update:
 >      - Any version references to current (`v0.5.2-dev`)
 >      - Package count to 16
->      - Test count to ~12,062
+>      - Test-count wording to a current verification summary instead of a hard-coded historical count
 >      - Add Mermaid diagrams: high-level component diagram, data flow diagram, mode-system diagram
 >      - Remove any references to deleted files (CLAUDE.md, AGENTS.md, machine-setup folder)
 >      - Update path references: `docs/setup/` (not `docs/machine-setup/`)
@@ -671,7 +671,7 @@ core:
   purpose: "Flask app, OpenAlgo client (45+ endpoints), config + workspace management, auth service (argon2id + Fernet TOTP + JWT), and the WSGI prefix-stripper."
   entry_points: ["app.py", "openalgo_client.py", "auth_service.py", "config.py"]
 data:
-  purpose: "Tick recorder, audit logger (SEBI 5-year retention), trade logger, DuckDB storage, QuestDB writer/bridge, Excel bridge."
+  purpose: "Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage, QuestDB writer/bridge, Excel bridge."
   entry_points: ["tick_recorder.py", "audit_logger.py", "questdb_writer.py"]
 desktop:
   purpose: "Tauri-based native desktop app wrapper (scaffolded)."
@@ -683,7 +683,7 @@ engine:
   purpose: "Five-layer safety system, order router, scheduler, base strategy, sandbox executor (AST-guarded), bracket-order engine, mode guard, reconciliation."
   entry_points: ["safety.py", "router.py", "strategy.py", "sandbox_executor.py"]
 gateway:
-  purpose: "Direct broker connections (32 brokers via OpenAlgo adapter pattern), encrypted credentials, WebSocket bridge."
+  purpose: "Native broker gateway contract/routing, Dhan scaffold, optional OpenAlgo-compatible shims, encrypted credentials, WebSocket bridge."
   entry_points: ["adapter.py", "auth.py", "credentials.py", "registry.py", "ws_bridge.py"]
 historical:
   purpose: "OHLCV downloader, free-data sources (OpenChart + yfinance), DuckDB pipeline, expiry manager for derivatives."
@@ -698,7 +698,7 @@ screener:
   purpose: "Option chain, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, IV smile, fundamental screener, FII/DII tracker, RRG calculator."
   entry_points: ["optionchain.py", "max_pain.py", "rrg.py", "fundamental.py"]
 terminal:
-  purpose: "React 19 + TypeScript + Vite single-page terminal — Dockview workspace, 82 widgets, 7 tools, 13 workspace presets, 12 public routes."
+  purpose: "React 19 + TypeScript + Vite single-page terminal — Dockview workspace, 83 widgets, 7 tools, 13 workspace presets, 12 public routes."
   entry_points: ["src/main.tsx", "src/layout/widgetFactory.tsx", "src/services/api.ts"]
 tick-engine:
   purpose: "High-performance tick processing engine (Rust core with Python bindings via PyO3)."

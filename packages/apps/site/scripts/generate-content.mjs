@@ -58,6 +58,7 @@ const rootDocs = [
   ['docs/COMPATIBILITY.md', 'compatibility', 'Docs', 'Supported brokers, exchanges, and environments'],
   ['docs/SEBI_COMPLIANCE.md', 'sebi-compliance', 'Operations', 'Audit, retention, and trading safety notes'],
   ['docs/CI.md', 'ci', 'Contributing', 'Continuous integration and quality checks'],
+  ['docs/REFERENCES.md', 'references', 'Credits', 'Public attribution and project influence notes'],
 ];
 
 const setupDocs = [
@@ -66,6 +67,10 @@ const setupDocs = [
   ['docs/setup/linux.md', 'setup/linux', 'Setup', 'Linux setup guide'],
   ['docs/setup/windows.md', 'setup/windows', 'Setup', 'Windows setup guide'],
   ['docs/setup/raspberry-pi.md', 'setup/raspberry-pi', 'Setup', 'Raspberry Pi setup guide'],
+  ['docs/setup/static-ip-setup.md', 'setup/static-ip-setup', 'Setup', 'Static IP setup notes for broker API access'],
+  ['docs/setup/email.md', 'setup/email', 'Setup', 'SMTP and SES setup for recovery email'],
+  ['docs/setup/backup.md', 'setup/backup', 'Setup', 'Local backup and restore guide'],
+  ['docs/setup/multi-user.md', 'setup/multi-user', 'Setup', 'Multi-user mode boundary and enablement notes'],
 ];
 
 const releaseDocs = [
@@ -595,6 +600,7 @@ async function main() {
         'compatibility',
         'sebi-compliance',
         'ci',
+        'references',
         'setup',
         'releases',
         'packages',
@@ -608,7 +614,17 @@ async function main() {
     path.join(contentRoot, 'setup', 'meta.json'),
     JSON.stringify({
       title: 'Setup',
-      pages: ['quickstart', 'macos', 'linux', 'windows', 'raspberry-pi'],
+      pages: [
+        'quickstart',
+        'macos',
+        'linux',
+        'windows',
+        'raspberry-pi',
+        'static-ip-setup',
+        'email',
+        'backup',
+        'multi-user',
+      ],
     }, null, 2),
   );
 

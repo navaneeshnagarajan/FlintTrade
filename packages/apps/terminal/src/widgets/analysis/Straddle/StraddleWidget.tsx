@@ -12,9 +12,10 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
-import { createChart, LineSeries } from "lightweight-charts";
-import type { IChartApi, ISeriesApi, LineData, Time } from "lightweight-charts";
+import type { ISeriesApi, LineData, Time } from "lightweight-charts";
+import { createFlintLineChart } from "@flinttrade/design-system";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightLineRuntime } from "@/lib/lightweightChartRuntime";
 import {
   RefreshCw,
   ChevronDown,
@@ -249,7 +250,6 @@ function StraddleChart({
   height = 180,
 }: StraddleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef     = useRef<IChartApi | null>(null);
   const straddleRef  = useRef<ISeriesApi<"Line"> | null>(null);
   const spotRef      = useRef<ISeriesApi<"Line"> | null>(null);
   const synfutRef    = useRef<ISeriesApi<"Line"> | null>(null);
@@ -258,62 +258,58 @@ function StraddleChart({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const chart = createChart(containerRef.current, {
-      width:  containerRef.current.clientWidth,
-      height,
-      layout: {
-        ...chartTheme.layout,
-        fontSize: 10,
+    const flintChart = createFlintLineChart(
+      lightweightLineRuntime,
+      containerRef.current,
+      chartTheme,
+      {
+        ariaLabel: "ATM straddle price chart",
+        height,
+        layout: { fontSize: 10 },
+        timeScale: { ticksVisible: true },
+        defaultSeriesOptions: {
+          priceLineVisible: false,
+          lastValueVisible: true,
+        },
+        series: [
+          {
+            id: "straddle",
+            options: {
+              color: CHART_COLORS.straddle,
+              lineWidth: 2,
+            },
+          },
+          {
+            id: "spot",
+            options: {
+              color: CHART_COLORS.spot,
+              lineWidth: 1,
+              lineStyle: 2,
+              visible: false,
+            },
+          },
+          {
+            id: "synfut",
+            options: {
+              color: CHART_COLORS.synfut,
+              lineWidth: 1,
+              lineStyle: 2,
+              visible: false,
+            },
+          },
+        ],
       },
-      grid:            chartTheme.grid,
-      crosshair:       { mode: 1 },
-      rightPriceScale: chartTheme.rightPriceScale,
-      timeScale: {
-        ...chartTheme.timeScale,
-        ticksVisible: true,
-      },
-      handleScale:  { mouseWheel: true },
-      handleScroll: { mouseWheel: true },
-    });
+    );
 
-    straddleRef.current = chart.addSeries(LineSeries, {
-      color:     CHART_COLORS.straddle,
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
-
-    spotRef.current = chart.addSeries(LineSeries, {
-      color:     CHART_COLORS.spot,
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      visible: false,
-    });
-
-    synfutRef.current = chart.addSeries(LineSeries, {
-      color:     CHART_COLORS.synfut,
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      visible: false,
-    });
-
-    chartRef.current = chart;
-
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
-    const ro = new ResizeObserver(handleResize);
-    ro.observe(containerRef.current);
+    straddleRef.current = flintChart.seriesById.straddle ?? null;
+    spotRef.current = flintChart.seriesById.spot ?? null;
+    synfutRef.current = flintChart.seriesById.synfut ?? null;
 
     return () => {
-      ro.disconnect();
-      chart.remove();
+      flintChart.remove();
+      straddleRef.current = null;
+      spotRef.current = null;
+      synfutRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height, chartTheme]);
@@ -355,6 +351,12 @@ function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOve
 
   useEffect(() => {
     if (!wrapRef.current) return;
+    if (typeof ResizeObserver === "undefined") {
+      const measuredHeight = wrapRef.current.getBoundingClientRect().height;
+      setHeight(Math.max(80, measuredHeight || 180));
+      return;
+    }
+
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         setHeight(Math.max(80, entry.contentRect.height));

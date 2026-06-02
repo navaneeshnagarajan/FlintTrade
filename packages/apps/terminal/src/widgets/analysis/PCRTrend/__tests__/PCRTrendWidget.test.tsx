@@ -45,9 +45,12 @@ describe("PCRTrendWidget", () => {
     expect(screen.queryByText("Sample")).toBeNull();
   });
 
-  it("renders the SVG PCR chart with role img", () => {
+  it("renders the PCR chart through the shared Flint threshold line primitive", () => {
     render(<PCRTrendWidget />);
-    expect(screen.getByRole("img", { name: /pcr trend chart/i })).toBeTruthy();
+    const chart = screen.getByRole("img", { name: /pcr trend chart/i });
+    expect(chart).toHaveAttribute("data-flint-chart", "threshold-line");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelectorAll("[data-threshold-band]").length).toBeGreaterThan(0);
   });
 
   it("displays a current PCR value", () => {

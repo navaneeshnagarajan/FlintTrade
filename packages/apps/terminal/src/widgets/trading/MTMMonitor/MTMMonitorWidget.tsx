@@ -28,15 +28,15 @@ import {
   memo,
 } from "react";
 import {
-  AreaSeries,
-  ColorType,
-  CrosshairMode,
-  createChart,
   type IChartApi,
   type ISeriesApi,
   type IPriceLine,
   type UTCTimestamp,
 } from "lightweight-charts";
+import {
+  FLINT_TRANSPARENT_CHART_LAYOUT,
+  createFlintAreaChart,
+} from "@flinttrade/design-system";
 import { TrendingUp, TrendingDown, AlertTriangle, Target } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { Card, CardContent } from "@/components/ui/card";
@@ -46,6 +46,8 @@ import { useFunds } from "@/hooks/useFunds";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightAreaRuntime } from "@/lib/lightweightChartRuntime";
 import { PnLSummary } from "./PnLSummary";
 
 // ---------------------------------------------------------------------------
@@ -141,6 +143,7 @@ function MTMMonitorWidget(_props: WidgetProps) {
   const [minMtm, setMinMtm] = useState(0);
   const [minMtmTime, setMinMtmTime] = useState("--:--");
   const [maxDrawdown, setMaxDrawdown] = useState(0);
+  const chartTheme = useLightweightChartTheme();
 
   // Stable ref for risk limits (pattern from PnLTracker)
   const riskLimitsRef = useRef(riskLimits);
@@ -156,29 +159,19 @@ function MTMMonitorWidget(_props: WidgetProps) {
     }
 
     const container = chartContainerRef.current;
-    const chart = createChart(container, {
-      width: container.offsetWidth,
-      height: container.offsetHeight,
-      layout: {
-        background: { type: ColorType.Solid, color: "transparent" },
-        textColor: getThemeColor("--color-text-muted", "#a0a0b0"),
-      },
-      grid: {
-        vertLines: { color: getThemeColor("--color-border", "#2a2a3a") },
-        horzLines: { color: getThemeColor("--color-border", "#2a2a3a") },
-      },
+    const flintChart = createFlintAreaChart(lightweightAreaRuntime, container, chartTheme, {
+      ariaLabel: "Mark-to-market PnL chart",
+      layout: FLINT_TRANSPARENT_CHART_LAYOUT,
       rightPriceScale: {
-        borderColor: getThemeColor("--color-border", "#2a2a3a"),
         scaleMargins: { top: 0.15, bottom: 0.15 },
       },
       timeScale: {
-        borderColor: getThemeColor("--color-border", "#2a2a3a"),
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: istTickFormatter,
       },
       crosshair: {
-        mode: CrosshairMode.Normal,
+        mode: 0,
         vertLine: { color: getThemeColor("--color-text-muted", "#a0a0b0"), style: 2, width: 1, labelVisible: false },
         horzLine: {
           color: getThemeColor("--color-text-muted", "#a0a0b0"),
@@ -187,33 +180,37 @@ function MTMMonitorWidget(_props: WidgetProps) {
           labelBackgroundColor: getThemeColor("--color-card", "#16161f"),
         },
       },
-    });
-
-    // MTM PnL area series (absorbed colour from PnLTracker)
-    const pnlSeries = chart.addSeries(AreaSeries, {
-      lineColor: "#7C3AED",
-      topColor: "rgba(124,58,237,0.35)",
-      bottomColor: "rgba(124,58,237,0.02)",
-      lineWidth: 2,
-      priceScaleId: "right",
-      priceFormat: {
-        type: "custom",
-        formatter: (price: number) => formatINR(price),
+      defaultSeriesOptions: {
+        priceScaleId: "right",
+        priceFormat: {
+          type: "custom",
+          formatter: (price: number) => formatINR(price),
+        },
       },
+      series: [
+        {
+          id: "pnl",
+          options: {
+            lineColor: "#7C3AED",
+            topColor: "rgba(124,58,237,0.35)",
+            bottomColor: "rgba(124,58,237,0.02)",
+            lineWidth: 2,
+          },
+        },
+        {
+          id: "drawdown",
+          options: {
+            lineColor: "#EF4444",
+            topColor: "rgba(239,68,68,0.0)",
+            bottomColor: "rgba(239,68,68,0.25)",
+            lineWidth: 1,
+          },
+        },
+      ],
     });
-
-    // Drawdown area series
-    const drawdownSeries = chart.addSeries(AreaSeries, {
-      lineColor: "#EF4444",
-      topColor: "rgba(239,68,68,0.0)",
-      bottomColor: "rgba(239,68,68,0.25)",
-      lineWidth: 1,
-      priceScaleId: "right",
-      priceFormat: {
-        type: "custom",
-        formatter: (price: number) => formatINR(price),
-      },
-    });
+    const chart = flintChart.chart;
+    const pnlSeries = flintChart.seriesById.pnl;
+    const drawdownSeries = flintChart.seriesById.drawdown;
 
     // Target price line
     const targetLine = pnlSeries.createPriceLine({
@@ -247,31 +244,19 @@ function MTMMonitorWidget(_props: WidgetProps) {
       chart.timeScale().fitContent();
     }
 
-    // Resize observer (absorbed from PnLTracker handleResize)
-    const ro = new ResizeObserver(() => {
-      if (chartRef.current && container) {
-        chartRef.current.applyOptions({
-          width: container.offsetWidth,
-          height: container.offsetHeight,
-        });
-      }
-    });
-    ro.observe(container);
-
-    return () => {
-      ro.disconnect();
-    };
-  }, []);
+    return () => flintChart.remove();
+  }, [chartTheme]);
 
   // Init chart once on mount
   useEffect(() => {
     const cleanup = initChart();
     return () => {
       cleanup?.();
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
-      }
+      chartRef.current = null;
+      pnlSeriesRef.current = null;
+      drawdownSeriesRef.current = null;
+      targetLineRef.current = null;
+      slLineRef.current = null;
     };
   }, [initChart]);
 

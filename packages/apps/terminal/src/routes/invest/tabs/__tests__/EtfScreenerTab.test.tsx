@@ -101,6 +101,16 @@ describe("EtfScreenerTab", () => {
     expect(screen.getByText("GOLDBEES")).toBeInTheDocument();
   });
 
+  it("renders trend sparklines through the shared Flint primitive", () => {
+    render(<EtfScreenerTab />);
+
+    const sparklines = screen.getAllByRole("img", { name: /etf 30-day trend sparkline/i });
+    expect(sparklines.length).toBeGreaterThan(0);
+    expect(sparklines[0]).toHaveAttribute("viewBox", "0 0 160 42");
+    expect(sparklines[0].querySelector("polyline")).not.toBeInTheDocument();
+    expect(sparklines[0].querySelectorAll("path").length).toBeGreaterThan(0);
+  });
+
   it("renders table view toggle buttons", () => {
     render(<EtfScreenerTab />);
     expect(screen.getByRole("button", { name: /table view/i })).toBeInTheDocument();

@@ -254,7 +254,8 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
 /** POST an order through the FlintTrade safety proxy.
  *
  *  The backend at order_routes.py:
- *    - Validates `X-API-Key` against OPENALGO_API_KEY (via require_auth).
+ *    - Validates `X-API-Key` against FLINTTRADE_API_KEY, with
+ *      OPENALGO_API_KEY retained only as a compatibility fallback.
  *    - Reads `X-FlintTrade-Mode` to enforce explore / practice / live gates.
  *    - For live-mode orders, additionally requires
  *      `Authorization: Bearer <jwt>` with the `live_mode_unlocked` claim.
@@ -262,7 +263,8 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
  *  Headers we attach:
  *    - `Content-Type: application/json`
  *    - `X-FlintTrade-Mode: <explore|practice|live>`
- *    - `X-API-Key: <connectionStore.apiKey>`  (gates the auth middleware)
+ *    - `X-API-Key: <connectionStore.apiKey>`  (gates the auth middleware when
+ *      a backend key is configured)
  *    - `Authorization: Bearer <authStore.token>` when a session token is
  *      available; the backend ignores it in explore/practice mode and
  *      checks the `live_mode_unlocked` claim before letting a real order

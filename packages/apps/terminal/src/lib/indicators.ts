@@ -163,8 +163,8 @@ export function bollingerBands(
  * (POST /ft-api/v1/indicators/macd). Uses `histogram` (not `hist`) and
  * returns non-nullable number arrays because nulls are stripped server-side.
  *
- * Distinct from `MACDResult` in widgets/analysis/Chart/indicators.ts which
- * uses `hist` and nullable arrays for the chart rendering layer.
+ * Distinct from design-system `MACDResult` for chart rendering, which uses
+ * `hist` and nullable arrays.
  */
 export interface MACDApiResult {
   macd: number[];

@@ -8,7 +8,7 @@
 
 | Service | Role | Minimum | Latest tested | Upstream |
 |---|---|---|---|---|
-| **OpenAlgo** | Broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
+| **OpenAlgo** | Optional broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
 | **OpenClaw** | Optional AI agent gateway (Telegram / WhatsApp) | (any) | `8c4ecf42` (2026-04-19) | [openclaw/openclaw](https://github.com/openclaw/openclaw) |
 
 **OpenAlgo minimum (v2.0.0):** required only when you enable the optional
@@ -36,12 +36,16 @@ call AlgoMirror at runtime. The upstream repo is not tracked or pulled.
 
 ## Brokers
 
-FlintTrade supports two broker paths: native FlintTrade adapters and an
-optional OpenAlgo-compatible bridge. For the OpenAlgo path, whatever broker
-version OpenAlgo supports is the compatibility boundary. The broker list lives
-in [`flint.toml`](../flint.toml) under `[packages]` / gateway metadata. The
-2026-05 sync added **IIFL Capital** as a distinct entry alongside the existing
-**IIFL** adapter.
+FlintTrade supports two broker paths: the native FlintTrade gateway and an
+optional OpenAlgo-compatible bridge. The native path is alpha: the gateway
+contract, routing, credentials, capabilities, and Dhan adapter scaffold are in
+the repo, but direct Dhan live SDK calls remain gated pending SDK attestation.
+Do not treat native direct broker support as production-live complete yet.
+
+For the OpenAlgo path, whatever broker version OpenAlgo supports is the
+compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)
+under `[packages]` / gateway metadata. The 2026-05 sync added
+**IIFL Capital** as a distinct entry alongside the existing **IIFL** adapter.
 
 ### Surface added in v2.0.1.1
 

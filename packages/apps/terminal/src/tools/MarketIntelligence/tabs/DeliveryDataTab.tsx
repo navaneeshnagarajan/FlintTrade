@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { ArrowUpDown } from "lucide-react";
+import { FlintLinearMeter } from "@flinttrade/design-system";
 import {
   Table,
   TableBody,
@@ -44,6 +45,11 @@ export function DeliveryDataTab() {
     { label: "Delivery %", field: "delivery_pct" },
   ];
 
+  const sortStateFor = (field: keyof DeliveryRow) => {
+    if (sortField !== field) return "none";
+    return sortDir === "asc" ? "ascending" : "descending";
+  };
+
   return (
     <div className="p-4">
       <DataNotice text="Delivery data from NSE bhavcopy. Available after 6 PM on trading days. High delivery % indicates institutional interest and conviction." />
@@ -55,11 +61,18 @@ export function DeliveryDataTab() {
               {headers.map(({ label, field }) => (
                 <TableHead
                   key={field}
-                  className={["text-xs h-8 px-2 cursor-pointer select-none", sortField === field ? "text-primary" : "text-text-muted"].join(" ")}
-                  onClick={() => handleSort(field)}
+                  aria-sort={sortStateFor(field)}
+                  className={["h-8 px-2 text-xs", sortField === field ? "text-primary" : "text-text-muted"].join(" ")}
                 >
-                  {label}
-                  {sortField === field && <ArrowUpDown size={9} className="inline ml-1 opacity-80" />}
+                  <button
+                    type="button"
+                    aria-label={`Sort by ${label}`}
+                    className="inline-flex items-center gap-1 rounded-sm text-left hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    onClick={() => handleSort(field)}
+                  >
+                    <span>{label}</span>
+                    {sortField === field && <ArrowUpDown size={9} className="opacity-80" aria-hidden="true" />}
+                  </button>
                 </TableHead>
               ))}
             </TableRow>
@@ -69,6 +82,7 @@ export function DeliveryDataTab() {
               const changeAmt = row.close - row.open;
               const changePct = ((changeAmt / row.open) * 100);
               const deliveryColor = row.delivery_pct >= 60 ? "text-profit" : row.delivery_pct >= 45 ? "text-warning" : "text-text-secondary";
+              const deliveryFill = row.delivery_pct >= 60 ? "#10b981" : row.delivery_pct >= 45 ? "#f59e0b" : "#6b7280";
               return (
                 <TableRow key={row.symbol} className="border-border-default hover:bg-surface-card">
                   <TableCell className="px-2 py-1.5">
@@ -84,15 +98,13 @@ export function DeliveryDataTab() {
                   <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{row.volume_lakh.toFixed(1)}L</TableCell>
                   <TableCell className="px-2 py-1.5">
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 h-1.5 bg-surface-elevated rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-[width]"
-                          style={{
-                            width: `${row.delivery_pct}%`,
-                            backgroundColor: row.delivery_pct >= 60 ? "#10b981" : row.delivery_pct >= 45 ? "#f59e0b" : "#6b7280",
-                          }}
-                        />
-                      </div>
+                      <FlintLinearMeter
+                        ariaLabel={`${row.symbol} delivery percentage`}
+                        value={row.delivery_pct}
+                        fillColor={deliveryFill}
+                        heightClassName="h-1.5"
+                        className="flex-1"
+                      />
                       <span className={`font-mono text-xs font-semibold w-10 text-right ${deliveryColor}`}>
                         {row.delivery_pct.toFixed(1)}%
                       </span>

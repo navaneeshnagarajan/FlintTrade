@@ -148,6 +148,7 @@ function renderExplore() {
 describe("ExploreRoute", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    localStorage.clear();
   });
 
   it("renders the explore page immediately without the demo choice interstitial", () => {
@@ -166,6 +167,7 @@ describe("ExploreRoute", () => {
 
     expect(mockSetMode).toHaveBeenCalledWith("explore");
     expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");
+    expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");
     expect(mockNavigate).toHaveBeenCalledWith("/home");
   });
 

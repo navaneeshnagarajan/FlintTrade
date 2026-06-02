@@ -18,6 +18,7 @@
 
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { createFlintPlotlyTheme } from "@flinttrade/design-system";
 import { useThemeStore } from "@/stores/themeStore";
 import type { Layout } from "plotly.js";
 
@@ -83,30 +84,15 @@ export function usePlotlyTheme(): Partial<Layout> {
     const warning = cssVar("--color-warning", "#f59e0b");
     const border = cssVar("--color-border", "#2a2a3a");
 
-    return {
-      paper_bgcolor: "transparent",
-      plot_bgcolor: "transparent",
-      font: {
-        family: "Inter, system-ui, sans-serif",
-        color: text,
-        size: 11,
-      },
-      xaxis: {
-        gridcolor: grid,
-        linecolor: border,
-        zerolinecolor: border,
-      },
-      yaxis: {
-        gridcolor: grid,
-        linecolor: border,
-        zerolinecolor: border,
-      },
-      legend: {
-        bgcolor: "transparent",
-        font: { size: 10 },
-      },
-      colorway: [accent, profit, loss, warning, "#818cf8", "#06b6d4"],
-    } satisfies Partial<Layout>;
+    return createFlintPlotlyTheme({
+      grid,
+      text,
+      accent,
+      profit,
+      loss,
+      warning,
+      border,
+    }) as Partial<Layout>;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeThemeId, resolvedMode]);
 }

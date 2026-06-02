@@ -1,3 +1,6 @@
+import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -50,6 +53,10 @@ const mockRemoveAccount = removeDittoAccount as ReturnType<typeof vi.fn>;
 const mockSetAccountEnabled = setDittoAccountEnabled as ReturnType<typeof vi.fn>;
 const mockGetMirrorStatus = getDittoMirrorStatus as ReturnType<typeof vi.fn>;
 const mockGetRisk = getDittoRisk as ReturnType<typeof vi.fn>;
+
+const testDir = dirname(fileURLToPath(import.meta.url));
+const dittoRouteSource = () =>
+  readFileSync(resolve(testDir, "../DittoRoute.tsx"), "utf8");
 
 function createWrapper() {
   const qc = new QueryClient({
@@ -142,6 +149,10 @@ describe("DittoRoute", () => {
   it("renders the Multi-Account Manager header", () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
     expect(screen.getByText("Multi-Account Manager")).toBeInTheDocument();
+  });
+
+  it("keeps route-local checkmark SVG markup out of the source", () => {
+    expect(dittoRouteSource()).not.toContain("<" + "svg");
   });
 
   it("renders all three tabs", () => {

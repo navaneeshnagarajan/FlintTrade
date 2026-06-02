@@ -12,6 +12,7 @@
 
 import { useState, useMemo, memo } from "react";
 import { TrendingDown, ChevronDown, ArrowUp, ArrowDown, Minus } from "lucide-react";
+import { FlintThresholdLineChart } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -83,24 +84,20 @@ const REGIME_COLOUR: Record<PCRRegime, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// SVG chart
+// Threshold chart
 // ---------------------------------------------------------------------------
 
-const SVG_W = 500;
-const SVG_H = 180;
-const PAD = { top: 12, right: 16, bottom: 30, left: 36 };
-
 const BANDS = [
-  { yMin: 0,   yMax: 0.7, fill: "rgba(34,197,94,0.10)",  label: "Bullish Extreme" },
-  { yMin: 0.7, yMax: 1.0, fill: "rgba(34,197,94,0.06)",  label: "Bullish" },
-  { yMin: 1.0, yMax: 1.3, fill: "rgba(239,68,68,0.06)",  label: "Bearish" },
-  { yMin: 1.3, yMax: 2.0, fill: "rgba(239,68,68,0.12)",  label: "Bearish Extreme" },
+  { min: 0,   max: 0.7, color: "rgba(34,197,94,0.10)",  label: "Bullish Extreme" },
+  { min: 0.7, max: 1.0, color: "rgba(34,197,94,0.06)",  label: "Bullish" },
+  { min: 1.0, max: 1.3, color: "rgba(239,68,68,0.06)",  label: "Bearish" },
+  { min: 1.3, max: 2.0, color: "rgba(239,68,68,0.12)",  label: "Bearish Extreme" },
 ];
 
 const BAND_LINES = [
-  { y: 0.7, stroke: "rgba(34,197,94,0.5)", dash: "4,2" },
-  { y: 1.0, stroke: "rgba(156,163,175,0.4)", dash: "4,2" },
-  { y: 1.3, stroke: "rgba(239,68,68,0.5)", dash: "4,2" },
+  { value: 0.7, color: "rgba(34,197,94,0.5)", dash: "4,2" },
+  { value: 1.0, color: "rgba(156,163,175,0.4)", dash: "4,2" },
+  { value: 1.3, color: "rgba(239,68,68,0.5)", dash: "4,2" },
 ];
 
 interface PCRChartProps {
@@ -108,152 +105,19 @@ interface PCRChartProps {
 }
 
 function PCRChart({ points }: PCRChartProps) {
-  const chartW = SVG_W - PAD.left - PAD.right;
-  const chartH = SVG_H - PAD.top - PAD.bottom;
-
-  const minV = 0;
-  const maxV = Math.max(2.0, ...points.map((p) => p.pcr)) * 1.05;
-
-  const xOf = (i: number) =>
-    points.length > 1 ? (i / (points.length - 1)) * chartW : chartW / 2;
-  const yOf = (v: number) => chartH - ((v - minV) / (maxV - minV)) * chartH;
-
-  const linePoints = points
-    .map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.pcr).toFixed(1)}`)
-    .join(" ");
-
-  const areaPath = [
-    `M ${xOf(0).toFixed(1)},${yOf(points[0].pcr).toFixed(1)}`,
-    ...points.slice(1).map((p, i) => `L ${xOf(i + 1).toFixed(1)},${yOf(p.pcr).toFixed(1)}`),
-    `L ${xOf(points.length - 1).toFixed(1)},${chartH.toFixed(1)}`,
-    `L ${xOf(0).toFixed(1)},${chartH.toFixed(1)}`,
-    "Z",
-  ].join(" ");
-
-  const yTicks = [0, 0.5, 1.0, 1.5, 2.0].filter((v) => v <= maxV);
-
-  // X-axis labels: show first, middle, last
-  const xLabelIndices = [
-    0,
-    Math.floor(points.length / 2),
-    points.length - 1,
-  ];
-
   return (
-    <svg
-      viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-      className="w-full"
-      style={{ height: SVG_H }}
-      aria-label="PCR trend chart"
-      role="img"
-    >
-      <defs>
-        <linearGradient id="pcrGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(99,102,241,0.3)" />
-          <stop offset="100%" stopColor="rgba(99,102,241,0.01)" />
-        </linearGradient>
-        <clipPath id="pcrClip">
-          <rect x={0} y={0} width={chartW} height={chartH} />
-        </clipPath>
-      </defs>
-
-      <g transform={`translate(${PAD.left},${PAD.top})`}>
-        {/* Band fills */}
-        {BANDS.map((b) => {
-          const y1 = yOf(Math.min(b.yMax, maxV));
-          const y2 = yOf(Math.max(b.yMin, minV));
-          if (y1 >= y2) return null;
-          return (
-            <rect
-              key={b.label}
-              x={0}
-              y={y1}
-              width={chartW}
-              height={y2 - y1}
-              fill={b.fill}
-            />
-          );
-        })}
-
-        {/* Band threshold lines */}
-        {BAND_LINES.map((bl) => {
-          if (bl.y > maxV) return null;
-          const y = yOf(bl.y);
-          return (
-            <line
-              key={bl.y}
-              x1={0}
-              y1={y}
-              x2={chartW}
-              y2={y}
-              stroke={bl.stroke}
-              strokeWidth={0.75}
-              strokeDasharray={bl.dash}
-            />
-          );
-        })}
-
-        {/* Area fill */}
-        <path d={areaPath} fill="url(#pcrGrad)" clipPath="url(#pcrClip)" />
-
-        {/* Line */}
-        <polyline
-          points={linePoints}
-          fill="none"
-          stroke="rgba(99,102,241,0.85)"
-          strokeWidth={1.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          clipPath="url(#pcrClip)"
-        />
-
-        {/* Last point dot */}
-        {points.length > 0 && (
-          <circle
-            cx={xOf(points.length - 1)}
-            cy={yOf(points[points.length - 1].pcr)}
-            r={3.5}
-            fill="#6366f1"
-            stroke="var(--color-surface-base,#0a0a0f)"
-            strokeWidth={1.5}
-          />
-        )}
-
-        {/* Y axis ticks */}
-        {yTicks.map((v) => (
-          <g key={v}>
-            <line x1={-4} x2={0} y1={yOf(v)} y2={yOf(v)} stroke="var(--color-border-default,#2a2a3a)" />
-            <text
-              x={-6}
-              y={yOf(v) + 3}
-              textAnchor="end"
-              fontSize={8}
-              fill="var(--color-text-muted,#666)"
-            >
-              {v.toFixed(1)}
-            </text>
-          </g>
-        ))}
-
-        {/* X axis labels */}
-        {xLabelIndices.map((idx) => (
-          <text
-            key={idx}
-            x={xOf(idx)}
-            y={chartH + 18}
-            textAnchor="middle"
-            fontSize={8}
-            fill="var(--color-text-muted,#666)"
-          >
-            {points[idx]?.session ?? ""}
-          </text>
-        ))}
-
-        {/* Axes */}
-        <line x1={0} y1={chartH} x2={chartW} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={0} x2={0} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-      </g>
-    </svg>
+    <FlintThresholdLineChart
+      ariaLabel="PCR trend chart"
+      points={points.map((point) => ({ label: point.session, value: point.pcr }))}
+      minValue={0}
+      maxValue={Math.max(2.0, ...points.map((point) => point.pcr)) * 1.05}
+      bands={BANDS}
+      thresholds={BAND_LINES}
+      yTicks={[0, 0.5, 1.0, 1.5, 2.0]}
+      xLabelIndices={[0, Math.floor(points.length / 2), points.length - 1]}
+      lineColor="rgba(99,102,241,0.85)"
+      fillColor="rgba(99,102,241,0.10)"
+    />
   );
 }
 

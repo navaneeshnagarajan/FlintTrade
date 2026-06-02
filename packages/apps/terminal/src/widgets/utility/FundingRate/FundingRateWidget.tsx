@@ -4,7 +4,7 @@
  * Features:
  *   - Table of Delta Exchange perpetual pairs with current funding rate,
  *     predicted next rate, countdown to next funding event, and open interest
- *   - 7-day sparkline for each symbol (SVG, inline)
+ *   - 7-day core mini sparkline for each symbol
  *   - Positive rates highlighted green (longs pay shorts)
  *   - Negative rates highlighted red (shorts pay longs)
  *   - Sort by rate magnitude (default) or alphabetical
@@ -15,6 +15,7 @@
 import { useState, useMemo, useCallback, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Loader2, AlertCircle, ArrowUpDown, TrendingUp, TrendingDown } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
 import { getCryptoFundingRates } from "@/services/ftApi";
 import type { FundingRateEntry } from "@/services/ftApi";
@@ -43,50 +44,23 @@ function formatOI(oi: number | null): string {
   return `$${oi}`;
 }
 
-// ---------------------------------------------------------------------------
-// Sparkline (pure SVG, no deps)
-// ---------------------------------------------------------------------------
-
 interface SparklineProps {
   data: number[];
-  width?: number;
-  height?: number;
 }
 
-function Sparkline({ data, width = 80, height = 24 }: SparklineProps) {
+function Sparkline({ data }: SparklineProps) {
   if (!data.length) return null;
-
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 0.0001;
-
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - ((v - min) / range) * (height - 4) - 2;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
 
   const lastVal = data[data.length - 1];
   const prevVal = data[data.length - 2] ?? lastVal;
-  const lineColour = lastVal >= prevVal ? "#22c55e" : "#ef4444";
 
   return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      aria-label="7-day funding rate sparkline"
-      role="img"
-    >
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke={lineColour}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={data}
+      positive={lastVal >= prevVal}
+      ariaLabel="7-day funding rate sparkline"
+      className="h-6 w-20"
+    />
   );
 }
 

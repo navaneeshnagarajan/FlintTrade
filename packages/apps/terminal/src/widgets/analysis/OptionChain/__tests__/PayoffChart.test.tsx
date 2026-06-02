@@ -5,6 +5,9 @@
  * Covers: rendering, zero line, breakeven labels, strike labels, tooltip.
  */
 
+import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
@@ -84,6 +87,10 @@ function renderChart(overrides: Partial<PayoffChartProps> = {}) {
   return render(<PayoffChart {...defaultProps} {...overrides} />);
 }
 
+const testDir = dirname(fileURLToPath(import.meta.url));
+const payoffChartSource = () =>
+  readFileSync(resolve(testDir, "../PayoffChart.tsx"), "utf8");
+
 // ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
@@ -105,6 +112,19 @@ describe("PayoffChart — render", () => {
     expect(
       screen.getByRole("img", { name: "Options payoff chart" }),
     ).toBeInTheDocument();
+  });
+
+  it("routes rendering through the shared Flint payoff chart primitive", () => {
+    renderChart();
+    const chart = screen.getByRole("img", { name: "Options payoff chart" });
+    expect(chart).toHaveAttribute("data-flint-chart", "payoff");
+  });
+
+  it("keeps local SVG path markup out of the OptionChain wrapper", () => {
+    const source = payoffChartSource();
+    expect(source).not.toContain("<" + "svg");
+    expect(source).not.toContain("<" + "path");
+    expect(source).not.toContain("<" + "line");
   });
 
   it("renders with no legs without crashing", () => {

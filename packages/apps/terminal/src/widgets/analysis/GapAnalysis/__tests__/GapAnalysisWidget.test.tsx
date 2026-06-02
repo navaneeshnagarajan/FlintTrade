@@ -91,10 +91,13 @@ describe("GapAnalysisWidget", () => {
     expect(screen.getByText(/Fill time/i)).toBeTruthy();
   });
 
-  it("scatter chart has aria label", () => {
+  it("renders the scatter chart through the shared Flint scatter primitive", () => {
     mockConnected.mockReturnValue(false);
     render(<GapAnalysisWidget />);
-    expect(screen.getByLabelText(/Scatter chart/i)).toBeTruthy();
+    const chart = screen.getByRole("img", { name: /Scatter chart/i });
+    expect(chart).toHaveAttribute("data-flint-chart", "scatter");
+    expect(chart.querySelectorAll("[data-scatter-point]").length).toBeGreaterThan(0);
+    expect(chart.querySelector("svg")).not.toBeInTheDocument();
   });
 
   it("symbol selector is present", () => {

@@ -39,12 +39,26 @@ from typing import Any
 logger = logging.getLogger("flinttrade.core.backup")
 
 # Patterns that are always excluded (even with include_ticks=False).
-_ALWAYS_EXCLUDE: frozenset[str] = frozenset(
-    {".git", "__pycache__", "*.pyc", "*.pyo"}
-)
+_ALWAYS_EXCLUDE: frozenset[str] = frozenset({".git", "__pycache__"})
 
 # Sub-directory name patterns classified as "tick data" (large, optional).
 _TICK_DIRS: frozenset[str] = frozenset({"ticks", "tick_data", "questdb_data"})
+
+_PLAINTEXT_SECRET_FILENAMES: frozenset[str] = frozenset(
+    {
+        "master_password",
+        "api_key_pepper",
+        "jwt_secret",
+        "totp_install_key",
+    }
+)
+
+_CREDENTIAL_STORE_FILENAMES: frozenset[str] = frozenset(
+    {
+        "credentials.db",
+        "credentials.duckdb",
+    }
+)
 
 _MANIFEST_FILENAME = "manifest.json"
 
@@ -89,6 +103,7 @@ class WorkspaceBackup:
         self,
         output_path: Path,
         include_ticks: bool = False,
+        include_credentials: bool = False,
     ) -> Path:
         """Create a tar.gz backup of the workspace directory.
 
@@ -105,6 +120,9 @@ class WorkspaceBackup:
                 Parent directories are created if they do not exist.
             include_ticks: When ``True``, include tick data directories
                 (may be very large).  Defaults to ``False``.
+            include_credentials: When ``True``, include encrypted credential
+                database files such as ``credentials.db``. Plain-text secret
+                seed files are never included. Defaults to ``False``.
 
         Returns:
             The resolved path to the created archive.
@@ -121,10 +139,15 @@ class WorkspaceBackup:
         output_path = output_path.expanduser().resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        files_to_backup = self._collect_files(include_ticks)
+        files_to_backup = self._collect_files(
+            include_ticks=include_ticks,
+            include_credentials=include_credentials,
+        )
 
         manifest = self._build_manifest(
-            files_to_backup, include_ticks=include_ticks
+            files_to_backup,
+            include_ticks=include_ticks,
+            include_credentials=include_credentials,
         )
 
         # Write manifest to a temporary file so it can be added first.
@@ -355,11 +378,16 @@ class WorkspaceBackup:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _collect_files(self, include_ticks: bool) -> list[Path]:
+    def _collect_files(
+        self,
+        include_ticks: bool,
+        include_credentials: bool = False,
+    ) -> list[Path]:
         """Gather files to include in the backup.
 
         Args:
             include_ticks: Whether to include tick-data directories.
+            include_credentials: Whether to include credential database files.
 
         Returns:
             Sorted list of absolute :class:`~pathlib.Path` objects.
@@ -376,6 +404,10 @@ class WorkspaceBackup:
                 continue
             if item.suffix in (".pyc", ".pyo"):
                 continue
+            if item.name in _PLAINTEXT_SECRET_FILENAMES:
+                continue
+            if not include_credentials and item.name in _CREDENTIAL_STORE_FILENAMES:
+                continue
 
             # Optionally skip tick directories.
             if not include_ticks:
@@ -387,13 +419,17 @@ class WorkspaceBackup:
         return sorted(collected)
 
     def _build_manifest(
-        self, files: list[Path], include_ticks: bool
+        self,
+        files: list[Path],
+        include_ticks: bool,
+        include_credentials: bool,
     ) -> dict[str, Any]:
         """Build a manifest dict describing the backup.
 
         Args:
             files: List of files that will be archived.
             include_ticks: Whether tick data was included.
+            include_credentials: Whether credential stores were included.
 
         Returns:
             Manifest dict with metadata fields.
@@ -405,5 +441,6 @@ class WorkspaceBackup:
             "file_count": len(files),
             "workspace_size_mb": round(total_bytes / (1024 * 1024), 3),
             "include_ticks": include_ticks,
+            "include_credentials": include_credentials,
             "version": "1",
         }

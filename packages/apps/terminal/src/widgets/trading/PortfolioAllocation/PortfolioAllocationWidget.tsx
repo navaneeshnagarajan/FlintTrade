@@ -5,12 +5,13 @@
  *   - Asset class breakdown (Equity, F&O, Commodity, Currency, Cash)
  *   - Sector breakdown (Banking, IT, Energy, etc.)
  *
- * Pure SVG donut — no chart library dependency.
+ * Shared Flint donut primitive — no chart library dependency.
  * Live data from positions + holdings API; sample data in explore mode.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { PieChart } from "lucide-react";
+import { FlintDonutBreakdown } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
@@ -76,109 +77,11 @@ function fmt(v: number): string {
 function buildSlices(
   data: AllocationSlice[],
   total: number,
-): Array<AllocationSlice & { pct: number; startAngle: number; endAngle: number }> {
-  let cumAngle = -Math.PI / 2; // Start at top (12 o'clock)
+): Array<AllocationSlice & { pct: number }> {
   return data.map((s) => {
     const pct = total > 0 ? s.value / total : 0;
-    const arc = pct * 2 * Math.PI;
-    const start = cumAngle;
-    cumAngle += arc;
-    return { ...s, pct, startAngle: start, endAngle: cumAngle };
+    return { ...s, pct };
   });
-}
-
-// ---------------------------------------------------------------------------
-// SVG donut
-// ---------------------------------------------------------------------------
-
-interface DonutProps {
-  slices: Array<AllocationSlice & { pct: number; startAngle: number; endAngle: number }>;
-  total: number;
-  size?: number;
-  thickness?: number;
-  hovered: string | null;
-  onHover: (label: string | null) => void;
-}
-
-function Donut({ slices, total, size = 160, thickness = 36, hovered, onHover }: DonutProps) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const outerR = size / 2 - 4;
-  const innerR = outerR - thickness;
-
-  function describePath(start: number, end: number, outer: number, inner: number): string {
-    const gap = 0.02;
-    const s = start + gap;
-    const e = end - gap;
-    if (e <= s) return "";
-
-    const ox1 = cx + outer * Math.cos(s);
-    const oy1 = cy + outer * Math.sin(s);
-    const ox2 = cx + outer * Math.cos(e);
-    const oy2 = cy + outer * Math.sin(e);
-    const ix1 = cx + inner * Math.cos(e);
-    const iy1 = cy + inner * Math.sin(e);
-    const ix2 = cx + inner * Math.cos(s);
-    const iy2 = cy + inner * Math.sin(s);
-    const large = e - s > Math.PI ? 1 : 0;
-
-    return [
-      `M ${ox1} ${oy1}`,
-      `A ${outer} ${outer} 0 ${large} 1 ${ox2} ${oy2}`,
-      `L ${ix1} ${iy1}`,
-      `A ${inner} ${inner} 0 ${large} 0 ${ix2} ${iy2}`,
-      "Z",
-    ].join(" ");
-  }
-
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      role="img"
-      aria-label="Portfolio allocation donut chart"
-    >
-      {slices.map((s) => (
-        <path
-          key={s.label}
-          d={describePath(s.startAngle, s.endAngle, outerR, innerR)}
-          fill={s.colour}
-          opacity={hovered === null || hovered === s.label ? 1 : 0.35}
-          className="cursor-pointer transition-opacity duration-150"
-          onMouseEnter={() => onHover(s.label)}
-          onMouseLeave={() => onHover(null)}
-          role="button"
-          aria-label={`${s.label}: ${fmt(s.value)} (${(s.pct * 100).toFixed(1)}%)`}
-          tabIndex={0}
-          onFocus={() => onHover(s.label)}
-          onBlur={() => onHover(null)}
-        />
-      ))}
-      {/* Centre text */}
-      <text
-        x={cx}
-        y={cy - 8}
-        textAnchor="middle"
-        className="fill-text-primary"
-        style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}
-      >
-        {hovered
-          ? fmt(slices.find((s) => s.label === hovered)?.value ?? 0)
-          : fmt(total)
-        }
-      </text>
-      <text
-        x={cx}
-        y={cy + 8}
-        textAnchor="middle"
-        className="fill-text-muted"
-        style={{ fontSize: 9, fontFamily: "Inter, sans-serif" }}
-      >
-        {hovered ?? "Total"}
-      </text>
-    </svg>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +152,7 @@ function PortfolioAllocationWidget() {
   const rawSlices = view === "asset" ? liveAssetSlices : liveSectorSlices;
   const total = rawSlices.reduce((s, d) => s + d.value, 0);
   const slices = buildSlices(rawSlices, total);
+  const hoveredSlice = slices.find((s) => s.label === hovered);
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
@@ -292,13 +196,16 @@ function PortfolioAllocationWidget() {
       {/* Chart + legend */}
       <div className="flex-1 overflow-auto flex flex-col items-center py-3 gap-4">
         {/* Donut */}
-        <Donut
-          slices={slices}
-          total={total}
-          size={164}
-          thickness={38}
-          hovered={hovered}
-          onHover={setHovered}
+        <FlintDonutBreakdown
+          ariaLabel="Portfolio allocation donut chart"
+          slices={slices.map((s) => ({
+            label: s.label,
+            value: s.value,
+            color: s.colour,
+          }))}
+          centerValue={fmt(hoveredSlice?.value ?? total)}
+          centerLabel={hoveredSlice?.label ?? "Total"}
+          className="size-[164px]"
         />
 
         {/* Legend */}

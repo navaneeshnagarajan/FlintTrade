@@ -50,6 +50,14 @@ describe("TradePerformanceWidget", () => {
     expect(screen.getByRole("img", { name: /equity curve chart/i })).toBeTruthy();
   });
 
+  it("uses the shared core threshold-line chart for the equity curve", () => {
+    render(<TradePerformanceWidget />);
+    const chart = screen.getByRole("img", { name: /equity curve chart/i });
+
+    expect(chart).toHaveAttribute("data-flint-chart", "threshold-line");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+  });
+
   it("renders key metrics section with Win Rate", () => {
     render(<TradePerformanceWidget />);
     expect(screen.getByText("Win Rate")).toBeTruthy();
@@ -75,6 +83,14 @@ describe("TradePerformanceWidget", () => {
   it("renders day distribution chart", () => {
     render(<TradePerformanceWidget />);
     expect(screen.getByRole("img", { name: /trade distribution by day/i })).toBeTruthy();
+  });
+
+  it("uses the shared core categorical bar chart for day distribution", () => {
+    render(<TradePerformanceWidget />);
+    const chart = screen.getByRole("img", { name: /trade distribution by day/i });
+
+    expect(chart).toHaveAttribute("data-flint-chart", "categorical-bar");
+    expect(chart.querySelectorAll("[data-categorical-bar]").length).toBeGreaterThan(0);
   });
 
   it("renders Expectancy metric", () => {

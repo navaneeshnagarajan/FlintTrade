@@ -14,8 +14,13 @@
  */
 
 import { useState, useEffect, useRef, useMemo, memo } from "react";
-import { createChart, CandlestickSeries } from "lightweight-charts";
-import type { IChartApi, ISeriesApi, CandlestickData, Time } from "lightweight-charts";
+import type { CandlestickData, HistogramData, IChartApi, ISeriesApi, MouseEventParams, Time } from "lightweight-charts";
+import {
+  createFlintCandlestickChart,
+  FlintChartLegend,
+  getFlintChartCrosshairReadout,
+} from "@flinttrade/design-system";
+import type { FlintChartLegendState } from "@flinttrade/design-system";
 import { RefreshCw, AlertCircle, Loader2 } from "lucide-react";
 import { useOIProfile } from "./useOIProfile";
 import { SAMPLE_OI_PROFILE_DATA } from "./sampleData";
@@ -24,6 +29,8 @@ import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useModeStore } from "@/stores/modeStore";
 import { getHistory } from "@/services/api";
+import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightCandlestickRuntime } from "@/lib/lightweightChartRuntime";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Data, Layout } from "plotly.js";
 
@@ -105,56 +112,65 @@ function OIProfileWidget() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const flintChartRef = useRef<ReturnType<typeof createFlintCandlestickChart<IChartApi, ISeriesApi<"Candlestick">, ISeriesApi<"Histogram">>> | null>(null);
+  const [legend, setLegend] = useState<FlintChartLegendState | null>(null);
+  const chartTheme = useLightweightChartTheme();
 
   useEffect(() => {
     const el = chartContainerRef.current;
     if (!el) return;
 
-    const chart = createChart(el, {
-      width: el.clientWidth,
-      height: el.clientHeight,
+    const flintChart = createFlintCandlestickChart(
+      lightweightCandlestickRuntime,
+      el,
+      chartTheme,
+      {
+        ariaLabel: `${symbol} futures price chart`,
+        layout: {
+          background: { color: "transparent" },
+          fontFamily: "Inter, system-ui, sans-serif",
+          fontSize: 11,
+        },
+        timeScale: { timeVisible: true, secondsVisible: false },
+      },
+    );
+    const { chart, candleSeries, volumeSeries } = flintChart;
+
+    chartRef.current = chart;
+    seriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+    flintChartRef.current = flintChart;
+
+    chart.subscribeCrosshairMove((param: MouseEventParams) => {
+      setLegend(getFlintChartCrosshairReadout(param, candleSeries, volumeSeries));
+    });
+
+    return () => {
+      flintChart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      volumeSeriesRef.current = null;
+      flintChartRef.current = null;
+      setLegend(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    flintChartRef.current?.applyTheme(chartTheme, {
       layout: {
         background: { color: "transparent" },
-        textColor: getThemeColor("--color-text-muted", "#a0a0b0"),
         fontFamily: "Inter, system-ui, sans-serif",
         fontSize: 11,
       },
-      grid: {
-        vertLines: { color: getThemeColor("--color-border", "#2a2a3a") },
-        horzLines: { color: getThemeColor("--color-border", "#2a2a3a") },
-      },
-      rightPriceScale: { borderColor: getThemeColor("--color-border", "#2a2a3a") },
-      timeScale: { borderColor: getThemeColor("--color-border", "#2a2a3a"), timeVisible: true, secondsVisible: false },
+      timeScale: { timeVisible: true, secondsVisible: false },
     });
-
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
-
-    chartRef.current = chart;
-    seriesRef.current = series;
-
-    const ro = new ResizeObserver(() => {
-      chart.resize(el.clientWidth, el.clientHeight);
-    });
-    ro.observe(el);
-
-    return () => {
-      ro.disconnect();
-      chart.remove();
-      chartRef.current = null;
-      seriesRef.current = null;
-    };
-  }, []);
+  }, [chartTheme]);
 
   // Fetch and set OHLCV data when symbol/interval changes
   useEffect(() => {
-    if (!seriesRef.current) return;
+    if (!seriesRef.current || !volumeSeriesRef.current) return;
     let cancelled = false;
 
     const iv = INTERVAL_MAP[interval] ?? "15";
@@ -166,7 +182,7 @@ function OIProfileWidget() {
 
     getHistory(symbol, spotExchange, iv, startDate, endDate)
       .then((bars) => {
-        if (cancelled || !seriesRef.current || !Array.isArray(bars)) return;
+        if (cancelled || !seriesRef.current || !volumeSeriesRef.current || !Array.isArray(bars)) return;
         const candles: CandlestickData[] = bars
           .filter((b) => b.timestamp && b.open && b.high && b.low && b.close)
           .map((b) => ({
@@ -177,7 +193,16 @@ function OIProfileWidget() {
             close: b.close,
           }))
           .sort((a, b) => Number(a.time) - Number(b.time));
+        const volumes: HistogramData[] = bars
+          .filter((b) => b.timestamp && Number.isFinite(b.volume))
+          .map((b) => ({
+            time: Math.floor(b.timestamp / 1000) as Time,
+            value: b.volume,
+            color: b.close >= b.open ? "rgba(34,197,94,0.22)" : "rgba(239,68,68,0.22)",
+          }))
+          .sort((a, b) => Number(a.time) - Number(b.time));
         seriesRef.current.setData(candles);
+        volumeSeriesRef.current.setData(volumes);
         chartRef.current?.timeScale().fitContent();
       })
       .catch(() => {
@@ -260,15 +285,16 @@ function OIProfileWidget() {
         zeroline: true,
         zerolinecolor: getThemeColor("--color-border", "#2a2a3a"),
         zerolinewidth: 1,
+        automargin: true,
       },
       yaxis: {
-        title: { text: "Strike" },
+        title: { text: "Strike", standoff: 6 },
         tickformat: ",.0f",
-        dtick: data.strikes.length > 1
-          ? (data.strikes[1].strike - data.strikes[0].strike)
-          : undefined,
+        tickmode: "auto",
+        nticks: 8,
+        automargin: true,
       },
-      margin: { t: 10, r: 10, b: 45, l: 60 },
+      margin: { t: 10, r: 10, b: 45, l: 68 },
       annotations,
       shapes,
     };
@@ -336,8 +362,14 @@ function OIProfileWidget() {
       )}
 
       {/* Top: Futures candlestick */}
-      <div className="flex-none h-[38%] border-b border-border-default">
+      <div className="relative flex-none h-[38%] border-b border-border-default">
         <div ref={chartContainerRef} className="w-full h-full" />
+        {legend && (
+          <FlintChartLegend
+            legend={legend}
+            className="pointer-events-none absolute left-2 top-2 z-10 max-w-[calc(100%-1rem)] overflow-x-auto"
+          />
+        )}
       </div>
 
       {/* Bottom: OI Butterfly */}

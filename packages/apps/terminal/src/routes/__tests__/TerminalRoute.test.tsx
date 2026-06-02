@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -19,6 +19,37 @@ const mockTradingState = vi.hoisted(() => ({
   totalPnl: 0,
   mtmStoploss: 5000,
   mode: "live",
+}));
+
+const mockLayoutState = vi.hoisted(() => {
+  const state = {
+    setDockviewApi: vi.fn(),
+    dockviewApi: null as Record<string, unknown> | null,
+    widgetPickerOpen: false,
+    setWidgetPickerOpen: vi.fn(),
+    presetPickerOpen: false,
+    setPresetPickerOpen: vi.fn(),
+    activeTabId: "default",
+    getTabLayout: vi.fn(() => null),
+    saveTabLayout: vi.fn(),
+  };
+  state.setDockviewApi = vi.fn((api: Record<string, unknown> | null) => {
+    state.dockviewApi = api;
+  });
+  return state;
+});
+
+const mockDockviewState = vi.hoisted(() => ({
+  api: null as {
+    panels: unknown[];
+    addPanel: ReturnType<typeof vi.fn>;
+    fromJSON: ReturnType<typeof vi.fn>;
+    toJSON: ReturnType<typeof vi.fn>;
+    onDidAddPanel: ReturnType<typeof vi.fn>;
+    onDidRemovePanel: ReturnType<typeof vi.fn>;
+    onDidActivePanelChange: ReturnType<typeof vi.fn>;
+    onDidLayoutChange: ReturnType<typeof vi.fn>;
+  } | null,
 }));
 
 const mockNavigate = vi.fn();
@@ -41,6 +72,7 @@ vi.mock("dockview-react", () => ({
       onDidActivePanelChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
       onDidLayoutChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
     };
+    mockDockviewState.api = fakeApi;
     // Schedule onReady in a microtask so the component mounts first
     Promise.resolve().then(() => onReady({ api: fakeApi }));
     return <div data-testid="dockview-canvas" />;
@@ -88,19 +120,9 @@ vi.mock("@/routes/trade/TradeBottomPanel", () => ({
 vi.mock("@/stores/layoutStore", () => ({
   useLayoutStore: Object.assign(
     vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({
-        setDockviewApi: vi.fn(),
-        dockviewApi: null,
-        widgetPickerOpen: false,
-        setWidgetPickerOpen: vi.fn(),
-        presetPickerOpen: false,
-        setPresetPickerOpen: vi.fn(),
-        activeTabId: "default",
-        getTabLayout: () => null,
-        saveTabLayout: vi.fn(),
-      }),
+      selector(mockLayoutState),
     ),
-    { getState: () => ({ activeTabId: "default", getTabLayout: () => null, saveTabLayout: vi.fn(), dockviewApi: null, setDockviewApi: vi.fn() }), setState: vi.fn() },
+    { getState: () => mockLayoutState, setState: vi.fn() },
   ),
 }));
 
@@ -157,8 +179,22 @@ vi.mock("@/lib/tourDefinitions", () => ({
 
 // Widget factory
 vi.mock("@/layout/widgetFactory", () => ({
-  widgetComponents: {},
-  widgetCatalog: [],
+  widgetComponents: {
+    chart: () => <div data-testid="compact-widget-chart">Chart widget</div>,
+    threepanel: () => <div>Three-Panel Chart widget</div>,
+    watchlist: () => <div data-testid="compact-widget-watchlist">Watchlist widget</div>,
+    orderpad: () => <div data-testid="compact-widget-orderpad">Order Pad widget</div>,
+    positions: () => <div data-testid="compact-widget-positions">Positions widget</div>,
+    dashboard: () => <div data-testid="compact-widget-dashboard">Dashboard widget</div>,
+  },
+  widgetCatalog: [
+    {
+      id: "threepanel",
+      name: "Three-Panel Chart",
+      category: "Analysis",
+      description: "Three synchronised chart panels",
+    },
+  ],
 }));
 
 vi.mock("@/layout/workspacePresets", () => ({
@@ -183,15 +219,30 @@ function renderTerminalRoute() {
   );
 }
 
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  window.dispatchEvent(new Event("resize"));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("TerminalRoute", () => {
   beforeEach(() => {
+    setViewportWidth(1280);
     mockTradingState.totalPnl = 0;
     mockTradingState.mtmStoploss = 5000;
     mockTradingState.mode = "live";
+    mockLayoutState.dockviewApi = null;
+    mockLayoutState.widgetPickerOpen = false;
+    mockLayoutState.presetPickerOpen = false;
+    mockLayoutState.getTabLayout.mockReturnValue(null);
+    mockDockviewState.api = null;
     vi.clearAllMocks();
   });
 
@@ -209,6 +260,15 @@ describe("TerminalRoute", () => {
     expect(screen.queryByTestId("panel-trade-sidebar")).not.toBeInTheDocument();
     expect(screen.queryByTestId("separator-trade-sep-left")).not.toBeInTheDocument();
     expect(screen.getByTestId("trade-bottom-panel")).toBeInTheDocument();
+  });
+
+  it("keeps the collapsed right order-pad panel from creating horizontal overflow", () => {
+    const { container } = renderTerminalRoute();
+
+    const shell = container.querySelector("[data-testid='trade-right-panel-shell']");
+
+    expect(shell).toHaveClass("w-full", "min-w-0", "overflow-x-hidden");
+    expect(shell).toHaveClass("box-border");
   });
 
   it("keeps the kill switch in reserved trade-route layout space", () => {
@@ -236,5 +296,40 @@ describe("TerminalRoute", () => {
 
     expect(screen.getByTestId("widget-picker")).toBeInTheDocument();
     expect(screen.getByTestId("preset-picker")).toBeInTheDocument();
+  });
+
+  it("uses a tabbed compact workspace instead of the dockview split on narrow screens", () => {
+    setViewportWidth(390);
+
+    renderTerminalRoute();
+
+    expect(screen.getByTestId("trade-compact-workspace")).toBeInTheDocument();
+    expect(screen.queryByTestId("dockview-canvas")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("compact-widget-chart")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Order Pad" }));
+
+    expect(screen.getByRole("tab", { name: "Order Pad" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("compact-widget-orderpad")).toBeInTheDocument();
+  });
+
+  it("adds a widget when the command palette dispatches flinttrade:addWidget", async () => {
+    renderTerminalRoute();
+
+    await waitFor(() => expect(mockDockviewState.api).not.toBeNull());
+
+    window.dispatchEvent(
+      new CustomEvent("flinttrade:addWidget", {
+        detail: { widgetId: "threepanel" },
+      }),
+    );
+
+    expect(mockDockviewState.api?.addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "threepanel",
+        title: "Three-Panel Chart",
+      }),
+    );
   });
 });

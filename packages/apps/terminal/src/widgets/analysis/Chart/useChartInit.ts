@@ -4,24 +4,21 @@
 // stable refs to the chart and its primary series.
 
 import { useEffect, useRef } from "react";
-import {
-  createChart,
-  CandlestickSeries,
-  HistogramSeries,
-  createSeriesMarkers,
-} from "lightweight-charts";
 import type {
   IChartApi,
   ISeriesApi,
   ISeriesMarkersPluginApi,
   MouseEventParams,
-  CandlestickData,
-  HistogramData,
   Time,
 } from "lightweight-charts";
+import {
+  createFlintCandlestickChart,
+  getFlintChartCrosshairReadout,
+} from "@flinttrade/design-system";
 import type { LegendState } from "./ChartLegend";
 import type { IndicatorSeriesRefs } from "./types";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightCandlestickRuntime } from "@/lib/lightweightChartRuntime";
 
 export type { IndicatorSeriesRefs };
 
@@ -98,70 +95,30 @@ export function useChartInit(
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const chart = createChart(containerRef.current, {
-      layout: chartTheme.layout,
-      grid: chartTheme.grid,
-      crosshair: chartTheme.crosshair,
-      rightPriceScale: chartTheme.rightPriceScale,
-      timeScale: chartTheme.timeScale,
-      width: containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight,
-    });
+    const flintChart = createFlintCandlestickChart(
+      lightweightCandlestickRuntime,
+      containerRef.current,
+      chartTheme,
+      { ariaLabel: "Price chart" },
+    );
+    const chart = flintChart.chart;
+    const candleSeries = flintChart.candleSeries;
+    const volumeSeries = flintChart.volumeSeries;
 
-    const candleSeries = chart.addSeries(CandlestickSeries, chartTheme.candle);
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "vol",
-    });
-    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
-
-    markersPluginRef.current = createSeriesMarkers(candleSeries, []);
+    markersPluginRef.current = flintChart.markersPlugin;
 
     chartRef.current = chart;
     candleRef.current = candleSeries;
     volumeRef.current = volumeSeries;
 
-    // Accessibility: lightweight-charts renders raw <canvas> elements with no
-    // text alternative. Annotate the first canvas found in the container so
-    // screen readers surface a meaningful description (WCAG SC 1.1.1, Issue #49).
-    const canvas = containerRef.current?.querySelector("canvas");
-    if (canvas) {
-      canvas.setAttribute("role", "img");
-      canvas.setAttribute("aria-label", "Price chart");
-    }
-
-    // Crosshair OHLCV legend
+    // Crosshair OHLCV readout is normalised in the shared chart core so every
+    // chart surface can converge on the same behaviour.
     chart.subscribeCrosshairMove((param: MouseEventParams) => {
-      if (!param || !param.time || !candleSeries) {
-        setLegend(null);
-        return;
-      }
-      const bar = param.seriesData.get(candleSeries) as CandlestickData | undefined;
-      const vol = param.seriesData.get(volumeSeries) as HistogramData | undefined;
-      if (bar) {
-        setLegend({
-          open: bar.open,
-          high: bar.high,
-          low: bar.low,
-          close: bar.close,
-          volume: vol?.value ?? null,
-          bull: bar.close >= bar.open,
-        });
-      }
+      setLegend(getFlintChartCrosshairReadout(param, candleSeries, volumeSeries));
     });
-
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        chart.applyOptions({ width, height });
-      }
-    });
-    ro.observe(containerRef.current);
 
     return () => {
-      ro.disconnect();
-      chart.remove();
+      flintChart.remove();
       chartRef.current = null;
       candleRef.current = null;
       volumeRef.current = null;

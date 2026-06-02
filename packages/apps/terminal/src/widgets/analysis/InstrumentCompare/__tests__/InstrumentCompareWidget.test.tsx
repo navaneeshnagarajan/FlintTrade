@@ -64,6 +64,14 @@ describe("InstrumentCompareWidget", () => {
     expect(screen.getByRole("img", { name: /instrument comparison chart/i })).toBeTruthy();
   });
 
+  it("renders comparison through the shared Flint multi-line chart primitive", () => {
+    render(<InstrumentCompareWidget />);
+    const chart = screen.getByRole("img", { name: /instrument comparison chart/i });
+    expect(chart).toHaveAttribute("data-flint-chart", "multi-line");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelectorAll("[data-line-series]").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("shows active count in header", () => {
     render(<InstrumentCompareWidget />);
     // Default: NIFTY + BANKNIFTY = 2 active

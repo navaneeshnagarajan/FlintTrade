@@ -106,6 +106,29 @@ from flinttrade_gateway.contracts import ContractManager  # noqa: E402
 logger = logging.getLogger("flinttrade")
 
 
+def _rag_auto_index_enabled() -> bool:
+    """Return whether startup should auto-index docs into the RAG store."""
+    raw = os.environ.get("FLINTTRADE_RAG_AUTO_INDEX", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _rag_runtime_enabled() -> bool:
+    """Return whether the startup path should construct the RAG runtime."""
+    raw = os.environ.get("FLINTTRADE_RAG_ENABLED")
+    if raw is not None:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return _rag_auto_index_enabled()
+
+
+def _index_rag_docs_safely(rag: Any) -> None:
+    """Index docs for RAG without letting background thread errors escape."""
+    try:
+        count = rag.index_directory("docs/")
+        logger.info("RAG background indexing completed (%s document chunks)", count)
+    except Exception as exc:
+        logger.warning("RAG background indexing failed: %s", exc)
+
+
 def _reconnect_saved_accounts(
     registry: BrokerRegistry,
     credential_store: CredentialStore,
@@ -1508,10 +1531,16 @@ def create_flask_app(
             or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         )
 
-        expected_key = os.environ.get("OPENALGO_API_KEY", "")
+        expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
         if not expected_key:
-            logger.warning("OPENALGO_API_KEY not set — all requests will be rejected")
-            return jsonify({"status": "error", "message": "Server not configured"}), 503
+            remote = request.remote_addr or ""
+            if remote in ("127.0.0.1", "::1", "localhost"):
+                logger.debug(
+                    "FLINTTRADE_API_KEY/OPENALGO_API_KEY not set — allowing loopback local request",
+                )
+                return None
+            logger.warning("FLINTTRADE_API_KEY/OPENALGO_API_KEY not set — remote requests will be rejected")
+            return jsonify({"status": "error", "message": "Backend API key not configured"}), 503
 
         if not api_key or not hmac.compare_digest(api_key, expected_key):
             # Record auth failure for brute-force detection
@@ -2037,29 +2066,39 @@ class FlintTradeApp:
         # ChromaDB, sentence-transformers, and the LLM HTTP client at module
         # level, which would add 2-5 s to startup time even when the AI
         # features are not yet used.
-        rag_dir = flinttrade_dir / "rag"
-        rag_dir.mkdir(exist_ok=True)
-        try:
-            from flinttrade_ai.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
-            from flinttrade_ai.rag import RAGEngine  # noqa: PLC0415
-
+        if _rag_runtime_enabled():
+            rag_dir = flinttrade_dir / "rag"
+            rag_dir.mkdir(exist_ok=True)
             try:
-                _cfg = LLMConfig.from_env()
-                _llm_ok = bool(_cfg.provider)
-            except Exception:
-                _llm_ok = False
-            llm_client = LLMClient() if _llm_ok else None
-            self.rag = RAGEngine(llm_client=llm_client, persist_directory=str(rag_dir))
-            if self.rag.document_count() == 0:
-                logger.info("RAG database empty — indexing docs/ directory in background...")
-                # Index documentation in background — do not block startup
-                threading.Thread(
-                    target=lambda: self.rag.index_directory("docs/"),
-                    daemon=True,
-                    name="rag-indexer",
-                ).start()
-        except Exception as exc:
-            logger.warning("RAG initialisation failed: %s", exc)
+                from flinttrade_ai.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
+                from flinttrade_ai.rag import RAGEngine  # noqa: PLC0415
+
+                try:
+                    _cfg = LLMConfig.from_env()
+                    _llm_ok = bool(_cfg.provider)
+                except Exception:
+                    _llm_ok = False
+                llm_client = LLMClient() if _llm_ok else None
+                self.rag = RAGEngine(llm_client=llm_client, persist_directory=str(rag_dir))
+                if self.rag.document_count() == 0:
+                    if _rag_auto_index_enabled():
+                        logger.info("RAG database empty — indexing docs/ directory in background...")
+                        # Index documentation in background — do not block startup.
+                        threading.Thread(
+                            target=lambda: _index_rag_docs_safely(self.rag),
+                            daemon=True,
+                            name="rag-indexer",
+                        ).start()
+                    else:
+                        logger.info(
+                            "RAG database empty — automatic docs indexing disabled "
+                            "(set FLINTTRADE_RAG_AUTO_INDEX=true to enable)",
+                        )
+            except Exception as exc:
+                logger.warning("RAG initialisation failed: %s", exc)
+                self.rag = None
+        else:
+            logger.info("RAG runtime disabled (set FLINTTRADE_RAG_ENABLED=true to enable)")
             self.rag = None
 
         self._stop_event = asyncio.Event()

@@ -5,7 +5,7 @@
  * Shows: CPU gauge, Memory gauge, Disk usage bar, Uptime, Network I/O.
  * Auto-refreshes every 30 seconds via TanStack Query.
  *
- * Uses Tremor ProgressBar for disk/CPU/memory bars.
+ * Uses local progress bars for disk/CPU/memory usage.
  * Layout stays within the existing AdminRoute shell.
  */
 
@@ -148,7 +148,7 @@ function GaugeBar({ label, percent, detail, icon }: GaugeBarProps) {
           </span>
         </div>
       </div>
-      {/* Custom progress bar — avoids Tremor import issues */}
+      {/* Custom progress bar kept local so admin metrics do not depend on a chart package. */}
       <div
         className="h-2 w-full rounded-full bg-surface-elevated overflow-hidden"
         role="progressbar"

@@ -91,10 +91,13 @@ describe("TickSpeedWidget", () => {
     expect(screen.getByText(/Tick rate/i)).toBeTruthy();
   });
 
-  it("spark chart SVG is rendered", () => {
+  it("renders the tick rate chart through the shared Flint primitive", () => {
     render(<TickSpeedWidget />);
-    const svg = document.querySelector("svg");
-    expect(svg).toBeTruthy();
+    const chart = screen.getByRole("img", { name: "Tick rate over last 5 minutes" });
+
+    expect(chart).toHaveAttribute("viewBox", "0 0 160 42");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
   it("connection quality badge is rendered", () => {

@@ -1,9 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
+const authState = vi.hoisted(() => ({
+  token: "",
+}));
+
 // Mock connectionStore — ftApi reads ftApiKey/apiKey for X-API-Key header
 vi.mock("@/stores/connectionStore", () => ({
   useConnectionStore: {
     getState: () => ({ ftApiKey: "test-ft-key", apiKey: "test-oa-key" }),
+  },
+}));
+vi.mock("@/stores/authStore", () => ({
+  useAuthStore: {
+    getState: () => authState,
   },
 }));
 import {
@@ -39,6 +48,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
   beforeEach(() => {
+    authState.token = "";
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
@@ -123,6 +133,32 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     );
     expect(sentBody.symbol).toBe("NIFTY");
     expect(sentBody.strategy).toBe("SMA Cross");
+  });
+
+  it("runBacktest returns deterministic sample results without network in demo mode", async () => {
+    authState.token = "demo-user";
+    const config = {
+      symbol: "NIFTY",
+      exchange: "NFO",
+      interval: "5m",
+      start_date: "2024-01-01",
+      end_date: "2024-12-31",
+      strategy: "sma_crossover",
+      initial_capital: 100000,
+      position_size_pct: 10,
+    };
+
+    const result = await runBacktest(config);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.equity_curve.length).toBeGreaterThan(2);
+    expect(result.trades.length).toBeGreaterThan(0);
+    expect(result.final_equity).toBeGreaterThan(config.initial_capital);
+    expect(result.metrics.total_trades).toBe(result.trades.length);
+    expect(result.trades[0]).toMatchObject({
+      symbol: "NIFTY",
+      side: "BUY",
+    });
   });
 
   // ---- getSafetyConfig flattens nested response ----

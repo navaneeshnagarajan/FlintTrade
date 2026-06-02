@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useRef, useMemo, memo, useCallback } from "react";
 import { Microscope, RefreshCw } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -137,44 +138,21 @@ function computeStats(ticks: TickSample[]): MicroStats {
 }
 
 // ---------------------------------------------------------------------------
-// Sparkline (SVG, 60 data points)
+// Sparkline
 // ---------------------------------------------------------------------------
 
 interface SparklineProps {
   data: number[];
-  width?: number;
-  height?: number;
 }
 
-function Sparkline({ data, width = 240, height = 36 }: SparklineProps) {
-  const max = Math.max(...data, 1);
-  const pts = data
-    .map((v, i) => {
-      const x = (i / (data.length - 1)) * width;
-      const y = height - (v / max) * (height - 4);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-
+function Sparkline({ data }: SparklineProps) {
   return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      aria-label="Tick velocity sparkline over last 60 seconds"
-      role="img"
-      className="w-full"
-    >
-      <polyline
-        points={pts}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        className="text-accent"
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={data}
+      positive
+      ariaLabel="Tick velocity sparkline over last 60 seconds"
+      className="h-9 w-full text-accent"
+    />
   );
 }
 

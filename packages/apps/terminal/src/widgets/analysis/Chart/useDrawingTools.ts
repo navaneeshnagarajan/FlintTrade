@@ -3,7 +3,17 @@
 // and the effect that renders all current drawings onto the chart.
 
 import { useEffect, useRef, useCallback } from "react";
-import { LineSeries, createSeriesMarkers } from "lightweight-charts";
+import {
+  advanceFlintChartDrawingDraft,
+  createFlintChartBrushDrawing,
+  createFlintChartDrawingRenderPlan,
+  createFlintChartDrawingRenderPlanDiff,
+  findFlintChartDrawingHit,
+  findFlintChartDrawingHandleHit,
+  getFlintChartTimeDelta,
+  removeFlintChartDrawingById,
+} from "@flinttrade/design-system";
+import { lightweightLineRuntime } from "@/lib/lightweightChartRuntime";
 import type {
   IChartApi,
   ISeriesApi,
@@ -14,6 +24,14 @@ import type {
   Time,
 } from "lightweight-charts";
 import type {
+  FlintChartDrawingLineSeriesRenderSpec,
+  FlintChartDrawingRenderPlan,
+  FlintChartDrawingPriceLineRenderSpec,
+  FlintChartDrawingDraftResult,
+  FlintChartDrawingHandleId,
+  FlintChartDrawingMoveDelta,
+} from "@flinttrade/design-system";
+import type {
   DrawToolType,
   Drawing,
   DrawingPoint,
@@ -21,23 +39,17 @@ import type {
   HlineRef,
 } from "./types";
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
-const FIB_COLORS: Record<number, string> = {
-  0: "#ef4444",
-  0.236: "#f97316",
-  0.382: "#eab308",
-  0.5: "#22c55e",
-  0.618: "#3b82f6",
-  0.786: "#a855f7",
-  1: "#ef4444",
-};
-
-function uid(): string {
-  return Math.random().toString(36).slice(2, 10);
+function getCanvasPriceTolerance(
+  candle: ISeriesApi<"Candlestick">,
+  y: number,
+  price: number,
+): number {
+  const upper = candle.coordinateToPrice(y - 6);
+  const lower = candle.coordinateToPrice(y + 6);
+  if (upper != null && lower != null && Number.isFinite(upper) && Number.isFinite(lower)) {
+    return Math.max(Math.abs(upper - lower), Math.abs(price) * 0.0005, 0.01);
+  }
+  return Math.max(Math.abs(price) * 0.001, 0.01);
 }
 
 // ---------------------------------------------------------------------------
@@ -45,6 +57,7 @@ function uid(): string {
 // ---------------------------------------------------------------------------
 
 interface UseDrawingToolsOptions {
+  containerRef: React.RefObject<HTMLDivElement | null>;
   chartRef: React.MutableRefObject<IChartApi | null>;
   candleRef: React.MutableRefObject<ISeriesApi<"Candlestick"> | null>;
   markersPluginRef: React.MutableRefObject<ISeriesMarkersPluginApi<Time> | null>;
@@ -52,12 +65,24 @@ interface UseDrawingToolsOptions {
   setDrawMode: React.Dispatch<React.SetStateAction<DrawToolType | null>>;
   drawings: Drawing[];
   setDrawings: React.Dispatch<React.SetStateAction<Drawing[]>>;
+  selectedDrawingId?: string | null;
+  onDrawingCreated?: (drawingId: string) => void;
+  onDrawingHit?: (drawingId: string | null) => void;
+  onDrawingMove?: (drawingId: string, delta: FlintChartDrawingMoveDelta) => void;
+  onDrawingHandleMove?: (
+    drawingId: string,
+    handle: FlintChartDrawingHandleId,
+    delta: FlintChartDrawingMoveDelta,
+  ) => void;
   pendingPoint: DrawingPoint | null;
   setPendingPoint: React.Dispatch<React.SetStateAction<DrawingPoint | null>>;
+  pendingPoints?: DrawingPoint[];
+  setPendingPoints?: React.Dispatch<React.SetStateAction<DrawingPoint[]>>;
   setAwaitingText: React.Dispatch<React.SetStateAction<DrawingPoint | null>>;
 }
 
 export function useDrawingTools({
+  containerRef,
   chartRef,
   candleRef,
   markersPluginRef,
@@ -65,20 +90,68 @@ export function useDrawingTools({
   setDrawMode,
   drawings,
   setDrawings,
+  selectedDrawingId,
+  onDrawingCreated,
+  onDrawingHit,
+  onDrawingMove,
+  onDrawingHandleMove,
   pendingPoint,
   setPendingPoint,
+  pendingPoints = [],
+  setPendingPoints,
   setAwaitingText,
 }: UseDrawingToolsOptions) {
   // Refs so click handler closures always see the latest values
   const drawModeRef = useRef<DrawToolType | null>(drawMode);
   const pendingPointRef = useRef<DrawingPoint | null>(pendingPoint);
+  const pendingPointsRef = useRef<DrawingPoint[]>(pendingPoints);
+  const drawingsRef = useRef<Drawing[]>(drawings);
+  const selectedDrawingIdRef = useRef<string | null | undefined>(selectedDrawingId);
+  const onDrawingHitRef = useRef<typeof onDrawingHit>(onDrawingHit);
+  const onDrawingCreatedRef = useRef<typeof onDrawingCreated>(onDrawingCreated);
+  const onDrawingMoveRef = useRef<typeof onDrawingMove>(onDrawingMove);
+  const onDrawingHandleMoveRef = useRef<typeof onDrawingHandleMove>(onDrawingHandleMove);
+  const lastNativeDrawingClickRef = useRef(0);
+  const dragStateRef = useRef<{
+    kind: "drawing" | "handle";
+    drawingId: string;
+    handle?: FlintChartDrawingHandleId;
+    lastPrice: number;
+    lastTime?: Time;
+  } | null>(null);
+  const brushDraftRef = useRef<DrawingPoint[] | null>(null);
   const clickHandlerRef = useRef<((param: MouseEventParams) => void) | null>(null);
   const drawingSeriesRef = useRef<DrawingSeriesMap>(new Map());
-  const hlineSeriesRef = useRef<HlineRef[]>([]);
+  const hlineSeriesRef = useRef<Map<string, HlineRef>>(new Map());
+  const drawingRenderPlanRef = useRef<FlintChartDrawingRenderPlan<Time>>({
+    lineSeries: [],
+    priceLines: [],
+    markers: [],
+  });
   const textMarkersRef = useRef<SeriesMarker<Time>[]>([]);
 
   useEffect(() => { drawModeRef.current = drawMode; }, [drawMode]);
   useEffect(() => { pendingPointRef.current = pendingPoint; }, [pendingPoint]);
+  useEffect(() => { pendingPointsRef.current = pendingPoints; }, [pendingPoints]);
+  useEffect(() => { drawingsRef.current = drawings; }, [drawings]);
+  useEffect(() => { selectedDrawingIdRef.current = selectedDrawingId; }, [selectedDrawingId]);
+  useEffect(() => { onDrawingHitRef.current = onDrawingHit; }, [onDrawingHit]);
+  useEffect(() => { onDrawingCreatedRef.current = onDrawingCreated; }, [onDrawingCreated]);
+  useEffect(() => { onDrawingMoveRef.current = onDrawingMove; }, [onDrawingMove]);
+  useEffect(() => { onDrawingHandleMoveRef.current = onDrawingHandleMove; }, [onDrawingHandleMove]);
+
+  const applyDrawingDraft = useCallback((creation: FlintChartDrawingDraftResult<Time>) => {
+    const nextPendingPoints = (creation.pendingPoints ?? []) as DrawingPoint[];
+    pendingPointRef.current = creation.pendingPoint;
+    pendingPointsRef.current = nextPendingPoints;
+    setPendingPoint(creation.pendingPoint);
+    setPendingPoints?.(nextPendingPoints);
+    setAwaitingText(creation.awaitingText);
+    if (creation.drawing) {
+      setDrawings((prev) => [...prev, creation.drawing as Drawing]);
+      onDrawingCreated?.(creation.drawing.id);
+    }
+  }, [onDrawingCreated, setAwaitingText, setDrawings, setPendingPoint, setPendingPoints]);
 
   // --- Subscribe / re-subscribe chart click handler whenever drawMode changes ---
   useEffect(() => {
@@ -92,47 +165,35 @@ export function useDrawingTools({
 
     const handler = (param: MouseEventParams) => {
       const mode = drawModeRef.current;
-      if (!param || !param.point || !mode) return;
+      if (!param || !param.point) return;
       const price = candle.coordinateToPrice(param.point.y);
       if (price == null) return;
       const time = param.time as Time | undefined;
-      if (!time) return;
+
+      if (!mode) {
+        const hit = findFlintChartDrawingHit<Time>(
+          drawingsRef.current,
+          { ...(time != null ? { time } : {}), price },
+          { priceTolerance: getCanvasPriceTolerance(candle, param.point.y, price) },
+        );
+        onDrawingHitRef.current?.(hit?.id ?? null);
+        return;
+      }
+
+      if (mode === "eraser" || mode === "brush") return;
+
+      if (Date.now() - lastNativeDrawingClickRef.current < 250) return;
+      if (time == null) return;
 
       const point: DrawingPoint = { time, price };
+      const creation = advanceFlintChartDrawingDraft<Time>({
+        tool: mode,
+        point,
+        pendingPoint: pendingPointRef.current,
+        pendingPoints: pendingPointsRef.current,
+      });
 
-      if (mode === "hline") {
-        setDrawings((prev) => [...prev, { kind: "hline", id: uid(), price }]);
-        return;
-      }
-
-      if (mode === "vline") {
-        setDrawings((prev) => [...prev, { kind: "vline", id: uid(), time }]);
-        return;
-      }
-
-      if (mode === "text") {
-        setAwaitingText(point);
-        return;
-      }
-
-      // Two-click tools: trendline, ray, fib, rect
-      const pending = pendingPointRef.current;
-      if (!pending) {
-        setPendingPoint(point);
-        return;
-      }
-
-      const id = uid();
-      if (mode === "trendline") {
-        setDrawings((prev) => [...prev, { kind: "trendline", id, p1: pending, p2: point }]);
-      } else if (mode === "ray") {
-        setDrawings((prev) => [...prev, { kind: "ray", id, p1: pending, p2: point }]);
-      } else if (mode === "fib") {
-        setDrawings((prev) => [...prev, { kind: "fib", id, p1: pending, p2: point }]);
-      } else if (mode === "rect") {
-        setDrawings((prev) => [...prev, { kind: "rect", id, p1: pending, p2: point }]);
-      }
-      setPendingPoint(null);
+      applyDrawingDraft(creation);
     };
 
     clickHandlerRef.current = handler;
@@ -144,177 +205,386 @@ export function useDrawingTools({
     };
   // drawMode is intentionally the only dep — the handler body reads live refs
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawMode]);
+  }, [drawMode, applyDrawingDraft]);
 
-  // --- Re-render all drawings whenever the drawings array changes ---
+  useEffect(() => {
+    const container = containerRef.current;
+    const chart = chartRef.current;
+    const candle = candleRef.current;
+    if (!container || !chart || !candle) return;
+    const activeChart = chart;
+
+    function pointFromPointer(event: PointerEvent) {
+      if (!container || !chart || !candle) return null;
+      const rect = container.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const price = candle.coordinateToPrice(y);
+      if (price == null || !Number.isFinite(price)) return null;
+      let time: Time | undefined;
+      try {
+        const timeScale = activeChart.timeScale() as unknown as {
+          coordinateToTime?: (coordinate: number) => Time | null;
+        };
+        const pointerTime = timeScale.coordinateToTime?.(x);
+        if (pointerTime != null) time = pointerTime;
+      } catch { /* ignore */ }
+      return { price, time, x, y };
+    }
+
+    function getCanvasTimeTolerance(x: number): number {
+      try {
+        const timeScale = activeChart.timeScale() as unknown as {
+          coordinateToTime?: (coordinate: number) => Time | null;
+        };
+        const leftTime = timeScale.coordinateToTime?.(x - 8);
+        const rightTime = timeScale.coordinateToTime?.(x + 8);
+        const delta =
+          leftTime != null && rightTime != null
+            ? getFlintChartTimeDelta(leftTime, rightTime)
+            : null;
+        return delta != null && Number.isFinite(delta)
+          ? Math.max(1, Math.abs(delta))
+          : 2;
+      } catch {
+        return 2;
+      }
+    }
+
+    function appendBrushPoint(point: DrawingPoint) {
+      const points = brushDraftRef.current ?? [];
+      const lastPoint = points.at(-1);
+      if (
+        lastPoint &&
+        lastPoint.time === point.time &&
+        Math.abs(lastPoint.price - point.price) < 0.000001
+      ) {
+        return;
+      }
+      const nextPoints = [...points, point];
+      brushDraftRef.current = nextPoints;
+      pendingPointRef.current = point;
+      pendingPointsRef.current = nextPoints;
+      setPendingPoint(point);
+      setPendingPoints?.(nextPoints);
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const activeMode = drawModeRef.current;
+      if (activeMode) {
+        if (event.button !== 0 && event.buttons !== 1) return;
+        const pointerPoint = pointFromPointer(event);
+        if (!pointerPoint) return;
+        if (activeMode === "eraser") {
+          const priceTolerance = getCanvasPriceTolerance(candle, pointerPoint.y, pointerPoint.price);
+          const timeTolerance = getCanvasTimeTolerance(pointerPoint.x);
+          const hit = findFlintChartDrawingHit<Time>(
+            drawingsRef.current,
+            { ...(pointerPoint.time != null ? { time: pointerPoint.time } : {}), price: pointerPoint.price },
+            { priceTolerance, timeTolerance },
+          );
+          if (!hit || hit.locked === true) return;
+          setDrawings((prev) => removeFlintChartDrawingById(prev, hit.id) as Drawing[]);
+          onDrawingHitRef.current?.(null);
+          setPendingPoint(null);
+          pendingPointsRef.current = [];
+          setPendingPoints?.([]);
+          setAwaitingText(null);
+          event.preventDefault();
+          return;
+        }
+        if (activeMode === "brush") {
+          if (pointerPoint.time == null) return;
+          const point: DrawingPoint = { time: pointerPoint.time, price: pointerPoint.price };
+          lastNativeDrawingClickRef.current = Date.now();
+          brushDraftRef.current = [];
+          appendBrushPoint(point);
+          setAwaitingText(null);
+          try { container.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+          event.preventDefault();
+          return;
+        }
+        if (pointerPoint.time == null) return;
+        lastNativeDrawingClickRef.current = Date.now();
+        applyDrawingDraft(advanceFlintChartDrawingDraft<Time>({
+          tool: activeMode,
+          point: { time: pointerPoint.time, price: pointerPoint.price },
+          pendingPoint: pendingPointRef.current,
+          pendingPoints: pendingPointsRef.current,
+        }));
+        event.preventDefault();
+        return;
+      }
+
+      if (event.button !== 0 && event.buttons !== 1) return;
+      const selectedId = selectedDrawingIdRef.current;
+      if (!selectedId || !onDrawingMoveRef.current) return;
+      const point = pointFromPointer(event);
+      if (!point) return;
+      const priceTolerance = getCanvasPriceTolerance(candle, point.y, point.price);
+      const timeTolerance = getCanvasTimeTolerance(point.x);
+      const handleHit = findFlintChartDrawingHandleHit<Time>(
+        drawingsRef.current,
+        selectedId,
+        { ...(point.time != null ? { time: point.time } : {}), price: point.price },
+        { priceTolerance, timeTolerance },
+      );
+      const hit = handleHit
+        ? drawingsRef.current.find((drawing) => drawing.id === selectedId)
+        : findFlintChartDrawingHit<Time>(
+          drawingsRef.current,
+          { ...(point.time != null ? { time: point.time } : {}), price: point.price },
+          { priceTolerance, timeTolerance },
+        );
+      if (!hit || hit.id !== selectedId || hit.locked === true) return;
+      dragStateRef.current = handleHit && onDrawingHandleMoveRef.current
+        ? {
+            kind: "handle",
+            drawingId: selectedId,
+            handle: handleHit.handle,
+            lastPrice: point.price,
+            lastTime: point.time,
+          }
+        : {
+            kind: "drawing",
+            drawingId: selectedId,
+            lastPrice: point.price,
+            lastTime: point.time,
+          };
+      try { container.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+      event.preventDefault();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (brushDraftRef.current && drawModeRef.current === "brush") {
+        const point = pointFromPointer(event);
+        if (!point || point.time == null) return;
+        appendBrushPoint({ time: point.time, price: point.price });
+        event.preventDefault();
+        return;
+      }
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      const point = pointFromPointer(event);
+      if (!point) return;
+      const priceDelta = point.price - drag.lastPrice;
+      const timeDelta =
+        drag.lastTime != null && point.time != null
+          ? getFlintChartTimeDelta(drag.lastTime, point.time)
+          : null;
+      const delta: FlintChartDrawingMoveDelta = {};
+      if (Number.isFinite(priceDelta) && Math.abs(priceDelta) > 0.000001) {
+        delta.priceDelta = priceDelta;
+      }
+      if (timeDelta != null && Number.isFinite(timeDelta) && Math.abs(timeDelta) > 0.000001) {
+        delta.timeDelta = timeDelta;
+      }
+      if (delta.priceDelta != null || delta.timeDelta != null) {
+        if (drag.kind === "handle" && drag.handle) {
+          onDrawingHandleMoveRef.current?.(drag.drawingId, drag.handle, delta);
+        } else {
+          onDrawingMoveRef.current?.(drag.drawingId, delta);
+        }
+        dragStateRef.current = {
+          kind: drag.kind,
+          drawingId: drag.drawingId,
+          ...(drag.handle ? { handle: drag.handle } : {}),
+          lastPrice: point.price,
+          lastTime: point.time,
+        };
+      }
+      event.preventDefault();
+    };
+
+    const handlePointerEnd = (event: PointerEvent) => {
+      if (brushDraftRef.current) {
+        const drawing = createFlintChartBrushDrawing<Time>(brushDraftRef.current);
+        brushDraftRef.current = null;
+        pendingPointRef.current = null;
+        pendingPointsRef.current = [];
+        setPendingPoint(null);
+        setPendingPoints?.([]);
+        setAwaitingText(null);
+        if (drawing) {
+          setDrawings((prev) => [...prev, drawing as Drawing]);
+          onDrawingCreatedRef.current?.(drawing.id);
+        }
+        try { container.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+        event.preventDefault();
+        return;
+      }
+      if (!dragStateRef.current) return;
+      dragStateRef.current = null;
+      try { container.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+    };
+
+    container.addEventListener("pointerdown", handlePointerDown, { capture: true });
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+
+    return () => {
+      container.removeEventListener("pointerdown", handlePointerDown, { capture: true });
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+      dragStateRef.current = null;
+      brushDraftRef.current = null;
+    };
+  }, [applyDrawingDraft, candleRef, chartRef, containerRef, setAwaitingText, setDrawings, setPendingPoint, setPendingPoints]);
+
+  // --- Reconcile drawings whenever the core render plan changes ---
   useEffect(() => {
     const chart = chartRef.current;
     const candle = candleRef.current;
     if (!chart || !candle) return;
 
     const dsMap = drawingSeriesRef.current;
+    const priceLineMap = hlineSeriesRef.current;
+    const renderPlan = createFlintChartDrawingRenderPlan(drawings, selectedDrawingId);
+    const renderPlanDiff = createFlintChartDrawingRenderPlanDiff(drawingRenderPlanRef.current, renderPlan);
+    const markers = renderPlan.markers as SeriesMarker<Time>[];
 
-    // Clean up all previous drawing series
-    for (const seriesList of dsMap.values()) {
-      for (const s of seriesList) {
-        try { chart.removeSeries(s); } catch { /* ignore */ }
+    const addLineSeries = (lineSeriesSpec: FlintChartDrawingLineSeriesRenderSpec<Time>) => {
+      try {
+        const s = lightweightLineRuntime.addLineSeries(chart, lineSeriesSpec.options);
+        s.setData(lineSeriesSpec.data as LineData[]);
+        dsMap.set(lineSeriesSpec.key, s);
+      } catch { /* ignore */ }
+    };
+
+    const updateLineSeries = (lineSeriesSpec: FlintChartDrawingLineSeriesRenderSpec<Time>) => {
+      const series = dsMap.get(lineSeriesSpec.key);
+      if (!series) {
+        addLineSeries(lineSeriesSpec);
+        return;
       }
-    }
-    dsMap.clear();
+      try {
+        series.applyOptions(lineSeriesSpec.options);
+        series.setData(lineSeriesSpec.data as LineData[]);
+      } catch {
+        try { chart.removeSeries(series); } catch { /* ignore */ }
+        dsMap.delete(lineSeriesSpec.key);
+        addLineSeries(lineSeriesSpec);
+      }
+    };
 
-    // Clean up old price lines from hlines and fib/rect
-    for (const ref of hlineSeriesRef.current) {
+    const removeLineSeries = (lineSeriesSpec: FlintChartDrawingLineSeriesRenderSpec<Time>) => {
+      const series = dsMap.get(lineSeriesSpec.key);
+      if (!series) return;
+      try { chart.removeSeries(series); } catch { /* ignore */ }
+      dsMap.delete(lineSeriesSpec.key);
+    };
+
+    const addPriceLine = (priceLineSpec: FlintChartDrawingPriceLineRenderSpec) => {
+      try {
+        const priceLine = candle.createPriceLine(priceLineSpec.priceLine);
+        priceLineMap.set(priceLineSpec.key, {
+          _key: priceLineSpec.key,
+          _priceLine: priceLine,
+          _series: candle,
+        });
+      } catch { /* ignore */ }
+    };
+
+    const removePriceLine = (priceLineSpec: FlintChartDrawingPriceLineRenderSpec) => {
+      const ref = priceLineMap.get(priceLineSpec.key);
+      if (!ref) return;
       try { ref._series.removePriceLine(ref._priceLine); } catch { /* ignore */ }
-    }
-    hlineSeriesRef.current = [];
+      priceLineMap.delete(priceLineSpec.key);
+    };
 
-    const markers: SeriesMarker<Time>[] = [];
-    textMarkersRef.current = [];
-
-    for (const d of drawings) {
-      if (d.kind === "hline") {
-        try {
-          const pl = candle.createPriceLine({
-            price: d.price,
-            color: "#eab308",
-            lineWidth: 1,
-            lineStyle: 2,
-            axisLabelVisible: true,
-            title: "",
-          });
-          hlineSeriesRef.current.push({ _priceLine: pl, _series: candle });
-        } catch { /* ignore */ }
-
-      } else if (d.kind === "vline") {
-        // lightweight-charts v5 has no native vertical line;
-        // approximate with a square marker at the target time.
-        const marker: SeriesMarker<Time> = {
-          time: d.time,
-          position: "inBar",
-          color: "#64748b",
-          shape: "square",
-          size: 0.5,
-          text: "|",
-        };
-        markers.push(marker);
-
-      } else if (d.kind === "trendline" || d.kind === "ray") {
-        try {
-          const color = d.kind === "ray" ? "#f97316" : "#3b82f6";
-          const s = chart.addSeries(LineSeries, {
-            color,
-            lineWidth: 1,
-            priceScaleId: "right",
-            lastValueVisible: false,
-            priceLineVisible: false,
-          });
-          const data: LineData[] = [
-            { time: d.p1.time, value: d.p1.price },
-            { time: d.p2.time, value: d.p2.price },
-          ];
-          s.setData(data);
-          dsMap.set(d.id, [s]);
-        } catch { /* ignore */ }
-
-      } else if (d.kind === "fib") {
-        const hiPrice = Math.max(d.p1.price, d.p2.price);
-        const loPrice = Math.min(d.p1.price, d.p2.price);
-        const range = hiPrice - loPrice;
-        for (const level of FIB_LEVELS) {
-          const price = hiPrice - range * level;
-          const color = FIB_COLORS[level] ?? "#94a3b8";
-          try {
-            const pl = candle.createPriceLine({
-              price,
-              color,
-              lineWidth: 1,
-              lineStyle: 2,
-              axisLabelVisible: true,
-              title: `Fib ${(level * 100).toFixed(1)}%`,
-            });
-            hlineSeriesRef.current.push({ _priceLine: pl, _series: candle });
-          } catch { /* ignore */ }
-        }
-
-      } else if (d.kind === "rect") {
-        const topPrice = Math.max(d.p1.price, d.p2.price);
-        const botPrice = Math.min(d.p1.price, d.p2.price);
-        for (const [price, title] of [
-          [topPrice, "Rect Top"],
-          [botPrice, "Rect Bot"],
-        ] as [number, string][]) {
-          try {
-            const pl = candle.createPriceLine({
-              price,
-              color: "#8b5cf6",
-              lineWidth: 1,
-              lineStyle: 1,
-              axisLabelVisible: true,
-              title,
-            });
-            hlineSeriesRef.current.push({ _priceLine: pl, _series: candle });
-          } catch { /* ignore */ }
-        }
-
-      } else if (d.kind === "text") {
-        const marker: SeriesMarker<Time> = {
-          time: d.point.time,
-          position: "atPriceMiddle",
-          color: "#facc15",
-          shape: "circle",
-          size: 1,
-          price: d.point.price,
-          text: d.label,
-        };
-        markers.push(marker);
-      }
+    for (const lineSeriesSpec of renderPlanDiff.lineSeries.removed) {
+      removeLineSeries(lineSeriesSpec);
     }
 
-    if (markersPluginRef.current) {
+    for (const lineSeriesSpec of renderPlanDiff.lineSeries.updated) {
+      updateLineSeries(lineSeriesSpec);
+    }
+
+    for (const lineSeriesSpec of renderPlanDiff.lineSeries.added) {
+      addLineSeries(lineSeriesSpec);
+    }
+
+    for (const priceLineSpec of renderPlanDiff.priceLines.removed) {
+      removePriceLine(priceLineSpec);
+    }
+
+    for (const priceLineSpec of renderPlanDiff.priceLines.updated) {
+      removePriceLine(priceLineSpec);
+      addPriceLine(priceLineSpec);
+    }
+
+    for (const priceLineSpec of renderPlanDiff.priceLines.added) {
+      addPriceLine(priceLineSpec);
+    }
+
+    if (markersPluginRef.current && renderPlanDiff.markersChanged) {
       try {
         markersPluginRef.current.setMarkers(markers);
         textMarkersRef.current = markers;
       } catch { /* ignore */ }
     }
 
+    drawingRenderPlanRef.current = renderPlan;
+  }, [drawings, selectedDrawingId, chartRef, candleRef, markersPluginRef]);
+
+  useEffect(() => {
     return () => {
-      for (const seriesList of dsMap.values()) {
-        for (const s of seriesList) {
-          try { chart.removeSeries(s); } catch { /* ignore */ }
+      const chart = chartRef.current;
+      const dsMap = drawingSeriesRef.current;
+      if (chart) {
+        for (const series of dsMap.values()) {
+          try { chart.removeSeries(series); } catch { /* ignore */ }
         }
       }
       dsMap.clear();
-      for (const ref of hlineSeriesRef.current) {
+      for (const ref of hlineSeriesRef.current.values()) {
         try { ref._series.removePriceLine(ref._priceLine); } catch { /* gone */ }
       }
-      hlineSeriesRef.current = [];
+      hlineSeriesRef.current.clear();
+      drawingRenderPlanRef.current = { lineSeries: [], priceLines: [], markers: [] };
     };
-  }, [drawings, chartRef, candleRef, markersPluginRef]);
+  }, [chartRef]);
 
   // --- Convenience actions returned to the caller ---
   const toggleDrawMode = useCallback((mode: DrawToolType) => {
     setDrawMode((prev) => {
-      if (prev === mode) {
+      if (mode === "cursor") {
+        brushDraftRef.current = null;
+        pendingPointsRef.current = [];
         setPendingPoint(null);
+        setPendingPoints?.([]);
         return null;
       }
+      if (prev === mode) {
+        brushDraftRef.current = null;
+        pendingPointsRef.current = [];
+        setPendingPoint(null);
+        setPendingPoints?.([]);
+        return null;
+      }
+      brushDraftRef.current = null;
+      pendingPointsRef.current = [];
       setPendingPoint(null);
+      setPendingPoints?.([]);
       return mode;
     });
-  }, [setDrawMode, setPendingPoint]);
+  }, [setDrawMode, setPendingPoint, setPendingPoints]);
 
   const clearAllDrawings = useCallback(() => {
     setDrawings([]);
+    brushDraftRef.current = null;
+    pendingPointsRef.current = [];
     setPendingPoint(null);
-  }, [setDrawings, setPendingPoint]);
+    setPendingPoints?.([]);
+  }, [setDrawings, setPendingPoint, setPendingPoints]);
 
   const undoLastDrawing = useCallback(() => {
     setDrawings((prev) => prev.slice(0, -1));
   }, [setDrawings]);
 
-  // Expose the markers plugin ref so the parent can re-use it for
-  // createSeriesMarkers initialisation (already done in useChartInit).
-  // Also expose the internal series refs for cleanup on symbol change.
+  // Expose the internal series refs for cleanup on symbol change.
   return {
     drawingSeriesRef,
     hlineSeriesRef,
@@ -323,5 +593,3 @@ export function useDrawingTools({
     undoLastDrawing,
   };
 }
-
-export { createSeriesMarkers };

@@ -25,7 +25,8 @@ export function AboutSection() {
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Description</p>
         <p className="text-xs text-text-secondary leading-relaxed">
           Open-source modular trading and investment platform for Indian F&amp;O, commodities, and crypto.
-          Built on OpenAlgo (30+ broker gateway). Monorepo with 12 packages (11 Python + 1 React).
+          FlintTrade has its own backend, native gateway contract, 83 widgets, and optional OpenAlgo-compatible bridge.
+          Monorepo with 17 package surfaces across Python, React, shared UI, and Rust.
         </p>
       </div>
 

@@ -51,7 +51,11 @@ describe("CurrencyConverterWidget", () => {
 
   it("renders 30-day sparkline", () => {
     render(<CurrencyConverterWidget />);
-    expect(screen.getByRole("img", { name: /30-day rate history sparkline/i })).toBeTruthy();
+    const sparkline = screen.getByRole("img", { name: /30-day rate history sparkline/i });
+
+    expect(sparkline).toHaveAttribute("viewBox", "0 0 160 42");
+    expect(sparkline.querySelector("polyline")).not.toBeInTheDocument();
+    expect(sparkline.querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
   it("shows exchange rate info section", () => {

@@ -76,5 +76,8 @@ describe("GlobalIndicesWidget", () => {
     render(<GlobalIndicesWidget />, { wrapper });
     const sparklines = screen.getAllByRole("img", { name: /30-day index sparkline/i });
     expect(sparklines.length).toBeGreaterThanOrEqual(10);
+    expect(sparklines[0]).toHaveAttribute("viewBox", "0 0 160 42");
+    expect(sparklines[0].querySelector("polyline")).not.toBeInTheDocument();
+    expect(sparklines[0].querySelectorAll("path").length).toBeGreaterThan(0);
   });
 });

@@ -38,9 +38,12 @@ describe("PositionSizingWidget", () => {
     expect(screen.getByText("Max Loss")).toBeTruthy();
   });
 
-  it("renders pie chart with aria label", () => {
+  it("renders capital allocation through the shared Flint donut primitive", () => {
     render(<PositionSizingWidget />);
-    expect(screen.getByRole("img", { name: /capital allocation/i })).toBeTruthy();
+    const chart = screen.getByRole("img", { name: /capital allocation/i });
+    expect(chart).toHaveClass("rounded-full");
+    expect(chart.getAttribute("style")).toContain("conic-gradient");
+    expect(chart.querySelector("svg")).not.toBeInTheDocument();
   });
 
   it("switches to Kelly tab and shows Kelly inputs", () => {

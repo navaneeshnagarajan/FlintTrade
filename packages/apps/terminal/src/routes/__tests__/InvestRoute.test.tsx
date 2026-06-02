@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
 // Mock framer-motion to avoid animation issues in tests
 vi.mock("framer-motion", () => ({
-  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
     div: ({ children, ...props }: Record<string, unknown>) => (
       <div {...props}>{children as React.ReactNode}</div>
@@ -94,5 +94,21 @@ describe("InvestRoute", () => {
     render(<InvestRoute />, { wrapper: createWrapper() });
     const dashboardTab = screen.getByRole("tab", { name: /Dashboard/i });
     expect(dashboardTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("switches to the Shareholding panel when the Shareholding tab is selected", async () => {
+    const user = userEvent.setup();
+    render(<InvestRoute />, { wrapper: createWrapper() });
+
+    await user.click(screen.getByRole("tab", { name: /Shareholding/i }));
+
+    expect(screen.getByRole("tab", { name: /Shareholding/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Shareholding Pattern")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Portfolio Allocation")).not.toBeInTheDocument();
   });
 });

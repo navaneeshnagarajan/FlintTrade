@@ -72,14 +72,17 @@ run OpenAlgo.
 1. **Choose a path.** Use the FlintTrade gateway as native adapters become
    available, or install OpenAlgo separately if you want the OpenAlgo
    integration path.
-2. **Configure your broker in OpenAlgo.** Open `http://localhost:5000`,
+2. **Optional: configure your broker in OpenAlgo.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
-   broker). OpenAlgo persists the session.
-3. **Generate an OpenAlgo API key.** From the OpenAlgo dashboard, copy the
-   generated API key. This is the key FlintTrade uses (not your broker's
-   key).
-4. **Set the key in FlintTrade.** Edit `.env` in the FlintTrade repo root:
+   broker). OpenAlgo persists the session. Skip this step for Explore mode,
+   Practice mode, and native FlintTrade gateway work that does not use the
+   OpenAlgo-compatible bridge.
+3. **Optional: generate an OpenAlgo API key.** From the OpenAlgo dashboard,
+   copy the generated API key. This is the key FlintTrade uses for the
+   OpenAlgo-compatible bridge only (not your broker's key).
+4. **Optional: set the OpenAlgo key in FlintTrade.** Edit `.env` in the
+   FlintTrade repo root:
 
    ```env
    OPENALGO_HOST=http://127.0.0.1:5000
@@ -90,7 +93,8 @@ run OpenAlgo.
 
 5. **Restart the terminal.** Kill the `npm run dev` server, run it again,
    and open `http://localhost:5173/setup`. Walk through the wizard — it will
-   verify the OpenAlgo connection on the last step.
+   verify the OpenAlgo connection on the last step when you configure that
+   bridge.
 
 ### Why two layers?
 
@@ -187,7 +191,7 @@ sync across sessions.
 | `/explore` | Demo mode with sample data — no broker connection needed. |
 | `/setup` | First-time wizard (Quick / Guided / Advanced paths). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
-| `/trade` | Trader workspace — Dockview canvas, 82 widgets, 13 presets. |
+| `/trade` | Trader workspace — Dockview canvas, 83 widgets, 13 presets. |
 | `/invest` | Investor dashboard — holdings, net worth, SIPs, mutual-fund tracker. |
 | `/learn` | Beginner centre — courses, glossary, strategies, paper trading. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
@@ -196,18 +200,31 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The 82 widgets
+### The 83 widgets
 
 Widgets are organised into three categories under
 `packages/apps/terminal/src/widgets/`:
 
-- **Trading (22)** — Order Pad, Positions, Orderbook, Tradebook, Bracket
-  Order, Basket Order, Quick Order, Funds, Margin, etc.
-- **Analysis (38)** — Chart, Option Chain, OI Profile, IV Smile, Max Pain,
-  Gamma Exposure, Greeks, Straddle P&L, Strategy Builder, Payoff Diagram,
-  Correlation Matrix, Regime Detector, etc.
-- **Utility (22)** — Watchlist, Heatmap, News, Calendar, Ticker, Calculator,
-  Notes, Journal, Alerts, etc.
+- **Trading (22)** — Dashboard, Scalper, Positions, Orders, Holdings,
+  Trade Book, Order Pad, Intraday P&L, MTM Monitor, Risk Panel, Action
+  Center, Position Heat Map, Trade Copier, Portfolio Allocation, Quick
+  Trade, Session Stats, Risk Dashboard, Trade Log, Trade Performance,
+  Strategy Monitor, Net Positions, and Order Ladder.
+- **Analysis (39)** — Chart, Multi Chart, Option Chain, OI Chart,
+  Straddle, Depth, Greeks, Sector Map, GEX Dashboard, Vol Surface, IV
+  Smile, Straddle P&L, OI Profile, Order Flow, Depth Heatmap,
+  Three-Panel Chart, OI Heatmap, Greeks Surface, Pivot Points, Order
+  Book Replay, Market Breadth, Volatility Cone, Heat Calendar, VWAP
+  Bands, Correlation Pairs, Multi-Timeframe, PCR Trend, Instrument
+  Compare, Spread View, Greeks Heatmap, Gap Analysis, Implied Move,
+  Options Flow, Market Microstructure, Correlation Matrix, IV Skew,
+  Sector Performance, Footprint Chart, and DOM Heatmap.
+- **Utility (22)** — Watchlist, Calculator, News Feed, Ticker, AI
+  Advisor, Pre-Market Scanner, Price Alerts, System Health, Funding
+  Rates, Currency Converter, Earnings Calendar, Global Indices,
+  Strategy Templates, Audit Trail, Economic Calendar, Profit Target
+  Calc, Expiry Countdown, Position Sizing, Market Clock, Trade Ideas,
+  Tick Speed, and Market Summary.
 
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
@@ -352,7 +369,12 @@ interval.
 
 Retrieval-augmented question answering over your own trading documents
 (strategy notes, broker statements, research reports). Indexed in
-ChromaDB with sentence-transformer embeddings.
+ChromaDB with sentence-transformer embeddings. Startup auto-indexing is off by
+default, and the RAG runtime itself is also off unless enabled, so the backend
+does not download or embed documents during ordinary local launches. Set
+`FLINTTRADE_RAG_ENABLED=true` when you want the RAG runtime available, or
+`FLINTTRADE_RAG_AUTO_INDEX=true` when you intentionally want `docs/` indexed at
+startup.
 
 ![AI](screenshots/08-ai.png)
 
@@ -385,7 +407,8 @@ FlintTrade has two layers of configuration:
 
 ### Layer 1: `.env` (infrastructure)
 
-Lives in the repo root, never committed. Four variables only:
+Lives in the repo root, never committed. OpenAlgo variables are only needed
+when you enable the OpenAlgo-compatible bridge:
 
 | Variable | Purpose |
 |---|---|

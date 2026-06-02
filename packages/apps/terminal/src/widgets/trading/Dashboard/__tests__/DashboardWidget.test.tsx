@@ -17,6 +17,9 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 const mockUseFunds = vi.fn();
 const mockUsePositions = vi.fn();
 const mockUseOrders = vi.fn();
+const jotaiMocks = vi.hoisted(() => ({
+  useAtomValue: vi.fn<() => unknown>(() => null),
+}));
 
 vi.mock("@/hooks/useFunds", () => ({
   useFunds: (...args: unknown[]) => mockUseFunds(...args),
@@ -36,14 +39,8 @@ vi.mock("@/atoms/marketAtoms", () => ({
 }));
 
 vi.mock("jotai", () => ({
-  useAtomValue: () => null,
+  useAtomValue: () => jotaiMocks.useAtomValue(),
   atom: (v: unknown) => v,
-}));
-
-// Mock Tremor charts to avoid canvas/SVG rendering issues in JSDOM
-vi.mock("@tremor/react", () => ({
-  SparkAreaChart: () => null,
-  Tracker: () => null,
 }));
 
 // Mock tradingStore to avoid side-effects in useFunds/usePositions
@@ -118,6 +115,8 @@ function setupMocks(config: {
 describe("DashboardWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    jotaiMocks.useAtomValue.mockReset();
+    jotaiMocks.useAtomValue.mockReturnValue(null);
     setupMocks({});
   });
 
@@ -175,5 +174,28 @@ describe("DashboardWidget", () => {
     render(<DashboardWidget {...defaultProps} />);
 
     expect(screen.getByText("No orders today")).toBeInTheDocument();
+  });
+
+  it("renders sparkline and position status through Flint UI primitives", () => {
+    jotaiMocks.useAtomValue.mockReturnValue({
+      close: 99,
+      high: 106,
+      low: 94,
+      ltp: 104,
+      open: 98,
+      prevClose: 100,
+    });
+    setupMocks({
+      positions: [
+        { symbol: "NIFTY", pnl: 1500, quantity: 50, average_price: 100, ltp: 130 },
+        { symbol: "BANKNIFTY", pnl: -500, quantity: 30, average_price: 200, ltp: 183 },
+        { symbol: "RELIANCE", pnl: 0, quantity: 10, average_price: 2500, ltp: 2500 },
+      ],
+    });
+
+    render(<DashboardWidget {...defaultProps} />);
+
+    expect(screen.getByRole("img", { name: "NIFTY 50 OHLC sparkline" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Position status tracker" })).toBeInTheDocument();
   });
 });

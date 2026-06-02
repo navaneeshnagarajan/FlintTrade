@@ -18,8 +18,12 @@
 
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
+import {
+  createFlintLightweightChartTheme,
+  type FlintLightweightChartTheme,
+} from "@flinttrade/design-system";
 import { useThemeStore } from "@/stores/themeStore";
-import type { DeepPartial, ChartOptions, CrosshairMode } from "lightweight-charts";
+import type { DeepPartial, ChartOptions } from "lightweight-charts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,42 +41,14 @@ function cssVar(name: string, fallback = ""): string {
 // Return type
 // ---------------------------------------------------------------------------
 
-export interface LightweightChartTheme {
-  layout: {
-    background: { color: string };
-    textColor: string;
-    fontFamily: string;
-    fontSize: number;
-  };
-  grid: {
-    vertLines: { color: string };
-    horzLines: { color: string };
-  };
-  crosshair: { mode: CrosshairMode };
-  rightPriceScale: { borderColor: string };
-  timeScale: {
-    borderColor: string;
-    timeVisible: boolean;
-    secondsVisible: boolean;
-  };
-  /** Colors for candlestick series — apply to series options, not chart options */
-  candle: {
-    upColor: string;
-    downColor: string;
-    borderUpColor: string;
-    borderDownColor: string;
-    wickUpColor: string;
-    wickDownColor: string;
-  };
-}
+export type LightweightChartTheme = FlintLightweightChartTheme &
+  DeepPartial<ChartOptions>;
 
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useLightweightChartTheme(): DeepPartial<ChartOptions> & {
-  candle: LightweightChartTheme["candle"];
-} {
+export function useLightweightChartTheme(): LightweightChartTheme {
   const { activeThemeId, resolvedMode } = useThemeStore(
     useShallow((s) => ({
       activeThemeId: s.activeThemeId,
@@ -87,34 +63,19 @@ export function useLightweightChartTheme(): DeepPartial<ChartOptions> & {
     const up = cssVar("--chart-up", "#22c55e");
     const down = cssVar("--chart-down", "#ef4444");
     const border = cssVar("--color-border", "#2a2a3a");
+    const accent = cssVar("--color-accent", "#38bdf8");
+    const muted = cssVar("--color-text-muted", "#6b6b78");
 
-    return {
-      layout: {
-        background: { color: bg },
-        textColor: text,
-        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: grid },
-        horzLines: { color: grid },
-      },
-      crosshair: { mode: 0 as CrosshairMode },
-      rightPriceScale: { borderColor: border },
-      timeScale: {
-        borderColor: border,
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      candle: {
-        upColor: up,
-        downColor: down,
-        borderUpColor: up,
-        borderDownColor: down,
-        wickUpColor: up,
-        wickDownColor: down,
-      },
-    };
+    return createFlintLightweightChartTheme({
+      background: bg,
+      grid,
+      text,
+      border,
+      up,
+      down,
+      accent,
+      muted,
+    }) as LightweightChartTheme;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeThemeId, resolvedMode]);
 }

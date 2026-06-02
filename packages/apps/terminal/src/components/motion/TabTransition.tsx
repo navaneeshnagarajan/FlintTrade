@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { motionConfig } from "@/lib/motion";
 
 interface TabTransitionProps {
@@ -9,11 +9,15 @@ interface TabTransitionProps {
 }
 
 /**
- * Crossfade wrapper for sidebar/tab content switches within routes.
+ * Fade wrapper for sidebar/tab content switches within routes.
  *
  * Used by /invest, /learn, /lab, /automate, /ai when switching between
  * their internal tabs. Respects prefers-reduced-motion — renders children
  * without any animation wrapper when the user has opted out of motion.
+ *
+ * The keyed motion node mounts the new panel immediately. That keeps ARIA tab
+ * state and visible panel content in sync even when a tab's lazy chunk is still
+ * resolving.
  */
 export default function TabTransition({
   tabKey,
@@ -25,17 +29,14 @@ export default function TabTransition({
   }
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={tabKey}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={motionConfig.transitions.tab}
-        className={className}
-      >
-        {children}
-      </motion.div>
-    </AnimatePresence>
+    <motion.div
+      key={tabKey}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={motionConfig.transitions.tab}
+      className={className}
+    >
+      {children}
+    </motion.div>
   );
 }

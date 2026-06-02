@@ -1,9 +1,16 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+const oiProfilePlotlyMocks = vi.hoisted(() => ({
+  props: [] as Array<{ layout?: { yaxis?: Record<string, unknown> } }>,
+}));
+
 vi.mock("@/components/charts/PlotlyChart", () => ({
-  PlotlyChart: () => <div data-testid="plotly-chart" />,
+  PlotlyChart: (props: { layout?: { yaxis?: Record<string, unknown> } }) => {
+    oiProfilePlotlyMocks.props.push(props);
+    return <div data-testid="plotly-chart" />;
+  },
 }));
 
 vi.mock("../useOIProfile", () => ({
@@ -15,15 +22,32 @@ vi.mock("@/services/api", () => ({
   getHistory: vi.fn().mockResolvedValue([]),
 }));
 
+const oiProfileChartMocks = vi.hoisted(() => ({
+  crosshairCallbacks: [] as Array<(param: unknown) => void>,
+  fitContent: vi.fn(),
+  series: [] as Array<{ setData: ReturnType<typeof vi.fn>; applyOptions: ReturnType<typeof vi.fn> }>,
+}));
+
 // Mock lightweight-charts
 vi.mock("lightweight-charts", () => ({
   createChart: vi.fn(() => ({
-    addSeries: vi.fn(() => ({ setData: vi.fn() })),
+    addSeries: vi.fn(() => {
+      const series = { setData: vi.fn(), applyOptions: vi.fn() };
+      oiProfileChartMocks.series.push(series);
+      return series;
+    }),
     resize: vi.fn(),
     remove: vi.fn(),
-    timeScale: vi.fn(() => ({ fitContent: vi.fn() })),
+    applyOptions: vi.fn(),
+    priceScale: vi.fn(() => ({ applyOptions: vi.fn() })),
+    subscribeCrosshairMove: (callback: (param: unknown) => void) => {
+      oiProfileChartMocks.crosshairCallbacks.push(callback);
+    },
+    timeScale: vi.fn(() => ({ fitContent: oiProfileChartMocks.fitContent })),
   })),
   CandlestickSeries: {},
+  HistogramSeries: {},
+  createSeriesMarkers: vi.fn(() => ({ setMarkers: vi.fn() })),
 }));
 
 // Mock useBrokerConnected — default: disconnected
@@ -59,6 +83,13 @@ beforeAll(() => {
 });
 
 describe("OIProfileWidget", () => {
+  beforeEach(() => {
+    oiProfileChartMocks.crosshairCallbacks = [];
+    oiProfileChartMocks.fitContent.mockReset();
+    oiProfileChartMocks.series = [];
+    oiProfilePlotlyMocks.props = [];
+  });
+
   it("renders loading state when connected and loading", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     mockUseOIProfile.mockReturnValue({
@@ -145,5 +176,58 @@ describe("OIProfileWidget", () => {
     expect(screen.getByTestId("feature-teaser")).toBeTruthy();
     expect(screen.getByTestId("plotly-chart")).toBeTruthy();
     expect(screen.getByText(/PCR/i)).toBeTruthy();
+  });
+
+  it("caps OI butterfly strike ticks so compact widgets do not overlap labels", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseOIProfile.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+
+    render(<OIProfileWidget />, { wrapper });
+
+    expect(oiProfilePlotlyMocks.props[0]?.layout?.yaxis?.nticks).toBe(8);
+    expect(oiProfilePlotlyMocks.props[0]?.layout?.yaxis?.dtick).toBeUndefined();
+  });
+
+  it("shows the shared OHLCV readout when the futures chart crosshair moves", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseOIProfile.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+
+    render(<OIProfileWidget />, { wrapper });
+
+    expect(oiProfileChartMocks.crosshairCallbacks).toHaveLength(1);
+    const [candleSeries, volumeSeries] = oiProfileChartMocks.series;
+    act(() => {
+      oiProfileChartMocks.crosshairCallbacks[0]?.({
+        time: 1_779_811_200,
+        seriesData: {
+          get: (series: unknown) => {
+            if (series === candleSeries) {
+              return { open: 24100, high: 24250, low: 24050, close: 24210 };
+            }
+            if (series === volumeSeries) {
+              return { value: 1_250_000 };
+            }
+            return undefined;
+          },
+        },
+      });
+    });
+
+    expect(screen.getByText("24,100.00")).toBeTruthy();
+    expect(screen.getByText("12.50L")).toBeTruthy();
   });
 });

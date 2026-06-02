@@ -17,6 +17,7 @@ import { useAuthStore } from "@/stores/authStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
 import { Button } from "@/components/ui/button";
+import { ArrowRight } from "lucide-react";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -53,10 +54,12 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
       className="fixed inset-0 z-200 flex flex-col items-center justify-center bg-surface-base px-6 text-center"
     >
       <div className="flex flex-col items-center gap-5 max-w-xs">
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-          <rect width="40" height="40" rx="8" fill="var(--color-accent, #6366f1)" fillOpacity="0.15" />
-          <path d="M12 20h16M20 12l8 8-8 8" stroke="var(--color-accent, #6366f1)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <div
+          className="grid size-10 place-items-center rounded-lg bg-accent/15 text-accent"
+          aria-hidden="true"
+        >
+          <ArrowRight className="size-5" strokeWidth={2} />
+        </div>
         <div className="space-y-2">
           <h1 id="small-screen-title" className="font-heading font-bold text-lg text-text-primary">
             FlintTrade is designed for desktop

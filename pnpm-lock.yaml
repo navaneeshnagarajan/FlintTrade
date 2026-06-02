@@ -107,9 +107,6 @@ importers:
       '@tanstack/react-table':
         specifier: ^8.21.3
         version: 8.21.3(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      '@tremor/react':
-        specifier: ^3.18.7
-        version: 3.18.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.10.2(@types/react@19.2.15)(immer@11.1.8)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -173,9 +170,6 @@ importers:
       react-hook-form:
         specifier: ^7.71.2
         version: 7.76.1(react@19.2.6)
-      react-plotly.js:
-        specifier: ^2.6.0
-        version: 2.6.0(plotly.js@3.5.1(mapbox-gl@1.13.3))(react@19.2.6)
       react-resizable-panels:
         specifier: ^4.7.6
         version: 4.11.2(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -225,15 +219,15 @@ importers:
       '@types/node':
         specifier: ^25.5.0
         version: 25.9.1
+      '@types/plotly.js':
+        specifier: ^3.0.10
+        version: 3.0.10
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.15
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.15)
-      '@types/react-plotly.js':
-        specifier: ^2.6.4
-        version: 2.6.4
       '@types/three':
         specifier: 0.184.1
         version: 0.184.1
@@ -2385,12 +2379,6 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
-  '@tremor/react@3.18.7':
-    resolution: {integrity: sha512-nmqvf/1m0GB4LXc7v2ftdfSLoZhy5WLrhV6HNf0SOriE6/l8WkYeWuhQq8QsBjRi94mUIKLJ/VC3/Y/pj6VubQ==}
-    peerDependencies:
-      react: ^18.0.0
-      react-dom: '>=16.6.0'
-
   '@turf/area@7.3.5':
     resolution: {integrity: sha512-sSn80wPT7XfBIDN3vurCPxhk9W4U8ozS/XImSqeLN8qveTICOxzZkhsGDMp0CuncaN+plWut4a2TdNM7mzZB6Q==}
 
@@ -2524,9 +2512,6 @@ packages:
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
     peerDependencies:
       '@types/react': ^19.2.0
-
-  '@types/react-plotly.js@2.6.4':
-    resolution: {integrity: sha512-AU6w1u3qEGM0NmBA69PaOgNc0KPFA/+qkH6Uu9EBTJ45/WYOUoXi9AF5O15PRM2klpHSiHAAs4WnlI+OZAFmUA==}
 
   '@types/react-reconciler@0.28.9':
     resolution: {integrity: sha512-HHM3nxyUZ3zAylX8ZEyrDNd2XZOnQ0D5XfunJF5FLQnZbHHYq4UWvW1QfelQNXv1ICNkwYhfxjwfnqivYB6bFg==}
@@ -4771,12 +4756,6 @@ packages:
     peerDependencies:
       react: ^0.14 || ^15.0.0 || ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^0.14 || ^15.0.0 || ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
-  react-plotly.js@2.6.0:
-    resolution: {integrity: sha512-g93xcyhAVCSt9kV1svqG1clAEdL6k3U+jjuSzfTV7owaSU9Go6Ph8bl25J+jKfKvIGAEYpe4qj++WHJuc9IaeA==}
-    peerDependencies:
-      plotly.js: '>1.34.0'
-      react: '>0.13.0'
 
   react-redux@9.3.0:
     resolution: {integrity: sha512-KQopgqFo/p/fgmAs5qz6p5RWaNAzq40WAu7fJIXnQpYxFPbJYtsJPWvGeF2rOBaY/kEuV77AVsX8TsQzKm+A/g==}
@@ -7722,18 +7701,6 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.1
 
-  '@tremor/react@3.18.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
-    dependencies:
-      '@floating-ui/react': 0.19.2(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      '@headlessui/react': 2.2.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      date-fns: 3.6.0
-      react: 19.2.6
-      react-day-picker: 8.10.2(date-fns@3.6.0)(react@19.2.6)
-      react-dom: 19.2.6(react@19.2.6)
-      react-transition-state: 2.4.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      recharts: 2.15.4(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      tailwind-merge: 2.6.1
-
   '@turf/area@7.3.5':
     dependencies:
       '@turf/helpers': 7.3.5
@@ -7889,11 +7856,6 @@ snapshots:
 
   '@types/react-dom@19.2.3(@types/react@19.2.15)':
     dependencies:
-      '@types/react': 19.2.15
-
-  '@types/react-plotly.js@2.6.4':
-    dependencies:
-      '@types/plotly.js': 3.0.10
       '@types/react': 19.2.15
 
   '@types/react-reconciler@0.28.9(@types/react@19.2.15)':
@@ -10580,12 +10542,6 @@ snapshots:
     dependencies:
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
-
-  react-plotly.js@2.6.0(plotly.js@3.5.1(mapbox-gl@1.13.3))(react@19.2.6):
-    dependencies:
-      plotly.js: 3.5.1(mapbox-gl@1.13.3)
-      prop-types: 15.8.1
-      react: 19.2.6
 
   react-redux@9.3.0(@types/react@19.2.15)(react@19.2.6)(redux@5.0.1):
     dependencies:

@@ -48,6 +48,7 @@ import { useAuthGuard } from "../useAuthGuard";
 describe("useAuthGuard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    localStorage.clear();
     mockStatus = "unknown";
     mockNavigate.mockReset();
     mockSetLoggedIn.mockReset();
@@ -107,5 +108,22 @@ describe("useAuthGuard", () => {
     await waitFor(() => {
       expect(mockSetLoggedOut).toHaveBeenCalled();
     });
+  });
+
+  it("restores demo workspace auth on reload when explore demo session is active", async () => {
+    mockStatus = "unknown";
+    localStorage.setItem("flinttrade:demo-session", "active");
+    localStorage.setItem("flinttrade:mode", JSON.stringify({ state: { mode: "explore" }, version: 2 }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { result } = renderHook(() => useAuthGuard());
+
+    await waitFor(() => {
+      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.current.isLoading).toBe(false);
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { Activity, TrendingDown, TrendingUp } from "lucide-react";
+import { FlintStackedBarChart, type FlintStackedBarSeries } from "@flinttrade/design-system";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { BREADTH_DATA } from "../data";
@@ -15,6 +16,24 @@ export function MarketBreadthTab() {
     totalAdvances + totalDeclines > 0
       ? (totalAdvances / (totalAdvances + totalDeclines)) * 100
       : 0;
+  const breadthLabels = BREADTH_DATA.map((bd) => bd.label);
+  const breadthSeries: FlintStackedBarSeries[] = [
+    {
+      label: "Advances",
+      color: "var(--color-profit, #22c55e)",
+      values: BREADTH_DATA.map((bd) => (bd.advances / bd.total) * 100),
+    },
+    {
+      label: "Unchanged",
+      color: "var(--color-surface-active, #374151)",
+      values: BREADTH_DATA.map((bd) => (bd.unchanged / bd.total) * 100),
+    },
+    {
+      label: "Declines",
+      color: "var(--color-loss, #ef4444)",
+      values: BREADTH_DATA.map((bd) => (bd.declines / bd.total) * 100),
+    },
+  ];
 
   return (
     <ScrollArea className="h-full">
@@ -69,11 +88,21 @@ export function MarketBreadthTab() {
 
         <div>
           <SectionLabel icon={Activity} label="Index-wise Breadth" />
+          <Card className="mb-3 bg-surface-card border-border-default">
+            <CardContent className="pt-3 pb-3 px-4">
+              <FlintStackedBarChart
+                ariaLabel="Market breadth by index"
+                labels={breadthLabels}
+                series={breadthSeries}
+                valueFormatter={(value) => `${value.toFixed(0)}%`}
+                className="text-text-primary"
+              />
+            </CardContent>
+          </Card>
           <div className="space-y-2">
             {BREADTH_DATA.map((bd) => {
               const advPct = ((bd.advances / bd.total) * 100).toFixed(0);
               const decPct = ((bd.declines / bd.total) * 100).toFixed(0);
-              const unchPct = (100 - parseInt(advPct) - parseInt(decPct)).toFixed(0);
               return (
                 <Card key={bd.label} className="bg-surface-card border-border-default">
                   <CardContent className="pt-3 pb-3 px-4">
@@ -90,11 +119,6 @@ export function MarketBreadthTab() {
                         </span>
                         <span className="text-text-muted">{bd.unchanged} Unch</span>
                       </div>
-                    </div>
-                    <div className="h-2 bg-surface-elevated rounded-full overflow-hidden flex gap-px">
-                      <div className="h-full bg-profit transition-[width]" style={{ width: `${advPct}%` }} />
-                      <div className="h-full bg-surface-active transition-[width]" style={{ width: `${unchPct}%` }} />
-                      <div className="h-full bg-loss transition-[width]" style={{ width: `${decPct}%` }} />
                     </div>
                     <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
                       <span>52W High: <span className="text-profit">{bd.newHighs}</span></span>

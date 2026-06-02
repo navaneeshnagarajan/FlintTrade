@@ -1,7 +1,4 @@
-/**
- * Sparkline — SVG mini price trend indicator for WatchlistWidget rows.
- */
-
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { TrendingUp, TrendingDown } from "lucide-react";
 
 export interface SparklineProps {
@@ -20,36 +17,14 @@ export function Sparkline({ prices, positive }: SparklineProps) {
     );
   }
 
-  const W = 40;
-  const H = 16;
-  const min   = Math.min(...prices);
-  const max   = Math.max(...prices);
-  const range = max - min || 1;
-
-  const pts = prices.map((p, i) => {
-    const x = (i / (prices.length - 1)) * W;
-    const y = H - ((p - min) / range) * H;
-    return `${x},${y}`;
-  });
-
-  const color = positive === false ? "#ef4444" : "#22c55e";
+  const trendLabel = positive === false ? "falling" : positive === true ? "rising" : "flat";
 
   return (
-    <svg
-      width={W}
-      height={H}
-      className="shrink-0"
-      role="img"
-      aria-label={`Price trend: ${positive === false ? "falling" : "rising"}`}
-    >
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={prices}
+      positive={positive !== false}
+      ariaLabel={`Watchlist price trend: ${trendLabel}`}
+      className="h-4 w-10 shrink-0"
+    />
   );
 }

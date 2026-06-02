@@ -19,17 +19,20 @@ import {
   useCallback,
   memo,
 } from "react";
-import {
-  createChart,
-  CandlestickSeries,
-  HistogramSeries,
-} from "lightweight-charts";
 import type {
   IChartApi,
   ISeriesApi,
+  MouseEventParams,
   Time,
   IRange,
 } from "lightweight-charts";
+import {
+  applyFlintCandlestickTheme,
+  createFlintCandlestickChart,
+  FlintChartLegend,
+  getFlintChartCrosshairReadout,
+} from "@flinttrade/design-system";
+import type { FlintChartLegendState } from "@flinttrade/design-system";
 import type { OHLCVBar } from "@/types/api";
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -42,6 +45,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { getHistory, getExpiry, getOptionSymbol, getOptionChain } from "@/services/api";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { lightweightCandlestickRuntime } from "@/lib/lightweightChartRuntime";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,6 +81,17 @@ const PE_COLOR = "rgba(239, 68, 68, 0.9)";    // loss red
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function getPanelCandleOptions(color: string) {
+  return {
+    upColor: color === CE_COLOR ? "#22c55e" : color === PE_COLOR ? "#ef4444" : "#94a3b8",
+    downColor: color === CE_COLOR ? "#16a34a" : color === PE_COLOR ? "#dc2626" : "#64748b",
+    borderUpColor: color === CE_COLOR ? "#22c55e" : color === PE_COLOR ? "#ef4444" : "#94a3b8",
+    borderDownColor: color === CE_COLOR ? "#16a34a" : color === PE_COLOR ? "#dc2626" : "#64748b",
+    wickUpColor: color === CE_COLOR ? "#22c55e" : color === PE_COLOR ? "#ef4444" : "#94a3b8",
+    wickDownColor: color === CE_COLOR ? "#16a34a" : color === PE_COLOR ? "#dc2626" : "#64748b",
+  };
+}
 
 function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -138,9 +153,10 @@ interface UsePanelChartOptions {
   label: PanelLabel;
   interval: string;
   syncGroup: React.MutableRefObject<IChartApi[]>;
+  setLegend: (state: FlintChartLegendState | null) => void;
 }
 
-function usePanelChart({ label, interval, syncGroup }: UsePanelChartOptions) {
+function usePanelChart({ label, interval, syncGroup, setLegend }: UsePanelChartOptions) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -152,43 +168,21 @@ function usePanelChart({ label, interval, syncGroup }: UsePanelChartOptions) {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const chart = createChart(containerRef.current, {
-      layout: chartTheme.layout,
-      grid: chartTheme.grid,
-      crosshair: chartTheme.crosshair,
-      rightPriceScale: chartTheme.rightPriceScale,
-      timeScale: {
-        ...(chartTheme.timeScale ?? {}),
-        borderVisible: false,
-        timeVisible: true,
-        secondsVisible: false,
+    const flintChart = createFlintCandlestickChart(
+      lightweightCandlestickRuntime,
+      containerRef.current,
+      chartTheme,
+      {
+        ariaLabel: `${label.title} price chart`,
+        candleOptions: getPanelCandleOptions(label.color),
+        timeScale: {
+          borderVisible: false,
+          timeVisible: true,
+          secondsVisible: false,
+        },
       },
-      width: containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight,
-    });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      ...(chartTheme.candle ?? {}),
-      upColor: label.color === CE_COLOR ? "#22c55e" : label.color === PE_COLOR ? "#ef4444" : "#94a3b8",
-      downColor: label.color === CE_COLOR ? "#16a34a" : label.color === PE_COLOR ? "#dc2626" : "#64748b",
-      borderUpColor: label.color === CE_COLOR ? "#22c55e" : label.color === PE_COLOR ? "#ef4444" : "#94a3b8",
-      borderDownColor: label.color === CE_COLOR ? "#16a34a" : label.color === PE_COLOR ? "#dc2626" : "#64748b",
-      wickUpColor: label.color === CE_COLOR ? "#22c55e" : label.color === PE_COLOR ? "#ef4444" : "#94a3b8",
-      wickDownColor: label.color === CE_COLOR ? "#16a34a" : label.color === PE_COLOR ? "#dc2626" : "#64748b",
-    });
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "vol",
-    });
-    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
-
-    // WCAG: aria-label on canvas
-    const canvas = containerRef.current?.querySelector("canvas");
-    if (canvas) {
-      canvas.setAttribute("role", "img");
-      canvas.setAttribute("aria-label", `${label.title} price chart`);
-    }
+    );
+    const { chart, candleSeries, volumeSeries } = flintChart;
 
     chartRef.current = chart;
     candleRef.current = candleSeries;
@@ -209,19 +203,13 @@ function usePanelChart({ label, interval, syncGroup }: UsePanelChartOptions) {
       isSyncingRef.current = false;
     });
 
-    // Resize observer
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        chart.applyOptions({ width, height });
-      }
+    chart.subscribeCrosshairMove((param: MouseEventParams) => {
+      setLegend(getFlintChartCrosshairReadout(param, candleSeries, volumeSeries));
     });
-    ro.observe(containerRef.current);
 
     return () => {
-      ro.disconnect();
       syncGroup.current = syncGroup.current.filter((c) => c !== chart);
-      chart.remove();
+      flintChart.remove();
       chartRef.current = null;
       candleRef.current = null;
       volumeRef.current = null;
@@ -232,10 +220,17 @@ function usePanelChart({ label, interval, syncGroup }: UsePanelChartOptions) {
   // Apply theme changes
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
-    const { candle: _candle, ...chartOptions } = chartTheme;
-    chart.applyOptions(chartOptions);
-  }, [chartTheme]);
+    const candle = candleRef.current;
+    if (!chart || !candle) return;
+    applyFlintCandlestickTheme(chart, candle, chartTheme, {
+      candleOptions: getPanelCandleOptions(label.color),
+      timeScale: {
+        borderVisible: false,
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+  }, [chartTheme, label.color]);
 
   // Fetch OHLCV data when symbol/interval changes
   useEffect(() => {
@@ -290,27 +285,36 @@ interface ChartPanelProps {
 }
 
 const ChartPanel = memo(function ChartPanel({ label, interval, syncGroup, flex = "flex-1" }: ChartPanelProps) {
-  const { containerRef } = usePanelChart({ label, interval, syncGroup });
+  const [legend, setLegend] = useState<FlintChartLegendState | null>(null);
+  const { containerRef } = usePanelChart({ label, interval, syncGroup, setLegend });
 
   return (
     <div className={`${flex} flex flex-col min-w-0 overflow-hidden border-r border-border-default last:border-r-0`}>
       {/* Panel header label */}
       <div
-        className="flex items-center justify-between px-2 py-1 shrink-0 border-b border-border-default"
+        className="flex flex-col gap-1 px-2 py-1 shrink-0 border-b border-border-default"
         style={{ borderBottomColor: label.color.replace(/[\d.]+\)$/, "0.3)") }}
       >
-        <div className="flex items-center gap-1.5">
-          <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: label.color }}
-          />
-          <span className="text-xs font-heading font-semibold text-text-primary truncate">
-            {label.title}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: label.color }}
+            />
+            <span className="text-xs font-heading font-semibold text-text-primary truncate">
+              {label.title}
+            </span>
+          </div>
+          <span className="text-xxs font-mono text-text-muted truncate max-w-28">
+            {label.symbol || "—"}
           </span>
         </div>
-        <span className="text-xxs font-mono text-text-muted truncate max-w-28">
-          {label.symbol || "—"}
-        </span>
+        {legend && (
+          <FlintChartLegend
+            legend={legend}
+            className="w-full min-w-0 flex-wrap justify-start gap-x-2 gap-y-0.5 border-border-default/50 bg-surface-card/60"
+          />
+        )}
       </div>
 
       {/* Chart canvas container */}

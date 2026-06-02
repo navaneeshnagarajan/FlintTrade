@@ -90,6 +90,13 @@ describe("RiskDashboardWidget", () => {
       expect(card).toBeTruthy();
     }
   });
+
+  it("renders metric gauges through the shared Flint radial gauge primitive", () => {
+    mockConnected.mockReturnValue(false);
+    const { container } = render(<RiskDashboardWidget />);
+    const gauges = container.querySelectorAll('[data-flint-chart="radial-gauge"]');
+    expect(gauges.length).toBe(SAMPLE_RISK_DATA.metrics.length);
+  });
 });
 
 // ---------------------------------------------------------------------------

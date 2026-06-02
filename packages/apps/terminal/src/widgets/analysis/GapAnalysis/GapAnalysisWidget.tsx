@@ -11,6 +11,7 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef, memo } from "react";
 import { ArrowUpFromLine, RefreshCw, Loader2 } from "lucide-react";
+import { FlintScatterChart } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -105,16 +106,12 @@ function computeStats(events: GapEvent[]): GapStats {
 
 const CHART_W = 340;
 const CHART_H = 120;
-const PAD = { top: 10, right: 16, bottom: 28, left: 40 };
 
 interface ScatterProps {
   events: GapEvent[];
 }
 
 function ScatterChart({ events }: ScatterProps) {
-  const chartW = CHART_W - PAD.left - PAD.right;
-  const chartH = CHART_H - PAD.top - PAD.bottom;
-
   // Bucket by 0.25% gap size increments
   const buckets = useMemo(() => {
     const map = new Map<number, { total: number; filled: number }>();
@@ -137,71 +134,29 @@ function ScatterChart({ events }: ScatterProps) {
   }
 
   const maxGap = Math.max(...buckets.map((b) => b.gapSize), 0.25);
-  const xOf = (g: number) => (g / maxGap) * chartW;
-  const yOf = (pct: number) => chartH - (pct / 100) * chartH;
-
-  const yTicks = [0, 25, 50, 75, 100];
 
   return (
-    <svg
-      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-      className="w-full"
-      style={{ height: CHART_H }}
-      aria-label="Scatter chart: gap size vs fill probability"
-      role="img"
-    >
-      <g transform={`translate(${PAD.left},${PAD.top})`}>
-        {/* Y grid */}
-        {yTicks.map((t) => (
-          <g key={t}>
-            <line x1={0} y1={yOf(t)} x2={chartW} y2={yOf(t)} stroke="rgba(255,255,255,0.06)" />
-            <text x={-4} y={yOf(t) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted,#666)">
-              {t}%
-            </text>
-          </g>
-        ))}
-
-        {/* Axes */}
-        <line x1={0} y1={0} x2={0} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={chartH} x2={chartW} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-
-        {/* 50% fill line */}
-        <line x1={0} y1={yOf(50)} x2={chartW} y2={yOf(50)} stroke="rgba(99,102,241,0.3)" strokeDasharray="3,2" />
-
-        {/* Dots */}
-        {buckets.map((b) => {
-          const cx = xOf(b.gapSize);
-          const cy = yOf(b.fillPct);
-          const r = Math.min(6, 3 + Math.sqrt(b.count) * 1.2);
-          const colour = b.fillPct >= 50 ? "rgba(34,197,94,0.75)" : "rgba(239,68,68,0.75)";
-          return (
-            <circle
-              key={b.gapSize}
-              cx={cx}
-              cy={cy}
-              r={r}
-              fill={colour}
-              stroke="rgba(255,255,255,0.15)"
-              strokeWidth={0.5}
-              role="img"
-              aria-label={`Gap ${b.gapSize.toFixed(2)}% fill rate ${b.fillPct.toFixed(0)}% (${b.count} events)`}
-            />
-          );
-        })}
-
-        {/* X ticks */}
-        {[0.5, 1.0, 1.5, 2.0].filter((v) => v <= maxGap + 0.1).map((v) => (
-          <text key={v} x={xOf(v)} y={chartH + 14} textAnchor="middle" fontSize={8} fill="var(--color-text-muted,#666)">
-            {v}%
-          </text>
-        ))}
-
-        {/* Axis labels */}
-        <text x={chartW / 2} y={chartH + 24} textAnchor="middle" fontSize={8} fill="var(--color-text-muted,#666)">
-          Gap size →
-        </text>
-      </g>
-    </svg>
+    <FlintScatterChart
+      ariaLabel="Scatter chart: gap size vs fill probability"
+      points={buckets.map((bucket) => ({
+        id: `gap-${bucket.gapSize.toFixed(2)}`,
+        label: `Gap ${bucket.gapSize.toFixed(2)}% fill rate ${bucket.fillPct.toFixed(0)}% (${bucket.count} events)`,
+        x: bucket.gapSize,
+        y: bucket.fillPct,
+        radius: Math.min(6, 3 + Math.sqrt(bucket.count) * 1.2),
+        color: bucket.fillPct >= 50 ? "rgba(34,197,94,0.75)" : "rgba(239,68,68,0.75)",
+      }))}
+      xDomain={[0, maxGap]}
+      yDomain={[0, 100]}
+      xTicks={[0.5, 1.0, 1.5, 2.0]}
+      yTicks={[0, 25, 50, 75, 100]}
+      xFormatter={(value) => `${value}%`}
+      yFormatter={(value) => `${value}%`}
+      xAxisLabel="Gap size ->"
+      referenceLines={[{ axis: "y", value: 50, color: "rgba(99,102,241,0.3)", dash: "3,2" }]}
+      width={CHART_W}
+      height={CHART_H}
+    />
   );
 }
 

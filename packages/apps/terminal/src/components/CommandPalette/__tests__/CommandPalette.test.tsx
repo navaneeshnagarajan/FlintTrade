@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
@@ -94,6 +94,17 @@ describe("CommandPalette — tabbed", () => {
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "#" } });
     expect(screen.getByRole("tab", { name: /widgets/i })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows widget results when # routes the query to Widgets", () => {
+    renderPalette();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "#chart" } });
+
+    expect(screen.getByRole("tab", { name: /widgets/i })).toHaveAttribute("aria-selected", "true");
+    const visiblePanel = screen.getByRole("tabpanel");
+    expect(within(visiblePanel).getByRole("option", { name: /Add Chart/i })).toBeInTheDocument();
+    expect(within(visiblePanel).queryByText(/type to search stocks/i)).not.toBeInTheDocument();
   });
 
   it("switches to AI tab when @ai is typed", () => {

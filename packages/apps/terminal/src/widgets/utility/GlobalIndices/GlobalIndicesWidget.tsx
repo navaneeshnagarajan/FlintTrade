@@ -12,6 +12,7 @@
 import { useEffect, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Globe, RefreshCw, Loader2 } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
 import { getGlobalIndices } from "@/services/ftApi";
 import type { GlobalIndexEntry } from "@/services/ftApi";
@@ -27,10 +28,6 @@ import { cn } from "@/lib/utils";
 const REGIONS = ["India", "US", "Europe", "Asia"] as const;
 type Region = (typeof REGIONS)[number];
 
-// ---------------------------------------------------------------------------
-// Sparkline (inline SVG)
-// ---------------------------------------------------------------------------
-
 interface SparklineProps {
   data: number[];
   positive: boolean;
@@ -38,34 +35,14 @@ interface SparklineProps {
 
 function Sparkline({ data, positive }: SparklineProps) {
   if (data.length < 2) return null;
-  const w = 60;
-  const h = 20;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 0.0001;
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * w;
-    const y = h - ((v - min) / range) * (h - 4) - 2;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const colour = positive ? "#22c55e" : "#ef4444";
+
   return (
-    <svg
-      width={w}
-      height={h}
-      viewBox={`0 0 ${w} ${h}`}
-      aria-label="30-day index sparkline"
-      role="img"
-    >
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke={colour}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={data}
+      positive={positive}
+      ariaLabel="30-day index sparkline"
+      className="h-5 w-[60px]"
+    />
   );
 }
 

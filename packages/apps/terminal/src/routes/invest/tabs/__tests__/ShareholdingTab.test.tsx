@@ -114,6 +114,10 @@ describe("ShareholdingTab", () => {
   it("renders quarterly trend section with stacked bar", () => {
     render(<ShareholdingTab />);
     expect(screen.getByText("Quarterly Trend")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /shareholding trend/i })).toHaveAttribute(
+      "data-flint-chart",
+      "stacked-bar",
+    );
     // Promoter label in legend
     expect(screen.getByText("Promoter")).toBeInTheDocument();
     expect(screen.getByText("FII")).toBeInTheDocument();

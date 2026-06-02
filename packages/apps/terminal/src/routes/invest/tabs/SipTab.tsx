@@ -14,6 +14,7 @@
  */
 
 import { useState, useMemo } from "react";
+import { FlintStackedBarChart, type FlintStackedBarSeries } from "@flinttrade/design-system";
 import { Info, Plus, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -219,6 +220,14 @@ export function SipTab() {
   );
 
   const frequencyLabel = FREQUENCY_LABELS[frequency].toLowerCase();
+  const wealthBreakdownSeries = useMemo<FlintStackedBarSeries[]>(() => {
+    if (!result) return [];
+    const gainsPct = Math.max(0, Math.min(result.progress, 100));
+    return [
+      { label: "Principal", color: "#2563eb", values: [100 - gainsPct] },
+      { label: "Estimated returns", color: "var(--color-profit, #34d399)", values: [gainsPct] },
+    ];
+  }, [result]);
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -388,20 +397,11 @@ export function SipTab() {
 
           {/* Stacked bar */}
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-text-muted">
-              <span>Principal</span>
-              <span>Estimated returns (10%)</span>
-            </div>
-            <div className="h-2.5 w-full bg-border-default rounded-full overflow-hidden flex">
-              <div
-                className="h-full bg-blue-600 transition-[width] duration-500"
-                style={{ width: `${100 - result.progress}%` }}
-              />
-              <div
-                className="h-full bg-profit transition-[width] duration-500"
-                style={{ width: `${result.progress}%` }}
-              />
-            </div>
+            <FlintStackedBarChart
+              labels={["10% p.a."]}
+              series={wealthBreakdownSeries}
+              ariaLabel="SIP wealth breakdown at 10% projected return"
+            />
             <div className="flex justify-between text-xs">
               <span className="text-neutral-text font-mono tabular-nums">
                 {(100 - result.progress).toFixed(1)}% principal

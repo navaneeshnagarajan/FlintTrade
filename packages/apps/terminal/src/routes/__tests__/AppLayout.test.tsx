@@ -5,6 +5,9 @@
  * Verifies header/main landmarks, mode banners, and child Outlet rendering.
  */
 
+import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
@@ -109,6 +112,10 @@ vi.mock("@/stores/authStore", () => ({
 
 import AppLayout from "../AppLayout";
 
+const testDir = dirname(fileURLToPath(import.meta.url));
+const appLayoutSource = () =>
+  readFileSync(resolve(testDir, "../AppLayout.tsx"), "utf8");
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -155,6 +162,10 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
     // <main> landmark with aria-label from route title
     expect(screen.getByRole("main", { name: /trading workspace/i })).toBeInTheDocument();
+  });
+
+  it("keeps route-local icon SVG markup out of the layout source", () => {
+    expect(appLayoutSource()).not.toContain("<" + "svg");
   });
 
   it("renders child route content via Outlet", () => {

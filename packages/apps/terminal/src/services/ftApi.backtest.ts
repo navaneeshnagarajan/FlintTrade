@@ -189,8 +189,84 @@ export interface RefineStrategyRequest {
   current_params: Record<string, unknown>;
 }
 
+function parseDemoStartDate(startDate: string): Date {
+  const parsed = new Date(`${startDate}T09:15:00.000Z`);
+  return Number.isNaN(parsed.getTime()) ? new Date("2024-01-01T09:15:00.000Z") : parsed;
+}
+
+function demoIsoDay(startDate: string, offsetDays: number): string {
+  const date = parseDemoStartDate(startDate);
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString();
+}
+
+function createDemoBacktestResult(config: BacktestConfig): BacktestResult {
+  const initialCapital = config.initial_capital || 100000;
+  const tradePnls = [1800, 1400, -700, 2700];
+  const cumulativeEquity = tradePnls.reduce<number[]>(
+    (points, pnl) => [...points, points[points.length - 1] + pnl],
+    [initialCapital],
+  );
+
+  const equity_curve = cumulativeEquity.map((equity, index) => ({
+    timestamp: demoIsoDay(config.start_date, index * 14),
+    equity,
+  }));
+
+  const basePrice = config.exchange.includes("NFO") ? 22480 : 2480;
+  const trades: BacktestTrade[] = tradePnls.map((pnl, index) => {
+    const isLong = index !== 1;
+    const entryPrice = basePrice + index * 85;
+    const exitPrice = entryPrice + (isLong ? pnl / 20 : -pnl / 20);
+    return {
+      entry_timestamp: demoIsoDay(config.start_date, index * 14 + 1),
+      exit_timestamp: demoIsoDay(config.start_date, index * 14 + 5),
+      symbol: config.symbol,
+      side: isLong ? "BUY" : "SELL",
+      quantity: 20,
+      entry_price: Number(entryPrice.toFixed(2)),
+      exit_price: Number(exitPrice.toFixed(2)),
+      pnl,
+      commission: 40,
+      bars_held: 75 + index * 8,
+    };
+  });
+
+  const final_equity = cumulativeEquity[cumulativeEquity.length - 1];
+  const grossProfit = tradePnls.filter((pnl) => pnl > 0).reduce((sum, pnl) => sum + pnl, 0);
+  const grossLoss = Math.abs(tradePnls.filter((pnl) => pnl < 0).reduce((sum, pnl) => sum + pnl, 0));
+  const totalReturn = (final_equity - initialCapital) / initialCapital;
+  const peakDrawdown = cumulativeEquity.reduce(
+    (state, equity) => {
+      const peak = Math.max(state.peak, equity);
+      const drawdown = peak > 0 ? (equity - peak) / peak : 0;
+      return { peak, maxDrawdown: Math.min(state.maxDrawdown, drawdown) };
+    },
+    { peak: initialCapital, maxDrawdown: 0 },
+  ).maxDrawdown;
+
+  return {
+    trades,
+    equity_curve,
+    final_equity,
+    total_bars: 320,
+    metrics: {
+      total_return: totalReturn,
+      sharpe_ratio: 1.84,
+      sortino_ratio: 2.31,
+      max_drawdown: peakDrawdown,
+      win_rate: trades.filter((trade) => trade.pnl > 0).length / trades.length,
+      profit_factor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit,
+      total_trades: trades.length,
+      expectancy: tradePnls.reduce((sum, pnl) => sum + pnl, 0) / trades.length,
+    },
+  };
+}
+
 export const runBacktest = (config: BacktestConfig) =>
-  post<BacktestResult>("backtest/run", config);
+  isDemoAuthSession()
+    ? Promise.resolve(createDemoBacktestResult(config))
+    : post<BacktestResult>("backtest/run", config);
 
 export const runPortfolioBacktest = (config: PortfolioBacktestConfig) =>
   post<PortfolioBacktestResult>("backtest/portfolio", config);

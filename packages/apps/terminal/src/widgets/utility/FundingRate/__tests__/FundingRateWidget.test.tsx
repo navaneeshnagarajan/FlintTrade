@@ -185,6 +185,9 @@ describe("FundingRateWidget", () => {
     });
     // One sparkline per symbol
     expect(sparklines.length).toBe(SAMPLE_FUNDING_RATES.rates.length);
+    expect(sparklines[0].getAttribute("viewBox")).toBe("0 0 160 42");
+    expect(sparklines[0].querySelector("polyline")).toBeNull();
+    expect(sparklines[0].querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
   it("positive rate rows show TrendingUp indicator", () => {

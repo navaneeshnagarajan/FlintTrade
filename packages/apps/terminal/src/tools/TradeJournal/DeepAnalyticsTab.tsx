@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Target, Activity, Clock, Flame, Calendar } from "lucide-react";
+import { FlintCategoricalBarChart, FlintRankedBarList } from "@flinttrade/design-system";
 import { formatCurrencyCompact } from "@/lib/formatters";
 import {
   computeWeeklyWinRate,
@@ -20,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatCard } from "./StatCard";
-import { pnlColor, formatMinutes } from "./utils";
+import { formatMinutes } from "./utils";
 
 export function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
   const [winRatePeriod, setWinRatePeriod] = useState<"weekly" | "monthly">("weekly");
@@ -49,9 +50,27 @@ export function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
     );
   }
 
-  const maxRR = Math.max(...rrBuckets.map((b) => b.count), 1);
   const topInstruments = instruments.slice(0, 8);
-  const maxInstrPnl = Math.max(...topInstruments.map((i) => Math.abs(i.pnl)), 1);
+  const winRateEntries = winRateData.map((d) => {
+    const label = winRatePeriod === "weekly"
+      ? (d as { week: string }).week
+      : (d as { month: string }).month;
+    return {
+      label,
+      value: d.winRate,
+      color: d.winRate >= 50 ? "var(--color-profit, #22c55e)" : "var(--color-loss, #ef4444)",
+    };
+  });
+  const instrumentEntries = topInstruments.map(({ symbol, pnl }) => ({
+    label: symbol,
+    value: pnl,
+    color: pnl >= 0 ? "var(--color-profit, #22c55e)" : "var(--color-loss, #ef4444)",
+  }));
+  const riskRewardEntries = rrBuckets.map(({ label, count }) => ({
+    label,
+    value: count,
+    color: "var(--color-accent, #818cf8)",
+  }));
 
   return (
     <ScrollArea className="flex-1 px-3 py-2">
@@ -116,31 +135,27 @@ export function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
               <p className="text-xs text-text-muted text-center py-4">No data for this period</p>
             ) : (
               <div className="space-y-1">
-                {winRateData.map((d) => {
+                <FlintRankedBarList
+                  ariaLabel="Deep analytics win rate over time"
+                  entries={winRateEntries}
+                  maxValue={100}
+                  valueFormatter={(value) => `${value.toFixed(0)}%`}
+                />
+                <div className="space-y-1 pt-1">
+                  {winRateData.map((d) => {
                   const label = winRatePeriod === "weekly"
                     ? (d as { week: string }).week
                     : (d as { month: string }).month;
-                  const wr = d.winRate;
                   return (
-                    <div key={label} className="flex items-center gap-2">
-                      <span className="text-xxs font-mono text-text-muted w-16 shrink-0">
-                        {label}
-                      </span>
-                      <div className="flex-1 h-3 bg-surface-base rounded overflow-hidden">
-                        <div
-                          className={`h-full rounded transition-[width] ${wr >= 50 ? "bg-emerald-600/60" : "bg-red-600/60"}`}
-                          style={{ width: `${Math.min(100, wr)}%` }}
-                        />
-                      </div>
-                      <span className={`text-xxs font-mono w-12 text-right shrink-0 ${wr >= 50 ? "text-profit" : "text-loss"}`}>
-                        {wr.toFixed(0)}%
-                      </span>
-                      <span className="text-xxs text-text-muted w-14 text-right shrink-0">
+                    <div key={label} className="flex items-center justify-between gap-2 text-xxs text-text-muted">
+                      <span className="truncate font-mono text-text-secondary">{label}</span>
+                      <span className="shrink-0">
                         {d.wins}W/{d.losses}L
                       </span>
                     </div>
                   );
-                })}
+                  })}
+                </div>
               </div>
             )}
           </CardContent>
@@ -205,28 +220,23 @@ export function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-3 pt-1 space-y-1.5">
-            {topInstruments.map(({ symbol, pnl, trades: tradeCount }) => {
-              const w = maxInstrPnl > 0 ? (Math.abs(pnl) / maxInstrPnl) * 100 : 0;
-              return (
-                <div key={symbol} className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-text-primary w-24 shrink-0 truncate">
-                    {symbol}
-                  </span>
-                  <div className="flex-1 h-4 bg-surface-base rounded overflow-hidden">
-                    <div
-                      className={`h-full rounded transition-[width] ${pnl >= 0 ? "bg-emerald-700/60" : "bg-red-700/60"}`}
-                      style={{ width: `${w}%` }}
-                    />
-                  </div>
-                  <span className={`text-xs font-mono w-20 text-right shrink-0 ${pnlColor(pnl)}`}>
-                    {formatCurrencyCompact(pnl)}
-                  </span>
-                  <span className="text-xs text-text-muted w-10 text-right shrink-0">
-                    {tradeCount}t
-                  </span>
+            {topInstruments.length > 0 && (
+              <>
+                <FlintRankedBarList
+                  ariaLabel="Deep analytics instrument performance"
+                  entries={instrumentEntries}
+                  valueFormatter={formatCurrencyCompact}
+                />
+                <div className="space-y-1 pt-1">
+                  {topInstruments.map(({ symbol, trades: tradeCount }) => (
+                    <div key={symbol} className="flex items-center justify-between gap-2 text-xs text-text-muted">
+                      <span className="truncate font-mono text-text-secondary">{symbol}</span>
+                      <span className="shrink-0">{tradeCount}t</span>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
+              </>
+            )}
             {topInstruments.length === 0 && (
               <p className="text-xs text-text-muted text-center py-2">No data</p>
             )}
@@ -271,27 +281,13 @@ export function DeepAnalyticsTab({ trades }: { trades: JournalTrade[] }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-3 pt-1">
-              <div className="flex items-end gap-2 h-20">
-                {rrBuckets.map(({ label, count }) => {
-                  const h = maxRR > 0 ? count / maxRR : 0;
-                  return (
-                    <div key={label} className="flex flex-col items-center gap-1 flex-1">
-                      <div
-                        className="w-full flex items-end justify-center"
-                        style={{ height: "56px" }}
-                      >
-                        <div
-                          className="w-full rounded-sm bg-accent/40 transition-[height]"
-                          style={{ height: `${Math.max(2, h * 56)}px` }}
-                          title={`${label}: ${count} trades`}
-                        />
-                      </div>
-                      <span className="text-xxs text-text-muted">{label}</span>
-                      <span className="text-xxs font-mono text-text-secondary">{count}</span>
-                    </div>
-                  );
-                })}
-              </div>
+              <FlintCategoricalBarChart
+                ariaLabel="Deep analytics risk-reward distribution"
+                entries={riskRewardEntries}
+                valueFormatter={(value) => `${value.toFixed(0)}t`}
+                height={82}
+                className="text-text-primary"
+              />
             </CardContent>
           </Card>
         )}

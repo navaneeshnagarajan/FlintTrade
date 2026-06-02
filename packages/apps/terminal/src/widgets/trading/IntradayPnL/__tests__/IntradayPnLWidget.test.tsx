@@ -98,6 +98,22 @@ describe("IntradayPnLWidget", () => {
     expect(netEl.className).toMatch(/profit/);
   });
 
+  it("renders the equity curve through the shared Flint baseline primitive once snapshots exist", async () => {
+    mockGetPositionbook
+      .mockResolvedValueOnce([makePosition("SBIN", 500)])
+      .mockResolvedValueOnce([makePosition("SBIN", -250)]);
+
+    render(<IntradayPnLWidget />);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+    const chart = screen.getByRole("img", { name: "Intraday P&L equity curve" });
+    expect(chart).toHaveAttribute("viewBox", "0 0 160 42");
+    expect(chart.querySelector("polyline")).not.toBeInTheDocument();
+    expect(chart.querySelector("line")).toBeInTheDocument();
+    expect(chart.querySelectorAll("path").length).toBeGreaterThan(0);
+  });
+
   it("displays negative net P&L in loss colour", async () => {
     mockGetPositionbook.mockResolvedValue([makePosition("SBIN", -300)]);
     render(<IntradayPnLWidget />);

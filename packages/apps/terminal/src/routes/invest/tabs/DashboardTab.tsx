@@ -6,7 +6,7 @@
  */
 
 import { useMemo } from "react";
-import { DonutChart, BarList } from "@tremor/react";
+import { FlintDonutBreakdown, FlintRankedBarList } from "@flinttrade/design-system";
 import {
   TrendingUp,
   TrendingDown,
@@ -24,7 +24,6 @@ import { xirr } from "@/lib/xirr";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { classifySector } from "@/lib/sectors";
-import { useTremorTheme } from "@/hooks/useTremorTheme";
 import { cn } from "@/lib/utils";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { DemoBanner } from "@/components/ui/DemoBanner";
@@ -71,6 +70,7 @@ interface AllocationBand {
   value: number;
   color: string;
   bg: string;
+  hex: string;
 }
 
 interface TopMover {
@@ -83,7 +83,6 @@ interface TopMover {
 
 export function DashboardTab() {
   const { holdings: liveHoldings, summary: liveSummary, isLoading, isError } = useInvest();
-  const tremorColors = useTremorTheme();
 
   // Fall back to demo data when API fails or returns empty
   const isDemo = isError || (!isLoading && liveHoldings.length === 0);
@@ -112,9 +111,9 @@ export function DashboardTab() {
   );
 
   const bands: AllocationBand[] = [
-    { label: "Equity", value: equityValue, color: "text-neutral-text", bg: "bg-neutral-text" },
-    { label: "Commodity", value: commodityValue, color: "text-warning", bg: "bg-warning" },
-    { label: "Cash", value: availableCash, color: "text-profit", bg: "bg-profit" },
+    { label: "Equity", value: equityValue, color: "text-neutral-text", bg: "bg-neutral-text", hex: "#60a5fa" },
+    { label: "Commodity", value: commodityValue, color: "text-warning", bg: "bg-warning", hex: "#fbbf24" },
+    { label: "Cash", value: availableCash, color: "text-profit", bg: "bg-profit", hex: "#34d399" },
   ].filter((b) => b.value > 0);
 
   const sortedByPnl = useMemo(
@@ -314,20 +313,20 @@ export function DashboardTab() {
 
         {bands.length > 0 ? (
           <div className="flex flex-col sm:flex-row gap-4 items-start">
-            <DonutChart
-              data={bands.map((b) => ({ name: b.label, value: b.value }))}
-              category="value"
-              index="name"
-              valueFormatter={(v: number) => formatINR(v)}
-              colors={tremorColors.slice(0, 3) as string[]}
-              className="h-36 shrink-0"
-              showLabel={false}
+            <FlintDonutBreakdown
+              ariaLabel="Portfolio allocation donut"
+              slices={bands.map((b) => ({ label: b.label, value: b.value, color: b.hex }))}
+              className="size-36"
             />
             <div className="flex-1 min-w-0">
-              <BarList
-                data={bands.filter((b) => b.value > 0).map((b) => ({ name: b.label, value: b.value }))}
+              <FlintRankedBarList
+                ariaLabel="Portfolio allocation values"
+                entries={bands.filter((b) => b.value > 0).map((b) => ({
+                  label: b.label,
+                  value: b.value,
+                  color: b.hex,
+                }))}
                 valueFormatter={(v: number) => formatINR(v)}
-                color="slate"
                 className="text-xs"
               />
             </div>

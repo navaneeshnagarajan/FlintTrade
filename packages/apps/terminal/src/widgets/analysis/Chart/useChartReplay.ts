@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
-import type { OhlcvBar } from "./indicators";
+import type { FlintChartOhlcvBar as OhlcvBar } from "@flinttrade/design-system";
 
 // ---------------------------------------------------------------------------
 // Types

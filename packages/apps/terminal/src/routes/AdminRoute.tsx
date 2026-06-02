@@ -220,7 +220,9 @@ core
 
 gateway
   +-- core (config, models)
-  +-- broker SDKs (30+ brokers via adapter.py)
+  +-- native adapter contract + routing
+  +-- Dhan direct scaffold (SDK calls gated)
+  +-- optional OpenAlgo-compatible shims
 
 engine
   +-- core (OpenAlgo client, models)

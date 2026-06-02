@@ -28,8 +28,9 @@ else here is reference material you reach for when a specific question arises.
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Trader / Contributor | Supported brokers, exchanges, operating systems, and Python / Node versions. |
 | [SEBI_COMPLIANCE.md](SEBI_COMPLIANCE.md) | Trader / Operator | Audit logging, rate limits, retention, kill-switch design for SEBI alignment. |
 | [CI.md](CI.md) | Contributor | How the GitHub Actions pipeline runs, what each job covers, and how to read CI failures. |
+| [REFERENCES.md](REFERENCES.md) | Everyone | Public attribution and project influence notes. |
 | [releases/](releases/) | Everyone | Per-version release notes (chronological). |
-| [setup/](setup/) | Contributor | Platform-specific dev-environment guides (Windows, macOS, Linux, Raspberry Pi). |
+| [setup/](setup/) | Contributor / Operator | Platform setup plus static IP, email, backup, and multi-user notes. |
 | [screenshots/](screenshots/) | Documentation | UI screenshots referenced from user-facing docs. |
 | [superpowers/specs/](superpowers/specs/) | Contributor | Active design specs (brainstorming gate output) for in-flight work. |
 
@@ -50,6 +51,8 @@ else here is reference material you reach for when a specific question arises.
 - **[Architecture](ARCHITECTURE.md)** — Mermaid diagrams, component map, data-flow model, mode-system state machine, WSGI prefix-strip explanation.
 - **[CI and quality contract](CI.md)** — how the per-push pipeline is shaped, how to interpret failure logs, how the nightly cross-platform matrix works.
 - **[Setup guides](setup/)** — pick the file that matches your operating system, follow it end-to-end, you should have a green test run inside an hour.
+- **[Static IP](setup/static-ip-setup.md)**, **[Email](setup/email.md)**, **[Backup](setup/backup.md)**, and **[Multi-user](setup/multi-user.md)** — operator notes for the parts that touch broker access, recovery email, local data, and trust boundaries.
+- **[References](REFERENCES.md)** — public credit and attribution notes.
 - **[Specs](superpowers/specs/)** — design documents for in-flight work. If you are about to start a feature, check whether a spec already covers it.
 
 ## Conventions used in this folder

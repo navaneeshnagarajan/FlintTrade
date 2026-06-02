@@ -173,17 +173,27 @@ JWT-based. Source: `packages/core/core/src/auth_routes.py`.
 | `auth/setup-2fa` | Enrol TOTP for the FlintTrade login (separate from broker TOTP). |
 | `auth/verify-2fa` | Verify a TOTP code during login. |
 
-### Monitoring (`/ft-api/v1/monitoring/*`, `/ft-api/v1/health`)
+### Monitoring And Observability
 
 GET endpoints. Source: `packages/core/core/src/monitoring_routes.py`,
-`health_routes.py`.
+`health_routes.py`, `infra_routes.py`, and the scoped audit/activity routes in
+`packages/core/data/src/flinttrade_data`.
+
+The terminal has two development proxy namespaces:
+
+- backend `/api/v1/*` routes are requested as `/ft-api/api/v1/*`;
+- backend `/v1/admin/*` routes are requested as `/ft-api/v1/admin/*`.
 
 | Endpoint | Purpose |
 |---|---|
-| `health` | Liveness probe — returns 200 if the backend is responsive. |
-| `monitoring/metrics` | System metrics (CPU, memory, process). |
-| `monitoring/services` | Health of dependent services (OpenAlgo, ChromaDB, LM Studio). |
-| `monitoring/audit` | Recent audit log entries (SEBI retention). |
+| `/api/v1/health` | Aggregated backend health used by the Settings monitoring panel. |
+| `/api/v1/traffic/stats` | Request count, request rate, error rate, average latency, and top paths. |
+| `/api/v1/traffic/recent` | Recent request records for operator forensics. |
+| `/api/v1/latency/stats` | Per-broker order latency percentiles. |
+| `/api/v1/latency/recent` | Recent latency records. |
+| `/health`, `/health/detail`, `/healthz`, `/readyz`, `/api/v1/ping` | Process health and compatibility probes. |
+| `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
+| `/v1/audit/*`, `/v1/activity/*`, `/v1/operations/audit/logs` | Scoped audit/activity views; admin audit endpoints require `admin.audit.read`. |
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
 
@@ -284,11 +294,17 @@ A `jti` (JWT ID) is included so the server can revoke individual tokens
 when the user logs out or switches mode. The revocation blocklist lives
 in `packages/core/core/src/auth_state.py`.
 
-### X-API-Key (OpenAlgo passthrough)
+### Backend API Keys
 
-The OpenAlgo passthrough uses OpenAlgo's own API-key auth. The key is
-read from `.env` (`OPENALGO_API_KEY`) and forwarded as the
-`X-API-KEY` header by `OpenAlgoClient`.
+FlintTrade backend routes accept `X-API-Key` against `FLINTTRADE_API_KEY`
+when configured. `OPENALGO_API_KEY` is retained as a compatibility fallback,
+but it is no longer required for native FlintTrade practice/explore flows.
+When neither key exists, loopback-only local requests are allowed so a fresh
+desktop/dev install can reach native setup and sandbox endpoints.
+
+The OpenAlgo-compatible passthrough still uses OpenAlgo's own API key. That
+key is read from `.env` (`OPENALGO_API_KEY`) and forwarded as the `X-API-KEY`
+header by `OpenAlgoClient` only for OpenAlgo/live bridge calls.
 
 ---
 
@@ -317,13 +333,18 @@ the guard returns one of three verdicts:
 
 | Verdict | Behaviour |
 |---|---|
-| `live` | Pass-through to OpenAlgo's real endpoints. |
-| `practice` | Pass-through to OpenAlgo's `analyzer` (sandbox) endpoints. |
-| `explore` | Short-circuit — return a simulated success response without touching OpenAlgo. |
+| `explore` | Reject order placement with HTTP 403. Explore is for reading, learning, and demo data only. |
+| `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, and cancel paths go through the gated `BrokerRouter`; remaining legacy-compatible live actions forward to the configured OpenAlgo-compatible endpoint until native parity is complete. |
 
 Mode switching is a deliberate, audited step. `/ft-api/v1/auth/mode`
 issues a fresh JWT with the new mode and revokes the previous `jti`,
 so the old token cannot be replayed.
+
+Authoritative coverage: `packages/core/core/tests/test_order_routes.py` asserts
+Explore rejection, Practice sandbox routing, and Live gate/forward behaviour.
+Engine routes that bypass the core order proxy use
+`packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 ---
 

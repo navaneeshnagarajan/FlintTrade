@@ -1,9 +1,9 @@
-"""Sandbox paper trading engine — virtual capital, paper orders, DuckDB storage.
+"""Sandbox paper trading engine — virtual capital, paper orders, SQLite state.
 
 Provides a simple, direct interface for the Sandbox execution mode.
-Data is stored in ``sandbox_trades``, ``sandbox_positions``, and
-``sandbox_capital`` tables in a dedicated DuckDB file, completely
-separate from real trade data.
+Data is stored in the canonical data-layer ``state.sqlite`` schema
+(``capital``, ``orders``, ``positions``, ``pnl``, and ``mtm`` tables),
+completely separate from real trade data.
 
 Usage::
 
@@ -17,82 +17,26 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from flinttrade_core.db import open_sqlite
+
+from .state_store import ensure_schema, init_capital
 
 logger = logging.getLogger("flinttrade.data.sandbox_engine")
 
 _DEFAULT_CAPITAL = 1_000_000.0  # ₹10,00,000
 
 # ---------------------------------------------------------------------------
-# DuckDB soft-import
-# ---------------------------------------------------------------------------
-
-try:
-    import duckdb  # type: ignore[import]
-
-    _DUCKDB_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    _DUCKDB_AVAILABLE = False
-    duckdb = None  # type: ignore[assignment]
-
-
-# ---------------------------------------------------------------------------
-# Schema DDL
-# ---------------------------------------------------------------------------
-
-_DDL_CAPITAL = """
-CREATE TABLE IF NOT EXISTS sandbox_capital (
-    id              VARCHAR PRIMARY KEY DEFAULT 'default',
-    initial         DOUBLE NOT NULL,
-    current         DOUBLE NOT NULL,
-    used_margin     DOUBLE NOT NULL DEFAULT 0.0,
-    updated_at      TIMESTAMP NOT NULL
-);
-"""
-
-_DDL_ORDERS = """
-CREATE TABLE IF NOT EXISTS sandbox_orders (
-    order_id    VARCHAR PRIMARY KEY,
-    symbol      VARCHAR NOT NULL,
-    exchange    VARCHAR NOT NULL,
-    action      VARCHAR NOT NULL,
-    quantity    INTEGER NOT NULL,
-    price       DOUBLE NOT NULL,
-    product     VARCHAR NOT NULL DEFAULT 'MIS',
-    status      VARCHAR NOT NULL DEFAULT 'COMPLETE',
-    created_at  TIMESTAMP NOT NULL
-);
-"""
-
-_DDL_POSITIONS = """
-CREATE TABLE IF NOT EXISTS sandbox_positions (
-    position_id     VARCHAR PRIMARY KEY,
-    symbol          VARCHAR NOT NULL,
-    exchange        VARCHAR NOT NULL,
-    product         VARCHAR NOT NULL DEFAULT 'MIS',
-    net_qty         INTEGER NOT NULL DEFAULT 0,
-    avg_price       DOUBLE NOT NULL DEFAULT 0.0,
-    buy_qty         INTEGER NOT NULL DEFAULT 0,
-    buy_value       DOUBLE NOT NULL DEFAULT 0.0,
-    sell_qty        INTEGER NOT NULL DEFAULT 0,
-    sell_value      DOUBLE NOT NULL DEFAULT 0.0,
-    realised_pnl    DOUBLE NOT NULL DEFAULT 0.0,
-    unrealised_pnl  DOUBLE NOT NULL DEFAULT 0.0,
-    updated_at      TIMESTAMP NOT NULL,
-    UNIQUE (symbol, exchange, product)
-);
-"""
-
-_ALL_DDL = [_DDL_CAPITAL, _DDL_ORDERS, _DDL_POSITIONS]
-
-# ---------------------------------------------------------------------------
 # Table name allowlist — prevents SQL injection via dynamic table names
 # ---------------------------------------------------------------------------
 
-_VALID_TABLES = frozenset({"sandbox_capital", "sandbox_orders", "sandbox_positions"})
+_VALID_TABLES = frozenset({"capital", "orders", "positions", "pnl", "mtm"})
 
 
 def _validate_table(table: str) -> str:
@@ -101,25 +45,25 @@ def _validate_table(table: str) -> str:
         raise ValueError(f"Invalid table name: {table}")
     return table
 
-_SANDBOX_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_sandbox_orders_created ON sandbox_orders (created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_sandbox_positions_sym_ex ON sandbox_positions (symbol, exchange, product)",
-]
-
-
 def _default_db_path() -> str:
-    """Resolve sandbox DuckDB path: env override > workspace > fallback."""
-    import os
+    """Resolve sandbox SQLite path: env override > workspace > fallback."""
 
-    env = os.getenv("SANDBOX_DB_PATH")
+    env = os.getenv("SANDBOX_STATE_PATH") or os.getenv("SANDBOX_DB_PATH")
     if env:
         return env
     try:
         from flinttrade_core.workspace import Workspace  # noqa: PLC0415
 
-        return str(Workspace().fast_data_dir / "sandbox.duckdb")
+        return str(Workspace().workspace_dir / "sandbox" / "state.sqlite")
     except Exception:
-        return str(Path.home() / ".flinttrade" / "data" / "sandbox.duckdb")
+        return str(Path.home() / ".flinttrade" / "sandbox" / "state.sqlite")
+
+
+def _format_ts(value: Any) -> str:
+    """Return a stable ISO-ish string for API/export compatibility."""
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+    return str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -128,13 +72,14 @@ def _default_db_path() -> str:
 
 
 class SandboxEngine:
-    """Virtual paper trading engine backed by DuckDB.
+    """Virtual paper trading engine backed by SQLite ``state.sqlite``.
 
     Tracks virtual capital, paper orders, and positions entirely in a
-    separate DuckDB file so sandbox data never mingles with real trades.
+    separate SQLite WAL file so sandbox data never mingles with real trades.
 
     Args:
-        db_path: Path to the DuckDB file.  Defaults to the workspace data
+        db_path: Path to the SQLite state file. Defaults to
+            ``<workspace>/sandbox/state.sqlite``.
             directory.  Pass ``":memory:"`` for in-memory use in tests.
         initial_capital: Starting virtual capital in rupees.
             Ignored if the database already contains a capital row.
@@ -145,19 +90,13 @@ class SandboxEngine:
         db_path: str | None = None,
         initial_capital: float = _DEFAULT_CAPITAL,
     ) -> None:
-        if not _DUCKDB_AVAILABLE:  # pragma: no cover
-            raise ImportError(
-                "duckdb is required for SandboxEngine. "
-                "Install with: pip install duckdb"
-            )
-
         self._db_path = db_path or _default_db_path()
 
         # Ensure parent directory exists for file-based databases
         if self._db_path != ":memory:":
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
-        self._conn = duckdb.connect(self._db_path)
+        self._conn = open_sqlite(self._db_path, durability="normal")
         self._initial_capital = initial_capital
         self._init_db()
 
@@ -173,23 +112,8 @@ class SandboxEngine:
 
     def _init_db(self) -> None:
         """Create tables, indexes, and seed the capital row if missing."""
-        for ddl in _ALL_DDL:
-            self._conn.execute(ddl)
-        for idx in _SANDBOX_INDEXES:
-            self._conn.execute(idx)
-
-        existing = self._conn.execute(
-            "SELECT id FROM sandbox_capital WHERE id = 'default'"
-        ).fetchone()
-
-        if not existing:
-            now = datetime.now(timezone.utc)
-            self._conn.execute(
-                """INSERT INTO sandbox_capital
-                   (id, initial, current, used_margin, updated_at)
-                   VALUES ('default', ?, ?, 0.0, ?)""",
-                [self._initial_capital, self._initial_capital, now],
-            )
+        ensure_schema(self._conn)
+        init_capital(self._conn, self._initial_capital)
 
     # ------------------------------------------------------------------
     # Capital
@@ -207,7 +131,7 @@ class SandboxEngine:
             - ``used_margin`` — capital currently tied up in open positions
         """
         row = self._conn.execute(
-            "SELECT initial, current, used_margin FROM sandbox_capital WHERE id = 'default'"
+            "SELECT initial, current, used_margin FROM capital WHERE id = 'default'"
         ).fetchone()
 
         if not row:  # Should never happen after _init_db, but guard anyway
@@ -249,12 +173,12 @@ class SandboxEngine:
                 f"Cannot remove {abs(amount):.2f} — current capital is only {cap['current']:.2f}"
             )
 
-        now = datetime.now(timezone.utc)
+        now = time.time()
         self._conn.execute(
-            """UPDATE sandbox_capital
+            """UPDATE capital
                SET current = ?, updated_at = ?
                WHERE id = 'default'""",
-            [new_current, now],
+            (new_current, now),
         )
         logger.info("Sandbox capital adjusted by %.2f → %.2f", amount, new_current)
         return self.get_capital()
@@ -332,14 +256,14 @@ class SandboxEngine:
                 }
 
         order_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = time.time()
 
         self._conn.execute(
-            """INSERT INTO sandbox_orders
+            """INSERT INTO orders
                (order_id, symbol, exchange, action, quantity, price, product,
-                status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETE', ?)""",
-            [order_id, symbol, exchange, action, quantity, price, product, now],
+                status, filled_qty, avg_fill_px, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETE', ?, ?, ?, ?)""",
+            (order_id, symbol, exchange, action, quantity, price, product, quantity, price, now, now),
         )
 
         self._update_position(
@@ -378,7 +302,7 @@ class SandboxEngine:
             """SELECT symbol, exchange, product, net_qty, avg_price,
                       buy_qty, buy_value, sell_qty, sell_value,
                       realised_pnl, unrealised_pnl, updated_at
-               FROM sandbox_positions
+               FROM positions
                WHERE net_qty != 0
                ORDER BY updated_at DESC"""
         ).fetchall()
@@ -396,7 +320,7 @@ class SandboxEngine:
                 "sell_value": r[8],
                 "realised_pnl": r[9],
                 "unrealised_pnl": r[10],
-                "updated_at": str(r[11]),
+                "updated_at": _format_ts(r[11]),
             }
             for r in rows
         ]
@@ -415,10 +339,10 @@ class SandboxEngine:
         rows = self._conn.execute(
             """SELECT order_id, symbol, exchange, action, quantity, price,
                       product, status, created_at
-               FROM sandbox_orders
-               WHERE created_at::DATE = ?::DATE
+               FROM orders
+               WHERE date(created_at, 'unixepoch', 'localtime') = ?
                ORDER BY created_at DESC""",
-            [today],
+            (today,),
         ).fetchall()
 
         return [
@@ -431,7 +355,7 @@ class SandboxEngine:
                 "price": r[5],
                 "product": r[6],
                 "status": r[7],
-                "created_at": str(r[8]),
+                "created_at": _format_ts(r[8]),
             }
             for r in rows
         ]
@@ -451,10 +375,10 @@ class SandboxEngine:
             - ``total`` — realised + unrealised
         """
         row = self._conn.execute(
-            """SELECT
+               """SELECT
                    COALESCE(SUM(realised_pnl), 0.0),
                    COALESCE(SUM(unrealised_pnl), 0.0)
-               FROM sandbox_positions"""
+               FROM positions"""
         ).fetchone()
 
         realised, unrealised = row if row else (0.0, 0.0)
@@ -482,16 +406,16 @@ class SandboxEngine:
             "reset_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        for table in ("sandbox_orders", "sandbox_positions", "sandbox_capital"):
+        for table in ("orders", "positions", "capital"):
             self._conn.execute(f"DELETE FROM {_validate_table(table)}")  # noqa: S608
 
         # Re-seed capital
-        now = datetime.now(timezone.utc)
+        now = time.time()
         self._conn.execute(
-            """INSERT INTO sandbox_capital
+            """INSERT INTO capital
                (id, initial, current, used_margin, updated_at)
                VALUES ('default', ?, ?, 0.0, ?)""",
-            [self._initial_capital, self._initial_capital, now],
+            (self._initial_capital, self._initial_capital, now),
         )
 
         logger.info("Sandbox reset — restored to initial capital %.2f", self._initial_capital)
@@ -554,31 +478,31 @@ class SandboxEngine:
             raise ValueError("'orders' must be a JSON array")
 
         # --- Clear and restore ---
-        for table in ("sandbox_orders", "sandbox_positions", "sandbox_capital"):
+        for table in ("orders", "positions", "capital"):
             self._conn.execute(f"DELETE FROM {_validate_table(table)}")  # noqa: S608
 
-        now = datetime.now(timezone.utc)
+        now = time.time()
 
         # Restore capital
         initial = float(capital_data.get("initial", self._initial_capital))
         current = float(capital_data.get("current", initial))
         used_margin = float(capital_data.get("used_margin", 0.0))
         self._conn.execute(
-            """INSERT INTO sandbox_capital
+            """INSERT INTO capital
                (id, initial, current, used_margin, updated_at)
                VALUES ('default', ?, ?, ?, ?)""",
-            [initial, current, used_margin, now],
+            (initial, current, used_margin, now),
         )
 
         # Restore positions
         for pos in positions_data:
             self._conn.execute(
-                """INSERT OR IGNORE INTO sandbox_positions
+                """INSERT OR IGNORE INTO positions
                    (position_id, symbol, exchange, product, net_qty, avg_price,
                     buy_qty, buy_value, sell_qty, sell_value,
                     realised_pnl, unrealised_pnl, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                [
+                (
                     str(uuid.uuid4()),
                     str(pos.get("symbol", "")),
                     str(pos.get("exchange", "")),
@@ -592,27 +516,33 @@ class SandboxEngine:
                     float(pos.get("realised_pnl", 0.0)),
                     float(pos.get("unrealised_pnl", 0.0)),
                     now,
-                ],
+                ),
             )
 
         # Restore orders
         for order in orders_data:
+            status = str(order.get("status", "COMPLETE"))
+            quantity = int(order.get("quantity", 0))
+            price = float(order.get("price", 0.0))
             self._conn.execute(
-                """INSERT OR IGNORE INTO sandbox_orders
+                """INSERT OR IGNORE INTO orders
                    (order_id, symbol, exchange, action, quantity, price,
-                    product, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                [
+                    product, status, filled_qty, avg_fill_px, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
                     str(order.get("order_id", uuid.uuid4())),
                     str(order.get("symbol", "")),
                     str(order.get("exchange", "")),
                     str(order.get("action", "BUY")),
-                    int(order.get("quantity", 0)),
-                    float(order.get("price", 0.0)),
+                    quantity,
+                    price,
                     str(order.get("product", "MIS")),
-                    str(order.get("status", "COMPLETE")),
+                    status,
+                    quantity if status == "COMPLETE" else 0,
+                    price if status == "COMPLETE" else None,
                     now,
-                ],
+                    now,
+                ),
             )
 
         logger.info(
@@ -638,7 +568,7 @@ class SandboxEngine:
         rows = self._conn.execute(
             """SELECT order_id, symbol, exchange, action, quantity, price,
                       product, status, created_at
-               FROM sandbox_orders
+               FROM orders
                ORDER BY created_at DESC"""
         ).fetchall()
 
@@ -652,7 +582,7 @@ class SandboxEngine:
                 "price": r[5],
                 "product": r[6],
                 "status": r[7],
-                "created_at": str(r[8]),
+                "created_at": _format_ts(r[8]),
             }
             for r in rows
         ]
@@ -667,7 +597,7 @@ class SandboxEngine:
             """SELECT symbol, exchange, product, net_qty, avg_price,
                       buy_qty, buy_value, sell_qty, sell_value,
                       realised_pnl, unrealised_pnl, updated_at
-               FROM sandbox_positions
+               FROM positions
                ORDER BY updated_at DESC"""
         ).fetchall()
 
@@ -684,7 +614,7 @@ class SandboxEngine:
                 "sell_value": r[8],
                 "realised_pnl": r[9],
                 "unrealised_pnl": r[10],
-                "updated_at": str(r[11]),
+                "updated_at": _format_ts(r[11]),
             }
             for r in rows
         ]
@@ -700,9 +630,9 @@ class SandboxEngine:
         row = self._conn.execute(
             """SELECT position_id, net_qty, avg_price, buy_qty, buy_value,
                       sell_qty, sell_value, realised_pnl, unrealised_pnl
-               FROM sandbox_positions
+               FROM positions
                WHERE symbol = ? AND exchange = ? AND product = ?""",
-            [symbol, exchange, product],
+            (symbol, exchange, product),
         ).fetchone()
 
         if row is None:
@@ -729,7 +659,7 @@ class SandboxEngine:
         action: str,
         quantity: int,
         price: float,
-        now: datetime,
+        now: float,
     ) -> None:
         """Upsert a position row after a fill."""
         notional = quantity * price
@@ -745,16 +675,16 @@ class SandboxEngine:
             sell_value = notional if action == "SELL" else 0.0
 
             self._conn.execute(
-                """INSERT INTO sandbox_positions
+                """INSERT INTO positions
                    (position_id, symbol, exchange, product,
                     net_qty, avg_price, buy_qty, buy_value,
                     sell_qty, sell_value, realised_pnl, unrealised_pnl, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, ?)""",
-                [
+                (
                     pos_id, symbol, exchange, product,
                     net_qty, avg_price, buy_qty, buy_value,
                     sell_qty, sell_value, now,
-                ],
+                ),
             )
         else:
             pos_id = existing["position_id"]
@@ -791,38 +721,38 @@ class SandboxEngine:
                     new_realised = realised_pnl
 
             self._conn.execute(
-                """UPDATE sandbox_positions
+                """UPDATE positions
                    SET net_qty = ?, avg_price = ?,
                        buy_qty = ?, buy_value = ?,
                        sell_qty = ?, sell_value = ?,
                        realised_pnl = ?, updated_at = ?
                    WHERE position_id = ?""",
-                [
+                (
                     new_net_qty, new_avg_price,
                     new_buy_qty, new_buy_value,
                     new_sell_qty, new_sell_value,
                     new_realised, now,
                     pos_id,
-                ],
+                ),
             )
 
-    def _update_used_margin(self, now: datetime) -> None:
+    def _update_used_margin(self, now: float) -> None:
         """Recalculate used_margin as sum of abs(net_qty * avg_price) for open positions."""
         total_margin = self._conn.execute(
             """SELECT COALESCE(SUM(ABS(net_qty) * avg_price), 0.0)
-               FROM sandbox_positions
+               FROM positions
                WHERE net_qty != 0"""
         ).fetchone()[0]
 
         self._conn.execute(
-            """UPDATE sandbox_capital
+            """UPDATE capital
                SET used_margin = ?, updated_at = ?
                WHERE id = 'default'""",
-            [total_margin, now],
+            (total_margin, now),
         )
 
     def close(self) -> None:
-        """Close the underlying DuckDB connection."""
+        """Close the underlying SQLite connection."""
         try:
             self._conn.close()
         except Exception:  # pragma: no cover

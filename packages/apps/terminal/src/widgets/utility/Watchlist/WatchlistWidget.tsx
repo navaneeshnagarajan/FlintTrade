@@ -17,7 +17,7 @@
  *
  * Modules:
  *   types.ts          — types, constants, helpers, persistence
- *   Sparkline.tsx     — SVG sparkline component
+ *   Sparkline.tsx     — design-system mini sparkline wrapper
  *   SearchDialog.tsx  — debounced symbol search overlay
  *   ContextMenus.tsx  — SymbolContextMenu, TabContextMenu, RenameInput
  *   SymbolRow.tsx     — individual watchlist row

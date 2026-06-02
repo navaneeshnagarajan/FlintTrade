@@ -22,11 +22,11 @@ package with Python bindings.
 | `terminal` | TypeScript / React | User-facing single-page application; Dockview workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
 | `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
-| `data` | Python | Tick recorder, audit logger (SEBI 5 year), trade logger, DuckDB storage | `packages/core/data/tests/` |
+| `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `tick-engine` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `gateway` | Python | Direct broker connections (32 brokers via OpenAlgo shims), credential store, WebSocket bridge | `packages/integrations/gateway/tests/` |
+| `gateway` | Python | Native broker adapter contract/routing, Dhan scaffold, credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
 | `integration` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
@@ -36,8 +36,9 @@ package with Python bindings.
 | `journal` | Python | Journal entries, trade logging, execution-quality analytics, and realised P&L tracking | `packages/services/journal/tests/` |
 | `screener` | Python | Option chain, OI analysis, PCR, max pain, futures quadrant, IV smile, payoff engine | `packages/services/screener/tests/` |
 
-Test counts (measured 2026-05-19): roughly 9,089 Python (pytest, 313 files)
-and 2,973 terminal (Vitest, 264 files), totalling about 12,062.
+The repository carries a large Python and terminal test suite. Prefer the
+commands below for current counts instead of relying on stale hard-coded
+numbers.
 
 ---
 
@@ -52,9 +53,10 @@ Pick the guide for your platform and follow it end-to-end:
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
 A complete dev environment includes Python 3.12, Node 22+ (24 recommended),
-Rust stable (only if you build `tick-engine`), and an OpenAlgo install
-either at `.local/external/openalgo/` (via `scripts/setup-test-deps.sh`)
-or as a separate service.
+and Rust stable if you build `tick-engine`. OpenAlgo is optional: install it
+separately, or clone a local-dev copy into `.local/external/openalgo/` with
+`scripts/setup-test-deps.sh`, only when you want the OpenAlgo-compatible
+integration path.
 
 ---
 
@@ -65,7 +67,7 @@ or as a separate service.
 From the repository root:
 
 ```bash
-make test           # all ~9,089 tests
+make test           # full pytest suite
 make test-fast      # stop on first failure
 make lint           # ruff check across packages/*/src/
 
@@ -90,7 +92,7 @@ From `packages/apps/terminal/`:
 npm install
 npm run typecheck                          # tsc --noEmit only
 npm run build                              # full type-check + Vite build
-npx vitest run                             # all ~2,973 tests
+npx vitest run                             # full Vitest suite
 npx vitest run src/widgets/path/foo.test.tsx
 npx vitest run -t "renders the order pad"  # single test by name
 npx vitest                                 # watch mode (great for TDD)
@@ -193,6 +195,23 @@ Dockview panel.
   HTML.
 - Use **Tailwind v4** utility classes; no arbitrary `style={...}`
   except for measured pixel values from observers.
+- For chart widgets, use the Flint chart core in
+  `packages/core/design-system/src/charts/` and the terminal runtime adapter at
+  `packages/apps/terminal/src/lib/lightweightChartRuntime.ts`. Do not import
+  Lightweight Charts runtime values or call `createChart`, `chart.addSeries`,
+  or `createSeriesMarkers` directly from widget code. Drawing creation should
+  go through `advanceFlintChartDrawingDraft`, drawing render decisions should
+  go through `createFlintChartDrawingRenderPlan`, drawing runtime lifecycle
+  diffing should go through `createFlintChartDrawingRenderPlanDiff`, indicator
+  line/histogram render specs and pane-aware series options should go through
+  `createFlintChartIndicatorSeriesRenderPlan`, indicator runtime lifecycle
+  diffing should go through `createFlintChartIndicatorSeriesRenderPlanDiff`,
+  and OI overlay bar semantics should stay in core helpers such as
+  `createFlintChartOIProfileBarData`.
+- For Plotly-only analysis surfaces, keep the heavy runtime behind
+  `packages/apps/terminal/src/components/charts/PlotlyChart.tsx`, but use the
+  core `createFlintPlotlyTheme`, `FLINT_PLOTLY_DEFAULT_CONFIG`, and
+  `mergeFlintPlotlyLayout` contracts for theme, modebar, and layout behaviour.
 - Honour `prefers-reduced-motion` for any animation.
 - Use the **Glass Adaptive** design system tokens (CSS vars defined in
   `packages/apps/terminal/src/styles/`). No hardcoded colours.

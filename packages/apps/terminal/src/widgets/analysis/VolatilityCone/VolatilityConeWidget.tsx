@@ -11,6 +11,7 @@
 
 import { useState, useMemo, memo } from "react";
 import { Triangle, ChevronDown } from "lucide-react";
+import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -59,120 +60,65 @@ const STATUS_COLOUR: Record<string, string> = {
   expensive: "text-loss",
 };
 
-// ---------------------------------------------------------------------------
-// SVG Cone chart
-// ---------------------------------------------------------------------------
-
-const SVG_W = 520;
-const SVG_H = 200;
-const PAD = { top: 16, right: 20, bottom: 32, left: 40 };
-
-function ConeChart({ points }: { points: ConePoint[] }) {
-  const chartW = SVG_W - PAD.left - PAD.right;
-  const chartH = SVG_H - PAD.top - PAD.bottom;
-
+function buildConeChart(points: ConePoint[]) {
   const allValues = points.flatMap((p) => [p.p10, p.p90, p.currentIV]);
-  const minV = Math.min(...allValues) * 0.9;
-  const maxV = Math.max(...allValues) * 1.1;
-
-  const xOf = (i: number) => (i / (points.length - 1)) * chartW;
-  const yOf = (v: number) => chartH - ((v - minV) / (maxV - minV)) * chartH;
-
-  function polylinePoints(values: number[]) {
-    return values.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
-  }
-
-  function bandPath(upper: number[], lower: number[]) {
-    const fwd = upper.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" L ");
-    const bwd = lower
-      .map((v, i) => `${xOf(lower.length - 1 - i).toFixed(1)},${yOf(v).toFixed(1)}`)
-      .join(" L ");
-    return `M ${fwd} L ${bwd} Z`;
-  }
-
-  const yTicks = [minV, (minV + maxV) / 2, maxV].map((v) => ({
-    label: `${v.toFixed(0)}%`,
-    y: yOf(v),
-  }));
-
-  return (
-    <svg
-      viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-      className="w-full"
-      style={{ height: SVG_H }}
-      aria-label="Volatility cone chart"
-      role="img"
-    >
-      <g transform={`translate(${PAD.left},${PAD.top})`}>
-        {/* Bands: p10-p25, p25-p75, p75-p90 */}
-        <path
-          d={bandPath(points.map((p) => p.p90), points.map((p) => p.p75))}
-          fill="rgba(239,68,68,0.12)"
-          stroke="none"
-        />
-        <path
-          d={bandPath(points.map((p) => p.p75), points.map((p) => p.p25))}
-          fill="rgba(99,102,241,0.12)"
-          stroke="none"
-        />
-        <path
-          d={bandPath(points.map((p) => p.p25), points.map((p) => p.p10))}
-          fill="rgba(34,197,94,0.12)"
-          stroke="none"
-        />
-
-        {/* Band border lines */}
-        <polyline points={polylinePoints(points.map((p) => p.p90))} fill="none" stroke="rgba(239,68,68,0.4)" strokeWidth={1} strokeDasharray="3,2" />
-        <polyline points={polylinePoints(points.map((p) => p.p75))} fill="none" stroke="rgba(239,68,68,0.25)" strokeWidth={0.75} />
-        <polyline points={polylinePoints(points.map((p) => p.p50))} fill="none" stroke="rgba(99,102,241,0.5)" strokeWidth={1.25} strokeDasharray="4,2" />
-        <polyline points={polylinePoints(points.map((p) => p.p25))} fill="none" stroke="rgba(34,197,94,0.25)" strokeWidth={0.75} />
-        <polyline points={polylinePoints(points.map((p) => p.p10))} fill="none" stroke="rgba(34,197,94,0.4)" strokeWidth={1} strokeDasharray="3,2" />
-
-        {/* IV dots */}
-        {points.map((p, i) => {
-          const cx = xOf(i);
-          const cy = yOf(p.currentIV);
-          const status = ivStatus(p.currentIV, p.p25, p.p75);
-          const fill =
-            status === "cheap" ? "#22c55e" : status === "expensive" ? "#ef4444" : "#f59e0b";
-          return (
-            <g key={p.period}>
-              <circle cx={cx} cy={cy} r={4.5} fill={fill} stroke="var(--color-surface-base,#0a0a0f)" strokeWidth={1.5} />
-              <title>{`${p.period}d IV: ${p.currentIV.toFixed(1)}% (${status})`}</title>
-            </g>
-          );
-        })}
-
-        {/* X axis labels */}
-        {points.map((p, i) => (
-          <text
-            key={p.period}
-            x={xOf(i)}
-            y={chartH + 18}
-            textAnchor="middle"
-            fontSize={9}
-            fill="var(--color-text-muted,#666)"
-          >
-            {p.period}d
-          </text>
-        ))}
-
-        {/* Y axis labels */}
-        {yTicks.map((t) => (
-          <g key={t.label}>
-            <line x1={-4} x2={0} y1={t.y} y2={t.y} stroke="var(--color-border-default,#2a2a3a)" />
-            <text x={-6} y={t.y + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted,#666)">
-              {t.label}
-            </text>
-          </g>
-        ))}
-
-        {/* X axis line */}
-        <line x1={0} y1={chartH} x2={chartW} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-        <line x1={0} y1={0} x2={0} y2={chartH} stroke="var(--color-border-default,#2a2a3a)" />
-      </g>
-    </svg>
+  const minValue = Math.min(...allValues) * 0.9;
+  const maxValue = Math.max(...allValues) * 1.1;
+  const pointFor = (point: ConePoint, value: number, index: number) => ({
+    x: index,
+    y: value,
+    label: `${point.period}d ${value.toFixed(1)}%`,
+  });
+  const lineFor = (key: keyof Pick<ConePoint, "p10" | "p25" | "p50" | "p75" | "p90">) => (
+    points.map((point, index) => pointFor(point, point[key], index))
   );
+
+  return {
+    bands: [
+      {
+        id: "p75-p90",
+        label: "Expensive percentile band",
+        color: "rgba(239,68,68,0.12)",
+        upper: lineFor("p90"),
+        lower: lineFor("p75"),
+      },
+      {
+        id: "p25-p75",
+        label: "Normal percentile band",
+        color: "rgba(99,102,241,0.12)",
+        upper: lineFor("p75"),
+        lower: lineFor("p25"),
+      },
+      {
+        id: "p10-p25",
+        label: "Cheap percentile band",
+        color: "rgba(34,197,94,0.12)",
+        upper: lineFor("p25"),
+        lower: lineFor("p10"),
+      },
+    ],
+    series: [
+      { id: "p90", label: "90th percentile", color: "rgba(239,68,68,0.4)", dash: "3,2", strokeWidth: 1, points: lineFor("p90") },
+      { id: "p75", label: "75th percentile", color: "rgba(239,68,68,0.25)", strokeWidth: 0.75, points: lineFor("p75") },
+      { id: "p50", label: "Median", color: "rgba(99,102,241,0.5)", dash: "4,2", strokeWidth: 1.25, points: lineFor("p50") },
+      { id: "p25", label: "25th percentile", color: "rgba(34,197,94,0.25)", strokeWidth: 0.75, points: lineFor("p25") },
+      { id: "p10", label: "10th percentile", color: "rgba(34,197,94,0.4)", dash: "3,2", strokeWidth: 1, points: lineFor("p10") },
+    ],
+    markers: points.map((point, index) => {
+      const status = ivStatus(point.currentIV, point.p25, point.p75);
+      return {
+        id: `iv-${point.period}`,
+        label: `${point.period}d IV: ${point.currentIV.toFixed(1)}% (${status})`,
+        x: index,
+        y: point.currentIV,
+        color: status === "cheap" ? "#22c55e" : status === "expensive" ? "#ef4444" : "#f59e0b",
+      };
+    }),
+    xDomain: [0, Math.max(points.length - 1, 1)] as const,
+    yDomain: [minValue, maxValue] as const,
+    xTicks: points.map((_, index) => index),
+    yTicks: [minValue, (minValue + maxValue) / 2, maxValue],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +176,7 @@ function VolatilityConeWidget() {
   // In live mode this would fetch from /ft-api/v1/volcone?symbol=NIFTY
   // For now we use sample data always (endpoint not yet implemented)
   const coneData = SAMPLE_CONE;
+  const coneChart = useMemo(() => buildConeChart(coneData), [coneData]);
 
   const handleSymbolChange = (v: string) => {
     setSymbol(v);
@@ -266,7 +213,20 @@ function VolatilityConeWidget() {
 
       {/* Chart */}
       <div className="flex-1 min-h-0 overflow-hidden px-2 pt-2">
-        <ConeChart points={coneData} />
+        <FlintBandedLineChart
+          ariaLabel="Volatility cone chart"
+          bands={coneChart.bands}
+          series={coneChart.series}
+          markers={coneChart.markers}
+          xDomain={coneChart.xDomain}
+          yDomain={coneChart.yDomain}
+          xTicks={coneChart.xTicks}
+          yTicks={coneChart.yTicks}
+          xFormatter={(value) => `${coneData[value]?.period ?? value}d`}
+          yFormatter={(value) => `${value.toFixed(0)}%`}
+          width={520}
+          height={200}
+        />
       </div>
 
       {/* Legend */}

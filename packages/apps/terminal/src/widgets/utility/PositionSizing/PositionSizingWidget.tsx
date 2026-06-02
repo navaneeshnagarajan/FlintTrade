@@ -5,12 +5,12 @@
  *   - Inputs: account capital, risk per trade (%), stop loss distance, entry price
  *   - Methods: Fixed Fractional, Kelly Criterion, ATR-based
  *   - Calculates: position size (lots), rupee risk, max loss
- *   - Visual: pie chart (SVG) showing capital at risk vs available
- *   - No external dependencies — pure maths + Tailwind
+ *   - Visual: core donut chart showing capital at risk vs available
  */
 
 import { useState, useMemo, memo } from "react";
 import { Ruler } from "lucide-react";
+import { FlintDonutBreakdown } from "@flinttrade/design-system";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
@@ -101,50 +101,22 @@ function calcATR(
 
 interface PieChartProps {
   atRiskFraction: number;  // 0-1
-  size?: number;
 }
 
-function PieChart({ atRiskFraction, size = 80 }: PieChartProps) {
-  const r = size / 2 - 4;
-  const cx = size / 2;
-  const cy = size / 2;
+function PieChart({ atRiskFraction }: PieChartProps) {
   const clampedFraction = Math.min(1, Math.max(0, atRiskFraction));
-  const angle = clampedFraction * 2 * Math.PI;
-
-  // Full circle edge case
-  if (clampedFraction >= 0.999) {
-    return (
-      <svg width={size} height={size} aria-label={`Capital allocation: ${(clampedFraction * 100).toFixed(1)}% at risk`}>
-        <circle cx={cx} cy={cy} r={r} fill="currentColor" className="text-loss/60" />
-      </svg>
-    );
-  }
-  if (clampedFraction <= 0.001) {
-    return (
-      <svg width={size} height={size} aria-label="Capital allocation: 0% at risk">
-        <circle cx={cx} cy={cy} r={r} fill="currentColor" className="text-profit/60" />
-      </svg>
-    );
-  }
-
-  const x1 = cx + r * Math.sin(angle);
-  const y1 = cy - r * Math.cos(angle);
-  const largeArc = clampedFraction > 0.5 ? 1 : 0;
-
-  const riskPath = `M ${cx},${cy} L ${cx},${cy - r} A ${r},${r} 0 ${largeArc},1 ${x1.toFixed(2)},${y1.toFixed(2)} Z`;
-  const safePath = `M ${cx},${cy} L ${x1.toFixed(2)},${y1.toFixed(2)} A ${r},${r} 0 ${1 - largeArc},1 ${cx},${cy - r} Z`;
+  const atRiskPct = (clampedFraction * 100).toFixed(1);
+  const availablePct = ((1 - clampedFraction) * 100).toFixed(1);
 
   return (
-    <svg
-      width={size}
-      height={size}
-      aria-label={`Capital allocation: ${(clampedFraction * 100).toFixed(1)}% at risk, ${((1 - clampedFraction) * 100).toFixed(1)}% available`}
-      role="img"
-    >
-      <path d={safePath} fill="currentColor" className="text-profit/50" />
-      <path d={riskPath} fill="currentColor" className="text-loss/60" />
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="currentColor" strokeWidth="1" className="text-border-default" />
-    </svg>
+    <FlintDonutBreakdown
+      ariaLabel={`Capital allocation: ${atRiskPct}% at risk, ${availablePct}% available`}
+      slices={[
+        { label: "Available", value: 1 - clampedFraction, color: "#34d399" },
+        { label: "At Risk", value: clampedFraction, color: "#f87171" },
+      ]}
+      className="size-20"
+    />
   );
 }
 

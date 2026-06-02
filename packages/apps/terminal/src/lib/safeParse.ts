@@ -56,7 +56,7 @@ export const sseTokenSchema = z.object({
 
 /**
  * Persisted OHLCV cache entry.
- * `data` matches `OhlcvBar` from `@/widgets/analysis/Chart/indicators`.
+ * `data` matches `FlintChartOhlcvBar` from `@flinttrade/design-system`.
  * `timestamp` is the epoch ms when the cache was written.
  */
 export const ohlcvBarSchema = z.object({

@@ -14,7 +14,11 @@ function createNonce(): string {
  * Build the enforced CSP for a single request. The nonce lives in both the
  * request CSP and x-nonce header so Next can apply it to framework scripts.
  */
-function buildCsp(nonce: string, glitchtipUrl: string | null): string {
+export function buildCsp(
+  nonce: string,
+  glitchtipUrl: string | null,
+  nodeEnv = process.env.NODE_ENV,
+): string {
   const styleHashes = INLINE_STYLE_HASHES.join(' ');
   const connectSrc = [
     "'self'",
@@ -25,10 +29,18 @@ function buildCsp(nonce: string, glitchtipUrl: string | null): string {
   ]
     .filter(Boolean)
     .join(' ');
+  const scriptSrc = [
+    "'self'",
+    `'nonce-${nonce}'`,
+    nodeEnv === 'development' ? "'unsafe-eval'" : '',
+    'https://vercel.live',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' https://vercel.live`,
+    `script-src ${scriptSrc}`,
     `style-src 'self' ${styleHashes}`,
     "img-src 'self' data: https:",
     "font-src 'self' data:",

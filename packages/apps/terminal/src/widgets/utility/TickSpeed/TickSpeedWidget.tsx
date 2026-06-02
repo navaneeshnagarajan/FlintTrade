@@ -8,12 +8,13 @@
  *   - Reconnection count
  *   - Connection quality: Excellent / Good / Fair / Poor
  *
- * Mini spark chart: tick rate over last 5 minutes (300 samples at 1/s).
+ * Mini spark chart: core tick rate trend over last 5 minutes (300 samples at 1/s).
  * Reads from Zustand connectionStore. When disconnected shows sample data.
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Gauge, Wifi, WifiOff } from "lucide-react";
+import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -95,44 +96,23 @@ export function deriveQuality(ticksPerSec: number): Quality {
 }
 
 // ---------------------------------------------------------------------------
-// Spark chart (SVG polyline, no external dep)
+// Spark chart
 // ---------------------------------------------------------------------------
 
 interface SparkProps {
   data: number[];
-  width?: number;
-  height?: number;
 }
 
-function SparkChart({ data, width = 200, height = 36 }: SparkProps) {
+function SparkChart({ data }: SparkProps) {
   if (data.length < 2) return null;
-  const max = Math.max(...data, 1);
-  const pts = data
-    .map((v, i) => {
-      const x = (i / (data.length - 1)) * width;
-      const y = height - (v / max) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
 
   return (
-    <svg
-      width="100%"
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
-      aria-label="Tick rate over last 5 minutes"
-      role="img"
-    >
-      <polyline
-        points={pts}
-        fill="none"
-        stroke="var(--color-accent, #6366f1)"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+    <FlintMiniSparkline
+      points={data}
+      positive
+      ariaLabel="Tick rate over last 5 minutes"
+      className="h-full w-full text-accent"
+    />
   );
 }
 
@@ -288,7 +268,7 @@ function TickSpeedWidget() {
           Tick rate — last 5 min
         </div>
         <div className="flex-1 min-h-0">
-          <SparkChart data={spark} height={60} />
+          <SparkChart data={spark} />
         </div>
         <div className="flex justify-between text-xxs text-text-muted font-mono">
           <span>5m ago</span>

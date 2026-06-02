@@ -13,7 +13,7 @@
 [![Status](https://img.shields.io/badge/status-alpha%20not%20production%20ready-orange.svg)](disclaimer.md)
 [![Website](https://img.shields.io/badge/website-live-blue.svg)](https://flinttrade.vercel.app)
 
-A self-hosted trading workspace that turns native broker sessions, optional OpenAlgo-compatible integrations, real-time tick streams, and a strategy engine into one keyboard-driven cockpit you actually own.
+A self-hosted trading workspace that turns a native broker gateway contract, optional OpenAlgo-compatible integrations, real-time tick streams, and a strategy engine into one keyboard-driven cockpit you actually own.
 
 <p align="center">
   <a href="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260530"><img src="https://flinttrade.vercel.app/flinttrade/screenshots/01-welcome.png?v=20260530" alt="Cinematic welcome screen on first launch" width="48%" /></a>
@@ -35,7 +35,7 @@ connecting a broker or enabling Live mode.
 ## What it does
 
 - **Intraday F&O scalping** — sub-second order entry, bracket orders, hotkey-driven OrderPad, kill switch wired to Telegram and the UI.
-- **Multi-broker support** — one workspace for native FlintTrade broker adapters plus optional OpenAlgo-compatible integrations; switch accounts without leaving the canvas.
+- **Multi-broker support** — one workspace for FlintTrade's native gateway scaffolding plus optional OpenAlgo-compatible integrations; switch accounts without leaving the canvas.
 - **Options analysis** — option chain with OI heatmaps, IV smile, max-pain, GEX, portfolio Greeks, payoff visualiser, and a futures quadrant.
 - **Paper trading mode** — three-mode safety model (Explore / Practice / Live) with server-enforced isolation; learn without risking capital.
 - **AI-assisted signals** — local LLM chat (LM Studio), ChromaDB RAG over your trades, LightGBM signal pipeline, news sentiment, and a multi-agent risk debate.
@@ -45,7 +45,7 @@ connecting a broker or enabling Live mode.
 
 ## Supported brokers
 
-Native FlintTrade broker adapters plus optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
+FlintTrade's native broker gateway contract and routing are in alpha, with the Dhan direct adapter scaffolded and gated pending SDK attestation. Optional [OpenAlgo](https://github.com/marketcalls/openalgo)-compatible integrations remain available — see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
 
 ## Quickstart (5-minute Docker)
 
@@ -80,13 +80,13 @@ flowchart LR
     OA["OpenAlgo-compatible<br/>optional integration<br/>port 5000"]
     BR["Broker API"]
 
-    BE <-->|"native broker sessions"| BG
+    BE <-->|"native broker contract"| BG
     BE <-->|"REST + WebSocket"| OA
     BG <-->|"broker auth"| BR
     OA <-->|"broker auth"| BR
 ```
 
-FlintTrade runs its own backend and native sandbox. OpenAlgo remains an optional external integration for users who already rely on its broker gateway.
+FlintTrade runs its own backend, native sandbox, and broker gateway contract. OpenAlgo remains an optional external integration for users who already rely on its broker gateway.
 
 ### Package map
 
@@ -98,7 +98,7 @@ TypeScript design-system package, and 1 Rust/PyO3 tick engine.
 | `packages/apps/site` | Next.js + TS | Public website, generated documentation, and read-only docs MCP |
 | `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and Dockview terminal |
 | `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
-| `packages/core/data` | Python | Tick capture, audit log, trade logging, DuckDB storage |
+| `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
 | `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |
 | `packages/core/historical` | Python | OHLCV downloader, free-data sources, DuckDB/Parquet pipeline, expiry manager |
 | `packages/core/indicators` | Python + Numba | TA-Lib batch indicators, Numba streaming variants, Pine conversion |
@@ -150,7 +150,7 @@ TypeScript design-system package, and 1 Rust/PyO3 tick engine.
 
 ## Credits
 
-Built on [OpenAlgo](https://github.com/marketcalls/openalgo) by [Rajandran R](https://github.com/marketcalls) and the OpenAlgo community, and informed by [OpenClaw](https://github.com/openclaw/openclaw) for agent patterns. FlintTrade absorbs and adapts code from 215 open-source reference repositories — see [docs/REFERENCES.md](docs/REFERENCES.md) for the full attribution table.
+Built on [OpenAlgo](https://github.com/marketcalls/openalgo) by [Rajandran R](https://github.com/marketcalls) and the OpenAlgo community, and informed by [OpenClaw](https://github.com/openclaw/openclaw) for agent patterns. See [docs/REFERENCES.md](docs/REFERENCES.md) for public attribution and project influence notes.
 
 ## License
 

@@ -26,6 +26,7 @@ interface HomeWidgetFrameProps {
   card: BentoCardConfig;
   children: ReactNode;
   isDragOver: boolean;
+  isHighlighted?: boolean;
   label: string;
   onDragEnd: () => void;
   onDragLeave: (cardId: string) => void;
@@ -41,6 +42,7 @@ export function HomeWidgetFrame({
   card,
   children,
   isDragOver,
+  isHighlighted = false,
   label,
   onDragEnd,
   onDragLeave,
@@ -55,10 +57,14 @@ export function HomeWidgetFrame({
     <div
       data-testid={`home-widget-frame-${card.id}`}
       data-home-card-id={card.id}
+      data-home-component-id={card.componentId}
       data-bento-size={card.size}
+      data-new-widget={isHighlighted ? "true" : undefined}
+      tabIndex={-1}
       className={cn(
-        "home-widget-frame group relative flex min-h-28 flex-col gap-1 transition-[opacity,outline-color,transform] duration-150",
+        "home-widget-frame group relative flex min-h-28 flex-col gap-1 transition-[opacity,outline-color,transform,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
         isDragOver && "rounded outline outline-2 outline-accent/60",
+        isHighlighted && "rounded outline outline-2 outline-accent/80 shadow-[0_0_0_1px_rgba(34,197,94,0.28),0_0_28px_rgba(34,197,94,0.18)]",
       )}
       style={SIZE_STYLES[card.size]}
       onDragOver={(event) => onDragOver(card.id, event)}
