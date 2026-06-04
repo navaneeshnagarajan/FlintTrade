@@ -1,10 +1,13 @@
 """Flask Blueprint for broker capability queries.
 
-Endpoint
---------
-GET /api/v1/broker/capabilities  — return capabilities for one or all brokers
+Endpoints
+---------
+GET /api/v1/broker/capabilities   — capabilities for one or all brokers
+GET /api/v1/broker/recommendations — rank brokers per use-case ("which broker
+                                     for what")
 
-Wraps :data:`flinttrade_gateway.capabilities.REGISTRY`.
+Wraps :data:`flinttrade_gateway.capabilities.REGISTRY` and the
+:mod:`flinttrade_gateway.recommendations` engine.
 
 Register in ``create_flask_app()``::
 
@@ -21,6 +24,12 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from .capabilities import REGISTRY, BrokerCapabilities
+from .recommendations import (
+    NATIVE_BROKER_CAPABILITIES,
+    BrokerUseCase,
+    recommend,
+    recommend_all,
+)
 
 logger = logging.getLogger("flinttrade.gateway.capabilities_routes")
 
@@ -90,6 +99,92 @@ def get_capabilities() -> tuple[Any, int]:
                 "status": "success",
                 "count": len(all_caps),
                 "brokers": [_caps_to_dict(c) for c in all_caps],
+            }
+        ),
+        200,
+    )
+
+
+def _rec_to_dict(rec: Any) -> dict[str, Any]:
+    """Serialise a :class:`BrokerRecommendation` to a plain dict."""
+    return dataclasses.asdict(rec)
+
+
+@capabilities_bp.route("/broker/recommendations", methods=["GET"])
+def get_recommendations() -> tuple[Any, int]:
+    """Rank native brokers for a trading job — "which broker for what".
+
+    Query parameters:
+        use_case (str, optional): One of the :class:`BrokerUseCase` values
+            (e.g. ``low_cost_execution``, ``market_depth``). When omitted,
+            rankings for every use-case are returned.
+        brokers (str, optional): Comma-separated broker ids to restrict the
+            ranking to (e.g. the operator's connected brokers). When omitted,
+            all known native brokers are ranked.
+
+    Returns:
+        Single use-case: ``{"status": "success", "use_case": "...",
+        "recommendations": [{"broker_id", "score", "raw_score", "rationale"},
+        ...]}``.
+
+        All use-cases: ``{"status": "success", "use_cases": {"<use_case>":
+        [...], ...}}``.
+
+        HTTP 400 for an unknown ``use_case`` or unknown broker id.
+    """
+    brokers_param = request.args.get("brokers", "").strip()
+    caps_subset = None
+    if brokers_param:
+        wanted = [b.strip().lower() for b in brokers_param.split(",") if b.strip()]
+        unknown = [b for b in wanted if b not in NATIVE_BROKER_CAPABILITIES]
+        if unknown:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Unknown broker(s): {unknown}",
+                        "known_brokers": sorted(NATIVE_BROKER_CAPABILITIES),
+                    }
+                ),
+                400,
+            )
+        caps_subset = {b: NATIVE_BROKER_CAPABILITIES[b] for b in wanted}
+
+    use_case_param = request.args.get("use_case", "").strip().lower()
+    if use_case_param:
+        try:
+            use_case = BrokerUseCase(use_case_param)
+        except ValueError:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Unknown use_case {use_case_param!r}",
+                        "known_use_cases": [uc.value for uc in BrokerUseCase],
+                    }
+                ),
+                400,
+            )
+        recs = recommend(use_case, caps_subset)
+        return (
+            jsonify(
+                {
+                    "status": "success",
+                    "use_case": use_case.value,
+                    "recommendations": [_rec_to_dict(r) for r in recs],
+                }
+            ),
+            200,
+        )
+
+    everything = recommend_all(caps_subset)
+    return (
+        jsonify(
+            {
+                "status": "success",
+                "use_cases": {
+                    uc: [_rec_to_dict(r) for r in recs] for uc, recs in everything.items()
+                },
             }
         ),
         200,

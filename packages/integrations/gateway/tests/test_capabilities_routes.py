@@ -90,3 +90,46 @@ class TestCapabilitiesRoute:
             assert "broker_name" in entry
             assert isinstance(entry["broker_name"], str)
             assert len(entry["broker_name"]) > 0
+
+
+class TestRecommendationsRoute:
+    """Tests for GET /api/v1/broker/recommendations."""
+
+    def test_all_use_cases_returned_by_default(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get("/api/v1/broker/recommendations")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "success"
+        assert "low_cost_execution" in data["use_cases"]
+        recs = data["use_cases"]["low_cost_execution"]
+        assert {"broker_id", "score", "raw_score", "rationale"} <= set(recs[0])
+
+    def test_single_use_case(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get("/api/v1/broker/recommendations?use_case=low_cost_execution")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["use_case"] == "low_cost_execution"
+        # Kotak Neo's zero-brokerage differentiator should top this ranking.
+        assert data["recommendations"][0]["broker_id"] == "kotakneo"
+
+    def test_unknown_use_case_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get("/api/v1/broker/recommendations?use_case=teleport")
+        assert response.status_code == 400
+        data = response.get_json()
+        assert data["status"] == "error"
+        assert "known_use_cases" in data
+
+    def test_broker_subset_filter(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get(
+            "/api/v1/broker/recommendations?use_case=market_depth&brokers=upstox,dhan"
+        )
+        assert response.status_code == 200
+        ids = {r["broker_id"] for r in response.get_json()["recommendations"]}
+        assert ids == {"upstox", "dhan"}
+
+    def test_unknown_broker_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]
+        response = client.get("/api/v1/broker/recommendations?brokers=dhan,wakanda")
+        assert response.status_code == 400
+        data = response.get_json()
+        assert data["status"] == "error"
+        assert "known_brokers" in data
