@@ -16,7 +16,7 @@ workflow YAML should read this once.
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
 | `test.yml` | push to `main` / `dev`; non-draft PR | 7 Linux jobs (~70 minutes wall-clock) | The main quality gate. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
-| `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); daily cron (03:00 UTC); manual dispatch | ~13 Linux jobs + 1 macOS + 1 Windows | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
+| `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
 | `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to `packages/apps/site/**`, `packages/core/design-system/**`, `docs/**`) | 1 Linux job | Typechecks, tests and builds the marketing site (Next.js). Skipped unless the site, design system, or docs change. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | 1 macOS + 1 Windows | Catches slow-burn platform regressions before they accumulate. |
 | `refresh-vuln-snapshot.yml` | weekly cron (Sun 04:00 UTC); manual dispatch | 1 Linux job | Refreshes the offline OSV vuln snapshot used by `pip-audit-with-allowlist.py` and opens a PR for the founder to merge, keeping the snapshot inside its freshness window. |
@@ -165,21 +165,111 @@ same commit.
 
 ---
 
-## 7. Adding a new workflow
+## 7. CI policy & guardrails
+
+### Why this section exists
+
+FlintTrade is a public, multi-contributor repository, so cross-platform
+coverage genuinely matters — but it must be paid for carefully. Early in
+the project a heavy CI footprint tripped GitHub's abuse / over-usage
+auto-flagging and **Actions was disabled account-wide**. The combination
+that caused it:
+
+- **Daily** scheduled runs, on top of every push and pull request.
+- **Multi-platform matrices on the frequent triggers** — macOS runners
+  are billed at **10x** the Linux minute rate and Windows at **2x**, so a
+  single push fanned out into roughly **13x** the minutes of a
+  Linux-only run.
+- **Jobs with no `timeout-minutes`**, which can each burn minutes up to
+  the six-hour runner default if they hang — the single clearest runaway
+  signal an abuse heuristic watches for.
+- A large parallel-job count, which the same heuristics also weigh.
+
+On a young account this looked like resource abuse and the platform shut
+Actions off. The fix was to right-size CI to GitHub's published best
+practices, and to add a guardrail so no future change — by a human or an
+agent — can quietly re-introduce the footprint that caused the flag.
+
+### The rules (enforced in CI)
+
+`tests/test_workflow_policy.py` loads **every** `.github/workflows/*.yml`
+with PyYAML and asserts the following. It runs inside the normal
+`python-tests` job, so a workflow that breaks the policy fails CI like any
+other test, with an assertion message naming the offending workflow and
+job.
+
+1. **No expensive runner on a cheap, frequent trigger.** A job that uses a
+   `macos-*` or `windows-*` runner must **not** be reachable from a `push`
+   or `pull_request` trigger, nor from a **daily-or-more-frequent**
+   `schedule` cron. macOS / Windows coverage is allowed only under a
+   **weekly-or-less-frequent** `schedule` *or* a manual
+   `workflow_dispatch`. A release-tag push is still a push, so
+   cross-platform jobs gate behind `workflow_dispatch` / schedule, never an
+   unconditional push.
+
+   The check resolves the runner OS through both the literal `runs-on`
+   value **and** any `strategy.matrix` list (so `runs-on: ${{ matrix.os }}`
+   with `matrix.os: [ubuntu-latest, macos-latest]` is understood), and it
+   honours a job-level `if:` that confines the job to safe events — e.g.
+   `if: github.event_name == 'schedule' || github.event_name ==
+   'workflow_dispatch'`. Anything it cannot prove safe **fails closed**.
+
+2. **Every job declares `timeout-minutes`.** No exceptions for runnable
+   jobs. Sensible values: lint **~10**, tests **~30**, cross-platform
+   **~45**. (A pure reusable-workflow call — a job that is only `uses:`
+   with no `steps:` — is exempt, because its timeout lives in the called
+   workflow.)
+
+3. **Every workflow declares a top-level `permissions` block.** Default to
+   least privilege (`permissions:` → `contents: read`) and widen only the
+   specific scope a job needs (for example `pull-requests: write` only on a
+   workflow that comments on PRs).
+
+### How this maps onto the live workflows
+
+- Per-push / per-PR work stays on **`ubuntu-latest`** only (the cheapest
+  runner class): `test.yml`, the Linux audits in `supply-chain.yml`, and
+  `site.yml`.
+- macOS / Windows coverage lives in **`nightly-cross-platform.yml`**
+  (weekly Sunday cron + `workflow_dispatch`) and in the
+  `cross-platform-smoke` / `windows-acl-test` jobs of `supply-chain.yml`,
+  which are gated to `schedule` / `workflow_dispatch` even though that
+  workflow also runs Linux jobs on push.
+- Scheduled workflows use a **weekly-or-less** cadence
+  (`refresh-vuln-snapshot.yml`, `status-report.yml`,
+  `nightly-cross-platform.yml`, and the `supply-chain.yml` cron) — never a
+  daily one.
+
+If you genuinely need a daily run or a macOS / Windows job on push, the
+policy test will stop you. That is the intended behaviour: change the
+design (move it to a weekly schedule or behind `workflow_dispatch`), not
+the test.
+
+---
+
+## 8. Adding a new workflow
 
 If you add a new GitHub Actions workflow:
 
-- Default to `ubuntu-latest`. Anything else needs a written justification
-  in the same PR.
+- Default to `ubuntu-latest`. macOS / Windows must sit behind a
+  weekly-or-less `schedule` or `workflow_dispatch` only — never `push` /
+  `pull_request` / daily cron (§7).
+- Add a top-level `permissions` block (least privilege: `contents: read`,
+  widened only where a job needs it).
+- Set `timeout-minutes` on **every** job (lint ~10, tests ~30,
+  cross-platform ~45).
 - Add `paths-ignore` if the workflow does not need to fire on doc-only
   changes.
 - Add a `concurrency` block with `cancel-in-progress: true` for any
   workflow that can be triggered rapidly.
+- `tests/test_workflow_policy.py` enforces the first three points — run
+  `python -m pytest tests/test_workflow_policy.py -v --import-mode=importlib`
+  before you push.
 - Update this document in the same commit.
 
 ---
 
-## 8. When CI behaves unexpectedly
+## 9. When CI behaves unexpectedly
 
 1. `gh run list --limit 50 --json conclusion,createdAt` — look for a
    burst of red runs (force-pushes and cancellations can still consume

@@ -1,20 +1,35 @@
 # infra/security
 
-Server hardening configurations for the Ubuntu deployment target.
+Server-hardening configurations — an **optional** building block for one
+self-hosted deployment example.
 
 ## Purpose
 
-This directory holds production security configs that are applied on the Ubuntu deployment server to protect the FlintTrade + OpenAlgo stack.
+If you choose to self-host FlintTrade (with optional OpenAlgo-compatible
+integrations) on a server you control, this directory holds example hardening
+configs you can adapt. They are illustrative, not prescriptive: harden the box
+to suit your own environment.
+
+This is **one option among several** — running everything on `localhost`, in
+Docker, or on a managed cloud host are all equally valid. There is no single
+canonical deployment target. Bring your own server, your own addresses, and
+your own hostnames.
 
 ## What goes here
 
-- **fail2ban** — jail configs for SSH, Flask (OpenAlgo port 5000), and WebSocket (port 8765)
-- **UFW** — firewall rules allowing only required ports (22, 5000, 5173, 8765, 9090, 51820)
+- **fail2ban** — example jail configs for SSH and the exposed HTTP / WebSocket
+  ports
+- **firewall** — example rules (UFW, nftables, or your platform's equivalent)
+  allowing only the ports you actually expose
 - **sshd_config** — hardened SSH settings (key-only auth, no root login)
-- **rate limiting** — nginx or iptables rate-limit rules for API endpoints
+- **rate limiting** — example reverse-proxy or firewall rate-limit rules for API
+  endpoints
+
+Treat every value as a placeholder. Never commit real IP addresses, hostnames,
+or secrets.
 
 ## References
 
 - Architecture overview: `docs/ARCHITECTURE.md`
-- Deployment guide: `docs/machine-setup/QUICKSTART.md`
-- WireGuard tunnel config: `infra/wireguard/`
+- Setup guides: `docs/setup/QUICKSTART.md`
+- WireGuard tunnel config (optional): `infra/wireguard/`

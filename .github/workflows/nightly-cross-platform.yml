@@ -19,6 +19,12 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# Least-privilege token. These jobs only check out and run the test suite
+# on macOS/Windows — they never write to the repo — so a read-only
+# GITHUB_TOKEN is all they need.
+permissions:
+  contents: read
+
 # Concurrency: only one nightly run at a time. A manual dispatch while
 # a scheduled run is in flight cancels the scheduled one so the manual
 # one wins.
@@ -30,6 +36,9 @@ jobs:
   python-tests-macos:
     runs-on: macos-latest
     continue-on-error: true
+    # Runaway guard on the priciest runner (macOS bills 10× Linux). Caps a
+    # hung cross-platform job long before the 6-hour runner default.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -41,6 +50,8 @@ jobs:
   python-tests-windows:
     runs-on: windows-latest
     continue-on-error: true
+    # Runaway guard on the Windows runner (bills 2× Linux).
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash

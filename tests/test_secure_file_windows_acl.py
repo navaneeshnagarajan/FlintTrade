@@ -1,7 +1,7 @@
 """Windows secret-file ACL hardening contract (HI18 / Security H5; sub-spec §13.3).
 
 Runs in the `windows-acl-test` job of supply-chain.yml on windows-latest (which carries
-pywin32, so the DACL-content assertions execute). On the Windows dev box without pywin32
+pywin32, so the DACL-content assertions execute). On a Windows machine without pywin32
 the icacls-driven harden() still runs (idempotency + missing-file L1 message verified);
 the DACL-inspection tests skip. On POSIX the chmod-0o600 path is verified instead.
 """

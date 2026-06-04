@@ -99,16 +99,12 @@ REPOS.md
 # for AI-generated design-rule outputs and should not ship with the public repo.
 /design-system/
 
-# === Agent-internal context (machine-local; scaffold via scripts/setup-agent-context.sh) ===
-# CLAUDE.md / AGENTS.md / PLAN.md no longer ship with the public repo. They
-# remain useful for personal coding-agent workflows but are kept out of
-# tracking. Templates live at templates/agent-context/ and the script writes
-# them to .local/agent-context/ for local use.
-/CLAUDE.md
-/AGENTS.md
-/PLAN.md
-/packages/*/CLAUDE.md
-/packages/*/AGENTS.md
+# === Agent context is TRACKED (public repo, open for contributions) ===
+# CLAUDE.md / AGENTS.md / PLAN.md (and per-package agent docs, if added) SHIP
+# with the repo so every contributor and every agent — any OS, any model —
+# works from the same source of truth. They are NOT machine-local.
+# Only the per-machine GENERATED copies under .local/agent-context/ stay
+# ignored (covered by the .local/ rule above); the canonical files are tracked.
 
 # === Planning files (session-specific) ===
 task_plan.md

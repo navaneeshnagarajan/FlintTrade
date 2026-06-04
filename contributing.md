@@ -16,18 +16,54 @@ If you're filing a security issue, please do **not** open a public GitHub issue.
 
 ## Development setup
 
-Detailed, platform-specific setup guides live under [`docs/setup/`](docs/setup/):
+FlintTrade is developed on **any operating system** — Linux, macOS, and Windows
+are all first-class. There is no single "blessed" machine and no
+develop-here/test-there pipeline: CI and the contributor pool validate every
+platform. Pick whatever you already run.
+
+### Prerequisites (any OS)
+
+| Tool | Version | How we manage it |
+|---|---|---|
+| **Python** | `>=3.12,<3.14` | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
+| **Node.js** | `>=20` (22 recommended) | [`pnpm`](https://pnpm.io/) via Corepack — the repo pins the package manager. |
+| **Rust** | stable (latest) | [`rustup`](https://rustup.rs/) — only needed to build the `core/ticks` PyO3 tick-engine. |
+
+`uv` and `pnpm` install cleanly on Linux, macOS, and Windows; follow each tool's
+own cross-platform instructions. Enable Corepack once so the pinned `pnpm`
+version is used automatically:
+
+```bash
+corepack enable
+```
+
+### Install
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+cp .env.example .env             # non-secret infrastructure only — never commit .env
+uv sync                          # Python interpreter + all Python package deps
+pnpm install                     # JS/TS workspace deps (terminal, site, …)
+```
+
+To build the Rust tick-engine (optional unless you touch it):
+
+```bash
+cd packages/core/ticks && cargo build --release
+```
+
+User preferences live in `workspace.json` under your FlintTrade home, generated
+from defaults on first run. A sanitised, fully-commented reference lives at
+[`workspace.example.json`](workspace.example.json) — secrets there are shown as
+`_ref` placeholders, never real values (mirror that discipline in your own).
+
+Detailed, platform-specific walkthroughs live under [`docs/setup/`](docs/setup/):
 
 - [`docs/setup/windows.md`](docs/setup/windows.md)
 - [`docs/setup/macos.md`](docs/setup/macos.md)
 - [`docs/setup/linux.md`](docs/setup/linux.md)
 - [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) — the short version
-
-One-line summary for the impatient:
-
-```bash
-git clone https://github.com/navaneeshnagarajan/FlintTrade.git && cd FlintTrade && cp .env.example .env && make setup
-```
 
 OpenAlgo is optional for local development. See [`docs/setup/QUICKSTART.md`](docs/setup/QUICKSTART.md) for the helper that clones a local-dev OpenAlgo copy only when you want the OpenAlgo-compatible integration path.
 
@@ -38,24 +74,28 @@ FlintTrade has a large Python and TypeScript test suite. Run it with:
 ```bash
 make test                                        # all pytest tests
 make test-fast                                   # stop on first failure
-python -m pytest packages/core/core/tests/ -v         # single package
-cd packages/apps/terminal && npx vitest run           # all Vitest tests
+python -m pytest packages/core/core/tests/ -v --import-mode=importlib   # single package
+cd packages/apps/terminal && npx vitest run                             # all Vitest tests
 ```
 
 To run a single file or a single test by name:
 
 ```bash
-python -m pytest packages/core/core/tests/test_foo.py -v
-python -m pytest packages/core/core/tests/test_foo.py::test_name -v
+python -m pytest packages/core/core/tests/test_foo.py -v --import-mode=importlib
+python -m pytest packages/core/core/tests/test_foo.py::test_name -v --import-mode=importlib
 cd packages/apps/terminal && npx vitest run src/widgets/orderpad/OrderPad.test.tsx
 cd packages/apps/terminal && npx vitest run -t "places a market order"
 ```
 
-Lint passes are part of CI too:
+`--import-mode=importlib` is required when you invoke `pytest` directly (the
+flat-package layout needs it). The `make` targets set it for you, so prefer
+`make test` unless you're iterating on a single file.
+
+Lint and type-checks are part of CI too — run them locally before pushing:
 
 ```bash
-make lint                                        # ruff over all Python packages
-cd packages/apps/terminal && npm run typecheck        # tsc --noEmit, strict mode
+make lint                                             # ruff over all Python packages
+cd packages/apps/terminal && pnpm run typecheck       # tsc --noEmit, strict mode
 ```
 
 ## How to build
@@ -69,6 +109,34 @@ cd packages/core/ticks && cargo build --release
 ```
 
 The terminal build runs `tsc --noEmit` followed by `vite build`. A clean build is required before any commit that touches `packages/apps/terminal/`.
+
+## Continuous integration
+
+CI runs on GitHub Actions. The full policy and per-workflow breakdown is in
+[`docs/CI.md`](docs/CI.md) — read it before adding or editing any workflow. The
+guardrails exist because a heavy, daily, multi-platform CI footprint once tripped
+GitHub's over-usage protection and disabled Actions for the whole account. Keep
+within them:
+
+- **Per-push CI is Linux-only.** The essential quality gate (tests, lint,
+  type-check) runs on Ubuntu for every push and non-draft PR. Contributors are
+  multi-OS, so we *do* keep cross-platform coverage — but it does not run on
+  push or pull-request.
+- **macOS and Windows runners run weekly (cron) or on demand only** —
+  `nightly-cross-platform.yml` plus `workflow_dispatch`, never on push / PR /
+  daily. macOS minutes bill at 10x and Windows at 2x, so daily multi-platform
+  matrices are exactly what the abuse heuristics flag.
+- **Every job sets `timeout-minutes`.** A job with no timeout is the single
+  biggest runaway-usage signal. Sensible values: lint ~10, tests ~30,
+  cross-platform ~45.
+- **Least-privilege permissions.** Workflows default to `contents: read`; a job
+  adds only what it needs (e.g. `pull-requests: write` solely where it comments).
+- **`concurrency` with `cancel-in-progress: true`** on push/PR workflows so a
+  follow-up push cancels the superseded run.
+- **`paths-ignore`** lets doc-only changes skip the heavy test matrix.
+
+If you find yourself adding a daily cron or putting macOS/Windows on `push`,
+stop — that is the regression these guardrails prevent.
 
 ## Branch and commit conventions
 
@@ -98,7 +166,16 @@ Scopes are package names (`terminal`, `engine`, `gateway`, `screener`, …) or f
 
 **Pre-1.0 branching:** while FlintTrade is pre-1.0, contributors commit to `main` directly for trivial fixes (typos, doc tweaks, one-line bug fixes). Pull requests are welcome at any time and encouraged for anything larger than a tiny patch. After v1.0.0 this changes — feature branches and pull requests become mandatory.
 
-Never use `git add -A` or `git add .`. Stage the files you actually changed. Never commit `.env`, API keys, broker account names, fund amounts, or order IDs.
+Never use `git add -A` or `git add .`. Stage the files you actually changed.
+
+**Never commit personal infrastructure or secrets.** This means no IP addresses,
+hostnames, VPN configs or endpoints, broker account names or IDs, fund amounts,
+order IDs, API keys, or `.env`. FlintTrade is personal-use open-source: anything
+that points at *your* machine, network, or accounts stays out of the repo. Use
+placeholders (`<YOUR_HOSTNAME>`, `<YOUR_SERVER_IP>`) in examples, keep real
+values in your private, gitignored `.env`, and store secrets as keyring/env
+`_ref` references — never plaintext. The `secrets-check` (gitleaks) CI job and a
+pre-commit hook are backstops, not a substitute for not staging the file.
 
 ## Pull request flow
 

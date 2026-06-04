@@ -5,9 +5,14 @@ on:
     - cron: '0 7 * * 1'   # Every Monday at 07:00 UTC
   workflow_dispatch:        # Allow manual trigger
 
+# Least-privilege default: only reads the repo; the report is published as an artefact.
+permissions:
+  contents: read
+
 jobs:
   report:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
         # NOTE: `submodules: recursive` was removed 2026-05-19. OpenAlgo +

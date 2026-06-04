@@ -4,6 +4,10 @@ name: Supply Chain
 # job. Consolidates the python/rust/node audits, licence + provenance checks, NOTICE
 # drift, install enforcement, Windows ACL hardening, cross-platform smoke, lockfile
 # drift, and the CLA GPG binding (external forks only).
+#
+# CI right-sizing: the Linux audits run per-push/PR; the expensive cross-platform jobs
+# (windows-acl-test, cross-platform-smoke) run ONLY on the weekly cron + workflow_dispatch,
+# never on push/pull_request. Every job carries timeout-minutes as a runaway guard.
 
 on:
   pull_request:
@@ -31,7 +35,7 @@ on:
       - '.editorconfig'
       - '.github/ISSUE_TEMPLATE/**'
   schedule:
-    - cron: "0 3 * * *"          # 03:00 UTC = 08:30 IST (per §3.4)
+    - cron: "0 3 * * 1"          # weekly Monday 03:00 UTC = 08:30 IST (per §3.4)
   workflow_dispatch:
 
 concurrency:
@@ -75,24 +79,46 @@ env:
   ZERODHA_ACCESS_TOKEN: ""
 
 jobs:
+  # Consolidated Linux Python gate — pip-audit + brokers.lock integrity + broker SDK
+  # licences + NOTICE drift + provenance + install enforcement + uv.lock drift, as
+  # ordered steps sharing a single checkout/setup. Previously eight separate jobs.
   python-audit:
-    name: Python audit (pip-audit)
+    name: Python audit (pip-audit + lock/licence/provenance/install gates)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.draft }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12.8" }
+      - uses: astral-sh/setup-uv@v6
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - name: pip-audit (allowlist + offline fallback)
         run: python scripts/pip-audit-with-allowlist.py
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: pip-audit-report, path: pip-audit-report.json, retention-days: 30 }
+      - name: brokers.lock <-> requirements.lock integrity
+        run: python scripts/check-brokers-lock.py
+      - name: install runtime deps (so wheel metadata cross-check fires)
+        run: pip install --require-hashes -r requirements.lock
+      - name: broker SDK licence compatibility
+        run: python scripts/check-broker-sdk-licences.py
+      - name: NOTICE drift check
+        run: python scripts/generate-notice.py --check
+      - name: dependency provenance (no git/file/tarball deps)
+        run: python scripts/check-no-git-deps.py
+      - name: hashed-pip + frozen-lockfile enforcement
+        run: |
+          uv sync --frozen
+          uv run python -m pytest tests/test_no_unhashed_pip_install.py tests/test_pnpm_install_frozen.py -v
+      - name: uv.lock <-> requirements.lock drift check
+        run: python scripts/check-uv-lock-export-drift.py
 
   rust-audit:
     name: Rust audit (cargo audit)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.draft }}
     steps:
       - uses: actions/checkout@v4
@@ -110,6 +136,7 @@ jobs:
   node-audit:
     name: Node audit (pnpm audit)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.draft }}
     steps:
       - uses: actions/checkout@v4
@@ -126,33 +153,10 @@ jobs:
         if: always()
         with: { name: pnpm-audit-report, path: pnpm-audit-report.json }
 
-  brokers-lock-integrity:
-    name: brokers.lock <-> requirements.lock integrity
-    runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12.8" }
-      - name: check brokers.lock
-        run: python scripts/check-brokers-lock.py
-
-  broker-sdk-licences:
-    name: broker SDK licence compatibility
-    runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12.8" }
-      - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
-      - run: pip install --require-hashes -r requirements.lock   # so wheel metadata cross-check fires
-      - name: check broker SDK licences
-        run: python scripts/check-broker-sdk-licences.py
-
   transitive-licences:
     name: transitive dependency licence sweep
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.draft }}
     continue-on-error: true       # informational; does not block merge in v1.0
     steps:
@@ -167,44 +171,14 @@ jobs:
         if: always()
         with: { name: transitive-licences-report, path: supply-chain/transitive-licences.json }
 
-  notice-drift:
-    name: NOTICE drift check
-    runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12.8" }
-      - name: NOTICE up-to-date
-        run: python scripts/generate-notice.py --check
-
-  provenance-grep:
-    name: dependency provenance (no git/file/tarball deps)
-    runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12.8" }
-      - name: check no git deps
-        run: python scripts/check-no-git-deps.py
-
-  install-enforcement:
-    name: hashed-pip + frozen-lockfile grep
-    runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --frozen
-      - run: uv run python -m pytest tests/test_no_unhashed_pip_install.py tests/test_pnpm_install_frozen.py -v
-
+  # Cross-platform jobs are expensive (macOS billed 10x, Windows 2x). They run ONLY on the
+  # weekly cron + manual dispatch — never on push/pull_request — to keep the per-push CI
+  # footprint Linux-only.
   windows-acl-test:
     name: Windows secret-file ACL hardening (HI18)
     runs-on: windows-latest
-    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 45
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !github.event.pull_request.draft }}
     defaults:
       run:
         shell: bash
@@ -219,7 +193,8 @@ jobs:
 
   cross-platform-smoke:
     name: lockfile install smoke (${{ matrix.os }})
-    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 45
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:
@@ -233,20 +208,10 @@ jobs:
       - run: uv sync --frozen
       - run: uv run python -c "import flinttrade_core; print(flinttrade_core.__file__)"
 
-  uv-lock-export-drift:
-    name: uv.lock <-> requirements.lock drift check
-    runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@v6
-      - run: python scripts/check-uv-lock-export-drift.py
-
   cla-gpg-binding:
     name: CLA GPG fingerprint binding (Identity H8)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # only fires on external PRs (forks); the founder's own branches are auto-attested
     if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name != github.repository }}
     steps:

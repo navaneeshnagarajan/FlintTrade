@@ -76,6 +76,13 @@ env:
   ZERODHA_API_KEY: ""
   ZERODHA_ACCESS_TOKEN: ""
 
+# Least-privilege token. The default GITHUB_TOKEN scope is read-only:
+# none of these jobs comment, push, or alter repo state — they only check
+# out and run tests/lint/secret-scan. Narrowing the token is a GitHub
+# hardening best practice and keeps the workflow's blast radius minimal.
+permissions:
+  contents: read
+
 # Skip the whole matrix on draft PRs — cuts noise while a PR is in
 # active development. A PR-author opens the PR as draft, pushes
 # iteratively without CI cost, then marks ready-for-review when they
@@ -97,6 +104,10 @@ jobs:
     # CI cost, then mark ready-for-review when you want CI to run.
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    # Runaway guard. The whole suite finishes well inside this; the cap stops
+    # a hung job from idling up to the 6-hour runner default (the over-usage
+    # signal that tripped Actions in the first place).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -165,6 +176,7 @@ jobs:
   node-core-tests:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -186,6 +198,7 @@ jobs:
   node-widget-tests-1:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -203,6 +216,7 @@ jobs:
   node-widget-tests-2a:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -220,6 +234,7 @@ jobs:
   node-widget-tests-2b:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -247,6 +262,7 @@ jobs:
   node-widget-tests-3:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -264,6 +280,8 @@ jobs:
   secrets-check:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    # Lightweight grep scan — far quicker than this, but the cap is the guard.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - run: |

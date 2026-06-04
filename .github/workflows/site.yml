@@ -29,6 +29,10 @@ concurrency:
   group: site-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default: this workflow only reads the repo to build/test the site.
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -36,6 +40,7 @@ jobs:
   site:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

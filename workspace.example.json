@@ -1,0 +1,89 @@
+{
+  "_comment": [
+    "EXAMPLE workspace.json — copy to your FlintTrade home and edit.",
+    "Locations: Linux ~/.flinttrade/workspace.json | macOS ~/Library/Application Support/flinttrade/workspace.json | Windows %APPDATA%/flinttrade/workspace.json (override with FLINTTRADE_HOME).",
+    "This file is user PREFERENCES only. Infrastructure (OpenAlgo host/ports) lives in .env; hardened secrets live as ACL-locked files under your FlintTrade home — never here.",
+    "Secrets are NEVER stored in plaintext: *_ref fields name a keyring/env entry that is resolved at runtime. Leave them empty or point them at a reference; never paste a real token.",
+    "FlintTrade writes this file with sorted keys on save, and creates it from defaults on first run — you usually do not need to hand-write it. The _comment keys are ignored by the config reader and safe to keep or delete.",
+    "British spelling in any prose you add. Never commit your real workspace.json (it is gitignored)."
+  ],
+  "brokers": {
+    "_comment": "Broker wiring. 'openalgo:default' is the built-in OpenAlgo-compatible bridge. Register additional native gateway adapters by id, then route execution and each data feed to one of them. account_acls maps a broker account id to the actor allowed to use it.",
+    "account_acls": {},
+    "cost_aware": {
+      "enabled": false,
+      "tasks": []
+    },
+    "data": {
+      "global_indices": "",
+      "historical": "openalgo:default",
+      "option_chains": "openalgo:default",
+      "quote": "openalgo:default",
+      "ticks": "openalgo:default"
+    },
+    "execution": {
+      "default": "openalgo:default"
+    },
+    "failover": {
+      "enabled": false,
+      "order": []
+    },
+    "registered": [
+      "openalgo:default"
+    ]
+  },
+  "compliance": {
+    "_comment": "Personal-use open-source defaults. personal_use_mode true keeps FlintTrade in the single-user posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records — leave empty.",
+    "ai_disclosure_banner": true,
+    "personal_use_mode": true,
+    "static_ip": ""
+  },
+  "initialized": true,
+  "llm": {
+    "_comment": "Optional local or hosted LLM. provider/host/model are non-secret. api_key_ref names a keyring/env entry (e.g. 'env:ANTHROPIC_API_KEY') — never paste a real key here.",
+    "api_key_ref": "",
+    "host": "",
+    "model": "",
+    "provider": ""
+  },
+  "markets": [],
+  "modules": {
+    "_comment": "Toggle optional subsystems. terminal/dashboard/screener/backtest are on by default; ai/ditto/automation are off until you opt in.",
+    "ai": false,
+    "automation": false,
+    "backtest": true,
+    "dashboard": true,
+    "ditto": false,
+    "screener": true,
+    "terminal": true
+  },
+  "notifications": {
+    "_comment": "Telegram alerts are optional and off by default. telegram_bot_token_ref names a keyring/env entry — never paste the real bot token here. telegram_chat_id is your own chat id.",
+    "telegram_bot_token_ref": "",
+    "telegram_chat_id": "",
+    "telegram_enabled": false
+  },
+  "openalgo": {
+    "_comment": "Mirror of the optional OpenAlgo-compatible bridge. The authoritative connection settings are in .env (OPENALGO_HOST / OPENALGO_PORT / OPENALGO_WS_PORT). Loopback placeholders shown.",
+    "host": "http://127.0.0.1:5000",
+    "ws_port": 8765
+  },
+  "sebi": {
+    "_comment": "Local safety limits (personal use). max_ops_per_second throttles order operations; audit_retention_years keeps the local audit log; kill_switch_enabled arms the engine kill switch.",
+    "audit_retention_years": 5,
+    "kill_switch_enabled": true,
+    "max_ops_per_second": 10
+  },
+  "storage": {
+    "_comment": "Data directories. Defaults sit under your FlintTrade home; override with absolute paths or a leading ~ if you keep data elsewhere.",
+    "archive": "~/.flinttrade/archive",
+    "fast": "~/.flinttrade/data"
+  },
+  "ui": {
+    "_comment": "Display preferences. theme is 'dark' or 'light'; default_exchange and timezone suit an Indian-market setup out of the box.",
+    "default_exchange": "NSE",
+    "theme": "dark",
+    "timezone": "Asia/Kolkata"
+  },
+  "version": "1.0.0"
+}
