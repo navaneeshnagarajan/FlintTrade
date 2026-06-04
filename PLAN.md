@@ -35,7 +35,7 @@ Driven by the post-copy audit (0 critical, 2 high, 18 medium). See the audit rep
 
 ## In flight — 2026-06-05 usability campaign (branch `goal/usability-campaign-2026-06-05`)
 
-- [x] Restore terminal typecheck + build (shadcn primitives imported individual `@radix-ui/react-*` packages never declared in package.json → migrated to the unified `radix-ui`; 87 TS errors → 0; `vite build` green). **CI gap exposed:** no `tsc --noEmit`/`vite build` job in the per-push matrix — add one.
+- [x] Restore terminal typecheck + build (shadcn primitives imported individual `@radix-ui/react-*` packages never declared in package.json → migrated to the unified `radix-ui`; 87 TS errors → 0; `vite build` green). Note: `test.yml`'s `node-core-tests` job *does* gate `tsc --noEmit` + `run build`, so this would have failed CI — it went unnoticed only because Actions is currently disabled on the account (Trust & Safety abuse flag; founder support ticket). No CI change needed.
 - [x] Native broker scaffolding + multi-broker suggestions (see §2): `brokers/upstox.py`, `brokers/kotakneo.py` (doc-grounded gated skeletons), `recommendations.py` "which broker for what" engine + `GET /api/v1/broker/recommendations`.
 
 ---
