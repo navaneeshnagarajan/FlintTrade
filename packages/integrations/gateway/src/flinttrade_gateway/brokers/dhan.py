@@ -43,7 +43,11 @@ DHAN_CAPABILITIES = Capabilities(
         | OrderTypes.BO
         | OrderTypes.CO
     ),
-    depth_levels=DepthLevels.L5,
+    # Standard market-depth feed is 5-level, but Dhan v2 also offers a dedicated
+    # 20-level depth feed (wss://depth-api-feed.dhan.co/twentydepth) and a
+    # 200-level full-depth feed (wss://full-depth-api.dhan.co/twohundreddepth),
+    # so the advertised maximum is L20 (the enum ceiling; 200-level is beyond it).
+    depth_levels=DepthLevels.L20,
     tick_protocol=TickProtocol.DHAN_BINARY,
     auth_model=AuthModel.OAUTH_RENEWABLE_24H,
     session_lifetime_hours=24.0,

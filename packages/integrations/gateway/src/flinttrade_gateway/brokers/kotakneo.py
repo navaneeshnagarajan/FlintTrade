@@ -10,10 +10,14 @@ Capability values are grounded in the local Kotak Neo reference docs
 (``.local/reference/broker-docs/kotak-neo/``). Fields not stated in those docs
 are left at their dataclass defaults (``None``/``0``/``[]``) rather than guessed.
 
-Auth model (for the future ``login``/``refresh``): two-step Neo flow —
-``totp_login(mobile, ucc, totp)`` mints a view token + session id, then
-``totp_validate(mpin)`` mints the trade token. The base URL is resolved at
-runtime via ``algo-user/v5/get-base-url``.
+Auth model (for the future ``login``/``refresh``): the neo_api_client v2 SDK
+(``Kotak-Neo/Kotak-neo-api-v2``, git-pinned at tag ``v2.0.1`` — there is no
+official PyPI package) initialises as ``NeoAPI(environment='prod',
+access_token=None, neo_fin_key=None, consumer_key=...)``, then the two-step Neo
+flow: ``totp_login(mobile, ucc, totp)`` mints a view token + session id, and
+``totp_validate(mpin)`` mints the trade token. (v2 removed the older
+``base_url()``/``customer_key``/``customer_secret`` and QR-login flows; ``refresh``
+is a full daily re-login.) v2.0.1 added MCX trading and the MTF product type.
 
 Cost note: Kotak Neo advertises **zero brokerage** on API order execution and a
 free API (no subscription charge). The one documented exception is that a
