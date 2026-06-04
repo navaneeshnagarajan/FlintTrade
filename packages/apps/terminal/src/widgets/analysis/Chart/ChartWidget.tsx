@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo, type PointerEvent as ReactPointerEvent } from "react";
+import type { IDockviewPanelProps } from "dockview-react";
 import {
   FLINT_CHART_VIEW_STATE_STORAGE_KEY,
   FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY,
@@ -370,16 +371,31 @@ function IndicatorPaneResizeOverlay({
 // Main component
 // ---------------------------------------------------------------------------
 
-function ChartWidget() {
+// Per-panel parameters a layout/preset can pin onto a chart panel (e.g. the
+// options-scalper preset pins each of its four charts to a specific instrument).
+interface ChartPanelParams {
+  symbol?: string;
+  exchange?: string;
+  interval?: string;
+}
+
+function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   const track = useTrackBehavior();
   useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
 
-  const [initialChartView] = useState(() => loadSavedChartView());
-  const [symbol, setSymbol] = useState(() => initialChartView?.symbol ?? DEFAULT_SYMBOL);
-  const [exchange, setExchange] = useState(() => initialChartView?.exchange ?? DEFAULT_EXCHANGE);
-  const [interval, setInterval] = useState(() => initialChartView?.interval ?? "5m");
+  // When a preset/layout pins a symbol onto this panel, seed from it and treat
+  // the chart as "pinned": it must NOT write to (or read back) the single global
+  // chart-view key, so multiple pinned charts in one workspace never clobber each
+  // other or the user's default chart. Unpinned charts behave exactly as before.
+  const pinnedParams = props.params as ChartPanelParams | undefined;
+  const isPinned = Boolean(pinnedParams?.symbol);
+
+  const [initialChartView] = useState(() => (isPinned ? null : loadSavedChartView()));
+  const [symbol, setSymbol] = useState(() => pinnedParams?.symbol ?? initialChartView?.symbol ?? DEFAULT_SYMBOL);
+  const [exchange, setExchange] = useState(() => pinnedParams?.exchange ?? initialChartView?.exchange ?? DEFAULT_EXCHANGE);
+  const [interval, setInterval] = useState(() => pinnedParams?.interval ?? initialChartView?.interval ?? "5m");
   const [intervals, setIntervals] = useState<IntervalOption[]>(STATIC_INTERVALS);
   const [visibleLogicalRange, setVisibleLogicalRange] = useState<FlintChartVisibleLogicalRange | null>(
     () => initialChartView?.visibleLogicalRange ?? null,
@@ -396,8 +412,8 @@ function ChartWidget() {
   // chart storage contract. The parser still accepts the old raw-array format.
   const drawingsStorageKey = createFlintChartDrawingsStorageKey({ symbol, exchange });
   const [drawings, setDrawings] = useState<Drawing[]>(() => {
-    const initialSymbol = initialChartView?.symbol ?? DEFAULT_SYMBOL;
-    const initialExchange = initialChartView?.exchange ?? DEFAULT_EXCHANGE;
+    const initialSymbol = pinnedParams?.symbol ?? initialChartView?.symbol ?? DEFAULT_SYMBOL;
+    const initialExchange = pinnedParams?.exchange ?? initialChartView?.exchange ?? DEFAULT_EXCHANGE;
     const initialKey = createFlintChartDrawingsStorageKey({
       symbol: initialSymbol,
       exchange: initialExchange,
@@ -482,6 +498,10 @@ function ChartWidget() {
   }, [drawings]);
 
   useEffect(() => {
+    // A pinned (preset-driven) chart must not persist its symbol as the single
+    // global default — that would let one panel in a multi-chart layout clobber
+    // the user's default chart and every other pinned chart.
+    if (isPinned) return;
     try {
       localStorage.setItem(
         FLINT_CHART_VIEW_STATE_STORAGE_KEY,
@@ -493,7 +513,7 @@ function ChartWidget() {
         }),
       );
     } catch { /* localStorage quota exceeded — ignore */ }
-  }, [symbol, exchange, interval, visibleLogicalRange]);
+  }, [symbol, exchange, interval, visibleLogicalRange, isPinned]);
 
   useEffect(() => {
     try {
