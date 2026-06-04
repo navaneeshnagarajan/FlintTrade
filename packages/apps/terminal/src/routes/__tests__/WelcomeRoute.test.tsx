@@ -13,10 +13,20 @@ import "@testing-library/jest-dom";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockNavigate, mockSetMode, mockSetLoggedIn } = vi.hoisted(() => ({
+const {
+  mockNavigate,
+  mockSetMode,
+  mockSetLoggedIn,
+  mockSetSetupRequired,
+  mockSetLoggedOut,
+  authState,
+} = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockSetMode: vi.fn(),
   mockSetLoggedIn: vi.fn(),
+  mockSetSetupRequired: vi.fn(),
+  mockSetLoggedOut: vi.fn(),
+  authState: { status: "setup-required" as string },
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -70,13 +80,13 @@ vi.mock("@/stores/themeStore", () => ({
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: Object.assign(
     vi.fn((selector: (state: Record<string, unknown>) => unknown) =>
-      selector({ status: "setup-required" }),
+      selector({ status: authState.status }),
     ),
     {
       getState: () => ({
-        status: "setup-required",
-        setSetupRequired: vi.fn(),
-        setLoggedOut: vi.fn(),
+        status: authState.status,
+        setSetupRequired: mockSetSetupRequired,
+        setLoggedOut: mockSetLoggedOut,
         setLoggedIn: mockSetLoggedIn,
       }),
       setState: vi.fn(),
@@ -119,6 +129,8 @@ vi.mock("@/routes/LoginRoute", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { waitFor } from "@testing-library/react";
+
 import WelcomeRoute from "../WelcomeRoute";
 
 // ---------------------------------------------------------------------------
@@ -128,6 +140,7 @@ import WelcomeRoute from "../WelcomeRoute";
 describe("WelcomeRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.status = "setup-required";
   });
 
   it("renders the welcome heading", () => {
@@ -151,5 +164,26 @@ describe("WelcomeRoute", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/explore");
     expect(mockSetMode).not.toHaveBeenCalled();
     expect(mockSetLoggedIn).not.toHaveBeenCalled();
+  });
+
+  it("degrades gracefully when the backend auth probe fails (no infinite 'Checking workspace…')", async () => {
+    // Regression: previously the .catch only recovered in DEV, so a production
+    // build with an unreachable backend hung on "Checking workspace…" forever
+    // with no path to Explore. The probe must now surface the setup/Explore
+    // actions in every build on failure.
+    authState.status = "unknown";
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("backend unreachable"));
+
+    render(<WelcomeRoute />);
+
+    await waitFor(() => expect(mockSetSetupRequired).toHaveBeenCalled());
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/status",
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+
+    fetchSpy.mockRestore();
   });
 });
