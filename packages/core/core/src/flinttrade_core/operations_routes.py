@@ -939,7 +939,15 @@ def ditto_mirror_status() -> tuple[Any, int]:
 
 @operations_bp.route("/ditto/mirror/start", methods=["POST"])
 def ditto_mirror_start() -> tuple[Any, int]:
-    """Start position mirroring from primary to secondary accounts."""
+    """Start position mirroring from primary to secondary accounts.
+
+    Multi-account mirroring is not yet enabled in this build: the
+    ``PositionMirror`` engine is not wired into the running app. Rather
+    than fabricate a started session, this fails closed — it validates the
+    request shape, then truthfully reports ``active: false`` with a
+    ``deferred`` status so the front end can surface a "coming soon" state
+    instead of believing mirroring is live.
+    """
     data = request.get_json(silent=True) or {}
     source = data.get("source_account")
     targets = data.get("target_accounts", [])
@@ -951,12 +959,16 @@ def ditto_mirror_start() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "target_accounts must be non-empty"}), 400
 
     return jsonify({
-        "status": "success",
+        "status": "deferred",
+        "message": "Multi-account mirroring is not yet enabled in this build",
         "data": {
-            "active": True,
+            "active": False,
             "source_account": source,
             "target_accounts": targets,
             "mode": mode,
+            # Timestamp of this (deferred) response, not of a live session —
+            # no PositionMirror is started. Kept as an ISO string so the
+            # response stays shape-compatible with the typed contract.
             "started_at": _dt.now(_IST).isoformat(),
         },
     }), 200
@@ -973,19 +985,19 @@ def ditto_mirror_stop() -> tuple[Any, int]:
 
 @operations_bp.route("/ditto/risk", methods=["GET"])
 def ditto_risk() -> tuple[Any, int]:
-    """Per-account risk dashboard: margin utilization, aggregate P&L."""
-    if not (current_app.debug or os.environ.get("FLINTTRADE_DEV")):
-        return jsonify({"status": "success", "data": {"aggregate_pnl": 0, "aggregate_capital": 0, "accounts": []}}), 200
-    risk_data = {
-        "aggregate_pnl": 78300,
-        "aggregate_capital": 38000000,
-        "accounts": [
-            {"id": "acc_1", "name": "Account 1", "margin_used_pct": 45.2, "pnl_today": 12500, "positions": 8, "risk_status": "OK"},
-            {"id": "acc_2", "name": "Account 2", "margin_used_pct": 62.8, "pnl_today": -8200, "positions": 5, "risk_status": "WARNING"},
-            {"id": "acc_3", "name": "Account 3", "margin_used_pct": 38.1, "pnl_today": 34100, "positions": 12, "risk_status": "OK"},
-        ],
-    }
-    return jsonify({"status": "success", "data": risk_data}), 200
+    """Per-account risk dashboard: margin utilisation, aggregate P&L.
+
+    The per-account risk engine (``MarginCalculator`` / ``RiskManager``) is
+    not yet wired into the running app, so there is no live risk data to
+    report. This returns an honest empty/deferred shape — zeroed aggregates
+    and no accounts — rather than fabricating sample accounts. The front end
+    renders this as an empty "coming soon" dashboard.
+    """
+    return jsonify({
+        "status": "deferred",
+        "message": "Per-account risk monitoring is not yet enabled in this build",
+        "data": {"aggregate_pnl": 0, "aggregate_capital": 0, "accounts": []},
+    }), 200
 
 
 @operations_bp.route("/ditto/kill-all", methods=["POST"])

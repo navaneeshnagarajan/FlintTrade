@@ -27,10 +27,10 @@ package with Python bindings.
 | `indicators` | Python | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `tick-engine` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
 | `gateway` | Python | Native broker adapter contract/routing, Dhan scaffold, credential store, WebSocket bridge, and optional OpenAlgo shims | `packages/integrations/gateway/tests/` |
-| `integration` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
+| `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), RAG over ChromaDB, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, OpenClaw bridge, post-market analysis | `packages/services/automation/tests/` |
-| `backtest-engine` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
+| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
 | `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
 | `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
 | `journal` | Python | Journal entries, trade logging, execution-quality analytics, and realised P&L tracking | `packages/services/journal/tests/` |
@@ -226,25 +226,25 @@ live-runnable strategies.
 ### Backtest template
 
 For research and parameter sweeps. Lives under
-`packages/services/backtest/src/strategies/`.
+`packages/services/backtest/src/flinttrade_backtest/strategies/`.
 
 1. Create `my_strategy.py` and subclass
-   `backtest_engine.base.BaseBacktestStrategy`.
+   `flinttrade_backtest.base_strategy.BaseBacktestStrategy`.
 2. Implement `signal(ctx)` returning a typed `Signal` object.
 3. Register the template in
-   `packages/services/backtest/src/strategies/__init__.py`.
+   `packages/services/backtest/src/flinttrade_backtest/strategies/__init__.py`.
 4. Write a unit test in `packages/services/backtest/tests/` with
    deterministic input data.
 
 ### Live strategy
 
 For the production engine. Lives under
-`packages/services/engine/src/strategies/`.
+`packages/services/engine/src/flinttrade_engine/strategies/`.
 
-1. Subclass `engine.strategy.BaseStrategy`.
+1. Subclass `flinttrade_engine.strategy.BaseStrategy`.
 2. Implement the lifecycle hooks (`on_tick`, `on_order_event`,
    `on_position_event`, `on_stop`).
-3. Register in `packages/services/engine/src/strategies/__init__.py`.
+3. Register in `packages/services/engine/src/flinttrade_engine/strategies/__init__.py`.
 4. Write a unit test against a mocked OpenAlgo client.
 5. Update the strategy registry so the Strategy Lab UI lists it.
 
@@ -255,17 +255,26 @@ Use either as a reference implementation.
 
 ## 8. Adding a broker adapter
 
-OpenAlgo handles the heavy lifting, but FlintTrade keeps a thin shim
-layer for capability detection and broker-specific quirks.
+FlintTrade talks to brokers natively: each broker is a direct SDK/HTTP
+adapter that implements the `BrokerAdapter` Protocol and is routed through
+the `BrokerRouter`. OpenAlgo is just one optional bridge adapter
+(`brokers/openalgo.py`) alongside the native ones — it is not the primary
+path, so don't model a new broker as an OpenAlgo shim. The `shims/`
+directory holds only OpenAlgo infrastructure shims, not broker adapters.
 
-1. Add a shim under `packages/integrations/gateway/src/shims/<broker>.py` implementing
-   the `BrokerAdapter` protocol from `packages/integrations/gateway/src/adapter.py`.
+1. Add a native adapter under
+   `packages/integrations/gateway/src/flinttrade_gateway/brokers/<broker>.py`
+   implementing the `BrokerAdapter` Protocol from
+   `packages/integrations/gateway/src/flinttrade_gateway/adapter.py`. Map the
+   broker's native exceptions onto `flinttrade_core.exceptions` and advertise
+   capabilities truthfully (the router relies on them for failover).
 2. Add an entry to the `BROKER_CATALOG` dict in `adapter.py` with the
    broker's display name, auth flow type, and capabilities.
-3. Register in `packages/integrations/gateway/src/registry.py` so the session manager
-   can instantiate sessions for that broker.
-4. Add tests under `packages/integrations/gateway/tests/` — mock the OpenAlgo HTTP
-   responses, assert auth, capability lookup, and error handling.
+3. Register the adapter in
+   `packages/integrations/gateway/src/flinttrade_gateway/registry.py` so the
+   `BrokerRouter` in `router.py` can resolve and dispatch orders to it.
+4. Add tests under `packages/integrations/gateway/tests/` — mock the broker's
+   SDK/HTTP responses, assert auth, capability lookup, and error handling.
 5. Update [COMPATIBILITY.md](COMPATIBILITY.md) with the new broker.
 
 ---

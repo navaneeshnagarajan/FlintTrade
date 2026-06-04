@@ -1,4 +1,4 @@
-"""Workspace preset management API — /ft-api/v1/presets/*.
+"""Workspace preset management API — /ft-api/api/v1/presets/*.
 
 Persists custom Dockview workspace presets to ~/.flinttrade/presets.json so
 they are shared across machines when the file is synced (or served from the
@@ -8,9 +8,9 @@ Built-in presets are read-only and always included in the listing.  Custom
 presets are stored in the JSON file and can be created, updated, deleted, or
 forked from a built-in.
 
-External URL: /ft-api/v1/presets/* (the WSGI prefix stripper in app.py
-translates this to /v1/presets/* before Flask dispatch).
-Blueprint prefix: /v1/presets
+External URL: /ft-api/api/v1/presets/* (the WSGI prefix stripper in app.py
+strips the /ft-api segment, leaving /api/v1/presets/* for Flask dispatch).
+Blueprint prefix: /api/v1/presets
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger("flinttrade.core.preset_routes")
 
-preset_bp = Blueprint("presets", __name__, url_prefix="/v1/presets")
+preset_bp = Blueprint("presets", __name__, url_prefix="/api/v1/presets")
 
 
 # ---------------------------------------------------------------------------

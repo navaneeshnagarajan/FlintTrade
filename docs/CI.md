@@ -16,7 +16,10 @@ workflow YAML should read this once.
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
 | `test.yml` | push to `main` / `dev`; non-draft PR | 7 Linux jobs (~70 minutes wall-clock) | The main quality gate. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
+| `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); daily cron (03:00 UTC); manual dispatch | ~13 Linux jobs + 1 macOS + 1 Windows | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
+| `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to `packages/apps/site/**`, `packages/core/design-system/**`, `docs/**`) | 1 Linux job | Typechecks, tests and builds the marketing site (Next.js). Skipped unless the site, design system, or docs change. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | 1 macOS + 1 Windows | Catches slow-burn platform regressions before they accumulate. |
+| `refresh-vuln-snapshot.yml` | weekly cron (Sun 04:00 UTC); manual dispatch | 1 Linux job | Refreshes the offline OSV vuln snapshot used by `pip-audit-with-allowlist.py` and opens a PR for the founder to merge, keeping the snapshot inside its freshness window. |
 | `status-report.yml` | weekly cron (Mon 07:00 UTC); manual dispatch | 1 Linux job (~5 minutes) | Emits a repo-health snapshot artefact. |
 | `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
 | `claude-code-review.yml` | PR opened / ready-for-review / reopened (paths-ignore + draft guard) | 1 Linux job per qualifying transition | Skips `synchronize` events to avoid running on every PR commit. |

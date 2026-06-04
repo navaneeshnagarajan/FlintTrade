@@ -350,7 +350,7 @@ function PresetCard({
   onDelete,
   onExport,
 }: PresetCardProps) {
-  const isBuiltin = preset.source === "builtin";
+  const isBuiltin = preset.is_builtin;
 
   return (
     <div
@@ -533,8 +533,8 @@ export function PresetSection() {
   });
 
   const presets: WorkspacePresetRecord[] = data?.presets ?? [];
-  const builtinPresets = presets.filter((p) => p.source === "builtin");
-  const customPresets = presets.filter((p) => p.source === "custom");
+  const builtinPresets = presets.filter((p) => p.is_builtin);
+  const customPresets = presets.filter((p) => !p.is_builtin);
 
   // ---------------------------------------------------------------------------
   // Mutations

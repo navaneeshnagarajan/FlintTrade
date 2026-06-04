@@ -30,7 +30,7 @@ call AlgoMirror at runtime. The upstream repo is not tracked or pulled.
 
 | Component | Minimum | Tested | Notes |
 |---|---|---|---|
-| Python | 3.11 | 3.12.x | 3.13/3.14 partially supported (sklearn / lightgbm import issues on Windows 3.14) |
+| Python | 3.12 | 3.12.x | 3.13/3.14 partially supported (sklearn / lightgbm import issues on Windows 3.14) |
 | Node | 22 | 22.x | required for the terminal package, site package, and Playwright |
 | Operating system | Windows 11, macOS 14, Ubuntu 22.04 | same | tested matrix in CI |
 

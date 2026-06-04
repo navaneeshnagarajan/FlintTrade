@@ -8,9 +8,9 @@
 
 ## Public surface
 
-- `src/downloader.py — async OHLCV puller with rate-limit aware backoff`
-- `src/openchart.py — OpenChart free-data integration`
-- `src/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX`
+- `src/flinttrade_historical/downloader.py — async OHLCV puller with rate-limit aware backoff`
+- `src/flinttrade_historical/free_data.py — OpenChart + yfinance free-data integration`
+- `src/flinttrade_historical/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX`
 
 (See the source for the full surface.)
 
@@ -19,23 +19,26 @@
 This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Python packages
 uv pip install -e packages/core/historical
 ```
 
-If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
 ```bash
-python -m pytest packages/core/historical/tests/ -v
+python -m pytest packages/core/historical/tests/ -v --import-mode=importlib
 ```
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 

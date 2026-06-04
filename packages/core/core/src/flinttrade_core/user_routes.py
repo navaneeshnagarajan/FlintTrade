@@ -1,14 +1,14 @@
 # packages/core/core/src/user_routes.py
 """Multi-user admin REST API.
 
-Blueprint prefix: /v1/users
+Blueprint prefix: /api/v1/users
 All endpoints require admin role (enforced via JWT + role check).
 
 Endpoints:
-  - GET    /v1/users              — list all users
-  - POST   /v1/users              — create a user
-  - PUT    /v1/users/<username>   — update a user
-  - DELETE /v1/users/<username>   — soft-delete a user
+  - GET    /api/v1/users              — list all users
+  - POST   /api/v1/users              — create a user
+  - PUT    /api/v1/users/<username>   — update a user
+  - DELETE /api/v1/users/<username>   — soft-delete a user
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.users")
 
-users_bp = Blueprint("users", __name__, url_prefix="/v1/users")
+users_bp = Blueprint("users", __name__, url_prefix="/api/v1/users")
 
 
 def _get_user_manager():

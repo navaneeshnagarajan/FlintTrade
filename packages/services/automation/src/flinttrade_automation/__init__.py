@@ -6,7 +6,6 @@ __version__ = APP_VERSION
 
 from .cron_manager import CronManager, JobDefinition, JobHistory, JobStatus
 from .n8n_bridge import N8nBridge, N8nBridgeError
-from .openclaw_bridge import OpenClawBridge, OpenClawConfig, Skill, SkillResult
 from .post_market import (
     DailyReport,
     PostMarketAnalysis,
@@ -49,11 +48,6 @@ __all__ = [
     "TelegramBot",
     "BotConfig",
     "CommandResult",
-    # OpenClaw
-    "OpenClawBridge",
-    "OpenClawConfig",
-    "Skill",
-    "SkillResult",
     # Post-market
     "PostMarketAnalysis",
     "DailyReport",

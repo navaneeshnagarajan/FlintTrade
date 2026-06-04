@@ -19,17 +19,17 @@ core/core:
   language: Python
   purpose: "Flask application, OpenAlgo client (45+ endpoints), config and workspace management, authentication service, and the WSGI prefix-stripper."
   entry_points:
-    - "src/app.py — Flask app factory + blueprint registration"
-    - "src/openalgo_client.py — typed wrapper over OpenAlgo's REST API"
-    - "src/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance"
-    - "src/config.py / src/workspace.py — env + workspace.json loaders"
+    - "src/flinttrade_core/app.py — Flask app factory + blueprint registration"
+    - "src/flinttrade_core/openalgo_client.py — typed wrapper over OpenAlgo's REST API"
+    - "src/flinttrade_core/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance"
+    - "src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders"
 core/data:
   language: Python
   purpose: "Tick recorder, audit logger (SEBI 5-year retention), trade logger, DuckDB storage, QuestDB writer, and Excel bridge."
   entry_points:
-    - "src/tick_recorder.py — real-time tick capture to DuckDB / QuestDB"
-    - "src/audit_logger.py — append-only audit trail"
-    - "src/questdb_writer.py — ILP-based ingestion"
+    - "src/flinttrade_data/tick_recorder.py — real-time tick capture to DuckDB / QuestDB"
+    - "src/flinttrade_data/audit_logger.py — append-only audit trail"
+    - "src/flinttrade_data/questdb_bridge.py — ILP-based ingestion"
 core/design-system:
   language: TypeScript + React 19
   purpose: "Shared FlintTrade design tokens, brand primitives, layer scale, motion contracts, and React UI components."
@@ -42,92 +42,94 @@ core/historical:
   language: Python
   purpose: "OHLCV downloader, free-data sources (OpenChart + yfinance), DuckDB pipeline, and expiry-tracker for derivatives."
   entry_points:
-    - "src/downloader.py — async OHLCV puller with rate-limit aware backoff"
-    - "src/openchart.py — OpenChart free-data integration"
-    - "src/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX"
+    - "src/flinttrade_historical/downloader.py — async OHLCV puller with rate-limit aware backoff"
+    - "src/flinttrade_historical/free_data.py — OpenChart + yfinance free-data integration"
+    - "src/flinttrade_historical/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX"
 core/indicators:
   language: Python + Numba
   purpose: "43 indicator functions across 7 modules — TA-Lib batch indicators, Numba-accelerated streaming variants, and Pine Script conversion."
   entry_points:
-    - "src/trend.py — SMA, EMA, MACD, ADX"
-    - "src/momentum.py — RSI, Stochastic, ROC, MFI"
-    - "src/oscillators.py — CCI, Williams %R, TRIX"
-    - "src/volatility.py — ATR, Bollinger Bands, Keltner Channels"
-    - "src/volume.py — OBV, Chaikin, VWAP"
+    - "src/flinttrade_indicators/trend.py — SMA, EMA, MACD, ADX"
+    - "src/flinttrade_indicators/momentum.py — RSI, Stochastic, ROC, MFI"
+    - "src/flinttrade_indicators/oscillators.py — CCI, Williams %R, TRIX"
+    - "src/flinttrade_indicators/volatility.py — ATR, Bollinger Bands, Keltner Channels"
+    - "src/flinttrade_indicators/volume.py — OBV, Chaikin, VWAP"
 core/ticks:
   language: Rust + PyO3
   purpose: "High-performance tick-processing engine — Rust core with Python bindings."
   entry_points:
     - "src/lib.rs — PyO3 module entry"
-    - "src/processor.rs — tick aggregation and rollup"
+    - "src/types.rs — core Tick / Signal / BacktestResult types"
     - "Cargo.toml — crate metadata and dependencies"
 integrations/gateway:
   language: Python
-  purpose: "Direct broker connections for 32 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge."
+  purpose: "FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, per-broker adapters for 32 brokers, an encrypted credential vault, and the WebSocket bridge. OpenAlgo is one optional bridge adapter, not the primary path."
   entry_points:
-    - "src/adapter.py — base adapter class + OpenAlgo resolver"
-    - "src/registry.py — 32-broker registry"
-    - "src/credentials.py — Fernet-encrypted credential storage"
-    - "src/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
+    - "src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG"
+    - "src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification"
+    - "src/flinttrade_gateway/registry.py — BrokerRegistry over the 32-broker catalogue"
+    - "src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, OpenAlgo bridge, …) against the BrokerAdapter ABC"
+    - "src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault"
+    - "src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
 integrations/webhooks:
   language: Python
   purpose: "TradingView webhooks, ChartInk integration, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge."
   entry_points:
-    - "src/webhook_receiver.py — HMAC-validated webhook intake"
-    - "src/chartink.py — ChartInk scanner integration"
-    - "src/n8n_bridge.py — n8n workflow trigger and response"
+    - "src/flinttrade_webhooks/webhook_receiver.py — HMAC-validated webhook intake"
+    - "src/flinttrade_webhooks/tradingview.py — TradingView alert ingestion"
+    - "src/flinttrade_webhooks/chartink.py — ChartInk scanner integration"
 services/ai:
   language: Python
   purpose: "Local LLM client, RAG pipeline, multi-agent trading team, ML signal generation, and skill swarm."
   entry_points:
-    - "src/llm_client.py — multi-provider LLM client (LM Studio / Ollama / NVIDIA / OpenAI / Anthropic / Groq)"
-    - "src/rag.py — ChromaDB-backed retrieval-augmented generation"
-    - "src/multi_agent.py — analyst chain + risk debate + ensemble selector"
-    - "src/advisor.py — production advisor surface for the AI Centre route"
+    - "src/flinttrade_ai/llm_client.py — multi-provider LLM client (LM Studio / Ollama / NVIDIA / OpenAI / Anthropic / Groq)"
+    - "src/flinttrade_ai/rag.py — ChromaDB-backed retrieval-augmented generation"
+    - "src/flinttrade_ai/multi_agent.py — analyst chain + risk debate + ensemble selector"
+    - "src/flinttrade_ai/advisor.py — production advisor surface for the AI Centre route"
 services/automation:
   language: Python
   purpose: "Cron scheduler, Telegram bot with kill switch, OpenClaw bridge, post-market analysis pipelines, voice-order intent extraction."
   entry_points:
-    - "src/cron_manager.py — workspace.json-backed scheduled jobs"
-    - "src/telegram_bot.py — passive notifications + emergency kill switch"
-    - "src/voice_orders.py — speech-to-intent for hands-free order placement"
+    - "src/flinttrade_automation/cron_manager.py — workspace.json-backed scheduled jobs"
+    - "src/flinttrade_automation/telegram_bot.py — passive notifications + emergency kill switch"
+    - "src/flinttrade_automation/voice_order_bridge.py — speech-to-intent for hands-free order placement"
 services/backtest:
   language: Python
   purpose: "Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy templates across 6 categories."
   entry_points:
-    - "src/simulator.py — single-strategy event-driven backtest"
-    - "src/engine.py — entry point used by the Lab route and CLI"
-    - "src/portfolio_backtester.py — multi-strategy portfolio runs via VectorBT"
-    - "src/strategies/ — 94 ready-to-run templates"
+    - "src/flinttrade_backtest/simulator.py — single-strategy event-driven backtest"
+    - "src/flinttrade_backtest/engine.py — entry point used by the Lab route and CLI"
+    - "src/flinttrade_backtest/portfolio_backtest.py — multi-strategy portfolio runs via VectorBT"
+    - "src/flinttrade_backtest/strategies/ — 94 ready-to-run templates"
 services/ditto:
   language: Python
   purpose: "Multi-account orchestration: position mirror, margin calculator, trailing stop-loss, and risk manager (AlgoMirror patterns absorbed in-process)."
   entry_points:
-    - "src/mirror.py — copy trades across accounts with size scaling"
-    - "src/margin_calculator.py — pre-trade margin checks"
-    - "src/trailing_sl.py — dynamic trailing stop-loss"
-    - "src/risk_manager.py — per-account exposure + drawdown limits"
+    - "src/flinttrade_ditto/mirror.py — copy trades across accounts with size scaling"
+    - "src/flinttrade_ditto/margin_calculator.py — pre-trade margin checks"
+    - "src/flinttrade_ditto/trailing_sl.py — dynamic trailing stop-loss"
+    - "src/flinttrade_ditto/risk_manager.py — per-account exposure + drawdown limits"
 services/engine:
   language: Python
   purpose: "Five-layer safety system, order router, scheduler, base strategy class, AST-guarded sandbox executor, bracket-order engine, mode guard, and reconciliation."
   entry_points:
-    - "src/safety.py — kill switches across 5 layers"
-    - "src/router.py — broker-agnostic order routing"
-    - "src/strategy.py — base class for live strategies"
-    - "src/sandbox_executor.py — user-strategy execution with AST guard"
-    - "src/mode_guard.py — server-side Explore / Practice / Live enforcement"
+    - "src/flinttrade_engine/safety.py — kill switches across 5 layers"
+    - "src/flinttrade_engine/router.py — broker-agnostic order routing"
+    - "src/flinttrade_engine/strategy.py — base class for live strategies"
+    - "src/flinttrade_engine/sandbox_executor.py — user-strategy execution with AST guard"
+    - "src/flinttrade_engine/mode_guard.py — server-side Explore / Practice / Live enforcement"
 services/journal:
   language: Python
   purpose: "Trade journal service for entries, trade logging, execution-quality analytics, and realised P&L tracking."
   entry_points:
-    - "src/entries.py — journal-entry model and storage helpers"
-    - "src/analytics.py — execution-quality analytics"
-    - "src/pnl.py — realised P&L calculations"
+    - "src/flinttrade_journal/trade_journal.py — journal-entry model and storage helpers"
+    - "src/flinttrade_journal/order_analytics.py — execution-quality analytics"
+    - "src/flinttrade_journal/pnl_tracker.py — realised P&L calculations"
 services/screener:
   language: Python
   purpose: "Option chain, OI analysis, PCR, max-pain, futures quadrant, portfolio Greeks, IV smile, fundamental screener, FII / DII tracker, and RRG calculator."
   entry_points:
-    - "src/optionchain.py — strike-by-strike chain with Greeks"
-    - "src/max_pain.py — option max-pain calculation"
-    - "src/rrg.py — Relative Rotation Graph"
-    - "src/fundamental.py — Screener.in-style fundamentals"
+    - "src/flinttrade_screener/option_chain.py — strike-by-strike chain with Greeks"
+    - "src/flinttrade_screener/oi_analysis.py — OI analysis, PCR, and max-pain"
+    - "src/flinttrade_screener/rrg.py — Relative Rotation Graph"
+    - "src/flinttrade_screener/fundamental_screener.py — Screener.in-style fundamentals"

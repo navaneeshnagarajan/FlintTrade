@@ -235,3 +235,34 @@ class TestPing:
         assert data["status"] == "ok"
         assert "timestamp" in data
         assert "+" in data["timestamp"] or "IST" in data["timestamp"] or "T" in data["timestamp"]
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/health (aggregated subsystem health — canonical surface)
+# ---------------------------------------------------------------------------
+
+
+class TestHealthAggregated:
+    def test_health_returns_200_or_503(self, client):
+        """Aggregated health endpoint returns 200 or 503 with a status field.
+
+        Args:
+            client: Flask test client.
+        """
+        resp = client.get("/api/v1/health")
+        assert resp.status_code in (200, 503)
+        data = resp.get_json()
+        assert "status" in data
+        assert data["status"] in ("ok", "degraded", "error")
+
+    def test_health_has_all_subsystems(self, client):
+        """Aggregated health response includes broker, disk, and memory keys.
+
+        Args:
+            client: Flask test client.
+        """
+        resp = client.get("/api/v1/health")
+        data = resp.get_json()
+        assert "broker" in data
+        assert "disk" in data
+        assert "memory" in data

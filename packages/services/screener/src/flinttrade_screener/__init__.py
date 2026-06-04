@@ -99,28 +99,6 @@ from .lot_sizes import (
     LotSizeResolver,
     get_lot_size_sync,
 )
-from .gex_analytics import (
-    compute_gex_by_strike,
-    find_gamma_walls,
-    total_gex,
-    zero_gamma_level,
-)
-from .iv_analytics import (
-    compute_iv_smile,
-    compute_iv_skew,
-    compute_atm_iv,
-    compute_iv_term_structure,
-)
-from .vol_surface_analytics import (
-    build_vol_surface,
-    surface_to_grid,
-)
-from .oi_profile_analytics import (
-    oi_profile_by_strike,
-    put_call_oi_ratio,
-    max_pain,
-    oi_change_top_movers,
-)
 from .straddle_simulator import (
     simulate_short_straddle,
     simulate_iron_condor,
@@ -258,24 +236,6 @@ __all__ = [
     "FALLBACK_LOT_SIZES",
     "LotSizeResolver",
     "get_lot_size_sync",
-    # GEX analytics (P1)
-    "compute_gex_by_strike",
-    "find_gamma_walls",
-    "total_gex",
-    "zero_gamma_level",
-    # IV analytics (P1)
-    "compute_iv_smile",
-    "compute_iv_skew",
-    "compute_atm_iv",
-    "compute_iv_term_structure",
-    # Vol surface analytics (P1)
-    "build_vol_surface",
-    "surface_to_grid",
-    # OI profile analytics (P1)
-    "oi_profile_by_strike",
-    "put_call_oi_ratio",
-    "max_pain",
-    "oi_change_top_movers",
     # Straddle simulator (P1)
     "simulate_short_straddle",
     "simulate_iron_condor",

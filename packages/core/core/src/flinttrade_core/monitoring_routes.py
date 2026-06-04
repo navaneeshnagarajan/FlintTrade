@@ -2,9 +2,12 @@
 
 Registered as a Blueprint in ``create_flask_app()``.
 
+The aggregated ``GET /api/v1/health`` endpoint lives in
+:mod:`flinttrade_core.health_routes` — the single canonical health
+surface — not here.
+
 Endpoints
 ---------
-GET /api/v1/health             — aggregated health status
 GET /api/v1/traffic/stats      — traffic statistics
 GET /api/v1/traffic/recent     — recent requests
 GET /api/v1/latency/stats      — order latency stats
@@ -17,14 +20,13 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from .monitoring import HealthAggregator, LatencyTracker, TrafficCounter
+from .monitoring import LatencyTracker, TrafficCounter
 
 logger = logging.getLogger("flinttrade.monitoring_routes")
 
 monitoring_bp = Blueprint("monitoring", __name__, url_prefix="/api/v1")
 
 # Module-level singletons
-_health_agg = HealthAggregator()
 _traffic: TrafficCounter = TrafficCounter()
 _latency: LatencyTracker = LatencyTracker()
 
@@ -46,50 +48,21 @@ def get_latency_tracker() -> LatencyTracker:
 
 
 def init_monitoring_routes(
-    health_agg: HealthAggregator | None = None,
     traffic: TrafficCounter | None = None,
     latency: LatencyTracker | None = None,
 ) -> None:
     """Inject monitoring singletons into the blueprint.
 
     Args:
-        health_agg: Optional :class:`HealthAggregator` to inject.
         traffic: Optional :class:`TrafficCounter` to inject.
         latency: Optional :class:`LatencyTracker` to inject.
     """
-    global _health_agg, _traffic, _latency  # noqa: PLW0603
-    if health_agg is not None:
-        _health_agg = health_agg
+    global _traffic, _latency  # noqa: PLW0603
     if traffic is not None:
         _traffic = traffic
     if latency is not None:
         _latency = latency
     logger.info("Monitoring singletons injected")
-
-
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
-
-
-@monitoring_bp.route("/health", methods=["GET"])
-def health() -> tuple[Any, int]:
-    """Return aggregated health status.
-
-    Uses the registry stored in ``current_app.config["REGISTRY"]`` if
-    available.  DuckDB paths and data directory are resolved from the
-    workspace if available.
-
-    Returns:
-        JSON ``{"status": "ok"|"degraded"|"error", "broker": {...},
-        "duckdb": {...}, "disk": {...}, "memory": {...}}``.
-    """
-    from flask import current_app  # noqa: PLC0415
-
-    registry = current_app.config.get("REGISTRY")
-    result = _health_agg.get_health(registry=registry)
-    http_status = 200 if result["status"] == "ok" else 503
-    return jsonify(result), http_status
 
 
 # ---------------------------------------------------------------------------

@@ -117,7 +117,7 @@ jobs:
         with: { python-version: "3.12.8" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - uses: actions/setup-node@v4
-        with: { node-version: "20.18.1" }
+        with: { node-version: "22" }
       - run: corepack enable && corepack prepare "$(jq -r .packageManager package.json)" --activate
       - run: pnpm install --frozen-lockfile
       - name: pnpm audit (allowlist)

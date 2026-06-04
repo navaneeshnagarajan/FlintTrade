@@ -1,12 +1,15 @@
 """Health check Flask endpoints.
 
-Provides a Blueprint with five routes:
+This is the single canonical health surface for the FlintTrade backend.
+Provides a Blueprint with six routes:
 
 - ``GET /health``         — simple status JSON (one-liner)
 - ``GET /health/detail``  — full :class:`HealthReport` JSON
 - ``GET /healthz``        — Kubernetes liveness probe
 - ``GET /readyz``         — Kubernetes readiness probe
 - ``GET /api/v1/ping``    — simple liveness check with IST timestamp
+- ``GET /api/v1/health``  — aggregated subsystem health (broker, DuckDB,
+  disk, memory) via :class:`HealthAggregator`
 
 Register in ``create_flask_app()``::
 
@@ -23,6 +26,7 @@ from typing import Any
 from flask import Blueprint, jsonify
 
 from .health_monitor import HealthMonitor
+from .monitoring import HealthAggregator
 
 logger = logging.getLogger("flinttrade.health_routes")
 
@@ -31,8 +35,9 @@ health_bp = Blueprint("health_detail", __name__)
 # IST timezone offset
 _IST = timezone(timedelta(hours=5, minutes=30))
 
-# Module-level singleton — shared across all requests
+# Module-level singletons — shared across all requests
 _monitor = HealthMonitor()
+_health_agg = HealthAggregator()
 
 
 def get_health_monitor() -> HealthMonitor:
@@ -51,6 +56,24 @@ def init_health_monitor(monitor: HealthMonitor) -> None:
     """
     global _monitor  # noqa: PLW0603
     _monitor = monitor
+
+
+def get_health_aggregator() -> HealthAggregator:
+    """Return the module-level :class:`HealthAggregator` singleton.
+
+    Tests may call this to inject mocks or verify call counts.
+    """
+    return _health_agg
+
+
+def init_health_aggregator(health_agg: HealthAggregator) -> None:
+    """Replace the module-level :class:`HealthAggregator` (for testing / DI).
+
+    Args:
+        health_agg: Replacement :class:`HealthAggregator` instance.
+    """
+    global _health_agg  # noqa: PLW0603
+    _health_agg = health_agg
 
 
 @health_bp.route("/health", methods=["GET"])
@@ -145,3 +168,23 @@ def ping() -> tuple[Any, int]:
         ),
         200,
     )
+
+
+@health_bp.route("/api/v1/health", methods=["GET"])
+def health_aggregated() -> tuple[Any, int]:
+    """Return aggregated subsystem health status.
+
+    Uses the registry stored in ``current_app.config["REGISTRY"]`` if
+    available.  DuckDB paths and data directory are resolved from the
+    workspace if available.
+
+    Returns:
+        JSON ``{"status": "ok"|"degraded"|"error", "broker": {...},
+        "duckdb": {...}, "disk": {...}, "memory": {...}}``.
+    """
+    from flask import current_app  # noqa: PLC0415
+
+    registry = current_app.config.get("REGISTRY")
+    result = _health_agg.get_health(registry=registry)
+    http_status = 200 if result["status"] == "ok" else 503
+    return jsonify(result), http_status

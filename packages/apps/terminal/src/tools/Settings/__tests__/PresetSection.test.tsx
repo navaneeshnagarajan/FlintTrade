@@ -120,7 +120,7 @@ const BUILTIN_PRESET: WorkspacePresetRecord = {
   name: "Scalper Zone",
   description: "Chart + Order Pad + Depth + Positions",
   icon: "Zap",
-  source: "builtin",
+  is_builtin: true,
   widget_count: 4,
   widgets: [
     { id: "chart-0",    component: "chart",    title: "Chart"      },
@@ -135,7 +135,7 @@ const CUSTOM_PRESET: WorkspacePresetRecord = {
   name: "My Layout",
   description: "Custom morning setup",
   icon: "Star",
-  source: "custom",
+  is_builtin: false,
   widget_count: 2,
   widgets: [
     { id: "chart-0",     component: "chart",     title: "Chart"     },

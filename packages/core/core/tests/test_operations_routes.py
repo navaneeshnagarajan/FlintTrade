@@ -400,7 +400,10 @@ class TestDittoMirrorStart:
         }, headers=_auth_headers())
         assert resp.status_code == 400
 
-    def test_valid_start_returns_200(self, client):
+    def test_valid_start_returns_deferred(self, client):
+        # Multi-account mirroring is not yet wired (the PositionMirror engine
+        # is unwired), so a valid request must fail closed with a truthful
+        # "deferred" status rather than fabricate a live mirroring session.
         resp = client.post("/api/v1/ditto/mirror/start", json={
             "source_account": "acc_1",
             "target_accounts": ["acc_2", "acc_3"],
@@ -408,6 +411,6 @@ class TestDittoMirrorStart:
         }, headers=_auth_headers())
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["active"] is True
+        assert data["status"] == "deferred"
+        assert data["data"]["active"] is False
         assert data["data"]["source_account"] == "acc_1"

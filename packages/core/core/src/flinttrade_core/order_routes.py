@@ -320,7 +320,7 @@ def _dispatch_live_order(
 
     from pydantic import ValidationError  # noqa: PLC0415
 
-    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
+    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import (  # noqa: PLC0415
         SafetyConfig,
@@ -415,6 +415,19 @@ def _dispatch_live_order(
                 "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
             ),
         }), 503
+    except (NotImplementedError, UnsupportedCapabilityError) as exc:
+        # Gated-skeleton adapters (e.g. Dhan) raise NotImplementedError for
+        # un-built order paths; an adapter raises UnsupportedCapabilityError for
+        # a capability it does not advertise. Both are an honest "not yet
+        # available", not a server fault — map to 501 with the adapter message.
+        logger.warning(
+            "Live order — adapter capability not available | action=%s adapter=%s account=%s: %s",
+            ft_action, adapter_id, account_id, exc,
+        )
+        return jsonify({
+            "status": "error",
+            "message": str(exc) or f"Order placement is not yet available for broker '{adapter_id}'.",
+        }), 501
     except Exception:
         logger.exception(
             "Live order dispatch failed | action=%s adapter=%s account=%s",
@@ -485,7 +498,7 @@ def _gated_write_dispatch(
     """
     import asyncio  # noqa: PLC0415
 
-    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
+    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
     from flinttrade_engine.safety import gate_order  # noqa: PLC0415
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
@@ -524,6 +537,15 @@ def _gated_write_dispatch(
                 "selector to workspace.json brokers.registered and brokers.account_acls, then restart."
             ),
         }), 503
+    except (NotImplementedError, UnsupportedCapabilityError) as exc:
+        # Gated-skeleton adapters raise NotImplementedError for un-built write
+        # paths; UnsupportedCapabilityError signals a capability the adapter does
+        # not advertise. Both are an honest "not yet available" — map to 501.
+        logger.warning("Live %s — adapter capability not available | adapter=%s account=%s: %s", op, adapter_id, account_id, exc)
+        return jsonify({
+            "status": "error",
+            "message": str(exc) or f"This operation is not yet available for broker '{adapter_id}'.",
+        }), 501
     except Exception:
         logger.exception("Live %s dispatch failed | order=%s adapter=%s", op, order_id, adapter_id)
         return jsonify({"status": "error", "message": fail_message}), 500

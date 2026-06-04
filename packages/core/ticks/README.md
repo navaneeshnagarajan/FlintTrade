@@ -9,7 +9,7 @@
 ## Public surface
 
 - `src/lib.rs — PyO3 module entry`
-- `src/processor.rs — tick aggregation and rollup`
+- `src/types.rs — core Tick / Signal / BacktestResult types`
 - `Cargo.toml — crate metadata and dependencies`
 
 (See the source for the full surface.)
@@ -19,11 +19,13 @@
 This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Python packages
 uv pip install -e packages/core/ticks
+cd packages/core/ticks && cargo test
 ```
 
-If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
@@ -35,7 +37,9 @@ For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 

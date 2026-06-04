@@ -289,44 +289,39 @@ class TelegramBot:
         else:
             errors.append("Safety system not configured")
 
-        # 2. Cancel all orders via OpenAlgo
+        # 2. Cancel all orders via OpenAlgo — run to completion so the
+        #    confirmation reflects the actual outcome, not a fire-and-forget.
+        orders_cancelled = False
         if self.router and self.router.client:
             try:
                 coro = self.router.client.cancel_all_orders(strategy="Flint")
                 if asyncio.iscoroutine(coro):
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(coro)
-                    else:
-                        loop.run_until_complete(coro)
+                    self._run_async(coro)
+                orders_cancelled = True
             except Exception as exc:
                 errors.append(f"cancel_all_orders: {exc}")
                 logger.error("Kill switch cancel_all_orders failed: %s", exc)
 
         # 3. Close all positions via OpenAlgo
+        positions_closed = False
         if self.router and self.router.client:
             try:
                 coro = self.router.client.close_position(strategy="Flint")
                 if asyncio.iscoroutine(coro):
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(coro)
-                    else:
-                        loop.run_until_complete(coro)
+                    self._run_async(coro)
+                positions_closed = True
             except Exception as exc:
                 errors.append(f"close_position: {exc}")
                 logger.error("Kill switch close_position failed: %s", exc)
 
         # 4. Stop all strategies
+        strategies_stopped = False
         if self.scheduler and hasattr(self.scheduler, "stop_all"):
             try:
                 coro = self.scheduler.stop_all()
                 if asyncio.iscoroutine(coro):
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(coro)
-                    else:
-                        loop.run_until_complete(coro)
+                    self._run_async(coro)
+                strategies_stopped = True
             except Exception as exc:
                 errors.append(f"stop_all: {exc}")
                 logger.error("Kill switch stop_all failed: %s", exc)
@@ -341,20 +336,28 @@ class TelegramBot:
 
         logger.critical("KILL SWITCH activated via Telegram by %s", username or "operator")
 
+        status_lines = [
+            f"{'✅' if orders_cancelled else '❌'} "
+            f"{'All orders cancelled' if orders_cancelled else 'Orders not cancelled'}",
+            f"{'✅' if positions_closed else '❌'} "
+            f"{'All positions closed' if positions_closed else 'Positions not closed'}",
+            f"{'✅' if strategies_stopped else '❌'} "
+            f"{'All strategies stopped' if strategies_stopped else 'Strategies not stopped'}",
+        ]
+
         if errors:
             error_lines = "\n".join(f"⚠️ {e}" for e in errors)
             return (
-                f"🔴 KILL SWITCH ACTIVATED\n"
-                f"⚠️ Some actions had errors:\n{error_lines}\n"
+                "🔴 KILL SWITCH ACTIVATED\n"
+                + "\n".join(status_lines)
+                + f"\n⚠️ Some actions had errors:\n{error_lines}\n"
                 f"⏱ {now}"
             )
 
         return (
-            f"🔴 KILL SWITCH ACTIVATED\n"
-            f"✅ All orders cancelled\n"
-            f"✅ All positions closed\n"
-            f"✅ All strategies stopped\n"
-            f"⏱ {now}"
+            "🔴 KILL SWITCH ACTIVATED\n"
+            + "\n".join(status_lines)
+            + f"\n⏱ {now}"
         )
 
     # ------------------------------------------------------------------

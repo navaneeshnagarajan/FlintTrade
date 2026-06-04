@@ -150,8 +150,8 @@ User-visible strings, error messages, ARIA labels, docstrings, comments, and doc
 
 Look at the [`good first issue`](https://github.com/navaneeshnagarajan/FlintTrade/labels/good%20first%20issue) label for entry points. Beyond that, here's where the project most needs hands:
 
-- **Broker adapters** — especially crypto exchanges beyond Delta (CoinDCX, WazirX, Bybit, Binance India), and any broker not yet covered by the 33 OpenAlgo gateways.
-- **Strategy templates** — we ship 96 backtest templates and want more. Mean reversion, momentum, options spreads, sector rotation, volatility plays.
+- **Broker adapters** — especially crypto exchanges beyond Delta (CoinDCX, WazirX, Bybit, Binance India), and any broker not yet covered by the 32 OpenAlgo gateways.
+- **Strategy templates** — we ship 94 backtest templates and want more. Mean reversion, momentum, options spreads, sector rotation, volatility plays.
 - **AI prompt engineering** — improving the 30 trading skills under `packages/services/ai/skills/`, refining RAG retrieval, sharpening signal explanations.
 - **Translations** — Hindi and Tamil first, then other Indian regional languages. The UI needs an i18n pass; we're looking for translators and engineers to set up the framework.
 - **Accessibility** — WCAG AA is in place; AAA is the target. Screen-reader testing, keyboard-only flows, contrast audits, focus management.

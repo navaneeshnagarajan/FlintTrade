@@ -210,27 +210,28 @@ describe("SentimentPanel", () => {
     });
   });
 
-  it("shows error state on API failure", async () => {
+  it("shows an honest 'coming soon' state on API failure", async () => {
+    // The endpoint fails closed (e.g. 404 / no LLM configured); the panel
+    // degrades to a calm preview placeholder, not a raw backend error.
     mockGetMarketSentimentSummary.mockRejectedValue(
       new Error("Backend unavailable"),
     );
     renderPanel();
     await waitFor(() => {
       expect(
-        screen.getByText("Sentiment service unavailable"),
+        screen.getByText("Market sentiment coming soon"),
       ).toBeInTheDocument();
-      expect(screen.getByText("Backend unavailable")).toBeInTheDocument();
     });
+    // Raw backend error message must not leak into the UI.
+    expect(screen.queryByText("Backend unavailable")).not.toBeInTheDocument();
   });
 
-  it("retry button appears after error", async () => {
+  it("'Check again' button re-fetches after the coming-soon state", async () => {
     mockGetMarketSentimentSummary.mockRejectedValue(new Error("fail"));
     renderPanel();
-    await waitFor(() =>
-      screen.getByText("Sentiment service unavailable"),
-    );
-    expect(screen.getByText("Retry")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => screen.getByText("Market sentiment coming soon"));
+    expect(screen.getByText("Check again")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Check again"));
     // Refetch is triggered — mock gets called again
     await waitFor(() => {
       expect(mockGetMarketSentimentSummary).toHaveBeenCalledTimes(2);

@@ -374,7 +374,7 @@ function TickerSentimentTable() {
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
 export default function SentimentPanel() {
-  const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery({
+  const { data, isLoading, isError, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["market-sentiment-summary"],
     queryFn: getMarketSentimentSummary,
     refetchInterval: FIVE_MINUTES_MS,
@@ -428,17 +428,23 @@ export default function SentimentPanel() {
         </div>
       )}
 
-      {/* Error state */}
+      {/* Unavailable state — honest "coming soon" rather than an error.
+          The AI sentiment service is not yet enabled in this build (the
+          endpoint is not wired / no LLM is configured), so the request
+          fails closed. We degrade to a calm preview placeholder instead of
+          surfacing a raw backend error. */}
       {isError && (
-        <Card className="bg-surface-card border border-bearish-border rounded-lg p-5">
-          <div className="flex items-start gap-3 text-loss">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
+          <div className="flex items-start gap-3 text-text-secondary">
+            <Eye className="w-4 h-4 shrink-0 mt-0.5 text-text-muted" />
             <div>
-              <p className="text-sm font-semibold mb-1">Sentiment service unavailable</p>
+              <p className="text-sm font-semibold mb-1 text-text-primary">
+                Market sentiment coming soon
+              </p>
               <p className="text-xs text-text-muted">
-                {error instanceof Error
-                  ? error.message
-                  : "Ensure the AI backend is running and an LLM is configured."}
+                AI-generated market sentiment is not yet available in this build.
+                Once the AI backend is enabled and an LLM is configured, the live
+                dashboard will appear here.
               </p>
             </div>
           </div>
@@ -448,7 +454,7 @@ export default function SentimentPanel() {
             onClick={() => refetch()}
             className="mt-3 text-text-muted hover:text-text-primary text-xs"
           >
-            Retry
+            Check again
           </Button>
         </Card>
       )}

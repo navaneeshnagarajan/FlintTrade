@@ -1,6 +1,6 @@
 # Gateway
 
-> Direct broker connections for 32 brokers via OpenAlgo's adapter pattern, encrypted credentials, and the WebSocket bridge.
+> FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, per-broker adapters for 32 brokers, an encrypted credential vault, and the WebSocket bridge. OpenAlgo is one optional bridge adapter, not the primary path.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 
@@ -8,10 +8,12 @@
 
 ## Public surface
 
-- `src/adapter.py — base adapter class + OpenAlgo resolver`
-- `src/registry.py — 32-broker registry`
-- `src/credentials.py — Fernet-encrypted credential storage`
-- `src/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients`
+- `src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG`
+- `src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification`
+- `src/flinttrade_gateway/registry.py — BrokerRegistry over the 32-broker catalogue`
+- `src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, OpenAlgo bridge, …) against the BrokerAdapter ABC`
+- `src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault`
+- `src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients`
 
 (See the source for the full surface.)
 
@@ -20,23 +22,26 @@
 This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Python packages
 uv pip install -e packages/integrations/gateway
 ```
 
-If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
 ```bash
-python -m pytest packages/integrations/gateway/tests/ -v
+python -m pytest packages/integrations/gateway/tests/ -v --import-mode=importlib
 ```
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 

@@ -26,7 +26,7 @@ FlintTrade's backend for connection.
 
 ### Prerequisites
 
-- **Python 3.12** (3.11 also works for runtime, but contributors should use 3.12).
+- **Python 3.12+** (every package declares `requires-python >=3.12,<3.14`).
 - **Node.js 20+** (24 recommended for current LTS parity).
 - **Git**.
 - **Broker access.** FlintTrade can use its own broker gateway as adapters
@@ -288,8 +288,8 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 ### Backtest
 
 1. **Pick a template.** 94 templates ship under
-   `packages/services/backtest/src/strategies/` — ranging from simple EMA
-   crossover to complex options-spreads strategies.
+   `packages/services/backtest/src/flinttrade_backtest/strategies/` — ranging
+   from simple EMA crossover to complex options-spreads strategies.
 2. **Configure parameters.** Each template exposes a parameter form
    (built with `react-hook-form` + `zod`).
 3. **Pick a date range.** Historical OHLCV data is sourced from your

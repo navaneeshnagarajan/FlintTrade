@@ -1,17 +1,49 @@
 # @flinttrade/site
 
-Next.js + Fumadocs site for FlintTrade documentation, contribution flows, and MCP reference pages.
+> Next.js + Fumadocs public website, generated documentation, contribution pages, llms files, and read-only docs MCP.
 
-Run focused checks with:
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
+
+**Language:** TypeScript + React 19
+
+## Public surface
+
+- `src/app/page.tsx — public landing page`
+- `scripts/generate-content.mjs — docs/package/release content generator`
+- `src/lib/mcp/capabilities.ts — docs MCP tools and prompts`
+
+(See the source for the full surface.)
+
+## Install
+
+This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-cd packages/apps/site
-npm run typecheck
-npm run test
-npm run build
+pnpm install
 ```
 
-`npm run build` intentionally runs `next build --webpack` for now. Next 16's
-default Turbopack production build currently hangs with the Fumadocs content
-pipeline in this workspace, while the Webpack builder completes and matches the
-Vercel-compatible output path.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
+
+## Tests
+
+```bash
+cd packages/apps/site && npm run typecheck && npm run test && npm run build
+```
+
+For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
+
+## How this fits in
+
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+
+## Contributing
+
+Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+
+## License
+
+AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.

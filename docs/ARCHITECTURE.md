@@ -28,12 +28,12 @@ flowchart LR
         AI[ai]
         D[data]
         H[historical]
-        BT[backtest-engine]
+        BT[backtest]
         AUT[automation]
         DIT[ditto]
         JNL[journal]
         IND[indicators]
-        ING[integration]
+        ING[webhooks]
         GW[gateway]
         TICK[tick-engine · Rust/PyO3]
     end
@@ -92,7 +92,7 @@ flowchart TD
     terminal --> screener
     terminal --> ai
     terminal --> automation
-    terminal --> integration
+    terminal --> webhooks
     terminal --> engine
     terminal --> historical
     terminal --> designSystem[design-system]
@@ -103,7 +103,7 @@ flowchart TD
     engine --> core
     engine --> data
     engine --> gateway
-    backtestEngine[backtest-engine] --> engine
+    backtestEngine[backtest] --> engine
     backtestEngine --> tickEngine[tick-engine]
     backtestEngine --> historical
     backtestEngine --> indicators
@@ -117,8 +117,8 @@ flowchart TD
     journal --> data
     journal --> core
 
-    integration --> core
-    integration --> engine
+    webhooks --> core
+    webhooks --> engine
 
     automation --> core
     automation --> engine
@@ -285,7 +285,7 @@ stateDiagram-v2
 
 Each transition issues a fresh JWT with the new `mode` claim and revokes
 the old token's `jti`. The guard lives at
-`packages/services/engine/src/mode_guard.py`.
+`packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 ---
 

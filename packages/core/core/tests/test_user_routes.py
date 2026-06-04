@@ -118,7 +118,7 @@ def client_single_user(app):
 
 class TestListUsers:
     def test_list_users_admin(self, client, mock_mgr):
-        resp = client.get("/v1/users", headers=_auth_header(_admin_token()))
+        resp = client.get("/api/v1/users", headers=_auth_header(_admin_token()))
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "success"
@@ -126,16 +126,16 @@ class TestListUsers:
         mock_mgr.list_users.assert_called_once()
 
     def test_list_users_no_auth(self, client):
-        resp = client.get("/v1/users")
+        resp = client.get("/api/v1/users")
         assert resp.status_code == 401
 
     def test_list_users_non_admin_forbidden(self, client):
-        resp = client.get("/v1/users", headers=_auth_header(_trader_token()))
+        resp = client.get("/api/v1/users", headers=_auth_header(_trader_token()))
         assert resp.status_code == 403
 
     def test_list_users_multi_user_disabled(self, client_single_user):
         resp = client_single_user.get(
-            "/v1/users", headers=_auth_header(_admin_token()),
+            "/api/v1/users", headers=_auth_header(_admin_token()),
         )
         assert resp.status_code == 404
 
@@ -147,7 +147,7 @@ class TestListUsers:
 
 class TestCreateUser:
     def test_create_user_success(self, client, mock_mgr):
-        resp = client.post("/v1/users", json={
+        resp = client.post("/api/v1/users", json={
             "username": "newuser",
             "password": "StrongP@ss1!",
             "email": "new@example.com",
@@ -159,7 +159,7 @@ class TestCreateUser:
         mock_mgr.create_user.assert_called_once()
 
     def test_create_user_missing_fields(self, client):
-        resp = client.post("/v1/users", json={
+        resp = client.post("/api/v1/users", json={
             "username": "newuser",
         }, headers=_auth_header(_admin_token()))
         assert resp.status_code == 400
@@ -173,7 +173,7 @@ class TestCreateUser:
 
 class TestUpdateUser:
     def test_update_user_success(self, client, mock_mgr):
-        resp = client.put("/v1/users/admin", json={
+        resp = client.put("/api/v1/users/admin", json={
             "email": "updated@example.com",
         }, headers=_auth_header(_admin_token()))
         assert resp.status_code == 200
@@ -184,7 +184,7 @@ class TestUpdateUser:
         )
 
     def test_update_user_no_valid_fields(self, client):
-        resp = client.put("/v1/users/admin", json={
+        resp = client.put("/api/v1/users/admin", json={
             "password": "ignored",
         }, headers=_auth_header(_admin_token()))
         assert resp.status_code == 400
@@ -198,7 +198,7 @@ class TestUpdateUser:
 class TestDeleteUser:
     def test_delete_user_success(self, client, mock_mgr):
         resp = client.delete(
-            "/v1/users/trader1", headers=_auth_header(_admin_token()),
+            "/api/v1/users/trader1", headers=_auth_header(_admin_token()),
         )
         assert resp.status_code == 200
         data = resp.get_json()
@@ -209,6 +209,6 @@ class TestDeleteUser:
     def test_delete_user_not_found(self, client, mock_mgr):
         mock_mgr.delete_user.return_value = False
         resp = client.delete(
-            "/v1/users/ghost", headers=_auth_header(_admin_token()),
+            "/api/v1/users/ghost", headers=_auth_header(_admin_token()),
         )
         assert resp.status_code == 404

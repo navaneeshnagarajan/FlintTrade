@@ -495,90 +495,6 @@ class TestTelegramKillSwitch:
 
 
 # ======================================================================
-# OpenClaw Bridge — skill registration
-# ======================================================================
-
-
-class TestOpenClawBridge:
-    """Test OpenClaw skill registration and execution."""
-
-    def test_register_skill(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        bridge.register_skill("trade", handler=lambda text: f"trading: {text}")
-        assert "trade" in bridge.registered_skills
-
-    def test_register_multiple_skills(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        bridge.register_skill("trade", handler=lambda t: t)
-        bridge.register_skill("analyze", handler=lambda t: t)
-        bridge.register_skill("status", handler=lambda t: t)
-        assert len(bridge.registered_skills) == 3
-
-    def test_unregister_skill(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        bridge.register_skill("temp", handler=lambda t: t)
-        bridge.unregister_skill("temp")
-        assert "temp" not in bridge.registered_skills
-
-    def test_execute_skill(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        bridge.register_skill("trade", handler=lambda text: f"Processed: {text}")
-        result = bridge.execute_skill("trade", "Buy NIFTY")
-        assert result.success
-        assert result.output == "Processed: Buy NIFTY"
-
-    def test_execute_unregistered_skill(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        result = bridge.execute_skill("nonexistent", "test")
-        assert not result.success
-        assert "not registered" in result.error
-
-    def test_handle_message_with_command(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        bridge.register_skill("status", handler=lambda text: "All good")
-        result = bridge.handle_message("/status")
-        assert result.success
-        assert result.output == "All good"
-
-    def test_handle_message_freeform_routes_to_trade(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        bridge.register_skill("trade", handler=lambda text: f"Order: {text}")
-        result = bridge.handle_message("Buy 100 RELIANCE")
-        assert result.success
-        assert result.skill_name == "trade"
-
-    def test_skill_execution_error(self):
-        from flinttrade_automation.openclaw_bridge import OpenClawBridge
-        bridge = OpenClawBridge()
-        bridge.register_skill("bad", handler=lambda t: 1 / 0)
-        result = bridge.execute_skill("bad", "test")
-        assert not result.success
-        assert result.error
-
-    def test_config_from_env(self, monkeypatch):
-        monkeypatch.setenv("OPENCLAW_PORT", "9999")
-        monkeypatch.setenv("OPENCLAW_AUTH_TOKEN", "secret")
-        from flinttrade_automation.openclaw_bridge import OpenClawConfig
-        cfg = OpenClawConfig.from_env()
-        assert cfg.port == 9999
-        assert cfg.auth_token == "secret"
-
-    def test_default_skills_exist(self):
-        from flinttrade_automation.openclaw_bridge import DEFAULT_SKILLS
-        assert "trade" in DEFAULT_SKILLS
-        assert "analyse" in DEFAULT_SKILLS
-        assert "backtest" in DEFAULT_SKILLS
-        assert "status" in DEFAULT_SKILLS
-
-
-# ======================================================================
 # Post-Market Analysis — report generation
 # ======================================================================
 
@@ -696,7 +612,7 @@ class TestPackageExports:
         from flinttrade_automation import __all__
         expected = [
             "CronManager", "TelegramBot",
-            "OpenClawBridge", "PostMarketAnalysis",
+            "PostMarketAnalysis",
             "LoginResult", "JobDefinition", "BotConfig",
             "DailyReport", "TradeEntry", "is_trading_day",
         ]

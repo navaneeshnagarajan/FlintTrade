@@ -17,7 +17,7 @@ export interface WorkspacePresetRecord {
   name: string;
   description: string;
   icon: string;
-  source: "builtin" | "custom";
+  is_builtin: boolean;
   widget_count: number;
   widgets: PresetWidgetEntry[];
   created_at?: string;

@@ -264,7 +264,10 @@ describe("LegBuilder — metrics", () => {
     renderLegBuilder();
     await userEvent.click(screen.getByText("STR"));
     expect(screen.getByText(/Net/)).toBeInTheDocument();
-    expect(screen.getByText(/Place Strategy/)).toBeInTheDocument();
+    // The footer's place action is present (deferred → "Coming soon" label).
+    expect(
+      screen.getByRole("button", { name: /place strategy/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows credit net premium for sell-only strategy (straddle)", async () => {
@@ -292,59 +295,33 @@ describe("LegBuilder — metrics", () => {
   });
 });
 
-describe("LegBuilder — order placement", () => {
+describe("LegBuilder — order placement (deferred)", () => {
+  // Strategy placement is currently deferred: the basket executor is not yet
+  // wired server-side, so the "Place Strategy" action degrades to an honest
+  // "Coming soon" state and never dispatches basketOrder (which would 503).
   beforeEach(() => vi.clearAllMocks());
 
-  it("Place Strategy button is disabled with no legs", () => {
+  it("does not render the place action with no legs", () => {
     renderLegBuilder();
-    const btn = screen.queryByText("Place Strategy");
-    // Button only appears when legs.length > 0
-    expect(btn).toBeNull();
+    // The footer (and its action button) only appears when legs.length > 0.
+    expect(screen.queryByRole("button", { name: /place strategy/i })).toBeNull();
   });
 
-  it("Place Strategy button is enabled when legs are present", async () => {
+  it("shows a disabled 'Coming soon' action when legs are present", async () => {
     renderLegBuilder();
     await userEvent.click(screen.getByText("STR"));
-    const btn = screen.getByText("Place Strategy");
-    expect(btn).not.toBeDisabled();
+    const btn = screen.getByRole("button", { name: /place strategy \(coming soon\)/i });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveTextContent(/coming soon/i);
   });
 
-  it("calls basketOrder when Place Strategy is clicked", async () => {
+  it("never calls basketOrder when the deferred action is clicked", async () => {
     const { basketOrder } = await import("@/services/api");
     renderLegBuilder();
     await userEvent.click(screen.getByText("STR"));
-    await userEvent.click(screen.getByText("Place Strategy"));
-    expect(basketOrder).toHaveBeenCalledTimes(1);
-    const call = (basketOrder as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
-      strategy: string;
-      orders: unknown[];
-    };
-    expect(call.strategy).toBe("FlintLegBuilder");
-    expect(call.orders).toHaveLength(2); // straddle = 2 legs
-  });
-
-  it("shows success toast after order placement", async () => {
-    renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
-    await userEvent.click(screen.getByText("Place Strategy"));
-    expect(await screen.findByText(/legs placed/i)).toBeInTheDocument();
-  });
-
-  it("shows error toast when basketOrder rejects", async () => {
-    const { basketOrder } = await import("@/services/api");
-    (basketOrder as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error("Rate limit hit"),
-    );
-    renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
-    await userEvent.click(screen.getByText("Place Strategy"));
-    expect(await screen.findByText("Rate limit hit")).toBeInTheDocument();
-  });
-
-  it("shows expiry-missing error when expiry is null", async () => {
-    renderLegBuilder({ expiry: null });
-    await userEvent.click(screen.getByText("STR"));
-    await userEvent.click(screen.getByText("Place Strategy"));
-    expect(await screen.findByText("Select an expiry first")).toBeInTheDocument();
+    const btn = screen.getByRole("button", { name: /place strategy \(coming soon\)/i });
+    // Disabled, so a click must be a no-op — fire directly to be certain.
+    fireEvent.click(btn);
+    expect(basketOrder).not.toHaveBeenCalled();
   });
 });

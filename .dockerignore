@@ -12,9 +12,9 @@
 !.env.example
 
 # Node / Terminal (built separately by terminal service)
-packages/terminal/node_modules
-packages/terminal/dist
-packages/terminal/.vite
+packages/apps/terminal/node_modules
+packages/apps/terminal/dist
+packages/apps/terminal/.vite
 
 # Python caches
 __pycache__

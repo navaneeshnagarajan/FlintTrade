@@ -54,20 +54,6 @@ def _get(client, url):
 
 class TestMonitoringRoutes:
 
-    def test_health_returns_200_or_503(self, app_client):
-        resp = _get(app_client, "/api/v1/health")
-        assert resp.status_code in (200, 503)
-        data = json.loads(resp.data)
-        assert "status" in data
-        assert data["status"] in ("ok", "degraded", "error")
-
-    def test_health_has_all_subsystems(self, app_client):
-        resp = _get(app_client, "/api/v1/health")
-        data = json.loads(resp.data)
-        assert "broker" in data
-        assert "disk" in data
-        assert "memory" in data
-
     def test_traffic_stats_returns_data(self, app_client):
         resp = _get(app_client, "/api/v1/traffic/stats")
         assert resp.status_code == 200

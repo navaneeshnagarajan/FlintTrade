@@ -101,31 +101,31 @@ def _create_preset(
     widgets: list[str] | None = None,
     layout: dict | None = None,
 ) -> dict:
-    """POST /ft-api/v1/presets/ and return the parsed JSON response."""
+    """POST /ft-api/api/v1/presets/ and return the parsed JSON response."""
     payload = {
         "name": name,
         "description": description,
         "widgets": widgets or ["chart", "positions"],
         "layout": layout or {"type": "split"},
     }
-    resp = client.post("/v1/presets/", headers=_auth(), json=payload)
+    resp = client.post("/api/v1/presets/", headers=_auth(), json=payload)
     return resp.get_json(), resp.status_code
 
 
 # ---------------------------------------------------------------------------
-# GET /ft-api/v1/presets/ — list all presets
+# GET /ft-api/api/v1/presets/ — list all presets
 # ---------------------------------------------------------------------------
 
 
 class TestListPresets:
-    """GET /ft-api/v1/presets/ — list presets."""
+    """GET /ft-api/api/v1/presets/ — list presets."""
 
     def test_returns_200(self, client):
-        resp = client.get("/v1/presets/", headers=_auth())
+        resp = client.get("/api/v1/presets/", headers=_auth())
         assert resp.status_code == 200
 
     def test_response_shape(self, client):
-        data = client.get("/v1/presets/", headers=_auth()).get_json()
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()
         assert data["status"] == "success"
         assert "presets" in data["data"]
         assert "total" in data["data"]
@@ -133,19 +133,19 @@ class TestListPresets:
         assert "custom_count" in data["data"]
 
     def test_builtin_presets_included(self, client):
-        data = client.get("/v1/presets/", headers=_auth()).get_json()
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()
         assert data["data"]["builtin_count"] == 6
 
     def test_custom_count_zero_initially(self, client):
-        data = client.get("/v1/presets/", headers=_auth()).get_json()
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()
         assert data["data"]["custom_count"] == 0
 
     def test_total_equals_builtin_plus_custom(self, client):
-        d = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        d = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         assert d["total"] == d["builtin_count"] + d["custom_count"]
 
     def test_builtin_presets_have_required_fields(self, client):
-        data = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         for p in data["presets"]:
             assert "id" in p
             assert "name" in p
@@ -157,30 +157,30 @@ class TestListPresets:
             assert "updated_at" in p
 
     def test_builtin_flags_are_true(self, client):
-        data = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         builtins = [p for p in data["presets"] if p["is_builtin"]]
         assert len(builtins) == 6
 
     def test_custom_preset_appears_in_list(self, client):
         _create_preset(client, name="My Custom Layout")
-        data = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         names = [p["name"] for p in data["presets"]]
         assert "My Custom Layout" in names
 
     def test_custom_count_increments(self, client):
         _create_preset(client, name="Preset A")
         _create_preset(client, name="Preset B")
-        data = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         assert data["custom_count"] >= 2
 
 
 # ---------------------------------------------------------------------------
-# POST /ft-api/v1/presets/ — create
+# POST /ft-api/api/v1/presets/ — create
 # ---------------------------------------------------------------------------
 
 
 class TestCreatePreset:
-    """POST /ft-api/v1/presets/ — create a custom preset."""
+    """POST /ft-api/api/v1/presets/ — create a custom preset."""
 
     def test_returns_201(self, client):
         _, status = _create_preset(client)
@@ -215,12 +215,12 @@ class TestCreatePreset:
 
     def test_empty_name_returns_400(self, client):
         payload = {"name": "  ", "widgets": []}
-        resp = client.post("/v1/presets/", headers=_auth(), json=payload)
+        resp = client.post("/api/v1/presets/", headers=_auth(), json=payload)
         assert resp.status_code == 400
 
     def test_builtin_name_collision_returns_400(self, client):
         payload = {"name": "Scalper Zone", "widgets": []}
-        resp = client.post("/v1/presets/", headers=_auth(), json=payload)
+        resp = client.post("/api/v1/presets/", headers=_auth(), json=payload)
         assert resp.status_code == 400
 
     def test_timestamps_present(self, client):
@@ -230,21 +230,21 @@ class TestCreatePreset:
 
     def test_description_defaults_to_empty(self, client):
         payload = {"name": "No Desc"}
-        resp = client.post("/v1/presets/", headers=_auth(), json=payload)
+        resp = client.post("/api/v1/presets/", headers=_auth(), json=payload)
         data = resp.get_json()
         assert data["data"]["description"] == ""
 
 
 # ---------------------------------------------------------------------------
-# GET /ft-api/v1/presets/<id> — retrieve single preset
+# GET /ft-api/api/v1/presets/<id> — retrieve single preset
 # ---------------------------------------------------------------------------
 
 
 class TestGetPreset:
-    """GET /ft-api/v1/presets/<id>."""
+    """GET /ft-api/api/v1/presets/<id>."""
 
     def test_builtin_returns_200(self, client):
-        resp = client.get("/v1/presets/scalper-zone", headers=_auth())
+        resp = client.get("/api/v1/presets/scalper-zone", headers=_auth())
         assert resp.status_code == 200
         assert resp.get_json()["data"]["id"] == "scalper-zone"
 
@@ -254,39 +254,39 @@ class TestGetPreset:
             "analysis", "risk-monitor", "investor-view",
         ]
         for slug in slugs:
-            resp = client.get(f"/v1/presets/{slug}", headers=_auth())
+            resp = client.get(f"/api/v1/presets/{slug}", headers=_auth())
             assert resp.status_code == 200, f"Expected 200 for {slug}"
 
     def test_custom_preset_returns_200(self, client):
         created, _ = _create_preset(client, name="Get Me")
         preset_id = created["data"]["id"]
-        resp = client.get(f"/v1/presets/{preset_id}", headers=_auth())
+        resp = client.get(f"/api/v1/presets/{preset_id}", headers=_auth())
         assert resp.status_code == 200
         assert resp.get_json()["data"]["name"] == "Get Me"
 
     def test_unknown_id_returns_404(self, client):
-        resp = client.get("/v1/presets/does-not-exist", headers=_auth())
+        resp = client.get("/api/v1/presets/does-not-exist", headers=_auth())
         assert resp.status_code == 404
 
     def test_response_fields_complete(self, client):
-        resp = client.get("/v1/presets/analysis", headers=_auth())
+        resp = client.get("/api/v1/presets/analysis", headers=_auth())
         data = resp.get_json()["data"]
         for field in ("id", "name", "description", "widgets", "layout", "is_builtin", "created_at", "updated_at"):
             assert field in data, f"Missing field: {field}"
 
 
 # ---------------------------------------------------------------------------
-# PUT /ft-api/v1/presets/<id> — update
+# PUT /ft-api/api/v1/presets/<id> — update
 # ---------------------------------------------------------------------------
 
 
 class TestUpdatePreset:
-    """PUT /ft-api/v1/presets/<id>."""
+    """PUT /ft-api/api/v1/presets/<id>."""
 
     def test_update_name(self, client):
         created, _ = _create_preset(client, name="Original Name")
         preset_id = created["data"]["id"]
-        resp = client.put(f"/v1/presets/{preset_id}", headers=_auth(), json={"name": "Renamed"})
+        resp = client.put(f"/api/v1/presets/{preset_id}", headers=_auth(), json={"name": "Renamed"})
         assert resp.status_code == 200
         assert resp.get_json()["data"]["name"] == "Renamed"
 
@@ -294,7 +294,7 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="Desc Update")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}", headers=_auth(),
             json={"description": "New description"},
         )
         assert resp.status_code == 200
@@ -304,7 +304,7 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="Widget Update")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}", headers=_auth(),
             json={"widgets": ["orderpad", "depth"]},
         )
         assert resp.status_code == 200
@@ -315,7 +315,7 @@ class TestUpdatePreset:
         preset_id = created["data"]["id"]
         new_layout = {"type": "tabs", "tab_count": 4}
         resp = client.put(
-            f"/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}", headers=_auth(),
             json={"layout": new_layout},
         )
         assert resp.status_code == 200
@@ -325,7 +325,7 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="Time Update")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}", headers=_auth(),
             json={"description": "Updated"},
         )
         new_ts = resp.get_json()["data"]["updated_at"]
@@ -333,17 +333,17 @@ class TestUpdatePreset:
         assert new_ts is not None
 
     def test_builtin_update_returns_403(self, client):
-        resp = client.put("/v1/presets/scalper-zone", headers=_auth(), json={"name": "Hacked"})
+        resp = client.put("/api/v1/presets/scalper-zone", headers=_auth(), json={"name": "Hacked"})
         assert resp.status_code == 403
 
     def test_unknown_id_returns_404(self, client):
-        resp = client.put("/v1/presets/no-such-id", headers=_auth(), json={"name": "X"})
+        resp = client.put("/api/v1/presets/no-such-id", headers=_auth(), json={"name": "X"})
         assert resp.status_code == 404
 
     def test_empty_body_returns_400(self, client):
         created, _ = _create_preset(client, name="Empty Update")
         preset_id = created["data"]["id"]
-        resp = client.put(f"/v1/presets/{preset_id}", headers=_auth(), json={})
+        resp = client.put(f"/api/v1/presets/{preset_id}", headers=_auth(), json={})
         assert resp.status_code == 400
 
     def test_duplicate_name_returns_400(self, client):
@@ -351,120 +351,120 @@ class TestUpdatePreset:
         created, _ = _create_preset(client, name="To Rename")
         preset_id = created["data"]["id"]
         resp = client.put(
-            f"/v1/presets/{preset_id}", headers=_auth(),
+            f"/api/v1/presets/{preset_id}", headers=_auth(),
             json={"name": "Taken Name"},
         )
         assert resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------
-# DELETE /ft-api/v1/presets/<id> — delete
+# DELETE /ft-api/api/v1/presets/<id> — delete
 # ---------------------------------------------------------------------------
 
 
 class TestDeletePreset:
-    """DELETE /ft-api/v1/presets/<id>."""
+    """DELETE /ft-api/api/v1/presets/<id>."""
 
     def test_delete_custom_returns_200(self, client):
         created, _ = _create_preset(client, name="To Delete")
         preset_id = created["data"]["id"]
-        resp = client.delete(f"/v1/presets/{preset_id}", headers=_auth())
+        resp = client.delete(f"/api/v1/presets/{preset_id}", headers=_auth())
         assert resp.status_code == 200
 
     def test_delete_removes_from_list(self, client):
         created, _ = _create_preset(client, name="Gone Soon")
         preset_id = created["data"]["id"]
-        client.delete(f"/v1/presets/{preset_id}", headers=_auth())
-        list_data = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        client.delete(f"/api/v1/presets/{preset_id}", headers=_auth())
+        list_data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         ids = [p["id"] for p in list_data["presets"]]
         assert preset_id not in ids
 
     def test_deleted_preset_returns_404(self, client):
         created, _ = _create_preset(client, name="Check 404")
         preset_id = created["data"]["id"]
-        client.delete(f"/v1/presets/{preset_id}", headers=_auth())
-        resp = client.get(f"/v1/presets/{preset_id}", headers=_auth())
+        client.delete(f"/api/v1/presets/{preset_id}", headers=_auth())
+        resp = client.get(f"/api/v1/presets/{preset_id}", headers=_auth())
         assert resp.status_code == 404
 
     def test_builtin_delete_returns_403(self, client):
-        resp = client.delete("/v1/presets/options-desk", headers=_auth())
+        resp = client.delete("/api/v1/presets/options-desk", headers=_auth())
         assert resp.status_code == 403
 
     def test_unknown_id_returns_404(self, client):
-        resp = client.delete("/v1/presets/ghost-id", headers=_auth())
+        resp = client.delete("/api/v1/presets/ghost-id", headers=_auth())
         assert resp.status_code == 404
 
     def test_response_contains_message(self, client):
         created, _ = _create_preset(client, name="Message Check")
         preset_id = created["data"]["id"]
-        resp = client.delete(f"/v1/presets/{preset_id}", headers=_auth())
+        resp = client.delete(f"/api/v1/presets/{preset_id}", headers=_auth())
         data = resp.get_json()
         assert "message" in data["data"]
 
 
 # ---------------------------------------------------------------------------
-# POST /ft-api/v1/presets/<id>/fork — fork
+# POST /ft-api/api/v1/presets/<id>/fork — fork
 # ---------------------------------------------------------------------------
 
 
 class TestForkPreset:
-    """POST /ft-api/v1/presets/<id>/fork."""
+    """POST /ft-api/api/v1/presets/<id>/fork."""
 
     def test_fork_builtin_returns_201(self, client):
-        resp = client.post("/v1/presets/scalper-zone/fork", headers=_auth(), json={})
+        resp = client.post("/api/v1/presets/scalper-zone/fork", headers=_auth(), json={})
         assert resp.status_code == 201
 
     def test_fork_default_name(self, client):
-        resp = client.post("/v1/presets/options-desk/fork", headers=_auth(), json={})
+        resp = client.post("/api/v1/presets/options-desk/fork", headers=_auth(), json={})
         data = resp.get_json()["data"]
         assert data["name"] == "Copy of Options Desk"
 
     def test_fork_custom_name(self, client):
         resp = client.post(
-            "/v1/presets/market-watch/fork", headers=_auth(),
+            "/api/v1/presets/market-watch/fork", headers=_auth(),
             json={"name": "My Market Watch"},
         )
         assert resp.get_json()["data"]["name"] == "My Market Watch"
 
     def test_forked_preset_is_not_builtin(self, client):
-        resp = client.post("/v1/presets/analysis/fork", headers=_auth(), json={})
+        resp = client.post("/api/v1/presets/analysis/fork", headers=_auth(), json={})
         assert resp.get_json()["data"]["is_builtin"] is False
 
     def test_forked_preset_copies_widgets(self, client):
-        source = client.get("/v1/presets/risk-monitor", headers=_auth()).get_json()["data"]
-        resp = client.post("/v1/presets/risk-monitor/fork", headers=_auth(), json={})
+        source = client.get("/api/v1/presets/risk-monitor", headers=_auth()).get_json()["data"]
+        resp = client.post("/api/v1/presets/risk-monitor/fork", headers=_auth(), json={})
         forked = resp.get_json()["data"]
         assert forked["widgets"] == source["widgets"]
 
     def test_forked_preset_has_new_id(self, client):
-        resp = client.post("/v1/presets/investor-view/fork", headers=_auth(), json={})
+        resp = client.post("/api/v1/presets/investor-view/fork", headers=_auth(), json={})
         forked_id = resp.get_json()["data"]["id"]
         assert forked_id != "investor-view"
 
     def test_fork_custom_preset(self, client):
         created, _ = _create_preset(client, name="Forkable")
         preset_id = created["data"]["id"]
-        resp = client.post(f"/v1/presets/{preset_id}/fork", headers=_auth(), json={})
+        resp = client.post(f"/api/v1/presets/{preset_id}/fork", headers=_auth(), json={})
         assert resp.status_code == 201
         assert resp.get_json()["data"]["name"] == "Copy of Forkable"
 
     def test_fork_name_collision_returns_400(self, client):
         # First fork succeeds
-        client.post("/v1/presets/scalper-zone/fork", headers=_auth(), json={"name": "My Scalper"})
+        client.post("/api/v1/presets/scalper-zone/fork", headers=_auth(), json={"name": "My Scalper"})
         # Second fork with same name fails
-        resp = client.post("/v1/presets/scalper-zone/fork", headers=_auth(), json={"name": "My Scalper"})
+        resp = client.post("/api/v1/presets/scalper-zone/fork", headers=_auth(), json={"name": "My Scalper"})
         assert resp.status_code == 400
 
     def test_fork_unknown_id_returns_404(self, client):
-        resp = client.post("/v1/presets/ghost/fork", headers=_auth(), json={})
+        resp = client.post("/api/v1/presets/ghost/fork", headers=_auth(), json={})
         assert resp.status_code == 404
 
     def test_forked_preset_appears_in_list(self, client):
         client.post(
-            "/v1/presets/scalper-zone/fork", headers=_auth(),
+            "/api/v1/presets/scalper-zone/fork", headers=_auth(),
             json={"name": "Listed Fork"},
         )
-        list_data = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        list_data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         names = [p["name"] for p in list_data["presets"]]
         assert "Listed Fork" in names
 
@@ -482,7 +482,7 @@ class TestPersistence:
         preset_id = created["data"]["id"]
 
         # Fresh GET (new call to _load_custom internally)
-        resp = client.get(f"/v1/presets/{preset_id}", headers=_auth())
+        resp = client.get(f"/api/v1/presets/{preset_id}", headers=_auth())
         assert resp.status_code == 200
         assert resp.get_json()["data"]["id"] == preset_id
 
@@ -490,6 +490,6 @@ class TestPersistence:
         _create_preset(client, name="P1")
         _create_preset(client, name="P2")
         _create_preset(client, name="P3")
-        data = client.get("/v1/presets/", headers=_auth()).get_json()["data"]
+        data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         names = [p["name"] for p in data["presets"]]
         assert all(n in names for n in ("P1", "P2", "P3"))

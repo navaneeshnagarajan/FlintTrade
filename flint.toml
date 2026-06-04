@@ -62,10 +62,9 @@ general_per_second = 50
 webhooks_per_minute = 100
 
 [sebi]
+# Self-imposed rate limit (not a SEBI mandate) to stay within broker throttles.
 max_orders_per_second = 10
-static_ip_required = true
 audit_log_retention_years = 5
-algo_registration_required = true
 kill_switch_mandatory = true
 
 [naming]
@@ -114,7 +113,7 @@ DELTA = { name = "Delta Exchange (Crypto)", hours = "24/7", products = "BTC/ETH 
 
 [brokers]
 # Full broker list supported by OpenAlgo (FlintTrade works with ALL of them).
-# Mirrors BROKER_CATALOG in packages/integrations/gateway/src/adapter.py — keep in sync
+# Mirrors BROKER_CATALOG in packages/integrations/gateway/src/flinttrade_gateway/adapter.py — keep in sync
 # after every .local/external/openalgo refresh.
 supported = [
   "5paisa", "5paisa-xts", "AliceBlue", "AngelOne", "Compositedge",

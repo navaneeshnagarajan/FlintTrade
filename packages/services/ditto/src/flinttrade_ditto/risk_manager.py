@@ -30,6 +30,29 @@ class RiskStatus(StrEnum):
     PAUSED = "PAUSED"
 
 
+# Severity ordering for risk status. Higher rank == more severe. Used to
+# escalate (never downgrade) a status: a plain ``max()`` on the string values
+# would compare lexicographically — "CRITICAL" < "WARNING" — and silently
+# downgrade a CRITICAL state to WARNING.
+_RISK_SEVERITY: dict[str, int] = {
+    RiskStatus.OK.value: 0,
+    RiskStatus.WARNING.value: 1,
+    RiskStatus.CRITICAL.value: 2,
+    RiskStatus.PAUSED.value: 3,
+}
+
+
+def _escalate_status(current: str, candidate: str) -> str:
+    """Return whichever status is more severe, so a status is only ever raised.
+
+    Falls back to treating an unknown ``current`` as least severe, so any
+    recognised candidate still wins.
+    """
+    current_rank = _RISK_SEVERITY.get(current, -1)
+    candidate_rank = _RISK_SEVERITY.get(candidate, -1)
+    return candidate if candidate_rank > current_rank else current
+
+
 class TradeGrade(StrEnum):
     A = "A"  # Excellent: good entry, minimal slippage, disciplined exit
     B = "B"  # Good: decent entry, some slippage
@@ -244,7 +267,10 @@ class RiskManager:
 
         # Position count
         if state.position_count >= config.max_positions:
-            state.status = max(state.status, RiskStatus.WARNING.value)
+            # Escalate by severity rank — never downgrade an already-CRITICAL
+            # margin status to WARNING (a lexicographic ``max`` would do exactly
+            # that, since "CRITICAL" < "WARNING").
+            state.status = _escalate_status(state.status, RiskStatus.WARNING.value)
             state.alerts.append(
                 f"WARNING: Position count {state.position_count} >= limit {config.max_positions}"
             )

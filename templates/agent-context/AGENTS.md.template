@@ -26,8 +26,8 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-alpha
 
 ## Packages
 
-**Python (13):** gateway, core, engine, data, historical, screener, backtest-engine, ai, integration, automation, ditto, journal, indicators
-**Rust/PyO3 (1):** tick-engine (high-performance tick processing, Python bindings via PyO3)
+**Python (13):** core/core, core/data, core/historical, core/indicators, services/engine, services/screener, services/backtest, services/ai, services/automation, services/ditto, services/journal, integrations/gateway, integrations/webhooks
+**Rust/PyO3 (1):** core/ticks (high-performance tick processing, Python bindings via PyO3)
 **React apps (2):** terminal (5173), site (3000)
 **Shared UI (1):** design-system (tokens, layers, brand primitives, reusable React components)
 

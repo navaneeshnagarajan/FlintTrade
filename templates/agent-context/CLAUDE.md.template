@@ -25,9 +25,9 @@ python -m pytest packages/core/core/tests/test_foo.py::test_name -v   # single t
 make lint                                      # ruff check
 
 # Services
-make start                                     # start OpenAlgo
-make stop                                      # stop OpenAlgo
-make dev                                       # terminal dev + OpenAlgo
+make start                                     # start FlintTrade backend (OpenAlgo optional)
+make stop                                      # stop FlintTrade backend
+make dev                                       # terminal dev + FlintTrade backend
 make status                                    # check services
 make health                                    # health check
 
@@ -61,7 +61,9 @@ FlintTrade runs its own backend first. OpenAlgo is optional and external.
 - OpenAlgo is needed only for the optional OpenAlgo-compatible integration path. Native backend, site, terminal, docs, design-system, and most unit tests run without it.
 
 ```
-FlintTrade (React + Python) ──── REST/WS ────> OpenAlgo (Flask, port 5000) ──> Broker API
+                                ┌─ native gateway (BrokerAdapter) ──> Broker API
+FlintTrade (React + Python) ────┤
+                                └─ OpenAlgo bridge adapter (optional) ──> OpenAlgo (port 5000) ──> Broker API
 ```
 
 ### Application Routes
@@ -173,42 +175,44 @@ Two-tier config. No exceptions.
 
 ## Monorepo Structure
 
-### Python packages (12)
+17 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 2 apps**. Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` and `desktop` packages were dropped in the v0.6.0-alpha restructure.
+
+#### `packages/core/` — runtime foundation (4 Python + 1 Rust + 1 TS)
+
+| Package | Lang | Description |
+|---|---|---|
+| `core/core` | Py | Flask app, config, workspace, models, exceptions, JWT/auth; optional OpenAlgo client |
+| `core/data` | Py | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
+| `core/historical` | Py | OHLCV downloader, free data (OpenChart/yfinance), DuckDB pipeline, expiry manager |
+| `core/indicators` | Py | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) |
+| `core/ticks` | Rust/PyO3 | High-performance tick processing engine (Rust core with Python bindings via PyO3) |
+| `core/design-system` | TS | Shared FlintTrade tokens, layers, brand primitives, and React components |
+
+#### `packages/services/` — domain services (7 Python)
 
 | Package | Description |
 |---|---|
-| `gateway` | Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge |
-| `core` | Framework, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions |
-| `engine` | 5-layer safety system, order router, scheduler, base strategy, strategy registry |
-| `data` | Tick recorder, audit logger (SEBI 5yr), trade logger, DuckDB storage |
-| `historical` | OHLCV downloader, free data (OpenChart/yfinance), DuckDB pipeline, expiry manager |
-| `screener` | Option chain, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, IV |
-| `backtest-engine` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 96 strategy templates |
-| `ai` | LLM client (multi-provider), RAG (ChromaDB), signals, sentiment, MCP bridge, advisor |
-| `integration` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
-| `automation` | Cron manager, Telegram bot with kill switch, OpenClaw bridge, post-market analysis |
-| `ditto` | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager |
-| `indicators` | TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion) |
+| `services/engine` | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard |
+| `services/screener` | Option chain, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, IV |
+| `services/backtest` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 94 strategy templates |
+| `services/ai` | LLM client (multi-provider), RAG (ChromaDB), signals, sentiment, MCP bridge, advisor |
+| `services/automation` | Cron manager, Telegram bot with kill switch, OpenClaw bridge, post-market analysis |
+| `services/ditto` | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager |
+| `services/journal` | Trade journal, execution-quality analytics, and realised P&L tracking |
 
-### Rust/PyO3 package (1)
+#### `packages/integrations/` — external surfaces (2 Python)
 
 | Package | Description |
 |---|---|
-| `tick-engine` | High-performance tick processing engine (Rust core with Python bindings via PyO3) |
+| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (32 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); OpenAlgo is one optional bridge adapter; `shims/` holds OpenAlgo infra shims only |
+| `integrations/webhooks` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
 
-### React package (1)
+#### `packages/apps/` — front-ends (2)
 
 | Package | Port | Description |
 |---|---|---|
-| `terminal` | 5173 | Single React app. Dockview workspace, route-based personas, widget-composable layout. |
-
-### Additional app/core packages
-
-| Package | Description |
-|---|---|
-| `packages/apps/site` | Public Next.js/Fumadocs site, generated docs, and read-only docs MCP |
-| `packages/core/design-system` | Shared FlintTrade tokens, layers, brand primitives, and React components |
-| `packages/services/journal` | Trade journal, execution-quality analytics, and realised P&L tracking |
+| `apps/terminal` | 5173 | Single React app. Dockview workspace, route-based personas, widget-composable layout. |
+| `apps/site` | 3000 | Public Next.js/Fumadocs site, generated docs, and read-only docs MCP |
 
 ## Terminal — Widgets & Tools
 
@@ -388,7 +392,7 @@ To set up a new machine:
 7. `cd packages/apps/terminal && npm install && npm run build` (verify clean build, ~2,973 vitest pass)
 8. Read PLAN.md, pick a task, start building
 
-See `docs/machine-setup/QUICKSTART.md` for detailed instructions.
+See `docs/setup/QUICKSTART.md` for detailed instructions.
 
 ## Do NOT
 

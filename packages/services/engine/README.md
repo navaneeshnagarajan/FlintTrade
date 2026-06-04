@@ -8,11 +8,11 @@
 
 ## Public surface
 
-- `src/safety.py — kill switches across 5 layers`
-- `src/router.py — broker-agnostic order routing`
-- `src/strategy.py — base class for live strategies`
-- `src/sandbox_executor.py — user-strategy execution with AST guard`
-- `src/mode_guard.py — server-side Explore / Practice / Live enforcement`
+- `src/flinttrade_engine/safety.py — kill switches across 5 layers`
+- `src/flinttrade_engine/router.py — broker-agnostic order routing`
+- `src/flinttrade_engine/strategy.py — base class for live strategies`
+- `src/flinttrade_engine/sandbox_executor.py — user-strategy execution with AST guard`
+- `src/flinttrade_engine/mode_guard.py — server-side Explore / Practice / Live enforcement`
 
 (See the source for the full surface.)
 
@@ -21,23 +21,26 @@
 This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Python packages
 uv pip install -e packages/services/engine
 ```
 
-If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
 ```bash
-python -m pytest packages/services/engine/tests/ -v
+python -m pytest packages/services/engine/tests/ -v --import-mode=importlib
 ```
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 

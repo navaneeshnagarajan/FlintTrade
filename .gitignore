@@ -35,8 +35,25 @@ yarn.lock
 *~
 
 # === OS ===
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.fseventsd
+.Trashes
+.DocumentRevisions-V100
+.TemporaryItems
+.apdisk
+.VolumeIcon.icns
+Icon?
+__MACOSX/
+# Windows
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
 # === Data (large files) ===
 *.parquet
@@ -104,5 +121,4 @@ progress.md
 .worktrees/
 qa-*.png
 /apps/
-packages/tick-engine/target/
-packages/desktop/src-tauri/target/
+packages/core/ticks/target/

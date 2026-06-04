@@ -327,7 +327,7 @@ window opens; you do not get a 429 from the broker.
 ## 6. Mode system
 
 `explore | practice | live` — server-side JWT-claim enforcement. The
-guard lives at `packages/services/engine/src/mode_guard.py`. Every order-path
+guard lives at `packages/services/engine/src/flinttrade_engine/mode_guard.py`. Every order-path
 endpoint asks the guard whether the current JWT permits live orders;
 the guard returns one of three verdicts:
 

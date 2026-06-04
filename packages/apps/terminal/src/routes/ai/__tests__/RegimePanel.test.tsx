@@ -205,13 +205,18 @@ describe("RegimePanel", () => {
     });
   });
 
-  it("shows error state on API failure", async () => {
+  it("shows an honest 'coming soon' state on API failure", async () => {
+    // The endpoint fails closed (e.g. 404 / no historical data); the panel
+    // degrades to a calm preview placeholder, not a raw backend error.
     mockGetRegimeDetector.mockRejectedValue(new Error("Not enough bars"));
     renderPanel();
     await waitFor(() => {
-      expect(screen.getByText("Regime detection failed")).toBeInTheDocument();
-      expect(screen.getByText("Not enough bars")).toBeInTheDocument();
+      expect(
+        screen.getByText("Regime detection coming soon"),
+      ).toBeInTheDocument();
     });
+    // Raw backend error message must not leak into the UI.
+    expect(screen.queryByText("Not enough bars")).not.toBeInTheDocument();
   });
 
   it("clicking a quick symbol updates the query symbol", async () => {
@@ -292,15 +297,15 @@ describe("RegimePanel", () => {
     );
   });
 
-  it("retry button appears and triggers refetch after error", async () => {
+  it("'Check again' button triggers refetch after the coming-soon state", async () => {
     mockGetRegimeDetector
       .mockRejectedValueOnce(new Error("fail"))
       .mockResolvedValueOnce(TRENDING_UP_RESULT);
 
     renderPanel();
-    await waitFor(() => screen.getByText("Regime detection failed"));
+    await waitFor(() => screen.getByText("Regime detection coming soon"));
 
-    fireEvent.click(screen.getByText("Retry"));
+    fireEvent.click(screen.getByText("Check again"));
     await waitFor(() => {
       expect(mockGetRegimeDetector).toHaveBeenCalledTimes(2);
     });

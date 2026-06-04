@@ -10,7 +10,8 @@
  *     Bear Put Spread, Iron Condor, Butterfly, Custom
  *   - ATM-relative template auto-population with nearest-strike snapping
  *   - Net premium, max profit, max loss, breakeven(s) via payoff scan
- *   - Place Strategy button dispatches basketOrder
+ *   - Place Strategy button dispatches basketOrder (deferred: shows a
+ *     "Coming soon" state until the backend basket executor is wired)
  *   - BUY legs: profit tint background; SELL legs: loss tint background
  *   - forwardRef exposes addLegFromStrike so OptionChainWidget can push
  *     strike-click events in when the panel is open
@@ -23,6 +24,22 @@ import { NUM, NUM0, fmtLtp } from "./formatters";
 import type { StrikeRow } from "./types";
 import PayoffChart from "./PayoffChart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+// ---------------------------------------------------------------------------
+// Feature availability
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether multi-leg strategy placement is wired in this build.
+ *
+ * "Place Strategy" dispatches `basketOrder`, which hits the engine basket
+ * executor (`/api/v1/orders/basket`). That executor is not yet wired into
+ * the backend, so the route currently fails closed with a 503. Until it is
+ * enabled, we present an honest "coming soon" state rather than letting the
+ * click surface a raw 503 error toast. Flip this to `true` once the basket
+ * executor is wired server-side.
+ */
+const STRATEGY_PLACEMENT_AVAILABLE = false;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -570,6 +587,13 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
 
   async function handlePlaceStrategy() {
     if (legs.length < 1) return;
+    if (!STRATEGY_PLACEMENT_AVAILABLE) {
+      // Basket executor is not yet wired — degrade honestly instead of
+      // dispatching an order that would fail closed with a 503.
+      setOrderMsg({ text: "Strategy placement coming soon", ok: false });
+      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+      return;
+    }
     if (!expiry) {
       setOrderMsg({ text: "Select an expiry first", ok: false });
       return;
@@ -607,7 +631,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   // ---------------------------------------------------------------------------
 
   const canAddLeg = legs.length < 4;
-  const canPlace  = legs.length >= 1 && !placing;
+  const canPlace  = STRATEGY_PLACEMENT_AVAILABLE && legs.length >= 1 && !placing;
 
   const isDebit       = metrics.netPremiumRupees >= 0;
   const netPremLabel  = isDebit ? "Debit" : "Credit";
@@ -772,14 +796,28 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
             Lot {lotSize}
           </span>
 
-          {/* Place Strategy */}
+          {/* Place Strategy — deferred until the basket executor is wired */}
           <button
             onClick={() => void handlePlaceStrategy()}
             disabled={!canPlace}
+            title={
+              STRATEGY_PLACEMENT_AVAILABLE
+                ? undefined
+                : "Strategy placement is coming soon"
+            }
+            aria-label={
+              STRATEGY_PLACEMENT_AVAILABLE
+                ? "Place strategy"
+                : "Place strategy (coming soon)"
+            }
             className="flex items-center gap-1 px-3 py-0.5 text-xs font-semibold rounded bg-accent/20 text-accent border border-accent/40 hover:bg-accent/30 hover:border-accent/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Zap size={11} />
-            {placing ? "Placing…" : "Place Strategy"}
+            {!STRATEGY_PLACEMENT_AVAILABLE
+              ? "Coming soon"
+              : placing
+              ? "Placing…"
+              : "Place Strategy"}
           </button>
         </div>
       )}

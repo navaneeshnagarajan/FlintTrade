@@ -1,4 +1,4 @@
-# Integration
+# Webhooks
 
 > TradingView webhooks, ChartInk integration, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge.
 
@@ -8,9 +8,9 @@
 
 ## Public surface
 
-- `src/webhook_receiver.py — HMAC-validated webhook intake`
-- `src/chartink.py — ChartInk scanner integration`
-- `src/n8n_bridge.py — n8n workflow trigger and response`
+- `src/flinttrade_webhooks/webhook_receiver.py — HMAC-validated webhook intake`
+- `src/flinttrade_webhooks/tradingview.py — TradingView alert ingestion`
+- `src/flinttrade_webhooks/chartink.py — ChartInk scanner integration`
 
 (See the source for the full surface.)
 
@@ -19,23 +19,26 @@
 This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Python packages
 uv pip install -e packages/integrations/webhooks
 ```
 
-If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
 ```bash
-python -m pytest packages/integrations/webhooks/tests/ -v
+python -m pytest packages/integrations/webhooks/tests/ -v --import-mode=importlib
 ```
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 

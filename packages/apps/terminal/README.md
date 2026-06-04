@@ -1,6 +1,6 @@
 # Terminal
 
-> Single-page terminal — Dockview workspace with 83 widgets, 7 tools, 13 workspace presets, and 12 public routes.
+> Single-page terminal — Dockview workspace with home widgets, tools, routes, and workspace presets.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source modular trading platform for Indian F&O, commodities, and crypto.
 
@@ -9,8 +9,8 @@
 ## Public surface
 
 - `src/main.tsx — entry point and route registration`
-- `src/layout/widgetFactory.tsx — widget registry (83 entries)`
-- `src/layout/workspacePresets.ts — 13 named presets`
+- `src/routes/HomeRoute.tsx — dashboard and home widget orchestration`
+- `src/layout/workspacePresets.ts — named workspace presets`
 - `src/services/api.ts — REST + WebSocket client`
 
 (See the source for the full surface.)
@@ -21,25 +21,25 @@ This package is part of the FlintTrade monorepo. Install via the workspace from 
 
 ```bash
 pnpm install
-cd packages/apps/terminal
-npm run typecheck
 ```
 
-If you only want to use the package in isolation, `package.json` lists its dependencies, but the supported path is the root pnpm workspace.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
 ```bash
-cd packages/apps/terminal
-npm run test:base
-npm run build
+cd packages/apps/terminal && npm run test:base && npm run build
 ```
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 

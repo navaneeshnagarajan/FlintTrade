@@ -1031,21 +1031,28 @@ def create_flask_app(
     from flinttrade_screener.tv_routes import tv_bp  # noqa: PLC0415
     app.register_blueprint(tv_bp)
 
-    # Register monitoring blueprint (/api/v1/health, /api/v1/traffic/*, /api/v1/latency/*)
+    # Register monitoring blueprint (/api/v1/traffic/*, /api/v1/latency/*).
+    # Aggregated /api/v1/health lives in health_bp (the canonical health surface).
     from .monitoring_routes import monitoring_bp  # noqa: PLC0415
     app.register_blueprint(monitoring_bp)
 
     # Register frontend error ingestion + changelog reader (/v1/errors, /v1/changelog
     # — external URLs: /ft-api/v1/errors, /ft-api/v1/changelog). Previously referenced
     # by the terminal but not wired, causing 404s on fire-and-forget error reports.
+    # Initialise the persistent error log ONCE (always active — not gated by
+    # dev mode). The try/except guard means a DuckDB failure degrades to
+    # warning-only logging rather than crashing startup. The same instance is
+    # stored on app.config (so admin_routes and frontend_errors_bp can reach
+    # it) and reused by the global error handler below.
     from .error_log import ErrorLog as _ErrorLog  # noqa: PLC0415
     from .frontend_error_routes import frontend_errors_bp  # noqa: PLC0415
     _error_db = _workspace_dir() / "error_log.duckdb"
     try:
-        app.config["ERROR_LOG"] = _ErrorLog(db_path=str(_error_db))
+        _error_log = _ErrorLog(db_path=str(_error_db))
     except Exception as exc:
         logger.warning("ErrorLog initialisation failed (%s); /v1/errors will log warnings only", exc)
-        app.config["ERROR_LOG"] = None
+        _error_log = None
+    app.config["ERROR_LOG"] = _error_log
     app.register_blueprint(frontend_errors_bp)
 
     # Register Strategy Runner blueprint (/api/v1/strategies/*)
@@ -1066,14 +1073,6 @@ def create_flask_app(
     from flinttrade_data.sandbox_engine import SandboxEngine as _DataSandboxEngine  # noqa: PLC0415
     app.config["DATA_SANDBOX_ENGINE"] = _DataSandboxEngine()
     app.register_blueprint(data_sandbox_bp)
-
-    # Initialise persistent error log (always active — not gated by dev mode).
-    # Stored on app.config so admin_routes and the error handler can access it.
-    from .error_log import ErrorLog  # noqa: PLC0415
-
-    _error_log_path = _workspace_dir() / "error_log.duckdb"
-    _error_log = ErrorLog(_error_log_path)
-    app.config["ERROR_LOG"] = _error_log
 
     # ------------------------------------------------------------------
     # Global unhandled-exception handler — persists errors to DuckDB
@@ -1096,14 +1095,15 @@ def create_flask_app(
             return exc  # Flask will render the HTTPException normally.
 
         try:
-            _error_log.log(
-                route=request.path,
-                method=request.method,
-                status_code=500,
-                request_body=request.get_json(silent=True, force=True),
-                error=exc,
-                user_id=None,  # user context not available at this layer
-            )
+            if _error_log is not None:
+                _error_log.log(
+                    route=request.path,
+                    method=request.method,
+                    status_code=500,
+                    request_body=request.get_json(silent=True, force=True),
+                    error=exc,
+                    user_id=None,  # user context not available at this layer
+                )
         except Exception:
             # Never let the error logger itself crash the request.
             pass
@@ -1339,8 +1339,10 @@ def create_flask_app(
     #                               /api/v1/analytics/correlation
     #                               (prefix flipped 2026-05-19 to align with ftApi.helpers)
     #   health_bp                 — /health, /health/detail, /healthz, /readyz,
-    #                               /api/v1/ping (K8s + LB probes; /api/v1/ping
-    #                               is already in `_PUBLIC_V1_PREFIXES`)
+    #                               /api/v1/ping, /api/v1/health (K8s + LB probes
+    #                               + aggregated subsystem health; canonical health
+    #                               surface; /api/v1/ping is already in
+    #                               `_PUBLIC_V1_PREFIXES`)
     #   optimiser_bp              — /v1/portfolio/{optimise,frontier}
     #   permutation_bp            — /v1/backtest/{permutation,walkforward}
     #   admin_action_center_bp    — /admin/action-center/{pending,approve,reject,history}
@@ -1402,13 +1404,13 @@ def create_flask_app(
     app.config["AUTH_SERVICE"] = _AuthService(db_path=_auth_db)
     app.register_blueprint(auth_bp)
 
-    # Register Multi-user blueprint (/v1/users/*) — opt-in via FLINTTRADE_MULTI_USER=1
+    # Register Multi-user blueprint (/api/v1/users/*) — opt-in via FLINTTRADE_MULTI_USER=1
     if os.environ.get("FLINTTRADE_MULTI_USER", "").strip() in ("1", "true", "yes"):
         from .user_manager import UserManager as _UserManager  # noqa: PLC0415
         from .user_routes import users_bp  # noqa: PLC0415
         app.config["USER_MANAGER"] = _UserManager(db_path=_auth_db)
         app.register_blueprint(users_bp)
-        logger.info("Multi-user mode enabled — /v1/users/* endpoints registered")
+        logger.info("Multi-user mode enabled — /api/v1/users/* endpoints registered")
 
     # Reconnect saved accounts (best-effort, don't block startup)
     try:
@@ -1517,7 +1519,7 @@ def create_flask_app(
         All other /v1/ endpoints require the same API key auth.
         """
         # Allow health check, static files, and SPA fallback without auth
-        if request.endpoint in ("monitoring.health", "static", "_spa_fallback"):
+        if request.endpoint in ("health_detail.health_aggregated", "static", "_spa_fallback"):
             return None
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
@@ -1634,40 +1636,15 @@ def create_flask_app(
     # operations_bp  → packages/core/core/src/operations_routes.py
 
     # ------------------------------------------------------------------
-    # MCP bridge — register handlers that route through OpenAlgo
+    # MCP bridge — intentionally NOT wired here.
+    #
+    # A dormant bridge used to register an UNGATED ``place_order`` handler that
+    # built a fresh OpenAlgoClient and submitted live orders without passing
+    # through the SafetySystem / gate_order / BrokerRouter and mode guard. It
+    # was unreachable today but a latent ungated-order risk, so it has been
+    # removed. Any future MCP order path MUST route through the gated execution
+    # layer rather than calling OpenAlgoClient.place_order directly.
     # ------------------------------------------------------------------
-    try:
-        from flinttrade_ai.mcp_bridge import MCPBridge  # noqa: PLC0415
-
-        _mcp_bridge = MCPBridge()
-
-        def _mcp_place_order(**params: Any) -> dict[str, Any]:
-            """Route MCP place_order through OpenAlgo (sync wrapper)."""
-            from .openalgo_client import OpenAlgoClient  # noqa: PLC0415
-            client = OpenAlgoClient(Settings.from_env())
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(client.place_order(**params))
-            finally:
-                loop.run_until_complete(client.close())
-                loop.close()
-
-        def _mcp_get_positions(**params: Any) -> dict[str, Any]:
-            """Route MCP get_positions through OpenAlgo (sync wrapper)."""
-            from .openalgo_client import OpenAlgoClient  # noqa: PLC0415
-            client = OpenAlgoClient(Settings.from_env())
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(client.positionbook())
-            finally:
-                loop.run_until_complete(client.close())
-                loop.close()
-
-        _mcp_bridge.register_handler("place_order", _mcp_place_order)
-        _mcp_bridge.register_handler("get_positions", _mcp_get_positions)
-        logger.info("MCP bridge initialised with place_order, get_positions handlers")
-    except Exception:
-        logger.debug("MCP bridge not available — skipping handler registration")
 
     # ------------------------------------------------------------------
     # Config persistence endpoint — /ft-api/v1/config/openalgo

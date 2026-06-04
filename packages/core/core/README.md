@@ -8,10 +8,10 @@
 
 ## Public surface
 
-- `src/app.py — Flask app factory + blueprint registration`
-- `src/openalgo_client.py — typed wrapper over OpenAlgo's REST API`
-- `src/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance`
-- `src/config.py / src/workspace.py — env + workspace.json loaders`
+- `src/flinttrade_core/app.py — Flask app factory + blueprint registration`
+- `src/flinttrade_core/openalgo_client.py — typed wrapper over OpenAlgo's REST API`
+- `src/flinttrade_core/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance`
+- `src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders`
 
 (See the source for the full surface.)
 
@@ -20,23 +20,26 @@
 This package is part of the FlintTrade monorepo. Install via the workspace from the repo root:
 
 ```bash
-# Python packages
 uv pip install -e packages/core/core
 ```
 
-If you only want to use the package in isolation, the project's `pyproject.toml` (or `Cargo.toml` / `package.json`) lists its dependencies.
+If you only want to use the package in isolation, the package's `pyproject.toml`,
+`Cargo.toml`, or `package.json` lists its dependencies. The supported path is the
+root workspace.
 
 ## Tests
 
 ```bash
-python -m pytest packages/core/core/tests/ -v
+python -m pytest packages/core/core/tests/ -v --import-mode=importlib
 ```
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
 ## How this fits in
 
-This package's role in the wider FlintTrade architecture is documented in [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+This package's role in the wider FlintTrade architecture is documented in
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
