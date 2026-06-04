@@ -53,11 +53,14 @@ The gate is built and the OpenAlgo bridge dispatches through it. These dormant/d
 
 ### 2. Native broker SDK adapters (maintainer-owned accounts first)
 Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade_engine/algo_tag_guard.py` (per-exchange ops counter + `algo_id` relay) and runtime `flinttrade_core/broker_sdk_attest.py` (`attest_all()` + hourly `attest_loop()` → order-halt) before any adapter advertising `algo_tag_required=True` goes live.
+
+> **SDK/docs currency check (2026-06-05, adversarially verified — full report: `.local/reference/broker-currency-check-2026-06-05.md`):**
+> Dhan **dhanhq 2.2.0** = latest (pin exact; API server at feature-set v2.5; static-IP required on order APIs; 20-/200-level depth feeds → `DhanCaps.depth_levels=L20`). Upstox **upstox-python-sdk 2.27.0** = latest (build against **v3** classes; V3 protobuf feed; static-IP + `X-Algo-Name` enforced 2026-04-01; populate `brokers.lock`). Kotak Neo → bump **2.0.0 → v2.0.1** (git-pinned `Kotak-Neo/Kotak-neo-api-v2@v2.0.1`; **no PyPI package**; v2.0.1 adds MCX + MTF). IndMoney = **public REST/WS API exists (`api.indstocks.com` v1) but NO official SDK** — hand-roll a REST+dual-WS client; create `.local/reference/broker-docs/indmoney/`. Zerodha = official MIT SDK **kiteconnect 5.2.0** DOES exist (Kite Connect v3; depth 5×5 only; no BO).
 - [x] Wave 1 — **Dhan** (skeleton; long-lived JWT + sandbox; doc-grounded `DHAN_CAPABILITIES`).
 - [x] Wave 2 — **Upstox** (`brokers/upstox.py` gated skeleton + doc-grounded `UPSTOX_CAPABILITIES`; OAuth daily). Live bodies TODO behind SDK attestation.
 - [x] Wave 3 — **Kotak Neo** (`brokers/kotakneo.py` gated skeleton + doc-grounded `KOTAKNEO_CAPABILITIES`; MPIN+TOTP; zero-brokerage `brokerage_free`). Live bodies TODO behind SDK attestation.
-- [ ] Wave 4 — **IndMoney** (SDK availability needs an audit sub-spec first). File not yet created.
-- [ ] Community wave — **Zerodha** (`pykiteconnect`) — no maintainer-owned account; ships on contribution.
+- [ ] Wave 4 — **IndMoney / INDstocks** — verified (2026-06-05): a public REST+dual-WS API exists (`api.indstocks.com` v1, docs `api-docs.indstocks.com`) but **there is NO official SDK** (the advertised `indstocks-sdk` pip/npm packages 404). Build a hand-rolled REST+WS client; auth = 24h manual Bearer token + static-IP whitelist. File not yet created.
+- [ ] Community wave — **Zerodha** (`kiteconnect` **5.2.0**, official MIT SDK — confirmed to exist; Kite Connect v3; depth 5×5 only; no BO) — no maintainer-owned account; ships on contribution.
 - [x] **Multi-broker suggestions** ("which broker for what"): `recommendations.py` ranks brokers per use-case from declared `Capabilities` (zero-brokerage, depth, options, historical, streaming, throughput, advanced orders); `GET /api/v1/broker/recommendations`. UI wiring into the multi-broker setup screen is TODO.
 - [ ] Live adapter bodies (login/refresh/place/modify/cancel/reads/quotes/historical/option_chain/stream) — gated behind SDK attestation; verifiable only against live SDKs/creds.
 - [ ] Build `flinttrade_gateway/reconciliation.py` (`ReconciliationReport` per contract §14; adapters' `reconcile()` currently `NotImplementedError`).
