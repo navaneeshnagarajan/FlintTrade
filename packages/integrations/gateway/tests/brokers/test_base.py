@@ -2,9 +2,10 @@
 
 Every concrete adapter MUST implement the complete async ``BrokerAdapter``
 surface — no abstract method left over — so the router can rely on the full
-contract. The parametrize list grows as each broker's §9.5 wave lands; today
-only DhanAdapter ships, so it is the sole parameter. (upstox / kotakneo /
-indmoney / openalgo adapters join here as they are built.)
+contract. The parametrize list grows as each broker's wave lands. Today the
+OpenAlgo bridge adapter is functional and the native Dhan / Upstox / Kotak Neo
+adapters ship as gated skeletons (every live call raises until SDK attestation);
+all four are held to the full ABC surface here. (indmoney joins as it is built.)
 """
 
 from __future__ import annotations
@@ -13,15 +14,15 @@ import inspect
 
 import pytest
 
-from flinttrade_gateway.brokers import dhan
+from flinttrade_gateway.brokers import dhan, kotakneo, openalgo, upstox
 from flinttrade_gateway.brokers._base import BrokerAdapter
 
 ADAPTERS = [
     (dhan.DhanAdapter, "dhan"),
-    # (upstox.UpstoxAdapter, "upstox"),       # §9.5 wave — not yet built
-    # (kotakneo.KotakNeoAdapter, "kotakneo"), # §9.5 wave — not yet built
-    # (indmoney.IndMoneyAdapter, "indmoney"), # §9.5 wave — not yet built
-    # (openalgo.OpenAlgoAdapter, "openalgo"), # §9.5 wave — not yet built
+    (upstox.UpstoxAdapter, "upstox"),
+    (kotakneo.KotakNeoAdapter, "kotakneo"),
+    (openalgo.OpenAlgoAdapter, "openalgo"),
+    # (indmoney.IndMoneyAdapter, "indmoney"), # future wave — not yet built
 ]
 
 # The full abstract surface mandated by contract §5.
