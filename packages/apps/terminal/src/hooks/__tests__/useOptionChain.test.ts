@@ -49,7 +49,11 @@ import { useOptionChain } from "../useOptionChain";
 
 describe("useOptionChain", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    // clearAllMocks (not restoreAllMocks): the module-level `mockGetOptionChain`
+    // is a standalone vi.fn(), and under vitest v4 restoreAllMocks does not clear
+    // a standalone fn's call history — so the prior test's call leaked into
+    // `expect(mockGetOptionChain).not.toHaveBeenCalled()`, failing order-dependently.
+    vi.clearAllMocks();
   });
 
   it("returns data when expiry is selected", async () => {
