@@ -90,11 +90,14 @@ export default defineConfig({
         }
         warn(warning);
       },
-      // Glide Data Grid v6 has optional peer deps we don't use. Externalize them
-      // to suppress "unresolved import" build errors without installing them.
-      //   react-responsive-carousel — image overlay editor (unused)
-      //   marked — markdown cell renderer (unused)
-      external: ["react-responsive-carousel", "marked"],
+      // NOTE: do NOT externalise @glideapps/glide-data-grid's optional peer deps
+      // (react-responsive-carousel — image overlay editor; marked — markdown cell
+      // renderer). They are statically imported by glide-data-grid's module graph,
+      // so externalising them leaves a bare `import "react-responsive-carousel"` in
+      // the bundle that the browser cannot resolve at runtime — crashing every grid
+      // widget that loads that path (e.g. the Option Chain). Both are installed
+      // (devDependencies), so Vite bundles them cleanly. See the campaign log.
+      external: [],
       output: {
         manualChunks: (id: string) => {
           // React core — smallest possible initial payload
