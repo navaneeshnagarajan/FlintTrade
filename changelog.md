@@ -28,6 +28,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
   strategies (`StorageManager.get_trades_by_date_range`).
 - **Order-latency monitoring** — the gated order dispatch now feeds the latency tracker,
   so per-broker round-trip stats populate `/api/v1/latency/stats` (previously empty).
+- **Nightly DuckDB maintenance** — a scheduled `db_optimise_job` (00:30 IST) runs
+  `CHECKPOINT` + `ANALYZE` on the shared trade/tick store so the database stays compact
+  and queries stay fast.
+- **Regime-aware strategy suggestion** — the AI Regime panel now recommends a
+  regime-appropriate strategy style (momentum / mean-reversion / theta / stand-aside)
+  via `select_strategy_for_regime`, surfaced in `GET /ai/regime` as `suggested_strategy`.
 
 ### Fixed
 
@@ -61,6 +67,19 @@ Versioning: [Semantic Versioning](https://semver.org/).
   an honest note rather than invented, pending a portfolio option-greeks feed.
 - `order_analytics`/`strategy_comparison` blueprints registered (`/api/v1/...`) — were
   defined but never wired.
+- **14 more analysis/utility widgets** no longer show fabricated data to a connected
+  user — each renders an always-visible "Sample data" badge (or an honest empty state)
+  instead of disguising sample data as live, and deceptive "live updating" affordances
+  were removed (Market Summary, Multi-Timeframe, Correlation Pairs/Matrix, VWAP Bands,
+  PCR Trend, Sector Performance, Implied Move, Instrument Compare, Heat Calendar,
+  Microstructure, Audit Trail, Global Indices, Earnings Calendar).
+- **Five analysis endpoints** (GEX, IV Smile, Vol Surface, OI Profile, Straddle P&L)
+  now return the shape their widgets expect — they previously emitted raw dataclass
+  field names, so the widgets read undefined and rendered empty when connected.
+- Market Breadth fetched a 404 route (`/breadth` vs `/breadth/current`) and silently
+  showed sample data; now fetches the correct route and flags backend sample data.
+- Trade-journal analytics counted open legs (null P&L) as losing trades, distorting
+  win-rate; open legs are now excluded until they have a realised P&L.
 
 ## [0.6.0-alpha] - 2026-05-30
 
