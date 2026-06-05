@@ -388,8 +388,23 @@ function StrategyMonitorWidget() {
         aria-label="Strategy list"
       >
         {strategies.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-text-muted text-sm">
-            No strategies configured
+          <div className="flex flex-col items-center justify-center gap-2 h-full px-4 text-center">
+            <p className="text-sm text-text-muted">No strategies configured</p>
+            <p className="text-xxs text-text-muted leading-snug">
+              Build and deploy a strategy in the Strategy Lab to monitor it here.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent("flinttrade:navigate", { detail: "/lab" }),
+                )
+              }
+            >
+              Open Strategy Lab
+            </Button>
           </div>
         ) : (
           strategies.map((s) => (

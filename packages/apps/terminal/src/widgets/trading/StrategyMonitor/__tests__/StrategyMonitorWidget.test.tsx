@@ -60,6 +60,17 @@ describe("StrategyMonitorWidget", () => {
     expect(screen.getByText("No strategies configured")).toBeTruthy();
   });
 
+  it("offers a Strategy Lab action from the empty state", () => {
+    mockConnected.mockReturnValue(true);
+    render(<StrategyMonitorWidget />);
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:navigate", listener);
+    fireEvent.click(screen.getByRole("button", { name: /open strategy lab/i }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect((listener.mock.calls[0][0] as CustomEvent).detail).toBe("/lab");
+    window.removeEventListener("flinttrade:navigate", listener);
+  });
+
   it("renders all strategy names", () => {
     mockConnected.mockReturnValue(false);
     render(<StrategyMonitorWidget />);
