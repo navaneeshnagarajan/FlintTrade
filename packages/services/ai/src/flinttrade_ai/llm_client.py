@@ -152,6 +152,19 @@ _PROVIDER_URLS: dict[str, str] = {
 }
 
 
+def resolve_endpoint(provider: str, host: str) -> str:
+    """Resolve the OpenAI-compatible chat endpoint for a provider.
+
+    Local providers (Ollama → ``:11434``, LM Studio → ``:1234``, Hermes, custom)
+    interpolate the runtime ``host``; cloud providers return their fixed URL. An
+    unknown provider falls back to a generic ``{host}/v1/chat/completions`` so any
+    OpenAI-compatible endpoint still works. This is the single resolution point
+    used by both the blocking and streaming request paths.
+    """
+    template = _PROVIDER_URLS.get((provider or "").lower(), "{host}/v1/chat/completions")
+    return template.format(host=(host or "").rstrip("/"))
+
+
 def estimate_tokens(text: str) -> int:
     """Rough token count estimate (~4 chars per token for English)."""
     return max(1, len(text) // 4)
@@ -249,8 +262,7 @@ class LLMClient:
         max_tokens: int,
     ) -> LLMResponse:
         """OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI)."""
-        url_template = _PROVIDER_URLS.get(cfg.provider.lower(), "{host}/v1/chat/completions")
-        url = url_template.format(host=cfg.host.rstrip("/"))
+        url = resolve_endpoint(cfg.provider, cfg.host)
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if cfg.api_key:
@@ -366,8 +378,7 @@ class LLMClient:
         self, cfg: LLMConfig, messages: list[LLMMessage],
         temperature: float | None, max_tokens: int | None,
     ) -> Generator[str, None, None]:
-        url_template = _PROVIDER_URLS.get(cfg.provider.lower(), "{host}/v1/chat/completions")
-        url = url_template.format(host=cfg.host.rstrip("/"))
+        url = resolve_endpoint(cfg.provider, cfg.host)
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if cfg.api_key:
             headers["Authorization"] = f"Bearer {cfg.api_key}"
