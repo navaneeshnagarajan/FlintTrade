@@ -12,6 +12,7 @@
 
 import { useMemo } from "react";
 import { useSkillLevel } from "./useSkillLevel";
+import { widgetCatalog } from "@/layout/widgetFactory";
 import type { SkillLevel } from "@/types/skill";
 
 // ---------------------------------------------------------------------------
@@ -71,30 +72,27 @@ const INTERMEDIATE_WIDGETS: string[] = [
 ];
 
 /**
- * Advanced — all registered widgets. Kept as an explicit list (rather than
- * "show everything") so new widgets added to widgetCatalog default to
- * advanced-only until deliberately promoted to a lower level.
+ * Widgets deliberately kept OUT of the Add Widget picker. Empty today — every
+ * catalogued widget is functional and honest (renders real data, or carries a
+ * permanent "Sample data" disclosure for explore-mode sample content). Add an
+ * id here, with a reason, to hide a widget without removing it from the catalog.
  */
-const ADVANCED_WIDGETS: string[] = [
-  ...INTERMEDIATE_WIDGETS,
-  "scalper",
-  "tradebook",
-  "riskpanel",
-  "actioncenter",
-  "volsurface",
-  "ivsmile",
-  "straddlepnl",
-  "oiprofile",
-  "orderflow",
-  "depthheatmap",
-  "footprint",
-  "domheatmap",
-  "scanner",
-  "alerts",
-  "health",
-  "threepanel",
-  "aiadvisor",
-];
+const WIDGET_PICKER_DENY_LIST = new Set<string>([]);
+
+/**
+ * Advanced — EVERY registered widget, sourced directly from ``widgetCatalog``
+ * (minus the deny-list) so the advanced picker can never silently drift behind
+ * newly-added widgets. This honours the original "all registered widgets" intent
+ * without a hand-maintained list that falls out of date (the bug that left ~50
+ * built widgets unreachable). New catalogue widgets are reachable by default;
+ * exclude one explicitly via WIDGET_PICKER_DENY_LIST.
+ */
+const ADVANCED_WIDGETS: string[] = Array.from(
+  new Set([
+    ...INTERMEDIATE_WIDGETS,
+    ...widgetCatalog.map((w) => w.id).filter((id) => !WIDGET_PICKER_DENY_LIST.has(id)),
+  ]),
+);
 
 /** Tools available per skill level on the /trade route. */
 const BEGINNER_TOOLS: string[] = ["settings"];

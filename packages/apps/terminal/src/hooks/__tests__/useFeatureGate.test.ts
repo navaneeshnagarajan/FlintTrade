@@ -21,7 +21,10 @@ import type { GateStatus } from "@/hooks/useFeatureGate";
  */
 function resolveGate(featureId: string, level: SkillLevel): GateStatus {
   const gate = FEATURE_GATES[featureId];
-  if (!gate) return "visible";
+  // Mirror useFeatureGate's default: a catalogued `widget:` id without an
+  // explicit entry is visible (the skill tier is its gate); everything else
+  // fails closed to locked.
+  if (!gate) return featureId.startsWith("widget:") ? "visible" : "locked";
   return gate[level];
 }
 
@@ -40,6 +43,16 @@ describe("useFeatureGate — gate resolution logic", () => {
     expect(resolveGate("widget:greeks", "intermediate")).toBe("locked");
     // Advanced users see it as visible.
     expect(resolveGate("widget:greeks", "advanced")).toBe("visible");
+  });
+
+  it("an unknown widget: id defaults to visible (tier is the gate), but other unknown features stay locked", () => {
+    // A catalogued widget without an explicit FEATURE_GATES entry must NOT be
+    // locked — the skill-tier allowlist already decided it's appropriate.
+    expect(resolveGate("widget:somenewwidget", "advanced")).toBe("visible");
+    expect(resolveGate("widget:somenewwidget", "beginner")).toBe("visible");
+    // Non-widget unknown features still fail closed.
+    expect(resolveGate("route:unknown", "advanced")).toBe("locked");
+    expect(resolveGate("feature:unknown", "beginner")).toBe("locked");
   });
 
   it("gates the Wave-35 order-flow widgets so they unlock at advanced (not perma-locked)", () => {
@@ -74,11 +87,12 @@ describe("useFeatureGate — gate resolution logic", () => {
     expect(resolveGate("widget:scalper", globalLevel)).toBe("locked");
   });
 
-  it("returns 'visible' for an unknown feature ID (graceful default)", () => {
-    // Unknown features must never throw and must default to visible so that
-    // features added to the codebase before a gate entry is written stay usable.
-    expect(resolveGate("feature:does-not-exist-yet", "beginner")).toBe("visible");
+  it("defaults unknown features by kind: widgets visible (tier-gated), everything else locked", () => {
+    // Unknown features must never throw. A catalogued `widget:` id defaults to
+    // visible (its skill tier is the real gate); every other unknown feature
+    // (routes/capabilities) fails closed to locked.
     expect(resolveGate("widget:future-widget", "intermediate")).toBe("visible");
-    expect(resolveGate("", "advanced")).toBe("visible");
+    expect(resolveGate("feature:does-not-exist-yet", "beginner")).toBe("locked");
+    expect(resolveGate("", "advanced")).toBe("locked");
   });
 });

@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSkillStore } from "@/stores/skillStore";
 import { useSkillContent } from "../useSkillContent";
+import { widgetCatalog } from "@/layout/widgetFactory";
 
 // ---------------------------------------------------------------------------
 // Reset store between tests
@@ -263,6 +264,18 @@ describe("useSkillContent — additive invariant", () => {
     const advancedWidgets = result.current.availableWidgets;
     for (const id of intermediateWidgets) {
       expect(advancedWidgets).toContain(id);
+    }
+  });
+
+  it("advanced tier covers EVERY catalogued widget (no picker drift)", () => {
+    // Regression guard for the bug where ~50 registered widgets were unreachable
+    // because ADVANCED_WIDGETS was a hand-maintained list that fell behind the
+    // catalog. The advanced picker must expose every widgetCatalog id.
+    useSkillStore.getState().setGlobalLevel("advanced");
+    const { result } = renderHook(() => useSkillContent());
+    const advanced = new Set(result.current.availableWidgets);
+    for (const w of widgetCatalog) {
+      expect(advanced.has(w.id)).toBe(true);
     }
   });
 
