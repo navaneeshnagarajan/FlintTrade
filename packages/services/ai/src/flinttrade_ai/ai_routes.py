@@ -135,6 +135,138 @@ def sentiment_analyze() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
+def _net_to_label(net: float) -> str:
+    """Map a net sentiment score (-1..1) to a bullish/bearish/neutral label."""
+    return "bullish" if net > 0.15 else "bearish" if net < -0.15 else "neutral"
+
+
+def _score_value(score: Any) -> float:
+    """Signed numeric value of a SentimentScore (+conf bullish, -conf bearish)."""
+    sentiment = str(getattr(score, "sentiment", "NEUTRAL")).upper()
+    conf = float(getattr(score, "confidence", 0.0) or 0.0)
+    if sentiment == "BULLISH":
+        return conf
+    if sentiment == "BEARISH":
+        return -conf
+    return 0.0
+
+
+@ai_bp.route("/ai/sentiment/summary", methods=["GET"])
+def sentiment_summary() -> tuple[Any, int]:
+    """Market-wide sentiment summary for the terminal's Market Sentiment panel.
+
+    Aggregates net sentiment from the configured news feeds. Market-structure
+    fields (indices, sectors, FII/DII) are returned empty/neutral here — they
+    need a connected market-data source — so the panel renders a calm state
+    rather than a 404, and never shows fabricated bull/bear numbers.
+    """
+    scores: list[Any] = []
+    try:
+        from .sentiment import SentimentAnalyzer  # noqa: PLC0415
+
+        scores = SentimentAnalyzer().analyze_feeds()
+    except Exception as exc:  # no feed / network / LLM — honest neutral fallback
+        logger.info("sentiment/summary: no feed data (%s)", exc)
+
+    nums = [_score_value(s) for s in scores]
+    net = sum(nums) / len(nums) if nums else 0.0
+    key_points = (
+        []
+        if scores
+        else ["No live news feed available — connect a data source for full market sentiment."]
+    )
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "sentiment_score": round(net, 4),
+            "market_sentiment": _net_to_label(net),
+            "indices": [],
+            "sectors": [],
+            "key_points": key_points,
+            "fii_dii_flow": {
+                "fii_net": 0.0,
+                "dii_net": 0.0,
+                "interpretation": "FII/DII flow not connected.",
+            },
+            "risks": [],
+            "opportunities": [],
+        },
+    }), 200
+
+
+@ai_bp.route("/ai/sentiment/tickers", methods=["GET"])
+def sentiment_tickers() -> tuple[Any, int]:
+    """Per-ticker sentiment for the Market Sentiment panel.
+
+    Scores sentiment per symbol from the news feeds; returns an empty list when
+    no feed data is available (the panel shows a calm empty state, not a 404).
+    """
+    tickers: list[dict[str, Any]] = []
+    try:
+        from .sentiment import SentimentAnalyzer, aggregate_sentiment  # noqa: PLC0415
+
+        scores = SentimentAnalyzer().analyze_feeds()
+        symbols: set[str] = set()
+        for s in scores:
+            symbols.update(getattr(s, "symbols", []) or [])
+        for sym in sorted(symbols):
+            agg = aggregate_sentiment(scores, sym)
+            net = float(getattr(agg, "net_score", 0.0) or 0.0)
+            label = "positive" if net > 0.15 else "negative" if net < -0.15 else "neutral"
+            tickers.append({
+                "ticker": sym,
+                "score": round(net * 10.0, 2),  # -10..+10 scale
+                "label": label,
+                "key_factor": str(getattr(agg, "dominant_sentiment", "")) or "news sentiment",
+            })
+    except Exception as exc:
+        logger.info("sentiment/tickers: no feed data (%s)", exc)
+
+    return jsonify({"status": "success", "data": {"tickers": tickers}}), 200
+
+
+@ai_bp.route("/ai/regime", methods=["GET"])
+def market_regime() -> tuple[Any, int]:
+    """Market regime (ADX/ATR/BB) for a symbol — the AI Regime panel.
+
+    Computes the regime from the symbol's recent OHLCV when a market-data source
+    is connected; returns a clear 503 otherwise so the panel renders a connect
+    prompt rather than a 404. (OHLCV fetch wiring is a tracked follow-up.)
+    """
+    symbol = (request.args.get("symbol") or "NIFTY").strip()
+    registry = current_app.config.get("REGISTRY")
+    connected = bool(registry) and bool(getattr(registry, "is_connected", lambda: False)())
+    if not connected:
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Regime analysis for {symbol} requires a connected market-data "
+                "source — connect a broker to enable it."
+            ),
+        }), 503
+
+    try:
+        from .regime_detector import detect_regime_detailed  # noqa: PLC0415
+
+        params = {"symbol": symbol, "exchange": "NSE_INDEX", "interval": "D"}
+        history = registry.get_history(registry.get_primary_account_id(), params)
+        candles = history.get("data") or history.get("candles") or []
+        highs = [float(c["high"]) for c in candles]
+        lows = [float(c["low"]) for c in candles]
+        closes = [float(c["close"]) for c in candles]
+        if len(closes) < 20:
+            return jsonify({
+                "status": "error",
+                "message": f"Not enough history for {symbol} to compute a regime.",
+            }), 503
+        result = detect_regime_detailed(highs, lows, closes)
+        return jsonify({"status": "success", "data": result.to_dict()}), 200
+    except Exception:
+        logger.exception("market_regime error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
 @ai_bp.route("/ai/refine-strategy", methods=["POST"])
 def refine_strategy() -> tuple[Any, int]:
     """Analyse backtest results and suggest parameter improvements.
