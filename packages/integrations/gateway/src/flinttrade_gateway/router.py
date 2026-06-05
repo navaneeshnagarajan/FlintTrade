@@ -32,6 +32,7 @@ class BrokerRouter:
         *,
         consume_gate: Callable[[str], bool] | None = None,
         config: RoutingConfig | None = None,
+        rate_limiter: Any | None = None,
     ) -> None:
         self._adapters = adapters
         self._session_provider = session_provider
@@ -43,6 +44,14 @@ class BrokerRouter:
         # The parsed workspace.json routing config (contract §13). Optional so
         # tests and the legacy explicit-target form work without one.
         self._config = config
+        # Optional per-broker API rate limiter. A pure throttle that runs BELOW
+        # the gate (after verify + gate-consume), so it can only delay a dispatch,
+        # never bypass safety. None → no throttle (unchanged behaviour).
+        self._rate_limiter = rate_limiter
+
+    async def _throttle(self, adapter_id: str, kind: str) -> None:
+        if self._rate_limiter is not None:
+            await self._rate_limiter.acquire(adapter_id, kind)
 
     # ------------------------------------------------------------------
     # Resolution (contract §13.2)
@@ -119,6 +128,7 @@ class BrokerRouter:
         if session.is_read_only:
             raise SafetyBypassError(f"session {account_id!r} is read-only")
         self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+        await self._throttle(adapter_id, "order")
         return await self._adapters[adapter_id].place_order(session, order, _router_token=_ROUTER_TOKEN)
 
     async def modify_order(
@@ -147,6 +157,7 @@ class BrokerRouter:
         if session.is_read_only:
             raise SafetyBypassError(f"session {account_id!r} is read-only")
         self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+        await self._throttle(adapter_id, "order")
         return await self._adapters[adapter_id].modify_order(
             session, order_id, changes, _router_token=_ROUTER_TOKEN
         )
@@ -176,6 +187,7 @@ class BrokerRouter:
         if session.is_read_only:
             raise SafetyBypassError(f"session {account_id!r} is read-only")
         self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
+        await self._throttle(adapter_id, "order")
         return await self._adapters[adapter_id].cancel_order(
             session, order_id, _router_token=_ROUTER_TOKEN
         )
@@ -226,6 +238,7 @@ class BrokerRouter:
         if hint is not None or adapter_id is None:
             adapter_id, account_id = self._resolve(routing_key, None, hint)
         session = self._session_provider(request_ctx, adapter_id, account_id)
+        await self._throttle(adapter_id, "data")
         return await self._adapters[adapter_id].quotes(session, symbols)
 
     def _verify_safety(

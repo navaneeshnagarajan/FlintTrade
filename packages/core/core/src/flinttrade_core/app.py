@@ -708,7 +708,29 @@ def build_broker_router(
                     ),
                 )
 
-    return BrokerRouter(resolved_adapters, session_provider, consume_gate=gate.consume, config=config)
+    # Per-broker API rate limiter (DATA & INFRA: customizable rate limits). Built
+    # from each registered adapter's capability metadata, with operator overrides
+    # from workspace.json brokers.rate_limits[broker_id].{order,data}. A pure
+    # below-the-gate throttle — it only delays a dispatch, never bypasses safety.
+    rate_limiter = None
+    try:
+        from flinttrade_gateway.rate_limiter import BrokerRateLimiter  # noqa: PLC0415
+
+        caps = {
+            aid: adapter.capabilities
+            for aid, adapter in resolved_adapters.items()
+            if hasattr(adapter, "capabilities")
+        }
+        overrides = brokers_config.get("rate_limits", {}) if isinstance(brokers_config, dict) else {}
+        if caps or overrides:
+            rate_limiter = BrokerRateLimiter.from_capabilities(caps, overrides=overrides)
+    except Exception as exc:  # pragma: no cover - a bad limit must not brick routing
+        logger.warning("Broker rate limiter not built (%s); dispatch will be unthrottled", exc)
+
+    return BrokerRouter(
+        resolved_adapters, session_provider, consume_gate=gate.consume, config=config,
+        rate_limiter=rate_limiter,
+    )
 
 
 # ---------------------------------------------------------------------------

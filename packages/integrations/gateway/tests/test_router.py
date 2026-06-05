@@ -98,6 +98,30 @@ async def test_place_order_dispatches_with_valid_context() -> None:
     assert adapter.placed == [order]
 
 
+async def test_rate_limiter_throttle_runs_before_dispatch() -> None:
+    """The router throttles BELOW the gate — acquire() runs after verify, before
+    the broker call, and can only delay (never bypass) a dispatch."""
+    class _SpyLimiter:
+        def __init__(self) -> None:
+            self.acquired: list[tuple[str, str]] = []
+
+        async def acquire(self, broker_id: str, kind: str) -> None:
+            self.acquired.append((broker_id, kind))
+
+    adapter = _FakeAdapter()
+    limiter = _SpyLimiter()
+    router = BrokerRouter(
+        {"dhan": adapter},
+        lambda _ctx, _aid, _acct: _session(),
+        rate_limiter=limiter,
+    )
+    order = _order()
+    ctx = _mint(order)
+    await router.place_order(_request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx)
+    assert limiter.acquired == [("dhan", "order")]
+    assert adapter.placed == [order]  # throttle did not block the (gated) dispatch
+
+
 async def test_place_order_rejects_adapter_mismatch() -> None:
     """A ctx minted for 'dhan' must not fire when the order resolves to 'upstox'."""
     adapter = _FakeAdapter()
