@@ -44,6 +44,7 @@ class LLMProvider(StrEnum):
     TOGETHER = "together"
     NVIDIA = "nvidia"    # NVIDIA NIM — OpenAI-compatible (integrate.api.nvidia.com)
     OPENROUTER = "openrouter"  # Routes to 100+ models
+    HERMES = "hermes"    # Nous Hermes function-calling agent models (OpenAI-compatible host)
     CUSTOM = "custom"    # Any OpenAI-compatible endpoint
 
 
@@ -143,6 +144,9 @@ _PROVIDER_URLS: dict[str, str] = {
     "together": "https://api.together.xyz/v1/chat/completions",
     "nvidia": "https://integrate.api.nvidia.com/v1/chat/completions",
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    # Hermes — Nous Hermes function-calling/agent models, served OpenAI-compatibly
+    # (local Ollama `hermes3`, a self-hosted vLLM, or any Hermes API host).
+    "hermes": "{host}/v1/chat/completions",
     # Custom (any OpenAI-compatible endpoint)
     "custom": "{host}/v1/chat/completions",
 }
