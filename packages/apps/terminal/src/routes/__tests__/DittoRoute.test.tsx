@@ -146,9 +146,9 @@ beforeEach(() => {
 });
 
 describe("DittoRoute", () => {
-  it("renders the Multi-Account Manager header", () => {
+  it("renders the Account Manager header", () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
-    expect(screen.getByText("Multi-Account Manager")).toBeInTheDocument();
+    expect(screen.getByText("Account Manager")).toBeInTheDocument();
   });
 
   it("keeps route-local checkmark SVG markup out of the source", () => {

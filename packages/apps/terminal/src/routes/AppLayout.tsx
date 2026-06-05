@@ -32,7 +32,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/automate": "Automation Hub",
   "/ai": "AI Centre",
   "/settings": "Settings",
-  "/ditto": "Multi-Account Manager",
+  "/ditto": "Account Manager",
   "/admin": "Admin Panel",
 };
 

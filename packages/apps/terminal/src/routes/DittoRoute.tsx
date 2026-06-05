@@ -233,9 +233,9 @@ function AccountsTab() {
       <DialogContent className="max-w-xl bg-surface-card border-border-default">
         <form onSubmit={handleSubmitAccount} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Add Ditto Account</DialogTitle>
+            <DialogTitle>Add Account</DialogTitle>
             <DialogDescription>
-              Register an OpenAlgo-compatible account for Ditto mirroring and account-level risk controls.
+              Register an OpenAlgo-compatible account for mirroring and account-level risk controls.
             </DialogDescription>
           </DialogHeader>
 
@@ -982,10 +982,10 @@ export default function DittoRoute() {
             <Users className="w-5 h-5 text-accent" />
             <div>
               <h1 className="font-heading font-bold text-base text-text-primary">
-                Multi-Account Manager
+                Account Manager
               </h1>
               <p className="text-xxs text-text-muted">
-                Manage clients, mirror positions, and monitor risk across accounts
+                Manage connected accounts, mirror positions, and monitor risk across accounts
               </p>
             </div>
           </div>
@@ -994,7 +994,7 @@ export default function DittoRoute() {
         {/* Tab bar */}
         <div
           role="tablist"
-          aria-label="Ditto sections"
+          aria-label="Account Manager sections"
           className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
         >
           {TABS.map((tab) => {

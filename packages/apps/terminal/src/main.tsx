@@ -114,7 +114,7 @@ const router = createBrowserRouter([
           { path: "lab", element: <ProtectedRoute><RouteErrorBoundary routeName="Lab"><Suspense fallback={<Loading />}><LabRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "automate", element: <ProtectedRoute><RouteErrorBoundary routeName="Automate"><Suspense fallback={<Loading />}><AutomateRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "ai", element: <ProtectedRoute><RouteErrorBoundary routeName="AI"><Suspense fallback={<Loading />}><AIRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
-          { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Ditto"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
+          { path: "ditto", element: <ProtectedRoute><RouteErrorBoundary routeName="Account Manager"><Suspense fallback={<Loading />}><DittoRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "settings", element: <ProtectedRoute><RouteErrorBoundary routeName="Settings"><Suspense fallback={<Loading />}><SettingsRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           ...(import.meta.env.DEV
             ? [
