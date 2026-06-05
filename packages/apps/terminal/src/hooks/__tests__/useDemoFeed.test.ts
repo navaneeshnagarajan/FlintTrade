@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { getDefaultStore } from "jotai";
 import { useDemoFeed } from "../useDemoFeed";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
@@ -49,6 +49,20 @@ describe("useDemoFeed", () => {
     const { unmount } = renderHook(() => useDemoFeed());
     expect(mockDataEngine.isRunning).toBe(true);
     unmount();
+    expect(mockDataEngine.isRunning).toBe(false);
+  });
+
+  it("clears the simulated atoms when leaving explore mode", () => {
+    renderHook(() => useDemoFeed());
+    vi.advanceTimersByTime(1000);
+    expect(getDefaultStore().get(tickAtomFamily(NIFTY_KEY))).not.toBeNull();
+
+    // Switching away from explore re-runs the effect; cleanup must null the
+    // demo-written atoms so no stale simulated price persists.
+    act(() => {
+      useModeStore.setState({ mode: "live" });
+    });
+    expect(getDefaultStore().get(tickAtomFamily(NIFTY_KEY))).toBeNull();
     expect(mockDataEngine.isRunning).toBe(false);
   });
 });

@@ -211,7 +211,13 @@ function TickSpeedWidget() {
   }, [wsConnected]);
 
   const quality = metrics.quality;
-  const qualityLabel = quality.charAt(0).toUpperCase() + quality.slice(1);
+  // When the feed is down the quality is not meaningful — show a neutral "Idle"
+  // rather than a green "Excellent" next to the disconnected/Sample badges.
+  const qualityLabel = wsConnected
+    ? quality.charAt(0).toUpperCase() + quality.slice(1)
+    : "Idle";
+  const qualityColour = wsConnected ? QUALITY_COLOURS[quality] : "text-text-muted";
+  const qualityDot = wsConnected ? QUALITY_DOT[quality] : "bg-text-muted/50";
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Tick Speed widget">
@@ -223,10 +229,10 @@ function TickSpeedWidget() {
         <div className="flex-1" />
         {/* Connection quality badge */}
         <span
-          className={cn("flex items-center gap-1 text-xxs font-medium", QUALITY_COLOURS[quality])}
+          className={cn("flex items-center gap-1 text-xxs font-medium", qualityColour)}
           aria-label={`Connection quality: ${qualityLabel}`}
         >
-          <span className={cn("inline-block w-1.5 h-1.5 rounded-full", QUALITY_DOT[quality])} aria-hidden="true" />
+          <span className={cn("inline-block w-1.5 h-1.5 rounded-full", qualityDot)} aria-hidden="true" />
           {qualityLabel}
         </span>
         {wsConnected

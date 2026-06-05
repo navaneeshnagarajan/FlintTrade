@@ -150,13 +150,13 @@ TypeScript design-system package, and 1 Rust/PyO3 tick engine.
 
 ## Credits
 
-FlintTrade is an independent, native-first platform — its application code is
-written from scratch by the FlintTrade authors. It interoperates with
-[OpenAlgo](https://github.com/marketcalls/openalgo) through an optional bridge
-adapter, and its design was informed by ideas from several open-source projects
-(including OpenAlgo and OpenClaw's agent patterns) used for reference only. See
-[notice](notice) and [docs/REFERENCES.md](docs/REFERENCES.md) for acknowledgements
-and influence notes.
+FlintTrade is a native-first platform: its backend, native gateway contract,
+safety/gating layer, and most application code are original work. It
+interoperates with [OpenAlgo](https://github.com/marketcalls/openalgo) through an
+optional bridge adapter rather than bundling its source. Some widgets and modules
+were adapted from open-source projects (each marked in-source with an "Absorbed
+from:" header); their licences and attribution are preserved in [notice](notice).
+See [docs/REFERENCES.md](docs/REFERENCES.md) for the full influence notes.
 
 ## License
 

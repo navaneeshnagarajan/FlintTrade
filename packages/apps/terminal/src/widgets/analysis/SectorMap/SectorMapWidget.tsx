@@ -1,8 +1,8 @@
 /**
  * SectorMapWidget
  *
- * Absorbed from: openalgo-chart/src/components/SectorHeatmap/SectorHeatmapModal.tsx
- * Treemap algorithm: openalgo-chart/src/components/SectorHeatmap/utils/treemapLayout.ts
+ * Adapted from: openalgo-chart/src/components/SectorHeatmap/SectorHeatmapModal.tsx
+ * Treemap algorithm: FlintTrade's own squarified implementation (see ./treemapLayout.ts)
  * Color helpers:    openalgo-chart/src/components/SectorHeatmap/utils/heatmapHelpers.ts
  * Constants:        openalgo-chart/src/components/SectorHeatmap/constants/heatmapConstants.ts
  * RRG view:         absorbed from sector-rotation-map reference repo

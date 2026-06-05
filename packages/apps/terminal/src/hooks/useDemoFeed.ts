@@ -25,9 +25,16 @@ export function useDemoFeed(): void {
   useEffect(() => {
     if (!isExplore) return;
 
+    // Track the atom keys we write so we can clear them on the way out — a
+    // residual simulated price must not linger (without the Explore banner)
+    // after a switch to Practice/Live.
+    const written = new Set<string>();
+
     const unsubscribe = mockDataEngine.onTick((ticks) => {
       for (const t of ticks) {
-        store.set(tickAtomFamily(`${t.exchange}:${t.symbol}`), {
+        const key = `${t.exchange}:${t.symbol}`;
+        written.add(key);
+        store.set(tickAtomFamily(key), {
           symbol: t.symbol,
           exchange: t.exchange,
           ltp: t.ltp,
@@ -48,6 +55,9 @@ export function useDemoFeed(): void {
     return () => {
       unsubscribe();
       mockDataEngine.stop();
+      // Drop the simulated values so non-explore surfaces start empty and wait
+      // for real WS/REST data rather than showing stale demo prices.
+      for (const key of written) store.set(tickAtomFamily(key), null);
     };
   }, [isExplore, store]);
 }
