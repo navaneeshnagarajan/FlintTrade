@@ -2157,6 +2157,12 @@ class FlintTradeApp:
         except Exception as exc:
             logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
 
+        # Hand the cron manager the shared trade store (created by the Flask
+        # factory above) so the nightly DuckDB maintenance job can CHECKPOINT +
+        # ANALYZE the same connection under its lock.
+        self.cron.trade_storage = flask_app.config.get("TRADE_STORAGE")
+        self.cron.trade_storage_lock = flask_app.config.get("TRADE_STORAGE_LOCK")
+
         # Register built-in cron jobs
         self.cron.register_builtin_jobs()
 

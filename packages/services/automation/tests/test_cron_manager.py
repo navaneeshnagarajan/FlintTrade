@@ -560,3 +560,51 @@ class TestDefaultJobsConfig:
         from flinttrade_automation.cron_manager import DEFAULT_JOBS
         for name, config in DEFAULT_JOBS.items():
             assert "trigger_args" in config, f"Job '{name}' missing trigger_args"
+
+
+class TestDbOptimiseJob:
+    """Nightly DuckDB maintenance job (CHECKPOINT + ANALYZE)."""
+
+    def test_runs_checkpoint_and_analyze_under_lock(self):
+        import threading
+
+        from flinttrade_automation.cron_manager import make_db_optimise_job
+
+        conn = MagicMock()
+        storage = MagicMock()
+        storage.connection = conn
+        lock = threading.Lock()
+
+        job = make_db_optimise_job(storage, lock)
+        job()
+
+        executed = [c.args[0] for c in conn.execute.call_args_list]
+        assert "CHECKPOINT" in executed
+        assert "ANALYZE" in executed
+        assert not lock.locked()  # released after the job
+
+    def test_no_storage_is_a_safe_noop(self):
+        from flinttrade_automation.cron_manager import make_db_optimise_job
+
+        # Must not raise when no store is configured.
+        make_db_optimise_job(None)()
+
+    def test_failure_never_raises(self):
+        from flinttrade_automation.cron_manager import make_db_optimise_job
+
+        storage = MagicMock()
+        storage.connection.execute.side_effect = RuntimeError("duckdb locked")
+        # Best-effort: a maintenance failure must be swallowed.
+        make_db_optimise_job(storage)()
+
+    def test_registered_only_when_trade_storage_present(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        without = CronManager()
+        without.register_builtin_jobs()
+        assert "db_optimise_job" not in {j["name"] for j in without.list_jobs()}
+
+        storage = MagicMock()
+        with_store = CronManager(trade_storage=storage)
+        with_store.register_builtin_jobs()
+        assert "db_optimise_job" in {j["name"] for j in with_store.list_jobs()}

@@ -102,6 +102,11 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "trigger_type": "cron",
         "trigger_args": {"hour": 23, "minute": 55, "timezone": "Asia/Kolkata"},
     },
+    "db_optimise_job": {
+        "description": "Nightly DuckDB CHECKPOINT + ANALYZE at 12:30 AM IST",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 0, "minute": 30, "timezone": "Asia/Kolkata"},
+    },
 }
 
 
@@ -194,6 +199,51 @@ def make_eod_logout_job(
     return eod_logout_job
 
 
+def make_db_optimise_job(
+    storage: Any = None,
+    storage_lock: Any = None,
+) -> Callable[[], None]:
+    """Create the db_optimise_job handler — nightly DuckDB maintenance.
+
+    Runs ``CHECKPOINT`` (folds the write-ahead log back into the main database
+    file, reclaiming space) and ``ANALYZE`` (refreshes the optimiser's column
+    statistics) on the shared trade/tick store, so analytical queries stay fast
+    and the file does not grow unbounded as ticks and trades accumulate.
+
+    Uses the shared connection under its lock — DuckDB allows only one
+    read-write connection per file, so a fresh connection would fail the file
+    lock the live store already holds. Runs every day (maintenance is not
+    market-gated). Best-effort: any failure is logged, never raised.
+
+    Args:
+        storage: The shared ``StorageManager`` (or ``None`` to skip).
+        storage_lock: A lock serialising access to the shared connection, since
+            DuckDB connections are not safe for concurrent use.
+    """
+
+    def db_optimise_job() -> None:
+        if storage is None:
+            logger.warning("db_optimise_job: no trade store configured; skipping")
+            return
+
+        def _run() -> None:
+            conn = storage.connection
+            conn.execute("CHECKPOINT")
+            conn.execute("ANALYZE")
+
+        try:
+            if storage_lock is not None:
+                with storage_lock:
+                    _run()
+            else:
+                _run()
+            logger.info("db_optimise_job: DuckDB CHECKPOINT + ANALYZE complete")
+        except Exception as exc:
+            logger.error("db_optimise_job: maintenance failed — %s", exc)
+
+    return db_optimise_job
+
+
 async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
     """Load market holidays from OpenAlgo API. Must be awaited.
 
@@ -254,6 +304,8 @@ class CronManager:
         audit_logger: Any = None,
         telegram_bot: Any = None,
         totp_login: Any = None,
+        trade_storage: Any = None,
+        trade_storage_lock: Any = None,
     ) -> None:
         self._jobs: dict[str, JobDefinition] = {}
         self._scheduler = None
@@ -262,6 +314,11 @@ class CronManager:
         self.audit_logger = audit_logger
         self.telegram_bot = telegram_bot
         self.totp_login = totp_login
+        # Shared trade/tick store + its lock, for the nightly DuckDB maintenance
+        # job. May be set after construction (the store is created by the Flask
+        # app factory, which runs after the CronManager is built).
+        self.trade_storage = trade_storage
+        self.trade_storage_lock = trade_storage_lock
         self._holidays: set[str] = set()
 
     @property
@@ -316,6 +373,14 @@ class CronManager:
             handler=make_eod_logout_job(self.audit_logger, self._holidays),
             **DEFAULT_JOBS["eod_logout_job"],
         )
+
+        # Nightly DuckDB maintenance — only when a trade store is wired.
+        if self.trade_storage is not None:
+            self.register(
+                "db_optimise_job",
+                handler=make_db_optimise_job(self.trade_storage, self.trade_storage_lock),
+                **DEFAULT_JOBS["db_optimise_job"],
+            )
 
     # ------------------------------------------------------------------
     # Job registration
