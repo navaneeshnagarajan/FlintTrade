@@ -229,6 +229,53 @@ def from_kotak_holding(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def to_quote_tokens(resolved: list[tuple[str, str]]) -> list[dict[str, str]]:
+    """Build the NEO ``quotes`` request from ``(trading_symbol, exchange)`` pairs.
+
+    NEO's ``quotes(instrument_tokens=[...])`` takes a list of
+    ``{"instrument_token": <scrip>, "exchange_segment": <seg>}`` dicts.
+    """
+    tokens: list[dict[str, str]] = []
+    for trading_symbol, exchange in resolved:
+        ex = _norm(exchange)
+        tokens.append({
+            "instrument_token": str(trading_symbol),
+            "exchange_segment": EXCHANGE_TO_KOTAK.get(ex, ex.lower()),
+        })
+    return tokens
+
+
+def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
+    """Parse one NEO quote record into a FlintTrade ``Quote`` dict.
+
+    NEO quotes share their key vocabulary with the streaming feed
+    (``settings.stock_key_mapping``); the REST surface may return either the long
+    names (``last_traded_price``) or the terse feed keys (``ltp``), so each field
+    falls back across both. Bid/ask come from ``buy_price``/``sell_price``.
+    """
+    def g(*keys: str) -> Any:
+        for k in keys:
+            if k in rec and rec[k] not in (None, ""):
+                return rec[k]
+        return 0
+
+    seg = str(g("exchange_segment", "e") or "")
+    return {
+        "symbol": g("trading_symbol", "ts") or "",
+        "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
+        "ltp": _num(g("last_traded_price", "ltp")),
+        "open": _num(g("open", "op")),
+        "high": _num(g("high", "h")),
+        "low": _num(g("low", "lo")),
+        "close": _num(g("close", "c")),
+        "volume": int(_num(g("volume", "v"))),
+        "bid": _num(g("buy_price", "bp")),
+        "ask": _num(g("sell_price", "sp")),
+        "prev_close": _num(g("close", "c")),
+        "oi": int(_num(g("open_interest", "oi"))),
+    }
+
+
 def from_kotak_funds(resp: dict[str, Any]) -> dict[str, Any]:
     """Normalise the NEO ``limits`` response into FlintTrade fund fields.
 

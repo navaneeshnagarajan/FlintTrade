@@ -57,6 +57,14 @@ class MockNeo:
     def funds(self):
         return {"data": {"avlCash": "38.19", "totMrgnUsd": "34.28", "stat": "Ok"}}
 
+    def quotes(self, instrument_tokens):
+        self.calls.append(("quotes", instrument_tokens))
+        return {"stat": "Ok", "data": [
+            {"trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm", "last_traded_price": 9.4,
+             "open": 9.2, "high": 9.6, "low": 9.1, "close": 9.3, "volume": 1000000,
+             "buy_price": 9.39, "sell_price": 9.41},
+        ]}
+
 
 def _adapter(mock):
     return KotakNeoAdapter(client_factory=lambda _s: mock, symbol_resolver=lambda s, e: "IDEA-EQ")
@@ -134,6 +142,21 @@ async def test_unresolvable_symbol_raises():
     order = Order(symbol="OBSCURE", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS")
     with pytest.raises(BrokerError, match="trading_symbol"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.asyncio
+async def test_quotes_maps_records():
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    quotes = await adapter.quotes(session, ["NSE:IDEA"])
+    assert len(quotes) == 1
+    q = quotes[0]
+    assert q.symbol == "IDEA-EQ" and q.exchange == "NSE"
+    assert q.ltp == 9.4 and q.bid == 9.39 and q.ask == 9.41
+    # request carried the NEO instrument-token dicts
+    _, tokens = [c for c in mock.calls if c[0] == "quotes"][0]
+    assert tokens[0]["exchange_segment"] == "nse_cm"
 
 
 @pytest.mark.asyncio

@@ -21,11 +21,14 @@ Cost: Kotak Neo advertises **zero brokerage** on API order execution and a free
 API. The one documented exception is that a bracket order's square-off leg
 attracts standard brokerage even though the initial leg is free.
 
+Market data: live ``quotes`` is implemented (the NEO trade API exposes live
+quotes + streaming but **no** historical-candle or option-chain endpoint, so
+those raise explicitly — see ``capabilities``). Only live tick streaming remains
+a separate wave.
+
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8). The
 adapter is NOT registered in ``build_broker_router`` — it stays dormant until SDK
-attestation + credentials. Market data (quotes/historical/option_chain/stream)
-is a separate wave (the NEO trade API exposes live quotes + streaming but no
-historical-candle or option-chain endpoint — see ``capabilities``).
+attestation + credentials.
 """
 
 from __future__ import annotations
@@ -51,7 +54,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
     from flinttrade_gateway.reconciliation import ReconciliationReport
 
-_PENDING = "Kotak Neo {0} — market-data/streaming wave pending live SDK verification"
+_PENDING = "Kotak Neo {0} — streaming wave pending live SDK verification"
+
+
+def _split_symbol(raw: str) -> tuple[str, str]:
+    """Split a ``"NSE:IDEA"`` quote symbol into ``(exchange, name)``.
+
+    A bare symbol (no ``":"``) defaults to the NSE cash segment.
+    """
+    if ":" in raw:
+        exchange, name = raw.split(":", 1)
+        return exchange.strip().upper(), name.strip()
+    return "NSE", raw.strip()
 
 KOTAKNEO_CAPABILITIES = Capabilities(
     segments=(
@@ -156,6 +170,9 @@ class KotakNeoClient:
 
     def funds(self) -> dict[str, Any]:
         return self._neo.limits()
+
+    def quotes(self, instrument_tokens: list[dict[str, str]]) -> dict[str, Any]:
+        return self._neo.quotes(instrument_tokens=instrument_tokens, quote_type="all")
 
 
 class KotakNeoAdapter(BrokerAdapter):
@@ -287,10 +304,21 @@ class KotakNeoAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).funds)
         return M.from_kotak_funds(resp)
 
-    # ---------- market data + streaming (separate wave) ----------
+    # ---------- market data ----------
 
     async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
-        raise NotImplementedError(_PENDING.format("quotes"))
+        from flinttrade_core.models import Quote  # noqa: PLC0415
+
+        resolved: list[tuple[str, str]] = []
+        for raw in symbols:
+            exchange, name = _split_symbol(raw)
+            resolved.append((self._resolve_symbol(name, exchange), exchange))
+        tokens = M.to_quote_tokens(resolved)
+        resp = await self._call(self._client(session).quotes, tokens)
+        rows = self._rows(resp)
+        if not rows and isinstance(resp, list):
+            rows = [r for r in resp if isinstance(r, dict)]
+        return [Quote(**M.from_kotak_quote(r)) for r in rows]
 
     async def historical(self, session: Session, req: dict) -> Candles:
         # NEO trade API has no historical-candle endpoint (capability is False).

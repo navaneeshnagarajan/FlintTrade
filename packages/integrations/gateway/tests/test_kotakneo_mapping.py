@@ -11,9 +11,11 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     from_kotak_funds,
     from_kotak_order,
     from_kotak_position,
+    from_kotak_quote,
     from_kotak_trade,
     to_modify_order_params,
     to_place_order_params,
+    to_quote_tokens,
 )
 
 pytestmark = pytest.mark.unit
@@ -120,3 +122,26 @@ def test_from_kotak_funds():
     assert funds["available_balance"] == "38.19"
     assert funds["used_margin"] == "34.28"
     assert funds["total_balance"] == "72.47"
+
+
+def test_to_quote_tokens_maps_segments():
+    tokens = to_quote_tokens([("IDEA-EQ", "NSE"), ("NIFTY25JUN24000CE", "NFO")])
+    assert tokens[0] == {"instrument_token": "IDEA-EQ", "exchange_segment": "nse_cm"}
+    assert tokens[1] == {"instrument_token": "NIFTY25JUN24000CE", "exchange_segment": "nse_fo"}
+
+
+def test_from_kotak_quote_long_keys():
+    q = from_kotak_quote({
+        "trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm", "last_traded_price": 9.4,
+        "open": 9.2, "high": 9.6, "low": 9.1, "close": 9.3, "volume": 1_000_000,
+        "buy_price": 9.39, "sell_price": 9.41, "open_interest": 0,
+    })
+    assert q["symbol"] == "IDEA-EQ" and q["exchange"] == "NSE"
+    assert q["ltp"] == 9.4 and q["bid"] == 9.39 and q["ask"] == 9.41 and q["volume"] == 1_000_000
+
+
+def test_from_kotak_quote_terse_feed_keys():
+    # REST may echo the streaming-feed abbreviations — both must parse.
+    q = from_kotak_quote({"ts": "NIFTY", "e": "nse_fo", "ltp": 24050.5, "h": 24100, "lo": 24000, "v": 500, "oi": 12345})
+    assert q["symbol"] == "NIFTY" and q["exchange"] == "NFO"
+    assert q["ltp"] == 24050.5 and q["high"] == 24100.0 and q["oi"] == 12345
