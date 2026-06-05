@@ -173,6 +173,66 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     return kwargs
 
 
+def _validated_core(order: Any, security_id: str) -> dict[str, Any]:
+    """Shared validation + core kwargs for every Dhan order variety."""
+    side = str(order.action).upper()
+    if side not in SIDE_MAP:
+        raise DhanMappingError(f"Unsupported action {side!r}")
+    ptype = _norm_pricetype(getattr(order, "pricetype", "MARKET"))
+    if ptype not in ORDER_TYPE_MAP:
+        raise DhanMappingError(f"Unsupported pricetype {ptype!r}")
+    product = str(order.product).upper()
+    if product not in PRODUCT_MAP:
+        raise DhanMappingError(f"Unsupported product {product!r}")
+    try:
+        segment = to_dhan_segment(str(order.exchange))
+    except KeyError as exc:
+        raise DhanMappingError(f"No Dhan segment for exchange {order.exchange!r}") from exc
+    return {
+        "security_id": str(security_id),
+        "exchange_segment": segment,
+        "transaction_type": SIDE_MAP[side],
+        "quantity": int(_num(order.quantity, 0)),
+        "order_type": ORDER_TYPE_MAP[ptype],
+        "product_type": PRODUCT_MAP[product],
+        "price": _num(getattr(order, "price", 0)),
+    }
+
+
+def to_super_order_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
+    """Translate a ``bracket``/``cover`` ``Order`` into ``dhanhq.place_super_order`` kwargs.
+
+    A Dhan super order carries entry + target + stop-loss legs. ``cover`` orders
+    set only the stop-loss leg; ``bracket`` orders set target (and optionally a
+    trailing jump) too. Raises if neither a target nor a stop-loss is present.
+    """
+    kwargs = _validated_core(order, security_id)
+    target = _num(getattr(order, "target_price", 0))
+    stop_loss = _num(getattr(order, "stop_loss_price", 0))
+    variety = str(getattr(order, "variety", "regular")).lower()
+    if variety == "cover":
+        target = 0.0  # a cover order has no target leg
+    if target <= 0 and stop_loss <= 0:
+        raise DhanMappingError("A super (bracket/cover) order needs a target_price or stop_loss_price")
+    kwargs.update({
+        "targetPrice": target,
+        "stopLossPrice": stop_loss,
+        "trailingJump": _num(getattr(order, "trailing_jump", 0)),
+    })
+    if tag:
+        kwargs["tag"] = tag
+    return kwargs
+
+
+def to_slice_order_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
+    """Translate an ``iceberg`` ``Order`` into ``dhanhq.place_slice_order`` kwargs.
+
+    Dhan slices a large order into freeze-quantity legs server-side, so the
+    payload mirrors a regular order (the broker performs the slicing).
+    """
+    return to_place_order_kwargs(order, security_id, tag=tag)
+
+
 def to_modify_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into ``dhanhq.modify_order`` keyword args."""
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))

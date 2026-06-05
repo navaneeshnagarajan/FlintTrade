@@ -87,6 +87,21 @@ class Order(BaseModel):
     price: str = "0"
     trigger_price: str = "0"
     disclosed_quantity: str = "0"
+    variety: str = "regular"
+    """Order variety. ``"regular"`` (default) is a plain order; ``"bracket"`` /
+    ``"cover"`` carry target/stop-loss legs (mapped to a broker's bracket/cover/
+    super-order endpoint); ``"iceberg"`` slices a large order into legs. Adapters
+    that do not support a variety raise ``BrokerError``. Because the variety and
+    its leg prices are part of the order, they are covered by the SafetyContext
+    HMAC — an advanced order traverses the SAME gated path as a regular one."""
+    target_price: str = "0"
+    """Target/take-profit leg price for ``bracket`` orders (0 = none)."""
+    stop_loss_price: str = "0"
+    """Stop-loss leg price for ``bracket`` / ``cover`` orders (0 = none)."""
+    trailing_jump: str = "0"
+    """Trailing stop-loss step for ``bracket`` orders (0 = no trailing)."""
+    iceberg_legs: str = "0"
+    """Number of legs to slice an ``iceberg`` order into (0 = broker default)."""
     strategy: str = "Flint"
     market_protection: bool | None = None
     """Enable Market Price Protection (MPP) for market orders.

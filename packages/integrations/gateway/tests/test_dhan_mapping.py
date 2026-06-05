@@ -22,6 +22,8 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     to_modify_order_kwargs,
     to_option_chain_dict,
     to_place_order_kwargs,
+    to_slice_order_kwargs,
+    to_super_order_kwargs,
     unwrap,
 )
 
@@ -57,6 +59,40 @@ def test_place_order_unmapped_exchange_raises():
     order = Order(symbol="X", action="BUY", exchange="NCDEX", pricetype="MARKET", product="MIS")
     with pytest.raises(DhanMappingError, match="segment"):
         to_place_order_kwargs(order, "1")
+
+
+def test_super_order_bracket_carries_both_legs():
+    order = Order(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+        quantity="5", price="2900", variety="bracket", target_price="2950",
+        stop_loss_price="2870", trailing_jump="5",
+    )
+    kw = to_super_order_kwargs(order, "11536", tag="A1")
+    assert kw["security_id"] == "11536" and kw["transaction_type"] == "BUY"
+    assert kw["targetPrice"] == 2950.0 and kw["stopLossPrice"] == 2870.0 and kw["trailingJump"] == 5.0
+    assert kw["tag"] == "A1"
+
+
+def test_super_order_cover_drops_target():
+    order = Order(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
+        quantity="5", variety="cover", target_price="2950", stop_loss_price="2870",
+    )
+    kw = to_super_order_kwargs(order, "11536")
+    assert kw["stopLossPrice"] == 2870.0 and kw["targetPrice"] == 0.0
+
+
+def test_super_order_without_legs_raises():
+    order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
+                  quantity="5", variety="bracket")
+    with pytest.raises(DhanMappingError, match="target_price or stop_loss_price"):
+        to_super_order_kwargs(order, "1")
+
+
+def test_slice_order_mirrors_place_order():
+    order = Order(symbol="RELIANCE", action="SELL", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="5000", price="2900", variety="iceberg")
+    assert to_slice_order_kwargs(order, "11536") == to_place_order_kwargs(order, "11536")
 
 
 def test_modify_order_kwargs():

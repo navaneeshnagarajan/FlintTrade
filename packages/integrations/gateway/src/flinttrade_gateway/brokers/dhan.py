@@ -209,8 +209,20 @@ class DhanAdapter(BrokerAdapter):
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         security_id = self._resolve_security(order.symbol, order.exchange)
         tag = session.algo_id or None
-        kwargs = M.to_place_order_kwargs(order, security_id, tag=tag)
-        resp = await self._call(self._client(session).place_order, **kwargs)
+        # Dispatch on order variety. Every variety travels this SAME gated method
+        # (the router token is already required above and the variety + leg prices
+        # are part of the SafetyContext-hashed order), so a bracket/cover/iceberg
+        # order is gated identically to a regular one — no parallel order path.
+        variety = str(getattr(order, "variety", "regular")).lower()
+        client = self._client(session)
+        if variety in ("regular", ""):
+            resp = await self._call(client.place_order, **M.to_place_order_kwargs(order, security_id, tag=tag))
+        elif variety in ("bracket", "cover"):
+            resp = await self._call(client.place_super_order, **M.to_super_order_kwargs(order, security_id, tag=tag))
+        elif variety == "iceberg":
+            resp = await self._call(client.place_slice_order, **M.to_slice_order_kwargs(order, security_id, tag=tag))
+        else:
+            raise BrokerError(f"Dhan does not support order variety {variety!r}")
         return M.extract_order_id(resp)
 
     async def modify_order(

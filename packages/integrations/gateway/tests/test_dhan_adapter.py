@@ -23,6 +23,14 @@ class MockDhan:
         self.calls.append(("place", kw))
         return {"status": "success", "data": {"orderId": "OID1", "orderStatus": "TRANSIT"}}
 
+    def place_super_order(self, **kw):
+        self.calls.append(("super", kw))
+        return {"status": "success", "data": {"orderId": "SUP1", "orderStatus": "TRANSIT"}}
+
+    def place_slice_order(self, **kw):
+        self.calls.append(("slice", kw))
+        return {"status": "success", "data": {"orderId": "SLC1", "orderStatus": "TRANSIT"}}
+
     def modify_order(self, **kw):
         self.calls.append(("modify", kw))
         return {"status": "success", "data": {"orderId": "OID1"}}
@@ -136,6 +144,76 @@ async def test_place_order_with_router_token():
     assert kw["exchange_segment"] == "NSE_EQ"
     assert kw["order_type"] == "LIMIT"
     assert kw["product_type"] == "CNC"
+
+
+@pytest.mark.asyncio
+async def test_bracket_order_dispatches_to_super_order():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+        quantity="5", price="2900", variety="bracket", target_price="2950", stop_loss_price="2870",
+        trailing_jump="5",
+    )
+    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert oid == "SUP1"
+    kind, kw = mock.calls[0]
+    assert kind == "super"  # routed to place_super_order, not place_order
+    assert kw["targetPrice"] == 2950.0 and kw["stopLossPrice"] == 2870.0 and kw["trailingJump"] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_cover_order_has_stop_loss_only():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
+        quantity="5", variety="cover", target_price="2950", stop_loss_price="2870",
+    )
+    await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    kind, kw = mock.calls[0]
+    assert kind == "super" and kw["stopLossPrice"] == 2870.0
+    assert kw["targetPrice"] == 0.0  # cover orders drop the target leg
+
+
+@pytest.mark.asyncio
+async def test_iceberg_order_dispatches_to_slice_order():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="SELL", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="5000", price="2900", variety="iceberg")
+    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert oid == "SLC1"
+    assert mock.calls[0][0] == "slice"
+
+
+@pytest.mark.asyncio
+async def test_advanced_order_still_requires_router_token():
+    # The gating invariant must hold for EVERY variety, not just regular orders.
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+                  quantity="5", price="2900", variety="bracket", stop_loss_price="2870")
+    with pytest.raises(SafetyBypassError):
+        await adapter.place_order(session, order)  # no token
+    assert mock.calls == []  # never reached the SDK
+
+
+@pytest.mark.asyncio
+async def test_unsupported_variety_raises():
+    from flinttrade_core.exceptions import BrokerError
+
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1")
+    object.__setattr__(order, "variety", "exotic")
+    with pytest.raises(BrokerError, match="variety"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
 
 
 @pytest.mark.asyncio
