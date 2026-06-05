@@ -1,9 +1,15 @@
 /**
- * PresetPicker.test.tsx — Renders the preset dialog with all 12 workspace names.
+ * PresetPicker.test.tsx — Renders the preset dialog with every workspace preset.
+ *
+ * The name/description assertions are driven from WORKSPACE_PRESETS so the test
+ * can never silently fall behind the registry again (it previously hard-coded
+ * "12 presets" and missed the mission-named Options Scalper + Everything).
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -39,48 +45,25 @@ describe("PresetPicker", () => {
     expect(screen.getByText("Choose a Workspace Template")).toBeInTheDocument();
   });
 
-  it("shows all original 6 preset names", () => {
+  it("renders a card for every registered preset (no preset is hidden)", () => {
     render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
-    const originalPresets = [
-      "Scalper Zone",
-      "Options Desk",
-      "Market Watch",
-      "Analysis",
-      "Risk Monitor",
-      "Investor View",
-    ];
-    for (const name of originalPresets) {
-      expect(screen.getByText(name)).toBeInTheDocument();
+    // Drive directly from the registry so adding a preset can't slip past the UI.
+    for (const preset of WORKSPACE_PRESETS) {
+      expect(
+        screen.getByText(preset.name),
+        `preset card "${preset.name}" is missing from the picker`,
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(preset.description),
+        `description for "${preset.name}" is missing from the picker`,
+      ).toBeInTheDocument();
     }
   });
 
-  it("shows all 6 new preset names", () => {
+  it("surfaces the mission-named Options Scalper four-chart desk", () => {
     render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
-    const newPresets = [
-      "Options Analysis",
-      "Sector View",
-      "Algo Trading",
-      "Portfolio Manager",
-      "Market Overview",
-      "Quick Scalper",
-    ];
-    for (const name of newPresets) {
-      expect(screen.getByText(name)).toBeInTheDocument();
-    }
-  });
-
-  it("shows all 12 preset descriptions", () => {
-    render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
-    // Spot-check a few descriptions from original and new presets
-    expect(
-      screen.getByText(/Watchlist \+ Chart \+ Ticker \+ Dashboard/i)
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Option Chain \+ IV Skew \+ Greeks Heatmap/i)
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Quick Trade \+ Order Ladder \+ Depth Heatmap/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText("Options Scalper")).toBeInTheDocument();
+    expect(screen.getByText(/Four-chart desk/i)).toBeInTheDocument();
   });
 
   it("does not render when closed", () => {
