@@ -2227,6 +2227,17 @@ class FlintTradeApp:
             except Exception as exc:
                 logger.warning("Tick capture failed to start (%s); not recording ticks", exc)
 
+        # Broker SDK attestation — log which native broker SDKs match brokers.lock
+        # so the operator can see what is / isn't ready to go live. No native
+        # adapter is wired into the router yet, so this is informational here;
+        # the halt loop (attest_loop + on_failure) is ready for when they are.
+        try:
+            from .broker_sdk_attest import attest_all, log_report  # noqa: PLC0415
+
+            log_report(attest_all())
+        except Exception as exc:  # pragma: no cover - never let attestation break boot
+            logger.warning("Broker SDK attestation failed (%s)", exc)
+
         # Verify OpenAlgo connectivity (non-fatal). Distinguish three
         # cases so the boot log is not misleading: REACHABLE_AUTHENTICATED,
         # REACHABLE_AUTH_FAILED, UNREACHABLE.
