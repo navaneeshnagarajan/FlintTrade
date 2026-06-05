@@ -228,6 +228,24 @@ describe("OrderPadWidget", () => {
     await screen.findByRole("alert");
     expect(screen.getByRole("alert")).toHaveTextContent(/TEST001/i);
   });
+
+  it("emits an order notification to the central log on success", async () => {
+    const { placeOrder } = await import("@/services/api");
+    vi.mocked(placeOrder).mockResolvedValue({ orderId: "TEST001" });
+
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:notify", listener);
+
+    render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByRole("alert");
+
+    expect(listener).toHaveBeenCalled();
+    const detail = (listener.mock.calls[0][0] as CustomEvent).detail;
+    expect(detail.category).toBe("order");
+    expect(detail.title).toMatch(/order placed/i);
+    window.removeEventListener("flinttrade:notify", listener);
+  });
 });
 
 // ---------------------------------------------------------------------------

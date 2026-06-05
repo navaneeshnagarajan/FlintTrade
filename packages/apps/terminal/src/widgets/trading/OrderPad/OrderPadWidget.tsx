@@ -49,6 +49,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { searchSymbol, placeOrder, getSymbol } from "@/services/api";
+import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useMargin } from "@/hooks/useMargin";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import type { PlaceOrderParams } from "@/types/api";
@@ -617,9 +618,20 @@ function OrderPadWidget(_props: WidgetProps) {
         (result as { order_id?: string }).order_id ??
         (result as { orderid?: string }).orderid ?? "";
       showToast("success", `Order placed${orderId ? ` · ID: ${orderId}` : ""}`, 3000);
+      // Log to the central Notification Centre (complements the transient toast).
+      emitNotification({
+        category: "order",
+        title: `Order placed: ${params.action} ${params.quantity} ${params.symbol}`,
+        body: orderId ? `Order ID ${orderId}` : "Submitted to the broker.",
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Order failed";
       showToast("error", msg, 6000, isRetryableError(msg));
+      emitNotification({
+        category: "order",
+        title: `Order failed: ${params.action} ${params.symbol}`,
+        body: msg,
+      });
     } finally {
       setLoading(false);
     }
