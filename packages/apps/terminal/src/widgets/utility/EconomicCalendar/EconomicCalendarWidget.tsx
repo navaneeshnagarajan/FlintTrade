@@ -242,7 +242,16 @@ function EconomicCalendarWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <CalendarClock size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Economic Calendar</span>
-        <span className="text-xxs text-text-muted ml-1 border border-border-subtle rounded px-1 py-0.5">sample data</span>
+        {/* Honest disclosure — events are SAMPLE_EVENTS unconditionally (no
+            economic-calendar backend is wired). Permanent badge. */}
+        <span
+          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 ml-1"
+          role="status"
+          aria-label="Showing sample data; no live economic-calendar source is wired yet"
+          title="No live data wired yet — showing sample economic events so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <div className="flex items-center gap-1.5">
           {(["high", "medium", "low"] as Impact[]).map((i) => (

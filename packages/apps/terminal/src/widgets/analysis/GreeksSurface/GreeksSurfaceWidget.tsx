@@ -419,6 +419,19 @@ function GreeksSurfaceWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
+        {/* Honest disclosure — when disconnected the surface is
+            SAMPLE_GREEKS_SURFACE_DATA (data = isConnected ? liveData : SAMPLE).
+            Permanent (non-dismissible) badge, unlike the dismissible PreviewBanner. */}
+        {!isConnected && (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample data; connect a broker for a live greeks surface"
+            title="Not connected — showing a sample greeks surface so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
         <Select value={symbol} onValueChange={setSymbol}>
           <SelectTrigger
             className="w-32 h-7 text-xs bg-surface-hover border-border-default text-text-primary focus:ring-accent/40"

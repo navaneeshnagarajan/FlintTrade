@@ -37,16 +37,18 @@ describe("StrategyMonitorWidget", () => {
     expect(screen.getByText("Strategy Monitor")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("shows the 'Sample data' badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<StrategyMonitorWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    const badge = screen.getByText("Sample data");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("role")).toBe("status");
   });
 
-  it("does not show Sample badge when connected", () => {
+  it("does not show the sample badge when connected (shows empty state instead)", () => {
     mockConnected.mockReturnValue(true);
     render(<StrategyMonitorWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.queryByText("Sample data")).toBeNull();
   });
 
   it("does NOT render fabricated sample strategies when a broker is connected", () => {

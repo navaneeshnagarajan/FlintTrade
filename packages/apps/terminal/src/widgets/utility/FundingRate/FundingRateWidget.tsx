@@ -240,6 +240,19 @@ function FundingRateWidget() {
         <span className="text-xxs text-text-muted px-1.5 py-0.5 rounded bg-surface-hover border border-border-subtle">
           Delta Exchange
         </span>
+        {/* Honest disclosure — when disconnected the table is SAMPLE_FUNDING_RATES
+            (rawData = isConnected ? liveData : SAMPLE_FUNDING_RATES). Badge shows
+            exactly when sample data is on screen. */}
+        {!isConnected && (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample funding rates; not connected to a live feed"
+            title="Not connected — showing sample funding rates so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
 
         <div className="flex-1" />
 

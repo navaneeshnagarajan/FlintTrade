@@ -39,9 +39,11 @@ describe("OrderBookReplayWidget", () => {
     expect(screen.getByText("Order Book Replay")).toBeTruthy();
   });
 
-  it("shows sample data badge", () => {
+  it("shows the permanent 'Sample data' badge", () => {
     render(<OrderBookReplayWidget />);
-    expect(screen.getByText("sample")).toBeTruthy();
+    const badge = screen.getByText("Sample data");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("role")).toBe("status");
   });
 
   it("renders the replay toolbar", () => {

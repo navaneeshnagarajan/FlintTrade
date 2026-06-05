@@ -162,6 +162,18 @@ function GlobalIndicesWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <Globe size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Global Indices</span>
+        {/* Honest disclosure — when disconnected the rows are SAMPLE_INDICES
+            (indices = isConnected ? liveData : SAMPLE_INDICES). */}
+        {!isConnected && (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample data; connect a broker for live global indices"
+            title="Not connected — showing illustrative sample index values so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
         {isConnected && (
           <Button

@@ -364,9 +364,16 @@ function StrategyMonitorWidget() {
 
         <span className="text-xxs text-text-muted">{runningCount} running</span>
 
+        {/* Honest disclosure — sample strategies are shown only when no broker is
+            connected (connected → empty state); upgrade to the canonical badge. */}
         {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample strategies; no broker connected"
+            title="No broker connected — showing sample strategies so the widget is usable in explore mode. Connect a broker to monitor live strategies."
+          >
+            Sample data
           </span>
         )}
       </div>

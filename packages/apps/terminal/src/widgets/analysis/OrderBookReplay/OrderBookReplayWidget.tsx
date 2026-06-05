@@ -235,7 +235,16 @@ function OrderBookReplayWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <BarChart3 size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Order Book Replay</span>
-        <span className="text-xxs text-text-muted border border-border-subtle rounded px-1.5 py-0.5 ml-1">sample</span>
+        {/* Honest disclosure — snapshots are SAMPLE_SNAPSHOTS unconditionally
+            (no order-book-replay backend is wired). Permanent badge. */}
+        <span
+          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 ml-1"
+          role="status"
+          aria-label="Showing sample data; no live order-book-replay feed is wired yet"
+          title="No live data wired yet — replaying sample order-book snapshots so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <span className="text-xxs font-mono tabular-nums text-text-muted">
           {fmtTime(snap.timestamp)} IST

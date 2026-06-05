@@ -28,9 +28,11 @@ describe("EconomicCalendarWidget", () => {
     expect(screen.getByText("Economic Calendar")).toBeTruthy();
   });
 
-  it("shows sample data badge", () => {
+  it("shows the permanent 'Sample data' badge", () => {
     render(<EconomicCalendarWidget />);
-    expect(screen.getByText("sample data")).toBeTruthy();
+    const badge = screen.getByText("Sample data");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("role")).toBe("status");
   });
 
   it("renders the impact legend with all three levels", () => {

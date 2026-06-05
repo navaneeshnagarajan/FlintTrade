@@ -172,7 +172,9 @@ function CurrencyConverterWidget() {
         <div className="flex-1" />
         <span
           className="flex items-center gap-1 text-xxs font-medium text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5"
-          title="Exchange rates are hardcoded and not fetched live"
+          role="status"
+          aria-label="Exchange rates are hardcoded sample values, not fetched live"
+          title="Exchange rates are hardcoded and not fetched live — indicative only"
         >
           <AlertTriangle size={9} aria-hidden="true" />
           Static rates — not live
