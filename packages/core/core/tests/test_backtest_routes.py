@@ -55,10 +55,20 @@ class TestListStrategies:
     503.  We test with a mock runner to verify the happy path.
     """
 
-    def test_strategies_returns_503_when_runner_not_configured(self, client):
-        """Without a strategy runner, the engine blueprint returns 503."""
-        resp = client.get("/api/v1/strategies", headers=_auth_headers())
-        assert resp.status_code == 503
+    def test_strategies_returns_503_when_runner_not_configured(self, flask_app, client):
+        """Without a strategy runner, the engine blueprint returns 503.
+
+        ``create_flask_app`` now auto-provisions a ``UserStrategyRunner`` so the
+        route works in production, so we null it out explicitly to exercise the
+        not-configured branch (mirroring ``test_strategies_returns_200_with_runner``).
+        """
+        previous = flask_app.config.get("STRATEGY_RUNNER")
+        flask_app.config["STRATEGY_RUNNER"] = None
+        try:
+            resp = client.get("/api/v1/strategies", headers=_auth_headers())
+            assert resp.status_code == 503
+        finally:
+            flask_app.config["STRATEGY_RUNNER"] = previous
 
     def test_strategies_returns_200_with_runner(self, flask_app, client):
         """With a strategy runner configured, returns the strategy list."""
