@@ -81,6 +81,13 @@ UPSTOX_CAPABILITIES = Capabilities(
     algo_tag_required=False,
     cost_paid=False,
     historical_intraday_intervals_minutes=[1, 3, 5, 15, 30],
+    # Upstox's documented historical-data edge: the v2/v3 history API serves
+    # 30-minute intraday candles for the last 1 year (≈365 days) — the deepest
+    # intraday lookback of the three natives (Dhan caps at 90) — and returns large
+    # date-range batches per request. Populating these lets the broker-recommendation
+    # engine credit Upstox's historical strength (HistoryApi.md interval/duration table).
+    historical_max_lookback_days_intraday=365,
+    historical_max_candles_per_request=2000,
     option_chain_supported=True,
     option_chain_greeks_supported=True,
     streaming_supported=True,

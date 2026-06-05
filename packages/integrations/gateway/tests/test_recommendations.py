@@ -72,6 +72,14 @@ def test_dhan_tops_streaming_and_advanced_orders() -> None:
     assert best_broker_for(BrokerUseCase.ADVANCED_ORDERS).broker_id == "dhan"
 
 
+def test_upstox_tops_historical_data() -> None:
+    # The mission names Upstox as the historical-data edge: its v2/v3 history API
+    # serves 30-minute intraday for the last 1 year (~365 days), the deepest
+    # intraday lookback of the three natives (Dhan caps at 90). The engine must
+    # rank Upstox first for HISTORICAL_DATA, not Dhan.
+    assert best_broker_for(BrokerUseCase.HISTORICAL_DATA).broker_id == "upstox"
+
+
 def test_options_analytics_excludes_brokers_without_a_chain() -> None:
     recs = {r.broker_id: r for r in recommend(BrokerUseCase.OPTIONS_ANALYTICS)}
     assert recs["dhan"].raw_score > 0
