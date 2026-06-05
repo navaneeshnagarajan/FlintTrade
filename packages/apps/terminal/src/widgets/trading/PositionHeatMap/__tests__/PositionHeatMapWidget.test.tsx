@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 
@@ -214,6 +214,33 @@ describe("PositionHeatMapWidget", () => {
 
     // Total P&L = 3000 + (-4000) = -1000 → "-₹1,000"
     expect(screen.getByText("-₹1,000")).toBeInTheDocument();
+  });
+
+  it("clicking a position cell opens a chart via flinttrade:addWidget (not a dead no-op)", () => {
+    mockUsePositions.mockReturnValue(makeQueryResult({ data: MOCK_POSITIONS }));
+    // JSDOM reports 0x0 for getBoundingClientRect, which would cull every
+    // treemap cell — give the container a real size so cells render.
+    const origRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      return { width: 800, height: 400, top: 0, left: 0, right: 800, bottom: 400, x: 0, y: 0, toJSON() {} } as DOMRect;
+    };
+    const events: CustomEvent[] = [];
+    const handler = (e: Event) => events.push(e as CustomEvent);
+    window.addEventListener("flinttrade:addWidget", handler);
+    try {
+      render(<PositionHeatMapWidget {...defaultProps} />);
+      // Cells are role="button" with the symbol in the aria-label.
+      const cell = screen.getByRole("button", { name: /^INFY:/ });
+      fireEvent.click(cell);
+      expect(events).toHaveLength(1);
+      expect(events[0].detail).toMatchObject({
+        widgetId: "chart",
+        props: { symbol: "INFY", exchange: "NSE" },
+      });
+    } finally {
+      window.removeEventListener("flinttrade:addWidget", handler);
+      Element.prototype.getBoundingClientRect = origRect;
+    }
   });
 
   it("renders group mode selector", () => {

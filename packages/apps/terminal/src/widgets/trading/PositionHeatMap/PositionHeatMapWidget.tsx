@@ -171,6 +171,7 @@ const EXPLORE_POSITIONS: Position[] = [
 
 interface HeatCell {
   symbol: string;
+  exchange: string;
   sector: string;
   qty: number;
   entryPrice: number;
@@ -342,6 +343,7 @@ function PositionHeatMapWidget(_props: WidgetProps) {
 
         return {
           symbol,
+          exchange,
           sector: groupMode === "exchange" ? exchange : getSector(symbol),
           qty,
           entryPrice: entry,
@@ -442,10 +444,13 @@ function PositionHeatMapWidget(_props: WidgetProps) {
 
   const handleCellClick = useCallback(
     (cell: HeatCell) => {
-      trackBehavior("trade", "positionheatmap:navigate");
+      // Open a chart for the clicked position. Must dispatch `flinttrade:addWidget`
+      // (handled in TerminalRoute) — the old `flinttrade:navigate` event carried no
+      // `path`, so the AppLayout listener resolved null and the click was a no-op.
+      trackBehavior("trade", "positionheatmap:open-chart");
       window.dispatchEvent(
-        new CustomEvent("flinttrade:navigate", {
-          detail: { widget: "chart", symbol: cell.symbol, exchange: "NSE" },
+        new CustomEvent("flinttrade:addWidget", {
+          detail: { widgetId: "chart", props: { symbol: cell.symbol, exchange: cell.exchange || "NSE" } },
         }),
       );
     },
