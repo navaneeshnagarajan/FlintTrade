@@ -20,6 +20,7 @@ import {
   resetKillSwitch,
   type SafetyConfig,
 } from "@/services/ftApi";
+import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { InlineToast } from "./shared";
 
 // ---------------------------------------------------------------------------
@@ -120,6 +121,11 @@ export default function SettingsSection() {
       void queryClient.invalidateQueries({ queryKey: ["safetyConfig"] });
       setToast({ msg: "Kill switch activated", variant: "success" });
       setKillReason("");
+      emitNotification({
+        category: "system",
+        title: "Kill switch ACTIVATED",
+        body: "All live order routing is halted. Reset the kill switch to resume trading.",
+      });
     },
     onError: (err: Error) => {
       setToast({ msg: err.message ?? "Failed to activate kill switch", variant: "error" });
@@ -131,6 +137,11 @@ export default function SettingsSection() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["safetyConfig"] });
       setToast({ msg: "Kill switch reset — trading resumed", variant: "success" });
+      emitNotification({
+        category: "system",
+        title: "Kill switch reset",
+        body: "Order routing has resumed.",
+      });
     },
     onError: (err: Error) => {
       setToast({ msg: err.message ?? "Failed to reset kill switch", variant: "error" });

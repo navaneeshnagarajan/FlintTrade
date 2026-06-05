@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent, IDockviewPanelProps } from "dockview-react";
@@ -74,6 +75,11 @@ function KillSwitchPill() {
       const { activateKillSwitch } = await import("@/services/ftApi");
       await activateKillSwitch("Manual kill switch — trader initiated from terminal");
       setTriggered(true);
+      emitNotification({
+        category: "system",
+        title: "Kill switch ACTIVATED",
+        body: "All live order routing is halted. Reset the kill switch to resume trading.",
+      });
     } catch {
       // Silent — the pill remains visible so the user can retry
     } finally {
