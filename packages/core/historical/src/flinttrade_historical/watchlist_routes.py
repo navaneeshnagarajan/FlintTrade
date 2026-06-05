@@ -18,6 +18,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from .historify_jobs import STATUS_REFUSED, HistorifyJobManager
 from .watchlist import DownloadWatchlist
 
 logger = logging.getLogger("flinttrade.historical.watchlist_routes")
@@ -26,6 +27,17 @@ historify_bp = Blueprint("historify", __name__)
 
 # Module-level singleton — replaced by ``init_watchlist_routes`` when injected.
 _watchlist: DownloadWatchlist | None = None
+
+# Background download-job manager singleton.
+_job_manager: HistorifyJobManager | None = None
+
+
+def _get_job_manager() -> HistorifyJobManager:
+    """Return the module-level download job manager, creating it lazily."""
+    global _job_manager  # noqa: PLW0603
+    if _job_manager is None:
+        _job_manager = HistorifyJobManager()
+    return _job_manager
 
 
 def _get_watchlist() -> DownloadWatchlist:
@@ -131,73 +143,76 @@ def remove_watchlist() -> tuple[Any, int]:
 
 @historify_bp.route("/v1/historify/download", methods=["POST"])
 def trigger_download() -> tuple[Any, int]:
-    """Trigger OHLCV download for all enabled watchlist items.
+    """Start a background OHLCV download for all enabled watchlist items.
 
-    Attempts to download historical data using the configured downloader.
-    Falls back to a summary of enabled items if the downloader is not
-    available (e.g. no OpenAlgo connection).
+    Non-blocking: returns a job id immediately. Poll
+    ``GET /v1/historify/download/status?job_id=<id>`` for progress, the
+    time-remaining (ETA) estimate, and the disk safety state. Bars are persisted
+    via the Historify engine (DuckDB) — the previous synchronous route discarded
+    them and, because it constructed OpenAlgoClient with the wrong signature,
+    never actually downloaded.
 
     Request JSON (optional):
-        start_date (str): ISO date, e.g. ``"2026-01-01"`` (default: 30 days ago).
+        start_date (str): ISO date (default: 30 days ago).
         end_date (str): ISO date (default: today).
 
     Returns:
-        JSON ``{"status": "success", "data": {"triggered": N, "items": [...]}}``
-        listing the symbols that were queued for download.
+        202 with the initial job snapshot, or 507 when the disk safety check
+        refuses to start, or 400 when there is nothing enabled / dates invalid.
     """
     body = request.get_json(silent=True) or {}
 
     today = date.today()
     default_start = (today - timedelta(days=30)).isoformat()
-
     start_date = body.get("start_date", default_start)
     end_date = body.get("end_date", today.isoformat())
 
     enabled = _get_watchlist().get_enabled()
-    results: list[dict[str, Any]] = []
+    if not enabled:
+        return jsonify({"status": "error", "message": "No enabled watchlist items to download"}), 400
 
-    for item in enabled:
-        entry: dict[str, Any] = {
-            "symbol": item.symbol,
-            "exchange": item.exchange,
-            "interval": item.interval,
-            "status": "queued",
-        }
-        # Attempt actual download if HistoricalDownloader is available
-        try:
-            from flinttrade_core.openalgo_client import OpenAlgoClient  # noqa: PLC0415
-            from .downloader import HistoricalDownloader  # noqa: PLC0415
-            from flinttrade_core.config import Settings  # noqa: PLC0415
+    try:
+        from_date = date.fromisoformat(start_date)
+        to_date = date.fromisoformat(end_date)
+    except ValueError:
+        return jsonify({"status": "error", "message": "start_date/end_date must be ISO dates"}), 400
 
-            settings = Settings()
-            oa_client = OpenAlgoClient(
-                host=settings.openalgo_host,
-                port=settings.openalgo_port,
-                api_key=settings.openalgo_api_key,
-            )
-            downloader = HistoricalDownloader(oa_client)
-            result = downloader.download(
-                symbol=item.symbol,
-                exchange=item.exchange,
-                interval=item.interval,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            entry["status"] = "ok" if result.success else "error"
-            entry["bars"] = result.total_bars
-            entry["errors"] = result.errors
-        except Exception as exc:
-            logger.debug("Download unavailable for %s/%s: %s", item.symbol, item.exchange, exc)
-            entry["status"] = "queued"
+    symbols = sorted({(item.symbol, item.exchange) for item in enabled})
+    intervals = sorted({item.interval for item in enabled})
+    total = len(symbols) * len(intervals)
 
-        results.append(entry)
+    async def _runner(progress: Any) -> None:
+        from flinttrade_core.config import Settings  # noqa: PLC0415
+        from flinttrade_core.openalgo_client import OpenAlgoClient  # noqa: PLC0415
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "triggered": len(enabled),
-            "start_date": start_date,
-            "end_date": end_date,
-            "items": results,
-        },
-    }), 200
+        from .historify import HistorifyDownloader  # noqa: PLC0415
+        from .pipeline import DataPipeline  # noqa: PLC0415
+
+        client = OpenAlgoClient(Settings.from_env())
+        downloader = HistorifyDownloader(client, DataPipeline())
+        await downloader.download_symbols(
+            symbols, intervals, from_date, to_date, progress_callback=progress,
+        )
+
+    storage_dir = str(Path.home() / ".flinttrade")
+    job = _get_job_manager().start(total=total, runner=_runner, storage_path=storage_dir)
+    status_code = 507 if job.status == STATUS_REFUSED else 202
+    return jsonify({"status": "success", "data": job.to_dict()}), status_code
+
+
+@historify_bp.route("/v1/historify/download/status", methods=["GET"])
+def download_status() -> tuple[Any, int]:
+    """Return a download job's progress + ETA + safety state (or all jobs).
+
+    Query:
+        job_id (str, optional): When given, return that job; 404 if unknown.
+        When omitted, return all jobs.
+    """
+    job_id = request.args.get("job_id", "").strip()
+    mgr = _get_job_manager()
+    if job_id:
+        job = mgr.get(job_id)
+        if job is None:
+            return jsonify({"status": "error", "message": f"Unknown job {job_id}"}), 404
+        return jsonify({"status": "success", "data": job.to_dict()}), 200
+    return jsonify({"status": "success", "data": [j.to_dict() for j in mgr.list_jobs()]}), 200
