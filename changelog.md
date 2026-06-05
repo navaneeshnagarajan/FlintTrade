@@ -21,6 +21,13 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - **Options Scalper** workspace preset (Index/Futures + CE/PE strike charts + Option
   Chain) and per-panel chart symbol pinning; all 14 layouts now applicable from the
   Ctrl+K command palette.
+- **Live trade journalling** — every executed live order is now recorded to a shared
+  DuckDB store (best-effort, never blocks the order), so the trade journal and P&L
+  analytics populate in Live instead of staying empty. `GET /api/v1/trades/journal`
+  reads the same store and supports a `start_date`+`end_date` history window across all
+  strategies (`StorageManager.get_trades_by_date_range`).
+- **Order-latency monitoring** — the gated order dispatch now feeds the latency tracker,
+  so per-broker round-trip stats populate `/api/v1/latency/stats` (previously empty).
 
 ### Fixed
 
@@ -46,6 +53,14 @@ Versioning: [Semantic Versioning](https://semver.org/).
   ID-list model; cards derive the widget count).
 - Earnings sample data always includes recent past results regardless of the calendar
   date.
+- Trade Log, Trade Performance, Net Positions and Risk Dashboard no longer show
+  fabricated sample data to a *connected* user — each now switches to the real broker
+  positionbook / funds / trade journal when connected (the connection flag previously
+  only toggled a "Sample" badge). Risk Dashboard shows only the metrics it can derive
+  faithfully (exposure, margin utilised); net delta / theta / max-loss are omitted with
+  an honest note rather than invented, pending a portfolio option-greeks feed.
+- `order_analytics`/`strategy_comparison` blueprints registered (`/api/v1/...`) — were
+  defined but never wired.
 
 ## [0.6.0-alpha] - 2026-05-30
 

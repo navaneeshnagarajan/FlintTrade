@@ -210,6 +210,19 @@ Source: `packages/services/engine/src/strategy_routes.py`. Backed by the
 | `strategies/<id>/logs` (**GET**) | Tail a strategy's logs. |
 | `strategies/<id>/schedule` (**POST**) · `strategies/scheduled` (**GET**) | Cron-schedule a strategy. |
 
+### Trade journal & P&L (`/ft-api/api/v1/trades/*`, `…/pnl-tracker/*`)
+
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py` (journal),
+`packages/core/data/src/flinttrade_data/pnl_routes.py` (P&L). Every executed live
+order is appended to a shared DuckDB store by the gated order dispatch, so the
+journal populates in Live mode.
+
+| Endpoint | Purpose |
+|---|---|
+| `trades/journal` (**GET**) | Recorded trades. No params → today; `start_date`+`end_date` → history window across all strategies; `+strategy` → that strategy only. Rows are keyed `timestamp` (ISO, IST), with `symbol`, `action`, `quantity`, `price`, `pnl`, `strategy`, `orderid`. |
+| `pnl-tracker` (**GET**) | Realised/unrealised P&L time series (optionally `?since=<unix>`). |
+| `pnl-tracker/summary` (**GET**) | Aggregated P&L summary (realised, unrealised, totals, trade count). |
+
 ### Auth (`/ft-api/v1/auth/*`)
 
 JWT-based. Source: `packages/core/core/src/auth_routes.py`.
@@ -239,7 +252,7 @@ The terminal has two development proxy namespaces:
 | `/api/v1/health` | Aggregated backend health used by the Settings monitoring panel. |
 | `/api/v1/traffic/stats` | Request count, request rate, error rate, average latency, and top paths. |
 | `/api/v1/traffic/recent` | Recent request records for operator forensics. |
-| `/api/v1/latency/stats` | Per-broker order latency percentiles. |
+| `/api/v1/latency/stats` | Per-broker order latency percentiles. Fed by the gated order dispatch, which records each order's round-trip latency. |
 | `/api/v1/latency/recent` | Recent latency records. |
 | `/health`, `/health/detail`, `/healthz`, `/readyz`, `/api/v1/ping` | Process health and compatibility probes. |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
