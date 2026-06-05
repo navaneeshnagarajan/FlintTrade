@@ -336,6 +336,18 @@ function TradeCopierWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <Copy size={13} className="text-accent flex-none" />
         <span className="text-sm font-medium text-text-primary">Trade Copier</span>
+        {/* Honest disclosure — the source/target accounts are hardcoded
+            SAMPLE_ACCOUNTS (the real Ditto account backend is not wired here
+            yet), so they are NOT the operator's connected brokers. Keep this
+            badge visible until the list loads from getDittoAccounts(). */}
+        <span
+          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+          role="status"
+          aria-label="Demo accounts — not your connected brokers; the account list is sample data"
+          title="Sample accounts — not connected. The real account list will load from the Ditto backend once wired."
+        >
+          Demo accounts
+        </span>
         <div className="flex-1" />
         {/* Test button for demo */}
         <Button

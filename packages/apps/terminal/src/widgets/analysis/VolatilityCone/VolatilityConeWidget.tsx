@@ -12,7 +12,6 @@
 import { useState, useMemo, memo } from "react";
 import { Triangle, ChevronDown } from "lucide-react";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -169,7 +168,6 @@ function SymbolDropdown({ value, onChange }: SymbolDropdownProps) {
 // ---------------------------------------------------------------------------
 
 function VolatilityConeWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
   const [symbol, setSymbol] = useState("NIFTY");
 
@@ -202,11 +200,19 @@ function VolatilityConeWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Triangle size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Volatility Cone</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — coneData is SAMPLE_CONE unconditionally; no
+            `/ft-api/v1/volcone` endpoint exists yet. The badge stays visible
+            even when connected (connecting a broker does not make this cone
+            live). When the endpoint lands, gate on `isConnected && mode !==
+            "live"` and add the fetch. */}
+        <span
+          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+          role="status"
+          aria-label="Showing sample data; no live volatility-cone endpoint is wired yet"
+          title="No live data wired yet — showing a sample IV cone so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <SymbolDropdown value={symbol} onChange={handleSymbolChange} />
       </div>

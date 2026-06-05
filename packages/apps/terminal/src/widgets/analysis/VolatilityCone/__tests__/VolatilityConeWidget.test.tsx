@@ -6,18 +6,11 @@ import "@testing-library/jest-dom";
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: vi.fn().mockReturnValue(false),
-}));
-
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import VolatilityConeWidget from "../VolatilityConeWidget";
-
-const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   global.ResizeObserver = class {
@@ -33,16 +26,13 @@ describe("VolatilityConeWidget", () => {
     expect(screen.getByText("Volatility Cone")).toBeTruthy();
   });
 
-  it("shows sample badge when broker is disconnected", () => {
-    mockUseBrokerConnected.mockReturnValue(false);
+  it("always shows the permanent 'Sample data' badge (no live endpoint wired)", () => {
+    // coneData is hardcoded SAMPLE_CONE with no `/ft-api/v1/volcone` backend; the
+    // badge must stay visible even when a broker is connected.
     render(<VolatilityConeWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
-  });
-
-  it("hides sample badge when broker is connected", () => {
-    mockUseBrokerConnected.mockReturnValue(true);
-    render(<VolatilityConeWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    const badge = screen.getByText("Sample data");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("aria-label")).toContain("sample data");
   });
 
   it("renders the cone chart", () => {

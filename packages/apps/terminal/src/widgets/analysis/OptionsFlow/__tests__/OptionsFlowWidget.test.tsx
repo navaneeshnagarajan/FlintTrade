@@ -5,18 +5,11 @@ import { render, screen, fireEvent } from "@testing-library/react";
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: vi.fn().mockReturnValue(false),
-}));
-
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import OptionsFlowWidget, { SAMPLE_FLOW } from "../OptionsFlowWidget";
-
-const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 beforeAll(() => {
   global.ResizeObserver = class {
@@ -32,31 +25,25 @@ beforeAll(() => {
 
 describe("OptionsFlowWidget", () => {
   it("renders widget title", () => {
-    mockConnected.mockReturnValue(false);
     render(<OptionsFlowWidget />);
     expect(screen.getByText("Options Flow")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
-    mockConnected.mockReturnValue(false);
+  it("always shows the permanent 'Sample data' badge (no live feed wired)", () => {
+    // The flow is hardcoded SAMPLE_FLOW with no backend; the badge must NOT be
+    // masked by broker connection — connecting a broker does not make it live.
     render(<OptionsFlowWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
-  });
-
-  it("does not show Sample badge when connected", () => {
-    mockConnected.mockReturnValue(true);
-    render(<OptionsFlowWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    const badge = screen.getByText("Sample data");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("aria-label")).toContain("sample data");
   });
 
   it("renders the flow table with aria label", () => {
-    mockConnected.mockReturnValue(false);
     render(<OptionsFlowWidget />);
     expect(screen.getByLabelText("Options flow table")).toBeTruthy();
   });
 
   it("renders column headers", () => {
-    mockConnected.mockReturnValue(false);
     render(<OptionsFlowWidget />);
     expect(screen.getByText("Time")).toBeTruthy();
     expect(screen.getByText("Symbol")).toBeTruthy();
@@ -67,20 +54,17 @@ describe("OptionsFlowWidget", () => {
   });
 
   it("renders filter controls", () => {
-    mockConnected.mockReturnValue(false);
     render(<OptionsFlowWidget />);
     expect(screen.getByLabelText("Filter by symbol")).toBeTruthy();
     expect(screen.getByLabelText("Filter by activity type")).toBeTruthy();
   });
 
   it("shows all sample entries initially", () => {
-    mockConnected.mockReturnValue(false);
     render(<OptionsFlowWidget />);
     expect(screen.getByText(`${SAMPLE_FLOW.length} entries`)).toBeTruthy();
   });
 
   it("symbol filter trigger is present with default value", () => {
-    mockConnected.mockReturnValue(false);
     render(<OptionsFlowWidget />);
     const trigger = screen.getByLabelText("Filter by symbol");
     expect(trigger).toBeTruthy();
@@ -89,7 +73,6 @@ describe("OptionsFlowWidget", () => {
   });
 
   it("sort toggle button exists and toggles label", () => {
-    mockConnected.mockReturnValue(false);
     render(<OptionsFlowWidget />);
     const btn = screen.getByLabelText(/Sort by/i) as HTMLButtonElement;
     expect(btn).toBeTruthy();
