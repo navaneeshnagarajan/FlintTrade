@@ -24,6 +24,7 @@ import {
   FlaskConical,
   LayoutTemplate,
   Rss,
+  UserCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,6 +33,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export type SectionId =
+  | "profile"
   | "general"
   | "appearance"
   | "ticker"
@@ -62,6 +64,7 @@ export interface SectionDef {
 // ---------------------------------------------------------------------------
 
 export const SECTIONS: SectionDef[] = [
+  { id: "profile",    label: "Profile",            icon: UserCircle   },
   { id: "general",    label: "General",           icon: Monitor      },
   { id: "appearance", label: "Appearance",         icon: Palette      },
   { id: "ticker",     label: "Ticker Bar",         icon: Rss          },

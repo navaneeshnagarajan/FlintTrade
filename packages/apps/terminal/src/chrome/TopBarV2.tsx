@@ -20,7 +20,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { Search, Maximize2, Minimize2, Settings, Wrench } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
@@ -34,6 +34,7 @@ import type { MarketTiming } from "@/types/api";
 import type { ToolId } from "@/types/widgets";
 import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
 import AccountSwitcher from "./AccountSwitcher";
+import ModeIndicator from "./ModeIndicator";
 import QuickAccessPanel from "./QuickAccessPanel";
 import TickerMarquee from "./TickerMarquee";
 import type { TickerMode } from "./TickerMarquee";
@@ -222,18 +223,23 @@ function FullscreenButton() {
 }
 
 // ---------------------------------------------------------------------------
-// Avatar — placeholder until auth/profile is wired
+// Avatar — opens the Profile Manager (Settings → Profile)
 // ---------------------------------------------------------------------------
 
 function Avatar() {
+  const navigate = useNavigate();
+  const name = useSettingsStore((s) => s.name);
+  const initial = (name.trim()[0] ?? "T").toUpperCase();
+
   return (
     <button
       type="button"
       className="w-6 h-6 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center text-accent text-xs font-bold shrink-0 hover:bg-accent/30 transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
-      aria-label="User profile"
+      aria-label="Open profile and settings"
       data-testid="avatar-btn"
+      onClick={() => navigate("/settings#profile")}
     >
-      U
+      {initial}
     </button>
   );
 }
@@ -422,6 +428,9 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         <FullscreenButton />
 
         <Divider />
+
+        {/* Trading mode switch (Explore / Practice / Live) */}
+        <ModeIndicator />
 
         {/* Live badge */}
         <LiveBadge />

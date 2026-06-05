@@ -272,6 +272,12 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("avatar-btn")).toBeInTheDocument();
   });
 
+  it("mounts the trading mode indicator (Explore by default)", () => {
+    renderTopBarV2();
+    // ModeIndicator renders the EXPLORE pill when modeStore is at its default.
+    expect(screen.getByText("EXPLORE")).toBeInTheDocument();
+  });
+
   it("uses adaptive glass chrome tokens for the background", () => {
     renderTopBarV2();
     const bar = screen.getByTestId("topbar-v2");

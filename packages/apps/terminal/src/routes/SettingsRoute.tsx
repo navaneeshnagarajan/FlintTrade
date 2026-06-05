@@ -15,6 +15,7 @@ import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { InlineToast } from "@/tools/Settings/shared";
+import { ProfileSection }    from "@/tools/Settings/ProfileSection";
 import { GeneralSection }    from "@/tools/Settings/GeneralSection";
 import { AppearanceSection } from "@/tools/Settings/AppearanceSection";
 import { ConnectionSection } from "@/tools/Settings/ConnectionSection";
@@ -111,6 +112,7 @@ export default function SettingsRoute() {
 
   function renderContent(): JSX.Element {
     switch (activeSection) {
+      case "profile":    return <ProfileSection />;
       case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
       case "appearance": return <AppearanceSection />;
       case "ticker":     return <TickerSettings />;

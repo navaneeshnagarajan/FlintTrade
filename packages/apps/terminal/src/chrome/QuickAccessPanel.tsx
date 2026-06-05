@@ -30,7 +30,7 @@ import {
   Brain,
   Send,
   TrendingUp,
-  Info,
+  UserCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -73,12 +73,12 @@ const THEME_DOTS = [
 const DENSITY_OPTIONS = ["compact", "comfortable"] as const;
 
 const SECTION_SHORTCUTS = [
+  { id: "profile", label: "Profile", icon: UserCircle },
   { id: "api", label: "API", icon: Wifi },
   { id: "risk", label: "Risk", icon: ShieldAlert },
   { id: "llm", label: "LLM", icon: Brain },
   { id: "telegram", label: "Telegram", icon: Send },
   { id: "trading", label: "Trading", icon: TrendingUp },
-  { id: "about", label: "About", icon: Info },
 ] as const;
 
 // ---------------------------------------------------------------------------
