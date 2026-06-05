@@ -247,7 +247,7 @@ def market_regime() -> tuple[Any, int]:
         }), 503
 
     try:
-        from .regime_detector import detect_regime_detailed  # noqa: PLC0415
+        from .regime_detector import detect_regime_detailed, select_strategy_for_regime  # noqa: PLC0415
 
         params = {"symbol": symbol, "exchange": "NSE_INDEX", "interval": "D"}
         history = registry.get_history(registry.get_primary_account_id(), params)
@@ -261,7 +261,10 @@ def market_regime() -> tuple[Any, int]:
                 "message": f"Not enough history for {symbol} to compute a regime.",
             }), 503
         result = detect_regime_detailed(highs, lows, closes)
-        return jsonify({"status": "success", "data": result.to_dict()}), 200
+        data = result.to_dict()
+        # Close the loop: recommend a regime-appropriate strategy style.
+        data["suggested_strategy"] = select_strategy_for_regime(result.state).to_dict()
+        return jsonify({"status": "success", "data": data}), 200
     except Exception:
         logger.exception("market_regime error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500

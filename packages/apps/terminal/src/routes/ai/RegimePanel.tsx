@@ -427,6 +427,25 @@ export default function RegimePanel() {
             </div>
           </Card>
 
+          {/* Regime-appropriate strategy suggestion (closes the loop on
+              detection — the backend maps the regime to a strategy style). */}
+          {data.suggested_strategy && (
+            <Card className="bg-surface-card border border-accent/30 rounded-lg p-4 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold text-text-primary">Suggested Strategy</h4>
+                <Badge
+                  variant="outline"
+                  className="text-xs font-semibold px-2.5 py-0.5 border-accent/40 text-accent bg-accent/10 rounded-full"
+                >
+                  {data.suggested_strategy.label}
+                </Badge>
+              </div>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                {data.suggested_strategy.rationale}
+              </p>
+            </Card>
+          )}
+
           {/* +DI / -DI bar */}
           {!isNaN(data.plus_di) && !isNaN(data.minus_di) && (
             <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-2">

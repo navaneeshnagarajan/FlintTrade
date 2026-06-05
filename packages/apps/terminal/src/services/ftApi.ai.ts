@@ -227,6 +227,13 @@ export type RegimeState =
   | "VOLATILE_DIRECTIONLESS"
   | "LOW_VOLATILITY";
 
+/** A regime-appropriate strategy recommendation (closes the loop on detection). */
+export interface RegimeStrategySuggestion {
+  strategy: string;
+  label: string;
+  rationale: string;
+}
+
 export interface RegimeResult {
   state: RegimeState;
   adx: number;
@@ -237,6 +244,8 @@ export interface RegimeResult {
   minus_di: number;
   close: number;
   n_bars: number;
+  /** Backend-recommended strategy style for the detected regime. */
+  suggested_strategy?: RegimeStrategySuggestion;
 }
 
 export const getRegimeDetector = (symbol: string) =>
