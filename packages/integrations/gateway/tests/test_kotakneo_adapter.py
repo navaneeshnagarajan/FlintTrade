@@ -71,6 +71,13 @@ class MockNeo:
         return {"data": {"reqdMrgn": "15.50", "ordMrgn": "15.50", "avlCash": "38.19",
                          "insufFund": "0", "rmsVldtd": "OK", "stat": "Ok"}}
 
+    def search_scrip(self, exchange_segment, symbol):
+        self.calls.append(("search", (exchange_segment, symbol)))
+        return [
+            {"pSymbol": 11915, "pExchSeg": "nse_cm", "pSymbolName": "YESBANK",
+             "pTrdSymbol": "YESBANK-EQ", "pISIN": "INE528G01035", "lLotSize": 1, "dTickSize": 1},
+        ]
+
 
 def _adapter(mock):
     return KotakNeoAdapter(client_factory=lambda _s: mock, symbol_resolver=lambda s, e: "IDEA-EQ")
@@ -246,6 +253,17 @@ async def test_margin_calculator_reads_estimate():
                   product="MIS", quantity="10", price="9.4")
     margin = await adapter.margin_calculator(session, order)
     assert margin["required_margin"] == "15.50" and margin["available_balance"] == "38.19"
+
+
+@pytest.mark.asyncio
+async def test_search_scrip_resolves_symbol():
+    adapter = _adapter(MockNeo())
+    session = await _session(adapter)
+    scrips = await adapter.search_scrip(session, "YESBANK", "NSE")
+    assert len(scrips) == 1
+    s = scrips[0]
+    assert s["trading_symbol"] == "YESBANK-EQ" and s["token"] == "11915"
+    assert s["exchange"] == "NSE" and s["isin"] == "INE528G01035" and s["lot_size"] == "1"
 
 
 @pytest.mark.asyncio

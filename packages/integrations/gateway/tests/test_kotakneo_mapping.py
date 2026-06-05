@@ -12,6 +12,7 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     from_kotak_holding,
     from_kotak_margin,
     from_kotak_order,
+    from_kotak_scrip,
     from_kotak_position,
     from_kotak_quote,
     from_kotak_trade,
@@ -236,6 +237,15 @@ def test_from_kotak_funds_check_margin_fallback():
     # If a build returns the data-wrapped check-margin shape, fall back to it.
     funds = from_kotak_funds({"data": {"avlCash": "100.00", "totMrgnUsd": "40.00"}})
     assert funds["available_balance"] == "100.00" and funds["used_margin"] == "40.00"
+
+
+def test_from_kotak_scrip():
+    s = from_kotak_scrip({
+        "pSymbol": 11915, "pExchSeg": "nse_cm", "pSymbolName": "YESBANK",
+        "pTrdSymbol": "YESBANK-EQ", "pISIN": "INE528G01035", "lLotSize": 1, "dTickSize": 1,
+    })
+    assert s["trading_symbol"] == "YESBANK-EQ" and s["token"] == "11915"
+    assert s["exchange"] == "NSE" and s["name"] == "YESBANK" and s["lot_size"] == "1"
 
 
 def test_margin_params_and_parse():

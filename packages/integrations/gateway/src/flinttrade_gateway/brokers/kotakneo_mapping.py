@@ -300,6 +300,25 @@ def from_kotak_holding(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
+    """Normalise one NEO ``search_scrip`` record into a scrip-lookup dict.
+
+    NEO returns scrip metadata with ``p``-prefixed keys; the ``pTrdSymbol`` is the
+    trading symbol the order endpoints expect and ``pSymbol`` is the token.
+    """
+    seg = str(rec.get("pExchSeg", ""))
+    return {
+        "trading_symbol": rec.get("pTrdSymbol", ""),
+        "token": str(rec.get("pSymbol", "")),
+        "name": rec.get("pSymbolName", rec.get("pDesc", "")),
+        "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
+        "isin": rec.get("pISIN", ""),
+        "lot_size": str(rec.get("lLotSize", 0)),
+        "tick_size": str(rec.get("dTickSize", 0)),
+        "option_type": rec.get("pOptionType") or "",
+    }
+
+
 def to_margin_params(order: Any, trading_symbol: str) -> dict[str, Any]:
     """Build ``NeoAPI.margin_required`` kwargs from an ``Order`` (pre-trade)."""
     side = _norm(order.action)

@@ -179,6 +179,9 @@ class KotakNeoClient:
     def margin(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._neo.margin_required(**params)
 
+    def search_scrip(self, exchange_segment: str, symbol: str) -> Any:
+        return self._neo.search_scrip(exchange_segment=exchange_segment, symbol=symbol)
+
 
 class KotakNeoAdapter(BrokerAdapter):
     """Native Kotak Neo adapter.
@@ -334,6 +337,19 @@ class KotakNeoAdapter(BrokerAdapter):
         params = M.to_margin_params(order, trading_symbol)
         resp = await self._call(self._client(session).margin, params)
         return M.from_kotak_margin(resp)
+
+    async def search_scrip(self, session: Session, symbol: str, exchange: str = "NSE") -> list[dict]:
+        """Resolve a symbol to NEO scrip metadata (trading_symbol, token, lot size).
+
+        A read — makes the adapter self-sufficient for symbol resolution rather
+        than always requiring an injected ``symbol_resolver``.
+        """
+        from .kotakneo_mapping import EXCHANGE_TO_KOTAK  # noqa: PLC0415
+
+        seg = EXCHANGE_TO_KOTAK.get(str(exchange).upper(), str(exchange).lower())
+        resp = await self._call(self._client(session).search_scrip, seg, symbol)
+        rows = resp if isinstance(resp, list) else (resp.get("data", []) if isinstance(resp, dict) else [])
+        return [M.from_kotak_scrip(r) for r in rows if isinstance(r, dict)]
 
     async def historical(self, session: Session, req: dict) -> Candles:
         # NEO trade API has no historical-candle endpoint (capability is False).
