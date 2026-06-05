@@ -15,9 +15,11 @@ Market data — quotes (full market quote), historical candles (v3 history) and
 the put/call option chain — is implemented too; only live tick streaming remains
 a separate wave. Response parsing lives in ``upstox_mapping`` and is unit-tested.
 
-Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8). The
-adapter is NOT registered in ``build_broker_router`` — it stays dormant until SDK
-attestation + credentials.
+Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8).
+``build_broker_router``'s native-activation factory registers this adapter
+automatically once its pinned SDK is attested AND vault credentials exist;
+until then it stays dormant (the ``brokers.lock`` Upstox pin is still
+PLACEHOLDER, so it is ``skipped`` and never activates today).
 """
 
 from __future__ import annotations

@@ -7,13 +7,16 @@ positions / holdings / funds). Request/response translation lives in
 the dhanhq SDK on a worker thread (the SDK is synchronous) and normalise results.
 
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8), so
-a bare call raises before any Dhan request. This adapter is NOT registered in
-``build_broker_router`` — it stays dormant until the operator wires it behind SDK
-attestation + the algo-tag guard and provides credentials; live order placement
-must be verified against the real SDK + a Dhan account.
+a bare call raises before any Dhan request. ``build_broker_router``'s
+native-activation factory registers this adapter automatically once its pinned
+SDK (``dhanhq``) is attested AND vault credentials exist; until then it stays
+dormant. Dhan is the one native with a real ``brokers.lock`` pin, so where
+``dhanhq`` is installed at the pinned version it *is* attested — only stored
+credentials + a live login then separate it from going live (verify live order
+placement against the real SDK + a Dhan account).
 
-Market-data methods (quotes/historical/option_chain) and the binary tick stream
-are a separate wave and currently raise ``NotImplementedError`` honestly.
+This adapter implements the FULL contract: auth, gated writes, portfolio reads,
+market data (quotes / historical / option_chain) and the binary tick stream.
 """
 
 from __future__ import annotations

@@ -34,6 +34,7 @@ import os
 import secrets
 import signal
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -565,12 +566,57 @@ def _snapshot_brokers_bak(brokers_config: dict[str, Any]) -> None:
     _atomic_write(bak, json.dumps(brokers_config, indent=2))
 
 
+def _native_activation_checks(
+    credential_store: CredentialStore | None,
+) -> tuple[Callable[[str], bool], Callable[[str], bool]]:
+    """Build the ``(attest_ok, has_credentials)`` gates for native activation.
+
+    ``attest_ok(broker_id)`` is true only when the broker's pinned SDK
+    (``brokers.lock``) is installed at the exact pinned version; ``has_credentials``
+    is true only when the encrypted vault holds an account for that broker. Both
+    fail closed: any error (no lock, no vault) yields ``False`` so a native stays
+    dormant. In the default no-SDK / no-creds environment every native is
+    correctly skipped.
+    """
+    from flinttrade_gateway.brokers.native_factory import SDK_PIN_BY_BROKER  # noqa: PLC0415
+
+    try:
+        from .broker_sdk_attest import STATUS_OK, attest_all  # noqa: PLC0415
+
+        attest_status = {r.broker: r.status for r in attest_all()}
+    except Exception as exc:  # pragma: no cover - attestation must never brick boot
+        logger.warning("Native attestation unavailable (%s) — natives stay dormant", exc)
+        attest_status = {}
+
+    def attest_ok(broker_id: str) -> bool:
+        pin = SDK_PIN_BY_BROKER.get(broker_id)
+        return pin is not None and attest_status.get(pin) == STATUS_OK
+
+    credentialled: set[str] = set()
+    if credential_store is not None:
+        try:
+            for account in credential_store.list_accounts():
+                adapter_id = account.get("adapter_id") or account.get("broker")
+                if adapter_id:
+                    credentialled.add(str(adapter_id))
+        except Exception as exc:  # pragma: no cover - vault read must never brick boot
+            logger.warning("Credential vault read failed (%s) — natives stay dormant", exc)
+
+    def has_credentials(broker_id: str) -> bool:
+        return broker_id in credentialled
+
+    return attest_ok, has_credentials
+
+
 def build_broker_router(
     registry: BrokerRegistry,
     brokers_config: dict[str, Any],
     *,
     adapters: dict[str, Any] | None = None,
     openalgo_client: Any | None = None,
+    native_attest_ok: Callable[[str], bool] | None = None,
+    native_has_credentials: Callable[[str], bool] | None = None,
+    native_adapter_kwargs: Callable[[str], dict[str, Any]] | None = None,
 ) -> Any:
     """Construct a config-driven :class:`BrokerRouter` (contract §13 / §11.4).
 
@@ -583,15 +629,27 @@ def build_broker_router(
     registered under the ``openalgo`` adapter id and a Session is put in the
     registry for every ``openalgo:<account>`` selector in ``registered`` — so the
     gated path can dispatch to ALL of the operator's brokers through OpenAlgo
-    (the actor still needs an entry in ``account_acls`` to be authorised). Native
-    SDK adapters register alongside as they come online; ``adapters`` lets a
-    caller inject them directly.
+    (the actor still needs an entry in ``account_acls`` to be authorised).
+
+    Native SDK adapters activate the moment their prerequisites hold: when both
+    ``native_attest_ok`` (SDK installed + pinned-match) and
+    ``native_has_credentials`` (vault holds creds) are supplied, the native
+    selectors in ``registered`` are run through ``build_native_adapters`` and the
+    survivors registered alongside OpenAlgo. With either callable omitted — the
+    default — no native is constructed, so the natives stay dormant exactly as
+    before. ``adapters`` still lets a caller inject adapters directly (and wins
+    over the factory for the same id). A registered native has no live Session
+    until the credential-replay login step establishes one; an unauthenticated
+    native selector simply has no session to dispatch to.
 
     Raises:
         RoutingConfigError: If ``brokers_config`` is malformed.
     """
     from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
     from flinttrade_engine.safety import SafetyGate  # noqa: PLC0415
+    from flinttrade_gateway.brokers.native_factory import (  # noqa: PLC0415
+        build_native_adapters,
+    )
     from flinttrade_gateway.router import BrokerRouter  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingConfig  # noqa: PLC0415
     from flinttrade_gateway.session_provider import (  # noqa: PLC0415
@@ -603,6 +661,28 @@ def build_broker_router(
     gate = SafetyGate()
 
     resolved_adapters: dict[str, Any] = dict(adapters or {})
+
+    # Native-adapter activation (dormant -> live bridge). Only runs when the
+    # caller supplies both prerequisite checks; otherwise natives stay dormant.
+    if native_attest_ok is not None and native_has_credentials is not None:
+        native_ids: list[str] = []
+        for selector in config.registered:
+            try:
+                adapter_id, _account = parse_selector(selector)
+            except ValueError:
+                continue
+            native_ids.append(adapter_id)
+        activated = build_native_adapters(
+            native_ids,
+            attest_ok=native_attest_ok,
+            has_credentials=native_has_credentials,
+            adapter_kwargs=native_adapter_kwargs,
+            on_skip=lambda bid, why: logger.info("Native adapter %s dormant: %s", bid, why),
+        )
+        for adapter_id, adapter in activated.items():
+            resolved_adapters.setdefault(adapter_id, adapter)
+        if activated:
+            logger.info("Native adapters activated: %s", ", ".join(sorted(activated)))
     if openalgo_client is not None and "openalgo" not in resolved_adapters:
         from flinttrade_gateway.brokers._base import Session as _AdapterSession  # noqa: PLC0415
         from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter  # noqa: PLC0415
@@ -949,8 +1029,13 @@ def create_flask_app(
 
         _brokers_cfg = _read_workspace_brokers()
         _effective_brokers = _brokers_cfg or default_workspace_config()["brokers"]
+        _native_attest_ok, _native_has_credentials = _native_activation_checks(credential_store)
         app.config["BROKER_ROUTER"] = build_broker_router(
-            registry, _effective_brokers, openalgo_client=client
+            registry,
+            _effective_brokers,
+            openalgo_client=client,
+            native_attest_ok=_native_attest_ok,
+            native_has_credentials=_native_has_credentials,
         )
         if _brokers_cfg is not None:
             _snapshot_brokers_bak(_brokers_cfg)

@@ -26,9 +26,11 @@ quotes + streaming but **no** historical-candle or option-chain endpoint, so
 those raise explicitly — see ``capabilities``). Only live tick streaming remains
 a separate wave.
 
-Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8). The
-adapter is NOT registered in ``build_broker_router`` — it stays dormant until SDK
-attestation + credentials.
+Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8).
+``build_broker_router``'s native-activation factory registers this adapter
+automatically once its pinned SDK is attested AND vault credentials exist;
+until then it stays dormant (the ``brokers.lock`` Kotak Neo pin is still
+PLACEHOLDER, so it is ``skipped`` and never activates today).
 """
 
 from __future__ import annotations

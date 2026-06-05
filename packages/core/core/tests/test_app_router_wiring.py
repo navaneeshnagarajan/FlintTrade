@@ -107,6 +107,123 @@ def test_no_openalgo_client_leaves_adapters_empty() -> None:
     assert router._adapters == {}
 
 
+def _native_brokers_cfg() -> dict:
+    return {
+        "registered": ["dhan:personal", "upstox:main"],
+        "account_acls": {"dhan": {"personal": ["me"]}, "upstox": {"main": ["me"]}},
+        "execution": {"default": "dhan:personal"},
+        "data": {
+            "ticks": "dhan:personal", "historical": "dhan:personal",
+            "option_chains": "dhan:personal", "quote": "dhan:personal",
+        },
+        "failover": {"enabled": False, "order": []},
+        "cost_aware": {"enabled": False, "tasks": []},
+    }
+
+
+def test_natives_stay_dormant_without_activation_checks() -> None:
+    # Default: no native_* callables → no native adapter constructed.
+    router = build_broker_router(BrokerRegistry(), _native_brokers_cfg())
+    assert router._adapters == {}
+
+
+def test_native_activates_only_when_attested_and_credentialled() -> None:
+    router = build_broker_router(
+        BrokerRegistry(),
+        _native_brokers_cfg(),
+        native_attest_ok=lambda b: b in {"dhan", "upstox"},
+        native_has_credentials=lambda b: b == "dhan",  # only dhan has creds
+    )
+    # dhan passes both gates; upstox is attested but has no creds → dormant.
+    assert set(router._adapters) == {"dhan"}
+    assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
+
+
+def test_native_activation_gates_fail_closed() -> None:
+    router = build_broker_router(
+        BrokerRegistry(),
+        _native_brokers_cfg(),
+        native_attest_ok=lambda _b: False,
+        native_has_credentials=lambda _b: True,
+    )
+    assert router._adapters == {}
+
+
+def test_injected_adapter_wins_over_factory() -> None:
+    sentinel = object()
+    router = build_broker_router(
+        BrokerRegistry(),
+        _native_brokers_cfg(),
+        adapters={"dhan": sentinel},
+        native_attest_ok=lambda _b: True,
+        native_has_credentials=lambda _b: True,
+    )
+    # Explicit injection takes precedence; the factory does not overwrite it.
+    assert router._adapters["dhan"] is sentinel
+
+
+def test_native_activation_checks_credential_presence() -> None:
+    """``_native_activation_checks`` reflects what the vault holds.
+
+    ``has_credentials`` must mirror the vault's ``list_accounts`` adapter ids.
+    ``attest_ok`` is real: brokers whose ``brokers.lock`` pin is still PLACEHOLDER
+    (upstox / kotakneo) are ``skipped`` and so never attested — environment-
+    independent. (Dhan's pin is real, so its attest_ok depends on whether dhanhq
+    is installed — not asserted here.)
+    """
+    from flinttrade_core.app import _native_activation_checks
+
+    class _FakeVault:
+        def list_accounts(self) -> list[dict]:
+            return [{"account_id": "personal", "adapter_id": "dhan", "broker": "dhan"}]
+
+    attest_ok, has_credentials = _native_activation_checks(_FakeVault())
+    assert has_credentials("dhan") is True
+    assert has_credentials("upstox") is False
+    # PLACEHOLDER-pinned brokers are never attested, regardless of environment.
+    assert attest_ok("upstox") is False
+    assert attest_ok("kotakneo") is False
+
+
+def test_native_activation_checks_no_vault_fails_closed() -> None:
+    from flinttrade_core.app import _native_activation_checks
+
+    attest_ok, has_credentials = _native_activation_checks(None)
+    assert has_credentials("dhan") is False
+    # No vault → nothing is credentialled, so nothing activates even if attested.
+    assert attest_ok("upstox") is False
+
+
+def test_dhan_activates_end_to_end_when_sdk_present() -> None:
+    """Real bridge: with dhanhq installed (pin match) + creds in the vault, the
+    router registers a live DhanAdapter via the activation factory.
+
+    Skipped where dhanhq is not installed (the PLACEHOLDER-pinned natives can
+    never reach this state, so this only exercises the one real pin).
+    """
+    pytest.importorskip("dhanhq")
+    from flinttrade_core.app import _native_activation_checks, build_broker_router
+
+    class _FakeVault:
+        def list_accounts(self) -> list[dict]:
+            return [{"account_id": "personal", "adapter_id": "dhan", "broker": "dhan"}]
+
+    attest_ok, has_credentials = _native_activation_checks(_FakeVault())
+    if not attest_ok("dhan"):  # dhanhq present but version != pin → nothing to prove
+        pytest.skip("dhanhq installed but version does not match brokers.lock pin")
+
+    router = build_broker_router(
+        BrokerRegistry(),
+        _native_brokers_cfg(),
+        native_attest_ok=attest_ok,
+        native_has_credentials=has_credentials,
+    )
+    assert "dhan" in router._adapters
+    assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
+    # upstox is registered in config but its pin is PLACEHOLDER → stays dormant.
+    assert "upstox" not in router._adapters
+
+
 def test_authorise_default_actor_trust_on_first_use() -> None:
     """A freshly authenticated operator claims the default execution selector once."""
     from flinttrade_engine.request_context import RequestContext
