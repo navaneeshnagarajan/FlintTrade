@@ -354,6 +354,17 @@ class DhanAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).expiry_list, security_id, segment)
         return M.from_dhan_expiry_list(resp)
 
+    async def kill_switch(self, session: Session, action: str) -> dict:
+        """Toggle Dhan's broker-side kill switch (``ACTIVATE`` disables trading for
+        the day; ``DEACTIVATE`` re-enables it). An account control, not an order —
+        it places nothing, so it is outside the order gate.
+        """
+        act = str(action).upper()
+        if act not in ("ACTIVATE", "DEACTIVATE"):
+            raise BrokerError(f"kill_switch action must be ACTIVATE or DEACTIVATE, got {action!r}")
+        resp = await self._call(self._client(session).kill_switch, act)
+        return M.unwrap(resp) if isinstance(M.unwrap(resp), dict) else {"status": str(resp)}
+
     # ---------- market data: streaming ----------
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:

@@ -40,6 +40,10 @@ class MockDhan:
         self.calls.append(("expiry", (under_security_id, under_exchange_segment)))
         return {"status": "success", "data": {"data": ["2026-06-26", "2026-07-31"]}}
 
+    def kill_switch(self, action):
+        self.calls.append(("kill", action))
+        return {"status": "success", "data": {"killSwitchStatus": action}}
+
     def modify_order(self, **kw):
         self.calls.append(("modify", kw))
         return {"status": "success", "data": {"orderId": "OID1"}}
@@ -245,6 +249,20 @@ async def test_expiry_list_returns_dates():
     session = await _session(adapter)
     expiries = await adapter.expiry_list(session, "NIFTY", "NSE_INDEX")
     assert expiries == ["2026-06-26", "2026-07-31"]
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_validates_and_relays():
+    from flinttrade_core.exceptions import BrokerError
+
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    resp = await adapter.kill_switch(session, "activate")  # case-insensitive
+    assert resp["killSwitchStatus"] == "ACTIVATE"
+    assert mock.calls[0] == ("kill", "ACTIVATE")
+    with pytest.raises(BrokerError, match="ACTIVATE or DEACTIVATE"):
+        await adapter.kill_switch(session, "maybe")
 
 
 @pytest.mark.asyncio
