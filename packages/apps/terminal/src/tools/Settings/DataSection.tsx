@@ -3,6 +3,7 @@
  */
 
 import { FieldRow, TextInput, SectionTitle } from "./shared";
+import { HistoricalDownloadPanel } from "./HistoricalDownloadPanel";
 
 interface DataPathSettings {
   fastStoragePath: string;
@@ -49,6 +50,8 @@ export function DataSection({ settings, onChange }: DataSectionProps) {
           aria-label="Archive storage path"
         />
       </FieldRow>
+
+      <HistoricalDownloadPanel />
     </div>
   );
 }
