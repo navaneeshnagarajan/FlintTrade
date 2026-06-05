@@ -2163,8 +2163,20 @@ class FlintTradeApp:
         self.cron.trade_storage = flask_app.config.get("TRADE_STORAGE")
         self.cron.trade_storage_lock = flask_app.config.get("TRADE_STORAGE_LOCK")
 
-        # Register built-in cron jobs
+        # Register built-in cron jobs AND start the scheduler. Without start()
+        # APScheduler never runs, so none of the built-in jobs fire — the
+        # nightly DuckDB CHECKPOINT+ANALYZE (db_optimise_job), square-off
+        # warning, EOD logout, and health check were all inert. Wrapped so a
+        # missing/broken APScheduler degrades to "no cron" instead of failing
+        # the whole boot.
         self.cron.register_builtin_jobs()
+        try:
+            self.cron.start()
+        except Exception as exc:
+            logger.warning(
+                "Cron scheduler failed to start (%s); scheduled jobs will not run",
+                exc,
+            )
 
         # Verify OpenAlgo connectivity (non-fatal). Distinguish three
         # cases so the boot log is not misleading: REACHABLE_AUTHENTICATED,
