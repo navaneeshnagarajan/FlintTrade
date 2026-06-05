@@ -46,8 +46,17 @@ export interface RiskMetric {
   level: TrafficLight;
 }
 
+/** Informational value with no limit/traffic-light semantics (e.g. exposure). */
+export interface RiskInfoStat {
+  label: string;
+  value: string;
+}
+
 export interface RiskDashboardData {
   metrics: RiskMetric[];
+  /** Plain values shown without a gauge — for quantities that have no meaningful
+   *  0–100% limit (notional exposure under F&O leverage). Optional. */
+  infoStats?: RiskInfoStat[];
   overallLevel: TrafficLight;
   timestamp: string;
 }
@@ -118,12 +127,17 @@ function nowIstHHMM(): string {
 }
 
 /**
- * Build the risk dashboard from real broker data. Only metrics we can derive
- * faithfully are shown: Total Exposure (gross notional from the positionbook)
- * and Margin Utilised (usedMargin / totalBalance from funds). Net delta, net
- * theta and max-loss require a portfolio option-greeks/payoff feed that is not
- * wired yet — they are omitted rather than fabricated, so a connected user is
- * never shown invented risk numbers.
+ * Build the risk dashboard from real broker data.
+ *
+ * Margin Utilised (usedMargin / totalBalance) is the one metric that maps to a
+ * meaningful 0–100% traffic-light gauge, so it is the only gauge shown. Total
+ * Exposure (gross notional from the positionbook) is shown as an informational
+ * value, NOT a gauge: account balance is the wrong "limit" for it — F&O leverage
+ * routinely makes notional exceed balance, and before funds load the balance is
+ * unknown, both of which would otherwise paint a false red "Risk Breached".
+ * Net delta, net theta and max-loss need a portfolio option-greeks/payoff feed
+ * that is not wired yet and are omitted rather than fabricated. A connected user
+ * is therefore never shown an invented or misleading risk verdict.
  */
 export function computeLiveRisk(positions: Position[], funds?: Funds): RiskDashboardData {
   const exposure = positions.reduce((s, p) => s + Math.abs(p.quantity * p.averagePrice), 0);
@@ -131,15 +145,18 @@ export function computeLiveRisk(positions: Position[], funds?: Funds): RiskDashb
   const usedMargin = funds?.usedMargin ?? 0;
   const marginPct = totalBalance > 0 ? (usedMargin / totalBalance) * 100 : 0;
 
-  const metrics: RiskMetric[] = [
-    buildMetric(
-      "exposure", "Total Exposure", exposure,
-      totalBalance > 0 ? totalBalance : exposure, "INR", fmtINR,
-    ),
-    buildMetric("margin", "Margin Utilised", marginPct, 100, "%", (v) => `${fmtNum(v, 1)}%`),
-  ];
+  // Only gauge metrics that have a real 0–100% limit. Margin utilisation only
+  // applies once funds are known; otherwise it is shown as an info stat too.
+  const metrics: RiskMetric[] = [];
+  const infoStats: RiskInfoStat[] = [{ label: "Total Exposure", value: fmtINR(exposure) }];
 
-  return { metrics, overallLevel: worstLevel(metrics), timestamp: nowIstHHMM() };
+  if (totalBalance > 0) {
+    metrics.push(buildMetric("margin", "Margin Utilised", marginPct, 100, "%", (v) => `${fmtNum(v, 1)}%`));
+  } else {
+    infoStats.push({ label: "Margin Utilised", value: "—" });
+  }
+
+  return { metrics, infoStats, overallLevel: worstLevel(metrics), timestamp: nowIstHHMM() };
 }
 
 const GAUGE_COLOURS: Record<TrafficLight, { stroke: string; bg: string; text: string }> = {
@@ -298,6 +315,21 @@ function RiskDashboardWidget() {
             <MetricCard key={m.id} metric={m} />
           ))}
         </div>
+
+        {/* Informational values (no gauge/limit semantics — e.g. exposure). */}
+        {data.infoStats && data.infoStats.length > 0 && (
+          <div className="grid grid-cols-2 gap-1.5" aria-label="Risk info">
+            {data.infoStats.map((s) => (
+              <div
+                key={s.label}
+                className="flex flex-col gap-0.5 bg-surface-card rounded-lg border border-border-default px-3 py-2"
+              >
+                <span className="text-xxs text-text-muted uppercase tracking-wide truncate">{s.label}</span>
+                <span className="text-sm font-bold font-mono tabular-nums text-text-primary">{s.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Honest note: greeks-derived metrics aren't wired for live data yet. */}
         {isConnected && (

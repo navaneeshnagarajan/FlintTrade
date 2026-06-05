@@ -187,23 +187,35 @@ const POS: Position[] = [
 const FUNDS: Funds = { availableCash: 40_000, usedMargin: 60_000, totalBalance: 100_000 };
 
 describe("computeLiveRisk", () => {
-  it("only shows the two faithfully-derivable metrics (no fabricated greeks)", () => {
-    const data = computeLiveRisk(POS, FUNDS);
-    const ids = data.metrics.map((m) => m.id);
-    expect(ids).toEqual(["exposure", "margin"]);
+  it("gauges only Margin Utilised; never fabricates greeks metrics", () => {
+    const ids = computeLiveRisk(POS, FUNDS).metrics.map((m) => m.id);
+    expect(ids).toEqual(["margin"]);
     expect(ids).not.toContain("delta");
     expect(ids).not.toContain("theta");
     expect(ids).not.toContain("maxloss");
   });
 
-  it("exposure is gross notional |qty × avgPrice| summed", () => {
-    const exposure = computeLiveRisk(POS, FUNDS).metrics.find((m) => m.id === "exposure")!;
-    expect(exposure.value).toBe(10 * 2500 + 5 * 3000); // 25000 + 15000
+  it("shows Total Exposure as an informational stat, not a balance-limited gauge", () => {
+    const data = computeLiveRisk(POS, FUNDS);
+    // Not a gauge metric (avoids the false-red-vs-balance verdict under leverage).
+    expect(data.metrics.find((m) => m.id === "exposure")).toBeUndefined();
+    const exposure = data.infoStats?.find((s) => s.label === "Total Exposure");
+    expect(exposure).toBeDefined();
+    expect(exposure!.value).toBeTruthy();
   });
 
-  it("margin utilised is usedMargin / totalBalance", () => {
+  it("margin utilised gauge is usedMargin / totalBalance", () => {
     const margin = computeLiveRisk(POS, FUNDS).metrics.find((m) => m.id === "margin")!;
     expect(margin.value).toBeCloseTo(60); // 60k / 100k
+  });
+
+  it("does not gauge a spurious red when funds have not loaded (totalBalance 0)", () => {
+    const data = computeLiveRisk(POS, undefined);
+    // No margin gauge without funds → no metric can flip the banner to red.
+    expect(data.metrics).toHaveLength(0);
+    expect(data.overallLevel).toBe("green");
+    // Margin shown as an honest "—" info stat instead of a fake 0%.
+    expect(data.infoStats?.find((s) => s.label === "Margin Utilised")?.value).toBe("—");
   });
 
   it("is all-clear (green) when flat with no funds", () => {
