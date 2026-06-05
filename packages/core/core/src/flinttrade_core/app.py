@@ -2270,6 +2270,26 @@ class FlintTradeApp:
         self.cron.trade_storage = flask_app.config.get("TRADE_STORAGE")
         self.cron.trade_storage_lock = flask_app.config.get("TRADE_STORAGE_LOCK")
 
+        # Wire the "optimise overnight" feature to a real engine. The cron slot
+        # (make_overnight_optimise_job) existed but nothing injected an optimiser,
+        # so the nightly job never ran. Build an OvernightOptimiser over the
+        # registered strategies + a rule-based StrategyRefiner and inject its
+        # run() as the job. Best-effort: a missing runner/refiner just leaves the
+        # job unregistered (as before) rather than failing boot.
+        try:
+            from flinttrade_ai.overnight_optimiser import OvernightOptimiser  # noqa: PLC0415
+            from flinttrade_ai.strategy_refiner import StrategyRefiner  # noqa: PLC0415
+
+            _runner = flask_app.config.get("STRATEGY_RUNNER")
+            if _runner is not None and hasattr(_runner, "list_strategies"):
+                _optimiser = OvernightOptimiser(
+                    strategy_provider=_runner.list_strategies,
+                    refiner=StrategyRefiner(),  # rule-based by default (no LLM required)
+                )
+                self.cron.overnight_optimiser = _optimiser.run
+        except Exception as exc:
+            logger.warning("Overnight optimiser not wired (%s); nightly optimisation will not run", exc)
+
         # Register built-in cron jobs AND start the scheduler. Without start()
         # APScheduler never runs, so none of the built-in jobs fire — the
         # nightly DuckDB CHECKPOINT+ANALYZE (db_optimise_job), square-off
