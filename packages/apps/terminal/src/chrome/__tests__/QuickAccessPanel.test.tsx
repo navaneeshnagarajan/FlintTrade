@@ -168,6 +168,23 @@ describe("QuickAccessPanel", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/settings");
   });
 
+  it('navigates to the Profile Manager (/settings#profile) from the quick-settings panel', () => {
+    // Mission: the Profile Manager must be reachable via the quick-settings panel
+    // AND the profile button. This is the quick-settings entry point.
+    const onClose = vi.fn();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QuickAccessPanel onClose={onClose} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /go to profile settings/i }));
+    expect(mockNavigate).toHaveBeenCalledWith("/settings#profile");
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("calls onClose when close button is clicked", () => {
     const onClose = vi.fn();
     const queryClient = new QueryClient({

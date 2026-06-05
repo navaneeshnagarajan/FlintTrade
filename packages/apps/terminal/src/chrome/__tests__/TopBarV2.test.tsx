@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
@@ -270,6 +270,29 @@ describe("TopBarV2", () => {
   it("renders the user avatar button", () => {
     renderTopBarV2();
     expect(screen.getByTestId("avatar-btn")).toBeInTheDocument();
+  });
+
+  it("avatar button navigates to the Profile Manager (/settings#profile)", () => {
+    // Mission: the Profile Manager must be reachable via the profile button AND
+    // the quick-settings panel. This is the profile-button entry point; the
+    // quick-settings entry point is covered in QuickAccessPanel.test.tsx.
+    function LocationProbe() {
+      const loc = useLocation();
+      return <div data-testid="location-probe">{loc.pathname + loc.hash}</div>;
+    }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/trade"]}>
+          <TopBarV2 />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId("location-probe").textContent).toBe("/trade");
+    fireEvent.click(screen.getByTestId("avatar-btn"));
+    expect(screen.getByTestId("location-probe").textContent).toBe("/settings#profile");
   });
 
   it("mounts the trading mode indicator (Explore by default)", () => {
