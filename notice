@@ -3,30 +3,32 @@
 FlintTrade
 Copyright 2026 Navaneesh Nagarajan
 
-This product includes software developed by:
+FlintTrade is an independent, native-first trading platform. Its application
+code is written from scratch by the FlintTrade authors; it is not a fork or a
+derivative of another trading application. FlintTrade can interoperate with
+OpenAlgo through an optional bridge adapter, but does not bundle OpenAlgo's
+source.
 
-- OpenAlgo (https://openalgo.in) — AGPL-3.0
-  Copyright 2024-2026 Rajandran R and OpenAlgo contributors
+## Acknowledgements
 
-- openalgo-flow — AGPL-3.0
-  Copyright 2025-2026 Marketcalls
+The following open-source projects informed FlintTrade's design through
+interoperation or as a reference for ideas. FlintTrade's implementation is its
+own; these are credited as influences, not as included code:
 
-- etftracker — MIT License
-  Copyright 2026 Marketcalls
+- OpenAlgo (https://openalgo.in) — AGPL-3.0 — broker-gateway interoperability target
+- openalgo-flow — Marketcalls — webhook/flow ideas
+- etftracker — Marketcalls — ETF tracking ideas
+- trading-journal — trade-journal ideas
+- trading-strategies-openalgo — WINDY-WINDWARD — strategy templates reference
+- openalgo-portfoliogreeks — Marketcalls — portfolio-Greeks reference
+- pyindicators — indicator API reference
+- OpenClaw — agent-pattern reference
 
-- trading-journal — MIT License
-  Copyright 2025 Trade Journal Application
+## Bundled third-party libraries
 
-- trading-strategies-openalgo — MIT License
-  Copyright 2025 WINDY-WINDWARD
+This product uses the following open-source libraries (their code IS distributed
+with FlintTrade builds):
 
-- openalgo-portfoliogreeks — MIT License
-  Copyright 2025 Marketcalls
-
-- pyindicators — MIT License
-  Copyright 2024 PyIndicators
-
-This product uses the following open-source libraries:
 - React (MIT) — Meta Platforms, Inc.
 - Dockview (MIT) — mathuo
 - Lightweight Charts (Apache-2.0) — TradingView

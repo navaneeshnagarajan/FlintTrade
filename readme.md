@@ -150,11 +150,18 @@ TypeScript design-system package, and 1 Rust/PyO3 tick engine.
 
 ## Credits
 
-Built on [OpenAlgo](https://github.com/marketcalls/openalgo) by [Rajandran R](https://github.com/marketcalls) and the OpenAlgo community, and informed by [OpenClaw](https://github.com/openclaw/openclaw) for agent patterns. See [docs/REFERENCES.md](docs/REFERENCES.md) for public attribution and project influence notes.
+FlintTrade is an independent, native-first platform — its application code is
+written from scratch by the FlintTrade authors. It interoperates with
+[OpenAlgo](https://github.com/marketcalls/openalgo) through an optional bridge
+adapter, and its design was informed by ideas from several open-source projects
+(including OpenAlgo and OpenClaw's agent patterns) used for reference only. See
+[notice](notice) and [docs/REFERENCES.md](docs/REFERENCES.md) for acknowledgements
+and influence notes.
 
 ## License
 
-FlintTrade is released under [AGPL-3.0](LICENSE) — the same licence as OpenAlgo. If you modify and run FlintTrade as a network service, you must publish your modified source.
+FlintTrade is released under [AGPL-3.0](LICENSE). If you modify and run
+FlintTrade as a network service, you must publish your modified source.
 
 ## Code of Conduct
 

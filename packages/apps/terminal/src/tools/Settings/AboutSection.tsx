@@ -24,9 +24,9 @@ export function AboutSection() {
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Description</p>
         <p className="text-xs text-text-secondary leading-relaxed">
-          Open-source modular trading and investment platform for Indian F&amp;O, commodities, and crypto.
-          FlintTrade has its own backend, native gateway contract, 83 widgets, and optional OpenAlgo-compatible bridge.
-          Monorepo with 17 package surfaces across Python, React, shared UI, and Rust.
+          Independent, native-first modular trading and investment platform for Indian F&amp;O, commodities, and crypto.
+          FlintTrade is built from scratch with its own backend, native gateway contract, 90+ widgets, and an
+          optional OpenAlgo-compatible bridge. Monorepo with 17 package surfaces across Python, React, shared UI, and Rust.
         </p>
       </div>
 
@@ -50,7 +50,7 @@ export function AboutSection() {
             className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors"
           >
             <ExternalLink size={12} className="flex-none text-text-muted" />
-            <span>OpenAlgo — Broker Gateway</span>
+            <span>OpenAlgo — optional broker bridge</span>
             <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
           </a>
           <a
