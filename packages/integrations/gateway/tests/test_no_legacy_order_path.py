@@ -84,6 +84,52 @@ def test_openalgo_writes_all_require_router_token():
     )
 
 
+def test_native_adapter_writes_all_require_router_token():
+    """Every write method of every direct broker adapter must call
+    ``_require_router_token`` in its body (§8) — the same source-level pin as
+    OpenAlgo, extended to the native SDK adapters (Dhan / Upstox / Kotak Neo).
+
+    These are real write surfaces (dispatched by BrokerRouter with the shared
+    per-process token), so a refactor that silently drops the guard from any of
+    their place/modify/cancel methods must fail here, not only in a unit test
+    that could be removed.
+    """
+    import ast
+
+    adapters = {
+        "dhan.py": "DhanAdapter",
+        "upstox.py": "UpstoxAdapter",
+        "kotakneo.py": "KotakNeoAdapter",
+    }
+    write_methods = ("place_order", "modify_order", "cancel_order")
+    ungated: list[str] = []
+    missing: list[str] = []
+    for fname, clsname in adapters.items():
+        src = (_GATEWAY_SRC / "brokers" / fname).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        cls = next(
+            (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == clsname),
+            None,
+        )
+        assert cls is not None, f"{fname}: class {clsname} not found"
+        bodies = {
+            node.name: ast.get_source_segment(src, node)
+            for node in cls.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in write_methods
+        }
+        missing += [f"{clsname}.{m}" for m in write_methods if m not in bodies]
+        ungated += [
+            f"{clsname}.{m}" for m, body in bodies.items()
+            if "_require_router_token" not in (body or "")
+        ]
+    assert not missing, f"native adapters missing write methods: {missing}"
+    assert not ungated, (
+        "native adapter write methods must call _require_router_token (§8); "
+        f"unguarded: {ungated}"
+    )
+
+
 def test_only_gate_order_mints_safety_context():
     """No adapter under brokers/ may construct a SafetyContext (contract §8.1)."""
     brokers_dir = _GATEWAY_SRC / "brokers"
