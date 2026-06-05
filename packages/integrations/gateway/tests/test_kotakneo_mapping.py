@@ -9,6 +9,7 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     KotakNeoMappingError,
     extract_order_id,
     from_kotak_funds,
+    from_kotak_holding,
     from_kotak_order,
     from_kotak_position,
     from_kotak_quote,
@@ -139,6 +140,32 @@ def test_from_kotak_position_flat_books_full_realised():
     assert pos["quantity"] == "0"
     assert pos["average_price"] == "0.00"
     assert pos["pnl"] == "50.00"
+
+
+def test_from_kotak_position_open_long_pnl_is_positive_zero():
+    # Open long (no sell leg): realised P&L is zero — must render "0.00", never
+    # the negative-zero artefact "-0.00".
+    pos = from_kotak_position({"trdSym": "X", "exSeg": "nse_cm", "flBuyQty": 100, "buyAmt": 5000})
+    assert pos["quantity"] == "100"
+    assert pos["pnl"] == "0.00"
+    assert not pos["pnl"].startswith("-")
+
+
+def test_from_kotak_position_malformed_precision_does_not_crash():
+    # A garbage negative precision must be clamped, not raise from the f-string.
+    pos = from_kotak_position({"trdSym": "X", "exSeg": "nse_cm", "flBuyQty": 10, "buyAmt": 5012, "precision": -1})
+    assert pos["average_price"] == "501"  # precision clamped to 0
+
+
+def test_from_kotak_holding_uses_closing_price_not_mktvalue():
+    h = from_kotak_holding({
+        "displaySymbol": "IDEA", "exchangeSegment": "nse_cm", "quantity": 35,
+        "averagePrice": 9.5699, "closingPrice": 9.36, "mktValue": 327.6,
+    })
+    assert h["symbol"] == "IDEA" and h["exchange"] == "NSE"
+    assert h["quantity"] == "35"
+    assert h["ltp"] == "9.36"        # closingPrice, NOT the 327.6 aggregate mktValue
+    assert h["average_price"] == "9.5699"
 
 
 def test_from_kotak_position_price_denomination_ratio():

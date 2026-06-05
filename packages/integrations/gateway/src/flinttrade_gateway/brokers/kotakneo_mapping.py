@@ -210,7 +210,10 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
     """
     price_div = _ratio(d.get("genNum", 1), d.get("genDen", 1)) * _ratio(d.get("prcNum", 1), d.get("prcDen", 1))
     price_div = price_div or 1.0
-    precision = int(_num(d.get("precision", 2), 2))
+    # Clamp to a sane decimal-place range: a malformed/negative precision would
+    # otherwise make the avg-price f-string raise ValueError and abort the whole
+    # positions() fetch instead of degrading one row.
+    precision = max(0, min(int(_num(d.get("precision", 2), 2)), 8))
 
     buy_qty = _num(d.get("cfBuyQty", 0)) + _num(d.get("flBuyQty", 0))
     sell_qty = _num(d.get("cfSellQty", 0)) + _num(d.get("flSellQty", 0))
@@ -228,7 +231,9 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
         avg_price = 0.0
 
     matched = min(buy_qty, sell_qty)
-    realised_pnl = matched * (sell_avg - buy_avg)
+    # `... or 0.0` normalises Python negative zero: an open long (matched == 0,
+    # buy_avg > 0) yields 0.0 * -buy_avg == -0.0, which would render as "-0.00".
+    realised_pnl = matched * (sell_avg - buy_avg) or 0.0
 
     return {
         "symbol": d.get("trdSym", d.get("sym", "")),
@@ -253,9 +258,11 @@ def from_kotak_holding(d: dict[str, Any]) -> dict[str, Any]:
     market value of the holding, which would be a per-share price inflated by the
     quantity factor).
     """
+    seg = str(d.get("exchangeSegment", ""))
+    exchange = KOTAK_TO_EXCHANGE.get(seg, seg) if seg else _exchange_of(d)
     return {
         "symbol": d.get("displaySymbol", d.get("symbol", d.get("trdSym", ""))),
-        "exchange": d.get("exchangeSegment", _exchange_of(d)),
+        "exchange": exchange,
         "quantity": str(d.get("quantity", d.get("sellableQuantity", 0))),
         "average_price": str(d.get("averagePrice", d.get("avgPrc", 0))),
         "ltp": str(d.get("closingPrice", 0)),
