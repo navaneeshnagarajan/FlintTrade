@@ -160,6 +160,56 @@ POST endpoints. Powered by `packages/integrations/gateway/`. Used by the
 | `broker/auth/callback` | Receive an OAuth callback. |
 | `broker/reconnect` | Re-authenticate an existing session that has expired. |
 
+### Broker capabilities & recommendations (`/api/v1/broker/*`, GET)
+
+Source: `packages/integrations/gateway/src/capabilities_routes.py`.
+
+| Endpoint | Purpose |
+|---|---|
+| `broker/capabilities` (**GET**) | Per-broker capability matrix (order types, segments, depth, rate limits). |
+| `broker/recommendations` (**GET**) | Rank native brokers per use-case ("which broker for what"). `?use_case=<id>` for one job (e.g. `low_cost_execution`, `market_depth`); `?brokers=a,b` to restrict to the operator's connected brokers. |
+
+### AI (`/ft-api/v1/ai/*`, `/ft-api/v1/signals/*`)
+
+Source: `packages/services/ai/`. GET unless noted.
+
+| Endpoint | Purpose |
+|---|---|
+| `signals/recent` (**GET**) | Recent ML/indicator signals (the live signal source). |
+| `ai/sentiment/summary` (**GET**) | Market-wide sentiment summary; neutral when no feed is connected. |
+| `ai/sentiment/tickers` (**GET**) | Per-ticker sentiment from news feeds. |
+| `ai/regime?symbol=` (**GET**) | ADX/ATR/BB market regime for a symbol (requires connected market data). |
+| `sentiment/analyse` (**POST**) | Sentiment for a text snippet or symbol (LLM, rule-based fallback). |
+| `ai/refine-strategy` (**POST**) | AI improvement suggestions for a backtested strategy. |
+| `rag/query` (**POST**) | Knowledge-base RAG query (when RAG is enabled). |
+
+### Sandbox / paper trading (`/ft-api/v1/sandbox/*`)
+
+Native virtual-capital paper trading. Source: `packages/core/data/src/sandbox_routes.py`.
+
+| Endpoint | Purpose |
+|---|---|
+| `sandbox/status` (**GET**) | Combined status: current + initial capital, P&L, trade count. |
+| `sandbox/capital` (**GET**) | Full capital state (initial / current / available / used margin). |
+| `sandbox/capital/adjust` (**POST**) | Add or remove virtual capital (`{amount}`). |
+| `sandbox/order` (**POST**) | Place a paper order. |
+| `sandbox/positions` · `sandbox/orders` · `sandbox/pnl` (**GET**) | Book and P&L reads. |
+| `sandbox/reset` (**POST**) | Clear all paper data (returns a backup). |
+| `sandbox/export` (**GET**) · `sandbox/import` (**POST**) | Export / import sandbox state. |
+
+### Strategies (`/ft-api/v1/strategies/*`)
+
+Source: `packages/services/engine/src/strategy_routes.py`. Backed by the
+`STRATEGY_RUNNER` + `CRON_SCHEDULER` wired at app creation.
+
+| Endpoint | Purpose |
+|---|---|
+| `strategies/uploaded` (**GET**) | List uploaded user strategies. |
+| `strategies/upload` (**POST**) | Upload + validate a strategy. |
+| `strategies/<id>/start` · `…/stop` (**POST**) | Start / stop a running strategy. |
+| `strategies/<id>/logs` (**GET**) | Tail a strategy's logs. |
+| `strategies/<id>/schedule` (**POST**) · `strategies/scheduled` (**GET**) | Cron-schedule a strategy. |
+
 ### Auth (`/ft-api/v1/auth/*`)
 
 JWT-based. Source: `packages/core/core/src/auth_routes.py`.
