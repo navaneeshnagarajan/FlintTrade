@@ -301,7 +301,20 @@ class DhanAdapter(BrokerAdapter):
         )
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
-        raise NotImplementedError(_PENDING.format("option_chain"))
+        from flinttrade_core.models import OptionChain, OptionChainStrike  # noqa: PLC0415
+
+        underlying = str(req.get("symbol") or req.get("underlying") or "")
+        exchange = str(req.get("exchange", "NSE_INDEX"))
+        expiry = req.get("expiry") or req.get("expiry_date")
+        security_id = self._resolve_security(underlying, exchange)
+        segment = M.to_dhan_segment(exchange)
+        resp = await self._call(self._client(session).option_chain, security_id, segment, expiry)
+        oc = M.to_option_chain_dict(underlying, exchange, resp)
+        return OptionChain(
+            underlying=oc["underlying"],
+            exchange=oc["exchange"],
+            strikes=[OptionChainStrike(**s) for s in oc["strikes"]],
+        )
 
     # ---------- market data: streaming (separate wave) ----------
 

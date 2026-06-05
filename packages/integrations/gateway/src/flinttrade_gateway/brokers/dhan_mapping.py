@@ -371,3 +371,38 @@ def quote_from_feed(segment: str, security_id: str, feed: Any) -> dict[str, Any]
         return None
     rec = by_seg.get(str(security_id))
     return rec if isinstance(rec, dict) else None
+
+
+def _leg(leg: dict[str, Any], side: str) -> dict[str, Any]:
+    """Map one CE/PE leg of a Dhan option-chain strike to ce_*/pe_* fields."""
+    greeks = leg.get("greeks", {}) or {}
+    return {
+        f"{side}_ltp": _num(leg.get("last_price", 0)),
+        f"{side}_oi": int(_num(leg.get("oi", 0))),
+        f"{side}_volume": int(_num(leg.get("volume", 0))),
+        f"{side}_iv": _num(leg.get("implied_volatility", 0)),
+        f"{side}_delta": _num(greeks.get("delta", 0)),
+        f"{side}_gamma": _num(greeks.get("gamma", 0)),
+        f"{side}_theta": _num(greeks.get("theta", 0)),
+        f"{side}_vega": _num(greeks.get("vega", 0)),
+        f"{side}_bid": _num(leg.get("top_bid_price", 0)),
+        f"{side}_ask": _num(leg.get("top_ask_price", 0)),
+    }
+
+
+def to_option_chain_dict(underlying: str, exchange: str, resp: Any) -> dict[str, Any]:
+    """Map a Dhan option-chain response to an OptionChain-shaped dict.
+
+    Dhan returns ``data.oc`` keyed by strike string → ``{ce:{...}, pe:{...}}``.
+    """
+    data = unwrap(resp) or {}
+    oc = data.get("oc", {}) or {}
+    strikes: list[dict[str, Any]] = []
+    for strike_str, legs in sorted(oc.items(), key=lambda kv: _num(kv[0])):
+        if not isinstance(legs, dict):
+            continue
+        row: dict[str, Any] = {"strike_price": _num(strike_str)}
+        row.update(_leg(legs.get("ce", {}) or {}, "ce"))
+        row.update(_leg(legs.get("pe", {}) or {}, "pe"))
+        strikes.append(row)
+    return {"underlying": underlying, "exchange": exchange, "strikes": strikes}

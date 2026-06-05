@@ -17,6 +17,7 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     quote_from_feed,
     to_candles_dict,
     to_modify_order_kwargs,
+    to_option_chain_dict,
     to_place_order_kwargs,
     unwrap,
 )
@@ -130,3 +131,22 @@ def test_quote_mapping():
     assert rec is not None
     q = from_dhan_quote("RELIANCE", "NSE", rec)
     assert q["ltp"] == 2901.5 and q["open"] == 2890.0 and q["volume"] == 1_200_000
+
+
+def test_to_option_chain_dict():
+    resp = {"status": "success", "data": {"last_price": 24000, "oc": {
+        "24100.000000": {"ce": {"last_price": 100}, "pe": {"last_price": 180}},
+        "24000.000000": {
+            "ce": {"last_price": 150, "oi": 10000, "volume": 500, "implied_volatility": 12.5,
+                   "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -5, "vega": 8},
+                   "top_bid_price": 149, "top_ask_price": 151},
+            "pe": {"last_price": 140, "oi": 12000, "greeks": {"delta": -0.5}},
+        },
+    }}}
+    oc = to_option_chain_dict("NIFTY", "NSE_INDEX", resp)
+    assert oc["underlying"] == "NIFTY" and len(oc["strikes"]) == 2
+    # sorted ascending by strike
+    assert oc["strikes"][0]["strike_price"] == 24000.0
+    assert oc["strikes"][1]["strike_price"] == 24100.0
+    s0 = oc["strikes"][0]
+    assert s0["ce_ltp"] == 150.0 and s0["ce_delta"] == 0.5 and s0["pe_oi"] == 12000

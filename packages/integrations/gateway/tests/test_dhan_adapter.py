@@ -76,6 +76,13 @@ class MockDhan:
             "open": [100], "high": [102], "low": [99], "close": [101], "volume": [1000], "timestamp": [1],
         }}
 
+    def option_chain(self, under_security_id, under_exchange_segment, expiry):
+        self.calls.append(("option_chain", under_security_id, expiry))
+        return {"status": "success", "data": {"oc": {"24000.000000": {
+            "ce": {"last_price": 150, "oi": 1000, "greeks": {"delta": 0.5}},
+            "pe": {"last_price": 140, "oi": 1200, "greeks": {"delta": -0.5}},
+        }}}}
+
 
 def _adapter(mock):
     return DhanAdapter(client_factory=lambda _s: mock, security_resolver=lambda s, e: "11536")
@@ -194,6 +201,19 @@ async def test_historical_intraday_and_daily():
     )
     assert len(daily.bars) == 1
     assert any(c[0] == "daily" for c in mock.calls)
+
+
+@pytest.mark.asyncio
+async def test_option_chain_maps_to_model():
+    mock = MockDhan()
+    adapter = _adapter(mock)  # NIFTY/NSE_INDEX uses the index fast path
+    session = await _session(adapter)
+    oc = await adapter.option_chain(session, {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": "2026-06-25"})
+    assert oc.underlying == "NIFTY"
+    assert len(oc.strikes) == 1
+    assert oc.strikes[0].strike_price == 24000.0
+    assert oc.strikes[0].ce_ltp == 150.0 and oc.strikes[0].pe_oi == 1200
+    assert ("option_chain", "13", "2026-06-25") in mock.calls  # NIFTY index id
 
 
 @pytest.mark.asyncio
