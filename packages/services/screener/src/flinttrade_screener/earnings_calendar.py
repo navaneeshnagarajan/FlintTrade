@@ -288,6 +288,18 @@ class EarningsCalendar:
         window_start = _shift_to_month_start(today, -half)
         window_end = _month_end(_shift_to_month_start(today, months - half))
 
+        # Ensure the window always reaches back to the most recent result month
+        # that is fully in the past, so there is recent completed earnings data
+        # (with actuals) regardless of where in the quarter "today" falls — a
+        # 3-month window centred mid-quarter could otherwise contain only future
+        # results. Quarters (Jan/Apr/Jul/Oct) are 3 months apart, so one lies
+        # within the last 4 months.
+        for offset in range(1, 5):
+            candidate = _shift_to_month_start(today, -offset)
+            if candidate.month in _RESULT_MONTHS and _month_end(candidate) < today:
+                window_start = min(window_start, candidate)
+                break
+
         all_events: list[EarningsEvent] = []
         symbols = list(_NIFTY50.keys())
 
