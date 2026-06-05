@@ -16,6 +16,38 @@ from pathlib import Path
 from flinttrade_gateway.registry import BrokerRegistry
 from flinttrade_gateway.session import BrokerSession
 
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+# Order-write call patterns that must traverse the gated chain.
+_ORDER_WRITE_RE = re.compile(
+    r"\.(place_order|placeorder|placesmartorder|close_position|closeposition)\s*\("
+)
+# A call is GATED/legitimate when it delegates to a *_router (the gating
+# chokepoint — gate_order -> BrokerRouter) or to the isolated sandbox engine
+# (Practice mode, never a live broker).
+_GATED_RECEIVER_RE = re.compile(
+    r"(\w*router\.(place_order|close_position)"
+    r"|sandbox\w*\.\w*\.?place_order"
+    r"|\.engine\.place_order)"
+)
+
+# Modules that legitimately contain a RAW (non-router) broker order-write. This
+# is the SHRINKING debt allowlist: every entry is either a known-dormant native
+# strategy/agent path (tracked in PLAN.md, not wired live) or an L5 emergency
+# close. A NEW raw order-write in any OTHER services/webhooks module fails the
+# guard below — it must be gated through gate_order -> BrokerRouter instead.
+_RAW_ORDER_ALLOWLIST = {
+    # Dormant — not wired to any live route/schedule (PLAN.md tracks the refactor):
+    "packages/services/ai/src/flinttrade_ai/autonomous_agent.py",
+    "packages/services/engine/src/flinttrade_engine/bracket_order.py",
+    "packages/services/engine/src/flinttrade_engine/router.py",
+    "packages/services/engine/src/flinttrade_engine/strategies/wheel_live.py",
+    # L5 emergency close (acceptable un-gated — gating an emergency exit could
+    # deadlock the very safety action it protects):
+    "packages/services/automation/src/flinttrade_automation/telegram_bot.py",
+    "packages/services/engine/src/flinttrade_engine/safety.py",
+}
+
 _GATEWAY_SRC = Path(__file__).resolve().parents[1] / "src" / "flinttrade_gateway"
 _WRITE_METHODS = (
     "place_order",
@@ -128,6 +160,69 @@ def test_native_adapter_writes_all_require_router_token():
         "native adapter write methods must call _require_router_token (§8); "
         f"unguarded: {ungated}"
     )
+
+
+def test_no_new_ungated_order_paths_in_services_and_webhooks():
+    """Repo-wide §8.1 tripwire: no NEW raw broker order-write outside the gate.
+
+    The gateway package self-guards (the tests above), but the order-placing
+    surfaces live in ``packages/services/*`` and ``packages/integrations/webhooks``.
+    This scans those for ``.place_order``/``.close_position`` (and the OpenAlgo
+    spellings) and asserts every occurrence either delegates to a ``*_router``
+    (the gate_order -> BrokerRouter chokepoint), targets the isolated sandbox
+    engine, or sits in a module on the explicit SHRINKING debt allowlist
+    (``_RAW_ORDER_ALLOWLIST``). A new raw order call in any other module fails
+    here — forcing it through the gate before it can ever go live.
+    """
+    scan_dirs = [
+        _REPO_ROOT / "packages" / "services",
+        _REPO_ROOT / "packages" / "integrations" / "webhooks",
+    ]
+    offenders: list[str] = []
+    for root in scan_dirs:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            parts = path.parts
+            if "tests" in parts or path.name.startswith("test_"):
+                continue
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#") or "def " in stripped:
+                    continue
+                if not _ORDER_WRITE_RE.search(line):
+                    continue
+                if _GATED_RECEIVER_RE.search(line):
+                    continue  # delegates to the router / sandbox — legitimate
+                if rel in _RAW_ORDER_ALLOWLIST:
+                    continue  # known dormant/emergency debt
+                offenders.append(f"{rel}:{n}: {stripped}")
+    assert not offenders, (
+        "Ungated broker order-write outside the gate_order -> BrokerRouter chain "
+        "(contract §8.1). Route it through gate_order/BrokerRouter, or — if it is a "
+        "deliberate dormant/emergency path — add the module to _RAW_ORDER_ALLOWLIST "
+        "with a justification:\n" + "\n".join(offenders)
+    )
+
+
+def test_raw_order_allowlist_has_no_stale_entries():
+    """The debt allowlist must shrink, never rot: every allowlisted module must
+    still exist and still contain a raw order-write (otherwise remove it)."""
+    stale: list[str] = []
+    for rel in sorted(_RAW_ORDER_ALLOWLIST):
+        path = _REPO_ROOT / rel
+        if not path.exists():
+            stale.append(f"{rel} (file gone)")
+            continue
+        has_raw = any(
+            _ORDER_WRITE_RE.search(line) and not _GATED_RECEIVER_RE.search(line)
+            and "def " not in line and not line.strip().startswith("#")
+            for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        if not has_raw:
+            stale.append(f"{rel} (no raw order-write left — remove from allowlist)")
+    assert not stale, "Stale _RAW_ORDER_ALLOWLIST entries (the allowlist must shrink):\n" + "\n".join(stale)
 
 
 def test_only_gate_order_mints_safety_context():
