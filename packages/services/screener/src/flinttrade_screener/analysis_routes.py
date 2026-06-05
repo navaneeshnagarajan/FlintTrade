@@ -51,6 +51,36 @@ analysis_bp = Blueprint("analysis", __name__, url_prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------
+# Expiry param normalisation
+#
+# The terminal sends `expiry_date` / `expiry_dates`; these handlers historically
+# read `expiry` / `expiries`. Accept all variants so a user-selected expiry is
+# never silently dropped (which made every OI/GEX/IV panel fall back to a
+# hardcoded expiry — see feature audit H7).
+# ---------------------------------------------------------------------------
+
+
+def _body_expiry(body: dict[str, Any], default: str) -> str:
+    """Return a single expiry from the request body, accepting any key variant."""
+    dates = body.get("expiry_dates") or body.get("expiries")
+    return (
+        body.get("expiry")
+        or body.get("expiry_date")
+        or (dates[0] if isinstance(dates, list) and dates else None)
+        or default
+    )
+
+
+def _body_expiries(body: dict[str, Any], default: list[str]) -> list[str]:
+    """Return a list of expiries from the request body, accepting any key variant."""
+    value = body.get("expiries") or body.get("expiry_dates")
+    if isinstance(value, list) and value:
+        return value
+    single = body.get("expiry") or body.get("expiry_date")
+    return [single] if single else default
+
+
+# ---------------------------------------------------------------------------
 # Registry access helper
 # ---------------------------------------------------------------------------
 
@@ -220,7 +250,7 @@ def gex_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "")
+    expiry = _body_expiry(body, "")
 
     lot_size = LOT_SIZES.get(symbol.upper(), 50)
     spot = 24000.0
@@ -277,7 +307,7 @@ def vol_surface_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiries = body.get("expiries", ["26MAR26", "24APR26"])
+    expiries = _body_expiries(body, ["26MAR26", "24APR26"])
     strike_count = int(body.get("strike_count", 20))
     spot = 24000.0
 
@@ -331,7 +361,7 @@ def iv_smile_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
@@ -387,7 +417,7 @@ def straddle_pnl_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     interval = body.get("interval", "5m")
     adjustment_points = float(body.get("adjustment_points", 50.0))
     lot_size = LOT_SIZES.get(symbol.upper(), 50)
@@ -463,7 +493,7 @@ def oi_profile_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     interval = body.get("interval", "5m")
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
@@ -524,7 +554,7 @@ def max_pain_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 

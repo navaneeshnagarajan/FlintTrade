@@ -296,3 +296,44 @@ class TestMaxPainEndpoint:
         max_pain = body["data"]["max_pain_strike"]
         # Max pain within 10% of spot is reasonable for synthetic data
         assert abs(max_pain - spot) <= spot * 0.10
+
+
+# ---------------------------------------------------------------------------
+# Expiry param normalisation (feature audit H7)
+# ---------------------------------------------------------------------------
+
+
+class TestExpiryParamNormalisation:
+    """The terminal sends expiry_date/expiry_dates; routes must honour them."""
+
+    def test_body_expiry_accepts_all_key_variants(self):
+        from flinttrade_screener.analysis_routes import _body_expiry
+
+        assert _body_expiry({"expiry": "26MAR26"}, "X") == "26MAR26"
+        assert _body_expiry({"expiry_date": "26MAR26"}, "X") == "26MAR26"
+        assert _body_expiry({"expiry_dates": ["26MAR26", "24APR26"]}, "X") == "26MAR26"
+        assert _body_expiry({}, "FALLBACK") == "FALLBACK"
+
+    def test_body_expiries_accepts_all_key_variants(self):
+        from flinttrade_screener.analysis_routes import _body_expiries
+
+        assert _body_expiries({"expiries": ["A"]}, ["X"]) == ["A"]
+        assert _body_expiries({"expiry_dates": ["A", "B"]}, ["X"]) == ["A", "B"]
+        assert _body_expiries({"expiry_date": "A"}, ["X"]) == ["A"]
+        assert _body_expiries({}, ["DEF"]) == ["DEF"]
+
+    def test_oiprofile_honours_frontend_expiry_date_key(self, client):
+        resp, _ = _post(
+            client,
+            "/api/v1/oiprofile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry_date": "26MAR26"},
+        )
+        assert resp.status_code == 200
+
+    def test_gex_honours_frontend_expiry_date_key(self, client):
+        resp, _ = _post(
+            client,
+            "/api/v1/gex",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry_date": "26MAR26"},
+        )
+        assert resp.status_code == 200
