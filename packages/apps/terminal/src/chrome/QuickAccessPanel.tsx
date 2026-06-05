@@ -14,9 +14,7 @@
 import { useEffect, useRef, useCallback, forwardRef, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { useMutation } from "@tanstack/react-query";
 import { layerClassNames } from "@flinttrade/design-system";
-import { toggleSandbox } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import {
   Settings,
@@ -167,39 +165,14 @@ function ConnectionCard({ connected, practiceMode }: ConnectionCardProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Practice mode toggle switch
+// Trading-mode label (read-only; the switch lives in the TopBar ModeIndicator)
 // ---------------------------------------------------------------------------
 
-interface PracticeSwitchProps {
-  enabled: boolean;
-  onToggle: () => void;
-}
-
-function PracticeSwitch({ enabled, onToggle }: PracticeSwitchProps) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label="Toggle sandbox mode"
-      onClick={onToggle}
-      className={cn(
-        "relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full",
-        "transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
-        "focus-visible:ring-2 focus-visible:ring-accent/50",
-        enabled ? "bg-accent" : "bg-surface-hover border border-border-default",
-      )}
-    >
-      <span
-        className={cn(
-          "inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200",
-          enabled ? "translate-x-4" : "translate-x-0.5",
-        )}
-        aria-hidden="true"
-      />
-    </button>
-  );
-}
+const MODE_LABEL: Record<"explore" | "practice" | "live", { text: string; className: string }> = {
+  explore: { text: "Explore", className: "text-text-secondary" },
+  practice: { text: "Practice", className: "text-amber-400" },
+  live: { text: "Live", className: "text-profit" },
+};
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -218,15 +191,9 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
   const density = useSettingsStore((s) => s.density);
   const setDensity = useSettingsStore((s) => s.setDensity);
 
-  // Mode store — practice flag drives the sandbox toggle in this panel
+  // Mode store — current trading mode (switched from the TopBar ModeIndicator)
   const appMode = useModeStore((s) => s.mode);
-  const setAppMode = useModeStore((s) => s.setMode);
   const isPractice = appMode === "practice";
-
-  const sandboxMutation = useMutation({
-    mutationFn: (enabled: boolean) => toggleSandbox(enabled),
-    onSuccess: (data) => setAppMode(data.enabled ? "practice" : "live"),
-  });
 
   // Theme store — active theme for dot selection
   const activeThemeId = useThemeStore((s) => s.activeThemeId);
@@ -495,19 +462,21 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         </div>
 
         {/* ------------------------------------------------------------------ */}
-        {/* Practice mode toggle                                                  */}
+        {/* Trading mode (read-only — switch from the TopBar mode pill)          */}
         {/* ------------------------------------------------------------------ */}
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
-            <span className="text-xs font-medium text-text-primary">Practice Mode</span>
+            <span className="text-xs font-medium text-text-primary">Trading Mode</span>
             <p className="text-[10px] text-text-muted leading-snug">
-              Practice mode — virtual orders only
+              Switch from the mode pill in the top bar
             </p>
           </div>
-          <PracticeSwitch
-            enabled={isPractice}
-            onToggle={() => sandboxMutation.mutate(!isPractice)}
-          />
+          <span
+            className={cn("text-xs font-semibold font-heading", MODE_LABEL[appMode].className)}
+            aria-label={`Current trading mode: ${MODE_LABEL[appMode].text}`}
+          >
+            {MODE_LABEL[appMode].text}
+          </span>
         </div>
 
         {/* ------------------------------------------------------------------ */}

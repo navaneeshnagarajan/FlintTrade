@@ -79,11 +79,6 @@ export interface PositionSizeResult {
   inputs: PositionSizeRequest;
 }
 
-export interface SandboxConfig {
-  enabled: boolean;
-  mode: "paper" | "live";
-}
-
 function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
   return {
     check_market_hours: raw.l1_order?.check_market_hours ?? true,
@@ -167,7 +162,9 @@ export const cancelBracketOrder = (bracketId: string) =>
 export const calculatePositionSize = (req: PositionSizeRequest) =>
   post<PositionSizeResult>("position/size", req);
 
-export const getSandboxStatus = () => get<SandboxConfig>("sandbox/config");
-
-export const toggleSandbox = (enabled: boolean) =>
-  post<SandboxConfig>("sandbox/config", { enabled });
+// NOTE: practice/sandbox mode is owned by the mode state machine
+// (ModeIndicator → POST /ft-api/v1/auth/mode + /auth/pin), not a standalone
+// `sandbox/config` toggle. The old getSandboxStatus/toggleSandbox helpers
+// pointed at /api/v1/sandbox/config — a route that never existed (the engine
+// leverage config lives at /v1/sandbox-config/config with a different shape) —
+// and were removed in the usability-recovery campaign.

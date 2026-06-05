@@ -23,7 +23,7 @@ beforeAll(() => {
   };
 });
 
-import TickSpeedWidget, { deriveQuality } from "../TickSpeedWidget";
+import TickSpeedWidget, { deriveQuality, formatTickAge } from "../TickSpeedWidget";
 
 // ---------------------------------------------------------------------------
 // deriveQuality unit tests
@@ -52,6 +52,24 @@ describe("deriveQuality", () => {
 });
 
 // ---------------------------------------------------------------------------
+// formatTickAge unit tests
+// ---------------------------------------------------------------------------
+
+describe("formatTickAge", () => {
+  it("returns an em dash when no tick has arrived", () => {
+    expect(formatTickAge(-1)).toBe("—");
+  });
+
+  it("formats sub-second ages in milliseconds", () => {
+    expect(formatTickAge(120)).toBe("120 ms");
+  });
+
+  it("formats ages over a second in seconds", () => {
+    expect(formatTickAge(2500)).toBe("2.5 s");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Widget render tests
 // ---------------------------------------------------------------------------
 
@@ -71,14 +89,9 @@ describe("TickSpeedWidget", () => {
     expect(screen.getByText("Ticks / second")).toBeTruthy();
   });
 
-  it("renders Latency metric label", () => {
+  it("renders Last tick metric label", () => {
     render(<TickSpeedWidget />);
-    expect(screen.getByText("Latency")).toBeTruthy();
-  });
-
-  it("renders Dropped metric label", () => {
-    render(<TickSpeedWidget />);
-    expect(screen.getByText("Dropped")).toBeTruthy();
+    expect(screen.getByText("Last tick")).toBeTruthy();
   });
 
   it("renders Reconnections metric label", () => {
@@ -123,9 +136,9 @@ describe("TickSpeedWidget", () => {
     expect(screen.getByText("84")).toBeTruthy();
   });
 
-  it("sample latency renders as number", () => {
+  it("sample last-tick age renders", () => {
     render(<TickSpeedWidget />);
-    // SAMPLE_METRICS.latencyMs = 6
-    expect(screen.getByText("6")).toBeTruthy();
+    // SAMPLE_METRICS.lastTickAgeMs = 120 → "120 ms"
+    expect(screen.getByText("120 ms")).toBeTruthy();
   });
 });

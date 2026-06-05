@@ -1,24 +1,30 @@
 /**
- * TickSpeedWidget — WebSocket tick delivery speed and health monitor.
+ * TickSpeedWidget — WebSocket tick delivery speed and feed-health monitor.
  *
- * Metrics tracked:
- *   - Ticks per second (rolling 1-second window)
- *   - Estimated latency in ms (derived from ping interval and heartbeat)
- *   - Dropped tick percentage (ticks expected vs received)
- *   - Reconnection count
- *   - Connection quality: Excellent / Good / Fair / Poor
+ * When the live WS feed is up the metrics are MEASURED, not simulated:
+ *   - Ticks per second — counted directly from the shared WS service tick
+ *     stream over a rolling 1-second window.
+ *   - Last tick — real age of the most recent tick (WS diagnostics.tickAgeMs),
+ *     the honest signal for a stale/frozen feed.
+ *   - Reconnections — real cumulative reconnect count from WS diagnostics.
+ *   - Connection quality — derived from the measured tick rate.
  *
- * Mini spark chart: core tick rate trend over last 5 minutes (300 samples at 1/s).
- * Reads from Zustand connectionStore. When disconnected shows sample data.
+ * Mini spark chart: measured tick-rate trend over the last 5 minutes.
+ *
+ * When the feed is DOWN, a clearly-badged "Sample" preview is shown (the
+ * isConnected guard + visible badge required by the no-fabricated-data rule).
+ * Round-trip latency and dropped-tick % are intentionally NOT shown — neither
+ * is measurable from the browser without server sequence numbers, so we do not
+ * invent them.
  */
 
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { Gauge, Wifi, WifiOff } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { getWsService } from "@/services/websocket";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,8 +34,8 @@ type Quality = "excellent" | "good" | "fair" | "poor";
 
 interface TickMetrics {
   ticksPerSec: number;
-  latencyMs: number;
-  droppedPct: number;
+  /** Milliseconds since the last tick; -1 when no tick has ever arrived. */
+  lastTickAgeMs: number;
   reconnectCount: number;
   quality: Quality;
 }
@@ -63,13 +69,12 @@ const QUALITY_DOT: Record<Quality, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Sample / simulated data when disconnected
+// Sample preview shown only behind the "Sample" badge (feed down)
 // ---------------------------------------------------------------------------
 
 const SAMPLE_METRICS: TickMetrics = {
   ticksPerSec:   84,
-  latencyMs:      6,
-  droppedPct:   0.2,
+  lastTickAgeMs: 120,
   reconnectCount: 0,
   quality: "excellent",
 };
@@ -84,6 +89,10 @@ function simulateSpark(): number[] {
   return arr;
 }
 
+function emptySpark(): number[] {
+  return new Array(SPARK_SAMPLES).fill(0);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -95,15 +104,18 @@ export function deriveQuality(ticksPerSec: number): Quality {
   return "poor";
 }
 
+/** Human-readable age of the most recent tick. */
+export function formatTickAge(ageMs: number): string {
+  if (ageMs < 0) return "—";
+  if (ageMs < 1000) return `${ageMs} ms`;
+  return `${(ageMs / 1000).toFixed(1)} s`;
+}
+
 // ---------------------------------------------------------------------------
 // Spark chart
 // ---------------------------------------------------------------------------
 
-interface SparkProps {
-  data: number[];
-}
-
-function SparkChart({ data }: SparkProps) {
+function SparkChart({ data }: { data: number[] }) {
   if (data.length < 2) return null;
 
   return (
@@ -142,57 +154,64 @@ function MetricRow({ label, value, unit, valueClass }: {
 
 function TickSpeedWidget() {
   const track = useTrackBehavior();
-  const connectionStatus = useConnectionStore((s) => s.status);
-  const isConnected = connectionStatus === "connected";
+  // The tick feed rides the WebSocket, so wsConnected — not the REST ping
+  // status — is the honest "is the feed live?" signal for this widget.
+  const wsConnected = useConnectionStore((s) => s.wsConnected);
 
   const [metrics, setMetrics] = useState<TickMetrics>(SAMPLE_METRICS);
   const [spark, setSpark] = useState<number[]>(() => simulateSpark());
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Mutable per-second tick counter incremented in the onTick callback.
+  const tickCounter = useRef(0);
 
   useEffect(() => {
     track("trade", "widget_view_tick_speed");
   }, [track]);
 
-  // When connected, subscribe to tick count increments from the WS layer.
-  // Since we cannot hook directly into the WS frame here, we approximate
-  // by sampling the atom layer tick counter if available, or simulating.
   useEffect(() => {
-    if (!isConnected) {
+    if (!wsConnected) {
+      // Feed down — show the clearly-badged sample preview.
       setSpark(simulateSpark());
       setMetrics(SAMPLE_METRICS);
       return;
     }
 
-    let reconnectCount = 0;
+    const ws = getWsService();
+    if (!ws) {
+      // Store says connected but the WS singleton is absent — show an honest
+      // empty state rather than fabricated numbers.
+      setSpark(emptySpark());
+      setMetrics({ ticksPerSec: 0, lastTickAgeMs: -1, reconnectCount: 0, quality: "poor" });
+      return;
+    }
 
-    intervalRef.current = setInterval(() => {
-      // In production: read accumulated tick counter from Jotai ws atom
-      // For now simulate realistic live numbers while connected
-      const tps = Math.round(60 + Math.random() * 80);
-      const latency = Math.round(3 + Math.random() * 12);
-      const dropped = parseFloat((Math.random() * 0.5).toFixed(2));
+    setSpark(emptySpark());
+    tickCounter.current = 0;
+    const offTick = ws.onTick(() => {
+      tickCounter.current += 1;
+    });
 
-      if (Math.random() < 0.002) reconnectCount++;
-
-      const quality = deriveQuality(tps);
-      setMetrics({ ticksPerSec: tps, latencyMs: latency, droppedPct: dropped, reconnectCount, quality });
-      setSpark((prev) => {
-        const next = [...prev.slice(1), tps];
-        return next;
+    const id = setInterval(() => {
+      const tps = tickCounter.current;
+      tickCounter.current = 0;
+      const diag = ws.diagnostics;
+      setMetrics({
+        ticksPerSec: tps,
+        lastTickAgeMs: diag.tickAgeMs,
+        reconnectCount: diag.reconnectCount,
+        quality: deriveQuality(tps),
       });
+      setSpark((prev) => [...prev.slice(1), tps]);
     }, UPDATE_INTERVAL_MS);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      offTick();
+      clearInterval(id);
     };
-  }, [isConnected]);
+  }, [wsConnected]);
 
   const quality = metrics.quality;
   const qualityLabel = quality.charAt(0).toUpperCase() + quality.slice(1);
-
-  const handleReset = useCallback(() => {
-    setMetrics((m) => ({ ...m, reconnectCount: 0 }));
-  }, []);
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Tick Speed widget">
@@ -210,11 +229,11 @@ function TickSpeedWidget() {
           <span className={cn("inline-block w-1.5 h-1.5 rounded-full", QUALITY_DOT[quality])} aria-hidden="true" />
           {qualityLabel}
         </span>
-        {isConnected
+        {wsConnected
           ? <Wifi size={12} className="text-profit" aria-label="Connected" />
           : <WifiOff size={12} className="text-text-muted" aria-label="Disconnected" />
         }
-        {!isConnected && (
+        {!wsConnected && (
           <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
             Sample
           </span>
@@ -230,36 +249,21 @@ function TickSpeedWidget() {
           valueClass={cn("font-semibold", QUALITY_COLOURS[quality])}
         />
         <MetricRow
-          label="Latency"
-          value={metrics.latencyMs}
-          unit="ms"
-          valueClass={metrics.latencyMs < 10 ? "text-profit" : metrics.latencyMs < 50 ? "text-warning" : "text-loss"}
+          label="Last tick"
+          value={formatTickAge(metrics.lastTickAgeMs)}
+          valueClass={
+            metrics.lastTickAgeMs < 0
+              ? "text-text-muted"
+              : metrics.lastTickAgeMs < 2000
+                ? "text-profit"
+                : "text-warning"
+          }
         />
         <MetricRow
-          label="Dropped"
-          value={metrics.droppedPct.toFixed(2)}
-          unit="%"
-          valueClass={metrics.droppedPct < 0.5 ? "text-profit" : "text-loss"}
+          label="Reconnections"
+          value={metrics.reconnectCount}
+          valueClass={metrics.reconnectCount > 0 ? "text-warning" : "text-text-primary"}
         />
-        <div className="flex items-center justify-between">
-          <span className="text-xxs text-text-muted">Reconnections</span>
-          <div className="flex items-center gap-1.5">
-            <span className={cn("text-xs font-mono tabular-nums font-semibold", metrics.reconnectCount > 0 ? "text-warning" : "text-text-primary")}>
-              {metrics.reconnectCount}
-            </span>
-            {metrics.reconnectCount > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleReset}
-                className="h-4 px-1 text-xxs text-text-muted hover:text-text-primary"
-                aria-label="Reset reconnection counter"
-              >
-                reset
-              </Button>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Spark chart */}
