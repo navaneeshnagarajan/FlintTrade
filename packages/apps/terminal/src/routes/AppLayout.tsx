@@ -5,6 +5,7 @@ import DockSidebar from "@/chrome/DockSidebar";
 import PageTransition from "@/components/motion/PageTransition";
 import TickerBar from "@/chrome/TickerBar";
 import { useWsBridge } from "@/hooks/useWsBridge";
+import { useDemoFeed } from "@/hooks/useDemoFeed";
 import { useTickerFallback } from "@/hooks/useTickerFallback";
 import { usePrevClose } from "@/hooks/usePrevClose";
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
@@ -90,6 +91,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
  */
 export default function AppLayout() {
   useWsBridge();         // WebSocket connection (no-ops if no apiKey)
+  useDemoFeed();         // Simulated-live market feed in Explore mode (no broker)
   useTickerFallback();   // REST polling fallback when WS is disconnected
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
   useTradingStoreSync(); // Mirror funds/positions REST cache → tradingStore scalars (single write point)
