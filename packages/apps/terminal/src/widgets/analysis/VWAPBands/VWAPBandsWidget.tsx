@@ -5,14 +5,19 @@
  *   - Pure SVG line chart — VWAP + price line
  *   - Upper/lower bands at 1σ, 2σ, 3σ — filled between bands
  *   - Symbol selector
- *   - Auto-refresh every 30s during market hours
- *   - Sample data in explore mode; /api/v1/history in live mode
+ *
+ * DATA HONESTY: this widget renders deterministic SAMPLE bars only. No live
+ * backend endpoint (e.g. /api/v1/history) is wired yet, so there is no live
+ * mode — the previous 30s "auto-refresh" only slept and bumped a "last
+ * updated" clock, making fake data look live. That deceptive affordance has
+ * been removed and the "Sample data" badge is shown unconditionally (mirrors
+ * the SessionStatsWidget precedent). Wiring a real intraday-bars endpoint is a
+ * separate future task.
  */
 
-import { useState, useMemo, useEffect, useCallback, memo } from "react";
-import { Waves, RefreshCw, ChevronDown } from "lucide-react";
+import { useState, useMemo, memo } from "react";
+import { Waves, ChevronDown } from "lucide-react";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -194,12 +199,9 @@ function buildVWAPChart(points: VWAPPoint[]) {
 // ---------------------------------------------------------------------------
 
 function VWAPBandsWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
 
   const [symbol, setSymbol] = useState("NIFTY");
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState("--");
   const [showSymbolMenu, setShowSymbolMenu] = useState(false);
 
   const bars = useMemo(() => buildSampleBars(BASE_PRICES[symbol] ?? 22500), [symbol]);
@@ -213,26 +215,6 @@ function VWAPBandsWidget() {
   const priceColour = priceVsVWAP >= 0 ? "text-profit" : "text-loss";
   const priceSign = priceVsVWAP >= 0 ? "+" : "";
 
-  const refresh = useCallback(async () => {
-    if (!isConnected) return;
-    setIsLoading(true);
-    try {
-      // In live mode: fetch /api/v1/history for intraday bars
-      await new Promise<void>((resolve) => setTimeout(resolve, 300));
-      setLastUpdated(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
-      track("trade", "vwapbands_refresh");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isConnected, track]);
-
-  useEffect(() => {
-    if (!isConnected) return;
-    void refresh();
-    const id = setInterval(() => void refresh(), 30_000);
-    return () => clearInterval(id);
-  }, [isConnected, refresh]);
-
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
 
@@ -240,11 +222,19 @@ function VWAPBandsWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Waves size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">VWAP Bands</span>
-        {!isConnected && (
-          <span className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — `buildSampleBars(...)` is the only data source
+            today; no live intraday-bars endpoint is wired yet. The badge was
+            previously gated on `!isConnected`, which hid the fact that the
+            widget still showed sample data after a broker connection. Keep it
+            visible at all times (mirrors SessionStatsWidget). */}
+        <span
+          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live backend endpoint yet"
+          title="No live data wired yet — showing sample VWAP bands so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
 
         {/* Symbol selector */}
@@ -278,16 +268,6 @@ function VWAPBandsWidget() {
             </div>
           )}
         </div>
-
-        <span className="text-xxs text-text-muted tabular-nums">{lastUpdated}</span>
-        <button
-          onClick={() => void refresh()}
-          disabled={isLoading || !isConnected}
-          aria-label="Refresh VWAP data"
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover disabled:opacity-40 transition-colors"
-        >
-          <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} aria-hidden="true" />
-        </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">

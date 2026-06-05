@@ -37,16 +37,32 @@ describe("SectorPerformanceWidget", () => {
     expect(screen.getByText("Sector Performance")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("shows the Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<SectorPerformanceWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when connected", () => {
+  // Case A: the badge is unconditional. No live sectoral-index endpoint is
+  // wired yet, so the widget always renders sample figures — and must stay
+  // honest about it even after a broker connection. The old behaviour (hiding
+  // the badge when connected) was the safety bug we are fixing here.
+  it("still shows the Sample data badge when connected", () => {
     mockConnected.mockReturnValue(true);
     render(<SectorPerformanceWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("never implies the sample data is live (no refresh control, no clock)", () => {
+    mockConnected.mockReturnValue(true);
+    render(<SectorPerformanceWidget />);
+    // The deceptive "Live updating" affordances were removed: no refresh button
+    // and no spinning loader that would make stale sample data look live.
+    expect(screen.queryByLabelText("Refresh sector performance")).toBeNull();
+    // The badge carries an honest, accessible explanation of why no live data
+    // is shown.
+    const badge = screen.getByText("Sample data");
+    expect(badge.getAttribute("title")).toMatch(/no live data wired yet/i);
   });
 
   it("renders all 5 timeframe tabs", () => {
@@ -103,10 +119,10 @@ describe("SectorPerformanceWidget", () => {
     expect(screen.getByLabelText("Sector performance bars")).toBeTruthy();
   });
 
-  it("refresh button is present", () => {
+  it("has no refresh control (sample data is never refreshed to look live)", () => {
     mockConnected.mockReturnValue(false);
     render(<SectorPerformanceWidget />);
-    expect(screen.getByLabelText("Refresh sector performance")).toBeTruthy();
+    expect(screen.queryByLabelText("Refresh sector performance")).toBeNull();
   });
 
   it("positive/negative count row is rendered", () => {

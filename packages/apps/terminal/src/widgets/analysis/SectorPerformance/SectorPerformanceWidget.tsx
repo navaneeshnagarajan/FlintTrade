@@ -6,15 +6,15 @@
  *   - All 12 Nifty sectoral indices
  *   - Timeframe toggle: 1D, 1W, 1M, 3M, 1Y
  *   - Sorted best to worst by default
- *   - Live data from /api/v1/multiquotes when connected; sample data otherwise
- *   - Refreshes every 60 s when connected
+ *   - Sample data only — no live sectoral-index endpoint is wired yet, so the
+ *     "Sample data" badge is shown unconditionally and the widget never implies
+ *     the figures are live (no auto-refresh, no "last updated" clock).
  */
 
-import { useState, useEffect, useCallback, useRef, memo } from "react";
-import { BarChart, RefreshCw, Loader2 } from "lucide-react";
+import { useState, useEffect, memo } from "react";
+import { BarChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -106,7 +106,6 @@ const SAMPLE_DATA: Record<Timeframe, SectorEntry[]> = {
 };
 
 const TIMEFRAMES: Timeframe[] = ["1D", "1W", "1M", "3M", "1Y"];
-const REFRESH_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Bar row
@@ -151,31 +150,11 @@ function BarRow({ entry, maxAbs }: BarRowProps) {
 
 function SectorPerformanceWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
   const [timeframe, setTimeframe] = useState<Timeframe>("1D");
-  const [isFetching, setIsFetching] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     track("trade", "widget_view_sector_performance");
   }, [track]);
-
-  const refresh = useCallback(() => {
-    if (!isConnected) return;
-    setIsFetching(true);
-    // Live: would call /api/v1/multiquotes for sectoral index LTPs and derive % change
-    setTimeout(() => {
-      setIsFetching(false);
-      setLastUpdate(new Date());
-    }, 600);
-  }, [isConnected]);
-
-  useEffect(() => {
-    if (!isConnected) return;
-    timerRef.current = setInterval(refresh, REFRESH_MS);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isConnected, refresh]);
 
   const sectors = SAMPLE_DATA[timeframe];
   const maxAbs = Math.max(...sectors.map((s) => Math.abs(s.changePct)), 0.1);
@@ -189,26 +168,21 @@ function SectorPerformanceWidget() {
       <div className="flex-none flex items-center gap-2 px-2.5 py-1.5 bg-surface-card border-b border-border-default">
         <BarChart size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Sector Performance</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
-        <div className="flex-1" />
-        <span className="text-xxs text-text-muted font-mono">
-          {lastUpdate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-        </span>
-        <button
-          onClick={refresh}
-          disabled={isFetching || !isConnected}
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
-          aria-label="Refresh sector performance"
+        {/* Honest disclosure — `SAMPLE_DATA[timeframe]` is the only data source
+            today; no live sectoral-index endpoint is wired yet. The badge
+            previously hid in `isConnected` mode, which masked the fact that we
+            were still showing sample figures even after a broker connection.
+            Keep it visible at all times, and never imply the data is live
+            (no auto-refresh, no "last updated" clock). */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live sectoral-index endpoint yet"
+          title="No live data wired yet — showing sample sector performance so the widget is usable in explore mode."
         >
-          {isFetching
-            ? <Loader2 size={11} className="animate-spin" />
-            : <RefreshCw size={11} />
-          }
-        </button>
+          Sample data
+        </span>
+        <div className="flex-1" />
       </div>
 
       {/* Timeframe tabs */}

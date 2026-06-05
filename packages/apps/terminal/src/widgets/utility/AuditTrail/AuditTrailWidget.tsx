@@ -7,7 +7,9 @@
  *   - Filter by action type and date range
  *   - Export to CSV
  *   - retention is operator-controlled (kept on disk under ~/.flinttrade)
- *   - Sample data in explore mode; live data via ft-api in connected mode
+ *   - Sample data (clearly flagged) only in explore/disconnected mode; connected
+ *     users see live ft-api data exclusively, with an honest empty state when the
+ *     live response is empty — never fabricated rows.
  */
 
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
@@ -167,8 +169,14 @@ function AuditTrailWidget() {
     staleTime: 30_000,
   });
 
+  // Connected users only ever see live rows. Never fall back to the SAMPLE
+  // constant on an empty/undefined live response — that would render
+  // fabricated audit rows to a real user. The SAMPLE constant is reserved for
+  // the explore (not-connected) branch, and is always paired with a visible
+  // "Sample data" affordance.
+  const showingSampleData = !isConnected;
   const rawEntries: ActivityEntry[] = isConnected
-    ? (liveData?.entries ?? SAMPLE_AUDIT_ENTRIES)
+    ? (liveData?.entries ?? [])
     : SAMPLE_AUDIT_ENTRIES;
 
   const filtered = useMemo(() => {
@@ -197,6 +205,11 @@ function AuditTrailWidget() {
         <span className="text-xxs text-text-muted px-1.5 py-px rounded bg-surface-hover border border-border-subtle">
           Audit log
         </span>
+        {showingSampleData && (
+          <span className="text-xxs text-accent px-1.5 py-px rounded bg-accent/10 border border-accent/20">
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
         <Button
           variant="outline"
@@ -297,7 +310,9 @@ function AuditTrailWidget() {
 
           {filtered.length === 0 && !isLoading && (
             <div className="flex items-center justify-center py-10 text-text-muted text-sm">
-              No audit entries match the current filters.
+              {actionFilter !== "all" || sinceDate
+                ? "No audit entries match the current filters."
+                : "No audit entries available."}
             </div>
           )}
         </div>

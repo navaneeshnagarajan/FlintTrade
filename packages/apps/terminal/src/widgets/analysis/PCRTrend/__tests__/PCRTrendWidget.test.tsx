@@ -33,16 +33,26 @@ describe("PCRTrendWidget", () => {
     expect(screen.getByText("PCR Trend")).toBeTruthy();
   });
 
-  it("shows Sample badge when broker is disconnected", () => {
+  it("shows the Sample data badge when broker is disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<PCRTrendWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("hides Sample badge when broker is connected", () => {
+  it("still shows the Sample data badge when broker is connected (data is never live yet)", () => {
+    // CASE A: the widget only ever renders `SAMPLE_PCR`; no live PCR endpoint
+    // is wired. The badge must stay visible on a live connection so we never
+    // imply the headline PCR / arrow / regime is real.
     mockUseBrokerConnected.mockReturnValue(true);
     render(<PCRTrendWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("labels the Sample data badge as a status disclosing no live source", () => {
+    render(<PCRTrendWidget />);
+    const badge = screen.getByText("Sample data");
+    expect(badge).toHaveAttribute("role", "status");
+    expect(badge.getAttribute("aria-label")).toMatch(/no live PCR data source is wired yet/i);
   });
 
   it("renders the PCR chart through the shared Flint threshold line primitive", () => {

@@ -1,10 +1,12 @@
 /**
  * EarningsCalendarWidget.test.tsx
  *
- * Tests: render, month navigation, sector filter, legend, calendar grid.
+ * Tests: render, month navigation, sector filter, legend, calendar grid,
+ * and the honest connected/disconnected data behaviour (no fabricated rows
+ * for connected users).
  */
 
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
@@ -30,12 +32,23 @@ vi.mock("@/services/ftApi", async (importOriginal) => {
   return { ...actual, getEarningsCalendar: vi.fn() };
 });
 
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getEarningsCalendar } from "@/services/ftApi";
 import EarningsCalendarWidget from "../EarningsCalendarWidget";
+
+const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
+const mockEarnings = getEarningsCalendar as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
+
+beforeEach(() => {
+  mockConnected.mockReturnValue(false);
+  mockEarnings.mockReset();
+  mockEarnings.mockResolvedValue({ entries: [] });
+});
 
 describe("EarningsCalendarWidget", () => {
   it("renders the widget header", () => {
@@ -98,5 +111,59 @@ describe("EarningsCalendarWidget", () => {
     // (INFY or TCS must be in the displayed month range for offset-based dates)
     const table = screen.getByRole("table", { name: "Earnings calendar" });
     expect(table).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Honest data behaviour (no fabricated rows for connected users)
+// ---------------------------------------------------------------------------
+
+describe("EarningsCalendarWidget — honest data", () => {
+  it("shows the Sample data badge when disconnected", () => {
+    mockConnected.mockReturnValue(false);
+    render(<EarningsCalendarWidget />, { wrapper });
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("hides the Sample data badge when connected", () => {
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({ entries: [] });
+    render(<EarningsCalendarWidget />, { wrapper });
+    expect(screen.queryByText("Sample data")).toBeNull();
+  });
+
+  it("renders an honest empty state and NO sample rows when connected with an empty response", async () => {
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({ entries: [] });
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    // Honest empty state must appear.
+    expect(
+      await screen.findByText("No earnings results available for this month."),
+    ).toBeTruthy();
+
+    // No fabricated sample symbols may be rendered to a connected user.
+    expect(screen.queryByText("INFY")).toBeNull();
+    expect(screen.queryByText("RELIANCE")).toBeNull();
+    expect(screen.queryByText("BAJFINANCE")).toBeNull();
+    expect(screen.queryByText("Sample data")).toBeNull();
+  });
+
+  it("renders the live entries (not sample data) when connected with a populated response", async () => {
+    const now = new Date();
+    const liveDate = new Date(now.getFullYear(), now.getMonth(), 15).toISOString().slice(0, 10);
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({
+      entries: [
+        { symbol: "ZOMATO", company: "Zomato", date: liveDate, result: "beat", sector: "Consumer" },
+      ],
+    });
+
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    // Live symbol shows; sample-only symbol must not.
+    expect(await screen.findByText("ZOMATO")).toBeTruthy();
+    expect(screen.queryByText("INFY")).toBeNull();
+    expect(screen.queryByText("Sample data")).toBeNull();
   });
 });

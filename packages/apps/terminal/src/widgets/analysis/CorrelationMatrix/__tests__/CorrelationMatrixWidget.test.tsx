@@ -10,11 +10,18 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+// NOTE: The widget no longer reads `useBrokerConnected` — the correlation
+// matrix is sample-only because no live endpoint is wired, so the "Sample data"
+// badge is unconditional. The mock is retained (harmlessly) to guard against a
+// regression that re-introduces a connection gate on the badge.
 vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: () => false,
+  useBrokerConnected: vi.fn().mockReturnValue(true),
 }));
 
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import CorrelationMatrixWidget from "../CorrelationMatrixWidget";
+
+const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 describe("CorrelationMatrixWidget", () => {
   it("renders widget header with title", () => {
@@ -22,9 +29,26 @@ describe("CorrelationMatrixWidget", () => {
     expect(screen.getByText("Correlation Matrix")).toBeTruthy();
   });
 
-  it("shows Sample badge when not connected", () => {
+  it("shows the Sample data badge even when connected (no live source wired)", () => {
+    // Honest disclosure must survive a live broker connection — the figures are
+    // still sample data, so a connected trader must see the badge.
+    mockConnected.mockReturnValue(true);
     render(<CorrelationMatrixWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("Sample data badge carries an honest status role and explanatory title", () => {
+    render(<CorrelationMatrixWidget />);
+    const badge = screen.getByText("Sample data");
+    expect(badge.getAttribute("role")).toBe("status");
+    expect(badge.getAttribute("title")).toMatch(/no live data wired yet/i);
+  });
+
+  it("does not render a live-looking refresh control implying fresh data", () => {
+    // The deceptive 400ms-sleep refresh button + "lastUpdated" timestamp were
+    // removed so nothing implies the sample matrix is live.
+    render(<CorrelationMatrixWidget />);
+    expect(screen.queryByLabelText("Refresh correlation data")).toBeNull();
   });
 
   it("renders default 8 instruments as column headers", () => {

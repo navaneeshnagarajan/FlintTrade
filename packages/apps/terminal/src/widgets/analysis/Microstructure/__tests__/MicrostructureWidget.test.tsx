@@ -10,8 +10,11 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+// NOTE: the widget no longer reads `useBrokerConnected` — the "Sample data"
+// badge is now unconditional because no live tick feed is wired in yet. We
+// still mock the hook defensively in case any transitive import touches it.
 vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: () => false,
+  useBrokerConnected: () => true,
 }));
 
 import MicrostructureWidget from "../MicrostructureWidget";
@@ -30,9 +33,29 @@ describe("MicrostructureWidget", () => {
     expect(screen.getByText("Market Microstructure")).toBeTruthy();
   });
 
-  it("shows Sample badge when not connected", () => {
+  it("always shows the 'Sample data' badge — even when a broker is connected", () => {
+    // The widget has no live tick feed wired yet, so it must honestly disclose
+    // that it is rendering sample data regardless of connection state. The
+    // mocked `useBrokerConnected` returns true here, proving the badge is not
+    // gated on disconnect.
     render(<MicrostructureWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("exposes the sample badge as a status with an honest accessible label", () => {
+    render(<MicrostructureWidget />);
+    const badge = screen.getByRole("status", {
+      name: /showing sample data; no live tick feed wired yet/i,
+    });
+    expect(badge).toBeTruthy();
+    expect(badge).toHaveTextContent("Sample data");
+  });
+
+  it("does not render a deceptive 'Live updating' affordance", () => {
+    // The old spinning RefreshCw indicator implied a live data source; it must
+    // be gone so nothing suggests the animated sample ticks are real.
+    render(<MicrostructureWidget />);
+    expect(screen.queryByLabelText(/live updating/i)).toBeNull();
   });
 
   it("renders tick velocity section", () => {

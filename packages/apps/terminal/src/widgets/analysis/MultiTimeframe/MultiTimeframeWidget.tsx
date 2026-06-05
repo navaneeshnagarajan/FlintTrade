@@ -6,12 +6,14 @@
  *   - Row colour: all bullish = green, all bearish = red, mixed = amber
  *   - Confluence score: count of agreeing timeframes
  *   - Symbol selector
- *   - Sample data in explore mode; /api/v1/history in live mode
+ *   - Sample data only: no live multi-timeframe endpoint is wired yet, so the
+ *     widget renders sample signals at all times and discloses this honestly
+ *     with an always-visible "Sample data" badge (see header comment below).
+ *     Wiring a live source (e.g. /api/v1/history) is a separate future task.
  */
 
 import { useState, useMemo, memo } from "react";
 import { Layers, ChevronDown, ArrowUp, ArrowDown, Minus } from "lucide-react";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -165,7 +167,10 @@ function ConfluenceBadge({ bullish, bearish, total }: ConfluenceBadgeProps) {
 // ---------------------------------------------------------------------------
 
 function MultiTimeframeWidget() {
-  const isConnected = useBrokerConnected();
+  // NOTE: We previously read `isConnected = useBrokerConnected()` to gate the
+  // "Sample" badge on disconnect-only. Now the badge is unconditional (the
+  // widget always renders sample signals because no live multi-timeframe
+  // endpoint exists yet — see header comment), so the hook is no longer needed.
   const track = useTrackBehavior();
   const [symbol, setSymbol] = useState("NIFTY");
   const [showMenu, setShowMenu] = useState(false);
@@ -186,11 +191,19 @@ function MultiTimeframeWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Layers size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Multi-Timeframe</span>
-        {!isConnected && (
-          <span className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — the `SAMPLE` map is the only data source today;
+            no live multi-timeframe endpoint exists. The badge previously hid in
+            `isConnected` mode, which masked the fact that we were still showing
+            sample signals even after a broker connection. Keep visible at all
+            times so a connected user is never misled into trusting fake data. */}
+        <span
+          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live multi-timeframe source is wired yet"
+          title="No live data wired yet — showing sample multi-timeframe signals so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
 
         {/* Symbol selector */}

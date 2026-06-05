@@ -6,12 +6,13 @@
  *   - Hover tooltip with exact return % and volume
  *   - Month/year navigation
  *   - Monthly return summary row
- *   - Sample data in explore mode; getHistory in live mode
+ *   - Sample data only — no live history endpoint is wired yet, so the
+ *     "Sample data" badge is shown unconditionally (it must never imply the
+ *     returns are live), mirroring SessionStatsWidget.
  */
 
 import { useState, useMemo, useCallback, memo } from "react";
 import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -214,8 +215,11 @@ const MONTH_NAMES = [
 ];
 
 function HeatCalendarWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
+  // NOTE: We previously read `isConnected = useBrokerConnected()` to gate the
+  // "Sample" badge on disconnect-only. The widget always renders
+  // `buildSampleData()` because no live history endpoint exists yet, so the
+  // badge is now unconditional (see header comment) and the hook is unused.
 
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -255,11 +259,19 @@ function HeatCalendarWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Calendar size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Heat Calendar</span>
-        {!isConnected && (
-          <span className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — `buildSampleData()` is the only data source
+            today; no live history endpoint is wired yet. The badge previously
+            hid in `isConnected` mode, which masked the fact that we were still
+            showing sample returns even after a broker connection. Keep visible
+            at all times so nothing implies these returns are live. */}
+        <span
+          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live data source is wired yet"
+          title="No live data wired yet — showing sample returns so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
 
         {/* Month navigation */}

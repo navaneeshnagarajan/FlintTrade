@@ -6,7 +6,9 @@
  *   - Past dates: beat (green dot) / missed (red dot) / inline (grey dot)
  *   - Future dates: highlighted with accent colour
  *   - Filter by sector
- *   - Sample data in explore mode; live data via ft-api in connected mode
+ *   - Sample data (with a visible "Sample data" badge) in explore mode only;
+ *     live data via ft-api in connected mode. A connected user never sees
+ *     fabricated rows — an empty live response shows an honest empty state.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
@@ -153,13 +155,18 @@ function EarningsCalendarWidget() {
     staleTime: 60 * 60 * 1000, // 1h
   });
 
-  const allEntries: EarningsEntry[] = isConnected
-    ? (liveData?.entries as EarningsEntry[] | undefined) ?? SAMPLE_EARNINGS
-    : SAMPLE_EARNINGS;
+  // Sample data is reserved for the not-connected/explore branch only. A
+  // connected user must NEVER see fabricated rows — when the live response is
+  // empty or undefined we render an honest empty state instead of the sample
+  // constant (see the "No earnings" message below).
+  const liveEntries = (liveData?.entries as EarningsEntry[] | undefined) ?? [];
+  const showingSample = !isConnected;
+  const allEntries: EarningsEntry[] = showingSample ? SAMPLE_EARNINGS : liveEntries;
+  const hasEntries = allEntries.length > 0;
 
   const sectors = useMemo(
-    () => (isConnected ? [...new Set(allEntries.map((e) => e.sector))].sort() : SAMPLE_SECTORS),
-    [allEntries, isConnected],
+    () => (showingSample ? SAMPLE_SECTORS : [...new Set(allEntries.map((e) => e.sector))].sort()),
+    [allEntries, showingSample],
   );
 
   const filtered = useMemo(
@@ -203,6 +210,11 @@ function EarningsCalendarWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <CalendarDays size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Earnings Calendar</span>
+        {showingSample && (
+          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
         <Select value={sectorFilter} onValueChange={setSectorFilter}>
           <SelectTrigger className="h-6 w-28 text-xxs" aria-label="Filter by sector">
@@ -249,6 +261,14 @@ function EarningsCalendarWidget() {
           <span className="text-xxs text-text-muted">Upcoming</span>
         </div>
       </div>
+
+      {/* Honest empty state — connected but no live earnings for this month.
+          We never fall back to sample rows for a connected user. */}
+      {!hasEntries && (
+        <div className="flex-none px-3 py-2 text-xxs text-text-muted border-b border-border-subtle">
+          No earnings results available for this month.
+        </div>
+      )}
 
       {/* Calendar grid */}
       <div className="flex-1 overflow-auto">

@@ -11,7 +11,7 @@
 
 import { useEffect, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Globe, RefreshCw, Loader2 } from "lucide-react";
+import { Globe, RefreshCw, Loader2, Inbox } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
 import { getGlobalIndices } from "@/services/ftApi";
@@ -131,13 +131,22 @@ function GlobalIndicesWidget() {
     staleTime: 25_000,
   });
 
+  // When connected, only ever show the live response — never the SAMPLE
+  // constant. An empty/undefined live response renders an honest empty state
+  // (see below), so a connected (live) user never sees fabricated rows.
+  // The SAMPLE constant is reserved for the not-connected/explore branch and
+  // is always paired with a visible "Sample data" affordance.
   const indices: GlobalIndexEntry[] = isConnected
-    ? (liveData?.indices ?? SAMPLE_INDICES)
+    ? (liveData?.indices ?? [])
     : SAMPLE_INDICES;
 
+  const isSample = !isConnected;
+
   const updatedAt: string = isConnected
-    ? (liveData?.updated_at ?? SAMPLE_UPDATED_AT)
+    ? (liveData?.updated_at ?? "")
     : SAMPLE_UPDATED_AT;
+
+  const isEmpty = indices.length === 0;
 
   const byRegion = REGIONS.reduce<Record<Region, GlobalIndexEntry[]>>(
     (acc, r) => {
@@ -176,8 +185,17 @@ function GlobalIndicesWidget() {
         </div>
       )}
 
+      {/* Honest empty state — connected but the live response had no indices.
+          A connected (live) user must never see fabricated sample rows. */}
+      {!isLoading && isEmpty && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted text-sm px-4 text-center">
+          <Inbox size={18} aria-hidden="true" />
+          <span>No global indices available</span>
+        </div>
+      )}
+
       {/* Table */}
-      {!isLoading && (
+      {!isLoading && !isEmpty && (
         <div className="flex-1 overflow-auto">
           <table className="w-full border-collapse" aria-label="Global market indices">
             <thead>
@@ -211,7 +229,7 @@ function GlobalIndicesWidget() {
               minute: "2-digit",
               hour12: false,
             })} IST
-            {!isConnected && (
+            {isSample && (
               <span className="ml-2 text-accent/70">(sample data)</span>
             )}
           </div>

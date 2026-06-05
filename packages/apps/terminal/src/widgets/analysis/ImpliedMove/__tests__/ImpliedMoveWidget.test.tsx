@@ -40,16 +40,28 @@ describe("ImpliedMoveWidget", () => {
     expect(screen.getByText("Implied Move")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("shows the Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<ImpliedMoveWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when connected", () => {
+  it("keeps the Sample data badge visible even when connected (no live endpoint yet)", () => {
+    // The widget renders sample figures only — there is no live implied-move
+    // backend endpoint. The badge MUST stay visible when a broker is connected
+    // so live users are never misled into thinking the figures are real.
     mockConnected.mockReturnValue(true);
     render(<ImpliedMoveWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("the Sample data badge discloses that no live data source is wired", () => {
+    mockConnected.mockReturnValue(true);
+    render(<ImpliedMoveWidget />);
+    const badge = screen.getByLabelText(
+      "Showing sample data; no live implied-move endpoint yet",
+    );
+    expect(badge.textContent).toBe("Sample data");
   });
 
   it("renders range bar with aria label", () => {

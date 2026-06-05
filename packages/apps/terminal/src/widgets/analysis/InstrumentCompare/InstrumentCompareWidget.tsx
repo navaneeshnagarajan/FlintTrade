@@ -13,7 +13,6 @@
 import { useState, useMemo, useCallback, memo } from "react";
 import { GitCompare, X, Plus } from "lucide-react";
 import { FlintMultiLineChart } from "@flinttrade/design-system";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -197,8 +196,13 @@ function LegendRow({ symbol, colour, currentPct }: LegendRowProps) {
 // ---------------------------------------------------------------------------
 
 function InstrumentCompareWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
+  // NOTE: We previously read `isConnected = useBrokerConnected()` to gate the
+  // "Sample" badge on disconnect-only. The comparison series are still built
+  // entirely from `SAMPLE_SERIES` (plus synthetic flat data for unknown
+  // symbols) — no /api/v1/history or /api/v1/quotes fetch is wired yet — so the
+  // badge is now unconditional. Hiding it while connected masked the fact that
+  // a live user was still looking at sample data.
   const [symbols, setSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
 
   const handleChange = useCallback((i: number, v: string) => {
@@ -249,11 +253,19 @@ function InstrumentCompareWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <GitCompare size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Instrument Compare</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — the overlay series come solely from `SAMPLE_SERIES`
+            (with synthetic flat data for unknown symbols); no live history/quote
+            endpoint is wired yet. The badge previously hid in `isConnected` mode,
+            which masked the fact that we were still showing sample data even
+            after a broker connection. Keep visible at all times. */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live data source is wired yet"
+          title="No live data wired yet — showing sample comparison series so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <span className="text-xxs text-text-muted">{activeCount}/{MAX_SLOTS} active</span>
       </div>

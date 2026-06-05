@@ -6,12 +6,15 @@
  *   - Columns: pair, correlation coefficient, divergence (current spread vs mean), signal
  *   - Signal: Converging / Diverging / Neutral based on spread z-score
  *   - Colour-coded rows; sortable by correlation or divergence
- *   - Sample data; /ft-api/v1/correlation in live mode
+ *
+ * Data source: sample records only. No backend endpoint (e.g. a future
+ * /ft-api/v1/correlation route) is wired yet, so the widget always shows
+ * sample data and carries an unconditional "Sample data" badge — even when a
+ * broker is connected — so nothing implies the figures are live.
  */
 
 import { useState, useMemo, memo } from "react";
-import { Link, RefreshCw, ArrowUp, ArrowDown, Minus, TrendingUp, TrendingDown } from "lucide-react";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { Link, ArrowUp, ArrowDown, Minus, TrendingUp, TrendingDown } from "lucide-react";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -150,10 +153,13 @@ function SortArrow({ active, direction }: SortArrowProps) {
 // ---------------------------------------------------------------------------
 
 function CorrelationPairsWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState("--");
+  // NOTE: We previously gated a "Sample" badge on `!useBrokerConnected()` and
+  // drove a stub refresh button that only slept 300ms and bumped a
+  // "lastUpdated" clock to *look* live while still rendering sample data. Both
+  // were dishonest: no backend correlation endpoint exists yet, so the data is
+  // never live. The badge is now unconditional and the fake refresh affordance
+  // has been removed.
   const [sortKey, setSortKey] = useState<SortKey>("correlation");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -184,19 +190,6 @@ function CorrelationPairsWidget() {
     return copy;
   }, [sortKey, sortDir]);
 
-  const handleRefresh = async () => {
-    if (!isConnected) return;
-    setIsLoading(true);
-    try {
-      // Live: fetch /ft-api/v1/correlation
-      await new Promise<void>((resolve) => setTimeout(resolve, 300));
-      setLastUpdated(new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }));
-      track("trade", "correlationpairs_refresh");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
 
@@ -204,21 +197,19 @@ function CorrelationPairsWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Link size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Correlation Pairs</span>
-        {!isConnected && (
-          <span className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
-        <div className="flex-1" />
-        <span className="text-xxs text-text-muted tabular-nums">{lastUpdated}</span>
-        <button
-          onClick={() => void handleRefresh()}
-          disabled={isLoading || !isConnected}
-          aria-label="Refresh correlation data"
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover disabled:opacity-40 transition-colors"
+        {/* Honest disclosure — `SAMPLE_PAIRS` is the only data source today; no
+            backend correlation endpoint exists. The badge previously hid when a
+            broker was connected, which masked the fact that we were still
+            showing sample data. Keep it visible at all times. */}
+        <span
+          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live correlation data source is wired yet"
+          title="No live data wired yet — showing sample correlation pairs so the widget is usable in explore mode."
         >
-          <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} aria-hidden="true" />
-        </button>
+          Sample data
+        </span>
+        <div className="flex-1" />
       </div>
 
       {/* Table */}
