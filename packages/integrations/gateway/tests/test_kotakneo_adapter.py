@@ -55,7 +55,8 @@ class MockNeo:
         ]}
 
     def funds(self):
-        return {"data": {"avlCash": "38.19", "totMrgnUsd": "34.28", "stat": "Ok"}}
+        # Real limits() shape: flat, keyed Net / MarginUsed / CollateralValue.
+        return {"CollateralValue": "38.19", "MarginUsed": "18.78", "Net": "19.41", "stat": "Ok"}
 
     def quotes(self, instrument_tokens):
         self.calls.append(("quotes", instrument_tokens))
@@ -132,7 +133,7 @@ async def test_reads_map_correctly():
     positions = await adapter.positions(session)
     assert positions[0]["symbol"] == "IDEA-EQ" and positions[0]["product"] == "MIS" and positions[0]["quantity"] == "10"
     funds = await adapter.funds(session)
-    assert funds["available_balance"] == "38.19"
+    assert funds["available_balance"] == "19.41" and funds["used_margin"] == "18.78"
 
 
 @pytest.mark.asyncio
@@ -157,6 +158,45 @@ async def test_quotes_maps_records():
     # request carried the NEO instrument-token dicts
     _, tokens = [c for c in mock.calls if c[0] == "quotes"][0]
     assert tokens[0]["exchange_segment"] == "nse_cm"
+
+
+class _EnvelopeNeo(MockNeo):
+    """Returns NEO error/empty envelopes (no `data` key) for the read surface."""
+
+    def order_book(self):
+        return {"stat": "Not_Ok", "errMsg": "Invalid session"}
+
+    def positions(self):
+        return {"stat": "Not_Ok", "errMsg": "Invalid session"}
+
+    def funds(self):
+        return {"stat": "Not_Ok", "errMsg": "Invalid session"}
+
+    def quotes(self, instrument_tokens):
+        # NEO quirk: REST sometimes echoes a bare top-level list, not {data: [...]}.
+        self.calls.append(("quotes", instrument_tokens))
+        return [
+            {"trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm", "last_traded_price": 9.4},
+        ]
+
+
+@pytest.mark.asyncio
+async def test_reads_tolerate_empty_and_error_envelope():
+    adapter = _adapter(_EnvelopeNeo())
+    session = await _session(adapter)
+    assert await adapter.order_book(session) == []
+    assert await adapter.positions(session) == []
+    funds = await adapter.funds(session)
+    # No data → zeroed funds dict, never a raise.
+    assert funds["available_balance"] == "0.00" and funds["used_margin"] == "0.00"
+
+
+@pytest.mark.asyncio
+async def test_quotes_bare_list_fallback():
+    adapter = _adapter(_EnvelopeNeo())
+    session = await _session(adapter)
+    quotes = await adapter.quotes(session, ["NSE:IDEA"])
+    assert len(quotes) == 1 and quotes[0].symbol == "IDEA-EQ" and quotes[0].ltp == 9.4
 
 
 @pytest.mark.asyncio

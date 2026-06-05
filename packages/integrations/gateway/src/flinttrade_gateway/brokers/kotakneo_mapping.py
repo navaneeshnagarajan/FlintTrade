@@ -9,8 +9,8 @@ broker docs (``.local/reference/broker-docs/kotak-neo/sdk-docs/``).
 NEO is an OMS-style API: order/position records use terse abbreviated keys
 (``nOrdNo``, ``trdSym``, ``exSeg``, ``trnsTp``, ``prcTp`` …) and positions are
 reported as cumulative buy/sell quantities + amounts rather than a single net
-line, so the net quantity and booked P&L are derived here per the documented
-formula (``Positions.md``).
+line, so the net quantity, average price and realised P&L are derived here
+(``Positions.md``); the unrealised leg is left to merge from a live quote.
 """
 
 from __future__ import annotations
@@ -173,42 +173,73 @@ def from_kotak_trade(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ratio(num: Any, den: Any) -> float:
+    """``num/den`` defaulting to 1.0 (NEO price-denomination ratios genNum/genDen
+    and prcNum/prcDen are 1 for equity; non-1 only for some commodity/currency)."""
+    n = _num(num, 1.0)
+    d = _num(den, 1.0)
+    return (n / d) if d else 1.0
+
+
+def _fmt_qty(value: float) -> str:
+    """Format a quantity as an integer string (positions are whole units)."""
+    return str(int(round(value)))
+
+
 def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a NEO position record.
 
     NEO reports cumulative carry-forward + intraday buy/sell legs rather than a
-    net line; the net quantity, average price and booked P&L are derived per the
-    documented formula (``Positions.md``). Unrealised P&L needs a live LTP, which
-    the position record does not carry, so it is left to be merged from quotes —
-    no LTP is fabricated here.
+    net line, so the net quantity, average price and **realised** P&L are derived
+    here (``Positions.md``).
+
+    Quantity is kept in raw traded units (shares/contracts), NOT divided by
+    ``lotSz`` — FlintTrade reports total quantity across every adapter (Dhan /
+    OpenAlgo do the same), so a lots-based F&O display would be an adapter-level
+    inconsistency; that normalisation, if ever wanted, belongs at the Position
+    layer. Average price is per-unit: ``amount / (qty * genNum/genDen *
+    prcNum/prcDen)`` rounded to the scrip ``precision`` (the ``multiplier``/
+    ``lotSz`` terms in the doc formula cancel once qty stays in raw units).
+
+    P&L is the **realised** component only — ``matched_qty * (sell_avg -
+    buy_avg)`` where ``matched_qty = min(buy_qty, sell_qty)`` — which is unit-safe
+    regardless of lot size. The open leg's unrealised P&L needs a live LTP not in
+    the record and is left to merge from quotes (``ltp`` is ``0``; none is
+    fabricated). This matches Dhan (realised+unrealised) / Upstox (broker pnl)
+    once a quote is merged.
     """
+    price_div = _ratio(d.get("genNum", 1), d.get("genDen", 1)) * _ratio(d.get("prcNum", 1), d.get("prcDen", 1))
+    price_div = price_div or 1.0
+    precision = int(_num(d.get("precision", 2), 2))
+
     buy_qty = _num(d.get("cfBuyQty", 0)) + _num(d.get("flBuyQty", 0))
     sell_qty = _num(d.get("cfSellQty", 0)) + _num(d.get("flSellQty", 0))
     buy_amt = _num(d.get("cfBuyAmt", 0)) + _num(d.get("buyAmt", 0))
     sell_amt = _num(d.get("cfSellAmt", 0)) + _num(d.get("sellAmt", 0))
     net_qty = buy_qty - sell_qty
 
-    if net_qty > 0 and buy_qty:
-        avg_price = buy_amt / buy_qty
-    elif net_qty < 0 and sell_qty:
-        avg_price = sell_amt / sell_qty
+    buy_avg = buy_amt / (buy_qty * price_div) if buy_qty else 0.0
+    sell_avg = sell_amt / (sell_qty * price_div) if sell_qty else 0.0
+    if buy_qty > sell_qty:
+        avg_price = buy_avg
+    elif sell_qty > buy_qty:
+        avg_price = sell_avg
     else:
         avg_price = 0.0
 
-    # Booked component only (sell proceeds - buy cost); the open leg's unrealised
-    # P&L requires a live LTP and is intentionally not estimated here.
-    booked_pnl = sell_amt - buy_amt
+    matched = min(buy_qty, sell_qty)
+    realised_pnl = matched * (sell_avg - buy_avg)
 
     return {
         "symbol": d.get("trdSym", d.get("sym", "")),
         "exchange": _exchange_of(d),
         "product": KOTAK_TO_PRODUCT.get(str(d.get("prod", "")), str(d.get("prod", ""))),
-        "quantity": str(int(net_qty)),
-        "average_price": f"{avg_price:.2f}",
+        "quantity": _fmt_qty(net_qty),
+        "average_price": f"{avg_price:.{precision}f}",
         "ltp": "0",
-        "pnl": f"{booked_pnl:.2f}",
-        "buy_quantity": str(int(buy_qty)),
-        "sell_quantity": str(int(sell_qty)),
+        "pnl": f"{realised_pnl:.2f}",
+        "buy_quantity": _fmt_qty(buy_qty),
+        "sell_quantity": _fmt_qty(sell_qty),
     }
 
 
@@ -216,15 +247,18 @@ def from_kotak_holding(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a NEO holding record.
 
     The holdings endpoint uses longer keys than the OMS order/position feed
-    (``displaySymbol``/``averagePrice``/``closingPrice`` …); we fall back across
-    the documented variants.
+    (``displaySymbol``/``averagePrice``/``closingPrice`` …). ``closingPrice`` is
+    the previous-day close (a per-share price), surfaced as ``ltp`` until a live
+    quote is merged — we do NOT fall back to ``mktValue`` (that is the aggregate
+    market value of the holding, which would be a per-share price inflated by the
+    quantity factor).
     """
     return {
-        "symbol": d.get("displaySymbol", d.get("trdSym", d.get("symbol", ""))),
+        "symbol": d.get("displaySymbol", d.get("symbol", d.get("trdSym", ""))),
         "exchange": d.get("exchangeSegment", _exchange_of(d)),
-        "quantity": str(d.get("quantity", d.get("holdingCost", 0)) if "quantity" in d else d.get("sellableQuantity", 0)),
+        "quantity": str(d.get("quantity", d.get("sellableQuantity", 0))),
         "average_price": str(d.get("averagePrice", d.get("avgPrc", 0))),
-        "ltp": str(d.get("closingPrice", d.get("mktValue", 0))),
+        "ltp": str(d.get("closingPrice", 0)),
         "pnl": str(d.get("pnl", 0)),
     }
 
@@ -279,13 +313,18 @@ def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
 def from_kotak_funds(resp: dict[str, Any]) -> dict[str, Any]:
     """Normalise the NEO ``limits`` response into FlintTrade fund fields.
 
-    NEO returns ``data: {avlCash, totMrgnUsd, mrgnUsd, ordMrgn, avlMrgn …}``.
+    The real ``limits()`` response is a FLAT object (no ``data`` wrapper) keyed
+    ``Net`` (net available margin) / ``MarginUsed`` / ``CollateralValue`` —
+    ``Net + MarginUsed == CollateralValue`` (``Limits.md``). We surface ``Net`` as
+    the available balance and ``MarginUsed`` as the used margin, falling back to
+    the ``data``-wrapped check-margin keys (``avlCash``/``totMrgnUsd``) only if a
+    gateway build returns that shape instead.
     """
     data = resp.get("data", resp) if isinstance(resp, dict) else {}
     if not isinstance(data, dict):
         data = {}
-    available = _num(data.get("avlCash", data.get("avlMrgn", 0)))
-    used = _num(data.get("totMrgnUsd", data.get("mrgnUsd", 0)))
+    available = _num(data.get("Net", data.get("avlCash", data.get("avlMrgn", 0))))
+    used = _num(data.get("MarginUsed", data.get("totMrgnUsd", data.get("mrgnUsd", 0))))
     return {
         "available_balance": f"{available:.2f}",
         "used_margin": f"{used:.2f}",

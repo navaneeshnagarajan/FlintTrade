@@ -7,8 +7,8 @@ from typing import Any, Callable
 from flinttrade_engine.request_context import RequestContext, parse_selector
 from flinttrade_engine.safety import SafetyBypassError, SafetyContext
 
+from .brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN
 from .brokers._base import BrokerAdapter, Session
-from .brokers.dhan import _ROUTER_TOKEN
 from .routing_config import RoutingConfig, RoutingHint
 
 

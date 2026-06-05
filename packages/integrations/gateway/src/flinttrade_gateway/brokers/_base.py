@@ -40,6 +40,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing only; not evaluated at runtime
     from flinttrade_gateway.reconciliation import ReconciliationReport
 
 
+# The single per-process router-call token (contract §8.0c). EVERY adapter's
+# write guard must compare against THIS object, and ``BrokerRouter`` passes THIS
+# object on every place/modify/cancel — so identity holds across all adapters.
+# Adapters re-export it as a module-private ``_ROUTER_TOKEN`` (``from ._base
+# import ROUTER_TOKEN as _ROUTER_TOKEN``) so a bare ``adapter.place_order``
+# without it still raises, while a real router dispatch always matches. Minting a
+# per-module ``object()`` instead silently breaks the gated path (the router's
+# token would never be identity-equal) — never do that.
+ROUTER_TOKEN = object()
+
+
 @dataclass
 class Session:
     """Canonical broker session (contract §9). All adapters share this shape;

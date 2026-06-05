@@ -85,21 +85,43 @@ def test_skip_reasons_reported():
     assert ("upstox", "sdk-not-attested") in skips
 
 
-def test_adapter_kwargs_passed_through():
-    resolver_called = {}
+@pytest.mark.parametrize(
+    "broker_id, kwarg_name, cls",
+    [
+        ("dhan", "security_resolver", DhanAdapter),
+        ("upstox", "instrument_resolver", UpstoxAdapter),
+        ("kotakneo", "symbol_resolver", KotakNeoAdapter),
+    ],
+)
+def test_adapter_kwargs_passed_through_per_broker(broker_id, kwarg_name, cls):
+    # Each native takes a DIFFERENTLY-named resolver kwarg; a rename here must
+    # fail the test rather than silently produce an unresolvable adapter.
+    seen = {}
 
-    def kwargs(broker_id: str) -> dict:
-        resolver_called[broker_id] = True
-        return {"security_resolver": lambda s, e: "1"} if broker_id == "dhan" else {}
+    def kwargs(bid: str) -> dict:
+        seen[bid] = True
+        return {kwarg_name: lambda s, e: "TOKEN"}
 
     out = build_native_adapters(
-        ["dhan"],
+        [broker_id],
         attest_ok=lambda _b: True,
         has_credentials=lambda _b: True,
         adapter_kwargs=kwargs,
     )
-    assert isinstance(out["dhan"], DhanAdapter)
-    assert resolver_called == {"dhan": True}
+    assert isinstance(out[broker_id], cls)
+    assert seen == {broker_id: True}
+
+
+def test_adapter_kwargs_wrong_key_raises_typeerror():
+    # A wrong kwarg for an adapter surfaces a clear TypeError (keyword-only,
+    # no **kwargs catch-all) rather than silently dropping the adapter.
+    with pytest.raises(TypeError):
+        build_native_adapters(
+            ["upstox"],
+            attest_ok=lambda _b: True,
+            has_credentials=lambda _b: True,
+            adapter_kwargs=lambda _b: {"security_resolver": lambda s, e: "x"},  # wrong for Upstox
+        )
 
 
 def test_duplicate_ids_constructed_once():

@@ -99,8 +99,9 @@ def test_from_kotak_trade():
     assert trade["product"] == "MIS" and trade["exchange"] == "NSE"
 
 
-def test_from_kotak_position_derives_net_and_pnl():
+def test_from_kotak_position_net_long_realised_pnl():
     # Bought 10 @ 100 (cost 1000), sold 4 @ 110 (proceeds 440): net long 6.
+    # Realised P&L = matched 4 * (sell_avg 110 - buy_avg 100) = +40.
     pos = from_kotak_position({
         "trdSym": "IDEA-EQ", "exSeg": "nse_cm", "prod": "CNC",
         "cfBuyQty": 0, "flBuyQty": 10, "cfSellQty": 0, "flSellQty": 4,
@@ -109,19 +110,62 @@ def test_from_kotak_position_derives_net_and_pnl():
     assert pos["symbol"] == "IDEA-EQ"
     assert pos["exchange"] == "NSE"
     assert pos["product"] == "CNC"
-    assert pos["quantity"] == "6"          # 10 buy - 4 sell
-    assert pos["average_price"] == "100.00"  # buy_amt / buy_qty
-    assert pos["pnl"] == "-560.00"         # 440 sell - 1000 buy (booked component)
+    assert pos["quantity"] == "6"            # 10 buy - 4 sell, raw units
+    assert pos["average_price"] == "100.00"  # buy side (buy_qty > sell_qty)
+    assert pos["pnl"] == "40.00"             # realised: 4 * (110 - 100), NOT -560
     assert pos["buy_quantity"] == "10" and pos["sell_quantity"] == "4"
 
 
-def test_from_kotak_funds():
-    funds = from_kotak_funds({"data": {
-        "avlCash": "38.190000", "totMrgnUsd": "34.280000", "mrgnUsd": "18.780000", "stat": "Ok", "stCode": 200,
-    }})
-    assert funds["available_balance"] == "38.19"
-    assert funds["used_margin"] == "34.28"
-    assert funds["total_balance"] == "72.47"
+def test_from_kotak_position_net_short():
+    # Sold 10 @ 110 (proceeds 1100), bought 4 @ 100 (cost 400): net short 6.
+    # avg from sell side; realised = matched 4 * (110 - 100) = +40.
+    pos = from_kotak_position({
+        "trdSym": "NIFTY25JUN24000CE", "exSeg": "nse_fo", "prod": "NRML",
+        "cfSellQty": 0, "flSellQty": 10, "cfBuyQty": 0, "flBuyQty": 4,
+        "sellAmt": 1100, "buyAmt": 400, "cfSellAmt": 0, "cfBuyAmt": 0,
+    })
+    assert pos["quantity"] == "-6"
+    assert pos["average_price"] == "110.00"  # sell side (sell_qty > buy_qty)
+    assert pos["pnl"] == "40.00"
+    assert pos["buy_quantity"] == "4" and pos["sell_quantity"] == "10"
+
+
+def test_from_kotak_position_flat_books_full_realised():
+    # Bought 5 @ 100, sold 5 @ 110: net flat → avg 0, realised = 5 * 10 = +50.
+    pos = from_kotak_position({
+        "trdSym": "IDEA-EQ", "exSeg": "nse_cm", "prod": "MIS",
+        "flBuyQty": 5, "flSellQty": 5, "buyAmt": 500, "sellAmt": 550,
+    })
+    assert pos["quantity"] == "0"
+    assert pos["average_price"] == "0.00"
+    assert pos["pnl"] == "50.00"
+
+
+def test_from_kotak_position_price_denomination_ratio():
+    # genNum/genDen + prcNum/prcDen scale the per-unit price (1 for equity).
+    pos = from_kotak_position({
+        "trdSym": "X", "exSeg": "nse_cm", "flBuyQty": 10, "buyAmt": 2000,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 2, "precision": 2,
+    })
+    # avg = 2000 / (10 * (1/1) * (1/2)) = 2000 / 5 = 400.00
+    assert pos["average_price"] == "400.00"
+
+
+def test_from_kotak_funds_real_limits_shape():
+    # The real limits() response is FLAT: Net + MarginUsed (== CollateralValue).
+    funds = from_kotak_funds({
+        "CollateralValue": "38.19", "MarginUsed": "18.78", "Net": "19.41",
+        "stat": "Ok", "stCode": 200,
+    })
+    assert funds["available_balance"] == "19.41"   # Net
+    assert funds["used_margin"] == "18.78"          # MarginUsed
+    assert funds["total_balance"] == "38.19"        # Net + MarginUsed
+
+
+def test_from_kotak_funds_check_margin_fallback():
+    # If a build returns the data-wrapped check-margin shape, fall back to it.
+    funds = from_kotak_funds({"data": {"avlCash": "100.00", "totMrgnUsd": "40.00"}})
+    assert funds["available_balance"] == "100.00" and funds["used_margin"] == "40.00"
 
 
 def test_to_quote_tokens_maps_segments():

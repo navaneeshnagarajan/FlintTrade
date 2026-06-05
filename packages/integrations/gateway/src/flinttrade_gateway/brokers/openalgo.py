@@ -42,8 +42,8 @@ from flinttrade_gateway.capabilities import (
     TickProtocol,
 )
 
+from ._base import ROUTER_TOKEN as _ROUTER_TOKEN  # the shared per-process router token (§8.0c)
 from ._base import BrokerAdapter, Session
-from .dhan import _ROUTER_TOKEN  # the shared per-process router token (§8.0c)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade

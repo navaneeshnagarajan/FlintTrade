@@ -343,4 +343,4 @@ class KotakNeoAdapter(BrokerAdapter):
         raise NotImplementedError(_PENDING.format("reconcile"))
 
 
-_ROUTER_TOKEN = object()
+from ._base import ROUTER_TOKEN as _ROUTER_TOKEN  # noqa: E402  shared per-process token (§8.0c)
