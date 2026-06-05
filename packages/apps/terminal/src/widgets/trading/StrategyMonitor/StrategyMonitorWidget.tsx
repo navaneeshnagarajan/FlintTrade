@@ -303,11 +303,22 @@ const HEALTH_LABEL: Record<OverallHealth, string> = {
 function StrategyMonitorWidget() {
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
-  const [strategies, setStrategies] = useState<Strategy[]>(SAMPLE_STRATEGIES);
+  const [strategies, setStrategies] = useState<Strategy[]>(() =>
+    isConnected ? [] : SAMPLE_STRATEGIES,
+  );
 
   useEffect(() => {
     track("trade", "widget_view_strategy_monitor");
   }, [track]);
+
+  // House rule: never render fabricated live P&L. Demo strategies show only when
+  // no broker is connected (explore/demo, with the "Sample" badge). When a broker
+  // IS connected we show the honest "No strategies configured" empty state rather
+  // than sample data presented as live — real strategy monitoring is wired via
+  // Automate -> Strategies (the StrategyRunner) until this widget subscribes to it.
+  useEffect(() => {
+    setStrategies(isConnected ? [] : SAMPLE_STRATEGIES);
+  }, [isConnected]);
 
   const health = computeHealth(strategies);
 

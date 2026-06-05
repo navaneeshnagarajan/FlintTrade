@@ -49,6 +49,17 @@ describe("StrategyMonitorWidget", () => {
     expect(screen.queryByText("Sample")).toBeNull();
   });
 
+  it("does NOT render fabricated sample strategies when a broker is connected", () => {
+    // House rule: no mock/live-looking P&L when connected. Must show the honest
+    // empty state instead of SAMPLE_STRATEGIES.
+    mockConnected.mockReturnValue(true);
+    render(<StrategyMonitorWidget />);
+    for (const s of SAMPLE_STRATEGIES) {
+      expect(screen.queryByText(s.name)).toBeNull();
+    }
+    expect(screen.getByText("No strategies configured")).toBeTruthy();
+  });
+
   it("renders all strategy names", () => {
     mockConnected.mockReturnValue(false);
     render(<StrategyMonitorWidget />);
