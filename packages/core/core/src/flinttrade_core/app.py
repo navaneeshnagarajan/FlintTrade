@@ -1011,6 +1011,29 @@ def create_flask_app(
     app.config["LOGIN_ACTIVITY"] = _LoginActivity(str(_login_db))
     app.config["SESSION_TRACKER"] = _SessionTracker(str(_login_db))
 
+    # Shared trade-journal store (DuckDB). The gated order dispatch writes every
+    # executed live order here and the /trades/journal route reads the SAME
+    # store, so the journal + P&L analytics populate in Live (previously the
+    # producer was missing → permanently empty journal). One shared, pre-
+    # initialised connection keeps the per-order cost to a single INSERT (latency
+    # is paramount). A lock serialises the writer against the route's reads —
+    # DuckDB connections are not safe for concurrent use. Best-effort: a storage
+    # failure degrades to "no journalling", never blocks boot.
+    try:
+        from flinttrade_data.storage import StorageManager as _TradeStore  # noqa: PLC0415
+
+        _trade_storage = _TradeStore()
+        _trade_storage.initialise()
+        app.config["TRADE_STORAGE"] = _trade_storage
+        app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
+    except Exception:  # pragma: no cover — defensive: never let storage break boot
+        logger.warning(
+            "Trade journal storage unavailable; live trades will not be journalled",
+            exc_info=True,
+        )
+        app.config["TRADE_STORAGE"] = None
+        app.config["TRADE_STORAGE_LOCK"] = None
+
     # Register P&L tracker blueprint (/api/v1/pnl-tracker/*)
     from flinttrade_data.pnl_routes import pnl_bp  # noqa: PLC0415
     app.register_blueprint(pnl_bp)

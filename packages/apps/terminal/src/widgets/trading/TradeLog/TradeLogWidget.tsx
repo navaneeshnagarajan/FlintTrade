@@ -15,12 +15,14 @@
  */
 
 import { useState, useMemo, useCallback, useEffect, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { FileText, Download, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getTradeJournal, type JournalTrade } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,7 +30,10 @@ import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 
 export type OrderStatus  = "filled" | "rejected" | "cancelled" | "pending";
 export type OrderAction  = "BUY" | "SELL";
-export type OrderType    = "MARKET" | "LIMIT" | "SL" | "SL-M";
+// "—" is the honest value for a real journalled fill: the trade journal records
+// executed fills and does not capture the original order type, so we never
+// fabricate one (e.g. "MARKET") for connected data.
+export type OrderType    = "MARKET" | "LIMIT" | "SL" | "SL-M" | "—";
 
 export interface TradeLogEntry {
   id: string;
@@ -71,15 +76,56 @@ export const SAMPLE_TRADES: TradeLogEntry[] = [
 // Computed stats
 // ---------------------------------------------------------------------------
 
-export function computeStats(entries: TradeLogEntry[]): TradeLogStats {
+export function computeStats(entries: TradeLogEntry[], pairedPnl = true): TradeLogStats {
   const filled = entries.filter((e) => e.status === "filled");
   const totalFilled = filled.length;
-  const totalPnl = filled.reduce((s, e) => s + (e.pnl ?? 0), 0) / 2;  // paired trades share P&L
+  // Sample rows log both legs with the same round-trip P&L, so halve to avoid
+  // double-counting. Real journalled rows carry per-row realised P&L (null on
+  // the open leg) → sum directly.
+  const rawPnl = filled.reduce((s, e) => s + (e.pnl ?? 0), 0);
+  const totalPnl = pairedPnl ? rawPnl / 2 : rawPnl;
   const fillTimes = filled.map((e) => e.fillTimeMs).filter((t): t is number => t !== null);
   const avgFillTimeMs = fillTimes.length > 0
     ? fillTimes.reduce((s, t) => s + t, 0) / fillTimes.length
     : 0;
   return { totalFilled, totalPnl, avgFillTimeMs };
+}
+
+// ---------------------------------------------------------------------------
+// Journal → TradeLogEntry mapping (connected mode)
+// ---------------------------------------------------------------------------
+
+/** Format an ISO timestamp as IST HH:MM:SS without fabricating a timezone. */
+function fmtIstTime(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false, timeZone: "Asia/Kolkata",
+    }).format(new Date(iso));
+  } catch {
+    return typeof iso === "string" ? iso.slice(11, 19) : "";
+  }
+}
+
+/**
+ * Map real backend journal rows to TradeLogEntry. The journal is a *fills* log,
+ * so every row is a recorded fill (status "filled"); order type and fill latency
+ * are not captured, shown honestly as "—" rather than invented.
+ */
+export function journalToTradeLog(rows: JournalTrade[]): TradeLogEntry[] {
+  return rows.map((r, i) => ({
+    id: r.orderid ?? `J${i}-${r.timestamp ?? ""}`,
+    time: fmtIstTime(r.timestamp),
+    symbol: r.symbol,
+    action: String(r.action).toUpperCase() === "SELL" ? "SELL" : "BUY",
+    qty: r.quantity,
+    price: r.price,
+    orderType: "—",
+    status: "filled",
+    strategy: r.strategy || "manual",
+    pnl: typeof r.pnl === "number" ? r.pnl : null,
+    fillTimeMs: null,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -212,17 +258,32 @@ function TradeLogWidget() {
     track("trade", "widget_view_trade_log");
   }, [track]);
 
+  // Connected → real trade journal (today's recorded fills). Disconnected/explore
+  // → labelled sample data. Never show fabricated trades to a connected user.
+  const { data: journalResp } = useQuery({
+    queryKey: ["tradeJournal", "today"],
+    queryFn: () => getTradeJournal(),
+    enabled: isConnected,
+    refetchInterval: isConnected ? 15_000 : false,
+  });
+
+  const baseRows = useMemo<TradeLogEntry[]>(() => {
+    if (!isConnected) return SAMPLE_TRADES;
+    return journalToTradeLog(journalResp?.trades ?? []);
+  }, [isConnected, journalResp]);
+
   const filtered = useMemo(() => {
-    let rows = SAMPLE_TRADES;
+    let rows = baseRows;
     if (statusFilter !== "All") rows = rows.filter((r) => r.status === statusFilter);
     if (symbolSearch.trim()) {
       const q = symbolSearch.trim().toLowerCase();
       rows = rows.filter((r) => r.symbol.toLowerCase().includes(q));
     }
     return rows;
-  }, [statusFilter, symbolSearch]);
+  }, [baseRows, statusFilter, symbolSearch]);
 
-  const stats = useMemo(() => computeStats(filtered), [filtered]);
+  // Sample rows double-log P&L; real journal rows do not.
+  const stats = useMemo(() => computeStats(filtered, !isConnected), [filtered, isConnected]);
 
   const handleExport = useCallback(() => {
     track("trade", "trade_log_export_csv");
@@ -317,7 +378,9 @@ function TradeLogWidget() {
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={9} className="py-8 text-center text-text-muted text-xs">
-                  No orders match the current filters
+                  {isConnected && baseRows.length === 0
+                    ? "No trades recorded yet today"
+                    : "No orders match the current filters"}
                 </td>
               </tr>
             ) : (

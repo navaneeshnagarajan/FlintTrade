@@ -43,11 +43,15 @@ export const getOrderFlow = (
 
 export interface JournalTrade {
   timestamp: string;
+  /** Broker order id of the fill (present on backend-journalled rows). */
+  orderid?: string;
   symbol: string;
   exchange: string;
   action: string;
   quantity: number;
   price: number;
+  /** Product code (MIS/NRML/CNC) — present on backend-journalled rows. */
+  product?: string;
   pnl: number;
   strategy: string;
   entry_price: number;

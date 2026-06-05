@@ -465,6 +465,14 @@ def _dispatch_live_order(
     except Exception:  # pragma: no cover — audit must never break the order path
         logger.debug("audit stamp failed for live order", exc_info=True)
 
+    # Trade journal (best-effort — never break the order path). Without this
+    # producer the journal + P&L analytics stayed empty in Live mode (the
+    # /trades/journal route read a store nothing ever wrote to).
+    try:
+        _record_trade_journal(typed_order, str(result))
+    except Exception:  # pragma: no cover — journalling must never break orders
+        logger.debug("trade journal stamp failed for live order", exc_info=True)
+
     logger.info(
         "Live order dispatched | action=%s adapter=%s account=%s symbol=%s",
         ft_action, adapter_id, account_id, body.get("symbol", "?"),
@@ -472,6 +480,62 @@ def _dispatch_live_order(
     # Return both keys: ``orderid`` (legacy OpenAlgo response shape the UI reads)
     # and ``data`` (the routed-path shape) so the frontend works either way.
     return jsonify({"status": "success", "orderid": result, "data": result}), 200
+
+
+def _record_trade_journal(typed_order: Any, orderid: str, strategy: str = "manual") -> None:
+    """Append an executed live order to the shared trade journal (best-effort).
+
+    Writes to the same DuckDB store the ``/trades/journal`` route reads, so the
+    journal and downstream P&L analytics populate in Live mode. No-ops when no
+    ``TRADE_STORAGE`` is configured (e.g. minimal test apps) so it never creates
+    DuckDB side effects where journalling isn't wired. Serialises writes against
+    the route's reads via the shared ``TRADE_STORAGE_LOCK`` (DuckDB connections
+    are not safe for concurrent use). Never raises.
+
+    Args:
+        typed_order: The dispatched :class:`flinttrade_core.models.Order`. The
+            journalled side (BUY/SELL) is read from ``typed_order.action`` — NOT
+            the route-level operation label (which is always ``"place"`` here).
+        orderid: The broker order id returned by the router.
+        strategy: Journal bucket for the trade; manual terminal orders use
+            ``"manual"`` so they group separately from strategy-runner fills.
+    """
+    store = current_app.config.get("TRADE_STORAGE")
+    if store is None:
+        return
+
+    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+
+    def _enum_value(value: Any) -> str:
+        return str(getattr(value, "value", value) or "")
+
+    def _to_number(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _insert() -> None:
+        store.insert_trade(
+            ts=datetime.now(ist),
+            orderid=str(orderid),
+            symbol=getattr(typed_order, "symbol", "") or "",
+            exchange=_enum_value(getattr(typed_order, "exchange", "")),
+            action=_enum_value(getattr(typed_order, "action", "")),
+            quantity=int(_to_number(getattr(typed_order, "quantity", 0))),
+            price=_to_number(getattr(typed_order, "price", 0.0)),
+            product=_enum_value(getattr(typed_order, "product", "")),
+            strategy=strategy,
+        )
+
+    lock = current_app.config.get("TRADE_STORAGE_LOCK")
+    if lock is not None:
+        with lock:
+            _insert()
+    else:
+        _insert()
 
 
 def _audit_write_event(

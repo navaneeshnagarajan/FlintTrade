@@ -216,6 +216,68 @@ def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.Mo
 
 
 # ---------------------------------------------------------------------------
+# Trade journal producer — a successful live dispatch records the executed
+# order in the same DuckDB store the /trades/journal route reads (was empty in
+# Live because nothing ever wrote to it).
+# ---------------------------------------------------------------------------
+
+
+def test_routed_happy_path_journals_the_trade(tmp_path: object) -> None:
+    """A successful live order is appended to the shared trade store."""
+    import threading
+    from datetime import datetime, timedelta, timezone
+
+    from flinttrade_data.storage import StorageManager
+
+    store = StorageManager(db_path=str(tmp_path / "journal.duckdb"))  # type: ignore[operator]
+    store.initialise()
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-555")
+    app = _app(broker_router=router, safety=_passing_safety())
+    app.config["TRADE_STORAGE"] = store
+    app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
+
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 200
+
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+    rows = store.get_trades_by_date(today)
+    store.close()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["orderid"] == "OA-555"
+    assert row["symbol"] == "RELIANCE"
+    assert row["action"] == "BUY"
+    assert int(row["quantity"]) == 1
+    assert row["strategy"] == "manual"
+
+
+def test_journal_failure_never_breaks_the_order() -> None:
+    """H-class best-effort: a journal store that raises still returns 200."""
+    import threading
+
+    bad_store = MagicMock()
+    bad_store.insert_trade.side_effect = RuntimeError("duckdb is on fire")
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-444")
+    app = _app(broker_router=router, safety=_passing_safety())
+    app.config["TRADE_STORAGE"] = bad_store
+    app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
+
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["orderid"] == "OA-444"
+    bad_store.insert_trade.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # Gated modify / cancel (the legacy /modify, /cancel endpoints now route through
 # BrokerRouter.modify_order / cancel_order — same one-shot gate + ACL as place).
 # ---------------------------------------------------------------------------

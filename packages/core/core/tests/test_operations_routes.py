@@ -231,6 +231,55 @@ class TestFrontendErrors:
 
 
 # ---------------------------------------------------------------------------
+# Trade journal — shared store wiring + frontend contract
+# ---------------------------------------------------------------------------
+
+
+class TestTradesJournal:
+    """GET /api/v1/trades/journal — reads the shared trade store.
+
+    The order dispatch writes to ``TRADE_STORAGE`` and this route reads the same
+    store, so a row inserted there must surface here — keyed as ``timestamp``
+    (the terminal's JournalTrade contract), not the DuckDB ``ts`` column.
+    """
+
+    def test_shared_store_is_wired_in_dev(self, flask_app):
+        assert flask_app.config.get("TRADE_STORAGE") is not None
+        assert flask_app.config.get("TRADE_STORAGE_LOCK") is not None
+
+    def test_returns_inserted_trade_with_timestamp_key(self, flask_app, client):
+        from datetime import datetime, timedelta, timezone
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        store = flask_app.config["TRADE_STORAGE"]
+        store.insert_trade(
+            ts=datetime.now(ist),
+            orderid="JNL-1",
+            symbol="RELIANCE",
+            exchange="NSE",
+            action="BUY",
+            quantity=5,
+            price=2500.0,
+            product="MIS",
+            strategy="manual",
+        )
+
+        resp = client.get("/api/v1/trades/journal", headers=_auth_headers())
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        rows = data["data"]["trades"]
+        mine = [r for r in rows if r.get("orderid") == "JNL-1"]
+        assert len(mine) == 1
+        row = mine[0]
+        # Frontend contract: `timestamp`, not the DuckDB `ts` column.
+        assert "timestamp" in row
+        assert "ts" not in row
+        assert row["symbol"] == "RELIANCE"
+        assert row["action"] == "BUY"
+
+
+# ---------------------------------------------------------------------------
 # Recent logs
 # ---------------------------------------------------------------------------
 
