@@ -103,6 +103,9 @@ vi.mock("@/hooks/useChartTheme", () => ({
     grid: {},
     rightPriceScale: {},
     timeScale: {},
+    // createFlintLineChart (real, from the design-system) reads
+    // theme.crosshair.vertLine — the mock must carry the same shape.
+    crosshair: { vertLine: {}, horzLine: {} },
   }),
 }));
 
