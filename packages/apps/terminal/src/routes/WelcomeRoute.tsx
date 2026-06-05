@@ -274,7 +274,12 @@ export default function WelcomeRoute() {
   useEffect(() => {
     if (authStatus !== "unknown") return;
 
-    fetch("/ft-api/v1/auth/status")
+    // Time-box the probe so a hung backend can't strand the user on
+    // "Checking workspace…" forever.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    fetch("/ft-api/v1/auth/status", { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : Promise.reject(response)))
       .then((data) => {
         if (!data.data?.is_setup) {
@@ -284,10 +289,21 @@ export default function WelcomeRoute() {
         }
       })
       .catch(() => {
-        if (import.meta.env.DEV) {
+        // Backend unreachable, errored, or timed out. Degrade gracefully in
+        // every build (not just DEV) so the welcome screen always offers a way
+        // forward — "Get Started" once the backend is up, and "Explore
+        // FlintTrade" which needs no backend at all. Without this the
+        // production welcome screen hangs on "Checking workspace…" with no exit.
+        if (useAuthStore.getState().status === "unknown") {
           useAuthStore.getState().setSetupRequired();
         }
-      });
+      })
+      .finally(() => clearTimeout(timeout));
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
   }, [authStatus]);
 
   useEffect(() => {

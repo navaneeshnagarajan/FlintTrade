@@ -159,21 +159,26 @@ function MarketBreadthWidget() {
   const [data, setData] = useState<BreadthData>(SAMPLE_DATA);
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("--");
+  // The backend tells us whether the snapshot is real or its own sample fallback.
+  const [isSample, setIsSample] = useState(true);
 
   const fetchLive = useMemo(
     () => async () => {
       setIsLoading(true);
       try {
-        const res = await fetch("/ft-api/v1/breadth");
+        // Registered route is /v1/breadth/current (served at /ft-api/v1/breadth/current);
+        // the bare /breadth path 404'd and silently fell back to sample data.
+        const res = await fetch("/ft-api/v1/breadth/current");
         if (!res.ok) throw new Error("Failed to fetch breadth data");
         const raw: unknown = await res.json();
         const parsed = BreadthResponseSchema.safeParse(raw);
         if (!parsed.success) {
-          console.error("[MarketBreadthWidget] /breadth shape mismatch:", parsed.error.issues);
+          console.error("[MarketBreadthWidget] /breadth/current shape mismatch:", parsed.error.issues);
           // Keep previous data on parse failure
         } else {
           // Map snake_case backend fields → camelCase widget fields
           const d = parsed.data.data;
+          setIsSample(parsed.data.is_sample_data ?? false);
           setData((prev) => ({
             series: prev.series,
             newHighs: d.new_highs ?? 0,
@@ -225,8 +230,11 @@ function MarketBreadthWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <BarChart4 size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Market Breadth</span>
-        {!isConnected && (
-          <span className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
+        {(!isConnected || isSample) && (
+          <span
+            className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            title="Showing sample breadth data — no live breadth source is reporting yet."
+          >
             Sample
           </span>
         )}

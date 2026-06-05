@@ -51,6 +51,36 @@ analysis_bp = Blueprint("analysis", __name__, url_prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------
+# Expiry param normalisation
+#
+# The terminal sends `expiry_date` / `expiry_dates`; these handlers historically
+# read `expiry` / `expiries`. Accept all variants so a user-selected expiry is
+# never silently dropped (which made every OI/GEX/IV panel fall back to a
+# hardcoded expiry — see feature audit H7).
+# ---------------------------------------------------------------------------
+
+
+def _body_expiry(body: dict[str, Any], default: str) -> str:
+    """Return a single expiry from the request body, accepting any key variant."""
+    dates = body.get("expiry_dates") or body.get("expiries")
+    return (
+        body.get("expiry")
+        or body.get("expiry_date")
+        or (dates[0] if isinstance(dates, list) and dates else None)
+        or default
+    )
+
+
+def _body_expiries(body: dict[str, Any], default: list[str]) -> list[str]:
+    """Return a list of expiries from the request body, accepting any key variant."""
+    value = body.get("expiries") or body.get("expiry_dates")
+    if isinstance(value, list) and value:
+        return value
+    single = body.get("expiry") or body.get("expiry_date")
+    return [single] if single else default
+
+
+# ---------------------------------------------------------------------------
 # Registry access helper
 # ---------------------------------------------------------------------------
 
@@ -220,7 +250,7 @@ def gex_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "")
+    expiry = _body_expiry(body, "")
 
     lot_size = LOT_SIZES.get(symbol.upper(), 50)
     spot = 24000.0
@@ -244,6 +274,45 @@ def gex_endpoint() -> Any:
 
     result = calculate_gex(snapshot, spot=spot, lot_size=lot_size)
 
+    # Shape ``data`` to the terminal's GEXData contract. The raw dataclass used
+    # strike_price / total_net_gex and lacked atm_strike / gamma_flip_strike /
+    # dealer_zone, so the widget read undefined for those.
+    frontend_strikes = [
+        {
+            "strike": gs.strike_price,
+            "call_gex": gs.call_gex,
+            "put_gex": gs.put_gex,
+            "net_gex": gs.net_gex,
+            "call_oi": gs.call_oi,
+            "put_oi": gs.put_oi,
+        }
+        for gs in result.strikes
+    ]
+    atm_strike = (
+        min(result.strikes, key=lambda s: abs(s.strike_price - spot)).strike_price
+        if result.strikes
+        else spot
+    )
+    # Gamma flip = first strike where net GEX crosses from positive to negative.
+    gamma_flip_strike: float | None = None
+    for i in range(len(result.strikes) - 1):
+        if result.strikes[i].net_gex >= 0 and result.strikes[i + 1].net_gex < 0:
+            gamma_flip_strike = result.strikes[i + 1].strike_price
+            break
+    dealer_zone = "Long Gamma" if result.total_net_gex > 0 else "Short Gamma"
+
+    gex_data = {
+        "underlying": symbol,
+        "spot_price": spot,
+        "atm_strike": atm_strike,
+        "strikes": frontend_strikes,
+        "gamma_flip_strike": gamma_flip_strike,
+        "dealer_zone": dealer_zone,
+        "total_call_gex": result.total_call_gex,
+        "total_put_gex": result.total_put_gex,
+        "net_gex": result.total_net_gex,
+    }
+
     return jsonify({
         "status": "success",
         "symbol": symbol,
@@ -251,7 +320,7 @@ def gex_endpoint() -> Any:
         "expiry": expiry,
         "spot": spot,
         "lot_size": lot_size,
-        "data": _dataclass_to_dict(result),
+        "data": gex_data,
         "is_sample_data": snapshot.underlying == symbol and registry is None,
     })
 
@@ -277,7 +346,7 @@ def vol_surface_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiries = body.get("expiries", ["26MAR26", "24APR26"])
+    expiries = _body_expiries(body, ["26MAR26", "24APR26"])
     strike_count = int(body.get("strike_count", 20))
     spot = 24000.0
 
@@ -302,12 +371,26 @@ def vol_surface_endpoint() -> Any:
 
     result = calculate_vol_surface(chains_by_expiry, spot=spot, strike_count=strike_count)
 
+    # Shape ``data`` to the terminal's VolSurfaceData contract (the widget read
+    # undefined for expiries/days_to_expiry/atm_strike from the raw dataclass,
+    # whose fields are expiry_labels/expiries_dte/atm_ivs).
+    atm_strike = min(result.strikes, key=lambda s: abs(s - spot)) if result.strikes else spot
+    vol_surface_data = {
+        "underlying": symbol,
+        "spot_price": spot,
+        "strikes": result.strikes,
+        "expiries": result.expiry_labels,
+        "days_to_expiry": result.expiries_dte,
+        "iv_matrix": result.iv_matrix,
+        "atm_strike": atm_strike,
+    }
+
     return jsonify({
         "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "spot": spot,
-        "data": _dataclass_to_dict(result),
+        "data": vol_surface_data,
     })
 
 
@@ -331,7 +414,7 @@ def iv_smile_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
@@ -352,13 +435,38 @@ def iv_smile_endpoint() -> Any:
 
     result = calculate_iv_smile(snapshot, spot=spot, expiry_date=expiry)
 
+    # Shape ``data`` to the terminal's IVSmileData contract: a single expiry's
+    # flat dataclass becomes one entry in a ``curves`` array of per-strike points.
+    # (The widget read `curves`/`points` and got undefined from the raw dataclass.)
+    curve = {
+        "expiry": result.expiry_date or expiry,
+        "days_to_expiry": 0,  # not derived for a single-expiry smile
+        "atm_iv": result.atm_iv,
+        "atm_strike": result.atm_strike,
+        "skew_25delta": result.skew,
+        "points": [
+            {
+                "strike": p.strike_price,
+                "call_iv": p.call_iv,
+                "put_iv": p.put_iv,
+                "moneyness": p.moneyness,
+            }
+            for p in result.points
+        ],
+    }
+    iv_smile_data = {
+        "underlying": symbol,
+        "spot_price": spot,
+        "curves": [curve],
+    }
+
     return jsonify({
         "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "expiry": expiry,
         "spot": spot,
-        "data": _dataclass_to_dict(result),
+        "data": iv_smile_data,
     })
 
 
@@ -387,7 +495,7 @@ def straddle_pnl_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     interval = body.get("interval", "5m")
     adjustment_points = float(body.get("adjustment_points", 50.0))
     lot_size = LOT_SIZES.get(symbol.upper(), 50)
@@ -431,6 +539,36 @@ def straddle_pnl_endpoint() -> Any:
         lot_size=lot_size,
     )
 
+    # Augment with the terminal's StraddlePnLData contract. The widget plots a
+    # long-straddle PAYOFF DIAGRAM (P&L at expiry vs underlying price) — a
+    # different object from the dataclass's intraday P&L time series, which is
+    # retained for any other consumer. The payoff is analytic from the legs:
+    # per unit at expiry, pnl(S) = |S - strike| - (ce_premium + pe_premium).
+    total_premium = ce_premium + pe_premium
+    lo, hi, steps = strike * 0.9, strike * 1.1, 41
+    payoff_curve = []
+    for i in range(steps):
+        s = lo + (hi - lo) * i / (steps - 1)
+        payoff_curve.append({
+            "spot_price": round(s, 2),
+            "pnl": round(lot_size * (abs(s - strike) - total_premium), 2),
+        })
+    data = _dataclass_to_dict(result)
+    data.update({
+        "underlying": symbol,
+        "atm_strike": strike,
+        "call_premium": ce_premium,
+        "put_premium": pe_premium,
+        "break_even_low": strike - total_premium,
+        "break_even_high": strike + total_premium,
+        "max_loss": -total_premium * lot_size,
+        "curve": payoff_curve,
+        "legs": [
+            {"strike": strike, "type": "CE", "action": "BUY", "premium": ce_premium, "lots": 1},
+            {"strike": strike, "type": "PE", "action": "BUY", "premium": pe_premium, "lots": 1},
+        ],
+    })
+
     return jsonify({
         "status": "success",
         "symbol": symbol,
@@ -438,7 +576,7 @@ def straddle_pnl_endpoint() -> Any:
         "expiry": expiry,
         "interval": interval,
         "spot": spot,
-        "data": _dataclass_to_dict(result),
+        "data": data,
     })
 
 
@@ -463,7 +601,7 @@ def oi_profile_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     interval = body.get("interval", "5m")
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
@@ -494,13 +632,43 @@ def oi_profile_endpoint() -> Any:
 
     result = calculate_oi_profile(snapshot, futures_candles=futures_candles)
 
+    # Augment the raw dataclass with the terminal's OIProfileData contract. The
+    # widget reads per-strike OBJECTS (strike/ce_oi/pe_oi/…) plus atm_strike,
+    # max_pain_strike, total_ce_oi/pe_oi and pcr — none of which the column-
+    # oriented dataclass exposed, so it rendered undefined. The dataclass's own
+    # keys (oi_butterfly, oi_change, futures_ohlcv, …) are retained for any other
+    # consumer; only ``strikes`` is overridden from a float list to the objects.
+    data = _dataclass_to_dict(result)
+    total_ce_oi = sum(result.ce_oi)
+    total_pe_oi = sum(result.pe_oi)
+    data.update({
+        "underlying": symbol,
+        "expiry": expiry,
+        "spot_price": spot,
+        "atm_strike": snapshot.atm_strike,
+        "max_pain_strike": OIAnalysis.max_pain(snapshot).max_pain_strike,
+        "strikes": [
+            {
+                "strike": ps.strike_price,
+                "ce_oi": ps.ce_oi,
+                "pe_oi": ps.pe_oi,
+                "ce_oi_change": ps.ce_oi_change,
+                "pe_oi_change": ps.pe_oi_change,
+            }
+            for ps in result.profile_strikes
+        ],
+        "total_ce_oi": total_ce_oi,
+        "total_pe_oi": total_pe_oi,
+        "pcr": (total_pe_oi / total_ce_oi) if total_ce_oi else 0.0,
+    })
+
     return jsonify({
         "status": "success",
         "symbol": symbol,
         "exchange": exchange,
         "expiry": expiry,
         "spot": spot,
-        "data": _dataclass_to_dict(result),
+        "data": data,
     })
 
 
@@ -524,7 +692,7 @@ def max_pain_endpoint() -> Any:
     body = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
-    expiry = body.get("expiry", "26MAR26")
+    expiry = _body_expiry(body, "26MAR26")
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 

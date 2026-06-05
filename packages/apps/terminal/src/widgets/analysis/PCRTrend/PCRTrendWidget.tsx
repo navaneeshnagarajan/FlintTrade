@@ -13,7 +13,6 @@
 import { useState, useMemo, memo } from "react";
 import { TrendingDown, ChevronDown, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { FlintThresholdLineChart } from "@flinttrade/design-system";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -188,11 +187,14 @@ function DirectionArrow({ current, previous }: { current: number; previous: numb
 // ---------------------------------------------------------------------------
 
 function PCRTrendWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
   const [symbol, setSymbol] = useState("NIFTY");
 
-  // In live mode: fetch /api/v1/optionchain?symbol=NIFTY and extract PCR series
+  // `SAMPLE_PCR` is the only data source today; no backend option-chain PCR
+  // endpoint is wired yet. The "Sample data" badge below is therefore
+  // unconditional — it must stay visible even after a broker connection so we
+  // never imply this headline PCR / arrow / regime is live. (Wiring the live
+  // /api/v1/optionchain PCR series is a separate future task.)
   const data = SAMPLE_PCR;
 
   const currentPCR = data[data.length - 1]?.pcr ?? 0;
@@ -217,11 +219,19 @@ function PCRTrendWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <TrendingDown size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">PCR Trend</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — the PCR series, current value, arrow and regime
+            are all derived from `SAMPLE_PCR`; no live option-chain PCR endpoint
+            is wired yet. The badge previously hid when `isConnected`, which
+            masked the fact that connected users still saw fabricated data.
+            Keep it visible at all times. */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live PCR data source is wired yet"
+          title="No live data wired yet — showing sample PCR trend so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <SymbolDropdown value={symbol} onChange={handleSymbolChange} />
       </div>

@@ -47,7 +47,6 @@ import {
   forkPreset,
   type WorkspacePresetRecord,
   type CreatePresetPayload,
-  type PresetWidgetEntry,
 } from "@/services/ftApi";
 import { widgetCatalog } from "@/layout/widgetFactory";
 
@@ -74,15 +73,6 @@ const EMPTY_FORM: PresetFormState = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function buildWidgetEntries(componentIds: string[]): PresetWidgetEntry[] {
-  return componentIds.map((id, index) => ({
-    id: `${id}-${index}`,
-    component: id,
-    title:
-      widgetCatalog.find((w) => w.id === id)?.name ?? id,
-  }));
-}
 
 function downloadJson(data: unknown, filename: string): void {
   const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -393,10 +383,10 @@ function PresetCard({
         </p>
       )}
 
-      {/* Widget count */}
+      {/* Widget count (derived — backend returns widgets as an ID list) */}
       <p className="text-[10px] text-text-muted">
-        {preset.widget_count}{" "}
-        {preset.widget_count === 1 ? "widget" : "widgets"}
+        {preset.widgets.length}{" "}
+        {preset.widgets.length === 1 ? "widget" : "widgets"}
       </p>
 
       {/* Actions */}
@@ -598,7 +588,7 @@ export function PresetSection() {
     setFormState({
       name: preset.name,
       description: preset.description,
-      selectedWidgets: preset.widgets.map((w) => w.component),
+      selectedWidgets: preset.widgets,
       targetId: preset.id,
     });
     setFormMode("edit");
@@ -609,7 +599,7 @@ export function PresetSection() {
     setFormState({
       name: `${preset.name} (copy)`,
       description: preset.description,
-      selectedWidgets: preset.widgets.map((w) => w.component),
+      selectedWidgets: preset.widgets,
       targetId: preset.id,
     });
     setFormMode("fork");
@@ -621,7 +611,8 @@ export function PresetSection() {
   }
 
   function handleFormSubmit(form: PresetFormState) {
-    const widgets = buildWidgetEntries(form.selectedWidgets);
+    // Backend stores widgets as an ordered list of widget IDs.
+    const widgets = form.selectedWidgets;
 
     if (formMode === "create") {
       createMutation.mutate({
@@ -669,17 +660,8 @@ export function PresetSection() {
     const importedPresetSchema = z.object({
       name: z.string().min(1),
       description: z.string().optional(),
-      widgets: z.array(z.object({
-        id: z.string(),
-        component: z.string(),
-        title: z.string().default(""),
-        position: z.object({
-          direction: z.enum(["left", "right", "above", "below", "within"]).optional(),
-          referenceComponent: z.string().optional(),
-        }).optional(),
-        initialWidth: z.number().optional(),
-        initialHeight: z.number().optional(),
-      })),
+      // Backend preset model: widgets is an ordered list of widget IDs.
+      widgets: z.array(z.string()),
     });
 
     reader.onload = (ev) => {

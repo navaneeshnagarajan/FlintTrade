@@ -106,6 +106,22 @@ describe("computeAnalytics", () => {
     expect(a.totalTrades).toBe(1);
   });
 
+  it("excludes open legs (null P&L) instead of counting them as losses", () => {
+    // Live manual fills are journalled with pnl=null until a round-trip closes
+    // them. They must not be miscounted as losing trades.
+    const trades: JournalTrade[] = [
+      makeTrade({ pnl: 1000 }), // win
+      makeTrade({ pnl: -400 }), // loss
+      makeTrade({ pnl: null as unknown as number }), // open leg
+      makeTrade({ pnl: null as unknown as number }), // open leg
+    ];
+    const a = computeAnalytics(trades);
+    expect(a.totalTrades).toBe(2); // only the 2 realised trades
+    expect(a.wins).toBe(1);
+    expect(a.losses).toBe(1); // NOT 3
+    expect(a.netPnl).toBe(600);
+  });
+
   it("tracks current streak", () => {
     // Last trade is a win (BANKNIFTY +1500 on Friday)
     const a = computeAnalytics(SAMPLE_TRADES);

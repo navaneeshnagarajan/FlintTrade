@@ -24,14 +24,19 @@
 
 ---
 
-## In flight — 2026-06-05 post-copy remediation
+## Shipped — 2026-06-05 post-copy remediation (commit `da32fa0a`)
 
 Driven by the post-copy audit (0 critical, 2 high, 18 medium). See the audit report + `.local/dev-logs/2026-06-05-postcopy-recovery-audit.md`.
 
-- [ ] Real defects: Telegram `/kill` await bug, docker-compose health probe + terminal build, preset/admin-user API `/api/v1` prefix, OrderLadder fabricated-price guard, risk-status ranking, `NotImplementedError`→501.
-- [ ] Confirmed-dead cleanup: `portfolio_optimizer` twin, 4 screener `_analytics` twins, duplicate `whatsapp_alerter`/`openclaw_bridge`, orphan `scanner_service`, duplicate `/api/v1/errors` + `/api/v1/health`, stale `.gitignore`/`.dockerignore` paths, `flint.toml [sebi]` overscope flags, `packages/ditto/` debris.
-- [ ] Honest-degradation of maintainer-deferred surfaces (truthful "not yet available" states, no fabricated `active:true`).
-- [ ] Docs reconciliation to the 4-way nest (CLAUDE.md/AGENTS.md/templates, `package-purposes.yml`, DEVELOPER_GUIDE/ARCHITECTURE/API/USER_GUIDE, counts).
+- [x] Real defects: Telegram `/kill` await bug, docker-compose health probe + terminal build, preset/admin-user API `/api/v1` prefix, OrderLadder fabricated-price guard, risk-status ranking, `NotImplementedError`→501.
+- [x] Confirmed-dead cleanup: `portfolio_optimizer` twin, 4 screener `_analytics` twins, duplicate `whatsapp_alerter`/`openclaw_bridge`, orphan `scanner_service`, duplicate `/api/v1/errors` + `/api/v1/health`, stale `.gitignore`/`.dockerignore` paths, `flint.toml [sebi]` overscope flags, `packages/ditto/` debris.
+- [x] Honest-degradation of maintainer-deferred surfaces (truthful "not yet available" states, no fabricated `active:true`).
+- [x] Docs reconciliation to the 4-way nest (CLAUDE.md/AGENTS.md/templates, `package-purposes.yml`, DEVELOPER_GUIDE/ARCHITECTURE/API/USER_GUIDE, counts).
+
+## In flight — 2026-06-05 usability campaign (branch `goal/usability-campaign-2026-06-05`)
+
+- [x] Restore terminal typecheck + build (shadcn primitives imported individual `@radix-ui/react-*` packages never declared in package.json → migrated to the unified `radix-ui`; 87 TS errors → 0; `vite build` green). Note: `test.yml`'s `node-core-tests` job *does* gate `tsc --noEmit` + `run build`, so this would have failed CI — it went unnoticed only because Actions is currently disabled on the account (Trust & Safety abuse flag; founder support ticket). No CI change needed.
+- [x] Native broker scaffolding + multi-broker suggestions (see §2): `brokers/upstox.py`, `brokers/kotakneo.py` (doc-grounded gated skeletons), `recommendations.py` "which broker for what" engine + `GET /api/v1/broker/recommendations`.
 
 ---
 
@@ -48,13 +53,18 @@ The gate is built and the OpenAlgo bridge dispatches through it. These dormant/d
 
 ### 2. Native broker SDK adapters (maintainer-owned accounts first)
 Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade_engine/algo_tag_guard.py` (per-exchange ops counter + `algo_id` relay) and runtime `flinttrade_core/broker_sdk_attest.py` (`attest_all()` + hourly `attest_loop()` → order-halt) before any adapter advertising `algo_tag_required=True` goes live.
-- [ ] Wave 1 — **Dhan** (skeleton exists; long-lived JWT + sandbox). Add fail-closed unit test for the gated skeleton.
-- [ ] Wave 2 — **Upstox** (OAuth daily). File not yet created.
-- [ ] Wave 3 — **Kotak Neo** (TOTP + MPIN). File not yet created.
-- [ ] Wave 4 — **IndMoney** (SDK availability needs an audit sub-spec first). File not yet created.
-- [ ] Community wave — **Zerodha** (`pykiteconnect`) — no maintainer-owned account; ships on contribution.
+
+> **SDK/docs currency check (2026-06-05, adversarially verified — full report: `.local/reference/broker-currency-check-2026-06-05.md`):**
+> Dhan **dhanhq 2.2.0** = latest (pin exact; API server at feature-set v2.5; static-IP required on order APIs; 20-/200-level depth feeds → `DhanCaps.depth_levels=L20`). Upstox **upstox-python-sdk 2.27.0** = latest (build against **v3** classes; V3 protobuf feed; static-IP + `X-Algo-Name` enforced 2026-04-01; populate `brokers.lock`). Kotak Neo → bump **2.0.0 → v2.0.1** (git-pinned `Kotak-Neo/Kotak-neo-api-v2@v2.0.1`; **no PyPI package**; v2.0.1 adds MCX + MTF). IndMoney = **public REST/WS API exists (`api.indstocks.com` v1) but NO official SDK** — hand-roll a REST+dual-WS client; create `.local/reference/broker-docs/indmoney/`. Zerodha = official MIT SDK **kiteconnect 5.2.0** DOES exist (Kite Connect v3; depth 5×5 only; no BO).
+- [x] Wave 1 — **Dhan** (skeleton; long-lived JWT + sandbox; doc-grounded `DHAN_CAPABILITIES`).
+- [x] Wave 2 — **Upstox** (`brokers/upstox.py` gated skeleton + doc-grounded `UPSTOX_CAPABILITIES`; OAuth daily). Live bodies TODO behind SDK attestation.
+- [x] Wave 3 — **Kotak Neo** (`brokers/kotakneo.py` gated skeleton + doc-grounded `KOTAKNEO_CAPABILITIES`; MPIN+TOTP; zero-brokerage `brokerage_free`). Live bodies TODO behind SDK attestation.
+- [ ] Wave 4 — **IndMoney / INDstocks** — verified (2026-06-05): a public REST+dual-WS API exists (`api.indstocks.com` v1, docs `api-docs.indstocks.com`) but **there is NO official SDK** (the advertised `indstocks-sdk` pip/npm packages 404). Build a hand-rolled REST+WS client; auth = 24h manual Bearer token + static-IP whitelist. File not yet created.
+- [ ] Community wave — **Zerodha** (`kiteconnect` **5.2.0**, official MIT SDK — confirmed to exist; Kite Connect v3; depth 5×5 only; no BO) — no maintainer-owned account; ships on contribution.
+- [x] **Multi-broker suggestions** ("which broker for what"): `recommendations.py` ranks brokers per use-case from declared `Capabilities` (zero-brokerage, depth, options, historical, streaming, throughput, advanced orders); `GET /api/v1/broker/recommendations`. UI wiring into the multi-broker setup screen is TODO.
+- [ ] Live adapter bodies (login/refresh/place/modify/cancel/reads/quotes/historical/option_chain/stream) — gated behind SDK attestation; verifiable only against live SDKs/creds.
 - [ ] Build `flinttrade_gateway/reconciliation.py` (`ReconciliationReport` per contract §14; adapters' `reconcile()` currently `NotImplementedError`).
-- [ ] Add the functional `OpenAlgoAdapter` to `tests/brokers/test_base.py` ABC-enforcement parametrisation.
+- [x] Add the functional `OpenAlgoAdapter` (+ upstox/kotakneo) to `tests/brokers/test_base.py` ABC-enforcement parametrisation.
 
 ### 3. AI / analytics backends (wire or keep demo-honest)
 - [ ] `ai/sentiment/summary`, `ai/sentiment/tickers`, `ai/regime` backend routes (panels currently 404 → honest demo state in the interim).

@@ -5,19 +5,16 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-
-vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: vi.fn().mockReturnValue(false),
-}));
+//
+// The widget no longer reads `useBrokerConnected` — it has no live data source
+// yet, so it always renders sample data with an unconditional "Sample data"
+// badge regardless of connection state.
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import CorrelationPairsWidget from "../CorrelationPairsWidget";
-
-const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   global.ResizeObserver = class {
@@ -29,25 +26,36 @@ beforeEach(() => {
 
 describe("CorrelationPairsWidget", () => {
   it("renders widget title", () => {
-    mockConnected.mockReturnValue(false);
     render(<CorrelationPairsWidget />);
     expect(screen.getByText("Correlation Pairs")).toBeTruthy();
   });
 
-  it("shows Sample badge when broker disconnected", () => {
-    mockConnected.mockReturnValue(false);
+  it("shows the Sample data badge", () => {
     render(<CorrelationPairsWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when broker connected", () => {
-    mockConnected.mockReturnValue(true);
+  it("always shows the Sample data badge — no live source is wired, so it must not hide", () => {
+    // Honest behaviour: the widget has no backend correlation endpoint, so the
+    // badge is unconditional. There is no connection state that should remove it.
     render(<CorrelationPairsWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    const badge = screen.getByText("Sample data");
+    expect(badge).toBeInTheDocument();
+    // The disclosure is exposed to assistive tech and explains there is no live source.
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      "Showing sample data; no live correlation data source is wired yet",
+    );
+  });
+
+  it("does not render a deceptive live-looking refresh control", () => {
+    // The old stub refresh button only slept and bumped a "lastUpdated" clock to
+    // look live while still showing sample data — it has been removed.
+    render(<CorrelationPairsWidget />);
+    expect(screen.queryByRole("button", { name: /refresh correlation data/i })).toBeNull();
   });
 
   it("renders table column headers: Pair, Corr, Z-Score, Signal", () => {
-    mockConnected.mockReturnValue(false);
     render(<CorrelationPairsWidget />);
     expect(screen.getByText("Pair")).toBeTruthy();
     expect(screen.getByText("Corr")).toBeTruthy();
@@ -56,7 +64,6 @@ describe("CorrelationPairsWidget", () => {
   });
 
   it("renders NIFTY and BANKNIFTY in pair rows", () => {
-    mockConnected.mockReturnValue(false);
     render(<CorrelationPairsWidget />);
     // NIFTY appears in two rows (NIFTY↔BANKNIFTY and RELIANCE↔NIFTY)
     expect(screen.getAllByText("NIFTY").length).toBeGreaterThanOrEqual(1);
@@ -64,7 +71,6 @@ describe("CorrelationPairsWidget", () => {
   });
 
   it("renders signal labels: Converging and Diverging", () => {
-    mockConnected.mockReturnValue(false);
     render(<CorrelationPairsWidget />);
     const divergingCells = screen.getAllByText("Diverging");
     const convergingCells = screen.getAllByText("Converging");
@@ -73,7 +79,6 @@ describe("CorrelationPairsWidget", () => {
   });
 
   it("sorts by correlation when Corr header is clicked", () => {
-    mockConnected.mockReturnValue(false);
     render(<CorrelationPairsWidget />);
     const corrHeader = screen.getByRole("columnheader", { name: /corr/i });
     fireEvent.click(corrHeader);
@@ -81,15 +86,7 @@ describe("CorrelationPairsWidget", () => {
     expect(screen.getByText("Correlation Pairs")).toBeTruthy();
   });
 
-  it("refresh button is disabled when broker disconnected", () => {
-    mockConnected.mockReturnValue(false);
-    render(<CorrelationPairsWidget />);
-    const btn = screen.getByRole("button", { name: /refresh correlation data/i });
-    expect(btn).toBeDisabled();
-  });
-
   it("renders footer note about z-score and correlation", () => {
-    mockConnected.mockReturnValue(false);
     render(<CorrelationPairsWidget />);
     // Z-Score appears in column header and footer — use getAllBy
     expect(screen.getAllByText(/Z-score/i).length).toBeGreaterThanOrEqual(1);

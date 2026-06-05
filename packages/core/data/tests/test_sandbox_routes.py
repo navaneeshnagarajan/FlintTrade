@@ -210,3 +210,28 @@ class TestGetPnl:
         data = resp.get_json()
         assert data["data"]["pnl"]["realised"] == 0.0
         engine.get_pnl.assert_called_once()
+
+
+class TestGetStatus:
+    """GET /v1/sandbox/status — combined status for the SandboxControls panel."""
+
+    def test_returns_flat_status_shape(self, client, engine):
+        resp = client.get("/v1/sandbox/status")
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        # The UI schema requires capital as a single current-balance number.
+        assert data["capital"] == 500_000.0
+        assert data["initial_capital"] == 500_000.0
+        assert data["pnl"] == 0.0
+        assert data["trades_count"] == 0
+        # capital must be a number, not the nested capital object
+        assert isinstance(data["capital"], (int, float))
+
+    def test_trades_count_reflects_orders(self, client, engine):
+        engine.get_orders.return_value = [{"id": "1"}, {"id": "2"}, {"id": "3"}]
+        resp = client.get("/v1/sandbox/status")
+        assert resp.get_json()["data"]["trades_count"] == 3
+
+    def test_no_engine_returns_503(self, client_no_engine):
+        resp = client_no_engine.get("/v1/sandbox/status")
+        assert resp.status_code == 503

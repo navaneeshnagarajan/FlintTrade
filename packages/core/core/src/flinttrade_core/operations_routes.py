@@ -196,26 +196,57 @@ def trades_journal() -> tuple[Any, int]:
         strategy_filter: str = request.args.get("strategy", "")
         limit: int = min(int(request.args.get("limit", 100)), 1000)
 
-        storage = StorageManager()
-        storage.initialise()
+        # Prefer the shared store the order dispatch writes to (same file, no
+        # per-request open, no within-process file-lock contention); fall back to
+        # a short-lived one when journalling isn't wired (e.g. minimal apps).
+        shared = current_app.config.get("TRADE_STORAGE")
+        lock = current_app.config.get("TRADE_STORAGE_LOCK")
+        storage = shared
+        opened = False
+        if storage is None:
+            storage = StorageManager()
+            storage.initialise()
+            opened = True
 
-        # Use available query methods on StorageManager
-        if strategy_filter and start_date and end_date:
-            trades = storage.get_trades_by_strategy(strategy_filter, start_date, end_date)
-        elif start_date:
-            trades = storage.get_trades_by_date(start_date)
-        else:
+        def _query() -> list[dict[str, Any]]:
+            # Use available query methods on StorageManager.
+            if strategy_filter and start_date and end_date:
+                return storage.get_trades_by_strategy(strategy_filter, start_date, end_date)
+            if start_date and end_date:
+                # History window across all strategies (e.g. the performance
+                # dashboard). Without this branch a start+end with no strategy
+                # fell through to a single-day query — the recurring contract bug.
+                return storage.get_trades_by_date_range(start_date, end_date)
+            if start_date:
+                return storage.get_trades_by_date(start_date)
             today = _dt.now(_IST).strftime("%Y-%m-%d")
-            trades = storage.get_trades_by_date(today)
+            return storage.get_trades_by_date(today)
 
-        # Apply limit
-        trades = trades[:limit]
-        # Convert datetime objects to strings for JSON serialisation
-        for t in trades:
-            for k, v in t.items():
+        try:
+            if lock is not None and not opened:
+                with lock:
+                    trades = _query()
+            else:
+                trades = _query()
+        finally:
+            if opened:
+                storage.close()
+
+        # Apply limit + normalise for the terminal contract. The DuckDB column is
+        # ``ts`` but the frontend ``JournalTrade`` type (and journalAnalytics,
+        # which does ``new Date(t.timestamp)``) keys off ``timestamp`` — emit that
+        # name so the journal renders instead of producing Invalid Dates. All
+        # datetimes serialise to ISO strings.
+        normalised: list[dict[str, Any]] = []
+        for t in trades[:limit]:
+            row = dict(t)
+            ts_val = row.pop("ts", None)
+            row["timestamp"] = ts_val.isoformat() if isinstance(ts_val, _dt) else ts_val
+            for k, v in list(row.items()):
                 if isinstance(v, _dt):
-                    t[k] = v.isoformat()
-        storage.close()
+                    row[k] = v.isoformat()
+            normalised.append(row)
+        trades = normalised
 
         return jsonify({
             "status": "success",

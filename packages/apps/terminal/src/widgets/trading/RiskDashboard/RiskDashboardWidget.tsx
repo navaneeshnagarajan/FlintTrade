@@ -17,11 +17,16 @@
  */
 
 import { useMemo, useEffect, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert } from "lucide-react";
 import { FlintRadialGauge } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getPositionbook, getFunds } from "@/services/api";
+import { queryKeys } from "@/services/queryKeys";
+import { isMarketHours } from "@/lib/market";
+import type { Position, Funds } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,8 +46,17 @@ export interface RiskMetric {
   level: TrafficLight;
 }
 
+/** Informational value with no limit/traffic-light semantics (e.g. exposure). */
+export interface RiskInfoStat {
+  label: string;
+  value: string;
+}
+
 export interface RiskDashboardData {
   metrics: RiskMetric[];
+  /** Plain values shown without a gauge — for quantities that have no meaningful
+   *  0–100% limit (notional exposure under F&O leverage). Optional. */
+  infoStats?: RiskInfoStat[];
   overallLevel: TrafficLight;
   timestamp: string;
 }
@@ -90,6 +104,60 @@ export const SAMPLE_RISK_DATA: RiskDashboardData = {
   overallLevel: "amber",
   timestamp: "15:23 IST",
 };
+
+const LEVEL_RANK: Record<TrafficLight, number> = { green: 0, amber: 1, red: 2 };
+
+function worstLevel(metrics: RiskMetric[]): TrafficLight {
+  return metrics.reduce<TrafficLight>(
+    (worst, m) => (LEVEL_RANK[m.level] > LEVEL_RANK[worst] ? m.level : worst),
+    "green",
+  );
+}
+
+function nowIstHHMM(): string {
+  try {
+    return (
+      new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata",
+      }).format(new Date()) + " IST"
+    );
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Build the risk dashboard from real broker data.
+ *
+ * Margin Utilised (usedMargin / totalBalance) is the one metric that maps to a
+ * meaningful 0–100% traffic-light gauge, so it is the only gauge shown. Total
+ * Exposure (gross notional from the positionbook) is shown as an informational
+ * value, NOT a gauge: account balance is the wrong "limit" for it — F&O leverage
+ * routinely makes notional exceed balance, and before funds load the balance is
+ * unknown, both of which would otherwise paint a false red "Risk Breached".
+ * Net delta, net theta and max-loss need a portfolio option-greeks/payoff feed
+ * that is not wired yet and are omitted rather than fabricated. A connected user
+ * is therefore never shown an invented or misleading risk verdict.
+ */
+export function computeLiveRisk(positions: Position[], funds?: Funds): RiskDashboardData {
+  const exposure = positions.reduce((s, p) => s + Math.abs(p.quantity * p.averagePrice), 0);
+  const totalBalance = funds?.totalBalance ?? 0;
+  const usedMargin = funds?.usedMargin ?? 0;
+  const marginPct = totalBalance > 0 ? (usedMargin / totalBalance) * 100 : 0;
+
+  // Only gauge metrics that have a real 0–100% limit. Margin utilisation only
+  // applies once funds are known; otherwise it is shown as an info stat too.
+  const metrics: RiskMetric[] = [];
+  const infoStats: RiskInfoStat[] = [{ label: "Total Exposure", value: fmtINR(exposure) }];
+
+  if (totalBalance > 0) {
+    metrics.push(buildMetric("margin", "Margin Utilised", marginPct, 100, "%", (v) => `${fmtNum(v, 1)}%`));
+  } else {
+    infoStats.push({ label: "Margin Utilised", value: "—" });
+  }
+
+  return { metrics, infoStats, overallLevel: worstLevel(metrics), timestamp: nowIstHHMM() };
+}
 
 const GAUGE_COLOURS: Record<TrafficLight, { stroke: string; bg: string; text: string }> = {
   green: { stroke: "#22c55e", bg: "rgba(34,197,94,0.12)", text: "text-profit" },
@@ -197,8 +265,27 @@ function RiskDashboardWidget() {
     track("trade", "widget_view_risk_dashboard");
   }, [track]);
 
-  // Live mode: replace with real hooks (useFunds, usePositions, useGreeks)
-  const data: RiskDashboardData = useMemo(() => SAMPLE_RISK_DATA, []);
+  // Connected → real risk from the positionbook + funds; disconnected → labelled
+  // sample data. Never show fabricated risk metrics to a live user.
+  const { data: livePositions } = useQuery<Position[]>({
+    queryKey: queryKeys.positions.all,
+    queryFn: getPositionbook,
+    enabled: isConnected,
+    staleTime: 3_000,
+    refetchInterval: isConnected ? () => (isMarketHours() ? 5_000 : 60_000) : false,
+  });
+  const { data: liveFunds } = useQuery<Funds>({
+    queryKey: queryKeys.funds.all,
+    queryFn: getFunds,
+    enabled: isConnected,
+    staleTime: 15_000,
+    refetchInterval: isConnected ? 30_000 : false,
+  });
+
+  const data: RiskDashboardData = useMemo(
+    () => (isConnected ? computeLiveRisk(livePositions ?? [], liveFunds) : SAMPLE_RISK_DATA),
+    [isConnected, livePositions, liveFunds],
+  );
 
   return (
     <div
@@ -228,6 +315,30 @@ function RiskDashboardWidget() {
             <MetricCard key={m.id} metric={m} />
           ))}
         </div>
+
+        {/* Informational values (no gauge/limit semantics — e.g. exposure). */}
+        {data.infoStats && data.infoStats.length > 0 && (
+          <div className="grid grid-cols-2 gap-1.5" aria-label="Risk info">
+            {data.infoStats.map((s) => (
+              <div
+                key={s.label}
+                className="flex flex-col gap-0.5 bg-surface-card rounded-lg border border-border-default px-3 py-2"
+              >
+                <span className="text-xxs text-text-muted uppercase tracking-wide truncate">{s.label}</span>
+                <span className="text-sm font-bold font-mono tabular-nums text-text-primary">{s.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Honest note: greeks-derived metrics aren't wired for live data yet. */}
+        {isConnected && (
+          <p className="text-xxs text-text-muted px-1 leading-snug">
+            Net delta, net theta and max-loss need a connected option-greeks feed
+            and are not shown live yet — only metrics derived from your real
+            positions and funds appear above.
+          </p>
+        )}
 
         {/* Legend */}
         <div className="flex items-center gap-3 pt-1 px-1">

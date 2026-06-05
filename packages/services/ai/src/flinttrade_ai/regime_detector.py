@@ -370,6 +370,89 @@ class RegimeResult:
 
 
 # ---------------------------------------------------------------------------
+# Regime -> strategy selection (closes the loop on detection)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StrategySuggestion:
+    """A regime-appropriate strategy recommendation.
+
+    Attributes:
+        strategy: Short machine id (e.g. ``"momentum_long"``) a strategy runner
+            can switch on.
+        label: Human-readable display name for the UI.
+        rationale: One-line explanation of why the style suits the regime.
+    """
+
+    strategy: str
+    label: str
+    rationale: str
+
+    def to_dict(self) -> dict[str, str]:
+        """Return a JSON-serialisable dict."""
+        return {"strategy": self.strategy, "label": self.label, "rationale": self.rationale}
+
+
+_REGIME_STRATEGY: dict[RegimeState, StrategySuggestion] = {
+    RegimeState.TRENDING_UP: StrategySuggestion(
+        "momentum_long",
+        "Momentum (long)",
+        "Strong ADX-confirmed uptrend — ride direction with trend-following or breakout longs; avoid fading.",
+    ),
+    RegimeState.TRENDING_DOWN: StrategySuggestion(
+        "momentum_short",
+        "Momentum (short)",
+        "Strong ADX-confirmed downtrend — trend-following shorts or protective puts; avoid bottom-picking.",
+    ),
+    RegimeState.RANGING: StrategySuggestion(
+        "mean_reversion",
+        "Mean reversion",
+        "Low ADX in a tight range — fade the edges (short strangles, range scalps); trend entries will whipsaw.",
+    ),
+    RegimeState.VOLATILE_DIRECTIONAL: StrategySuggestion(
+        "trend_pullback",
+        "Trend pullback",
+        "Trend in motion with expanding ATR — enter on pullbacks with wide stops; size down for the volatility.",
+    ),
+    RegimeState.VOLATILE_DIRECTIONLESS: StrategySuggestion(
+        "long_volatility",
+        "Stand aside / long volatility",
+        "Choppy with expanding bands and no direction — stand aside or buy volatility (long straddle); directional bets bleed.",
+    ),
+    RegimeState.LOW_VOLATILITY: StrategySuggestion(
+        "theta",
+        "Theta / premium selling",
+        "Compressed volatility — collect theta (short straddles, iron condors); expect an eventual volatility expansion.",
+    ),
+}
+
+
+def select_strategy_for_regime(state: RegimeState) -> StrategySuggestion:
+    """Map a detected market regime to a regime-appropriate strategy style.
+
+    Closes the loop on regime detection: the detector classifies the market and
+    this selector recommends the strategy style that historically suits that
+    regime — for the AI Regime panel and any regime-aware strategy runner. Falls
+    back to a stand-aside default for an unrecognised state.
+
+    Args:
+        state: The detected :class:`RegimeState`.
+
+    Returns:
+        A :class:`StrategySuggestion` for the regime.
+    """
+    return _REGIME_STRATEGY.get(
+        state,
+        StrategySuggestion(
+            "stand_aside",
+            "Stand aside",
+            "Unclassified regime — prefer to stand aside until it resolves.",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Primary public API
 # ---------------------------------------------------------------------------
 

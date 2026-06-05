@@ -6,13 +6,17 @@
  *   - Add / remove instruments via symbol search input
  *   - Default instruments: NIFTY, BANKNIFTY, RELIANCE, TCS, HDFCBANK, INFY, ICICIBANK, GOLD
  *   - Hover tooltip showing exact coefficient and pair name
- *   - Sample 20-day rolling return correlation; live via /ft-api/v1/correlation
+ *
+ * DATA SOURCE: sample only. The matrix is computed from `SAMPLE_MATRIX` and a
+ * deterministic `pseudoCorr` fallback — there is no live correlation endpoint
+ * wired yet (a future `/ft-api/v1/correlation` route is planned). The "Sample
+ * data" badge is therefore shown unconditionally so a connected (live) trader
+ * is never misled into reading these coefficients as real market data.
  */
 
 import { useState, useMemo, useCallback, useRef, memo } from "react";
-import { Grid2x2, Plus, X, RefreshCw } from "lucide-react";
+import { Grid2x2, Plus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -91,13 +95,14 @@ interface TooltipState {
 // ---------------------------------------------------------------------------
 
 function CorrelationMatrixWidget() {
-  const isConnected = useBrokerConnected();
+  // NOTE: We deliberately do NOT read `useBrokerConnected()` here. There is no
+  // live correlation endpoint, so the data is sample-only regardless of broker
+  // connection — gating anything on connection state would only let the UI
+  // pretend the figures are live. The "Sample data" badge stays visible always.
   const track = useTrackBehavior();
 
   const [symbols, setSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
   const [searchInput, setSearchInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState("--");
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -133,20 +138,6 @@ function CorrelationMatrixWidget() {
     if (e.key === "Enter") addSymbol();
   };
 
-  const handleRefresh = async () => {
-    if (!isConnected) return;
-    setIsLoading(true);
-    try {
-      await new Promise<void>((r) => setTimeout(r, 400));
-      setLastUpdated(
-        new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })
-      );
-      track("trade", "correlation_matrix_refresh");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleCellEnter = (
     e: React.MouseEvent<HTMLTableCellElement>,
     a: string,
@@ -175,21 +166,20 @@ function CorrelationMatrixWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Grid2x2 size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Correlation Matrix</span>
-        {!isConnected && (
-          <span className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
-        <div className="flex-1" />
-        <span className="text-xxs text-text-muted tabular-nums">{lastUpdated}</span>
-        <button
-          onClick={() => void handleRefresh()}
-          disabled={isLoading || !isConnected}
-          aria-label="Refresh correlation data"
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover disabled:opacity-40 transition-colors"
+        {/* Honest disclosure — the matrix is computed from `SAMPLE_MATRIX` and
+            the `pseudoCorr` fallback; no live correlation endpoint is wired yet.
+            The badge previously hid in `isConnected` mode, which masked the fact
+            that a connected trader was still reading sample coefficients. Keep
+            visible at all times. */}
+        <span
+          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live correlation source is wired yet"
+          title="No live data wired yet — showing a sample correlation matrix so the widget is usable in explore mode."
         >
-          <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} aria-hidden="true" />
-        </button>
+          Sample data
+        </span>
+        <div className="flex-1" />
       </div>
 
       {/* Symbol add bar */}

@@ -38,10 +38,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  getActiveSignals,
+  getRecentSignals,
   analyzeSentiment,
   queryKnowledge,
   type Signal,
+  type LiveSignal,
   type SentimentResult,
   type RAGResult,
 } from "@/services/ftApi";
@@ -194,14 +195,30 @@ function SignalCard({ signal, index }: { signal: Signal; index: number }) {
   );
 }
 
+// Adapt the working /signals/recent payload (LiveSignal: single indicator+value)
+// to the SignalCard's Signal shape (indicators as a Record). LiveSignal has no
+// exchange and may carry an "ALERT" type, which maps to "HOLD" for display.
+function liveSignalToSignal(ls: LiveSignal): Signal {
+  return {
+    symbol: ls.symbol,
+    exchange: "",
+    signal_type: ls.signal_type === "ALERT" ? "HOLD" : ls.signal_type,
+    confidence: ls.confidence,
+    timestamp: ls.timestamp,
+    indicators: { [ls.indicator]: ls.value },
+  };
+}
+
 function SignalsSection() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["signals"],
-    queryFn: getActiveSignals,
+    // /signals/active reads a _signal_pipeline that is never wired (always []);
+    // /signals/recent is the working ML-signal source (audit M9/M10).
+    queryFn: () => getRecentSignals(20),
     refetchInterval: 30_000,
   });
 
-  const signals = data?.signals ?? [];
+  const signals: Signal[] = (data?.signals ?? []).map(liveSignalToSignal);
 
   return (
     <div className="space-y-4" data-tour-target="ai-signals">

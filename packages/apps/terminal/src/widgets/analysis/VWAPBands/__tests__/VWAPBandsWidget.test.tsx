@@ -5,6 +5,11 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+//
+// The widget renders deterministic SAMPLE data only — no live backend endpoint
+// is wired yet, so it no longer reads `useBrokerConnected`. The mock below is
+// kept (defensively) so a future broker-connection signal cannot silently
+// resurrect the old "hide the Sample badge when connected" deception.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -20,6 +25,7 @@ import VWAPBandsWidget from "../VWAPBandsWidget";
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  mockConnected.mockReturnValue(false);
   global.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -29,27 +35,43 @@ beforeEach(() => {
 
 describe("VWAPBandsWidget", () => {
   it("renders the widget title", () => {
-    mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);
     expect(screen.getByText("VWAP Bands")).toBeTruthy();
   });
 
-  it("shows Sample badge when broker disconnected", () => {
+  it("shows the 'Sample data' badge in explore mode (disconnected)", () => {
     mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when broker connected", () => {
-    // Stub fetch to prevent unresolved async in test env
-    global.fetch = vi.fn().mockImplementation(() => new Promise(() => {}));
+  it("keeps the 'Sample data' badge visible even when broker connected", () => {
+    // The widget has no live data source wired yet — it must NOT pretend the
+    // sample bars become real once a broker connects. The badge stays put.
     mockConnected.mockReturnValue(true);
     render(<VWAPBandsWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("badge is an honest, screen-reader-announced status with an explanatory title", () => {
+    render(<VWAPBandsWidget />);
+    const badge = screen.getByText("Sample data");
+    expect(badge).toHaveAttribute("role", "status");
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      "Showing sample data; no live backend endpoint yet",
+    );
+    expect(badge.getAttribute("title")).toMatch(/no live data wired yet/i);
+  });
+
+  it("does not render a deceptive live-looking refresh affordance", () => {
+    // The old 30s "auto-refresh" only slept and bumped a clock — it implied
+    // the fake data was live. No refresh button / "last updated" clock now.
+    render(<VWAPBandsWidget />);
+    expect(screen.queryByRole("button", { name: /refresh VWAP data/i })).toBeNull();
   });
 
   it("renders VWAP stat labels", () => {
-    mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);
     // "VWAP" and "Price" each appear in both the stat card and the band legend
     expect(screen.getAllByText("VWAP").length).toBeGreaterThanOrEqual(1);
@@ -58,13 +80,11 @@ describe("VWAPBandsWidget", () => {
   });
 
   it("renders symbol selector button defaulting to NIFTY", () => {
-    mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);
     expect(screen.getByRole("button", { name: /selected symbol: NIFTY/i })).toBeTruthy();
   });
 
   it("opens symbol dropdown and shows all symbols", () => {
-    mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);
     fireEvent.click(screen.getByRole("button", { name: /selected symbol/i }));
     expect(screen.getByText("BANKNIFTY")).toBeTruthy();
@@ -73,7 +93,6 @@ describe("VWAPBandsWidget", () => {
   });
 
   it("renders band legend entries", () => {
-    mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);
     expect(screen.getByText("± 1σ")).toBeTruthy();
     expect(screen.getByText("± 2σ")).toBeTruthy();
@@ -81,7 +100,6 @@ describe("VWAPBandsWidget", () => {
   });
 
   it("renders VWAP through the shared Flint banded-line primitive", () => {
-    mockConnected.mockReturnValue(false);
     render(<VWAPBandsWidget />);
     const chart = screen.getByRole("img", { name: /vwap bands chart/i });
     expect(chart).toHaveAttribute("data-flint-chart", "banded-line");
@@ -91,15 +109,7 @@ describe("VWAPBandsWidget", () => {
   });
 
   it("renders band legend swatches without local SVG", () => {
-    mockConnected.mockReturnValue(false);
     const { container } = render(<VWAPBandsWidget />);
     expect(container.querySelector('svg[width="16"][height="8"]')).not.toBeInTheDocument();
-  });
-
-  it("refresh button is disabled when broker disconnected", () => {
-    mockConnected.mockReturnValue(false);
-    render(<VWAPBandsWidget />);
-    const btn = screen.getByRole("button", { name: /refresh VWAP data/i });
-    expect(btn).toBeDisabled();
   });
 });

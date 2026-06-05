@@ -8,15 +8,18 @@
  *   - Top 5 gainers and losers
  *   - Sector performance bars (colour-coded)
  *
- * Auto-refreshes every 60 seconds when connected to broker.
+ * HONESTY NOTE: every section renders from the SAMPLE_* constants below. No
+ * backend endpoint feeds this widget yet, so the data is identical whether or
+ * not a broker is connected. The "Sample data" badge is therefore shown at all
+ * times (it must NOT be gated on connection state) and there is no auto-refresh
+ * or "live updating" affordance — nothing here should imply the figures are
+ * live. Wiring a real market-overview endpoint is a separate future task.
  */
 
-import { useState, useEffect, useCallback, useRef, memo } from "react";
-import { LayoutDashboard, RefreshCw, Loader2, TrendingUp, TrendingDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, memo } from "react";
+import { LayoutDashboard, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -239,37 +242,12 @@ function SectionHeading({ id, children }: { id: string; children: React.ReactNod
 // Main widget
 // ---------------------------------------------------------------------------
 
-const REFRESH_INTERVAL_MS = 60_000;
-
 function MarketSummaryWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
-  const [isFetching, setIsFetching] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     track("trade", "widget_view_market_summary");
   }, [track]);
-
-  const refresh = useCallback(() => {
-    if (!isConnected) return;
-    setIsFetching(true);
-    // In live mode, data would come from /api/v1/quotes for indices
-    setTimeout(() => {
-      setIsFetching(false);
-      setLastUpdate(new Date());
-    }, 500);
-  }, [isConnected]);
-
-  // Auto-refresh every 60 s when connected
-  useEffect(() => {
-    if (!isConnected) return;
-    timerRef.current = setInterval(refresh, REFRESH_INTERVAL_MS);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isConnected, refresh]);
 
   const fiiPositive = SAMPLE_FII_DII.fii >= 0;
   const diiPositive = SAMPLE_FII_DII.dii >= 0;
@@ -281,28 +259,22 @@ function MarketSummaryWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <LayoutDashboard size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Market Summary</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
-        <div className="flex-1" />
-        <span className="text-xxs text-text-muted font-mono">
-          {lastUpdate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-        </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={refresh}
-          disabled={isFetching}
-          className="h-6 w-6 p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
-          aria-label="Refresh market summary"
+        {/* Honest disclosure — every section reads from the SAMPLE_* constants
+            above; no backend market-overview endpoint is wired yet. The badge
+            was previously hidden once a broker connected (`!isConnected`),
+            which masked the fact that the figures stayed sample even on a live
+            connection. Keep it visible at all times. There is deliberately no
+            timestamp or refresh control here: a "last updated" clock or a
+            spinning refresh button would falsely imply the data is live. */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live market-overview source is wired yet"
+          title="No live data wired yet — showing a sample market overview so the widget is usable in explore mode."
         >
-          {isFetching
-            ? <Loader2 size={11} className="animate-spin" />
-            : <RefreshCw size={11} />
-          }
-        </Button>
+          Sample data
+        </span>
+        <div className="flex-1" />
       </div>
 
       {/* Scrollable body */}

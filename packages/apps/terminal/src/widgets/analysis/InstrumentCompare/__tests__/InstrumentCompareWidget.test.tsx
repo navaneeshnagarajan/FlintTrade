@@ -33,16 +33,29 @@ describe("InstrumentCompareWidget", () => {
     expect(screen.getByText("Instrument Compare")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("shows the Sample data badge when disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<InstrumentCompareWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("hides Sample badge when connected", () => {
+  it("still shows the Sample data badge when connected (no live source wired)", () => {
+    // The overlay series are built entirely from SAMPLE_SERIES; no history/quote
+    // endpoint is wired yet, so a connected user must still see the disclosure.
     mockUseBrokerConnected.mockReturnValue(true);
     render(<InstrumentCompareWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("exposes the sample-data disclosure to assistive tech", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<InstrumentCompareWidget />);
+    const badge = screen.getByText("Sample data");
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      "Showing sample data; no live data source is wired yet",
+    );
+    expect(badge).toHaveAttribute("role", "status");
   });
 
   it("renders 4 symbol input slots", () => {

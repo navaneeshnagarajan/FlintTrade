@@ -1,9 +1,28 @@
-"""Dhan v2 adapter skeleton for wave-1 broker support.
+"""Kotak Neo adapter skeleton for wave-3 broker support.
 
-The full BrokerAdapter async surface (contract §5) is declared here, but every
-live broker call is gated behind SDK attestation until the Dhan §9.5 wave lands.
-``broker_id`` and ``capabilities`` return real values so the registry, router,
-and capability-routing layers can be exercised ahead of live trading.
+The full ``BrokerAdapter`` async surface (contract §5) is declared here, but
+every live broker call is gated behind SDK attestation until the Kotak Neo wave
+lands. ``broker_id`` and ``capabilities`` return real values so the registry,
+router, capability-routing, and broker-recommendation layers can be exercised
+ahead of live trading.
+
+Capability values are grounded in the local Kotak Neo reference docs
+(``.local/reference/broker-docs/kotak-neo/``). Fields not stated in those docs
+are left at their dataclass defaults (``None``/``0``/``[]``) rather than guessed.
+
+Auth model (for the future ``login``/``refresh``): the neo_api_client v2 SDK
+(``Kotak-Neo/Kotak-neo-api-v2``, git-pinned at tag ``v2.0.1`` — there is no
+official PyPI package) initialises as ``NeoAPI(environment='prod',
+access_token=None, neo_fin_key=None, consumer_key=...)``, then the two-step Neo
+flow: ``totp_login(mobile, ucc, totp)`` mints a view token + session id, and
+``totp_validate(mpin)`` mints the trade token. (v2 removed the older
+``base_url()``/``customer_key``/``customer_secret`` and QR-login flows; ``refresh``
+is a full daily re-login.) v2.0.1 added MCX trading and the MTF product type.
+
+Cost note: Kotak Neo advertises **zero brokerage** on API order execution and a
+free API (no subscription charge). The one documented exception is that a
+bracket order's square-off leg attracts standard brokerage even though the
+initial leg is free.
 """
 
 from __future__ import annotations
@@ -25,10 +44,21 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
     from flinttrade_gateway.reconciliation import ReconciliationReport
 
-_GATED = "Dhan {0} is gated behind broker SDK attestation (wave 1 §9.5)"
+_GATED = "Kotak Neo {0} is gated behind broker SDK attestation (wave 3)"
 
-DHAN_CAPABILITIES = Capabilities(
-    segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.MCX,
+KOTAKNEO_CAPABILITIES = Capabilities(
+    segments=(
+        Segments.NSE_EQ
+        | Segments.BSE_EQ
+        | Segments.NFO
+        | Segments.BFO
+        | Segments.CDS
+        | Segments.BCD
+        | Segments.MCX
+    ),
+    # Native bracket (BO) and cover (CO) orders; no GTT and no iceberg
+    # (only disclosed-quantity). Market orders are auto-converted to a protected
+    # limit per SEBI retail-algo rules — handled at the adapter layer when wired.
     order_types=(
         OrderTypes.MARKET
         | OrderTypes.LIMIT
@@ -38,63 +68,50 @@ DHAN_CAPABILITIES = Capabilities(
         | OrderTypes.CNC
         | OrderTypes.NRML
         | OrderTypes.AMO
-        | OrderTypes.GTT
-        | OrderTypes.ICEBERG
         | OrderTypes.BO
         | OrderTypes.CO
     ),
-    # Standard market-depth feed is 5-level, but Dhan v2 also offers a dedicated
-    # 20-level depth feed (wss://depth-api-feed.dhan.co/twentydepth) and a
-    # 200-level full-depth feed (wss://full-depth-api.dhan.co/twohundreddepth),
-    # so the advertised maximum is L20 (the enum ceiling; 200-level is beyond it).
-    depth_levels=DepthLevels.L20,
-    tick_protocol=TickProtocol.DHAN_BINARY,
-    auth_model=AuthModel.OAUTH_RENEWABLE_24H,
+    depth_levels=DepthLevels.L5,
+    tick_protocol=TickProtocol.KOTAK_NEO_JSON,
+    auth_model=AuthModel.MPIN_TOTP_DAILY,
+    # Trade-token TTL is not stated in the local docs; 24h is the daily-cycle
+    # ceiling used for refresh timing (the only JWT shown is a view-scope token).
     session_lifetime_hours=24.0,
-    session_renewal_leeway_seconds=120,
     sandbox=True,
+    # "Currently the system supports up to 10 orders per second."
     rate_limit_orders_per_sec=10,
-    rate_limit_orders_per_min=250,
-    rate_limit_orders_per_hour=1000,
-    rate_limit_orders_per_day=7000,
-    rate_limit_data_per_sec=5,
-    rate_limit_data_per_day=100_000,
-    rate_limit_quote_per_sec=1,
-    rate_limit_non_trading_per_sec=20,
-    order_modifications_per_order=25,
-    algo_tag_required=True,
-    historical_max_lookback_days_intraday=90,
-    historical_max_lookback_days_daily=None,
-    historical_max_candles_per_request=5000,
-    historical_intraday_intervals_minutes=[1, 5, 15, 25, 60],
-    option_chain_supported=True,
-    option_chain_greeks_supported=True,
-    option_chain_rate_limit_seconds=3,
+    # 'tag' is an optional order field, not a mandated algo tag.
+    algo_tag_required=False,
+    # Zero brokerage on execution + zero API subscription charge (BO square-off
+    # leg attracts standard brokerage — see module docstring).
+    cost_paid=False,
+    cost_inr_per_month=0,
+    brokerage_free=True,
+    brokerage_note=(
+        "Zero brokerage on all API order execution; only statutory charges "
+        "apply. Exception: a bracket order's square-off leg attracts standard "
+        "brokerage."
+    ),
+    # No historical/OHLC-candle API in the Neo trade API — only live quotes.
+    # No option-chain endpoint (search_scrip only).
+    option_chain_supported=False,
     streaming_supported=True,
-    streaming_max_connections_per_user=5,
-    streaming_max_symbols_per_connection=5000,
-    streaming_max_total_symbols=25_000,
-    streaming_heartbeat_seconds=10,
-    streaming_disconnect_timeout_seconds=40,
     bracket_order_native=True,
     cover_order_native=True,
-    iceberg_native=True,
-    gtt_native=True,
     modify_qty_supported=True,
-    modify_after_partial_fill=False,
 )
 
 
-class DhanAdapter(BrokerAdapter):
+class KotakNeoAdapter(BrokerAdapter):
     # ---------- identity + capabilities ----------
 
     @property
     def broker_id(self) -> str:
-        return "dhan"
+        return "kotakneo"
 
     @property
     def capabilities(self) -> Capabilities:
-        return DHAN_CAPABILITIES
+        return KOTAKNEO_CAPABILITIES
 
     # ---------- auth lifecycle ----------
 

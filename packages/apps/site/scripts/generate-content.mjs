@@ -1,7 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const siteRoot = path.resolve(new URL('.', import.meta.url).pathname, '..');
+// Use fileURLToPath (not URL.pathname): on Windows `.pathname` yields "/C:/…",
+// and path.resolve("/C:/…", "..") produces a doubled-drive "C:\C:\…" that breaks
+// every mkdir/read below. fileURLToPath converts file URLs correctly on all OSes.
+const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = process.env.FLINTTRADE_REPO_ROOT
   ? path.resolve(process.env.FLINTTRADE_REPO_ROOT)
   : path.resolve(siteRoot, '..', '..', '..');

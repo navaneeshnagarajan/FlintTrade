@@ -10,14 +10,16 @@
  *   1σ ≈ 68%  → ± 1× implied move
  *   2σ ≈ 95%  → ± 2× implied move
  *
- * Data source: sample data when disconnected; live when broker connected.
+ * Data source: this widget renders SAMPLE data only. No live implied-move
+ * backend endpoint is wired yet (that is a separate future task), so the
+ * "Sample data" badge is shown unconditionally — even when a broker is
+ * connected — to avoid implying the figures are live.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { MoveHorizontal, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // ---------------------------------------------------------------------------
@@ -180,7 +182,10 @@ const SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
 
 function ImpliedMoveWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
+  // NOTE: We previously read `isConnected = useBrokerConnected()` to gate the
+  // "Sample" badge on disconnect-only. Now the badge is unconditional (the
+  // widget always renders sample data because no live implied-move backend
+  // endpoint exists yet — see header comment), so the hook is no longer needed.
 
   const [symbolIdx, setSymbolIdx] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -189,7 +194,7 @@ function ImpliedMoveWidget() {
     track("trade", "widget_view_implied_move");
   }, [track]);
 
-  // In live mode we would call an API; use sample data for now
+  // No live implied-move endpoint is wired yet, so this is always sample data.
   const data: ImpliedMoveData = useMemo(
     () => SAMPLE_SYMBOLS[symbolIdx % SAMPLE_SYMBOLS.length] ?? SAMPLE_IMPLIED_MOVE,
     // refreshKey included so manual refresh triggers re-render
@@ -208,11 +213,19 @@ function ImpliedMoveWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <MoveHorizontal size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Implied Move</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — the sample symbols are the only data source
+            today; no live implied-move endpoint exists. The badge previously
+            hid in `isConnected` mode, which masked the fact that we were still
+            showing sample figures even after a broker connection. Keep visible
+            at all times. */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live implied-move endpoint yet"
+          title="No live data wired yet — showing sample implied-move figures so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         {/* Symbol picker */}
         <Select value={selectedSymbol} onValueChange={(v) => setSymbolIdx(SYMBOLS.indexOf(v))}>

@@ -400,3 +400,44 @@ class TestEmaAndSma:
         ema = _ema(values, period=5)
         # First valid EMA is the average of first 5 = 2.0
         assert ema[4] == pytest.approx(2.0)
+
+
+class TestSelectStrategyForRegime:
+    """Regime -> strategy selection (closes the loop on detection)."""
+
+    def test_every_regime_state_maps_to_a_suggestion(self) -> None:
+        from flinttrade_ai.regime_detector import (
+            RegimeState,
+            StrategySuggestion,
+            select_strategy_for_regime,
+        )
+
+        for state in RegimeState:
+            suggestion = select_strategy_for_regime(state)
+            assert isinstance(suggestion, StrategySuggestion)
+            assert suggestion.strategy
+            assert suggestion.label
+            assert suggestion.rationale
+
+    def test_trending_up_suggests_long_momentum(self) -> None:
+        from flinttrade_ai.regime_detector import RegimeState, select_strategy_for_regime
+
+        assert select_strategy_for_regime(RegimeState.TRENDING_UP).strategy == "momentum_long"
+        assert select_strategy_for_regime(RegimeState.TRENDING_DOWN).strategy == "momentum_short"
+
+    def test_ranging_suggests_mean_reversion(self) -> None:
+        from flinttrade_ai.regime_detector import RegimeState, select_strategy_for_regime
+
+        assert select_strategy_for_regime(RegimeState.RANGING).strategy == "mean_reversion"
+
+    def test_low_volatility_suggests_theta(self) -> None:
+        from flinttrade_ai.regime_detector import RegimeState, select_strategy_for_regime
+
+        assert select_strategy_for_regime(RegimeState.LOW_VOLATILITY).strategy == "theta"
+
+    def test_suggestion_serialises(self) -> None:
+        from flinttrade_ai.regime_detector import RegimeState, select_strategy_for_regime
+
+        d = select_strategy_for_regime(RegimeState.RANGING).to_dict()
+        assert set(d) == {"strategy", "label", "rationale"}
+        assert all(isinstance(v, str) for v in d.values())

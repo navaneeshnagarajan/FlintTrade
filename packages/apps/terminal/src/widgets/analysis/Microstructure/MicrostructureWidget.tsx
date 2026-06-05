@@ -7,13 +7,15 @@
  *   - Trade direction classification (uptick / downtick / neutral)
  *   - Large order detection (>2x average trade size)
  *   - Sparkline: tick velocity over last 60 seconds
- * Data: WebSocket depth/quote mode; falls back to animated sample data.
+ *
+ * Data: animated SAMPLE ticks only — no live tick/depth feed is wired into
+ * this widget yet, so it always renders sample data behind a permanent
+ * "Sample data" badge. Wiring a real backend feed is a separate future task.
  */
 
 import { useState, useEffect, useRef, useMemo, memo, useCallback } from "react";
-import { Microscope, RefreshCw } from "lucide-react";
+import { Microscope } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -234,7 +236,6 @@ function DirectionBadge({
 // ---------------------------------------------------------------------------
 
 function MicrostructureWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
   const ticksRef = useRef<TickSample[]>(buildInitialTicks());
   const [stats, setStats] = useState<MicroStats>(() => computeStats(ticksRef.current));
@@ -282,16 +283,25 @@ function MicrostructureWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Microscope size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Market Microstructure</span>
-        {!isConnected && (
-          <span className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — `makeSampleTick()` on a 500 ms interval is the
+            only data source today; no backend tick/depth feed is wired into
+            this widget yet. The badge previously hid in `isConnected` mode,
+            which masked the fact that we were still showing animated sample
+            ticks even after a broker connection. Keep visible at all times,
+            and do not render any "Live updating" affordance that would imply
+            the data is real. */}
+        <span
+          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="Showing sample data; no live tick feed wired yet"
+          title="No live data wired yet — showing animated sample ticks so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <span className="text-xxs text-text-muted tabular-nums">
           {lastTick ? `₹${lastTick.price.toFixed(2)}` : "--"}
         </span>
-        <RefreshCw size={10} className="animate-spin text-text-muted ml-1" aria-hidden="true" aria-label="Live updating" />
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-3">

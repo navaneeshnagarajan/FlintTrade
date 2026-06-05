@@ -1,7 +1,7 @@
 /**
  * workspacePresets.ts
  *
- * Defines the 6 built-in workspace layout presets for the FlintTrade terminal.
+ * Defines the built-in workspace layout presets for the FlintTrade terminal.
  * Each preset is applied programmatically via Dockview's `addPanel()` API so
  * that panels are positioned relative to each other — no serialized JSON is
  * stored, which means presets stay stable across Dockview version upgrades.
@@ -820,6 +820,86 @@ function applyEverything(api: DockviewApi): void {
 }
 
 // ---------------------------------------------------------------------------
+// Preset 14 — Options Scalper
+//
+// The four-chart options-scalping desk: the index drives timing (centre-top),
+// its future sits below (centre-bottom), and the CE / PE strike charts flank it
+// left and right with the live option chain (OI interpretation) under the PE.
+//
+// ┌──────────┬──────────────┬──────────────┐
+// │          │    Index     │   PE Strike  │
+// │ CE Strike├──────────────┼──────────────┤
+// │          │   Futures    │ Option Chain │
+// └──────────┴──────────────┴──────────────┘
+//
+// Each chart is pinned to its own instrument via panel params (see ChartWidget
+// ChartPanelParams), so the four charts are independent — unlike the other
+// presets where every chart tracks one global symbol. They seed to the NIFTY
+// index (always a valid symbol) on a 1-minute scalping interval; the trader then
+// loads the live future and the ATM CE/PE strikes into the labelled panels.
+// ---------------------------------------------------------------------------
+function applyOptionsScalper(api: DockviewApi): void {
+  const scalpInterval = "1m";
+  const index = (symbol: string) => ({
+    symbol,
+    exchange: "NSE_INDEX",
+    interval: scalpInterval,
+  });
+
+  const indexId = pid("chart-index");
+  const ceId = pid("chart-ce");
+  const peId = pid("chart-pe");
+  const futuresId = pid("chart-futures");
+  const optionChainId = pid("optionchain");
+
+  // Centre-top: the index (drives entry timing).
+  api.addPanel({
+    id: indexId,
+    component: "chart",
+    title: "Index",
+    params: index("NIFTY"),
+  });
+
+  // Left column: the CE strike chart.
+  api.addPanel({
+    id: ceId,
+    component: "chart",
+    title: "CE Strike",
+    params: index("NIFTY"),
+    position: { referencePanel: indexId, direction: "left" },
+    initialWidth: 380,
+  });
+
+  // Right column: the PE strike chart.
+  api.addPanel({
+    id: peId,
+    component: "chart",
+    title: "PE Strike",
+    params: index("NIFTY"),
+    position: { referencePanel: indexId, direction: "right" },
+    initialWidth: 380,
+  });
+
+  // Centre-bottom: the future, beneath the index.
+  api.addPanel({
+    id: futuresId,
+    component: "chart",
+    title: "Futures",
+    params: index("NIFTY"),
+    position: { referencePanel: indexId, direction: "below" },
+  });
+
+  // Below the PE strike: the option chain with OI interpretation.
+  api.addPanel({
+    id: optionChainId,
+    component: "optionchain",
+    title: "Option Chain",
+    params: { symbol: "NIFTY" },
+    position: { referencePanel: peId, direction: "below" },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Preset registry (exported)
 // ---------------------------------------------------------------------------
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
@@ -829,6 +909,13 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     description: "Chart + Order Pad + Depth + Positions + Scalper",
     icon: "Zap",
     apply: applyScalperZone,
+  },
+  {
+    id: "options-scalper",
+    name: "Options Scalper",
+    description: "Four-chart desk — Index + Futures + CE/PE strike charts + Option Chain",
+    icon: "Crosshair",
+    apply: applyOptionsScalper,
   },
   {
     id: "options-desk",

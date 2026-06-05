@@ -33,10 +33,11 @@ PACKAGES = [
 ]
 
 # Files every fresh clone must have at the repo root for the project to make
-# sense to a contributor or user. CLAUDE.md / AGENTS.md / PLAN.md are
-# intentionally absent — they were moved to templates/agent-context/ during
-# the public-repo modernisation pass and are scaffolded per-machine via
-# scripts/setup-agent-context.sh.
+# sense to a contributor or user. As of the public-repo policy
+# (see memory feedback_public_repos_ci_policy / commit bc7f5374), the
+# contributor-facing CLAUDE.md / AGENTS.md / PLAN.md are TRACKED at the root so
+# every human or agent picking up the repo gets the same in-repo guidance; the
+# templates/agent-context/ tree remains for per-package scaffolding.
 REQUIRED_ROOT_FILES = [
     "readme.md",
     "VERSION",
@@ -50,6 +51,9 @@ REQUIRED_ROOT_FILES = [
     "changelog.md",
     "code-of-conduct.md",
     "security.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "PLAN.md",
 ]
 
 
@@ -86,10 +90,15 @@ def test_version():
     assert len(base.split(".")) == 3, f"VERSION is not 3-part semver: {v!r}"
 
 
-def test_no_tracked_agent_internal_files():
-    """CLAUDE.md / AGENTS.md / PLAN.md must not be tracked at the repo root."""
+def test_agent_guidance_files_tracked_at_root():
+    """CLAUDE.md / AGENTS.md / PLAN.md are tracked at the repo root.
+
+    Per the public-repo policy (every repo is public and open for
+    contributions), the in-repo guidance files are the single source of truth
+    for how any human or agent works on the repo and must travel with a clone.
+    """
     for f in ["CLAUDE.md", "AGENTS.md", "PLAN.md"]:
-        assert not is_tracked(f), f"{f} should be gitignored — tracked at repo root"
+        assert is_tracked(f), f"{f} must be tracked at the repo root for contributors"
 
 
 def test_no_tracked_per_package_agent_files():

@@ -83,6 +83,10 @@ chroma_data/
 .vercel/
 .claude/
 .codex/
+# Agent Skills (agentskills.io) install artifacts — machine-local agent tooling,
+# installed per-contributor via e.g. `npx skills add dhan-oss/dhanhq-skills --skill dhanhq`.
+.agents/
+skills-lock.json
 
 # === Local dev (private docs, reference repos) ===
 .local/

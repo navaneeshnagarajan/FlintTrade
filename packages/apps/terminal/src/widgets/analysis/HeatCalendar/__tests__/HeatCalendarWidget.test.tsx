@@ -34,16 +34,29 @@ describe("HeatCalendarWidget", () => {
     expect(screen.getByText("Heat Calendar")).toBeTruthy();
   });
 
-  it("shows Sample badge when broker is disconnected", () => {
+  it("shows the Sample data badge when broker is disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<HeatCalendarWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when broker is connected", () => {
+  it("still shows the Sample data badge when broker is connected", () => {
+    // The widget has no live history endpoint wired yet — it always renders
+    // buildSampleData(). The badge must stay visible even when connected so it
+    // never implies the returns are live (house rule: no mock data without a
+    // visible Demo-data affordance).
     mockConnected.mockReturnValue(true);
     render(<HeatCalendarWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("labels the Sample data badge so it cannot pass as live data", () => {
+    mockConnected.mockReturnValue(true);
+    render(<HeatCalendarWidget />);
+    const badge = screen.getByText("Sample data");
+    expect(badge.getAttribute("role")).toBe("status");
+    expect(badge.getAttribute("aria-label")).toMatch(/no live data source is wired yet/i);
+    expect(badge.getAttribute("title")).toMatch(/no live data wired yet/i);
   });
 
   it("renders day-of-week column headers", () => {

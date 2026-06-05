@@ -1,9 +1,20 @@
-"""Dhan v2 adapter skeleton for wave-1 broker support.
+"""Upstox adapter skeleton for wave-2 broker support.
 
-The full BrokerAdapter async surface (contract §5) is declared here, but every
-live broker call is gated behind SDK attestation until the Dhan §9.5 wave lands.
-``broker_id`` and ``capabilities`` return real values so the registry, router,
-and capability-routing layers can be exercised ahead of live trading.
+The full ``BrokerAdapter`` async surface (contract §5) is declared here, but
+every live broker call is gated behind SDK attestation until the Upstox wave
+lands. ``broker_id`` and ``capabilities`` return real values so the registry,
+router, capability-routing, and broker-recommendation layers can be exercised
+ahead of live trading.
+
+Capability values are grounded in the local Upstox reference docs
+(``.local/reference/broker-docs/upstox/``). Fields not stated in those docs are
+left at their dataclass defaults (``None``/``0``/``[]``) rather than guessed.
+
+Auth model (for the future ``login``/``refresh``): standard OAuth 2.0
+authorization-code flow against ``api.upstox.com`` — ``client_id`` is the API
+key, ``client_secret`` the API secret; the access token is single-day (expires
+at the next ~03:30 IST, no programmatic refresh token, re-auth required). An
+optional read-only Extended Token is valid for one year.
 """
 
 from __future__ import annotations
@@ -25,10 +36,22 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
     from flinttrade_gateway.reconciliation import ReconciliationReport
 
-_GATED = "Dhan {0} is gated behind broker SDK attestation (wave 1 §9.5)"
+_GATED = "Upstox {0} is gated behind broker SDK attestation (wave 2)"
 
-DHAN_CAPABILITIES = Capabilities(
-    segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.MCX,
+UPSTOX_CAPABILITIES = Capabilities(
+    # NCDEX not supported; MF and currency (CDS/BCD) are.
+    segments=(
+        Segments.NSE_EQ
+        | Segments.BSE_EQ
+        | Segments.NFO
+        | Segments.BFO
+        | Segments.CDS
+        | Segments.BCD
+        | Segments.MCX
+        | Segments.MF
+    ),
+    # Product enum is Intraday / Delivery / CO / OCO — no native bracket (BO).
+    # Iceberg is offered via order slicing; GTT via the GTT Orders API.
     order_types=(
         OrderTypes.MARKET
         | OrderTypes.LIMIT
@@ -40,61 +63,50 @@ DHAN_CAPABILITIES = Capabilities(
         | OrderTypes.AMO
         | OrderTypes.GTT
         | OrderTypes.ICEBERG
-        | OrderTypes.BO
         | OrderTypes.CO
     ),
-    # Standard market-depth feed is 5-level, but Dhan v2 also offers a dedicated
-    # 20-level depth feed (wss://depth-api-feed.dhan.co/twentydepth) and a
-    # 200-level full-depth feed (wss://full-depth-api.dhan.co/twohundreddepth),
-    # so the advertised maximum is L20 (the enum ceiling; 200-level is beyond it).
-    depth_levels=DepthLevels.L20,
-    tick_protocol=TickProtocol.DHAN_BINARY,
-    auth_model=AuthModel.OAUTH_RENEWABLE_24H,
+    # REST quote and WS full_d5 give L5 depth; full_d30 (>L20) needs the paid
+    # Upstox Plus Pack, so the freely-available depth is L5.
+    depth_levels=DepthLevels.L5,
+    # Wire format is actually protobuf (MarketDataFeedV3.proto), decoded to dict
+    # by the SDK; UPSTOX_JSON is the registry's protocol identifier for Upstox.
+    tick_protocol=TickProtocol.UPSTOX_JSON,
+    auth_model=AuthModel.OAUTH_DAILY,
+    # Daily token cycle (expires ~03:30 IST next day); precise hours not stated
+    # in the local docs — 24h is the daily-cycle ceiling, used for refresh timing.
     session_lifetime_hours=24.0,
-    session_renewal_leeway_seconds=120,
     sandbox=True,
+    # Rate limits per the SEBI-2025 two-tier model: 10/sec for unregistered
+    # ("Regular") algos (50/sec once SEBI-registered).
     rate_limit_orders_per_sec=10,
-    rate_limit_orders_per_min=250,
-    rate_limit_orders_per_hour=1000,
-    rate_limit_orders_per_day=7000,
-    rate_limit_data_per_sec=5,
-    rate_limit_data_per_day=100_000,
-    rate_limit_quote_per_sec=1,
-    rate_limit_non_trading_per_sec=20,
-    order_modifications_per_order=25,
-    algo_tag_required=True,
-    historical_max_lookback_days_intraday=90,
-    historical_max_lookback_days_daily=None,
-    historical_max_candles_per_request=5000,
-    historical_intraday_intervals_minutes=[1, 5, 15, 25, 60],
+    rate_limit_orders_per_min=500,
+    rate_limit_data_per_sec=50,
+    rate_limit_quote_per_sec=50,
+    rate_limit_non_trading_per_sec=50,
+    # Algo name is optional (X-Algo-Name); registration only lifts the rate tier.
+    algo_tag_required=False,
+    cost_paid=False,
+    historical_intraday_intervals_minutes=[1, 3, 5, 15, 30],
     option_chain_supported=True,
     option_chain_greeks_supported=True,
-    option_chain_rate_limit_seconds=3,
     streaming_supported=True,
-    streaming_max_connections_per_user=5,
-    streaming_max_symbols_per_connection=5000,
-    streaming_max_total_symbols=25_000,
-    streaming_heartbeat_seconds=10,
-    streaming_disconnect_timeout_seconds=40,
-    bracket_order_native=True,
     cover_order_native=True,
     iceberg_native=True,
     gtt_native=True,
     modify_qty_supported=True,
-    modify_after_partial_fill=False,
 )
 
 
-class DhanAdapter(BrokerAdapter):
+class UpstoxAdapter(BrokerAdapter):
     # ---------- identity + capabilities ----------
 
     @property
     def broker_id(self) -> str:
-        return "dhan"
+        return "upstox"
 
     @property
     def capabilities(self) -> Capabilities:
-        return DHAN_CAPABILITIES
+        return UPSTOX_CAPABILITIES
 
     # ---------- auth lifecycle ----------
 

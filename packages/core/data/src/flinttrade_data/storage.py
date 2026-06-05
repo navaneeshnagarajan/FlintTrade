@@ -124,7 +124,7 @@ _INDEXES = [
 
 
 class StorageManager:
-    """DuckDB connection manager with schema initialization and query helpers.
+    """DuckDB connection manager with schema initialisation and query helpers.
 
     Usage::
 
@@ -307,6 +307,29 @@ class StorageManager:
                WHERE ts >= ?::DATE AND ts < ?::DATE + INTERVAL '1 day'
                ORDER BY ts""",
             [trade_date, trade_date],
+        )
+        columns = [desc[0] for desc in result.description]
+        return [dict(zip(columns, row)) for row in result.fetchall()]
+
+    def get_trades_by_date_range(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
+        """Get all trades between two dates (inclusive), across every strategy.
+
+        Args:
+            start_date: Inclusive lower bound (``YYYY-MM-DD``).
+            end_date: Inclusive upper bound (``YYYY-MM-DD``).
+
+        Returns:
+            Trade rows ordered by timestamp. Used by the journal route for
+            history-window queries (e.g. the performance dashboard) where no
+            single strategy is specified.
+        """
+        result = self.connection.execute(
+            """SELECT ts, orderid, symbol, exchange, action, quantity, price,
+                      product, strategy, entry_price, exit_price, pnl, slippage, fees
+               FROM trades
+               WHERE ts >= ?::DATE AND ts < ?::DATE + INTERVAL '1 day'
+               ORDER BY ts""",
+            [start_date, end_date],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]

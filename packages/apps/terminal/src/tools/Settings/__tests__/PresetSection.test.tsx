@@ -121,13 +121,7 @@ const BUILTIN_PRESET: WorkspacePresetRecord = {
   description: "Chart + Order Pad + Depth + Positions",
   icon: "Zap",
   is_builtin: true,
-  widget_count: 4,
-  widgets: [
-    { id: "chart-0",    component: "chart",    title: "Chart"      },
-    { id: "orderpad-1", component: "orderpad", title: "Order Pad"  },
-    { id: "depth-2",    component: "depth",    title: "Depth"      },
-    { id: "pos-3",      component: "positions",title: "Positions"  },
-  ],
+  widgets: ["chart", "orderpad", "depth", "positions"],
 };
 
 const CUSTOM_PRESET: WorkspacePresetRecord = {
@@ -136,11 +130,7 @@ const CUSTOM_PRESET: WorkspacePresetRecord = {
   description: "Custom morning setup",
   icon: "Star",
   is_builtin: false,
-  widget_count: 2,
-  widgets: [
-    { id: "chart-0",     component: "chart",     title: "Chart"     },
-    { id: "watchlist-1", component: "watchlist", title: "Watchlist" },
-  ],
+  widgets: ["chart", "watchlist"],
 };
 
 // ---------------------------------------------------------------------------

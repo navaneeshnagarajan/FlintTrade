@@ -407,7 +407,9 @@ export function TradeLogTab({
                   <TableCell
                     className={`py-1 text-xs font-mono text-right font-medium ${pnlColor(trade.pnl)}`}
                   >
-                    {trade.pnl !== 0 ? formatCurrencyCompact(trade.pnl) : "-"}
+                    {typeof trade.pnl === "number" && trade.pnl !== 0
+                      ? formatCurrencyCompact(trade.pnl)
+                      : "-"}
                   </TableCell>
                   <TableCell className="py-1 text-xs font-mono text-text-muted text-right">
                     {trade.fees > 0 ? formatPrice(trade.fees) : "-"}

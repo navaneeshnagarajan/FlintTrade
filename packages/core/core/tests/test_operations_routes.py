@@ -231,6 +231,112 @@ class TestFrontendErrors:
 
 
 # ---------------------------------------------------------------------------
+# Trade journal — shared store wiring + frontend contract
+# ---------------------------------------------------------------------------
+
+
+class TestTradesJournal:
+    """GET /api/v1/trades/journal — reads the shared trade store.
+
+    The order dispatch writes to ``TRADE_STORAGE`` and this route reads the same
+    store, so a row inserted there must surface here — keyed as ``timestamp``
+    (the terminal's JournalTrade contract), not the DuckDB ``ts`` column.
+    """
+
+    @staticmethod
+    def _temp_store(flask_app, tmp_path):
+        """Swap an isolated temp-file store into the app (restored by caller).
+
+        The DEV fixture wires TRADE_STORAGE at the real default DuckDB path;
+        writing test rows there would pollute a real file and accumulate across
+        runs, so each write-test gets its own throwaway store.
+        """
+        from flinttrade_data.storage import StorageManager
+
+        store = StorageManager(db_path=str(tmp_path / "journal.duckdb"))
+        store.initialise()
+        flask_app.config["TRADE_STORAGE"] = store
+        return store
+
+    def test_shared_store_is_wired_in_dev(self, flask_app):
+        assert flask_app.config.get("TRADE_STORAGE") is not None
+        assert flask_app.config.get("TRADE_STORAGE_LOCK") is not None
+
+    def test_returns_inserted_trade_with_timestamp_key(self, flask_app, client, tmp_path):
+        from datetime import datetime, timedelta, timezone
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        orig = flask_app.config.get("TRADE_STORAGE")
+        store = self._temp_store(flask_app, tmp_path)
+        try:
+            store.insert_trade(
+                ts=datetime.now(ist),
+                orderid="JNL-1",
+                symbol="RELIANCE",
+                exchange="NSE",
+                action="BUY",
+                quantity=5,
+                price=2500.0,
+                product="MIS",
+                strategy="manual",
+            )
+
+            resp = client.get("/api/v1/trades/journal", headers=_auth_headers())
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert data["status"] == "success"
+            rows = data["data"]["trades"]
+            mine = [r for r in rows if r.get("orderid") == "JNL-1"]
+            assert len(mine) == 1
+            row = mine[0]
+            # Frontend contract: `timestamp`, not the DuckDB `ts` column.
+            assert "timestamp" in row
+            assert "ts" not in row
+            assert row["symbol"] == "RELIANCE"
+            assert row["action"] == "BUY"
+        finally:
+            flask_app.config["TRADE_STORAGE"] = orig
+            store.close()
+
+    def test_date_range_without_strategy_uses_range_query(self, flask_app, client, tmp_path):
+        """start+end with no strategy must hit the range query, not single-day.
+
+        Previously a start+end (no strategy) fell through to a single-day lookup —
+        the recurring contract bug the performance dashboard would have tripped.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        orig = flask_app.config.get("TRADE_STORAGE")
+        store = self._temp_store(flask_app, tmp_path)
+        try:
+            base = datetime.now(ist)
+            store.insert_trade(
+                ts=base - timedelta(days=20), orderid="RNG-OLD", symbol="TCS",
+                exchange="NSE", action="BUY", quantity=1, price=100.0, strategy="manual",
+            )
+            store.insert_trade(
+                ts=base, orderid="RNG-NEW", symbol="TCS",
+                exchange="NSE", action="SELL", quantity=1, price=110.0, strategy="manual",
+            )
+
+            start = (base - timedelta(days=30)).strftime("%Y-%m-%d")
+            end = base.strftime("%Y-%m-%d")
+            resp = client.get(
+                f"/api/v1/trades/journal?start_date={start}&end_date={end}",
+                headers=_auth_headers(),
+            )
+            assert resp.status_code == 200
+            ids = {r.get("orderid") for r in resp.get_json()["data"]["trades"]}
+            # The 20-day-old trade is only reachable via the range query.
+            assert "RNG-OLD" in ids
+            assert "RNG-NEW" in ids
+        finally:
+            flask_app.config["TRADE_STORAGE"] = orig
+            store.close()
+
+
+# ---------------------------------------------------------------------------
 # Recent logs
 # ---------------------------------------------------------------------------
 

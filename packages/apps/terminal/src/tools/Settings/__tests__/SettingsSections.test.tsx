@@ -197,8 +197,10 @@ describe("RiskSection", () => {
 
     expect(screen.getByText("Risk Limits")).toBeInTheDocument();
     expect(screen.getByLabelText("Maximum position size in lots")).toBeInTheDocument();
-    expect(screen.getByLabelText("MTM stoploss in rupees")).toBeInTheDocument();
-    expect(screen.getByLabelText("MTM profit target in rupees")).toBeInTheDocument();
+    // Daily-loss thresholds are percentages (L4), not rupee MTM — the backend
+    // safety/config endpoint only enforces pnl_pause_pct / pnl_kill_pct.
+    expect(screen.getByLabelText("Daily loss kill threshold in percent")).toBeInTheDocument();
+    expect(screen.getByLabelText("Daily loss pause threshold in percent")).toBeInTheDocument();
     expect(screen.getByLabelText("Maximum orders per minute")).toBeInTheDocument();
   });
 });

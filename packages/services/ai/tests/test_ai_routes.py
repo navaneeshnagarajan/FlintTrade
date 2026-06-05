@@ -293,3 +293,43 @@ class TestRagQuery:
 
         resp = client.post("/api/v1/rag/query", json={"query": "delta hedging"})
         assert resp.status_code == 502
+
+
+class TestSentimentSummary:
+    """GET /api/v1/ai/sentiment/summary — honest neutral summary when no feed."""
+
+    def test_returns_neutral_summary_when_no_feed(self, client, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "flinttrade_ai.sentiment.SentimentAnalyzer.analyze_feeds",
+            lambda self: [],
+        )
+        resp = client.get("/api/v1/ai/sentiment/summary")
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["sentiment_score"] == 0.0
+        assert data["market_sentiment"] == "neutral"
+        assert isinstance(data["indices"], list)
+        assert "fii_net" in data["fii_dii_flow"]
+        assert data["key_points"]  # honest note when no feed
+
+
+class TestSentimentTickers:
+    """GET /api/v1/ai/sentiment/tickers — empty list when no feed."""
+
+    def test_returns_empty_list_when_no_feed(self, client, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "flinttrade_ai.sentiment.SentimentAnalyzer.analyze_feeds",
+            lambda self: [],
+        )
+        resp = client.get("/api/v1/ai/sentiment/tickers")
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["tickers"] == []
+
+
+class TestMarketRegime:
+    """GET /api/v1/ai/regime — clear 503 (not 404) without market data."""
+
+    def test_no_market_data_returns_503(self, client) -> None:
+        resp = client.get("/api/v1/ai/regime?symbol=NIFTY")
+        assert resp.status_code == 503
+        assert "connected market-data" in resp.get_json()["message"]

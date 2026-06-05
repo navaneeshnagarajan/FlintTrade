@@ -11,10 +11,12 @@
  */
 
 import { useMemo, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { FlintCategoricalBarChart, FlintThresholdLineChart } from "@flinttrade/design-system";
 import { Trophy } from "lucide-react";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { getTradeJournal, type JournalTrade } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +26,29 @@ interface TradeRecord {
   date: string;        // ISO date
   pnl: number;         // net P&L for the trade in INR
   isWin: boolean;
+}
+
+/**
+ * Map real journal rows to performance records. Only realised trades (a non-zero
+ * P&L leg) count — open/manual single-leg fills carry no P&L and are excluded
+ * rather than counted as break-even wins. Never fabricates a result.
+ */
+export function journalToRecords(rows: JournalTrade[]): TradeRecord[] {
+  return rows
+    .filter((r) => typeof r.pnl === "number" && r.pnl !== 0)
+    .map((r) => ({
+      date: typeof r.timestamp === "string" ? r.timestamp.slice(0, 10) : "",
+      pnl: r.pnl,
+      isWin: r.pnl > 0,
+    }));
+}
+
+/** YTD start (Jan 1 of the current year) and today, as YYYY-MM-DD. */
+function ytdRange(): { start: string; end: string } {
+  const now = new Date();
+  const start = `${now.getFullYear()}-01-01`;
+  const end = now.toISOString().slice(0, 10);
+  return { start, end };
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +337,23 @@ function TradePerformanceWidget() {
   const isConnected = useBrokerConnected();
   useTrackBehavior();
 
-  const metrics = useMemo(() => computeMetrics(SAMPLE_TRADES), []);
+  // Connected → real journal over the year-to-date window; disconnected/explore
+  // → labelled sample data. Never show fabricated performance to a live user.
+  const { start, end } = useMemo(() => ytdRange(), []);
+  const { data: journalResp } = useQuery({
+    queryKey: ["tradeJournal", "perf", start, end],
+    queryFn: () => getTradeJournal(start, end),
+    enabled: isConnected,
+    refetchInterval: isConnected ? 30_000 : false,
+  });
+
+  const records = useMemo<TradeRecord[]>(() => {
+    if (!isConnected) return SAMPLE_TRADES;
+    return journalToRecords(journalResp?.trades ?? []);
+  }, [isConnected, journalResp]);
+
+  const hasData = records.length > 0;
+  const metrics = useMemo(() => computeMetrics(records), [records]);
 
   const streakColour =
     metrics.currentStreakType === "win" ? "text-profit" : metrics.currentStreakType === "loss" ? "text-loss" : "text-text-muted";
@@ -338,6 +379,17 @@ function TradePerformanceWidget() {
         )}
       </div>
 
+      {isConnected && !hasData ? (
+        <div
+          className="flex-1 min-h-0 flex items-center justify-center px-4 text-center"
+          aria-label="No performance data"
+        >
+          <p className="text-xs text-text-muted">
+            No closed trades yet this year. Performance metrics appear once your
+            journalled trades have realised P&amp;L.
+          </p>
+        </div>
+      ) : (
       <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 flex flex-col gap-3">
 
         {/* Equity curve */}
@@ -404,6 +456,7 @@ function TradePerformanceWidget() {
           <DayDistribution distribution={metrics.dayDistribution} />
         </section>
       </div>
+      )}
     </div>
   );
 }

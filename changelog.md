@@ -6,6 +6,81 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Native **Upstox** and **Kotak Neo** broker adapter skeletons (gated, doc-grounded
+  capabilities) alongside Dhan, plus a **broker recommendation engine**
+  ("which broker for what") and `GET /api/v1/broker/recommendations` ranking brokers
+  per use-case (low-cost execution, market depth, options analytics, historical data,
+  streaming, throughput, advanced orders).
+- AI panel routes `GET /api/v1/ai/sentiment/summary`, `…/ai/sentiment/tickers`, and
+  `…/ai/regime` (previously 404) — wired to the sentiment and regime engines with
+  honest degradation when no data source is connected.
+- Sandbox `GET /v1/sandbox/status` — combined virtual-capital status for the terminal
+  panel.
+- **Options Scalper** workspace preset (Index/Futures + CE/PE strike charts + Option
+  Chain) and per-panel chart symbol pinning; all 14 layouts now applicable from the
+  Ctrl+K command palette.
+- **Live trade journalling** — every executed live order is now recorded to a shared
+  DuckDB store (best-effort, never blocks the order), so the trade journal and P&L
+  analytics populate in Live instead of staying empty. `GET /api/v1/trades/journal`
+  reads the same store and supports a `start_date`+`end_date` history window across all
+  strategies (`StorageManager.get_trades_by_date_range`).
+- **Order-latency monitoring** — the gated order dispatch now feeds the latency tracker,
+  so per-broker round-trip stats populate `/api/v1/latency/stats` (previously empty).
+- **Nightly DuckDB maintenance** — a scheduled `db_optimise_job` (00:30 IST) runs
+  `CHECKPOINT` + `ANALYZE` on the shared trade/tick store so the database stays compact
+  and queries stay fast.
+- **Regime-aware strategy suggestion** — the AI Regime panel now recommends a
+  regime-appropriate strategy style (momentum / mean-reversion / theta / stand-aside)
+  via `select_strategy_for_regime`, surfaced in `GET /ai/regime` as `suggested_strategy`.
+
+### Fixed
+
+- Terminal build restored — shadcn primitives imported undeclared `@radix-ui/react-*`
+  packages; migrated to the unified `radix-ui` (87 TS errors → 0).
+- Welcome screen no longer hangs on "Checking workspace…" when the backend is
+  unreachable (graceful degradation in production, not just dev).
+- Option Chain widget crashed in production builds (`react-responsive-carousel`
+  externalised); no longer externalises glide-data-grid's bundled peer deps.
+- Strategy runner wired (`STRATEGY_RUNNER`/`CRON_SCHEDULER`) — `/api/v1/strategies`
+  no longer 503s in production.
+- RiskSection sent rupee MTM values into the backend's *percentage* daily-loss fields
+  (kill switch could never fire) and sent 0 for blank fields (kill on any loss) — now
+  percentages, blanks omitted.
+- StrategyMonitor no longer renders fabricated live P&L when a broker is connected.
+- Sandbox virtual-capital panel works end-to-end (status/adjust/export/import contracts
+  aligned).
+- All six analysis routes (GEX/IV/OI/vol-surface) honour the terminal's
+  `expiry_date`/`expiry_dates` keys instead of silently using a hardcoded expiry.
+- AI Signals tab reads the working `/signals/recent` instead of the unwired
+  `/signals/active`.
+- Workspace preset save/edit no longer 400s (client `widgets` aligned to the backend's
+  ID-list model; cards derive the widget count).
+- Earnings sample data always includes recent past results regardless of the calendar
+  date.
+- Trade Log, Trade Performance, Net Positions and Risk Dashboard no longer show
+  fabricated sample data to a *connected* user — each now switches to the real broker
+  positionbook / funds / trade journal when connected (the connection flag previously
+  only toggled a "Sample" badge). Risk Dashboard shows only the metrics it can derive
+  faithfully (exposure, margin utilised); net delta / theta / max-loss are omitted with
+  an honest note rather than invented, pending a portfolio option-greeks feed.
+- `order_analytics`/`strategy_comparison` blueprints registered (`/api/v1/...`) — were
+  defined but never wired.
+- **14 more analysis/utility widgets** no longer show fabricated data to a connected
+  user — each renders an always-visible "Sample data" badge (or an honest empty state)
+  instead of disguising sample data as live, and deceptive "live updating" affordances
+  were removed (Market Summary, Multi-Timeframe, Correlation Pairs/Matrix, VWAP Bands,
+  PCR Trend, Sector Performance, Implied Move, Instrument Compare, Heat Calendar,
+  Microstructure, Audit Trail, Global Indices, Earnings Calendar).
+- **Five analysis endpoints** (GEX, IV Smile, Vol Surface, OI Profile, Straddle P&L)
+  now return the shape their widgets expect — they previously emitted raw dataclass
+  field names, so the widgets read undefined and rendered empty when connected.
+- Market Breadth fetched a 404 route (`/breadth` vs `/breadth/current`) and silently
+  showed sample data; now fetches the correct route and flags backend sample data.
+- Trade-journal analytics counted open legs (null P&L) as losing trades, distorting
+  win-rate; open legs are now excluded until they have a realised P&L.
+
 ## [0.6.0-alpha] - 2026-05-30
 
 Tag: `v0.6.0-alpha` · Type: SemVer alpha prerelease · Status: not

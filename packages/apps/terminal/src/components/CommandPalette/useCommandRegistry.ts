@@ -14,7 +14,9 @@
 
 import { useMemo, useCallback, useState } from "react";
 import { widgetCatalog } from "@/layout/widgetFactory";
+import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 import { useThemeStore } from "@/stores/themeStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,6 +86,7 @@ export function useCommandRegistry() {
   const setTheme = useThemeStore((s) => s.setTheme);
   const setMode  = useThemeStore((s) => s.setMode);
   const mode     = useThemeStore((s) => s.mode);
+  const applyLayoutPreset = useLayoutStore((s) => s.applyPreset);
 
   const [recentIds, setRecentIds] = useState<string[]>(loadRecentIds);
 
@@ -282,14 +285,28 @@ export function useCommandRegistry() {
       },
     ];
 
+    // ----- Layout preset commands (one per built-in workspace preset) -----
+    // Makes every layout — including the four-chart Options Scalper desk —
+    // applicable from Ctrl+K, instead of only via the preset-picker dialog.
+    // layoutStore.applyPreset is a no-op when no workspace is mounted, so this
+    // is safe to invoke from any route.
+    const layoutPresetCommands: Command[] = WORKSPACE_PRESETS.map((preset) => ({
+      id:          `layout:${preset.id}`,
+      title:       `Apply layout: ${preset.name}`,
+      description: preset.description,
+      category:    "action" as CommandCategory,
+      action:      () => applyLayoutPreset(preset.id),
+    }));
+
     return [
       ...widgetCommands,
       ...toolCommands,
       ...navigateCommands,
       ...actionCommands,
+      ...layoutPresetCommands,
       ...themeCommands,
     ];
-  }, [setTheme, setMode, mode]);
+  }, [setTheme, setMode, mode, applyLayoutPreset]);
 
   // ----- Derived: commands indexed by id -----
   const commandById = useMemo(() => {

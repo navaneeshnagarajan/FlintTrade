@@ -1011,6 +1011,29 @@ def create_flask_app(
     app.config["LOGIN_ACTIVITY"] = _LoginActivity(str(_login_db))
     app.config["SESSION_TRACKER"] = _SessionTracker(str(_login_db))
 
+    # Shared trade-journal store (DuckDB). The gated order dispatch writes every
+    # executed live order here and the /trades/journal route reads the SAME
+    # store, so the journal + P&L analytics populate in Live (previously the
+    # producer was missing → permanently empty journal). One shared, pre-
+    # initialised connection keeps the per-order cost to a single INSERT (latency
+    # is paramount). A lock serialises the writer against the route's reads —
+    # DuckDB connections are not safe for concurrent use. Best-effort: a storage
+    # failure degrades to "no journalling", never blocks boot.
+    try:
+        from flinttrade_data.storage import StorageManager as _TradeStore  # noqa: PLC0415
+
+        _trade_storage = _TradeStore()
+        _trade_storage.initialise()
+        app.config["TRADE_STORAGE"] = _trade_storage
+        app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
+    except Exception:  # pragma: no cover — defensive: never let storage break boot
+        logger.warning(
+            "Trade journal storage unavailable; live trades will not be journalled",
+            exc_info=True,
+        )
+        app.config["TRADE_STORAGE"] = None
+        app.config["TRADE_STORAGE_LOCK"] = None
+
     # Register P&L tracker blueprint (/api/v1/pnl-tracker/*)
     from flinttrade_data.pnl_routes import pnl_bp  # noqa: PLC0415
     app.register_blueprint(pnl_bp)
@@ -1058,6 +1081,36 @@ def create_flask_app(
     # Register Strategy Runner blueprint (/api/v1/strategies/*)
     from flinttrade_engine.strategy_routes import strategy_bp  # noqa: PLC0415
     app.register_blueprint(strategy_bp)
+
+    # Wire the Strategy Runner + Cron scheduler the strategy routes require so
+    # upload/start/stop/logs/schedule work in production — without these config
+    # keys every /api/v1/strategies write returned 503 "Strategy runner not
+    # configured" (feature audit H1/M13). Construction is side-effect-light: the
+    # runner only creates its own dirs, and CronStrategyScheduler does not start
+    # APScheduler until .start() is called.
+    if "STRATEGY_RUNNER" not in app.config:
+        try:
+            from flinttrade_engine.strategy_runner import UserStrategyRunner  # noqa: PLC0415
+
+            app.config["STRATEGY_RUNNER"] = UserStrategyRunner(_workspace_dir() / "strategies")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Strategy runner wiring failed (%s); /strategies writes will 503", exc)
+    if "CRON_SCHEDULER" not in app.config:
+        try:
+            from flinttrade_engine.scheduler import CronStrategyScheduler  # noqa: PLC0415
+
+            app.config["CRON_SCHEDULER"] = CronStrategyScheduler()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Cron scheduler wiring failed (%s); strategy scheduling will 503", exc)
+
+    # Execution-quality analytics (POST /api/v1/analytics/execution) and strategy
+    # comparison (POST /api/v1/backtest/compare) — both fully built + tested but were
+    # never registered (404 in production; feature audit H6/M2). Their blueprints
+    # carry no prefix, so register under /api/v1 to match the frontend convention.
+    from flinttrade_journal.order_analytics import order_analytics_bp  # noqa: PLC0415
+    app.register_blueprint(order_analytics_bp, url_prefix="/api/v1")
+    from flinttrade_backtest.strategy_comparison import strategy_comparison_bp  # noqa: PLC0415
+    app.register_blueprint(strategy_comparison_bp, url_prefix="/api/v1")
 
     # Register Engine Sandbox blueprint (/v1/sandbox-config/*) — config/leverage/squareoff.
     # Uses the /v1/sandbox-config prefix to avoid collision with the data sandbox
@@ -2103,6 +2156,12 @@ class FlintTradeApp:
             await self.cron.load_holidays()
         except Exception as exc:
             logger.warning("Could not load holidays (OpenAlgo may be starting): %s", exc)
+
+        # Hand the cron manager the shared trade store (created by the Flask
+        # factory above) so the nightly DuckDB maintenance job can CHECKPOINT +
+        # ANALYZE the same connection under its lock.
+        self.cron.trade_storage = flask_app.config.get("TRADE_STORAGE")
+        self.cron.trade_storage_lock = flask_app.config.get("TRADE_STORAGE_LOCK")
 
         # Register built-in cron jobs
         self.cron.register_builtin_jobs()

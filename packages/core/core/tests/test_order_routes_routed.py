@@ -171,6 +171,112 @@ def test_routed_happy_path_returns_200() -> None:
     assert dispatched.symbol == "RELIANCE"
 
 
+def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H5: a successful live dispatch records per-broker order RTT.
+
+    Without this producer the order-latency stats stayed empty forever, so the
+    health monitors had nothing to show. Best-effort: the recording must never
+    change the order result, but on the happy path it MUST fire once with the
+    adapter id + symbol.
+    """
+    import flinttrade_core.monitoring_routes as mon
+
+    tracker = MagicMock()
+    monkeypatch.setattr(mon, "get_latency_tracker", lambda: tracker)
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-999")
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+
+    assert resp.status_code == 200
+    tracker.record_order_latency.assert_called_once()
+    args = tracker.record_order_latency.call_args.args
+    assert args[0] == "openalgo"  # adapter/broker id
+    assert args[1] == "RELIANCE"  # symbol
+    assert isinstance(args[2], float) and args[2] >= 0.0  # latency_ms
+
+
+def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H5: monitoring is strictly best-effort — a tracker blow-up still 200s."""
+    import flinttrade_core.monitoring_routes as mon
+
+    def _boom() -> object:
+        raise RuntimeError("tracker exploded")
+
+    monkeypatch.setattr(mon, "get_latency_tracker", _boom)
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-777")
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+
+    assert resp.status_code == 200
+    assert resp.get_json()["orderid"] == "OA-777"
+
+
+# ---------------------------------------------------------------------------
+# Trade journal producer — a successful live dispatch records the executed
+# order in the same DuckDB store the /trades/journal route reads (was empty in
+# Live because nothing ever wrote to it).
+# ---------------------------------------------------------------------------
+
+
+def test_routed_happy_path_journals_the_trade(tmp_path: object) -> None:
+    """A successful live order is appended to the shared trade store."""
+    import threading
+    from datetime import datetime, timedelta, timezone
+
+    from flinttrade_data.storage import StorageManager
+
+    store = StorageManager(db_path=str(tmp_path / "journal.duckdb"))  # type: ignore[operator]
+    store.initialise()
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-555")
+    app = _app(broker_router=router, safety=_passing_safety())
+    app.config["TRADE_STORAGE"] = store
+    app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
+
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 200
+
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+    rows = store.get_trades_by_date(today)
+    store.close()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["orderid"] == "OA-555"
+    assert row["symbol"] == "RELIANCE"
+    assert row["action"] == "BUY"
+    assert int(row["quantity"]) == 1
+    assert row["strategy"] == "manual"
+
+
+def test_journal_failure_never_breaks_the_order() -> None:
+    """H-class best-effort: a journal store that raises still returns 200."""
+    import threading
+
+    bad_store = MagicMock()
+    bad_store.insert_trade.side_effect = RuntimeError("duckdb is on fire")
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-444")
+    app = _app(broker_router=router, safety=_passing_safety())
+    app.config["TRADE_STORAGE"] = bad_store
+    app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
+
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["orderid"] == "OA-444"
+    bad_store.insert_trade.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Gated modify / cancel (the legacy /modify, /cancel endpoints now route through
 # BrokerRouter.modify_order / cancel_order — same one-shot gate + ACL as place).

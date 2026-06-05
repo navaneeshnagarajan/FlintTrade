@@ -34,16 +34,27 @@ describe("MultiTimeframeWidget", () => {
     expect(screen.getByText("Multi-Timeframe")).toBeTruthy();
   });
 
-  it("shows Sample badge when broker disconnected", () => {
+  it("shows the Sample data badge when broker disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<MultiTimeframeWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when broker connected", () => {
+  // The widget has no live multi-timeframe endpoint wired yet, so it always
+  // renders sample signals. The badge must therefore stay visible even when a
+  // broker is connected — hiding it would mislead a live user into trusting
+  // fabricated data. This is the honest-disclosure guarantee.
+  it("still shows the Sample data badge when broker connected", () => {
     mockConnected.mockReturnValue(true);
     render(<MultiTimeframeWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample data")).toBeTruthy();
+  });
+
+  it("badge discloses that no live source is wired via its accessible name", () => {
+    mockConnected.mockReturnValue(true);
+    render(<MultiTimeframeWidget />);
+    const badge = screen.getByText("Sample data");
+    expect(badge.getAttribute("aria-label")).toMatch(/no live multi-timeframe source/i);
   });
 
   it("renders all four timeframe rows", () => {
