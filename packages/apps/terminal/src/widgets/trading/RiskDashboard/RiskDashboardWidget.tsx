@@ -17,11 +17,16 @@
  */
 
 import { useMemo, useEffect, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert } from "lucide-react";
 import { FlintRadialGauge } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getPositionbook, getFunds } from "@/services/api";
+import { queryKeys } from "@/services/queryKeys";
+import { isMarketHours } from "@/lib/market";
+import type { Position, Funds } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,6 +95,52 @@ export const SAMPLE_RISK_DATA: RiskDashboardData = {
   overallLevel: "amber",
   timestamp: "15:23 IST",
 };
+
+const LEVEL_RANK: Record<TrafficLight, number> = { green: 0, amber: 1, red: 2 };
+
+function worstLevel(metrics: RiskMetric[]): TrafficLight {
+  return metrics.reduce<TrafficLight>(
+    (worst, m) => (LEVEL_RANK[m.level] > LEVEL_RANK[worst] ? m.level : worst),
+    "green",
+  );
+}
+
+function nowIstHHMM(): string {
+  try {
+    return (
+      new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata",
+      }).format(new Date()) + " IST"
+    );
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Build the risk dashboard from real broker data. Only metrics we can derive
+ * faithfully are shown: Total Exposure (gross notional from the positionbook)
+ * and Margin Utilised (usedMargin / totalBalance from funds). Net delta, net
+ * theta and max-loss require a portfolio option-greeks/payoff feed that is not
+ * wired yet — they are omitted rather than fabricated, so a connected user is
+ * never shown invented risk numbers.
+ */
+export function computeLiveRisk(positions: Position[], funds?: Funds): RiskDashboardData {
+  const exposure = positions.reduce((s, p) => s + Math.abs(p.quantity * p.averagePrice), 0);
+  const totalBalance = funds?.totalBalance ?? 0;
+  const usedMargin = funds?.usedMargin ?? 0;
+  const marginPct = totalBalance > 0 ? (usedMargin / totalBalance) * 100 : 0;
+
+  const metrics: RiskMetric[] = [
+    buildMetric(
+      "exposure", "Total Exposure", exposure,
+      totalBalance > 0 ? totalBalance : exposure, "INR", fmtINR,
+    ),
+    buildMetric("margin", "Margin Utilised", marginPct, 100, "%", (v) => `${fmtNum(v, 1)}%`),
+  ];
+
+  return { metrics, overallLevel: worstLevel(metrics), timestamp: nowIstHHMM() };
+}
 
 const GAUGE_COLOURS: Record<TrafficLight, { stroke: string; bg: string; text: string }> = {
   green: { stroke: "#22c55e", bg: "rgba(34,197,94,0.12)", text: "text-profit" },
@@ -197,8 +248,27 @@ function RiskDashboardWidget() {
     track("trade", "widget_view_risk_dashboard");
   }, [track]);
 
-  // Live mode: replace with real hooks (useFunds, usePositions, useGreeks)
-  const data: RiskDashboardData = useMemo(() => SAMPLE_RISK_DATA, []);
+  // Connected → real risk from the positionbook + funds; disconnected → labelled
+  // sample data. Never show fabricated risk metrics to a live user.
+  const { data: livePositions } = useQuery<Position[]>({
+    queryKey: queryKeys.positions.all,
+    queryFn: getPositionbook,
+    enabled: isConnected,
+    staleTime: 3_000,
+    refetchInterval: isConnected ? () => (isMarketHours() ? 5_000 : 60_000) : false,
+  });
+  const { data: liveFunds } = useQuery<Funds>({
+    queryKey: queryKeys.funds.all,
+    queryFn: getFunds,
+    enabled: isConnected,
+    staleTime: 15_000,
+    refetchInterval: isConnected ? 30_000 : false,
+  });
+
+  const data: RiskDashboardData = useMemo(
+    () => (isConnected ? computeLiveRisk(livePositions ?? [], liveFunds) : SAMPLE_RISK_DATA),
+    [isConnected, livePositions, liveFunds],
+  );
 
   return (
     <div
@@ -228,6 +298,15 @@ function RiskDashboardWidget() {
             <MetricCard key={m.id} metric={m} />
           ))}
         </div>
+
+        {/* Honest note: greeks-derived metrics aren't wired for live data yet. */}
+        {isConnected && (
+          <p className="text-xxs text-text-muted px-1 leading-snug">
+            Net delta, net theta and max-loss need a connected option-greeks feed
+            and are not shown live yet — only metrics derived from your real
+            positions and funds appear above.
+          </p>
+        )}
 
         {/* Legend */}
         <div className="flex items-center gap-3 pt-1 px-1">

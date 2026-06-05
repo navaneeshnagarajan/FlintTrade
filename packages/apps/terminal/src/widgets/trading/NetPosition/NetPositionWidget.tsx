@@ -11,9 +11,14 @@
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Layers, ChevronDown, ChevronRight } from "lucide-react";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getPositionbook } from "@/services/api";
+import { queryKeys } from "@/services/queryKeys";
+import { isMarketHours } from "@/lib/market";
+import type { Position } from "@/types/api";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +64,33 @@ export const SAMPLE_RAW_POSITIONS: RawPosition[] = [
   { strategy: "Theta",       symbol: "FINNIFTY 22000 CE 10APR", underlying: "FINNIFTY", qty: -1, avgPrice: 88, ltp: 72, lotSize: 40 },
   { strategy: "Theta",       symbol: "FINNIFTY 22000 CE 24APR", underlying: "FINNIFTY", qty:  1, avgPrice: 112, ltp: 125, lotSize: 40 },
 ];
+
+// ---------------------------------------------------------------------------
+// Live broker positions → RawPosition mapping
+// ---------------------------------------------------------------------------
+
+/** Underlying = first whitespace-delimited token ("NIFTY 22200 CE" → "NIFTY"). */
+export function underlyingOf(symbol: string): string {
+  return symbol.trim().split(/\s+/)[0] || symbol;
+}
+
+/**
+ * Map a broker positionbook row to a RawPosition. The broker book is already
+ * netted per symbol and reports total-unit quantity, so lotSize is 1 (P&L =
+ * (ltp − avg) × quantity). Strategy is unknown at the broker boundary (OpenAlgo
+ * does not tag positions by strategy) and left blank.
+ */
+export function positionToRaw(p: Position): RawPosition {
+  return {
+    strategy: "",
+    symbol: p.symbol,
+    underlying: underlyingOf(p.symbol),
+    qty: p.quantity,
+    avgPrice: p.averagePrice,
+    ltp: p.ltp,
+    lotSize: 1,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Netting logic
@@ -239,7 +271,23 @@ function NetPositionWidget() {
     track("trade", "widget_view_net_position");
   }, [track]);
 
-  const netRows = useMemo(() => netPositions(SAMPLE_RAW_POSITIONS), []);
+  // Connected → real broker positionbook (netted, live LTP/P&L); disconnected
+  // → labelled sample data. Never show fabricated positions to a live user.
+  const { data: livePositions } = useQuery<Position[]>({
+    queryKey: queryKeys.positions.all,
+    queryFn: getPositionbook,
+    enabled: isConnected,
+    staleTime: 3_000,
+    refetchInterval: isConnected ? () => (isMarketHours() ? 5_000 : 60_000) : false,
+  });
+
+  const netRows = useMemo(
+    () =>
+      netPositions(
+        isConnected ? (livePositions ?? []).map(positionToRaw) : SAMPLE_RAW_POSITIONS,
+      ),
+    [isConnected, livePositions],
+  );
 
   const underlyings = useMemo(() => {
     const map = new Map<string, NetPositionRow[]>();
