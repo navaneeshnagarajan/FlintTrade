@@ -655,3 +655,56 @@ def test_all_new_strategies_produce_signals_on_100_bars(strategy_name: str) -> N
     bars = _make_bars(n=100)
     all_orders = _run(instance, bars)
     assert isinstance(all_orders, list)
+
+
+# ===========================================================================
+# Behavioural signal-correctness tests
+#
+# The suite above proves every strategy RUNS and returns a list. These prove a
+# strategy emits the DIRECTIONALLY CORRECT signal from known data — a golden
+# cross must BUY, a death cross must SELL — so the built-in strategies are
+# verified as functional, not merely instantiable.
+# ===========================================================================
+
+
+def _flat_then_trend(flat: int, n: int, start: float, step: float) -> list[_Bar]:
+    """Flat warmup bars (fast EMA == slow EMA), then a clean monotonic trend.
+
+    A positive ``step`` rises (forces a golden cross); negative falls (death
+    cross). On the constant warmup the two EMAs are exactly equal, so the first
+    trending bar produces precisely one crossover.
+    """
+    bars: list[_Bar] = []
+    price = start
+    for i in range(flat):
+        bars.append(_Bar(timestamp=f"2025-01-01 {i % 24:02d}:00:00",
+                         open=price, high=price + 1.0, low=price - 1.0, close=price, volume=10000))
+    for i in range(n):
+        price += step
+        bars.append(_Bar(timestamp=f"2025-01-02 {i % 24:02d}:00:00",
+                         open=price, high=price + 1.0, low=price - 1.0, close=price, volume=10000))
+    return bars
+
+
+@pytest.mark.unit
+def test_ema_crossover_buys_on_a_golden_cross() -> None:
+    from flinttrade_backtest.strategies.trend_following import EMACrossoverStrategy
+
+    strat = EMACrossoverStrategy(symbol="NIFTY", fast_period=3, slow_period=5)
+    # Flat, then a clean rise: the fast EMA crosses ABOVE the slow EMA exactly once.
+    orders = _run(strat, _flat_then_trend(flat=8, n=6, start=100.0, step=2.0))
+
+    actions = [o.action for o in orders]
+    assert actions == ["BUY"], f"a golden cross must emit exactly one BUY, got {actions}"
+
+
+@pytest.mark.unit
+def test_ema_crossover_sells_on_a_death_cross() -> None:
+    from flinttrade_backtest.strategies.trend_following import EMACrossoverStrategy
+
+    strat = EMACrossoverStrategy(symbol="NIFTY", fast_period=3, slow_period=5)
+    # Flat, then a clean decline: the fast EMA crosses BELOW the slow EMA exactly once.
+    orders = _run(strat, _flat_then_trend(flat=8, n=6, start=100.0, step=-2.0))
+
+    actions = [o.action for o in orders]
+    assert actions == ["SELL"], f"a death cross must emit exactly one SELL, got {actions}"
