@@ -88,7 +88,12 @@ export interface RiskRewardBucket {
 // ---------------------------------------------------------------------------
 
 function getClosedTrades(trades: JournalTrade[]): JournalTrade[] {
-  return trades.filter((t) => t.pnl !== 0);
+  // A trade counts as "closed" only once it has a realised, non-zero P&L. Live
+  // manual fills are journalled with pnl=null (no round-trip yet) — `null !== 0`
+  // is true, so without the numeric guard those open legs were treated as closed
+  // and, via `pnl <= 0`, miscounted as LOSSES, distorting win-rate/profit-factor
+  // for connected users. Exclude any non-numeric (null/undefined) P&L.
+  return trades.filter((t) => typeof t.pnl === "number" && t.pnl !== 0);
 }
 
 function sortChronological(trades: JournalTrade[]): JournalTrade[] {

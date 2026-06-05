@@ -124,7 +124,7 @@ _INDEXES = [
 
 
 class StorageManager:
-    """DuckDB connection manager with schema initialization and query helpers.
+    """DuckDB connection manager with schema initialisation and query helpers.
 
     Usage::
 
