@@ -75,6 +75,37 @@ def _registry_with_account(
     return registry, mock_session
 
 
+class TestConnectivity:
+    """is_connected() + get_primary_account_id() — the live-data gate the AI
+    regime + screener routes depend on (regression for the missing-method bug
+    that pinned those screens to sample data / 500s in production)."""
+
+    def test_is_connected_false_when_no_sessions(self) -> None:
+        assert BrokerRegistry().is_connected() is False
+
+    def test_is_connected_true_when_a_session_is_connected(self) -> None:
+        reg, sess = _registry_with_account("AB1234")
+        sess.is_connected = True
+        assert reg.is_connected() is True
+
+    def test_is_connected_false_when_all_sessions_disconnected(self) -> None:
+        reg, sess = _registry_with_account("AB1234")
+        sess.is_connected = False
+        assert reg.is_connected() is False
+
+    def test_get_primary_account_id_returns_explicit_primary(self) -> None:
+        reg, _sess = _registry_with_account("AB1234")
+        reg.set_primary("AB1234")
+        assert reg.get_primary_account_id() == "AB1234"
+
+    def test_get_primary_account_id_falls_back_to_first_account(self) -> None:
+        reg, _sess = _registry_with_account("AB1234")  # no explicit primary
+        assert reg.get_primary_account_id() == "AB1234"
+
+    def test_get_primary_account_id_none_when_empty(self) -> None:
+        assert BrokerRegistry().get_primary_account_id() is None
+
+
 # ---------------------------------------------------------------------------
 # 1. get_supported_brokers_excludes_sandbox
 # ---------------------------------------------------------------------------

@@ -312,6 +312,28 @@ class BrokerRegistry:
             )
         return session
 
+    def is_connected(self) -> bool:
+        """``True`` when at least one registered broker session is connected.
+
+        The read routes (AI regime, screener analysis, OI analytics, payoff,
+        scanner) gate their LIVE-data path on this. Before this method existed,
+        ``registry.is_connected()`` was an ``AttributeError`` (caught as a 500, or
+        a ``getattr(..., lambda: False)`` fallback that pinned the route to 503) —
+        so those screens could never show live data and fell back to sample data
+        forever even with a broker connected.
+        """
+        with self._lock:
+            return any(s.is_connected for s in self._sessions.values())
+
+    def get_primary_account_id(self) -> str | None:
+        """Account id of the primary session, falling back to the first
+        registered account when no explicit primary is set (so a caller that has
+        already checked :meth:`is_connected` always gets a usable id)."""
+        with self._lock:
+            if self._primary and self._primary in self._sessions:
+                return self._primary
+            return next(iter(self._sessions), None)
+
     def list_accounts(self) -> list[BrokerAccountInfo]:
         """Return a snapshot of info for all registered sessions.
 

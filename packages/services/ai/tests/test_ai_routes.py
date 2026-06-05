@@ -333,3 +333,30 @@ class TestMarketRegime:
         resp = client.get("/api/v1/ai/regime?symbol=NIFTY")
         assert resp.status_code == 503
         assert "connected market-data" in resp.get_json()["message"]
+
+    def test_connected_registry_returns_live_regime(self, app, client) -> None:
+        """The LIVE branch was dead code: registry.is_connected() /
+        get_primary_account_id() did not exist, so a connected broker still got a
+        503/500. With those methods present the route computes a real regime."""
+        # 30 trending candles → a detectable regime.
+        candles = [
+            {"high": 100 + i, "low": 98 + i, "close": 99 + i, "open": 98.5 + i}
+            for i in range(30)
+        ]
+
+        class _FakeRegistry:
+            def is_connected(self):
+                return True
+
+            def get_primary_account_id(self):
+                return "acc-1"
+
+            def get_history(self, account_id, params):
+                assert account_id == "acc-1"
+                return {"data": candles}
+
+        app.config["REGISTRY"] = _FakeRegistry()
+        resp = client.get("/api/v1/ai/regime?symbol=NIFTY")
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert "state" in data and "suggested_strategy" in data  # the regime loop closed
