@@ -71,14 +71,15 @@ async function fetchSandboxStatus(): Promise<SandboxStatus> {
 }
 
 async function adjustCapital(delta: number): Promise<SandboxStatus> {
-  const resp = await fetch(`${BASE}/capital`, {
+  // Backend route is POST /capital/adjust {amount} (not /capital {delta}); it
+  // returns the capital object, so refetch the combined status afterwards.
+  const resp = await fetch(`${BASE}/capital/adjust`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ delta }),
+    body: JSON.stringify({ amount: delta }),
   });
   if (!resp.ok) throw new Error("Failed to adjust capital.");
-  const json = await resp.json() as { data: SandboxStatus };
-  return json.data;
+  return fetchSandboxStatus();
 }
 
 async function resetSandbox(): Promise<void> {
@@ -89,7 +90,9 @@ async function resetSandbox(): Promise<void> {
 async function exportSandboxData(): Promise<ExportData> {
   const resp = await fetch(`${BASE}/export`);
   if (!resp.ok) throw new Error("Failed to export sandbox data.");
-  return resp.json() as Promise<ExportData>;
+  // Backend returns { status, data: "<json string>" } — parse the inner payload.
+  const json = await resp.json() as { data: string };
+  return JSON.parse(json.data) as ExportData;
 }
 
 async function importSandboxData(file: File): Promise<void> {
@@ -97,7 +100,8 @@ async function importSandboxData(file: File): Promise<void> {
   const resp = await fetch(`${BASE}/import`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: text,
+    // Backend expects { data: "<json string from /export>" }, not raw text.
+    body: JSON.stringify({ data: text }),
   });
   if (!resp.ok) throw new Error("Failed to import sandbox data.");
 }

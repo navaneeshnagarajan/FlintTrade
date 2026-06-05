@@ -88,6 +88,39 @@ def get_capital() -> Response:
     return jsonify({"status": "success", "data": {"capital": engine.get_capital()}})
 
 
+@data_sandbox_bp.route("/status", methods=["GET"])
+def get_status() -> Response:
+    """Combined sandbox status for the terminal's virtual-capital panel.
+
+    The terminal SandboxControls panel reads a flat status shape (capital as a
+    single current-balance number) rather than the nested ``/capital`` payload.
+    Provide it in one round-trip so the panel does not 404 on a missing route.
+
+    Returns:
+        JSON ``{status, data: {capital, initial_capital, pnl, trades_count}}``.
+    """
+    engine, err = _engine_required()
+    if err:
+        return err
+
+    capital = engine.get_capital()
+    pnl = engine.get_pnl()
+    try:
+        trades_count = len(engine.get_orders())
+    except Exception:  # pragma: no cover - defensive
+        trades_count = 0
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "capital": capital.get("current", 0.0),
+            "initial_capital": capital.get("initial", 0.0),
+            "pnl": pnl.get("total", 0.0),
+            "trades_count": trades_count,
+        },
+    })
+
+
 @data_sandbox_bp.route("/capital/adjust", methods=["POST"])
 def adjust_capital() -> Response:
     """Add or remove virtual capital.
