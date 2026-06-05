@@ -107,6 +107,11 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "trigger_type": "cron",
         "trigger_args": {"hour": 0, "minute": 30, "timezone": "Asia/Kolkata"},
     },
+    "overnight_optimise_job": {
+        "description": "Overnight strategy optimisation at 2:00 AM IST (after EOD)",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 2, "minute": 0, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
+    },
 }
 
 
@@ -244,6 +249,26 @@ def make_db_optimise_job(
     return db_optimise_job
 
 
+def make_overnight_optimise_job(optimiser: Callable[[], Any]) -> Callable[[], None]:
+    """Create the overnight strategy-optimisation handler.
+
+    Runs the injected ``optimiser`` callable (e.g. a hyperopt / auto-retrain
+    sweep) once overnight, so "optimise overnight" is an actual scheduled trigger
+    rather than a library that is never invoked. Errors are logged, never raised
+    (a failed optimisation must not crash the scheduler).
+    """
+
+    def overnight_optimise_job() -> None:
+        try:
+            logger.info("overnight_optimise_job: starting overnight strategy optimisation")
+            optimiser()
+            logger.info("overnight_optimise_job: optimisation complete")
+        except Exception as exc:  # noqa: BLE001 - never crash the scheduler
+            logger.error("overnight_optimise_job: optimisation failed — %s", exc)
+
+    return overnight_optimise_job
+
+
 async def load_holidays_from_client(openalgo_client: Any) -> set[str]:
     """Load market holidays from OpenAlgo API. Must be awaited.
 
@@ -319,6 +344,9 @@ class CronManager:
         # app factory, which runs after the CronManager is built).
         self.trade_storage = trade_storage
         self.trade_storage_lock = trade_storage_lock
+        # Injected overnight strategy optimiser (a zero-arg callable). When set,
+        # register_builtin_jobs schedules the "optimise overnight" trigger.
+        self.overnight_optimiser: Callable[[], Any] | None = None
         self._holidays: set[str] = set()
 
     @property
@@ -380,6 +408,14 @@ class CronManager:
                 "db_optimise_job",
                 handler=make_db_optimise_job(self.trade_storage, self.trade_storage_lock),
                 **DEFAULT_JOBS["db_optimise_job"],
+            )
+
+        # Overnight strategy optimisation — only when an optimiser is injected.
+        if self.overnight_optimiser is not None:
+            self.register(
+                "overnight_optimise_job",
+                handler=make_overnight_optimise_job(self.overnight_optimiser),
+                **DEFAULT_JOBS["overnight_optimise_job"],
             )
 
     # ------------------------------------------------------------------
