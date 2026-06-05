@@ -63,6 +63,27 @@ describe("HistoricalDownloadPanel", () => {
     expect(screen.getByText(/complete/i)).toBeInTheDocument();
   });
 
+  it("shows the time-remaining (ETA) and free-disk readout while running", async () => {
+    // Mission: historical download must surface a live ETA + safety state.
+    const running = { ...RUNNING, eta_seconds: 90 }; // 90s -> "1m 30s"
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        String(url).includes("/download/status")
+          ? jsonResponse({ data: running })
+          : jsonResponse({ data: running }, 202),
+      ),
+    );
+
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /download 30d/i }));
+
+    // ETA is formatted (90s -> 1m 30s) and the disk-safety free space is shown.
+    await waitFor(() => expect(screen.getByText(/ETA\s*1m 30s/i)).toBeInTheDocument());
+    expect(screen.getByText(/5000 MB free/i)).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
+  });
+
   it("surfaces the disk-safety refusal message", async () => {
     const refused = {
       ...RUNNING,
