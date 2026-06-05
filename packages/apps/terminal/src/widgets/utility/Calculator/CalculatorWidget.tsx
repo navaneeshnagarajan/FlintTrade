@@ -1,7 +1,7 @@
 /**
  * CalculatorWidget
  *
- * Absorbed from:
+ * Adapted from:
  *   openalgo-chart/src/components/RiskCalculatorPanel/RiskCalculatorPanel.tsx
  *   openalgo-chart/src/utils/indicators/riskCalculator.ts
  *
@@ -36,7 +36,7 @@ import { getMargin, getFunds } from "@/services/api";
 import type { MarginData, Funds } from "@/types/api";
 
 // ---------------------------------------------------------------------------
-// Risk calculation engine (absorbed from riskCalculator.ts)
+// Risk calculation engine (adapted from riskCalculator.ts)
 // ---------------------------------------------------------------------------
 type TradeSide = "BUY" | "SELL";
 
@@ -100,7 +100,7 @@ function calculateRiskPosition(params: RiskCalcParams): RiskCalcResult | null {
   return { riskAmount, slPoints, quantity, positionValue, targetPrice: finalTarget, rewardPoints, rewardAmount, rrRatio: finalRR };
 }
 
-// Auto-detect side from entry vs SL (absorbed from riskCalculator.ts)
+// Auto-detect side from entry vs SL (adapted from riskCalculator.ts)
 function autoDetectSide(entry: number, sl: number): TradeSide | null {
   if (entry <= 0 || sl <= 0 || entry === sl) return null;
   return sl > entry ? "SELL" : "BUY";
@@ -155,7 +155,7 @@ function calculateBrokerage(
 }
 
 // ---------------------------------------------------------------------------
-// Templates (absorbed from TemplateSelector concept)
+// Templates (adapted from TemplateSelector concept)
 // ---------------------------------------------------------------------------
 interface Template {
   label: string;

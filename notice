@@ -11,7 +11,7 @@ adapter rather than bundling OpenAlgo's source.
 
 A number of widgets and modules were adapted from open-source projects. Where a
 file was adapted from a specific upstream source it carries an in-source
-"Absorbed from:" header naming that source; the licence terms and attribution of
+"Adapted from:" header naming that source; the licence terms and attribution of
 those upstream projects are preserved here. (Reducing this adapted surface to
 fully-original implementations is in progress.)
 

@@ -17,7 +17,7 @@ Design:
 - The LLM generation step is optional; callers can use the pipeline in
   retrieval-only mode by calling ``retrieve()`` instead of ``query()``.
 
-Absorbed from: openalgo-chatbot/openalgo_documentation_chatbot.py
+Adapted from: openalgo-chatbot/openalgo_documentation_chatbot.py
 Extended with:
   - Configurable chunk_size / overlap (512 / 64 per spec).
   - PDF support via pypdf (not PyPDF2 — maintained fork).
@@ -170,7 +170,7 @@ class RAGResult:
 class DomainFilter:
     """Pre-query topic guard that rejects off-topic questions.
 
-    Absorbed from openalgo-chatbot's intent-filtering pattern: before
+    Adapted from openalgo-chatbot's intent-filtering pattern: before
     hitting the vector store we confirm the query is finance/trading
     related via keyword matching.  An optional semantic similarity check
     can be wired in when an embedding provider is available.

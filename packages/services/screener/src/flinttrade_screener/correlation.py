@@ -11,7 +11,7 @@ Integration:
   with current market regime classification.
 - The Flask route in payoff_routes.py exposes this via POST /ft-api/v1/analytics/correlation.
 
-Absorbed from:
+Adapted from:
 - Standard numpy correlation patterns
 - MarketCalls portfolio analysis patterns
 """

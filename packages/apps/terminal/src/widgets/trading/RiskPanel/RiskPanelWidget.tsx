@@ -1,7 +1,7 @@
 /**
  * RiskPanelWidget
  *
- * Absorbed from:
+ * Adapted from:
  *   openalgo-chart/src/components/RiskCalculatorPanel/RiskCalculatorPanel.tsx
  *   (risk field structure and validation concepts)
  *

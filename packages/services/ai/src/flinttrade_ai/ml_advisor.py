@@ -13,7 +13,7 @@ Signal enum:
     Signal.HOLD = 1
     Signal.SELL = 2
 
-Absorbed from: openadvisor/training_predictions.py (CatBoost → LightGBM per project stack).
+Adapted from: openadvisor/training_predictions.py (CatBoost → LightGBM per project stack).
 
 Design decisions:
 - LightGBM (not CatBoost / sklearn): project stack choice. See docs/ARCHITECTURE.md.

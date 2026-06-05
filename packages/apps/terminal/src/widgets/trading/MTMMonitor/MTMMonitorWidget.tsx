@@ -1,9 +1,9 @@
 /**
  * MTMMonitorWidget
  *
- * Absorbed from: openalgo/frontend/src/pages/PnLTracker.tsx
+ * Adapted from: openalgo/frontend/src/pages/PnLTracker.tsx
  *
- * Key logic absorbed:
+ * Key logic adapted:
  * - createChart / AreaSeries setup (Lightweight Charts v5)
  * - IST tick-mark formatter
  * - Max/min MTM tracking and drawdown calculation
@@ -59,7 +59,7 @@ function getThemeColor(varName: string, fallback: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// IST time formatter (absorbed from PnLTracker.tsx)
+// IST time formatter (adapted from PnLTracker.tsx)
 // ---------------------------------------------------------------------------
 function istTickFormatter(time: number): string {
   const utcMs = time * 1000;
@@ -149,7 +149,7 @@ function MTMMonitorWidget(_props: WidgetProps) {
   const riskLimitsRef = useRef(riskLimits);
   useEffect(() => { riskLimitsRef.current = riskLimits; }, [riskLimits]);
 
-  // Build chart (absorbed from PnLTracker.initChart)
+  // Build chart (adapted from PnLTracker.initChart)
   const initChart = useCallback(() => {
     if (!chartContainerRef.current) return;
 

@@ -35,7 +35,7 @@ Per-timeframe signal details:
 Integration:
 - Flask route in ``pair_routes.py`` exposes this via POST /ft-api/v1/analytics/mtf.
 
-Absorbed from:
+Adapted from:
 - Standard TA-Lib / pandas-ta patterns for multi-timeframe analysis
 - FlintTrade indicators package (rsi, macd, ema functions)
 """

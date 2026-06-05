@@ -4,7 +4,7 @@ Tracks open and closed positions across multiple strategies simultaneously,
 calculates cumulative P&L (realised + unrealised), enforces per-strategy
 position limits, and persists state to DuckDB for crash recovery.
 
-Absorbed from: nifty-trading-railway/baseline_v1_live/position_tracker.py
+Adapted from: nifty-trading-railway/baseline_v1_live/position_tracker.py
 Redesigned for FlintTrade's multi-strategy, DuckDB-first architecture:
 - No hardcoded strategy names or instrument filters
 - DuckDB persistence (not SQLite)

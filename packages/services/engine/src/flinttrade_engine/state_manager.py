@@ -10,7 +10,7 @@ State machine::
                                   ↗                            ↘
                           (loop back for next trade)       (session end)
 
-Absorbed from: nifty-trading-railway/baseline_v1_live/state_manager.py
+Adapted from: nifty-trading-railway/baseline_v1_live/state_manager.py
 Redesigned for FlintTrade's DuckDB-first, multi-strategy architecture:
 - DuckDB persistence (not SQLite)
 - No hardcoded strategy identifiers
