@@ -572,7 +572,7 @@ def test_ichimoku_strategy_runs() -> None:
 
 
 def test_strategy_registry_contains_all_new_strategies() -> None:
-    """All 29 absorbed strategy classes must be in STRATEGY_REGISTRY."""
+    """All 29 adapted strategy classes must be in STRATEGY_REGISTRY."""
     from flinttrade_backtest.strategies import STRATEGY_REGISTRY
 
     for name in ALL_NEW_STRATEGY_NAMES:
@@ -580,7 +580,7 @@ def test_strategy_registry_contains_all_new_strategies() -> None:
 
 
 def test_strategy_registry_size() -> None:
-    """STRATEGY_REGISTRY must have exactly 29 entries (the absorbed batch)."""
+    """STRATEGY_REGISTRY must have exactly 29 entries (the adapted batch)."""
     from flinttrade_backtest.strategies import STRATEGY_REGISTRY
 
     assert len(STRATEGY_REGISTRY) == len(ALL_NEW_STRATEGY_NAMES), (

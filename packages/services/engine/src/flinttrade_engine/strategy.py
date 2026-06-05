@@ -3,7 +3,7 @@
 All user strategies inherit from BaseStrategy. The StrategyRegistry manages
 discovery, enabling/disabling, and lifecycle.
 
-State persistence (absorbed from trading-strategies-openalgo pattern):
+State persistence (adapted from trading-strategies-openalgo pattern):
     Each strategy can persist its state to
     ``~/.flinttrade/strategies/<strategy_id>/state.json`` so it can resume
     after a crash without losing position tracking.  Call ``save_state()``

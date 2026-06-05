@@ -1,6 +1,6 @@
 """Multi-agent trading team for collaborative market analysis.
 
-Absorbs patterns from:
+Adapts patterns from:
 - **MiroFish** (CAMEL-AI/OASIS): Agents with specialised system prompts that
   independently observe their environment, then a consensus mechanism
   combines their views into a unified decision.
@@ -324,7 +324,7 @@ class AgentTeam:
         concurrency limit, making it safe to call from external async code
         such as a FastAPI route handler or an async research loop.
 
-        Absorbs the MiroFish parallel-agent pattern: agents are
+        Adapts the MiroFish parallel-agent pattern: agents are
         independent observers that run simultaneously and write their
         reports into a shared result.
 
@@ -626,7 +626,7 @@ class AgentTeam:
 
 
 # ---------------------------------------------------------------------------
-# Autonomous Research Loop (absorbed from MarketCalls/autoresearch)
+# Autonomous Research Loop (adapted from MarketCalls/autoresearch)
 # ---------------------------------------------------------------------------
 
 
@@ -719,7 +719,7 @@ class AutonomousResearchLoop:
         ``stop()`` is called), running a full AgentTeam analysis on each
         symbol per iteration.
 
-        Absorbs autoresearch's "never stop" philosophy: the loop continues
+        Adapts autoresearch's "never stop" philosophy: the loop continues
         until max_iterations or explicit stop, logging each result.
 
         Args:

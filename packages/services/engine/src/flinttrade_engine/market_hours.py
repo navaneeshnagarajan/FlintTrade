@@ -3,7 +3,7 @@
 Provides standard market hours for Indian exchanges (NSE, BSE, MCX, etc.)
 and special session handling for events like Muhurat Trading on Diwali.
 
-Pattern absorbed from AlgoMirror SpecialTradingSession model and adapted
+Pattern adapted from AlgoMirror SpecialTradingSession model and adapted
 to a pure-Python dataclass-based approach (no DB dependency).
 
 Usage::

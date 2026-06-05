@@ -1,6 +1,6 @@
 """FII/DII institutional flow data scraper and analysis.
 
-Absorbs patterns from MarketCalls/fii-dii-data:
+Adapts patterns from MarketCalls/fii-dii-data:
 - NSE session management with cookie refresh
 - Cash market FII/DII data from NSE API
 - F&O participant OI data from NSE CSV archives
@@ -38,7 +38,7 @@ logger = logging.getLogger("flinttrade.screener.fii_dii")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # ---------------------------------------------------------------------------
-# Constants (absorbed from fii-dii-data's CONFIG)
+# Constants (adapted from fii-dii-data's CONFIG)
 # ---------------------------------------------------------------------------
 
 _NSE_HOME = "https://www.nseindia.com/"
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS fii_dii_flows (
 
 
 # ---------------------------------------------------------------------------
-# NSE session + fetch helpers (absorbed from fii-dii-data)
+# NSE session + fetch helpers (adapted from fii-dii-data)
 # ---------------------------------------------------------------------------
 
 
@@ -300,7 +300,7 @@ def _fetch_fao_oi(
 def _parse_fao_csv(csv_text: str | None) -> dict[str, dict[str, int]]:
     """Parse F&O participant OI CSV into FII/DII dicts.
 
-    Absorbed from fii-dii-data's ``parseFao`` function.
+    Adapted from fii-dii-data's ``parseFao`` function.
 
     Args:
         csv_text: Raw CSV text from NSE.
@@ -354,7 +354,7 @@ def _compute_sentiment(
 ) -> float:
     """Derive a 0-100 sentiment score from flows.
 
-    Absorbed from fii-dii-data's sentiment heuristic.
+    Adapted from fii-dii-data's sentiment heuristic.
 
     Args:
         fii_net: FII net cash flow (in crores).
@@ -380,7 +380,7 @@ def _transform_data(
 ) -> FiiDiiSnapshot | None:
     """Transform raw NSE data into a ``FiiDiiSnapshot``.
 
-    Absorbed from fii-dii-data's ``transformData`` function.
+    Adapted from fii-dii-data's ``transformData`` function.
 
     Args:
         raw_cash: List of category dicts from NSE cash API.

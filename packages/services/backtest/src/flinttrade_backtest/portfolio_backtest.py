@@ -1,6 +1,6 @@
 """Portfolio-level backtesting using VectorBT.
 
-Absorbed from vectorbt-backtesting-skills dual_momentum pattern.
+Adapted from vectorbt-backtesting-skills dual_momentum pattern.
 Supports multi-asset allocation, periodic rebalancing, and benchmark comparison.
 
 Typical usage::
@@ -178,7 +178,7 @@ def _momentum_weight(
 ) -> dict[str, float]:
     """Dual-momentum: rank by trailing return, overweight recent winners.
 
-    Absorbed from the vectorbt-backtesting-skills dual_momentum pattern.
+    Adapted from the vectorbt-backtesting-skills dual_momentum pattern.
     Symbols with positive trailing momentum receive proportional weights;
     symbols with negative momentum receive zero weight (go to cash).
 
@@ -522,7 +522,7 @@ def _simulate_portfolio_vbt(
 class PortfolioBacktester:
     """Portfolio-level backtesting using VectorBT.
 
-    Absorbed from vectorbt-backtesting-skills dual_momentum pattern.
+    Adapted from vectorbt-backtesting-skills dual_momentum pattern.
     Supports: multi-asset allocation, periodic rebalancing, benchmark comparison.
 
     Uses vectorbt when available; falls back to an equivalent pure-Python

@@ -1,7 +1,7 @@
 /**
  * BasketTab.tsx — Stock basket / thematic investing
  *
- * Absorbs opencase patterns. Lets users create custom stock baskets with
+ * Adapts opencase patterns. Lets users create custom stock baskets with
  * weightings, rebalance, and track performance (like Smallcase).
  *
  * All data is client-side (localStorage). Basket definitions + allocations

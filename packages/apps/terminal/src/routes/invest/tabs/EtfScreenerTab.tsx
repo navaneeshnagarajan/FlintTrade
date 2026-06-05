@@ -13,7 +13,7 @@
  *   - Asset Quilt: calendar-year return heatmap (rows=ETFs, cols=years),
  *     cells colour-coded by rank within the year (green=top, red=bottom)
  *
- * Design absorbed from:
+ * Design adapted from:
  *   - etftracker Dashboard4_IndiaSectors: category pills, colour-coded return cells
  *   - EtfTab.tsx: TanStack Table column pattern, GlassCard usage
  *   - StocksTab.tsx: search + filter bar, loading/error states

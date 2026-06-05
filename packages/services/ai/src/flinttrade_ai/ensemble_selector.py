@@ -1,6 +1,6 @@
 """Rolling-window ensemble model selector for adaptive signal generation.
 
-Absorbs patterns from:
+Adapts patterns from:
 - **FinRL** ``DRLEnsembleAgent``: trains multiple models (A2C, PPO, DDPG),
   validates each on a rolling window, and selects the best-performing one
   for the next trading period based on Sharpe ratio.
@@ -284,7 +284,7 @@ def compute_dissimilarity_index(
 ) -> float:
     """Backward-compatible wrapper around ``calculate_di``.
 
-    Absorbs freqtrade FreqAI's DI_threshold pattern.
+    Adapts freqtrade FreqAI's DI_threshold pattern.
 
     Args:
         train_features: 2D list of training feature vectors.
@@ -313,7 +313,7 @@ def _compute_validation_sharpe(
     Simulates: if model says BUY, we earn the forward return;
     if SELL, we earn the negative; if HOLD, we earn 0.
 
-    Absorbs FinRL's ensemble selection: pick the model with best
+    Adapts FinRL's ensemble selection: pick the model with best
     validation-period Sharpe ratio.
 
     Args:
@@ -370,7 +370,7 @@ class EnsembleSelector:
     Trains multiple LightGBM model variants on the same data, validates
     each on a holdout window, and selects the best performer.
 
-    Absorbs FinRL's ``DRLEnsembleAgent`` pattern (rolling rebalance +
+    Adapts FinRL's ``DRLEnsembleAgent`` pattern (rolling rebalance +
     validation-based selection) and freqtrade's FreqAI dissimilarity
     index for staleness detection.
 
@@ -600,7 +600,7 @@ class EnsembleSelector:
     ) -> tuple[bool, float]:
         """Check if the live data has drifted from training distribution.
 
-        Absorbs freqtrade FreqAI's DI_threshold pattern.
+        Adapts freqtrade FreqAI's DI_threshold pattern.
 
         Args:
             recent_bars: Recent OHLCV bars to check against training data.

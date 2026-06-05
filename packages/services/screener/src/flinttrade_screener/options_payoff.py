@@ -3,7 +3,7 @@
 Calculates P&L curves, Greeks aggregation, breakevens, and probability of
 profit for multi-leg option strategies.
 
-Absorbed patterns:
+Adapted patterns:
 - Black-Scholes Greeks from packages/services/screener/src/greeks.py (_bs_greeks)
 - Pydantic model conventions from packages/core/core/src/models.py
 - Standard normal helpers (_norm_cdf, _norm_pdf) already in this package

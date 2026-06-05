@@ -1,6 +1,6 @@
 """Strategy flow builder — visual strategy definition as connected nodes.
 
-Absorbs all 54 node types from openalgo-flow: N8N-style node graph for
+Adapts all 54 node types from openalgo-flow: N8N-style node graph for
 defining trading strategies without code.
 
 Categories (8):

@@ -1,6 +1,6 @@
 """NSE charting API session with cookie pre-warming.
 
-Absorbed from openchart-js audit: NSE's charting.nseindia.com requires a valid
+Adapted from openchart-js audit: NSE's charting.nseindia.com requires a valid
 browser session (cookies) before it will serve OHLCV or search data. The
 standard approach is to hit the NSE homepage first so the CDN sets the
 required session cookies, then use those cookies in subsequent data requests.

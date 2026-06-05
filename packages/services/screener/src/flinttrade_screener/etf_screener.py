@@ -570,7 +570,7 @@ ETF_CATALOGUE: dict[str, ETFRecord] = {
 
 
 # ---------------------------------------------------------------------------
-# Momentum scoring (absorbed from marketcalls etftracker analytics)
+# Momentum scoring (adapted from marketcalls etftracker analytics)
 # ---------------------------------------------------------------------------
 
 

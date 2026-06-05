@@ -1,6 +1,6 @@
 """Optuna-based hyperparameter optimisation for signal models.
 
-Absorbs freqtrade's hyperopt pattern:
+Adapts freqtrade's hyperopt pattern:
 - Pluggable loss functions (Sharpe, Calmar, MaxDrawdown, Accuracy)
 - Optuna TPE sampler with early stopping
 - Walk-forward validation to avoid overfitting
@@ -60,7 +60,7 @@ def _sharpe_loss(
 ) -> float:
     """Negative Sharpe ratio of simulated strategy returns.
 
-    Absorbs freqtrade's SharpeHyperOptLoss: if model predicts BUY, we earn
+    Adapts freqtrade's SharpeHyperOptLoss: if model predicts BUY, we earn
     the forward return; SELL earns the negative; HOLD earns zero.
     """
     returns: list[float] = []
@@ -97,7 +97,7 @@ def _calmar_loss(
 ) -> float:
     """Negative Calmar ratio (annualised return / max drawdown).
 
-    Absorbs freqtrade's CalmarHyperOptLoss.
+    Adapts freqtrade's CalmarHyperOptLoss.
     """
     equity = [1.0]
     for i, pred in enumerate(preds):
@@ -147,7 +147,7 @@ def _max_drawdown_loss(
 ) -> float:
     """Max drawdown as the loss -- lower drawdown is better.
 
-    Absorbs freqtrade's MaxDrawDownHyperOptLoss.
+    Adapts freqtrade's MaxDrawDownHyperOptLoss.
     """
     equity = [1.0]
     for i, pred in enumerate(preds):
@@ -217,7 +217,7 @@ class OptimisationResult:
 class StrategyOptimiser:
     """Optuna-based hyperparameter optimiser for LightGBM signal models.
 
-    Absorbs freqtrade's hyperopt architecture:
+    Adapts freqtrade's hyperopt architecture:
     - Pluggable loss functions (Sharpe, Calmar, MaxDrawdown, Accuracy)
     - TPE sampler with optional early stopping
     - Walk-forward validation split

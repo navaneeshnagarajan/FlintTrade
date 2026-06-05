@@ -1,4 +1,4 @@
-// Absorbed patterns from:
+// Adapted patterns from:
 //   openalgo-chart/src/components/OptionChainPicker/OptionChainPicker.jsx — multi-leg state, strategy templates, direction (buy/sell), net premium calc
 //   openalgo-chart/src/services/strategyTemplates.js — STRATEGY_TEMPLATES, calculateNetPremium, validateStrategy, formatStrategyName
 
@@ -55,7 +55,7 @@ export default function StrategyBuilderTool({ onClose }: Props) {
     setLegs((prev) => prev.map((l) => (l.id === id ? { ...l, [field]: value } : l)));
   };
 
-  // Apply template — absorbed from OptionChainPicker's applyTemplate logic
+  // Apply template — adapted from OptionChainPicker's applyTemplate logic
   const handleTemplate = (key: string) => {
     const tmpl = STRATEGY_TEMPLATES[key];
     if (!tmpl) return;

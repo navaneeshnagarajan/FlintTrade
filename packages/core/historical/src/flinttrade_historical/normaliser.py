@@ -1,6 +1,6 @@
 """OHLCV normaliser — converts provider-specific formats to a standard schema.
 
-Absorbed patterns from:
+Adapted patterns from:
 - openchart utils.py: timestamp-from-milliseconds, column renaming, intraday
   cutoff at 15:29:59 IST, timezone stripping
 - historify data_fetcher.py: DataFrame-vs-dict response handling, date/time
@@ -39,7 +39,7 @@ logger = logging.getLogger("flinttrade.historical.normaliser")
 # Indian Standard Time offset — UTC+5:30
 _IST = timezone(timedelta(hours=5, minutes=30))
 
-# Intraday market cutoff (inclusive) — absorbed from openchart utils.py
+# Intraday market cutoff (inclusive) — adapted from openchart utils.py
 _INTRADAY_CUTOFF_HH = 15
 _INTRADAY_CUTOFF_MM = 29
 _INTRADAY_CUTOFF_SS = 59
@@ -50,7 +50,7 @@ _INTRADAY_INTERVALS: frozenset[str] = frozenset(
 )
 
 # Column aliases — maps many source-specific names to our standard names
-# Absorbed from openchart (Open/High/Low/Close/Volume/Timestamp) and
+# Adapted from openchart (Open/High/Low/Close/Volume/Timestamp) and
 # historify (open/high/low/close/volume/date/time)
 _COLUMN_ALIASES: dict[str, str] = {
     # Timestamp variants
@@ -301,7 +301,7 @@ class OHLCVNormaliser:
 
         Args:
             apply_intraday_cutoff: If True, bars after 15:29:59 IST are
-                dropped for intraday intervals (absorbed from openchart).
+                dropped for intraday intervals (adapted from openchart).
             drop_invalid: If True (default), invalid bars are dropped.
                 If False, they are kept but a warning is added.
             forward_fill: If True, missing close values are forward-filled

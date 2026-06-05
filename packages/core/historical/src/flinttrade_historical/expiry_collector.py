@@ -1,6 +1,6 @@
 """Collect historical data for expired F&O contracts.
 
-Absorbs ExpiryTrack patterns. Downloads OHLCV data before each expiry date for
+Adapts ExpiryTrack patterns. Downloads OHLCV data before each expiry date for
 NIFTY, BANKNIFTY weekly/monthly options and stock F&O. Stores as CSV/JSON in
 ~/.flinttrade/expiry_data/ for backtesting expired strategies.
 

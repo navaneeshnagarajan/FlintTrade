@@ -154,7 +154,7 @@ FlintTrade is a native-first platform: its backend, native gateway contract,
 safety/gating layer, and most application code are original work. It
 interoperates with [OpenAlgo](https://github.com/marketcalls/openalgo) through an
 optional bridge adapter rather than bundling its source. Some widgets and modules
-were adapted from open-source projects (each marked in-source with an "Absorbed
+were adapted from open-source projects (each marked in-source with an "Adapted
 from:" header); their licences and attribution are preserved in [notice](notice).
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the full influence notes.
 

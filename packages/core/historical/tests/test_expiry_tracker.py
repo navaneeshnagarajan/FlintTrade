@@ -164,12 +164,12 @@ class TestParseOptionChain:
 
 
 # ---------------------------------------------------------------------------
-# ExpiryFlow-absorbed features: rate limiter, metadata, bulk capture
+# ExpiryFlow-adapted features: rate limiter, metadata, bulk capture
 # ---------------------------------------------------------------------------
 
 
 class TestSnapshotRateLimiter:
-    """Verify the rate limiter absorbed from ExpiryFlow."""
+    """Verify the rate limiter adapted from ExpiryFlow."""
 
     def test_rate_limiter_allows_burst(self):
         from flinttrade_historical.expiry_tracker import SnapshotRateLimiter
@@ -191,7 +191,7 @@ class TestSnapshotRateLimiter:
 
 
 class TestDownloadMetadata:
-    """Verify download metadata tracking absorbed from ExpiryFlow."""
+    """Verify download metadata tracking adapted from ExpiryFlow."""
 
     def _tracker(self, client=None):
         from flinttrade_historical.expiry_tracker import ExpiryTracker
@@ -228,7 +228,7 @@ class TestDownloadMetadata:
 
 
 class TestBulkCapture:
-    """Verify bulk capture with skip-existing absorbed from ExpiryFlow."""
+    """Verify bulk capture with skip-existing adapted from ExpiryFlow."""
 
     def test_capture_multiple_skips_existing(self):
         client = MagicMock()

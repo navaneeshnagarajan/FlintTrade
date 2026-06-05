@@ -1,6 +1,6 @@
 """DuckDB-backed OHLCV cache with TTL, incremental updates, and batch fetch.
 
-Absorbed patterns from:
+Adapted patterns from:
 - historify DataPipeline: staging-table merge, batch processing, no per-row SELECT
 - pipeline.py: _validate_table allowlist, _default_db_path, staging anti-join pattern
 
@@ -542,7 +542,7 @@ class OHLCVCache:
         """Fetch multiple symbols, reusing the same cache and provider registry.
 
         Requests are processed sequentially to respect broker rate limits
-        (absorbed from historify batch_process / BATCH_SIZE = 10 pattern).
+        (adapted from historify batch_process / BATCH_SIZE = 10 pattern).
         Each request is a dict with "symbol" and "exchange".
 
         Args:

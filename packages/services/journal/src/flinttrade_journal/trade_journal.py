@@ -1,6 +1,6 @@
 """Trade Journal — DuckDB-backed journal for annotating and analysing trades.
 
-Absorbs patterns from trading-journal (SQLAlchemy CRUD) and adapts them to
+Adapts patterns from trading-journal (SQLAlchemy CRUD) and adapts them to
 FlintTrade's DuckDB-first persistence layer.
 
 Each ``JournalEntry`` extends the raw ``trades`` table with qualitative

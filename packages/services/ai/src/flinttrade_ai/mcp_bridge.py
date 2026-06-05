@@ -1,6 +1,6 @@
 """MCP (Model Context Protocol) bridge for natural language trading.
 
-Absorbs openalgo-mcp patterns. Exposes FlintTrade functions as MCP tools
+Adapts openalgo-mcp patterns. Exposes FlintTrade functions as MCP tools
 that can be invoked via natural language commands parsed by the LLM.
 
 Safety: ALL orders go through the engine's safety layers. Never bypass.

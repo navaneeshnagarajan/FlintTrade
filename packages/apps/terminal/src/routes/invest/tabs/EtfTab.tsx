@@ -7,7 +7,7 @@
  *   ETF_UNIVERSE (static config) → getMultiQuotes() → TanStack Query
  *   → summary cards (grid) + sortable TanStack Table
  *
- * Design absorbed from:
+ * Design adapted from:
  * - etftracker Dashboard4_IndiaSectors: grid of summary cards + table below
  * - SectorTab.tsx: sort-header pattern, GlassCard usage, table structure
  * - HoldingsTab.tsx: TanStack Table column definition and row rendering

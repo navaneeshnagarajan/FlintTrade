@@ -1,6 +1,6 @@
 """Automated batch trade reflection system.
 
-Absorbed from LLM-TradeBot/src/agents/reflection_agent.py:
+Adapted from LLM-TradeBot/src/agents/reflection_agent.py:
 - Trigger-every-N-trades pattern
 - Structured JSON output for patterns and recommendations
 - Rule-based fallback when no LLM is configured (confidence calibration,
@@ -263,7 +263,7 @@ class TradeReflector:
     def _rule_reflect(self, trades: list[dict[str, Any]]) -> ReflectionResult:
         """Produce a rule-based ReflectionResult without an LLM.
 
-        Absorbed from LLM-TradeBot ReflectionAgent (no-LLM variant):
+        Adapted from LLM-TradeBot ReflectionAgent (no-LLM variant):
         win-rate, risk-reward, confidence calibration, and action stats.
 
         Args:

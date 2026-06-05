@@ -5,7 +5,7 @@
  *
  * Data flow: InvestContext holdings → getSectorBreakdown() → Flint donut + Table.
  *
- * Design absorbed from:
+ * Design adapted from:
  * - etftracker Dashboard4_IndiaSectors: side-by-side donut + sortable sector rows
  * - openalgo-chart SectorHeatmapModal: sector pills with percentage rings
  *

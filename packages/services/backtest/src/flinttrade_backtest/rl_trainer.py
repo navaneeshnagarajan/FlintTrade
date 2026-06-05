@@ -1,6 +1,6 @@
 """RL agent trainer for trading environments.
 
-Absorbs patterns from FinRL's DRLAgent and train.py. Provides a unified
+Adapts patterns from FinRL's DRLAgent and train.py. Provides a unified
 interface for training RL agents on historical market data using
 stable-baselines3 (optional dependency).
 

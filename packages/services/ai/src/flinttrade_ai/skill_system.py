@@ -1,7 +1,7 @@
 """Skill system for FlintTrade AI agents.
 
 Domain knowledge is stored as markdown files with YAML frontmatter and loaded
-on-demand into LLM system prompts. Absorbs the progressive-disclosure pattern
+on-demand into LLM system prompts. Adapts the progressive-disclosure pattern
 from Vibe-Trading's SkillsLoader: one-line summaries injected into the system
 prompt; full content loaded only when the agent explicitly requests a skill.
 

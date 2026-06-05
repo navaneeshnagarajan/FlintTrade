@@ -1,6 +1,6 @@
 """Multi-agent analysis pipeline for FlintTrade AI.
 
-Absorbs TradingAgents pattern: a typed ``AnalysisState`` flows sequentially
+Adapts TradingAgents pattern: a typed ``AnalysisState`` flows sequentially
 through analyst nodes, each calling ``LLMClient`` with a structured prompt
 and writing its report back to the shared state.  No LangGraph — pure Python
 state machine.
@@ -91,7 +91,7 @@ class AnalysisState:
 class AnalystChain:
     """Sequential multi-agent analysis pipeline.
 
-    Absorbs TradingAgents pattern: typed state flows through analyst nodes.
+    Adapts TradingAgents pattern: typed state flows through analyst nodes.
     Each node calls LLMClient with a structured prompt and writes its report
     to the shared state.  No LangGraph — pure Python state machine.
 

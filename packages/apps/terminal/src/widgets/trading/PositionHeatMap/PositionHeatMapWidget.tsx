@@ -6,7 +6,7 @@
  * by P&L% — green gradient for profit, red for loss.
  *
  * Treemap algorithm: squarified treemap (inline, no external library).
- * Layout algorithm absorbed from SectorMapWidget / treemapLayout.ts pattern.
+ * Layout algorithm adapted from SectorMapWidget / treemapLayout.ts pattern.
  *
  * Data sources:
  *   - Positions: usePositions() TanStack Query hook
@@ -45,7 +45,7 @@ import type { WidgetProps } from "@/types/widgets";
 
 // ---------------------------------------------------------------------------
 // Squarified treemap layout (inline — no external library)
-// Adapted from SectorMapWidget pattern, originally absorbed from
+// Adapted from SectorMapWidget pattern, originally adapted from
 // openalgo-chart/src/components/SectorHeatmap/utils/treemapLayout.ts
 // ---------------------------------------------------------------------------
 

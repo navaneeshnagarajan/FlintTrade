@@ -4,7 +4,7 @@ Complements the ChromaDB-backed TradedMemory (memory.py) by providing a fast,
 embedding-free, in-memory store suitable for short-lived agent sessions,
 strategy contexts, and intraday state where full vector search is not required.
 
-Pattern absorbed from FinMem-LLM-StockTrading:
+Pattern adapted from FinMem-LLM-StockTrading:
 - Compound scoring: importance x recency-decay x relevance
 - Exponential time decay parameterised per entry category
 - Access-count boost: frequently accessed memories resist decay

@@ -1,7 +1,7 @@
 /**
  * colourScale.ts — Diverging colour scale utilities for heatmap widgets.
  *
- * Absorbed from highcharts-heatmap audit: a 9-stop diverging gradient that
+ * Adapted from highcharts-heatmap audit: a 9-stop diverging gradient that
  * maps negative values (losses/selling pressure) to red tones, zero to a
  * neutral grey, and positive values (gains/buying pressure) to green tones.
  *

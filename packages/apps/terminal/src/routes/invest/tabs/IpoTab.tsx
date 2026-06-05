@@ -5,7 +5,7 @@
  * Live IPO tracking will replace this when the NSE IPO scraper
  * backend is available.
  *
- * Design absorbed from:
+ * Design adapted from:
  * - EtfTab.tsx: GlassCard + TanStack Table sortable pattern
  * - SectorTab.tsx: sort-header, status badge pattern
  *

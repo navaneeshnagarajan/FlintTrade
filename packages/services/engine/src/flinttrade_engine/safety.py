@@ -1058,7 +1058,7 @@ class OvertradingGuard:
     meant to be called *before* :meth:`SafetySystem.check_order` as a
     pre-filter, or used independently inside strategy logic.
 
-    Absorbed from LLM-TradeBot's ``OvertradingGuard`` (decision_core_agent.py)
+    Adapted from LLM-TradeBot's ``OvertradingGuard`` (decision_core_agent.py)
     and adapted to FlintTrade's time-based (rather than cycle-based) design.
 
     Features:
@@ -1422,7 +1422,7 @@ class MTMCircuitBreaker:
     trading day — once triggered it stays triggered until :meth:`reset_daily`
     is called (typically at the next market open).
 
-    Absorbed from the MTM-based short straddle pattern in
+    Adapted from the MTM-based short straddle pattern in
     ``algo_trading_strategies_india``, adapted for async OpenAlgo execution.
 
     Args:

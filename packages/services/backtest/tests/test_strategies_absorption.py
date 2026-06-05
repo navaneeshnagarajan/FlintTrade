@@ -1,4 +1,4 @@
-"""Tests for the 10 absorbed backtest strategies + 3 new indicators.
+"""Tests for the 10 adapted backtest strategies + 3 new indicators.
 
 Coverage: 2+ tests per strategy, indicator unit tests, and registry checks.
 All tests use synthetic bar data; no external dependencies required.

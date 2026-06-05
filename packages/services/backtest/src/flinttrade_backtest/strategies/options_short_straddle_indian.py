@@ -1,6 +1,6 @@
 """Indian F&O Short Straddle strategy — unified parameterised implementation.
 
-Absorbs all 14 variants from algo_trading_strategies_india/short-straddle:
+Adapts all 14 variants from algo_trading_strategies_india/short-straddle:
 
     Variant group              Reference file
     ─────────────────────────  ─────────────────────────────────────────────

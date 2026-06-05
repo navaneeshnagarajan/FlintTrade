@@ -10,7 +10,7 @@ Wraps ``BacktestEngine`` to add:
 - ``StressTestRunner``: drives a strategy through every built-in scenario and
   produces a ranked ``StressTestReport``.
 
-Patterns absorbed from Stockagent (navaneeshnagarajan/FlintTrade/.local/reference/
+Patterns adapted from Stockagent (navaneeshnagarajan/FlintTrade/.local/reference/
 repos/external-all/Stockagent/main.py):
 - Phase separation (Initial → Trading → Post-Trading → Special Events)
 - Discrete special-event injection keyed to bar/date index

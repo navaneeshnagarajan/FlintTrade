@@ -240,7 +240,7 @@ class TestOHLCVNormaliserNormalise:
 
 
 class TestIntradayCutoff:
-    """Test the 15:29:59 intraday cutoff absorbed from openchart."""
+    """Test the 15:29:59 intraday cutoff adapted from openchart."""
 
     def _make_bar(self, ts, o=100, h=101, lo=99, c=100.5, v=1000):
         return {"timestamp": ts, "open": o, "high": h, "low": lo, "close": c, "volume": v}

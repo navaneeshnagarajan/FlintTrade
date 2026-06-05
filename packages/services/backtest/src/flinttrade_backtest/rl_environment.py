@@ -1,6 +1,6 @@
 """Gymnasium-compatible trading environment for RL agents.
 
-Absorbs patterns from FinRL's StockTradingEnv. Designed to work standalone
+Adapts patterns from FinRL's StockTradingEnv. Designed to work standalone
 for testing (no gymnasium/stable-baselines3 required at import time).
 
 Key design choices from FinRL:

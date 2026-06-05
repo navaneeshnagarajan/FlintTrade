@@ -1,6 +1,6 @@
 /**
  * BacktestLabTool — Backtest configuration and results UI
- * Absorbed patterns from:
+ * Adapted patterns from:
  *   - trading-strategies-openalgo: metric categories (Sharpe, drawdown, win rate, tax)
  *   - VectorBT-Tearsheets: EMA crossover, equity curve structure, QuantStats metrics
  */
@@ -81,7 +81,7 @@ const backtestSchema = z.object({
 type BacktestFormValues = z.infer<typeof backtestSchema>;
 
 // ---------------------------------------------------------------------------
-// Constants — absorbed from trading-strategies-openalgo and VectorBT-Tearsheets
+// Constants — adapted from trading-strategies-openalgo and VectorBT-Tearsheets
 // ---------------------------------------------------------------------------
 
 interface StrategyDef {
@@ -184,7 +184,7 @@ interface MockTrade {
   holdingPeriod: string;
 }
 
-// Absorbed metric categories from trading-strategies-openalgo README
+// Adapted metric categories from trading-strategies-openalgo README
 const MOCK_RETURN_METRICS: BacktestMetric[] = [
   { label: "Total Return", value: "+24.7%", sub: "₹2,47,000 on ₹10,00,000", positive: true },
   { label: "Annualised Return", value: "+18.3%", sub: "CAGR", positive: true },

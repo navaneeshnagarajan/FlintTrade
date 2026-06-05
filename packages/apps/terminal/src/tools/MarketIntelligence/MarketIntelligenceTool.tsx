@@ -1,6 +1,6 @@
 /**
  * MarketIntelligenceTool — 14-tab market intelligence dashboard
- * Absorbed patterns from etftracker and oipulse repos.
+ * Adapted patterns from etftracker and oipulse repos.
  */
 
 import { useState } from "react";

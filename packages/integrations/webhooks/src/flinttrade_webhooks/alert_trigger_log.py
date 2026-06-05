@@ -1,6 +1,6 @@
 """Alert trigger log — durable audit trail of alert fire events.
 
-Pattern absorbed from YFinance-Alert-Manager:
+Pattern adapted from YFinance-Alert-Manager:
 - Alert fires → log the trigger with full price context
 - Debounce: suppress re-triggers within a configurable cooldown (default 60 s)
 - Auto-pause: one-shot alerts are marked paused immediately after their first

@@ -1,6 +1,6 @@
 """Data models for the multi-agent trading team.
 
-Absorbs patterns from:
+Adapts patterns from:
 - MiroFish (CAMEL-AI/OASIS): agent roles with specialised system prompts,
   environment observation, consensus via aggregation.
 - TradingAgents: independent analyst personas (market, fundamentals,

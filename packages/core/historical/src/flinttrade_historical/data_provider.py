@@ -5,7 +5,7 @@ Defines a Protocol for data providers and a registry with fallback chain:
     2. NSEData / OpenChart (free NSE/NFO data, no API key required)
     3. CommodityData / yfinance (free MCX commodity data)
 
-Absorbed patterns from:
+Adapted patterns from:
 - historify: OpenAlgo integration, rate limiting, interval normalisation
 - openchart: NSE charting API, segment/exchange mapping
 """
@@ -20,7 +20,7 @@ logger = logging.getLogger("flinttrade.historical.data_provider")
 
 # ---------------------------------------------------------------------------
 # Canonical interval map — normalise user-supplied strings to OpenAlgo format
-# Absorbed from historify convert_interval_format() and openchart interval_map
+# Adapted from historify convert_interval_format() and openchart interval_map
 # ---------------------------------------------------------------------------
 
 INTERVAL_MAP: dict[str, str] = {
@@ -305,7 +305,7 @@ class OpenChartProvider:
     MCX and other exchanges are not supported — the registry falls back to
     OpenAlgo for those.
 
-    Absorbed from openchart core.py patterns: lazy cookie initialisation,
+    Adapted from openchart core.py patterns: lazy cookie initialisation,
     segment-based symbol resolution, intraday cutoff at 15:29:59.
     """
 
@@ -399,7 +399,7 @@ class YFinanceProvider:
     Covers MCX commodities (GOLD, SILVER, CRUDEOIL, NATURALGAS, COPPER, ZINC)
     with optional INR conversion.
 
-    Absorbed from historify patterns: approximate INR conversion via USDINR=X
+    Adapted from historify patterns: approximate INR conversion via USDINR=X
     with fallback rate, and the yfinance ticker mapping table.
     """
 

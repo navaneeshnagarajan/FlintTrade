@@ -374,7 +374,7 @@ class TestMajorityVoteFallback:
 
 
 # ---------------------------------------------------------------------------
-# AutonomousResearchLoop (absorbed from MarketCalls/autoresearch)
+# AutonomousResearchLoop (adapted from MarketCalls/autoresearch)
 # ---------------------------------------------------------------------------
 
 

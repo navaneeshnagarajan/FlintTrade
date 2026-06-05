@@ -1,6 +1,6 @@
 """Financial news sentiment analysis.
 
-Absorbs finnews-ai patterns. Parses RSS feeds, extracts entities (symbols),
+Adapts finnews-ai patterns. Parses RSS feeds, extracts entities (symbols),
 scores sentiment via LLM, and aggregates per-symbol per-day scores.
 """
 

@@ -1,6 +1,6 @@
 """Margin calculator — per-account margin requirements and availability.
 
-Absorbs AlgoMirror's margin_calculator.py patterns. Fetches margin info from
+Adapts AlgoMirror's margin_calculator.py patterns. Fetches margin info from
 each account's OpenAlgo instance and calculates whether orders can be placed.
 Supports all product types (CNC, MIS, NRML) and all exchanges.
 """

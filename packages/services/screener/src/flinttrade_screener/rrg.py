@@ -3,7 +3,7 @@
 Computes RS-Ratio and RS-Momentum for each sector versus NIFTY 50 benchmark,
 producing the (x, y) tail coordinates used to plot a Relative Rotation Graph.
 
-Algorithm (absorbed from sector-rotation-map reference):
+Algorithm (adapted from sector-rotation-map reference):
   1. Raw RS = (sector_price / benchmark_price) * 100
   2. EWM-smooth raw RS with span=10 → smoothed_rs
   3. RS-Ratio = rolling z-score of smoothed_rs over 52-week window, rescaled

@@ -1,6 +1,6 @@
 """Feature engineering and reward functions for RL trading environments.
 
-Absorbs patterns from FinRL's data processing and feature engineering.
+Adapts patterns from FinRL's data processing and feature engineering.
 Provides technical indicator computation, normalisation, and multiple
 reward function implementations for reinforcement learning agents.
 

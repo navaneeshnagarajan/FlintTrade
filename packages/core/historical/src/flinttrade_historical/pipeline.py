@@ -1,6 +1,6 @@
 """DuckDB storage pipeline for historical OHLCV data.
 
-Absorbs Historify patterns: per-interval tables, merge without duplicates,
+Adapts Historify patterns: per-interval tables, merge without duplicates,
 client-side aggregation (1m → 5m → 15m → 1h → 1d), Parquet export.
 
 Schema per table: timestamp (TIMESTAMP), open, high, low, close (DOUBLE),

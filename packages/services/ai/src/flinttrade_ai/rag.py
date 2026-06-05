@@ -5,7 +5,7 @@ Indexes strategy docs, market reports, OpenAlgo API docs, and trade journals.
 Chunks documents into 1000-token pieces with 200-token overlap.
 Retrieval uses a similarity threshold of 0.7 to filter low-quality matches.
 
-Config values absorbed from openalgo-chatbot audit:
+Config values adapted from openalgo-chatbot audit:
   - chunk_size=1000  (was 512 — larger chunks preserve more context per retrieval)
   - overlap=200      (was 50  — wider overlap reduces boundary-cut information loss)
   - similarity_threshold=0.7 (new — drops chunks below 70% similarity to reduce noise)

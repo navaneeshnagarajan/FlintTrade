@@ -1,4 +1,4 @@
-"""Multi-indicator composite strategies — absorbed from AlgoTrading repo.
+"""Multi-indicator composite strategies — adapted from AlgoTrading repo.
 
 Strategies:
     RSI_MACD_Strategy      — RSI oversold/overbought + MACD trend confirmation

@@ -1,6 +1,6 @@
 """Fundamental stock screener — scrapes Screener.in for financial data.
 
-Absorbed from openscreener (Playwright-based). Uses httpx for lighter HTTP
+Adapted from openscreener (Playwright-based). Uses httpx for lighter HTTP
 fetching and BeautifulSoup / stdlib html.parser for HTML parsing. Results are
 cached for 24 hours via StockCache (DuckDB-backed).
 
@@ -56,7 +56,7 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 # ---------------------------------------------------------------------------
-# Minimal HTML helpers (absorbed from openscreener parsers/_html.py)
+# Minimal HTML helpers (adapted from openscreener parsers/_html.py)
 # ---------------------------------------------------------------------------
 
 
@@ -151,7 +151,7 @@ def _parse_html(html: str) -> _Node:
 
 
 # ---------------------------------------------------------------------------
-# Value parsing helpers (absorbed from openscreener parsers/_helpers.py)
+# Value parsing helpers (adapted from openscreener parsers/_helpers.py)
 # ---------------------------------------------------------------------------
 
 
@@ -234,7 +234,7 @@ class SearchResult:
 
 
 # ---------------------------------------------------------------------------
-# Screener page parsers (absorbed from openscreener parsers/)
+# Screener page parsers (adapted from openscreener parsers/)
 # ---------------------------------------------------------------------------
 
 

@@ -1,4 +1,4 @@
-"""Momentum strategies — absorbed from AlgoTrading repo (0018–0020, 0046–0055).
+"""Momentum strategies — adapted from AlgoTrading repo (0018–0020, 0046–0055).
 
 Strategies:
     MomentumStrategy       — Rate of change crosses zero (0018_ROC_Impulce)

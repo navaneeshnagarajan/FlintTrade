@@ -21,10 +21,11 @@ sanity check.
 **OpenClaw — optional:** only needed when AI-agent features are enabled
 in `~/.flinttrade/workspace.json`. Default install does not require it.
 
-**AlgoMirror is not on this list.** Its multi-account mirroring patterns
-are fully absorbed into `packages/services/ditto/` (PositionMirror, TrailingSLManager,
-MarginCalculator, RiskManager) and run in-process — FlintTrade does not
-call AlgoMirror at runtime. The upstream repo is not tracked or pulled.
+**AlgoMirror is not on this list.** Its multi-account mirroring patterns are
+reimplemented natively in `packages/services/ditto/` (PositionMirror,
+TrailingSLManager, MarginCalculator, RiskManager — our own code) and run
+in-process — FlintTrade does not call AlgoMirror at runtime. The upstream repo
+is not tracked or pulled.
 
 ## Runtime stack
 

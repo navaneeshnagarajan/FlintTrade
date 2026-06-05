@@ -1,6 +1,6 @@
 """4-layer tiered memory system for AI trading agents.
 
-Absorbs FinMem patterns: compound scoring, layer-differentiated importance,
+Adapts FinMem patterns: compound scoring, layer-differentiated importance,
 access-count reinforcement on correct predictions, and exponential recency decay.
 
 Layers:
@@ -174,7 +174,7 @@ def initial_importance(layer: MemoryLayer) -> float:
 class TradedMemory:
     """4-layer tiered memory with exponential recency decay and feedback reinforcement.
 
-    Absorbs FinMem patterns: compound scoring, layer-differentiated importance,
+    Adapts FinMem patterns: compound scoring, layer-differentiated importance,
     access-count reinforcement on correct predictions.
 
     One ChromaDB collection is created per layer, named

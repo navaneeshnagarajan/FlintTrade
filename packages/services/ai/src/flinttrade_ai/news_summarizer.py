@@ -1,6 +1,6 @@
 """AI-powered market news summarization for Indian markets.
 
-Absorbs FinSights patterns. Fetches RSS feeds from MoneyControl, ET Markets,
+Adapts FinSights patterns. Fetches RSS feeds from MoneyControl, ET Markets,
 LiveMint, extracts articles, and uses the configured LLM to generate
 pre-market/post-market/sector summaries.
 

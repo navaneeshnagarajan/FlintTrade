@@ -1,6 +1,6 @@
 """Lightweight multi-agent swarm task executor.
 
-Absorbs the DAG orchestration pattern from Vibe-Trading's SwarmRuntime:
+Adapts the DAG orchestration pattern from Vibe-Trading's SwarmRuntime:
 topological layering (Kahn's algorithm), parallel execution of independent
 tasks via ``asyncio.gather``, upstream result injection, and SSE-ready event
 emission — but adapted to FlintTrade's async-first architecture and existing

@@ -11,7 +11,7 @@
  * Data flow:
  *   GET /ft-api/api/v1/sectors/rotation → TanStack Query (5 min stale)
  *
- * Design absorbed from:
+ * Design adapted from:
  *   - etftracker Dashboard4_IndiaSectors: heatmap tile approach
  *   - SectorTab.tsx: sort-header pattern, GlassCard usage
  *

@@ -1,6 +1,6 @@
 """Event-driven backtesting simulator.
 
-Absorbs openengine architecture. Feeds historical bars to a BaseStrategy,
+Adapts openengine architecture. Feeds historical bars to a BaseStrategy,
 simulates order execution with configurable slippage/commission, and tracks
 equity curve, positions, trades, and cash balance.
 

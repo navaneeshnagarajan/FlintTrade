@@ -2,7 +2,7 @@
  * nodeRegistry.ts — Node category definitions, metadata descriptors, and lookup maps.
  *
  * Single source of truth for all 54 flow builder nodes.
- * Absorbed from openalgo-flow node registry.
+ * Adapted from openalgo-flow node registry.
  *
  * Pattern: metadata-driven node rendering (inspired by n8n).
  * Every node type carries full field descriptors so ConfigPanel can render

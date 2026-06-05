@@ -1,11 +1,11 @@
 """Per-account and aggregate risk monitoring.
 
-Absorbs AlgoMirror's risk_manager.py patterns. Tracks daily P&L, position
+Adapts AlgoMirror's risk_manager.py patterns. Tracks daily P&L, position
 counts, margin utilization, and trade quality per account. Auto-pauses
 accounts when risk thresholds are breached.
 
 Also provides :class:`RiskEvent` — a structured audit record for every risk
-threshold breach, absorbed from AlgoMirror's ``RiskEvent`` SQLAlchemy model
+threshold breach, adapted from AlgoMirror's ``RiskEvent`` SQLAlchemy model
 (app/models.py ~line 893) and adapted as a pure-Python dataclass for
 FlintTrade's non-ORM architecture.
 """
@@ -385,7 +385,7 @@ class RiskManager:
 class RiskEventType(StrEnum):
     """Category of risk threshold that was breached.
 
-    Absorbed from AlgoMirror's ``RiskEvent.event_type`` column choices
+    Adapted from AlgoMirror's ``RiskEvent.event_type`` column choices
     (app/models.py ~line 903).
     """
 
@@ -428,7 +428,7 @@ class RiskActionTaken(StrEnum):
 class RiskEvent:
     """Structured audit record for a single risk threshold breach.
 
-    Absorbed from AlgoMirror's SQLAlchemy ``RiskEvent`` model
+    Adapted from AlgoMirror's SQLAlchemy ``RiskEvent`` model
     (app/models.py ~line 893) and re-implemented as a pure-Python dataclass
     for FlintTrade's non-ORM architecture.
 

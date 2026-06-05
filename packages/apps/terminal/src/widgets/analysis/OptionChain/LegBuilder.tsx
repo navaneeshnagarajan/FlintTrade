@@ -1,7 +1,7 @@
 /**
  * LegBuilder — multi-leg option strategy builder panel.
  *
- * Absorbed from openalgo-chart OptionChainPicker/strategyTemplates patterns,
+ * Adapted from openalgo-chart OptionChainPicker/strategyTemplates patterns,
  * ported to TypeScript strict mode with FlintTrade design tokens and shadcn/ui.
  *
  * Features:
@@ -95,7 +95,7 @@ export interface LegBuilderProps {
 }
 
 // ---------------------------------------------------------------------------
-// Strategy templates (absorbed from openalgo-chart strategyTemplates.js)
+// Strategy templates (adapted from openalgo-chart strategyTemplates.js)
 // ---------------------------------------------------------------------------
 
 const STRATEGY_TEMPLATES: Record<string, StrategyTemplate> = {

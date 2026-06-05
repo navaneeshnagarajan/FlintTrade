@@ -9,7 +9,7 @@
  * showing individual stock positions within that sector, fetched from
  * GET /ft-api/v1/screener/sector-constituents?sector=<symbol>.
  *
- * Absorbed pattern: RRGCanvas draw loop from RRGCanvas.tsx.
+ * Adapted pattern: RRGCanvas draw loop from RRGCanvas.tsx.
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";

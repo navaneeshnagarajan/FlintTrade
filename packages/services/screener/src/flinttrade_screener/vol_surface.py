@@ -41,7 +41,7 @@ def _norm_cdf(x: float) -> float:
 
 
 def _black76_call(F: float, K: float, T: float, sigma: float) -> float:
-    """Black-76 call price (assumes r absorbed into forward price).
+    """Black-76 call price (assumes r adapted into forward price).
 
     Args:
         F: Forward price.

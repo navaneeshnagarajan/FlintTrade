@@ -1,6 +1,6 @@
 """Market regime detector using ADX, Bollinger Bands, and ATR.
 
-Absorbed from LLM-TradeBot's regime_detector_agent pattern:
+Adapted from LLM-TradeBot's regime_detector_agent pattern:
 combines directional-strength (ADX), volatility-spread (BB width),
 and volatility-trend (ATR slope) into 6 mutually-exclusive regime
 states that downstream strategies and the AI advisor use to adapt

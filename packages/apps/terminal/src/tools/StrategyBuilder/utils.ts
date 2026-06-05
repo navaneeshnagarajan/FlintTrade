@@ -1,11 +1,11 @@
 // Pure utility functions for StrategyBuilder — extracted from StrategyBuilderTool.tsx
-// Absorbed patterns from openalgo-chart/src/services/strategyTemplates.js
+// Adapted patterns from openalgo-chart/src/services/strategyTemplates.js
 
 import { formatCurrency as formatINRCanonical } from "@/lib/formatters";
 
 import type { Leg, PayoffPoint, EquityPoint, PerfMetrics, Underlying } from "./types";
 
-// Absorbed from strategyTemplates.js — calculateNetPremium
+// Adapted from strategyTemplates.js — calculateNetPremium
 export function calculateNetPremium(legs: Leg[]): number {
   return legs.reduce((total, leg) => {
     const multiplier = leg.action === "BUY" ? 1 : -1;
@@ -13,7 +13,7 @@ export function calculateNetPremium(legs: Leg[]): number {
   }, 0);
 }
 
-// Absorbed from strategyTemplates.js — validateStrategy
+// Adapted from strategyTemplates.js — validateStrategy
 export function validateLegs(legs: Leg[]): { valid: boolean; error: string | null } {
   if (legs.length < 1) return { valid: false, error: "Add at least one leg" };
   if (legs.length > 6) return { valid: false, error: "Maximum 6 legs allowed" };
@@ -55,7 +55,7 @@ export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
   return points;
 }
 
-// SPAN margin estimate (simplified — absorbed from openalgo-chart PositionTracker margin concept)
+// SPAN margin estimate (simplified — adapted from openalgo-chart PositionTracker margin concept)
 // Use 15% of notional for sold options, 100% premium for bought
 export function estimateMargin(legs: Leg[], underlying: Underlying): number {
   const notionalPerUnit = 20000; // approximate index unit value for NIFTY

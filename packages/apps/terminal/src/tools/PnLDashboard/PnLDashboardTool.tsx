@@ -1,4 +1,4 @@
-// Absorbed patterns from:
+// Adapted patterns from:
 //   etftracker/frontend/src/pages/Dashboard1_AssetQuilt.tsx — heatmap color scale concept (green/red/gray grid cells)
 //   tier1-core/openalgo/frontend/src/pages/PnLTracker.tsx — daily/weekly/monthly summary cards, drawdown calc
 //   trading-journal/frontend/app/dashboard/analytics/page.tsx — symbol breakdown bar chart pattern
@@ -45,7 +45,7 @@ function pnlClass(v: number) {
   return "text-text-secondary";
 }
 
-// Calendar heatmap cell color (absorbed from etftracker heatmap colorscale concept)
+// Calendar heatmap cell color (adapted from etftracker heatmap colorscale concept)
 function heatmapColor(pnl: number, maxAbs: number): string {
   if (maxAbs === 0) return "bg-surface-elevated";
   const ratio = Math.abs(pnl) / maxAbs;
@@ -429,7 +429,7 @@ function CalendarTab({ trades }: { trades: Trade[] }) {
         ))}
       </div>
 
-      {/* Calendar heatmap — absorbed from etftracker heatmap color concept */}
+      {/* Calendar heatmap — adapted from etftracker heatmap color concept */}
       {months.map(({ year, month, label }) => {
         const firstDay = new Date(year, month, 1);
         const lastDay = new Date(year, month + 1, 0);

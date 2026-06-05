@@ -1,6 +1,6 @@
 """Trailing stop loss manager.
 
-Absorbs AlgoMirror's supertrend.py patterns. Supports four trailing modes:
+Adapts AlgoMirror's supertrend.py patterns. Supports four trailing modes:
 1. Points-based: trail by N points from peak
 2. Percentage-based: trail by N% from peak
 3. Supertrend-based: Supertrend indicator as dynamic trailing SL

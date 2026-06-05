@@ -12,7 +12,7 @@ Additional capabilities:
 - Broker cost metadata on mirror configs for routing cost-aware decisions
 
 Uses ThreadPoolExecutor for parallel execution across accounts
-(absorbs AlgoMirror's strategy_executor.py pattern).
+(adapts AlgoMirror's strategy_executor.py pattern).
 """
 
 from __future__ import annotations

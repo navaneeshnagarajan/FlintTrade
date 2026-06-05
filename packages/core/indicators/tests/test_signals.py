@@ -222,7 +222,7 @@ class TestPivotLow:
 
 
 # ---------------------------------------------------------------------------
-# exrem (absorbed from pandas_signals_library)
+# exrem (adapted from pandas_signals_library)
 # ---------------------------------------------------------------------------
 
 

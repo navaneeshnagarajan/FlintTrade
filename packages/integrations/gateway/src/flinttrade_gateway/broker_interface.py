@@ -1,6 +1,6 @@
 """Broker Interface — Protocol, models, registry, and OpenAlgo concrete implementation.
 
-Absorbs patterns from openbull (per-broker plugin directory with standard interface)
+Adapts patterns from openbull (per-broker plugin directory with standard interface)
 and adapts them to FlintTrade's architecture where OpenAlgo is the single
 broker gateway layer.
 

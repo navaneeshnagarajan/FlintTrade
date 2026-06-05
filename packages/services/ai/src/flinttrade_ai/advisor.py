@@ -1,6 +1,6 @@
 """ML-based stock recommendation engine.
 
-Absorbs openadvisor CatBoost patterns. Combines fundamental features (PE, PB,
+Adapts openadvisor CatBoost patterns. Combines fundamental features (PE, PB,
 ROE), technical features (trend, momentum), and sentiment scores to rank stocks
 and generate portfolio suggestions.
 """

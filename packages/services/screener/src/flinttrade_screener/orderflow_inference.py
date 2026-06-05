@@ -1,6 +1,6 @@
 """Order flow inference — infers buy/sell aggression from tick data.
 
-Pattern absorbed from order-flow-chart repo:
+Pattern adapted from order-flow-chart repo:
 - Compare LTP movement direction with volume delta tick-by-tick
 - LTP up + volume increase → likely buy aggression
 - LTP down + volume increase → likely sell aggression

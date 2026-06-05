@@ -1,4 +1,4 @@
-"""Volatility-based strategies — absorbed from AlgoTrading repo (0036–0045).
+"""Volatility-based strategies — adapted from AlgoTrading repo (0036–0045).
 
 Strategies:
     ATRBreakoutStrategy            — ATR expansion + price vs SMA direction (0036_ATR_Expansion)

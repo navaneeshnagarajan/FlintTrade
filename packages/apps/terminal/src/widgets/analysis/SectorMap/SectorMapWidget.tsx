@@ -5,7 +5,7 @@
  * Treemap algorithm: FlintTrade's own squarified implementation (see ./treemapLayout.ts)
  * Color helpers:    openalgo-chart/src/components/SectorHeatmap/utils/heatmapHelpers.ts
  * Constants:        openalgo-chart/src/components/SectorHeatmap/constants/heatmapConstants.ts
- * RRG view:         absorbed from sector-rotation-map reference repo
+ * RRG view:         adapted from sector-rotation-map reference repo
  *
  * Adaptations for FlintTrade:
  * - CSS Modules → Tailwind CSS v4
@@ -112,7 +112,7 @@ function SectorMapWidget(_props: WidgetProps) {
 
   const { data: positionsData } = usePositions();
 
-  // Memoized callback ref for treemap container (absorbed from source)
+  // Memoized callback ref for treemap container (adapted from source)
   const setTreemapRef = useCallback((node: HTMLDivElement | null): void => {
     if (resizeObserverRef.current) {
       resizeObserverRef.current.disconnect();

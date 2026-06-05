@@ -418,18 +418,18 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "WheelStrategy": WheelStrategy,
     "IndianShortStraddle": IndianShortStraddle,
     # User's personal strategy (in ema_supertrend_dema.py)
-    # Momentum — absorbed batch (2 new)
+    # Momentum — adapted batch (2 new)
     "LaguerreRSI": LaguerreRSI,
     "ElderImpulse": ElderImpulse,
-    # Mean Reversion — absorbed batch (2 new)
+    # Mean Reversion — adapted batch (2 new)
     "ZScoreMeanReversion": ZScoreMeanReversion,
     "PivotPointReversion": PivotPointReversion,
-    # Volatility — absorbed batch (2 new)
+    # Volatility — adapted batch (2 new)
     "VCPBreakout": VCPBreakout,
     "IndiaVIXRegime": IndiaVIXRegime,
-    # Volume — absorbed batch (1 new)
+    # Volume — adapted batch (1 new)
     "VWMACrossover": VWMACrossover,
-    # Pattern — absorbed batch (2 legacy + 4 new candlestick)
+    # Pattern — adapted batch (2 legacy + 4 new candlestick)
     "EngulfingPattern": EngulfingPattern,
     "HammerShootingStar": HammerShootingStar,
     "DojiReversal": DojiReversal,
@@ -438,7 +438,7 @@ ALL_STRATEGIES: dict[str, type[_BaseStrategy]] = {
     "ThreeWhiteSoldiers": ThreeWhiteSoldiers,
     # Momentum — MACD divergence
     "MACDDivergence": MACDDivergence,
-    # Trend — absorbed batch (1 new)
+    # Trend — adapted batch (1 new)
     "TripleMA": TripleMA,
     # -----------------------------------------------------------------------
     # NEW BATCH — 43 additional strategies (~100 total)

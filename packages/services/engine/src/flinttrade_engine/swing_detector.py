@@ -1,6 +1,6 @@
 """Swing high / swing low detector for OHLCV data.
 
-Implements the watch-based confirmation system absorbed from
+Implements the watch-based confirmation system adapted from
 nifty-trading-railway. A swing is only confirmed after two independent
 "watch" events validate that the candidate bar was a true turning point.
 

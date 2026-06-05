@@ -1077,7 +1077,7 @@ def ditto_kill_all() -> tuple[Any, int]:
 
 
 # NOTE: The /ditto/algomirror/status route was removed 2026-04-30.
-# AlgoMirror's mirroring logic is fully absorbed into packages/services/ditto/
+# AlgoMirror's mirroring logic is fully adapted into packages/services/ditto/
 # (PositionMirror, TrailingSLManager, MarginCalculator, RiskManager) and
 # runs in-process — no separately-deployed AlgoMirror to query.
 

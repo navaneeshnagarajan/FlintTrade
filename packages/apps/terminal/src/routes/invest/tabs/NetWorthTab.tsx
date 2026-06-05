@@ -5,7 +5,7 @@
  * per-asset-class status cards. Equity + Cash live from OpenAlgo;
  * other asset classes show "Not connected" with a disabled Add button.
  *
- * Absorbed pattern from etftracker Dashboard3_SectorRotation: side-by-side
+ * Adapted pattern from etftracker Dashboard3_SectorRotation: side-by-side
  * donut + legend layout with category pills below.
  */
 

@@ -1,6 +1,6 @@
 """Scheduled news polling for FlintTrade AI.
 
-Absorbed from FinSights/app/services/scheduler.py:
+Adapted from FinSights/app/services/scheduler.py:
 - APScheduler-style async scheduling pattern (re-implemented with asyncio)
 - Job registry with enable/disable toggle
 - TTL-based deduplication cache

@@ -1,6 +1,6 @@
 """Post-trade reflection loop for extracting and storing trading lessons.
 
-Absorbs TradingAgents reflection.py pattern: after a trade closes, the LLM
+Adapts TradingAgents reflection.py pattern: after a trade closes, the LLM
 reviews the original analysis alongside the actual outcome, extracts a
 concise actionable lesson, and stores it in the REFLECTION layer of
 TradedMemory so future analysis can benefit from accumulated experience.
@@ -59,7 +59,7 @@ class TradeOutcome:
 class TradeReflector:
     """Post-trade reflection loop.
 
-    Absorbs TradingAgents pattern: after a trade closes, an LLM reviews the
+    Adapts TradingAgents pattern: after a trade closes, an LLM reviews the
     original analysis together with the actual outcome, extracts a lesson, and
     stores it in TradedMemory's REFLECTION layer.  The lesson is also used to
     reinforce or weaken the importance of memories that contributed to the

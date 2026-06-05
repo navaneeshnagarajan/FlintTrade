@@ -80,7 +80,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `screener` | services | Py | Option chain, OI/PCR/max-pain, IV smile, futures quadrant, portfolio Greeks, RRG, FII/DII |
 | `backtest` | services | Py | Event-driven simulator, 94 templates, walk-forward, Monte Carlo, VectorBT |
 | `ai` | services | Py | Multi-provider LLM client, ChromaDB RAG, ML signals, multi-agent team, sentiment, OpenClaw bridge |
-| `ditto` | services | Py | Multi-account mirror, margin calc, trailing SL, risk manager (AlgoMirror patterns absorbed) |
+| `ditto` | services | Py | Multi-account mirror, margin calc, trailing SL, risk manager (AlgoMirror patterns reimplemented natively) |
 | `automation` | services | Py | Cron, Telegram bot (kill switch), post-market analysis, voice orders |
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (32 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
@@ -122,7 +122,7 @@ Apply to anyone touching the order/data path (the OpenAlgo bridge adapter):
 
 ## External test deps (not bundled)
 
-OpenAlgo and OpenClaw are external services (formerly submodules). For local testing, `scripts/setup-test-deps.sh` clones them into `.local/external/` (gitignored). AlgoMirror is intentionally absent: its patterns are absorbed in-process by `packages/services/ditto/`.
+OpenAlgo and OpenClaw are external services (formerly submodules). For local testing, `scripts/setup-test-deps.sh` clones them into `.local/external/` (gitignored). AlgoMirror is intentionally absent: its patterns are reimplemented natively in `packages/services/ditto/` (our own code).
 
 ## Working style (this repo)
 

@@ -1,6 +1,6 @@
 """Reconciliation engine — compare broker state vs local state to detect drift.
 
-Absorbed from openalgo-execution-system audit: in live trading, the local
+Adapted from openalgo-execution-system audit: in live trading, the local
 in-memory view of positions and orders can diverge from the broker's actual
 state due to network failures, race conditions, partial fills, or broker-side
 modifications. Detecting this drift early prevents acting on stale data.
@@ -71,7 +71,7 @@ class MismatchKind(StrEnum):
     CLOSED_MANUAL = "closed_manual"
     """Position was open in local state but broker reports zero or missing quantity —
     the position was closed externally (manually by the trader or by the broker's
-    risk system).  Absorbed from openalgo-execution-system reconciliation loop."""
+    risk system).  Adapted from openalgo-execution-system reconciliation loop."""
 
 
 @dataclass
@@ -316,7 +316,7 @@ class ReconciliationEngine:
 
                 # Non-zero local position not found in broker positionbook —
                 # the position was closed externally (manually or by broker
-                # risk system).  Absorbed from openalgo-execution-system.
+                # risk system).  Adapted from openalgo-execution-system.
                 mismatches.append(Mismatch(
                     kind=MismatchKind.CLOSED_MANUAL,
                     symbol=sym,
@@ -447,7 +447,7 @@ class BackgroundReconciler:
     discrepancies.  Specially highlights :data:`MismatchKind.CLOSED_MANUAL`
     events — positions closed externally without FlintTrade's knowledge.
 
-    Absorbed from the 60-second reconciliation loop in
+    Adapted from the 60-second reconciliation loop in
     ``openalgo-execution-system/backend/engine/reconciliation.py``.
 
     Args:

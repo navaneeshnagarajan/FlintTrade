@@ -658,7 +658,7 @@ class OpenAlgoClient:
         payload = self._body({"symbol": symbol, "expiry": expiry})
         return await self._post("data/oiprofile", payload)
 
-    # ── New OpenAlgo endpoints (absorbed 2026-03-30) ──────────────────────
+    # ── New OpenAlgo endpoints (adapted 2026-03-30) ──────────────────────
 
     async def broker_capabilities(self) -> dict[str, Any]:
         """GET /api/broker/capabilities — broker exchange/feature metadata.

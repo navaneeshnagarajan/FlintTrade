@@ -469,9 +469,9 @@ into `.local/external/`.
 | OpenAlgo | `.local/external/openalgo/` | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) | Broker gateway. |
 | OpenClaw | `.local/external/openclaw/` | [openinterface-ai/openclaw](https://github.com/openinterface-ai/openclaw) | AI agent gateway. |
 
-AlgoMirror is intentionally absent — its mirroring patterns are absorbed
-in-process by `packages/services/ditto/` and the upstream repo is no longer
-tracked.
+AlgoMirror is intentionally absent — its mirroring patterns are reimplemented
+natively in `packages/services/ditto/` (our own code; the upstream repo is not
+tracked, pulled, or called at runtime).
 
 ### Scripts
 

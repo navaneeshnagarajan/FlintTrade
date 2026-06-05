@@ -3,7 +3,7 @@
 Captures option chain snapshots before expiry using OpenAlgo's ``optionchain``
 endpoint and stores them in DuckDB for historical analysis.
 
-Absorbs patterns from MarketCalls/ExpiryFlow:
+Adapts patterns from MarketCalls/ExpiryFlow:
 - DuckDB schema with composite primary keys and download metadata tracking
 - Date-chunked downloads with skip-if-exists deduplication
 - Thread-safe rate limiting for broker API calls
@@ -37,7 +37,7 @@ logger = logging.getLogger("flinttrade.historical.expiry_tracker")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # ---------------------------------------------------------------------------
-# Rate limiter (absorbed from ExpiryFlow's DataApiRateLimiter)
+# Rate limiter (adapted from ExpiryFlow's DataApiRateLimiter)
 # ---------------------------------------------------------------------------
 
 _MAX_DAYS_PER_CHUNK = 30
@@ -47,7 +47,7 @@ class SnapshotRateLimiter:
     """Thread-safe rate limiter for snapshot capture API calls.
 
     Prevents overwhelming the broker API when bulk-capturing snapshots.
-    Pattern absorbed from ExpiryFlow's ``DataApiRateLimiter``.
+    Pattern adapted from ExpiryFlow's ``DataApiRateLimiter``.
 
     Args:
         max_per_second: Maximum API calls per second.
@@ -341,7 +341,7 @@ class ExpiryTracker:
         return records
 
     # ------------------------------------------------------------------
-    # Download metadata (absorbed from ExpiryFlow)
+    # Download metadata (adapted from ExpiryFlow)
     # ------------------------------------------------------------------
 
     def has_snapshot(
@@ -352,7 +352,7 @@ class ExpiryTracker:
     ) -> bool:
         """Check whether a snapshot already exists for this symbol/expiry.
 
-        Absorbed from ExpiryFlow's ``_has_data`` skip-if-exists pattern:
+        Adapted from ExpiryFlow's ``_has_data`` skip-if-exists pattern:
         avoids redundant API calls when data has already been captured.
 
         Args:
@@ -398,7 +398,7 @@ class ExpiryTracker:
     def get_download_history(self, limit: int = 100) -> list[dict[str, Any]]:
         """Return recent download metadata records.
 
-        Absorbed from ExpiryFlow's ``get_download_history``.
+        Adapted from ExpiryFlow's ``get_download_history``.
 
         Args:
             limit: Maximum number of records to return.
@@ -418,7 +418,7 @@ class ExpiryTracker:
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
     # ------------------------------------------------------------------
-    # Bulk capture (absorbed from ExpiryFlow's download_service)
+    # Bulk capture (adapted from ExpiryFlow's download_service)
     # ------------------------------------------------------------------
 
     def capture_multiple(
@@ -430,7 +430,7 @@ class ExpiryTracker:
     ) -> dict[str, int]:
         """Capture snapshots for multiple expiries with rate limiting.
 
-        Absorbed from ExpiryFlow's ``run_download_job`` pattern:
+        Adapted from ExpiryFlow's ``run_download_job`` pattern:
         - Iterates over expiries
         - Skips already-downloaded data
         - Rate-limits API calls

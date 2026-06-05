@@ -1,4 +1,4 @@
-// Absorbed patterns from:
+// Adapted patterns from:
 //   trading-journal/frontend/app/dashboard/portfolios/[id]/page.tsx — TradesTable, win/loss stat cards
 //   trading-journal/frontend/app/dashboard/analytics/page.tsx — analytics metrics, formatINR pattern
 

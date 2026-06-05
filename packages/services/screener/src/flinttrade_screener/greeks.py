@@ -1,6 +1,6 @@
 """Portfolio-level Greeks calculator.
 
-Absorbs openalgo-portfoliogreeks patterns. Supports:
+Adapts openalgo-portfoliogreeks patterns. Supports:
 - Fetching Greeks via OpenAlgo /api/v1/optiongreeks and /api/v1/multioptiongreeks
 - Position-aware signs: BUY CE = +delta, SELL CE = -delta, BUY PE = -delta, SELL PE = +delta
 - Aggregate Delta, Gamma, Theta, Vega across entire portfolio

@@ -1,6 +1,6 @@
 // LegsTab — leg builder for StrategyBuilder
 // Extracted from StrategyBuilderTool.tsx
-// Absorbed patterns from openalgo-chart/src/components/OptionChainPicker/OptionChainPicker.jsx
+// Adapted patterns from openalgo-chart/src/components/OptionChainPicker/OptionChainPicker.jsx
 
 import { Brain, Plus, Trash2, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -90,7 +90,7 @@ export function LegsTab({
         )}
       </div>
 
-      {/* Template quick-apply bar — absorbed from OptionChainPicker strategy template buttons */}
+      {/* Template quick-apply bar — adapted from OptionChainPicker strategy template buttons */}
       <div className="flex items-center gap-1 px-3 flex-wrap">
         {Object.entries(STRATEGY_TEMPLATES).map(([key, tmpl]) => (
           <Button

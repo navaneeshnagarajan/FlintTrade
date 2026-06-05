@@ -1,4 +1,4 @@
-"""Trend-following strategies — absorbed from AlgoTrading repo (0001–0015, 0022).
+"""Trend-following strategies — adapted from AlgoTrading repo (0001–0015, 0022).
 
 Strategies:
     SupertrendStrategy        — Supertrend crossover (0010_Super_Trend)

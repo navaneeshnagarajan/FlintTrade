@@ -46,7 +46,7 @@ export type Underlying = {
   strikeGap: number;
 };
 
-// STRATEGY_TEMPLATES absorbed from openalgo-chart/src/services/strategyTemplates.js
+// STRATEGY_TEMPLATES adapted from openalgo-chart/src/services/strategyTemplates.js
 export const STRATEGY_TEMPLATES: Record<
   string,
   { name: string; description: string; legs: { action: Direction; optionType: OptionType; strikeOffset: number; lots: number }[] }

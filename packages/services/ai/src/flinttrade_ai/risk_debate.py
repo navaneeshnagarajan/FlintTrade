@@ -1,6 +1,6 @@
 """Multi-round risk debate with three adversarial perspectives.
 
-Absorbs TradingAgents' risk debate pattern: three LLM-driven debaters
+Adapts TradingAgents' risk debate pattern: three LLM-driven debaters
 (Aggressive, Conservative, Neutral) argue iteratively over a proposed
 trade.  Each debater reads and directly counters the others' arguments.
 A judge synthesises the final recommendation after N rounds.
@@ -145,7 +145,7 @@ class RiskDebate:
     proposal over ``rounds`` iterations, each reading and countering the
     others.  A Judge then synthesises the full transcript into a verdict.
 
-    Absorbs TradingAgents' debate pattern: the key innovation is that each
+    Adapts TradingAgents' debate pattern: the key innovation is that each
     debater sees the *current* arguments of the other two, creating genuine
     adversarial refinement rather than one-shot opinions.
 

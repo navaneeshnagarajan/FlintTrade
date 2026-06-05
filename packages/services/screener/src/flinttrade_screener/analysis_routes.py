@@ -1051,7 +1051,7 @@ def _make_sample_chains_by_expiry(
 
 
 # ---------------------------------------------------------------------------
-# FII/DII endpoint (absorbed from MarketCalls/fii-dii-data)
+# FII/DII endpoint (adapted from MarketCalls/fii-dii-data)
 # ---------------------------------------------------------------------------
 
 
@@ -1060,7 +1060,7 @@ def fii_dii_endpoint() -> Any:
     """FII/DII institutional flow data.
 
     Fetches latest FII/DII cash and F&O data from NSE, caches in DuckDB,
-    and returns the result.  Pattern absorbed from MarketCalls/fii-dii-data.
+    and returns the result.  Pattern adapted from MarketCalls/fii-dii-data.
 
     Query params:
         days (int): Number of days for trend data (default 1 = latest only).

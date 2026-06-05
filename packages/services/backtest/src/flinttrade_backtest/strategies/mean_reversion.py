@@ -1,4 +1,4 @@
-"""Mean-reversion strategies — absorbed from AlgoTrading repo (0016–0031, 0058).
+"""Mean-reversion strategies — adapted from AlgoTrading repo (0016–0031, 0058).
 
 Strategies:
     RSIStrategy              — RSI crossover from oversold/overbought zones (0058_RSI_Overbought_Oversold)

@@ -1,6 +1,6 @@
 """Order flow tick aggregator — converts raw ticks into footprint chart data.
 
-Absorbs pattern from .local/reference/repos/tier2-ecosystem/order-flow-chart/app.py:
+Adapts pattern from .local/reference/repos/tier2-ecosystem/order-flow-chart/app.py:
 - Time-bucket quantization
 - Price-level rounding
 - LTP direction → BUY/SELL classification

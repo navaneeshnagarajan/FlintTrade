@@ -8,7 +8,7 @@ Extends the core ``greeks.py`` module with:
 - Put-Call ratio derived from portfolio positions
 - Enhanced max pain calculation (full pain surface, not just minimum)
 
-Absorbs patterns from openalgo-portfoliogreeks:
+Adapts patterns from openalgo-portfoliogreeks:
 - rho calculation via Black-Scholes
 - lot-size lookup via OpenAlgo API (with fallback to LOT_SIZES map)
 - position-aware sign rules (BUY CE = +delta, SELL PE = +delta, etc.)

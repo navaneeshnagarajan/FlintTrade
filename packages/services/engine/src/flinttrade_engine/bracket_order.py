@@ -4,7 +4,7 @@ Places the entry order immediately via OpenAlgo, then registers SL and target
 legs as GTT-style limit orders once the entry is confirmed filled.  All three
 legs are tracked together under a single bracket_id.
 
-Absorbed from the algosattva bracket order pattern.
+Adapted from the algosattva bracket order pattern.
 """
 
 from __future__ import annotations
