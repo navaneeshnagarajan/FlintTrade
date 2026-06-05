@@ -306,6 +306,19 @@ def from_dhan_expiry_list(resp: Any) -> list[str]:
     return []
 
 
+def from_dhan_statement_list(resp: Any) -> list[dict[str, Any]]:
+    """Unwrap a Dhan statement response (trade history / ledger) to a row list.
+
+    Statement rows are returned as the broker provides them (informational
+    reads), so we surface the unwrapped ``data`` list rather than imposing a
+    bespoke normalisation that could mis-key the many statement columns.
+    """
+    data = unwrap(resp)
+    if isinstance(data, dict):
+        data = data.get("data", [])
+    return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+
 def to_modify_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into ``dhanhq.modify_order`` keyword args."""
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))

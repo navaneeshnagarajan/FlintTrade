@@ -48,6 +48,16 @@ class MockDhan:
         self.calls.append(("kill", action))
         return {"status": "success", "data": {"killSwitchStatus": action}}
 
+    def get_trade_history(self, from_date, to_date, page_number):
+        self.calls.append(("trade_history", (from_date, to_date, page_number)))
+        return {"status": "success", "data": [
+            {"orderId": "1", "customSymbol": "TCS", "tradedQuantity": 5, "tradedPrice": 3499},
+        ]}
+
+    def ledger_report(self, from_date, to_date):
+        self.calls.append(("ledger", (from_date, to_date)))
+        return {"status": "success", "data": [{"voucherdate": "2026-06-01", "debit": 0, "credit": 5000}]}
+
     def modify_order(self, **kw):
         self.calls.append(("modify", kw))
         return {"status": "success", "data": {"orderId": "OID1"}}
@@ -280,6 +290,18 @@ async def test_expiry_list_returns_dates():
     session = await _session(adapter)
     expiries = await adapter.expiry_list(session, "NIFTY", "NSE_INDEX")
     assert expiries == ["2026-06-26", "2026-07-31"]
+
+
+@pytest.mark.asyncio
+async def test_trade_history_and_ledger_reads():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    trades = await adapter.trade_history(session, "2026-06-01", "2026-06-05", 0)
+    assert len(trades) == 1 and trades[0]["customSymbol"] == "TCS"
+    assert mock.calls[0] == ("trade_history", ("2026-06-01", "2026-06-05", 0))
+    ledger = await adapter.ledger(session, "2026-06-01", "2026-06-05")
+    assert len(ledger) == 1 and ledger[0]["credit"] == 5000
 
 
 @pytest.mark.asyncio

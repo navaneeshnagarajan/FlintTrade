@@ -21,6 +21,7 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     to_candles_dict,
     from_dhan_expiry_list,
     from_dhan_margin,
+    from_dhan_statement_list,
     to_margin_kwargs,
     to_forever_kwargs,
     to_modify_order_kwargs,
@@ -144,6 +145,13 @@ def test_expiry_list_parse():
     assert from_dhan_expiry_list({"status": "success", "data": {"data": ["2026-06-26", "2026-07-31"]}}) == \
         ["2026-06-26", "2026-07-31"]
     assert from_dhan_expiry_list({"status": "success", "data": []}) == []
+
+
+def test_statement_list_parse():
+    rows = from_dhan_statement_list({"status": "success", "data": [{"a": 1}, "junk", {"b": 2}]})
+    assert rows == [{"a": 1}, {"b": 2}]  # only dict rows survive
+    assert from_dhan_statement_list({"status": "success", "data": []}) == []
+    assert from_dhan_statement_list({"status": "error"}) == []
 
 
 def test_modify_order_kwargs():

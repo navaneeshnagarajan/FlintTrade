@@ -356,6 +356,18 @@ class DhanAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).expiry_list, security_id, segment)
         return M.from_dhan_expiry_list(resp)
 
+    async def trade_history(
+        self, session: Session, from_date: str, to_date: str, page: int = 0
+    ) -> list[dict]:
+        """Historical trade statement for a date range (Dhan ``/trades``) — a read."""
+        resp = await self._call(self._client(session).get_trade_history, from_date, to_date, page)
+        return M.from_dhan_statement_list(resp)
+
+    async def ledger(self, session: Session, from_date: str, to_date: str) -> list[dict]:
+        """Ledger / funds statement for a date range (Dhan ledger report) — a read."""
+        resp = await self._call(self._client(session).ledger_report, from_date, to_date)
+        return M.from_dhan_statement_list(resp)
+
     async def kill_switch(self, session: Session, action: str) -> dict:
         """Toggle Dhan's broker-side kill switch (``ACTIVATE`` disables trading for
         the day; ``DEACTIVATE`` re-enables it). An account control, not an order —
