@@ -827,6 +827,34 @@ def ditto_accounts() -> tuple[Any, int]:
     return jsonify({"status": "success", "data": {"accounts": sample_accounts}}), 200
 
 
+@operations_bp.route("/accounts/status", methods=["GET"])
+def accounts_status() -> tuple[Any, int]:
+    """Consolidated Account Manager status — per-broker connection + daily reauth.
+
+    For each connected account, reports whether its OpenAlgo is reachable, the
+    broker session is authenticated today, and whether re-authentication is
+    required (a live ping; 200 = authenticated, 4xx = re-auth needed, connection
+    error = offline) — the data that drives the Account Manager's per-broker
+    reauth indicators and the OpenAlgo connection state.
+    """
+    try:
+        from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
+
+        with AccountManager() as mgr:
+            statuses = [s.to_dict() for s in mgr.account_status_all()]
+    except Exception as exc:
+        logger.warning("Account status fetch failed: %s", exc)
+        return jsonify({"status": "error", "message": "Account status unavailable"}), 503
+
+    summary = {
+        "total": len(statuses),
+        "connected": sum(1 for s in statuses if s["connected"]),
+        "authenticated": sum(1 for s in statuses if s["authenticated"]),
+        "needs_reauth": sum(1 for s in statuses if s["needs_reauth"]),
+    }
+    return jsonify({"status": "success", "data": {"accounts": statuses, "summary": summary}}), 200
+
+
 @operations_bp.route("/ditto/accounts", methods=["POST"])
 def ditto_account_create() -> tuple[Any, int]:
     """Create or update a Ditto managed OpenAlgo account."""

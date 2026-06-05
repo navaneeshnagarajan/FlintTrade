@@ -74,6 +74,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BrokerRecommendations } from "@/components/account/BrokerRecommendations";
+import { AccountStatusPanel } from "@/components/account/AccountStatusPanel";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -423,6 +424,9 @@ function AccountsTab() {
         />
         <SummaryCard label="Active Accounts" value={`${activeCount} / ${accounts.length}`} />
       </div>
+
+      {/* Connected brokers + daily reauth status + OpenAlgo connection state */}
+      <AccountStatusPanel />
 
       {/* Smart routing suggestions — which native broker for which job */}
       <BrokerRecommendations />

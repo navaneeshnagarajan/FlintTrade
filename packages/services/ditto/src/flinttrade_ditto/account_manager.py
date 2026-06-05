@@ -70,6 +70,31 @@ class AccountHealth:
     checked_at: str = ""
 
 
+@dataclass
+class AccountStatus:
+    """Consolidated connection + daily-reauth status for the Account Manager.
+
+    Derived from a live OpenAlgo ping: a 200 means the broker session is
+    authenticated today; a 4xx means it is reachable but needs re-auth; a
+    connection failure means it is offline.
+    """
+
+    account_id: str
+    name: str
+    enabled: bool
+    connected: bool = False       # OpenAlgo reachable (any HTTP response)
+    authenticated: bool = False   # broker session valid today (ping 200)
+    needs_reauth: bool = True     # daily re-auth required
+    latency_ms: float = 0.0
+    error: str = ""
+    checked_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        from dataclasses import asdict  # noqa: PLC0415
+
+        return asdict(self)
+
+
 # ---------------------------------------------------------------------------
 # Fernet encryption for API keys at rest
 # ---------------------------------------------------------------------------
@@ -296,6 +321,41 @@ class AccountManager:
         for account in self.get_enabled_accounts():
             results.append(self.health_check(account))
         return results
+
+    def connection_status(self, account: BrokerAccount) -> AccountStatus:
+        """Live connection + daily-reauth status for one account.
+
+        Pings the account's OpenAlgo and classifies the result so the Account
+        Manager can drive the operator: 200 = authenticated, 4xx = re-auth
+        required, connection error = offline.
+        """
+        import time  # noqa: PLC0415
+
+        status = AccountStatus(
+            account_id=account.account_id,
+            name=account.name,
+            enabled=account.enabled,
+            checked_at=datetime.now(IST).isoformat(),
+        )
+        url = f"{account.openalgo_host.rstrip('/')}/api/v1/ping"
+        try:
+            start = time.monotonic()
+            resp = self._http.post(url, json={"apikey": account.api_key})
+            status.latency_ms = round((time.monotonic() - start) * 1000, 1)
+            status.connected = True  # we got an HTTP response → reachable
+            if resp.status_code == 200:
+                status.authenticated = True
+                status.needs_reauth = False
+            else:
+                status.error = f"HTTP {resp.status_code}"
+        except Exception as exc:  # noqa: BLE001 - offline/connection error
+            status.connected = False
+            status.error = str(exc)
+        return status
+
+    def account_status_all(self) -> list[AccountStatus]:
+        """Consolidated status for every account (the Account Manager surface)."""
+        return [self.connection_status(a) for a in self.list_accounts()]
 
     # ------------------------------------------------------------------
     # Internal
