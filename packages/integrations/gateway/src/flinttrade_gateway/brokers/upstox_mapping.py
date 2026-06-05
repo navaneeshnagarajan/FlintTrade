@@ -192,3 +192,134 @@ def from_upstox_funds(resp: dict[str, Any]) -> dict[str, Any]:
         "total_balance": str(_num(available) + _num(used)),
         "extra": data,
     }
+
+
+# ---------------------------------------------------------------------------
+# Market data (quotes / historical candles / option chain)
+# ---------------------------------------------------------------------------
+
+# FlintTrade interval suffix -> Upstox v3 history (unit, interval) pair.
+# v3 ``get_historical_candle_data1(instrument_key, unit, interval, to, from)``
+# takes unit in {minutes, hours, days, weeks, months} + a numeric interval.
+_UNIT_BY_SUFFIX = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks", "mo": "months"}
+
+
+def to_history_params(req: dict[str, Any]) -> dict[str, Any]:
+    """Translate a FlintTrade historical ``req`` into Upstox v3 history kwargs.
+
+    Accepts ``interval`` like ``"1m"``, ``"3m"``, ``"15m"``, ``"1h"``, ``"1d"``,
+    ``"1w"``, ``"1mo"`` (or bare ``"day"``/``"week"``/``"month"``). Returns the
+    ``instrument_key`` (resolved by the adapter), ``unit``, ``interval`` (number
+    as string) and the ``to_date``/``from_date`` window.
+    """
+    raw = str(req.get("interval", req.get("timeframe", "1d"))).strip().lower()
+    named = {"day": ("days", "1"), "week": ("weeks", "1"), "month": ("months", "1")}
+    if raw in named:
+        unit, interval = named[raw]
+    else:
+        digits = "".join(c for c in raw if c.isdigit()) or "1"
+        suffix = "".join(c for c in raw if c.isalpha()) or "d"
+        unit = _UNIT_BY_SUFFIX.get(suffix, "days")
+        interval = digits
+    return {
+        "instrument_key": str(req.get("instrument_key", "")),
+        "unit": unit,
+        "interval": interval,
+        "to_date": req.get("to_date") or req.get("end") or req.get("end_date"),
+        "from_date": req.get("from_date") or req.get("start") or req.get("start_date"),
+    }
+
+
+def from_upstox_candles(symbol: str, exchange: str, interval: str, resp: dict[str, Any]) -> dict[str, Any]:
+    """Parse an Upstox history response into a FlintTrade ``Candles`` dict.
+
+    Upstox returns ``data.candles`` as arrays ordered
+    ``[timestamp, open, high, low, close, volume, open_interest]`` (newest first).
+    """
+    data = resp.get("data", {}) if isinstance(resp, dict) else {}
+    rows = data.get("candles", []) if isinstance(data, dict) else []
+    bars: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 5:
+            continue
+        bars.append({
+            "timestamp": str(row[0]),
+            "open": _num(row[1]),
+            "high": _num(row[2]),
+            "low": _num(row[3]),
+            "close": _num(row[4]),
+            "volume": int(_num(row[5])) if len(row) > 5 else 0,
+        })
+    return {"symbol": symbol, "exchange": exchange, "interval": interval, "bars": bars}
+
+
+def from_upstox_quote(rec: dict[str, Any]) -> dict[str, Any]:
+    """Parse one Upstox full-market-quote record into a FlintTrade ``Quote`` dict.
+
+    The full-quote payload keys each instrument by ``"EXCHANGE_SEG:SYMBOL"`` but
+    every record also carries its own ``symbol`` + ``instrument_token``, so the
+    record alone is enough. Bid/ask come from the top depth level.
+    """
+    ohlc = rec.get("ohlc", {}) if isinstance(rec.get("ohlc"), dict) else {}
+    depth = rec.get("depth", {}) if isinstance(rec.get("depth"), dict) else {}
+    buy = depth.get("buy", []) if isinstance(depth.get("buy"), list) else []
+    sell = depth.get("sell", []) if isinstance(depth.get("sell"), list) else []
+    bid = _num(buy[0].get("price")) if buy and isinstance(buy[0], dict) else 0.0
+    ask = _num(sell[0].get("price")) if sell and isinstance(sell[0], dict) else 0.0
+    return {
+        "symbol": rec.get("symbol", ""),
+        "exchange": _exchange_of_token(rec.get("instrument_token", "")),
+        "ltp": _num(rec.get("last_price")),
+        "open": _num(ohlc.get("open")),
+        "high": _num(ohlc.get("high")),
+        "low": _num(ohlc.get("low")),
+        "close": _num(ohlc.get("close")),
+        "volume": int(_num(rec.get("volume"))),
+        "bid": bid,
+        "ask": ask,
+        "prev_close": _num(ohlc.get("close")),
+        "oi": int(_num(rec.get("oi"))),
+    }
+
+
+def _leg(side: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one option-chain leg (market_data + option_greeks)."""
+    md = side.get("market_data", {}) if isinstance(side.get("market_data"), dict) else {}
+    gk = side.get("option_greeks", {}) if isinstance(side.get("option_greeks"), dict) else {}
+    return {
+        "ltp": _num(md.get("ltp")),
+        "oi": int(_num(md.get("oi"))),
+        "volume": int(_num(md.get("volume"))),
+        "iv": _num(gk.get("iv")),
+        "delta": _num(gk.get("delta")),
+        "gamma": _num(gk.get("gamma")),
+        "theta": _num(gk.get("theta")),
+        "vega": _num(gk.get("vega")),
+        "bid": _num(md.get("bid_price")),
+        "ask": _num(md.get("ask_price")),
+    }
+
+
+def to_option_chain_dict(underlying: str, exchange: str, resp: dict[str, Any]) -> dict[str, Any]:
+    """Parse an Upstox put/call option-chain response into a FlintTrade dict.
+
+    Upstox returns ``data`` as a list of strike rows, each with ``strike_price``,
+    ``call_options`` and ``put_options`` (each ``{market_data, option_greeks}``).
+    """
+    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    strikes: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        call = _leg(row.get("call_options", {}) if isinstance(row.get("call_options"), dict) else {})
+        put = _leg(row.get("put_options", {}) if isinstance(row.get("put_options"), dict) else {})
+        strikes.append({
+            "strike_price": _num(row.get("strike_price")),
+            "ce_ltp": call["ltp"], "ce_oi": call["oi"], "ce_volume": call["volume"], "ce_iv": call["iv"],
+            "ce_delta": call["delta"], "ce_gamma": call["gamma"], "ce_theta": call["theta"], "ce_vega": call["vega"],
+            "ce_bid": call["bid"], "ce_ask": call["ask"],
+            "pe_ltp": put["ltp"], "pe_oi": put["oi"], "pe_volume": put["volume"], "pe_iv": put["iv"],
+            "pe_delta": put["delta"], "pe_gamma": put["gamma"], "pe_theta": put["theta"], "pe_vega": put["vega"],
+            "pe_bid": put["bid"], "pe_ask": put["ask"],
+        })
+    return {"underlying": underlying, "exchange": exchange, "strikes": strikes}

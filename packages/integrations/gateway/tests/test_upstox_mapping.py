@@ -8,10 +8,14 @@ from flinttrade_core.models import Order
 from flinttrade_gateway.brokers.upstox_mapping import (
     UpstoxMappingError,
     extract_order_id,
+    from_upstox_candles,
     from_upstox_funds,
     from_upstox_order,
     from_upstox_position,
+    from_upstox_quote,
+    to_history_params,
     to_modify_order_params,
+    to_option_chain_dict,
     to_place_order_params,
 )
 
@@ -71,3 +75,56 @@ def test_from_upstox_order_position_funds():
 
     funds = from_upstox_funds({"status": "success", "data": {"equity": {"available_margin": 50000, "used_margin": 12000}}})
     assert funds["available_balance"] == "50000" and funds["used_margin"] == "12000"
+
+
+def test_to_history_params_minutes_named_and_default():
+    p = to_history_params({"interval": "15m", "from_date": "2025-01-01", "to_date": "2025-01-04", "instrument_key": "NSE_EQ|X"})
+    assert p["unit"] == "minutes" and p["interval"] == "15"
+    assert p["instrument_key"] == "NSE_EQ|X" and p["from_date"] == "2025-01-01"
+    assert to_history_params({"interval": "day"})["unit"] == "days"
+    assert to_history_params({"interval": "1h"})["unit"] == "hours"
+    assert to_history_params({})["unit"] == "days"  # default 1d
+
+
+def test_from_upstox_candles_array_order():
+    cd = from_upstox_candles("RELIANCE", "NSE", "1d", {"status": "success", "data": {"candles": [
+        ["2025-01-02T00:00:00+05:30", 100.0, 110.0, 95.0, 105.0, 1500, 0],
+        ["bad-row"],  # too short → skipped
+    ]}})
+    assert cd["symbol"] == "RELIANCE" and len(cd["bars"]) == 1
+    bar = cd["bars"][0]
+    assert bar["open"] == 100.0 and bar["high"] == 110.0 and bar["low"] == 95.0 and bar["close"] == 105.0
+    assert bar["volume"] == 1500
+
+
+def test_from_upstox_quote_uses_record_and_depth():
+    q = from_upstox_quote({
+        "symbol": "RELIANCE", "instrument_token": "NSE_EQ|INE002A01018", "last_price": 2905.5,
+        "volume": 120000, "oi": 0,
+        "ohlc": {"open": 2900, "high": 2920, "low": 2890, "close": 2899},
+        "depth": {"buy": [{"price": 2905.0, "quantity": 10}], "sell": [{"price": 2906.0, "quantity": 8}]},
+    })
+    assert q["symbol"] == "RELIANCE" and q["exchange"] == "NSE"
+    assert q["ltp"] == 2905.5 and q["bid"] == 2905.0 and q["ask"] == 2906.0
+    assert q["open"] == 2900.0 and q["volume"] == 120000
+
+
+def test_to_option_chain_dict_flattens_legs_and_greeks():
+    oc = to_option_chain_dict("NIFTY", "NSE_INDEX", {"status": "success", "data": [
+        {
+            "strike_price": 24000, "underlying_spot_price": 24050,
+            "call_options": {
+                "market_data": {"ltp": 120.5, "oi": 30000, "volume": 5000, "bid_price": 120.0, "ask_price": 121.0},
+                "option_greeks": {"iv": 13.2, "delta": 0.55, "gamma": 0.002, "theta": -8.1, "vega": 6.4},
+            },
+            "put_options": {
+                "market_data": {"ltp": 95.0, "oi": 28000, "volume": 4200, "bid_price": 94.5, "ask_price": 95.5},
+                "option_greeks": {"iv": 12.8, "delta": -0.45, "gamma": 0.002, "theta": -7.5, "vega": 6.1},
+            },
+        },
+    ]})
+    assert oc["underlying"] == "NIFTY" and len(oc["strikes"]) == 1
+    s = oc["strikes"][0]
+    assert s["strike_price"] == 24000.0
+    assert s["ce_ltp"] == 120.5 and s["ce_oi"] == 30000 and s["ce_iv"] == 13.2 and s["ce_delta"] == 0.55
+    assert s["pe_ltp"] == 95.0 and s["pe_delta"] == -0.45 and s["pe_bid"] == 94.5

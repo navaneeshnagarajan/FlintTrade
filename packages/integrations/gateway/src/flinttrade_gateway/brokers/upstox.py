@@ -11,10 +11,13 @@ models; ``login`` builds the live facade and tests inject a mock one. The adapte
 itself only depends on the facade's dict interface, so it is fully mock-testable
 without the SDK.
 
+Market data — quotes (full market quote), historical candles (v3 history) and
+the put/call option chain — is implemented too; only live tick streaming remains
+a separate wave. Response parsing lives in ``upstox_mapping`` and is unit-tested.
+
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8). The
 adapter is NOT registered in ``build_broker_router`` — it stays dormant until SDK
-attestation + credentials. Market data (quotes/historical/option_chain/stream) is
-a separate wave.
+attestation + credentials.
 """
 
 from __future__ import annotations
@@ -40,7 +43,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
     from flinttrade_gateway.reconciliation import ReconciliationReport
 
-_PENDING = "Upstox {0} — market-data/streaming wave pending live SDK verification"
+_PENDING = "Upstox {0} — streaming wave pending live SDK verification"
+
+
+def _split_symbol(raw: str) -> tuple[str, str]:
+    """Split a ``"NSE:RELIANCE"`` quote symbol into ``(exchange, name)``.
+
+    A bare symbol (no ``":"``) defaults to the NSE cash segment.
+    """
+    if ":" in raw:
+        exchange, name = raw.split(":", 1)
+        return exchange.strip().upper(), name.strip()
+    return "NSE", raw.strip()
 
 UPSTOX_CAPABILITIES = Capabilities(
     segments=(
@@ -95,6 +109,9 @@ class UpstoxClient:
         self._order = upstox_client.OrderApi(api)
         self._portfolio = upstox_client.PortfolioApi(api)
         self._user = upstox_client.UserApi(api)
+        self._market = upstox_client.MarketQuoteApi(api)
+        self._history = upstox_client.HistoryV3Api(api)
+        self._options = upstox_client.OptionsApi(api)
 
     def place_order(self, params: dict[str, Any]) -> dict[str, Any]:
         body = self._upstox.PlaceOrderRequest(**params)
@@ -121,6 +138,17 @@ class UpstoxClient:
 
     def funds(self) -> dict[str, Any]:
         return self._user.get_user_fund_margin(self._V).to_dict()
+
+    def full_quote(self, instrument_keys: str) -> dict[str, Any]:
+        return self._market.get_full_market_quote(instrument_keys, self._V).to_dict()
+
+    def historical(self, instrument_key: str, unit: str, interval: str, to_date: str, from_date: str) -> dict[str, Any]:
+        return self._history.get_historical_candle_data1(
+            instrument_key, unit, interval, to_date, from_date
+        ).to_dict()
+
+    def option_chain(self, instrument_key: str, expiry_date: str) -> dict[str, Any]:
+        return self._options.get_put_call_option_chain(instrument_key, expiry_date).to_dict()
 
 
 class UpstoxAdapter(BrokerAdapter):
@@ -246,16 +274,55 @@ class UpstoxAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).funds)
         return M.from_upstox_funds(resp)
 
-    # ---------- market data + streaming (separate wave) ----------
+    # ---------- market data ----------
 
     async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
-        raise NotImplementedError(_PENDING.format("quotes"))
+        from flinttrade_core.models import Quote  # noqa: PLC0415
+
+        # Resolve every symbol to its instrument key and batch into one request.
+        keys: list[str] = []
+        for raw in symbols:
+            exchange, name = _split_symbol(raw)
+            keys.append(self._resolve_instrument(name, exchange))
+        resp = await self._call(self._client(session).full_quote, ",".join(keys))
+        data = resp.get("data", {}) if isinstance(resp, dict) else {}
+        records = data.values() if isinstance(data, dict) else []
+        return [Quote(**M.from_upstox_quote(rec)) for rec in records if isinstance(rec, dict)]
 
     async def historical(self, session: Session, req: dict) -> Candles:
-        raise NotImplementedError(_PENDING.format("historical"))
+        from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
+
+        symbol = str(req.get("symbol", ""))
+        exchange = str(req.get("exchange", "NSE"))
+        interval = str(req.get("interval", req.get("timeframe", "1d")))
+        instrument_key = str(req.get("instrument_key") or self._resolve_instrument(symbol, exchange))
+        params = M.to_history_params({**req, "instrument_key": instrument_key})
+        resp = await self._call(
+            self._client(session).historical,
+            params["instrument_key"], params["unit"], params["interval"],
+            params["to_date"], params["from_date"],
+        )
+        cd = M.from_upstox_candles(symbol, exchange, interval, resp)
+        return Candles(
+            symbol=cd["symbol"], exchange=cd["exchange"], interval=cd["interval"],
+            bars=[OHLCV(**b) for b in cd["bars"]],
+        )
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
-        raise NotImplementedError(_PENDING.format("option_chain"))
+        from flinttrade_core.models import OptionChain, OptionChainStrike  # noqa: PLC0415
+
+        underlying = str(req.get("symbol") or req.get("underlying") or "")
+        exchange = str(req.get("exchange", "NSE_INDEX"))
+        expiry = str(req.get("expiry") or req.get("expiry_date") or "")
+        instrument_key = str(req.get("instrument_key") or self._resolve_instrument(underlying, exchange))
+        resp = await self._call(self._client(session).option_chain, instrument_key, expiry)
+        oc = M.to_option_chain_dict(underlying, exchange, resp)
+        return OptionChain(
+            underlying=oc["underlying"], exchange=oc["exchange"],
+            strikes=[OptionChainStrike(**s) for s in oc["strikes"]],
+        )
+
+    # ---------- streaming (separate wave) ----------
 
     def stream(self, session: Session) -> AsyncIterator[Any]:
         raise NotImplementedError(_PENDING.format("stream"))
