@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -387,6 +388,7 @@ def _dispatch_live_order(
     # so a dict would AttributeError at the broker boundary. gate_order mints and
     # the router re-verifies over the SAME typed_order object, keeping the
     # order-binding fingerprint consistent end-to-end.
+    _t0 = time.perf_counter()
     try:
         safety_ctx = gate_order(typed_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
         result = asyncio.run(
@@ -397,6 +399,19 @@ def _dispatch_live_order(
                 hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
             )
         )
+        # Feed the latency monitor (audit H5) — without this producer the order
+        # latency stats were empty forever. Best-effort: never let monitoring
+        # affect the order result.
+        try:
+            from .monitoring_routes import get_latency_tracker  # noqa: PLC0415
+
+            get_latency_tracker().record_order_latency(
+                adapter_id,
+                getattr(typed_order, "symbol", "") or "",
+                (time.perf_counter() - _t0) * 1000.0,
+            )
+        except Exception:  # pragma: no cover - monitoring must never break orders
+            logger.debug("order latency record failed", exc_info=True)
     except SafetyBypassError as exc:
         logger.warning(
             "Live order refused by safety gate | action=%s adapter=%s account=%s: %s",

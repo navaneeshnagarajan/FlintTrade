@@ -171,6 +171,50 @@ def test_routed_happy_path_returns_200() -> None:
     assert dispatched.symbol == "RELIANCE"
 
 
+def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H5: a successful live dispatch records per-broker order RTT.
+
+    Without this producer the order-latency stats stayed empty forever, so the
+    health monitors had nothing to show. Best-effort: the recording must never
+    change the order result, but on the happy path it MUST fire once with the
+    adapter id + symbol.
+    """
+    import flinttrade_core.monitoring_routes as mon
+
+    tracker = MagicMock()
+    monkeypatch.setattr(mon, "get_latency_tracker", lambda: tracker)
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-999")
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+
+    assert resp.status_code == 200
+    tracker.record_order_latency.assert_called_once()
+    args = tracker.record_order_latency.call_args.args
+    assert args[0] == "openalgo"  # adapter/broker id
+    assert args[1] == "RELIANCE"  # symbol
+    assert isinstance(args[2], float) and args[2] >= 0.0  # latency_ms
+
+
+def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H5: monitoring is strictly best-effort — a tracker blow-up still 200s."""
+    import flinttrade_core.monitoring_routes as mon
+
+    def _boom() -> object:
+        raise RuntimeError("tracker exploded")
+
+    monkeypatch.setattr(mon, "get_latency_tracker", _boom)
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-777")
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
+
+    assert resp.status_code == 200
+    assert resp.get_json()["orderid"] == "OA-777"
+
+
 # ---------------------------------------------------------------------------
 # Gated modify / cancel (the legacy /modify, /cancel endpoints now route through
 # BrokerRouter.modify_order / cancel_order — same one-shot gate + ACL as place).
