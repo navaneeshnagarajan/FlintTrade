@@ -120,6 +120,21 @@ def _rag_runtime_enabled() -> bool:
     return _rag_auto_index_enabled()
 
 
+def _tick_capture_enabled() -> bool:
+    """Return whether the startup path should launch live tick capture.
+
+    Off by default — the recorder opens an OpenAlgo WebSocket on boot, so it is
+    opt-in via ``FLINTTRADE_TICK_CAPTURE`` to avoid an unwanted connection on
+    deployments that do not want disk-backed tick storage.
+    """
+    return os.environ.get("FLINTTRADE_TICK_CAPTURE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _index_rag_docs_safely(rag: Any) -> None:
     """Index docs for RAG without letting background thread errors escape."""
     try:
@@ -2131,6 +2146,10 @@ class FlintTradeApp:
             logger.info("RAG runtime disabled (set FLINTTRADE_RAG_ENABLED=true to enable)")
             self.rag = None
 
+        # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
+        self._tick_recorder: Any | None = None
+        self._tick_recorder_task: Any | None = None
+
         self._stop_event = asyncio.Event()
 
         logger.info("FlintTradeApp initialised — v%s", self.version)
@@ -2177,6 +2196,36 @@ class FlintTradeApp:
                 "Cron scheduler failed to start (%s); scheduled jobs will not run",
                 exc,
             )
+
+        # Live tick capture (opt-in). Uses its OWN StorageManager (a separate
+        # DuckDB file) so the recorder's async-loop writes never share a
+        # connection with the Flask-thread trade journal (DuckDB connections are
+        # not safe for concurrent use). Launched as a background task on this
+        # loop; auto-reconnects to the OpenAlgo WebSocket.
+        if _tick_capture_enabled():
+            try:
+                from flinttrade_data.storage import StorageManager as _TickStore  # noqa: PLC0415
+                from flinttrade_data.tick_recorder import TickRecorder  # noqa: PLC0415
+
+                tick_db = str(_workspace_dir() / "ticks.duckdb")
+                tick_storage = _TickStore(tick_db)
+                tick_storage.initialise()
+                recorder = TickRecorder(storage=tick_storage)
+                # Default watchlist — the major indices in quote mode. Operators
+                # can extend this; an empty watchlist would capture nothing.
+                recorder.add_symbols(
+                    [
+                        {"exchange": "NSE_INDEX", "symbol": "NIFTY"},
+                        {"exchange": "NSE_INDEX", "symbol": "BANKNIFTY"},
+                        {"exchange": "BSE_INDEX", "symbol": "SENSEX"},
+                    ],
+                    mode="quote",
+                )
+                self._tick_recorder = recorder
+                self._tick_recorder_task = asyncio.create_task(recorder.run())
+                logger.info("Live tick capture started → %s", tick_db)
+            except Exception as exc:
+                logger.warning("Tick capture failed to start (%s); not recording ticks", exc)
 
         # Verify OpenAlgo connectivity (non-fatal). Distinguish three
         # cases so the boot log is not misleading: REACHABLE_AUTHENTICATED,
@@ -2239,6 +2288,12 @@ class FlintTradeApp:
 
         # Stop cron
         self.cron.stop()
+
+        # Stop tick capture (signal the loop to exit, then cancel the task)
+        if self._tick_recorder is not None:
+            self._tick_recorder.stop()
+        if self._tick_recorder_task is not None:
+            self._tick_recorder_task.cancel()
 
         # Log shutdown to audit before closing
         self.audit.log_event("APP_STOP", version=self.version)
