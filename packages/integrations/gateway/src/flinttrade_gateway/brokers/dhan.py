@@ -1,15 +1,28 @@
-"""Dhan v2 adapter skeleton for wave-1 broker support.
+"""Dhan v2 native adapter (doc-grounded against dhanhq 2.2.0).
 
-The full BrokerAdapter async surface (contract §5) is declared here, but every
-live broker call is gated behind SDK attestation until the Dhan §9.5 wave lands.
-``broker_id`` and ``capabilities`` return real values so the registry, router,
-and capability-routing layers can be exercised ahead of live trading.
+Implements the BrokerAdapter contract for Dhan: auth, the gated write surface
+(place/modify/cancel), and the portfolio reads (order book / trade book /
+positions / holdings / funds). Request/response translation lives in
+``dhan_mapping`` and is unit-tested; here the methods are thin wrappers that call
+the dhanhq SDK on a worker thread (the SDK is synchronous) and normalise results.
+
+Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8), so
+a bare call raises before any Dhan request. This adapter is NOT registered in
+``build_broker_router`` — it stays dormant until the operator wires it behind SDK
+attestation + the algo-tag guard and provides credentials; live order placement
+must be verified against the real SDK + a Dhan account.
+
+Market-data methods (quotes/historical/option_chain) and the binary tick stream
+are a separate wave and currently raise ``NotImplementedError`` honestly.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncIterator
+import asyncio
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.exceptions import BrokerError
 from flinttrade_gateway.capabilities import (
     AuthModel,
     Capabilities,
@@ -19,13 +32,14 @@ from flinttrade_gateway.capabilities import (
     TickProtocol,
 )
 
+from . import dhan_mapping as M
 from ._base import BrokerAdapter, Session
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
     from flinttrade_gateway.reconciliation import ReconciliationReport
 
-_GATED = "Dhan {0} is gated behind broker SDK attestation (wave 1 §9.5)"
+_PENDING = "Dhan {0} — market-data/streaming wave pending live SDK verification"
 
 DHAN_CAPABILITIES = Capabilities(
     segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.MCX,
@@ -85,7 +99,34 @@ DHAN_CAPABILITIES = Capabilities(
 )
 
 
+def _build_dhan_client(client_id: str, access_token: str) -> Any:
+    """Construct a live dhanhq 2.2.0 client (lazy import — SDK optional)."""
+    from dhanhq import DhanContext, dhanhq  # noqa: PLC0415
+
+    return dhanhq(DhanContext(client_id, access_token))
+
+
 class DhanAdapter(BrokerAdapter):
+    """Native Dhan adapter.
+
+    Args:
+        client_factory: ``session -> dhanhq client`` override (tests inject a
+            mock). When omitted, ``login`` builds a live client and stores it on
+            ``session.extra['client']``.
+        security_resolver: ``(symbol, exchange) -> security_id`` — Dhan trades by
+            numeric security id, so the operator must supply a scrip-master
+            resolver. Common indices are resolved from a built-in fast path.
+    """
+
+    def __init__(
+        self,
+        *,
+        client_factory: Callable[[Session], Any] | None = None,
+        security_resolver: Callable[[str, str], str] | None = None,
+    ) -> None:
+        self._client_factory = client_factory
+        self._security_resolver = security_resolver
+
     # ---------- identity + capabilities ----------
 
     @property
@@ -96,78 +137,134 @@ class DhanAdapter(BrokerAdapter):
     def capabilities(self) -> Capabilities:
         return DHAN_CAPABILITIES
 
+    # ---------- helpers ----------
+
+    def _client(self, session: Session) -> Any:
+        if self._client_factory is not None:
+            return self._client_factory(session)
+        client = session.extra.get("client")
+        if client is None:
+            raise BrokerError("Dhan client not initialised — call login() first")
+        return client
+
+    def _resolve_security(self, symbol: str, exchange: str) -> str:
+        key = str(symbol).upper()
+        if key in M.INDEX_SECURITY_IDS:
+            return M.INDEX_SECURITY_IDS[key][0]
+        if self._security_resolver is not None:
+            return str(self._security_resolver(symbol, exchange))
+        raise BrokerError(
+            f"Cannot resolve Dhan security_id for {symbol}/{exchange} — "
+            "configure a security resolver (scrip master)"
+        )
+
+    @staticmethod
+    async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        # dhanhq is synchronous — run it off the event loop.
+        return await asyncio.to_thread(fn, *args, **kwargs)
+
     # ---------- auth lifecycle ----------
 
     async def login(self, credentials: dict) -> Session:
-        raise NotImplementedError(_GATED.format("login"))
+        client_id = str(credentials.get("client_id") or credentials.get("dhan_client_id") or "")
+        access_token = str(credentials.get("access_token") or "")
+        if not access_token:
+            raise BrokerError("Dhan login requires an access_token")
+        client = None if self._client_factory is not None else _build_dhan_client(client_id, access_token)
+        return Session(
+            access_token=access_token,
+            expires_at=datetime.now(tz=timezone.utc).timestamp() + 24 * 3600,
+            account_id=client_id,
+            adapter_id="dhan",
+            extra={"client": client, "client_id": client_id},
+        )
 
     async def refresh(self, session: Session) -> Session:
-        raise NotImplementedError(_GATED.format("refresh"))
+        # Dhan access tokens are long-lived (manual 24h renewal); nothing to do
+        # until expiry, at which point a fresh login() is required.
+        return session
 
     async def logout(self, session: Session) -> None:
-        raise NotImplementedError(_GATED.format("logout"))
+        session.extra.pop("client", None)
+        return None
 
     # ---------- trading: writes (router-only) ----------
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        raise NotImplementedError(_GATED.format("order placement"))
+        security_id = self._resolve_security(order.symbol, order.exchange)
+        tag = session.algo_id or None
+        kwargs = M.to_place_order_kwargs(order, security_id, tag=tag)
+        resp = await self._call(self._client(session).place_order, **kwargs)
+        return M.extract_order_id(resp)
 
     async def modify_order(
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        raise NotImplementedError(_GATED.format("order modification"))
+        kwargs = M.to_modify_order_kwargs(order_id, changes)
+        resp = await self._call(self._client(session).modify_order, **kwargs)
+        M.unwrap(resp)
 
     async def cancel_order(
         self, session: Session, order_id: str, *, _router_token: object | None = None
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        raise NotImplementedError(_GATED.format("order cancellation"))
+        resp = await self._call(self._client(session).cancel_order, str(order_id))
+        M.unwrap(resp)
 
     # ---------- trading: reads ----------
 
     async def order_book(self, session: Session) -> list[Order]:
-        raise NotImplementedError(_GATED.format("order_book"))
+        resp = await self._call(self._client(session).get_order_list)
+        rows = M.unwrap(resp) or []
+        return [M.from_dhan_order(r) for r in rows]  # type: ignore[misc]
 
     async def trade_book(self, session: Session) -> list[Trade]:
-        raise NotImplementedError(_GATED.format("trade_book"))
+        resp = await self._call(self._client(session).get_trade_book)
+        rows = M.unwrap(resp) or []
+        return [M.from_dhan_trade(r) for r in rows]  # type: ignore[misc]
 
     async def positions(self, session: Session) -> list[Position]:
-        raise NotImplementedError(_GATED.format("positions"))
+        resp = await self._call(self._client(session).get_positions)
+        rows = M.unwrap(resp) or []
+        return [M.from_dhan_position(r) for r in rows]  # type: ignore[misc]
 
     async def holdings(self, session: Session) -> list[dict]:
-        raise NotImplementedError(_GATED.format("holdings"))
+        resp = await self._call(self._client(session).get_holdings)
+        rows = M.unwrap(resp) or []
+        return [M.from_dhan_holding(r) for r in rows]
 
     async def funds(self, session: Session) -> dict:
-        raise NotImplementedError(_GATED.format("funds"))
+        resp = await self._call(self._client(session).get_fund_limits)
+        return M.from_dhan_funds(resp)
 
-    # ---------- market data: rest ----------
+    # ---------- market data: rest (separate wave) ----------
 
     async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
-        raise NotImplementedError(_GATED.format("quotes"))
+        raise NotImplementedError(_PENDING.format("quotes"))
 
     async def historical(self, session: Session, req: dict) -> Candles:
-        raise NotImplementedError(_GATED.format("historical"))
+        raise NotImplementedError(_PENDING.format("historical"))
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
-        raise NotImplementedError(_GATED.format("option_chain"))
+        raise NotImplementedError(_PENDING.format("option_chain"))
 
-    # ---------- market data: streaming ----------
+    # ---------- market data: streaming (separate wave) ----------
 
     def stream(self, session: Session) -> AsyncIterator[Any]:
-        raise NotImplementedError(_GATED.format("stream"))
+        raise NotImplementedError(_PENDING.format("stream"))
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:
-        raise NotImplementedError(_GATED.format("subscribe"))
+        raise NotImplementedError(_PENDING.format("subscribe"))
 
     async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
-        raise NotImplementedError(_GATED.format("unsubscribe"))
+        raise NotImplementedError(_PENDING.format("unsubscribe"))
 
     # ---------- reconciliation ----------
 
     async def reconcile(self, session: Session) -> ReconciliationReport:
-        raise NotImplementedError(_GATED.format("reconcile"))
+        raise NotImplementedError(_PENDING.format("reconcile"))
 
 
 _ROUTER_TOKEN = object()
