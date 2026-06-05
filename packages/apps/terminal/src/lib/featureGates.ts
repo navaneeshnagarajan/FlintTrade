@@ -41,6 +41,8 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   "widget:ivsmile":     { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:straddlepnl": { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:oiprofile":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  "widget:footprint":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  "widget:domheatmap":  { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
 
   // ---------------------------------------------------------------
   // Route-level gates

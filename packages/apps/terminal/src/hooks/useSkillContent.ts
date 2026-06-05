@@ -87,6 +87,8 @@ const ADVANCED_WIDGETS: string[] = [
   "oiprofile",
   "orderflow",
   "depthheatmap",
+  "footprint",
+  "domheatmap",
   "scanner",
   "alerts",
   "health",

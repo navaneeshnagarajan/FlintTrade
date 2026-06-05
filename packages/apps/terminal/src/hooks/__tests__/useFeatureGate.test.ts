@@ -42,6 +42,17 @@ describe("useFeatureGate — gate resolution logic", () => {
     expect(resolveGate("widget:greeks", "advanced")).toBe("visible");
   });
 
+  it("gates the Wave-35 order-flow widgets so they unlock at advanced (not perma-locked)", () => {
+    // footprint + domheatmap were registered + in the advanced tier but had NO
+    // FEATURE_GATES entry, so the picker rendered them locked. They must resolve
+    // to a real gate (advanced=visible), not the unknown-feature fallback.
+    for (const id of ["widget:footprint", "widget:domheatmap"]) {
+      expect(FEATURE_GATES[id]).toBeDefined();
+      expect(resolveGate(id, "advanced")).toBe("visible");
+      expect(resolveGate(id, "beginner")).toBe("locked");
+    }
+  });
+
   it("returns 'preview' for a beginner-preview feature when the user is beginner", () => {
     // route:lab is 'preview' for beginners, 'visible' for intermediate/advanced.
     expect(resolveGate("route:lab", "beginner")).toBe("preview");

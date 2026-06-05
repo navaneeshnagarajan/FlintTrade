@@ -149,6 +149,10 @@ describe("useSkillContent — advanced", () => {
     expect(availableWidgets).toContain("orderflow");
     expect(availableWidgets).toContain("depthheatmap");
     expect(availableWidgets).toContain("scanner");
+    // Wave-35 order-flow widgets — promoted so the Add Widget picker can reach
+    // them (they were registered + functional but in no skill tier).
+    expect(availableWidgets).toContain("footprint");
+    expect(availableWidgets).toContain("domheatmap");
   });
 
   it("includes all tools", () => {
