@@ -233,6 +233,46 @@ def to_slice_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     return to_place_order_kwargs(order, security_id, tag=tag)
 
 
+def to_margin_kwargs(order: Any, security_id: str) -> dict[str, Any]:
+    """Translate an ``Order`` into ``dhanhq.margin_calculator`` kwargs (pre-trade)."""
+    core = _validated_core(order, security_id)
+    return {
+        "security_id": core["security_id"],
+        "exchange_segment": core["exchange_segment"],
+        "transaction_type": core["transaction_type"],
+        "quantity": core["quantity"],
+        "product_type": core["product_type"],
+        "price": core["price"],
+        "trigger_price": _num(getattr(order, "trigger_price", 0)),
+    }
+
+
+def from_dhan_margin(resp: Any) -> dict[str, Any]:
+    """Normalise a Dhan ``/margincalculator`` response into FlintTrade fields."""
+    data = unwrap(resp)
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "total_margin": str(data.get("totalMargin", data.get("total_margin", 0))),
+        "span_margin": str(data.get("spanMargin", 0)),
+        "exposure_margin": str(data.get("exposureMargin", 0)),
+        "available_balance": str(data.get("availableBalance", 0)),
+        "insufficient_balance": str(data.get("insufficientBalance", 0)),
+        "brokerage": str(data.get("brokerage", 0)),
+        "leverage": str(data.get("leverage", 0)),
+    }
+
+
+def from_dhan_expiry_list(resp: Any) -> list[str]:
+    """Parse a Dhan ``/optionchain/expirylist`` response into expiry-date strings."""
+    data = unwrap(resp)
+    if isinstance(data, dict):
+        data = data.get("data", data)
+    if isinstance(data, list):
+        return [str(d) for d in data]
+    return []
+
+
 def to_modify_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into ``dhanhq.modify_order`` keyword args."""
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))

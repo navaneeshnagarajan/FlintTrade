@@ -31,6 +31,15 @@ class MockDhan:
         self.calls.append(("slice", kw))
         return {"status": "success", "data": {"orderId": "SLC1", "orderStatus": "TRANSIT"}}
 
+    def margin_calculator(self, **kw):
+        self.calls.append(("margin", kw))
+        return {"status": "success", "data": {"totalMargin": 14500.0, "spanMargin": 12000.0,
+                                              "exposureMargin": 2500.0, "availableBalance": 50000.0}}
+
+    def expiry_list(self, under_security_id, under_exchange_segment):
+        self.calls.append(("expiry", (under_security_id, under_exchange_segment)))
+        return {"status": "success", "data": {"data": ["2026-06-26", "2026-07-31"]}}
+
     def modify_order(self, **kw):
         self.calls.append(("modify", kw))
         return {"status": "success", "data": {"orderId": "OID1"}}
@@ -214,6 +223,28 @@ async def test_unsupported_variety_raises():
     object.__setattr__(order, "variety", "exotic")
     with pytest.raises(BrokerError, match="variety"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.asyncio
+async def test_margin_calculator_reads_estimate():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="2900")
+    # No router token needed — margin calc is a read-only pre-trade estimate.
+    margin = await adapter.margin_calculator(session, order)
+    assert margin["total_margin"] == "14500.0" and margin["available_balance"] == "50000.0"
+    assert mock.calls[0][0] == "margin"
+
+
+@pytest.mark.asyncio
+async def test_expiry_list_returns_dates():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    expiries = await adapter.expiry_list(session, "NIFTY", "NSE_INDEX")
+    assert expiries == ["2026-06-26", "2026-07-31"]
 
 
 @pytest.mark.asyncio

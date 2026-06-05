@@ -335,6 +335,25 @@ class DhanAdapter(BrokerAdapter):
             strikes=[OptionChainStrike(**s) for s in oc["strikes"]],
         )
 
+    # ---------- pre-trade info (reads) ----------
+
+    async def margin_calculator(self, session: Session, order: Order) -> dict:
+        """Pre-trade margin estimate for ``order`` (Dhan ``/margincalculator``).
+
+        A read-only estimate — does NOT place anything, so it needs no gate.
+        """
+        security_id = self._resolve_security(order.symbol, order.exchange)
+        kwargs = M.to_margin_kwargs(order, security_id)
+        resp = await self._call(self._client(session).margin_calculator, **kwargs)
+        return M.from_dhan_margin(resp)
+
+    async def expiry_list(self, session: Session, symbol: str, exchange: str = "NSE_INDEX") -> list[str]:
+        """List the available option expiries for an underlying (read)."""
+        security_id = self._resolve_security(symbol, exchange)
+        segment = M.to_dhan_segment(exchange)
+        resp = await self._call(self._client(session).expiry_list, security_id, segment)
+        return M.from_dhan_expiry_list(resp)
+
     # ---------- market data: streaming ----------
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:

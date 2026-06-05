@@ -19,6 +19,9 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     interval_to_dhan,
     quote_from_feed,
     to_candles_dict,
+    from_dhan_expiry_list,
+    from_dhan_margin,
+    to_margin_kwargs,
     to_modify_order_kwargs,
     to_option_chain_dict,
     to_place_order_kwargs,
@@ -93,6 +96,21 @@ def test_slice_order_mirrors_place_order():
     order = Order(symbol="RELIANCE", action="SELL", exchange="NSE", pricetype="LIMIT",
                   product="MIS", quantity="5000", price="2900", variety="iceberg")
     assert to_slice_order_kwargs(order, "11536") == to_place_order_kwargs(order, "11536")
+
+
+def test_margin_kwargs_and_parse():
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="2900")
+    kw = to_margin_kwargs(order, "11536")
+    assert kw["security_id"] == "11536" and kw["quantity"] == 10 and kw["price"] == 2900.0
+    margin = from_dhan_margin({"status": "success", "data": {"totalMargin": 14500, "spanMargin": 12000}})
+    assert margin["total_margin"] == "14500" and margin["span_margin"] == "12000"
+
+
+def test_expiry_list_parse():
+    assert from_dhan_expiry_list({"status": "success", "data": {"data": ["2026-06-26", "2026-07-31"]}}) == \
+        ["2026-06-26", "2026-07-31"]
+    assert from_dhan_expiry_list({"status": "success", "data": []}) == []
 
 
 def test_modify_order_kwargs():
