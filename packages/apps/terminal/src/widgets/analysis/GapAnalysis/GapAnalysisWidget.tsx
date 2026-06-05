@@ -208,11 +208,17 @@ function GapAnalysisWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <ArrowUpFromLine size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Gap Analysis</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        {/* Honest disclosure — the widget renders SAMPLE_GAP_EVENTS
+            unconditionally (no gap-analysis backend is wired). The badge must
+            stay visible even when a broker is connected. */}
+        <span
+          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+          role="status"
+          aria-label="Showing sample data; no live gap-analysis source is wired yet"
+          title="No live data wired yet — showing sample gap events so the widget is usable in explore mode."
+        >
+          Sample data
+        </span>
         <div className="flex-1" />
         <button
           onClick={handleRefresh}

@@ -38,16 +38,14 @@ describe("GapAnalysisWidget", () => {
     expect(screen.getByText("Gap Analysis")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GapAnalysisWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
-  });
-
-  it("does not show Sample badge when connected", () => {
+  it("always shows the permanent 'Sample data' badge (no gap-analysis backend wired)", () => {
+    // The events are hardcoded SAMPLE_GAP_EVENTS regardless of connection, so
+    // the disclosure must NOT be masked when a broker connects.
     mockConnected.mockReturnValue(true);
     render(<GapAnalysisWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    const badge = screen.getByText("Sample data");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("aria-label")).toContain("sample data");
   });
 
   it("renders stat cards: Total Gaps, Fill Rate, Avg Size, Avg Fill", () => {

@@ -28,6 +28,7 @@ import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { FlintBaselineSparkline } from "@flinttrade/design-system";
 import { getPositionbook } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import type { Position } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -171,6 +172,7 @@ function StatCard({ label, value, colorCls = "text-text-primary" }: StatCardProp
 // ---------------------------------------------------------------------------
 
 function IntradayPnLWidget() {
+  const isConnected = useBrokerConnected();
   const [state, setState] = useState<IntradayState>({
     netPnL:        0,
     realisedPnL:   0,
@@ -273,8 +275,20 @@ function IntradayPnLWidget() {
         <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
           Intraday P&amp;L
         </span>
+        {/* Honest disclosure — when no broker is connected (explore mode) the
+            P&L is computed from SAMPLE positions, not a real account. */}
+        {!isConnected && (
+          <span
+            className="ml-auto inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample positions; not connected to a live broker"
+            title="Not connected — Intraday P&L is computed from sample positions, not your real account."
+          >
+            Sample data
+          </span>
+        )}
         {state.error && (
-          <span title={state.error} className="ml-auto w-1.5 h-1.5 rounded-full bg-loss shrink-0" />
+          <span title={state.error} className={`${isConnected ? "ml-auto" : ""} w-1.5 h-1.5 rounded-full bg-loss shrink-0`} />
         )}
         {!state.error && !state.loading && (
           <span className="ml-auto w-1.5 h-1.5 rounded-full bg-profit/60 shrink-0" />
