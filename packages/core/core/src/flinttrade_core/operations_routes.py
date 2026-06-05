@@ -212,6 +212,11 @@ def trades_journal() -> tuple[Any, int]:
             # Use available query methods on StorageManager.
             if strategy_filter and start_date and end_date:
                 return storage.get_trades_by_strategy(strategy_filter, start_date, end_date)
+            if start_date and end_date:
+                # History window across all strategies (e.g. the performance
+                # dashboard). Without this branch a start+end with no strategy
+                # fell through to a single-day query — the recurring contract bug.
+                return storage.get_trades_by_date_range(start_date, end_date)
             if start_date:
                 return storage.get_trades_by_date(start_date)
             today = _dt.now(_IST).strftime("%Y-%m-%d")
