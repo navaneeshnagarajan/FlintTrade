@@ -207,6 +207,10 @@ def to_super_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     trailing jump) too. Raises if neither a target nor a stop-loss is present.
     """
     kwargs = _validated_core(order, security_id)
+    # Dhan's place_super_order rejects price <= 0, so a MARKET super order is
+    # structurally impossible — require an entry (limit) price.
+    if kwargs["price"] <= 0:
+        raise DhanMappingError("A Dhan super (bracket/cover) order needs a limit entry price (MARKET is unsupported)")
     target = _num(getattr(order, "target_price", 0))
     stop_loss = _num(getattr(order, "stop_loss_price", 0))
     variety = str(getattr(order, "variety", "regular")).lower()

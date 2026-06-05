@@ -358,12 +358,18 @@ class DhanAdapter(BrokerAdapter):
         """Toggle Dhan's broker-side kill switch (``ACTIVATE`` disables trading for
         the day; ``DEACTIVATE`` re-enables it). An account control, not an order —
         it places nothing, so it is outside the order gate.
+
+        SAFETY: ``DEACTIVATE`` re-opens live trading, so any caller/route wiring it
+        MUST gate ``DEACTIVATE`` behind an explicit, authenticated operator action
+        (Live-mode + operator confirmation) and audit it. ``ACTIVATE`` is purely
+        risk-reducing and may be invoked freely.
         """
         act = str(action).upper()
         if act not in ("ACTIVATE", "DEACTIVATE"):
             raise BrokerError(f"kill_switch action must be ACTIVATE or DEACTIVATE, got {action!r}")
         resp = await self._call(self._client(session).kill_switch, act)
-        return M.unwrap(resp) if isinstance(M.unwrap(resp), dict) else {"status": str(resp)}
+        unwrapped = M.unwrap(resp)
+        return unwrapped if isinstance(unwrapped, dict) else {"status": str(resp)}
 
     # ---------- market data: streaming ----------
 

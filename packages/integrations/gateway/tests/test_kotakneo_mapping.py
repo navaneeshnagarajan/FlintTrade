@@ -59,17 +59,21 @@ def test_place_order_bracket_carries_legs_and_bo_product():
     p = to_place_order_params(order, "IDEA-EQ")
     assert p["product"] == "BO"
     assert p["square_off_value"] == "9.8" and p["stop_loss_value"] == "9.1"
-    assert p["trailing_stop_loss"] == "YES" and p["trailing_sl_value"] == "0.1"
+    # The OMS leg-type/flag enums must be the DOCUMENTED values, not "abs"/"YES".
+    assert p["stop_loss_type"] == "Absolute" and p["square_off_type"] == "Absolute"
+    assert p["trailing_stop_loss"] == "Y" and p["trailing_sl_value"] == "0.1"
 
 
 def test_place_order_cover_drops_target_uses_co():
     order = Order(
-        symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
-        quantity="10", variety="cover", target_price="9.8", stop_loss_price="9.1",
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+        quantity="10", price="9.4", variety="cover", target_price="9.8", stop_loss_price="9.1",
     )
     p = to_place_order_params(order, "IDEA-EQ")
     assert p["product"] == "CO" and p["stop_loss_value"] == "9.1"
+    assert p["stop_loss_type"] == "Absolute"
     assert "square_off_value" not in p  # cover orders have no target leg
+    assert "trailing_stop_loss" not in p  # no trailing supplied
 
 
 def test_place_order_bracket_without_legs_raises():

@@ -223,6 +223,22 @@ async def test_quotes_bare_list_fallback():
 
 
 @pytest.mark.asyncio
+async def test_iceberg_refused_at_gated_adapter_layer():
+    # NEO has no slice endpoint; an iceberg must be refused through the gated
+    # place path and NEVER reach the broker (no silent regular-order placement).
+    from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
+
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="5000", price="9.4", variety="iceberg")
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
 async def test_margin_calculator_reads_estimate():
     adapter = _adapter(MockNeo())
     session = await _session(adapter)

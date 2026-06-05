@@ -182,8 +182,8 @@ async def test_cover_order_has_stop_loss_only():
     adapter = _adapter(mock)
     session = await _session(adapter)
     order = Order(
-        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
-        quantity="5", variety="cover", target_price="2950", stop_loss_price="2870",
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+        quantity="5", price="2900", variety="cover", target_price="2950", stop_loss_price="2870",
     )
     await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     kind, kw = mock.calls[0]
@@ -263,6 +263,18 @@ async def test_kill_switch_validates_and_relays():
     assert mock.calls[0] == ("kill", "ACTIVATE")
     with pytest.raises(BrokerError, match="ACTIVATE or DEACTIVATE"):
         await adapter.kill_switch(session, "maybe")
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_non_dict_response_fallback():
+    class _ScalarKill(MockDhan):
+        def kill_switch(self, action):
+            return "ACTIVATED"  # some builds return a bare string
+
+    adapter = _adapter(_ScalarKill())
+    session = await _session(adapter)
+    resp = await adapter.kill_switch(session, "ACTIVATE")
+    assert resp == {"status": "ACTIVATED"}  # wrapped, not crashed
 
 
 @pytest.mark.asyncio

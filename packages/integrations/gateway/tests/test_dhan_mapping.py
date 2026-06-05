@@ -78,16 +78,33 @@ def test_super_order_bracket_carries_both_legs():
 
 def test_super_order_cover_drops_target():
     order = Order(
-        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
-        quantity="5", variety="cover", target_price="2950", stop_loss_price="2870",
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+        quantity="5", price="2900", variety="cover", target_price="2950", stop_loss_price="2870",
     )
     kw = to_super_order_kwargs(order, "11536")
     assert kw["stopLossPrice"] == 2870.0 and kw["targetPrice"] == 0.0
 
 
 def test_super_order_without_legs_raises():
+    order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+                  quantity="5", price="2900", variety="bracket")
+    with pytest.raises(DhanMappingError, match="target_price or stop_loss_price"):
+        to_super_order_kwargs(order, "1")
+
+
+def test_super_order_market_unsupported():
+    # Dhan rejects price<=0 for super orders, so a MARKET bracket must fail closed.
     order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
-                  quantity="5", variety="bracket")
+                  quantity="5", variety="bracket", stop_loss_price="2870")
+    with pytest.raises(DhanMappingError, match="limit entry price"):
+        to_super_order_kwargs(order, "1")
+
+
+def test_super_order_cover_with_only_target_raises():
+    # A cover order drops the target, so a cover with ONLY a target (no stop-loss)
+    # must fail closed — never reach the broker with a phantom target + no SL.
+    order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+                  quantity="5", price="2900", variety="cover", target_price="2950")
     with pytest.raises(DhanMappingError, match="target_price or stop_loss_price"):
         to_super_order_kwargs(order, "1")
 

@@ -201,6 +201,22 @@ async def test_option_chain_builds_strikes():
 
 
 @pytest.mark.asyncio
+async def test_advanced_variety_refused_at_gated_adapter_layer():
+    # Upstox v2 has no bracket via place_order; an advanced variety must be
+    # refused through the gated path and never reach the broker.
+    from flinttrade_gateway.brokers.upstox_mapping import UpstoxMappingError
+
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="5", price="2900", variety="bracket", stop_loss_price="2870")
+    with pytest.raises(UpstoxMappingError, match="variety"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
 async def test_margin_calculator_reads_estimate():
     adapter = _adapter(MockUpstox())
     session = await _session(adapter)

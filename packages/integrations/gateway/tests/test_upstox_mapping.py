@@ -51,6 +51,8 @@ def test_margin_instrument_and_parse():
     assert inst["transaction_type"] == "BUY" and inst["quantity"] == 10
     margin = from_upstox_margin({"status": "success", "data": {"required_margin": 14500, "final_margin": 14000}})
     assert margin["required_margin"] == "14500" and margin["final_margin"] == "14000"
+    # Upstox's margin response carries no balance — documented as 0, merged from funds().
+    assert margin["available_balance"] == "0"
 
 
 def test_place_order_advanced_variety_refused():

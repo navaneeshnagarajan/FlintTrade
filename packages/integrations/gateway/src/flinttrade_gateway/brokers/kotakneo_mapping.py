@@ -112,15 +112,19 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
             target = 0.0  # a cover order has only a stop-loss leg
         if target <= 0 and stop_loss <= 0:
             raise KotakNeoMappingError("A bracket/cover order needs a target_price or stop_loss_price")
+        # NEO leg-type / flag enums are forwarded verbatim to the OMS (slt/sot/tlt),
+        # so they MUST match the documented values: square_off_type/stop_loss_type
+        # ∈ {"Absolute","Ticks"} and trailing_stop_loss ∈ {"Y","N"} (Place_Order.md).
+        # Sending "abs"/"YES" silently drops the protective legs on a live order.
         params["product"] = "BO" if variety == "bracket" else "CO"
         params["stop_loss_value"] = str(stop_loss)
-        params["stop_loss_type"] = "abs"
+        params["stop_loss_type"] = "Absolute"
         if target > 0:
             params["square_off_value"] = str(target)
-            params["square_off_type"] = "abs"
+            params["square_off_type"] = "Absolute"
         trailing = _num(getattr(order, "trailing_jump", 0))
         if trailing > 0:
-            params["trailing_stop_loss"] = "YES"
+            params["trailing_stop_loss"] = "Y"
             params["trailing_sl_value"] = str(trailing)
     elif variety not in ("regular", ""):
         raise KotakNeoMappingError(f"Kotak Neo does not support order variety {variety!r}")
