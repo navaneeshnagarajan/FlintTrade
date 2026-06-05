@@ -1059,6 +1059,27 @@ def create_flask_app(
     from flinttrade_engine.strategy_routes import strategy_bp  # noqa: PLC0415
     app.register_blueprint(strategy_bp)
 
+    # Wire the Strategy Runner + Cron scheduler the strategy routes require so
+    # upload/start/stop/logs/schedule work in production — without these config
+    # keys every /api/v1/strategies write returned 503 "Strategy runner not
+    # configured" (feature audit H1/M13). Construction is side-effect-light: the
+    # runner only creates its own dirs, and CronStrategyScheduler does not start
+    # APScheduler until .start() is called.
+    if "STRATEGY_RUNNER" not in app.config:
+        try:
+            from flinttrade_engine.strategy_runner import UserStrategyRunner  # noqa: PLC0415
+
+            app.config["STRATEGY_RUNNER"] = UserStrategyRunner(_workspace_dir() / "strategies")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Strategy runner wiring failed (%s); /strategies writes will 503", exc)
+    if "CRON_SCHEDULER" not in app.config:
+        try:
+            from flinttrade_engine.scheduler import CronStrategyScheduler  # noqa: PLC0415
+
+            app.config["CRON_SCHEDULER"] = CronStrategyScheduler()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Cron scheduler wiring failed (%s); strategy scheduling will 503", exc)
+
     # Register Engine Sandbox blueprint (/v1/sandbox-config/*) — config/leverage/squareoff.
     # Uses the /v1/sandbox-config prefix to avoid collision with the data sandbox
     # blueprint below, which owns /v1/sandbox.
