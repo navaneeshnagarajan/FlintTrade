@@ -40,6 +40,12 @@ vi.mock("@/tools/Settings/shared", () => ({
 }));
 
 // Mock all section components to simple stubs
+vi.mock("@/tools/Settings/ProfileSection", () => ({
+  ProfileSection: () => <div data-testid="profile-section">Profile</div>,
+}));
+vi.mock("@/routes/settings/TickerSettings", () => ({
+  TickerSettings: () => <div data-testid="ticker-section">Ticker Bar</div>,
+}));
 vi.mock("@/tools/Settings/GeneralSection", () => ({
   GeneralSection: () => <div data-testid="general-section">General</div>,
 }));
@@ -120,6 +126,7 @@ vi.mock("@/hooks/useSettingsState", () => ({
 // ---------------------------------------------------------------------------
 
 import SettingsRoute from "../SettingsRoute";
+import { SECTIONS } from "@/tools/Settings/settingsConfig";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -170,5 +177,49 @@ describe("SettingsRoute", () => {
     });
 
     expect(screen.getByTestId("monitoring-section")).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Unified Settings — EVERY section must be reachable + render.
+  //
+  // The mission requires the unified Settings page to expose all of its
+  // sections, each reachable by deep-link. These two tests drive straight
+  // from the SECTIONS registry so a section can never be added to the nav
+  // yet (a) miss a renderContent() switch case, or (b) fail to activate from
+  // its #hash — both silent, content-empty failures the old smoke test (only
+  // #about + #monitoring) could not catch.
+  // -------------------------------------------------------------------------
+  it.each(SECTIONS.map((s) => [s.id, s.label] as const))(
+    "deep-links #%s to its tab and renders that section's panel",
+    (id, label) => {
+      window.history.replaceState(null, "", `/settings#${id}`);
+      render(<SettingsRoute />);
+
+      // The matching sidebar tab is the selected one and carries its label.
+      const tab = document.getElementById(`settings-tab-${id}`);
+      expect(tab, `tab for section "${id}" is missing`).not.toBeNull();
+      expect(tab).toHaveAttribute("aria-selected", "true");
+      expect(tab?.textContent).toContain(label);
+
+      // Exactly this section's content panel is rendered (one panel at a time).
+      const panel = screen.getByRole("tabpanel");
+      expect(panel).toHaveAttribute("id", `settings-tabpanel-${id}`);
+    },
+  );
+
+  it("renders non-empty content for every section (no missing switch case)", () => {
+    // A dropped renderContent() case returns undefined → an empty panel. With
+    // every section mocked to emit text, an empty panel can only mean the
+    // switch lost a case.
+    for (const { id } of SECTIONS) {
+      window.history.replaceState(null, "", `/settings#${id}`);
+      const { unmount } = render(<SettingsRoute />);
+      const panel = screen.getByRole("tabpanel");
+      expect(
+        (panel.textContent ?? "").trim().length,
+        `section "${id}" rendered an empty panel`,
+      ).toBeGreaterThan(0);
+      unmount();
+    }
   });
 });
