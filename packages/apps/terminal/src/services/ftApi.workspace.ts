@@ -12,14 +12,17 @@ export interface PresetWidgetEntry {
   initialHeight?: number;
 }
 
+// The backend preset model stores `widgets` as an ordered list of widget IDs
+// (strings), and does not return `icon`/`widget_count` — keep the client types in
+// lock-step so create/update don't 400 and cards don't show "undefined widgets".
 export interface WorkspacePresetRecord {
   id: string;
   name: string;
   description: string;
-  icon: string;
+  icon?: string;
   is_builtin: boolean;
-  widget_count: number;
-  widgets: PresetWidgetEntry[];
+  widget_count?: number;
+  widgets: string[];
   created_at?: string;
   updated_at?: string;
 }
@@ -28,14 +31,14 @@ export interface CreatePresetPayload {
   name: string;
   description: string;
   icon?: string;
-  widgets: PresetWidgetEntry[];
+  widgets: string[];
 }
 
 export interface UpdatePresetPayload {
   name?: string;
   description?: string;
   icon?: string;
-  widgets?: PresetWidgetEntry[];
+  widgets?: string[];
 }
 
 export const listPresets = () =>
