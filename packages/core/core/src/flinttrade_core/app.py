@@ -1285,6 +1285,9 @@ def create_flask_app(
     from flinttrade_ai.ai_routes import ai_bp  # noqa: PLC0415
     app.register_blueprint(ai_bp)
 
+    from flinttrade_ai.obsidian_routes import obsidian_bp  # noqa: PLC0415
+    app.register_blueprint(obsidian_bp)
+
     from flinttrade_ai.signal_routes import signal_bp  # noqa: PLC0415
     app.register_blueprint(signal_bp)
 
