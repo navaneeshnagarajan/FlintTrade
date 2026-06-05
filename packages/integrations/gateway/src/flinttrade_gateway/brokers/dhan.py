@@ -221,6 +221,8 @@ class DhanAdapter(BrokerAdapter):
             resp = await self._call(client.place_super_order, **M.to_super_order_kwargs(order, security_id, tag=tag))
         elif variety == "iceberg":
             resp = await self._call(client.place_slice_order, **M.to_slice_order_kwargs(order, security_id, tag=tag))
+        elif variety == "gtt":
+            resp = await self._call(client.place_forever, **M.to_forever_kwargs(order, security_id, tag=tag))
         else:
             raise BrokerError(f"Dhan does not support order variety {variety!r}")
         return M.extract_order_id(resp)

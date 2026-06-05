@@ -31,6 +31,10 @@ class MockDhan:
         self.calls.append(("slice", kw))
         return {"status": "success", "data": {"orderId": "SLC1", "orderStatus": "TRANSIT"}}
 
+    def place_forever(self, **kw):
+        self.calls.append(("forever", kw))
+        return {"status": "success", "data": {"orderId": "GTT1", "orderStatus": "TRANSIT"}}
+
     def margin_calculator(self, **kw):
         self.calls.append(("margin", kw))
         return {"status": "success", "data": {"totalMargin": 14500.0, "spanMargin": 12000.0,
@@ -201,6 +205,33 @@ async def test_iceberg_order_dispatches_to_slice_order():
     oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert oid == "SLC1"
     assert mock.calls[0][0] == "slice"
+
+
+@pytest.mark.asyncio
+async def test_gtt_order_dispatches_to_place_forever():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC",
+                  quantity="5", price="2900", trigger_price="2890", variety="gtt")
+    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert oid == "GTT1"
+    kind, kw = mock.calls[0]
+    assert kind == "forever" and kw["trigger_Price"] == 2890.0 and kw["order_flag"] == "SINGLE"
+
+
+@pytest.mark.asyncio
+async def test_gtt_without_trigger_fails_closed():
+    from flinttrade_gateway.brokers.dhan_mapping import DhanMappingError
+
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC",
+                  quantity="5", price="2900", variety="gtt")  # no trigger_price
+    with pytest.raises(DhanMappingError, match="trigger_price"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []  # never reached the broker
 
 
 @pytest.mark.asyncio

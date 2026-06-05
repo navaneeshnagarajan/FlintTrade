@@ -237,6 +237,33 @@ def to_slice_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     return to_place_order_kwargs(order, security_id, tag=tag)
 
 
+def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
+    """Translate a ``gtt`` ``Order`` into ``dhanhq.place_forever`` kwargs (SINGLE).
+
+    A Dhan forever (GTT / good-till-triggered) order rests until its
+    ``trigger_Price`` is hit, then fires at ``price``. Raises if no trigger price
+    is supplied (a GTT without a trigger is meaningless).
+    """
+    core = _validated_core(order, security_id)
+    trigger = _num(getattr(order, "trigger_price", 0))
+    if trigger <= 0:
+        raise DhanMappingError("A GTT (forever) order needs a trigger_price")
+    kwargs = {
+        "security_id": core["security_id"],
+        "exchange_segment": core["exchange_segment"],
+        "transaction_type": core["transaction_type"],
+        "product_type": core["product_type"],
+        "order_type": core["order_type"],
+        "quantity": core["quantity"],
+        "price": core["price"],
+        "trigger_Price": trigger,
+        "order_flag": "SINGLE",
+    }
+    if tag:
+        kwargs["tag"] = tag
+    return kwargs
+
+
 def to_margin_kwargs(order: Any, security_id: str) -> dict[str, Any]:
     """Translate an ``Order`` into ``dhanhq.margin_calculator`` kwargs (pre-trade)."""
     core = _validated_core(order, security_id)

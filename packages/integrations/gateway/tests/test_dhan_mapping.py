@@ -22,6 +22,7 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     from_dhan_expiry_list,
     from_dhan_margin,
     to_margin_kwargs,
+    to_forever_kwargs,
     to_modify_order_kwargs,
     to_option_chain_dict,
     to_place_order_kwargs,
@@ -113,6 +114,21 @@ def test_slice_order_mirrors_place_order():
     order = Order(symbol="RELIANCE", action="SELL", exchange="NSE", pricetype="LIMIT",
                   product="MIS", quantity="5000", price="2900", variety="iceberg")
     assert to_slice_order_kwargs(order, "11536") == to_place_order_kwargs(order, "11536")
+
+
+def test_forever_gtt_kwargs():
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="5", price="2900", trigger_price="2890", variety="gtt")
+    kw = to_forever_kwargs(order, "11536", tag="G1")
+    assert kw["order_flag"] == "SINGLE" and kw["trigger_Price"] == 2890.0
+    assert kw["price"] == 2900.0 and kw["product_type"] == "CNC" and kw["tag"] == "G1"
+
+
+def test_forever_without_trigger_raises():
+    order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="CNC", quantity="5", price="2900", variety="gtt")
+    with pytest.raises(DhanMappingError, match="trigger_price"):
+        to_forever_kwargs(order, "1")
 
 
 def test_margin_kwargs_and_parse():
