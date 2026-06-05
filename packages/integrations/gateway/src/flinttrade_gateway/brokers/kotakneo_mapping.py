@@ -99,6 +99,32 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
         "disclosed_quantity": str(int(_num(getattr(order, "disclosed_quantity", 0), 0))),
         "amo": "NO",
     }
+
+    # Advanced varieties: NEO places bracket (BO) and cover (CO) orders through
+    # the SAME place_order call, overriding the product code and attaching the
+    # target / stop-loss / trailing legs. NEO has no iceberg/slice endpoint (only
+    # disclosed_quantity), so that variety is refused.
+    variety = str(getattr(order, "variety", "regular")).lower()
+    if variety in ("bracket", "cover"):
+        target = _num(getattr(order, "target_price", 0))
+        stop_loss = _num(getattr(order, "stop_loss_price", 0))
+        if variety == "cover":
+            target = 0.0  # a cover order has only a stop-loss leg
+        if target <= 0 and stop_loss <= 0:
+            raise KotakNeoMappingError("A bracket/cover order needs a target_price or stop_loss_price")
+        params["product"] = "BO" if variety == "bracket" else "CO"
+        params["stop_loss_value"] = str(stop_loss)
+        params["stop_loss_type"] = "abs"
+        if target > 0:
+            params["square_off_value"] = str(target)
+            params["square_off_type"] = "abs"
+        trailing = _num(getattr(order, "trailing_jump", 0))
+        if trailing > 0:
+            params["trailing_stop_loss"] = "YES"
+            params["trailing_sl_value"] = str(trailing)
+    elif variety not in ("regular", ""):
+        raise KotakNeoMappingError(f"Kotak Neo does not support order variety {variety!r}")
+
     if tag:
         params["tag"] = str(tag)
     return params

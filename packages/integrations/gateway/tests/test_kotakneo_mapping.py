@@ -48,6 +48,43 @@ def test_place_order_sl_m_fno_and_string_coercion():
     assert "tag" not in p  # no tag passed → key omitted
 
 
+def test_place_order_bracket_carries_legs_and_bo_product():
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+        quantity="10", price="9.4", variety="bracket", target_price="9.8",
+        stop_loss_price="9.1", trailing_jump="0.1",
+    )
+    p = to_place_order_params(order, "IDEA-EQ")
+    assert p["product"] == "BO"
+    assert p["square_off_value"] == "9.8" and p["stop_loss_value"] == "9.1"
+    assert p["trailing_stop_loss"] == "YES" and p["trailing_sl_value"] == "0.1"
+
+
+def test_place_order_cover_drops_target_uses_co():
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS",
+        quantity="10", variety="cover", target_price="9.8", stop_loss_price="9.1",
+    )
+    p = to_place_order_params(order, "IDEA-EQ")
+    assert p["product"] == "CO" and p["stop_loss_value"] == "9.1"
+    assert "square_off_value" not in p  # cover orders have no target leg
+
+
+def test_place_order_bracket_without_legs_raises():
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET",
+                  product="MIS", quantity="10", variety="bracket")
+    with pytest.raises(KotakNeoMappingError, match="target_price or stop_loss_price"):
+        to_place_order_params(order, "IDEA-EQ")
+
+
+def test_place_order_iceberg_unsupported_raises():
+    # NEO has no slice/iceberg endpoint — must refuse, not silently place a regular order.
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="5000", price="9.4", variety="iceberg")
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_place_order_params(order, "IDEA-EQ")
+
+
 def test_place_order_unmapped_product_raises():
     order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS")
     object.__setattr__(order, "product", "ZZZ")

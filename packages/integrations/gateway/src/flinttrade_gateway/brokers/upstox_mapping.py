@@ -66,6 +66,17 @@ def to_place_order_params(order: Any, instrument_token: str, *, tag: str | None 
     if product not in PRODUCT_TO_UPSTOX:
         raise UpstoxMappingError(f"Unsupported product {product!r}")
 
+    # Safety: Upstox v2 does not expose bracket/cover/iceberg via place_order
+    # (cover + GTT are separate endpoints, bracket was retired). Refuse an
+    # advanced variety here rather than silently placing it as a plain order —
+    # a bracket order that quietly loses its stop-loss leg would be a real risk.
+    variety = str(getattr(order, "variety", "regular")).lower()
+    if variety not in ("regular", ""):
+        raise UpstoxMappingError(
+            f"Upstox does not place variety {variety!r} via place_order "
+            "(its cover/GTT order endpoints are a separate wave)"
+        )
+
     return {
         "instrument_token": str(instrument_token),
         "quantity": int(_num(order.quantity, 0)),

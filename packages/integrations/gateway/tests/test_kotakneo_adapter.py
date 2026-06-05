@@ -101,6 +101,24 @@ async def test_place_order_is_gated():
 
 
 @pytest.mark.asyncio
+async def test_bracket_order_flows_through_gated_place():
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
+                  quantity="10", price="9.4", variety="bracket", target_price="9.8", stop_loss_price="9.1")
+    # Still gated: a bare bracket order without the token must fail-closed.
+    with pytest.raises(SafetyBypassError):
+        await adapter.place_order(session, order)
+    assert mock.calls == []
+    # With the token it reaches the broker as a BO order carrying both legs.
+    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert oid == "250122000612876"
+    _, params = mock.calls[0]
+    assert params["product"] == "BO" and params["square_off_value"] == "9.8" and params["stop_loss_value"] == "9.1"
+
+
+@pytest.mark.asyncio
 async def test_place_order_with_router_token():
     mock = MockNeo()
     adapter = _adapter(mock)

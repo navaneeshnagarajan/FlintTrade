@@ -41,6 +41,15 @@ def test_place_order_sl_m_and_fno_product():
     assert p["trigger_price"] == 120.5
 
 
+def test_place_order_advanced_variety_refused():
+    # Upstox must refuse a bracket/cover/iceberg variety, not silently place a
+    # plain order that drops the protective legs.
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="5", price="2900", variety="bracket", stop_loss_price="2870")
+    with pytest.raises(UpstoxMappingError, match="variety"):
+        to_place_order_params(order, "NSE_EQ|X")
+
+
 def test_place_order_unmapped_product_raises():
     order = Order(symbol="X", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS")
     object.__setattr__(order, "product", "ZZZ")  # force an invalid product
