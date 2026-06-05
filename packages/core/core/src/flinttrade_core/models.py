@@ -417,6 +417,32 @@ class OHLCV(BaseModel):
     volume: int = 0
 
 
+class Candles(BaseModel):
+    """Historical OHLCV series for one instrument/interval.
+
+    The canonical return type of ``BrokerAdapter.historical`` — a thin envelope
+    around a list of :class:`OHLCV` bars plus the instrument context.
+    """
+
+    symbol: str = ""
+    exchange: str = ""
+    interval: str = ""
+    bars: list[OHLCV] = Field(default_factory=list)
+
+
+class TickEvent(BaseModel):
+    """A single streamed market tick (the unit yielded by ``BrokerAdapter.stream``)."""
+
+    symbol: str = ""
+    exchange: str = ""
+    ltp: float = 0.0
+    volume: int = 0
+    bid: float = 0.0
+    ask: float = 0.0
+    oi: int = 0
+    timestamp: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Account models
 # ---------------------------------------------------------------------------

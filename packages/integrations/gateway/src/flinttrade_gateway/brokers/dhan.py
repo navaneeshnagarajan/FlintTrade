@@ -159,6 +159,14 @@ class DhanAdapter(BrokerAdapter):
         )
 
     @staticmethod
+    def _split_symbol(s: str) -> tuple[str, str]:
+        """Split an ``"EXCHANGE:SYMBOL"`` quote key (defaults exchange to NSE)."""
+        if ":" in s:
+            exchange, name = s.split(":", 1)
+            return exchange.strip().upper(), name.strip()
+        return "NSE", s.strip()
+
+    @staticmethod
     async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         # dhanhq is synchronous — run it off the event loop.
         return await asyncio.to_thread(fn, *args, **kwargs)
@@ -239,13 +247,58 @@ class DhanAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).get_fund_limits)
         return M.from_dhan_funds(resp)
 
-    # ---------- market data: rest (separate wave) ----------
+    # ---------- market data: rest ----------
 
     async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
-        raise NotImplementedError(_PENDING.format("quotes"))
+        from flinttrade_core.models import Quote  # noqa: PLC0415
+
+        # Resolve every symbol to (segment, security_id) and batch by segment.
+        resolved: list[tuple[str, str, str, str]] = []
+        securities: dict[str, list[Any]] = {}
+        for raw in symbols:
+            exchange, name = self._split_symbol(raw)
+            sec_id = self._resolve_security(name, exchange)
+            segment = M.to_dhan_segment(exchange)
+            securities.setdefault(segment, []).append(int(sec_id) if sec_id.isdigit() else sec_id)
+            resolved.append((name, exchange, segment, sec_id))
+
+        resp = await self._call(self._client(session).quote_data, securities)
+
+        out: list[Quote] = []
+        for name, exchange, segment, sec_id in resolved:
+            rec = M.quote_from_feed(segment, sec_id, resp)
+            if rec is not None:
+                out.append(Quote(**M.from_dhan_quote(name, exchange, rec)))
+        return out
 
     async def historical(self, session: Session, req: dict) -> Candles:
-        raise NotImplementedError(_PENDING.format("historical"))
+        from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
+
+        symbol = str(req.get("symbol", ""))
+        exchange = str(req.get("exchange", "NSE"))
+        interval = str(req.get("interval", req.get("timeframe", "1m")))
+        instrument = str(req.get("instrument_type", req.get("instrument", "EQUITY")))
+        from_date = req.get("from_date") or req.get("start") or req.get("start_date")
+        to_date = req.get("to_date") or req.get("end") or req.get("end_date")
+        security_id = self._resolve_security(symbol, exchange)
+        segment = M.to_dhan_segment(exchange)
+        kind, minutes = M.interval_to_dhan(interval)
+        client = self._client(session)
+        if kind == "daily":
+            resp = await self._call(
+                client.historical_daily_data, security_id, segment, instrument, from_date, to_date
+            )
+        else:
+            resp = await self._call(
+                client.intraday_minute_data, security_id, segment, instrument, from_date, to_date, minutes
+            )
+        cd = M.to_candles_dict(symbol, exchange, interval, resp)
+        return Candles(
+            symbol=cd["symbol"],
+            exchange=cd["exchange"],
+            interval=cd["interval"],
+            bars=[OHLCV(**b) for b in cd["bars"]],
+        )
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
         raise NotImplementedError(_PENDING.format("option_chain"))

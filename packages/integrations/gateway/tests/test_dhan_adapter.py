@@ -56,6 +56,26 @@ class MockDhan:
     def get_fund_limits(self):
         return {"status": "success", "data": {"availabelBalance": 50000, "utilizedAmount": 12000}}
 
+    def quote_data(self, securities):
+        self.calls.append(("quote", securities))
+        return {"status": "success", "data": {"NSE_EQ": {"11536": {
+            "last_price": 2901.5, "ohlc": {"open": 2890, "high": 2910, "low": 2885, "close": 2888},
+            "volume": 1_200_000,
+        }}}}
+
+    def intraday_minute_data(self, security_id, exchange_segment, instrument_type, from_date, to_date, interval=1, oi=False):
+        self.calls.append(("intraday", security_id, interval))
+        return {"status": "success", "data": {
+            "open": [100, 101], "high": [102, 103], "low": [99, 100],
+            "close": [101, 102], "volume": [1000, 1500], "timestamp": [1, 2],
+        }}
+
+    def historical_daily_data(self, security_id, exchange_segment, instrument_type, from_date, to_date, expiry_code=0, oi=False):
+        self.calls.append(("daily", security_id))
+        return {"status": "success", "data": {
+            "open": [100], "high": [102], "low": [99], "close": [101], "volume": [1000], "timestamp": [1],
+        }}
+
 
 def _adapter(mock):
     return DhanAdapter(client_factory=lambda _s: mock, security_resolver=lambda s, e: "11536")
@@ -144,6 +164,36 @@ async def test_unresolvable_symbol_raises():
     order = Order(symbol="OBSCURE", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS")
     with pytest.raises(BrokerError, match="security_id"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.asyncio
+async def test_quotes_map_to_models():
+    adapter = _adapter(MockDhan())
+    session = await _session(adapter)
+    quotes = await adapter.quotes(session, ["NSE:RELIANCE"])
+    assert len(quotes) == 1
+    assert quotes[0].symbol == "RELIANCE"
+    assert quotes[0].ltp == 2901.5
+    assert quotes[0].open == 2890.0
+
+
+@pytest.mark.asyncio
+async def test_historical_intraday_and_daily():
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    intraday = await adapter.historical(
+        session, {"symbol": "RELIANCE", "exchange": "NSE", "interval": "5m", "from_date": "2026-06-01", "to_date": "2026-06-05"}
+    )
+    assert intraday.symbol == "RELIANCE" and len(intraday.bars) == 2
+    assert intraday.bars[0].open == 100.0
+    assert ("intraday", "11536", 5) in mock.calls
+
+    daily = await adapter.historical(
+        session, {"symbol": "RELIANCE", "exchange": "NSE", "interval": "D", "from_date": "2026-01-01", "to_date": "2026-06-05"}
+    )
+    assert len(daily.bars) == 1
+    assert any(c[0] == "daily" for c in mock.calls)
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,11 @@ from flinttrade_gateway.brokers.dhan_mapping import (
     from_dhan_funds,
     from_dhan_order,
     from_dhan_position,
+    from_dhan_quote,
     from_dhan_trade,
+    interval_to_dhan,
+    quote_from_feed,
+    to_candles_dict,
     to_modify_order_kwargs,
     to_place_order_kwargs,
     unwrap,
@@ -97,3 +101,32 @@ def test_from_dhan_funds():
     funds = from_dhan_funds({"status": "success", "data": {"availabelBalance": 50000, "utilizedAmount": 12000}})
     assert funds["available_balance"] == "50000"
     assert funds["used_margin"] == "12000"
+
+
+def test_interval_to_dhan():
+    assert interval_to_dhan("D") == ("daily", 0)
+    assert interval_to_dhan("daily") == ("daily", 0)
+    assert interval_to_dhan("5m") == ("intraday", 5)
+    assert interval_to_dhan("1h") == ("intraday", 60)
+    assert interval_to_dhan("3m") == ("intraday", 5)  # snapped to nearest supported
+
+
+def test_to_candles_dict():
+    resp = {"status": "success", "data": {
+        "open": [100, 101], "high": [102, 103], "low": [99, 100],
+        "close": [101, 102], "volume": [1000, 1500], "timestamp": [1, 2],
+    }}
+    cd = to_candles_dict("RELIANCE", "NSE", "5m", resp)
+    assert cd["symbol"] == "RELIANCE" and len(cd["bars"]) == 2
+    assert cd["bars"][0] == {"timestamp": "1", "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0, "volume": 1000}
+
+
+def test_quote_mapping():
+    feed = {"status": "success", "data": {"NSE_EQ": {"11536": {
+        "last_price": 2901.5, "ohlc": {"open": 2890, "high": 2910, "low": 2885, "close": 2888},
+        "volume": 1_200_000,
+    }}}}
+    rec = quote_from_feed("NSE_EQ", "11536", feed)
+    assert rec is not None
+    q = from_dhan_quote("RELIANCE", "NSE", rec)
+    assert q["ltp"] == 2901.5 and q["open"] == 2890.0 and q["volume"] == 1_200_000

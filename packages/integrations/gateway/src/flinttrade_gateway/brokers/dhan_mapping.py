@@ -290,3 +290,84 @@ def from_dhan_funds(resp: Any) -> dict[str, Any]:
         "total_balance": str(total),
         "extra": d,
     }
+
+
+# ---------------------------------------------------------------------------
+# Market data
+# ---------------------------------------------------------------------------
+
+# Dhan intraday candle intervals (minutes). Anything else falls back to daily.
+DHAN_INTRADAY_INTERVALS = {1, 5, 15, 25, 60}
+
+
+def interval_to_dhan(interval: str) -> tuple[str, int]:
+    """Map a FlintTrade interval to ``(kind, minutes)`` where kind is
+    ``"intraday"`` or ``"daily"`` (minutes is 0 for daily)."""
+    raw = str(interval).strip().lower()
+    if raw in {"d", "1d", "day", "daily"}:
+        return "daily", 0
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    minutes = int(digits) if digits else 1
+    if "h" in raw:  # hourly → minutes
+        minutes *= 60
+    if minutes not in DHAN_INTRADAY_INTERVALS:
+        # snap to the nearest supported intraday interval; on a tie prefer the
+        # larger interval (fewer requests / less over-sampling).
+        target = minutes
+        minutes = min(DHAN_INTRADAY_INTERVALS, key=lambda m: (abs(m - target), -m))
+    return "intraday", minutes
+
+
+def to_candles_dict(symbol: str, exchange: str, interval: str, resp: Any) -> dict[str, Any]:
+    """Map a Dhan historical response (parallel arrays) to a Candles-shaped dict."""
+    d = unwrap(resp) or {}
+    opens = d.get("open", []) or []
+    highs = d.get("high", []) or []
+    lows = d.get("low", []) or []
+    closes = d.get("close", []) or []
+    vols = d.get("volume", []) or []
+    stamps = d.get("timestamp", []) or []
+    n = min(len(opens), len(highs), len(lows), len(closes))
+    bars = [
+        {
+            "timestamp": str(stamps[i]) if i < len(stamps) else "",
+            "open": _num(opens[i]),
+            "high": _num(highs[i]),
+            "low": _num(lows[i]),
+            "close": _num(closes[i]),
+            "volume": int(_num(vols[i])) if i < len(vols) else 0,
+        }
+        for i in range(n)
+    ]
+    return {"symbol": symbol, "exchange": exchange, "interval": str(interval), "bars": bars}
+
+
+def from_dhan_quote(symbol: str, exchange: str, q: dict[str, Any]) -> dict[str, Any]:
+    """Map a single Dhan quote record (marketfeed/quote) to a Quote-shaped dict."""
+    ohlc = q.get("ohlc", {}) or {}
+    return {
+        "symbol": symbol,
+        "exchange": exchange,
+        "ltp": _num(q.get("last_price", q.get("ltp", 0))),
+        "open": _num(ohlc.get("open", 0)),
+        "high": _num(ohlc.get("high", 0)),
+        "low": _num(ohlc.get("low", 0)),
+        "close": _num(ohlc.get("close", 0)),
+        "volume": int(_num(q.get("volume", 0))),
+        "oi": int(_num(q.get("oi", 0))),
+    }
+
+
+def quote_from_feed(segment: str, security_id: str, feed: Any) -> dict[str, Any] | None:
+    """Pull one security's quote dict out of the nested marketfeed/quote payload.
+
+    The payload is ``{segment: {security_id: {...}}}`` after :func:`unwrap`.
+    """
+    data = unwrap(feed)
+    if not isinstance(data, dict):
+        return None
+    by_seg = data.get(segment)
+    if not isinstance(by_seg, dict):
+        return None
+    rec = by_seg.get(str(security_id))
+    return rec if isinstance(rec, dict) else None
