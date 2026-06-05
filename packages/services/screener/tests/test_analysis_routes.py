@@ -72,11 +72,18 @@ class TestGEXEndpoint:
     def test_gex_has_data(self, client):
         _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
         assert "data" in body
+        # Terminal GEXData contract (mapped from the GEXResult dataclass).
         data = body["data"]
         assert "strikes" in data
-        assert "total_net_gex" in data
-        assert "top_gamma_strikes" in data
-        assert "oi_walls" in data
+        assert "net_gex" in data  # was total_net_gex on the dataclass
+        assert "atm_strike" in data
+        assert "gamma_flip_strike" in data
+        assert "dealer_zone" in data
+        assert "underlying" in data
+        # Per-strike objects use the frontend `strike` key, not `strike_price`.
+        if data["strikes"]:
+            assert "strike" in data["strikes"][0]
+            assert "call_gex" in data["strikes"][0]
 
     def test_gex_strikes_not_empty(self, client):
         _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
@@ -113,11 +120,15 @@ class TestVolSurfaceEndpoint:
             "symbol": "NIFTY", "exchange": "NFO",
             "expiries": ["26MAR26", "24APR26"],
         })
+        # Terminal VolSurfaceData contract (mapped from the raw dataclass).
         data = body["data"]
         assert "iv_matrix" in data
         assert "strikes" in data
-        assert "expiries_dte" in data
-        assert "atm_ivs" in data
+        assert "days_to_expiry" in data  # was expiries_dte on the dataclass
+        assert "expiries" in data  # human-readable labels
+        assert "atm_strike" in data
+        assert "underlying" in data
+        assert "spot_price" in data
 
     def test_volsurface_matrix_dimensions(self, client):
         """iv_matrix rows should match expiry count."""
@@ -126,7 +137,7 @@ class TestVolSurfaceEndpoint:
             "expiries": ["26MAR26", "24APR26", "29MAY26"],
         })
         data = body["data"]
-        n_expiries = len(data["expiries_dte"])
+        n_expiries = len(data["days_to_expiry"])
         n_strikes = len(data["strikes"])
         assert len(data["iv_matrix"]) == n_expiries
         for row in data["iv_matrix"]:
@@ -160,21 +171,27 @@ class TestIVSmileEndpoint:
 
     def test_ivsmile_has_required_fields(self, client):
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
+        # Terminal IVSmileData contract: a `curves` array of per-strike points.
         data = body["data"]
-        assert "strikes" in data
-        assert "call_iv" in data
-        assert "put_iv" in data
-        assert "atm_iv" in data
-        assert "atm_strike" in data
-        assert "skew" in data
+        assert "underlying" in data
+        assert "spot_price" in data
+        assert "curves" in data and len(data["curves"]) >= 1
+        curve = data["curves"][0]
+        assert "atm_iv" in curve
+        assert "atm_strike" in curve
+        assert "skew_25delta" in curve  # was `skew` on the dataclass
+        assert "points" in curve
+        if curve["points"]:
+            p = curve["points"][0]
+            assert "strike" in p and "call_iv" in p and "put_iv" in p and "moneyness" in p
 
     def test_ivsmile_strikes_not_empty(self, client):
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
-        assert len(body["data"]["strikes"]) > 0
+        assert len(body["data"]["curves"][0]["points"]) > 0
 
     def test_ivsmile_atm_iv_positive(self, client):
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
-        assert body["data"]["atm_iv"] > 0
+        assert body["data"]["curves"][0]["atm_iv"] > 0
 
 
 # ---------------------------------------------------------------------------
