@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import struct
+
 import pytest
 
 from flinttrade_core.models import Order
@@ -214,6 +216,39 @@ async def test_option_chain_maps_to_model():
     assert oc.strikes[0].strike_price == 24000.0
     assert oc.strikes[0].ce_ltp == 150.0 and oc.strikes[0].pe_oi == 1200
     assert ("option_chain", "13", "2026-06-25") in mock.calls  # NIFTY index id
+
+
+@pytest.mark.asyncio
+async def test_subscribe_builds_feed_map_and_stream_yields_ticks():
+    frames = [struct.pack("<BHBIfI", 15, 16, 1, 11536, 2901.5, 1)]
+
+    async def fake_feed(_session):
+        for frame in frames:
+            yield frame
+
+    adapter = DhanAdapter(
+        client_factory=lambda _s: MockDhan(),
+        security_resolver=lambda s, e: "11536",
+        feed_factory=fake_feed,
+    )
+    session = await _session(adapter)
+    await adapter.subscribe(session, ["NSE:RELIANCE"])
+    assert adapter._feed_map["11536"] == ("RELIANCE", "NSE")
+
+    ticks = [t async for t in adapter.stream(session)]
+    assert len(ticks) == 1
+    assert ticks[0].symbol == "RELIANCE"
+    assert ticks[0].ltp == 2901.5
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_removes_from_feed_map():
+    adapter = _adapter(MockDhan())
+    session = await _session(adapter)
+    await adapter.subscribe(session, ["NSE:RELIANCE"])
+    assert "11536" in adapter._feed_map
+    await adapter.unsubscribe(session, ["NSE:RELIANCE"])
+    assert "11536" not in adapter._feed_map
 
 
 @pytest.mark.asyncio

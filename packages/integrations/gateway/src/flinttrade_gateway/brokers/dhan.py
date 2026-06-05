@@ -123,9 +123,13 @@ class DhanAdapter(BrokerAdapter):
         *,
         client_factory: Callable[[Session], Any] | None = None,
         security_resolver: Callable[[str, str], str] | None = None,
+        feed_factory: Callable[[Session], AsyncIterator[bytes]] | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._security_resolver = security_resolver
+        self._feed_factory = feed_factory
+        # security_id -> (symbol, exchange) for routing decoded ticks back to names.
+        self._feed_map: dict[str, tuple[str, str]] = {}
 
     # ---------- identity + capabilities ----------
 
@@ -316,16 +320,54 @@ class DhanAdapter(BrokerAdapter):
             strikes=[OptionChainStrike(**s) for s in oc["strikes"]],
         )
 
-    # ---------- market data: streaming (separate wave) ----------
-
-    def stream(self, session: Session) -> AsyncIterator[Any]:
-        raise NotImplementedError(_PENDING.format("stream"))
+    # ---------- market data: streaming ----------
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:
-        raise NotImplementedError(_PENDING.format("subscribe"))
+        # Resolve each symbol to its Dhan security id and remember it so decoded
+        # binary ticks (which carry only the security id) can be routed back to
+        # the symbol when streamed.
+        for raw in symbols:
+            exchange, name = self._split_symbol(raw)
+            security_id = self._resolve_security(name, exchange)
+            self._feed_map[str(security_id)] = (name, exchange)
 
     async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
-        raise NotImplementedError(_PENDING.format("unsubscribe"))
+        for raw in symbols:
+            exchange, name = self._split_symbol(raw)
+            try:
+                security_id = self._resolve_security(name, exchange)
+            except BrokerError:
+                continue
+            self._feed_map.pop(str(security_id), None)
+
+    def stream(self, session: Session) -> AsyncIterator[Any]:
+        return self._stream_impl(session)
+
+    async def _stream_impl(self, session: Session) -> AsyncIterator[Any]:
+        from flinttrade_core.models import TickEvent  # noqa: PLC0415
+
+        if self._feed_factory is None:
+            # Live: the binary WS feed needs the dhanhq SDK + credentials. The
+            # decode path (decode_dhan_tick) is implemented and tested; the live
+            # socket is provided by injecting a feed_factory.
+            raise NotImplementedError(
+                "Dhan live tick stream needs the dhanhq market feed (inject feed_factory)"
+            )
+
+        async for frame in self._feed_factory(session):
+            tick = M.decode_dhan_tick(frame)
+            if tick is None:
+                continue
+            symbol, exchange = self._feed_map.get(
+                tick["security_id"], ("", tick.get("exchange", "")),
+            )
+            yield TickEvent(
+                symbol=symbol,
+                exchange=exchange or tick.get("exchange", ""),
+                ltp=tick.get("ltp", 0.0),
+                volume=int(tick.get("volume", 0)),
+                timestamp="",
+            )
 
     # ---------- reconciliation ----------
 

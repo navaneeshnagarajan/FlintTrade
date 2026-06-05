@@ -8,6 +8,7 @@ and instrument resolution; keep them in lock-step with ``DHAN_CAPABILITIES``.
 
 from __future__ import annotations
 
+import struct
 from typing import Any
 
 # Canonical order type -> Dhan order_type.
@@ -388,6 +389,64 @@ def _leg(leg: dict[str, Any], side: str) -> dict[str, Any]:
         f"{side}_bid": _num(leg.get("top_bid_price", 0)),
         f"{side}_ask": _num(leg.get("top_ask_price", 0)),
     }
+
+
+# ---------------------------------------------------------------------------
+# Binary market feed (live tick stream)
+# ---------------------------------------------------------------------------
+
+# Dhan v2 binary feed response codes (first byte of each packet).
+DHAN_FEED_TICKER = 15
+DHAN_FEED_QUOTE = 17
+
+# Feed exchange-segment byte → canonical exchange.
+FEED_SEGMENT_TO_EXCHANGE = {
+    0: "NSE_INDEX",
+    1: "NSE",
+    2: "NFO",
+    3: "CDS",
+    4: "BSE",
+    5: "MCX",
+    7: "BCD",
+    8: "BFO",
+}
+
+
+def decode_dhan_tick(data: bytes) -> dict[str, Any] | None:
+    """Decode one Dhan binary market-feed packet into a normalised tick dict.
+
+    Dhan streams a packed binary frame whose first byte is a response code
+    (15 = Ticker, 17 = Quote). The header is ``<BHBIf`` =
+    code, message-length, exchange-segment, security-id, LTP. Returns None for
+    short or unrecognised packets.
+    """
+    if data is None or len(data) < 16:
+        return None
+    code = struct.unpack_from("<B", data, 0)[0]
+    if code == DHAN_FEED_TICKER:
+        _, _, seg, security_id, ltp, _ltt = struct.unpack_from("<BHBIfI", data, 0)
+        return {
+            "code": code,
+            "security_id": str(security_id),
+            "exchange": FEED_SEGMENT_TO_EXCHANGE.get(seg, ""),
+            "ltp": round(ltp, 2),
+        }
+    if code == DHAN_FEED_QUOTE and len(data) >= 50:
+        fields = struct.unpack_from("<BHBIfHIfIIIffff", data, 0)
+        # 0 code, 1 msglen, 2 seg, 3 security_id, 4 ltp, 5 ltq, 6 ltt, 7 atp,
+        # 8 volume, 9 total_sell_qty, 10 total_buy_qty, 11 open, 12 close, 13 high, 14 low
+        return {
+            "code": code,
+            "security_id": str(fields[3]),
+            "exchange": FEED_SEGMENT_TO_EXCHANGE.get(fields[2], ""),
+            "ltp": round(fields[4], 2),
+            "volume": int(fields[8]),
+            "open": round(fields[11], 2),
+            "close": round(fields[12], 2),
+            "high": round(fields[13], 2),
+            "low": round(fields[14], 2),
+        }
+    return None
 
 
 def to_option_chain_dict(underlying: str, exchange: str, resp: Any) -> dict[str, Any]:

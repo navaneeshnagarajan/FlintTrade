@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import struct
+
 import pytest
 
 from flinttrade_core.models import Order
 from flinttrade_gateway.brokers.dhan_mapping import (
     DhanMappingError,
+    decode_dhan_tick,
     extract_order_id,
     from_dhan_funds,
     from_dhan_order,
@@ -150,3 +153,32 @@ def test_to_option_chain_dict():
     assert oc["strikes"][1]["strike_price"] == 24100.0
     s0 = oc["strikes"][0]
     assert s0["ce_ltp"] == 150.0 and s0["ce_delta"] == 0.5 and s0["pe_oi"] == 12000
+
+
+def test_decode_dhan_ticker_packet():
+    # <BHBIfI: code=15 (Ticker), msglen, seg=1 (NSE), security_id=11536, ltp, ltt
+    data = struct.pack("<BHBIfI", 15, 16, 1, 11536, 2901.5, 123456)
+    tick = decode_dhan_tick(data)
+    assert tick is not None
+    assert tick["code"] == 15
+    assert tick["security_id"] == "11536"
+    assert tick["ltp"] == 2901.5
+    assert tick["exchange"] == "NSE"
+
+
+def test_decode_dhan_quote_packet():
+    data = struct.pack(
+        "<BHBIfHIfIIIffff",
+        17, 50, 2, 49081, 150.5, 10, 111, 149.0, 5000, 100, 200, 148.0, 145.0, 152.0, 144.0,
+    )
+    tick = decode_dhan_tick(data)
+    assert tick is not None
+    assert tick["code"] == 17 and tick["security_id"] == "49081"
+    assert tick["ltp"] == 150.5 and tick["volume"] == 5000
+    assert tick["exchange"] == "NFO"
+
+
+def test_decode_dhan_rejects_short_or_unknown():
+    assert decode_dhan_tick(b"\x00\x01") is None  # too short
+    unknown = struct.pack("<BHBIfI", 99, 16, 1, 1, 1.0, 1)  # unknown response code
+    assert decode_dhan_tick(unknown) is None
