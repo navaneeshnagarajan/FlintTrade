@@ -40,12 +40,52 @@ describe("MarketBreadthWidget", () => {
     expect(screen.getByText("Sample")).toBeTruthy();
   });
 
-  it("does not show sample badge when broker is connected", () => {
-    // Stub fetch to avoid unresolved promises in test environment
+  it("keeps the sample badge while connected until real live data arrives", () => {
+    // Fetch pending → no confirmed live snapshot yet → badge must stay (honest).
     global.fetch = vi.fn().mockImplementation(() => new Promise(() => {}));
     mockUseBrokerConnected.mockReturnValue(true);
     render(<MarketBreadthWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    expect(screen.getByText("Sample")).toBeTruthy();
+  });
+
+  it("hides the sample badge once the backend returns real (non-sample) data", async () => {
+    const realResponse = {
+      status: "success",
+      is_sample_data: false,
+      data: {
+        date: "2026-06-05",
+        advances: 1200, declines: 800, unchanged: 50,
+        new_highs: 40, new_lows: 12,
+        mcclellan_oscillator: 35, breadth_thrust: 0.62,
+      },
+    };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(realResponse),
+    });
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<MarketBreadthWidget />);
+    await vi.waitFor(() => expect(screen.queryByText("Sample")).toBeNull());
+  });
+
+  it("keeps the sample badge when the backend reports its own sample fallback", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        status: "success",
+        is_sample_data: true,
+        data: {
+          date: "2026-06-05",
+          advances: 1000, declines: 1000, unchanged: 0,
+          new_highs: 10, new_lows: 10,
+          mcclellan_oscillator: 0, breadth_thrust: 0.5,
+        },
+      }),
+    });
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<MarketBreadthWidget />);
+    // Badge persists because the data is the backend's sample, not live.
+    expect(screen.getByText("Sample")).toBeTruthy();
   });
 
   it("renders A/D ratio section with Advances and Declines labels", () => {
