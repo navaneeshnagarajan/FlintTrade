@@ -92,6 +92,36 @@ def to_place_order_params(order: Any, instrument_token: str, *, tag: str | None 
     }
 
 
+def to_margin_instrument(order: Any, instrument_token: str) -> dict[str, Any]:
+    """Build one Upstox margin-request instrument from an ``Order`` (pre-trade)."""
+    product = str(order.product).upper()
+    if product not in PRODUCT_TO_UPSTOX:
+        raise UpstoxMappingError(f"Unsupported product {product!r}")
+    side = str(order.action).upper()
+    if side not in SIDE_TO_UPSTOX:
+        raise UpstoxMappingError(f"Unsupported action {side!r}")
+    return {
+        "instrument_key": str(instrument_token),
+        "quantity": int(_num(order.quantity, 0)),
+        "product": PRODUCT_TO_UPSTOX[product],
+        "transaction_type": SIDE_TO_UPSTOX[side],
+        "price": _num(getattr(order, "price", 0)),
+    }
+
+
+def from_upstox_margin(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise an Upstox ``post_margin`` response into FlintTrade margin fields."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "required_margin": str(data.get("required_margin", 0)),
+        "final_margin": str(data.get("final_margin", 0)),
+        "available_balance": "0",  # Upstox margin response carries no balance; merge from funds()
+        "extra": data,
+    }
+
+
 def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into Upstox ``ModifyOrderRequest`` kwargs."""
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))

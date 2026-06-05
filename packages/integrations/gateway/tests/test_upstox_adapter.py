@@ -72,6 +72,10 @@ class MockUpstox:
             ["2025-01-02T00:00:00+05:30", 100.0, 110.0, 95.0, 105.0, 1500, 0],
         ]}}
 
+    def margin(self, instruments):
+        self.calls.append(("margin", instruments))
+        return {"status": "success", "data": {"required_margin": 14500, "final_margin": 14000}}
+
     def option_chain(self, instrument_key, expiry_date):
         self.calls.append(("option_chain", (instrument_key, expiry_date)))
         return {"status": "success", "data": [
@@ -194,6 +198,16 @@ async def test_option_chain_builds_strikes():
     assert chain.underlying == "NIFTY" and len(chain.strikes) == 1
     s = chain.strikes[0]
     assert s.strike_price == 24000.0 and s.ce_ltp == 120.5 and s.pe_delta == -0.45
+
+
+@pytest.mark.asyncio
+async def test_margin_calculator_reads_estimate():
+    adapter = _adapter(MockUpstox())
+    session = await _session(adapter)
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="2900")
+    margin = await adapter.margin_calculator(session, order)
+    assert margin["required_margin"] == "14500" and margin["final_margin"] == "14000"
 
 
 @pytest.mark.asyncio

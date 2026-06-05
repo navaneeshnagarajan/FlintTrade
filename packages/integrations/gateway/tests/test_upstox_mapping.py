@@ -10,10 +10,12 @@ from flinttrade_gateway.brokers.upstox_mapping import (
     extract_order_id,
     from_upstox_candles,
     from_upstox_funds,
+    from_upstox_margin,
     from_upstox_order,
     from_upstox_position,
     from_upstox_quote,
     to_history_params,
+    to_margin_instrument,
     to_modify_order_params,
     to_option_chain_dict,
     to_place_order_params,
@@ -39,6 +41,16 @@ def test_place_order_sl_m_and_fno_product():
     assert p["order_type"] == "SL-M"
     assert p["product"] == "D"    # NRML → Delivery/carry-forward
     assert p["trigger_price"] == 120.5
+
+
+def test_margin_instrument_and_parse():
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="2900")
+    inst = to_margin_instrument(order, "NSE_EQ|INE002A01018")
+    assert inst["instrument_key"] == "NSE_EQ|INE002A01018" and inst["product"] == "I"
+    assert inst["transaction_type"] == "BUY" and inst["quantity"] == 10
+    margin = from_upstox_margin({"status": "success", "data": {"required_margin": 14500, "final_margin": 14000}})
+    assert margin["required_margin"] == "14500" and margin["final_margin"] == "14000"
 
 
 def test_place_order_advanced_variety_refused():

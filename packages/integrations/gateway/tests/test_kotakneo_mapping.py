@@ -10,10 +10,12 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     extract_order_id,
     from_kotak_funds,
     from_kotak_holding,
+    from_kotak_margin,
     from_kotak_order,
     from_kotak_position,
     from_kotak_quote,
     from_kotak_trade,
+    to_margin_params,
     to_modify_order_params,
     to_place_order_params,
     to_quote_tokens,
@@ -230,6 +232,18 @@ def test_from_kotak_funds_check_margin_fallback():
     # If a build returns the data-wrapped check-margin shape, fall back to it.
     funds = from_kotak_funds({"data": {"avlCash": "100.00", "totMrgnUsd": "40.00"}})
     assert funds["available_balance"] == "100.00" and funds["used_margin"] == "40.00"
+
+
+def test_margin_params_and_parse():
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="9.4")
+    p = to_margin_params(order, "IDEA-EQ")
+    assert p["exchange_segment"] == "nse_cm" and p["instrument_token"] == "IDEA-EQ"
+    assert p["transaction_type"] == "B" and p["order_type"] == "L" and p["quantity"] == "10"
+    margin = from_kotak_margin({"data": {"reqdMrgn": "15.50", "ordMrgn": "15.50",
+                                         "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}})
+    assert margin["required_margin"] == "15.50" and margin["available_balance"] == "38.19"
+    assert margin["rms_validated"] == "OK"
 
 
 def test_to_quote_tokens_maps_segments():

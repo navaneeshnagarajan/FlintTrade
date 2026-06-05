@@ -66,6 +66,11 @@ class MockNeo:
              "buy_price": 9.39, "sell_price": 9.41},
         ]}
 
+    def margin(self, params):
+        self.calls.append(("margin", params))
+        return {"data": {"reqdMrgn": "15.50", "ordMrgn": "15.50", "avlCash": "38.19",
+                         "insufFund": "0", "rmsVldtd": "OK", "stat": "Ok"}}
+
 
 def _adapter(mock):
     return KotakNeoAdapter(client_factory=lambda _s: mock, symbol_resolver=lambda s, e: "IDEA-EQ")
@@ -215,6 +220,16 @@ async def test_quotes_bare_list_fallback():
     session = await _session(adapter)
     quotes = await adapter.quotes(session, ["NSE:IDEA"])
     assert len(quotes) == 1 and quotes[0].symbol == "IDEA-EQ" and quotes[0].ltp == 9.4
+
+
+@pytest.mark.asyncio
+async def test_margin_calculator_reads_estimate():
+    adapter = _adapter(MockNeo())
+    session = await _session(adapter)
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="10", price="9.4")
+    margin = await adapter.margin_calculator(session, order)
+    assert margin["required_margin"] == "15.50" and margin["available_balance"] == "38.19"
 
 
 @pytest.mark.asyncio

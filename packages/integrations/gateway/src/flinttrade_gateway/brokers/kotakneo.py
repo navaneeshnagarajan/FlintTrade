@@ -176,6 +176,9 @@ class KotakNeoClient:
     def quotes(self, instrument_tokens: list[dict[str, str]]) -> dict[str, Any]:
         return self._neo.quotes(instrument_tokens=instrument_tokens, quote_type="all")
 
+    def margin(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._neo.margin_required(**params)
+
 
 class KotakNeoAdapter(BrokerAdapter):
     """Native Kotak Neo adapter.
@@ -321,6 +324,16 @@ class KotakNeoAdapter(BrokerAdapter):
         if not rows and isinstance(resp, list):
             rows = [r for r in resp if isinstance(r, dict)]
         return [Quote(**M.from_kotak_quote(r)) for r in rows]
+
+    async def margin_calculator(self, session: Session, order: Order) -> dict:
+        """Pre-trade margin estimate for ``order`` (NEO ``margin_required``).
+
+        Read-only — places nothing, so it needs no gate.
+        """
+        trading_symbol = self._resolve_symbol(order.symbol, order.exchange)
+        params = M.to_margin_params(order, trading_symbol)
+        resp = await self._call(self._client(session).margin, params)
+        return M.from_kotak_margin(resp)
 
     async def historical(self, session: Session, req: dict) -> Candles:
         # NEO trade API has no historical-candle endpoint (capability is False).

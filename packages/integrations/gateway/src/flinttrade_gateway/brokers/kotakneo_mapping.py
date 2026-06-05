@@ -296,6 +296,45 @@ def from_kotak_holding(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def to_margin_params(order: Any, trading_symbol: str) -> dict[str, Any]:
+    """Build ``NeoAPI.margin_required`` kwargs from an ``Order`` (pre-trade)."""
+    side = _norm(order.action)
+    if side not in SIDE_TO_KOTAK:
+        raise KotakNeoMappingError(f"Unsupported action {side!r}")
+    ptype = _norm(getattr(order, "pricetype", "MARKET"))
+    if ptype not in ORDER_TYPE_TO_KOTAK:
+        raise KotakNeoMappingError(f"Unsupported pricetype {ptype!r}")
+    product = _norm(order.product)
+    if product not in PRODUCT_TO_KOTAK:
+        raise KotakNeoMappingError(f"Unsupported product {product!r}")
+    exchange = _norm(order.exchange)
+    if exchange not in EXCHANGE_TO_KOTAK:
+        raise KotakNeoMappingError(f"Unsupported exchange {exchange!r}")
+    return {
+        "exchange_segment": EXCHANGE_TO_KOTAK[exchange],
+        "price": str(_num(getattr(order, "price", 0))),
+        "order_type": ORDER_TYPE_TO_KOTAK[ptype],
+        "product": PRODUCT_TO_KOTAK[product],
+        "quantity": str(int(_num(order.quantity, 0))),
+        "instrument_token": str(trading_symbol),
+        "transaction_type": SIDE_TO_KOTAK[side],
+    }
+
+
+def from_kotak_margin(resp: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a NEO ``margin_required`` response into FlintTrade margin fields."""
+    data = resp.get("data", resp) if isinstance(resp, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "required_margin": f"{_num(data.get('reqdMrgn', 0)):.2f}",
+        "order_margin": f"{_num(data.get('ordMrgn', 0)):.2f}",
+        "available_balance": f"{_num(data.get('avlCash', data.get('avlMrgn', 0))):.2f}",
+        "insufficient_balance": f"{_num(data.get('insufFund', 0)):.2f}",
+        "rms_validated": str(data.get("rmsVldtd", "")),
+    }
+
+
 def to_quote_tokens(resolved: list[tuple[str, str]]) -> list[dict[str, str]]:
     """Build the NEO ``quotes`` request from ``(trading_symbol, exchange)`` pairs.
 

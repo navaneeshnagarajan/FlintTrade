@@ -252,8 +252,10 @@ def from_dhan_margin(resp: Any) -> dict[str, Any]:
     data = unwrap(resp)
     if not isinstance(data, dict):
         data = {}
+    total = str(data.get("totalMargin", data.get("total_margin", 0)))
     return {
-        "total_margin": str(data.get("totalMargin", data.get("total_margin", 0))),
+        "required_margin": total,  # common key across all three native adapters
+        "total_margin": total,
         "span_margin": str(data.get("spanMargin", 0)),
         "exposure_margin": str(data.get("exposureMargin", 0)),
         "available_balance": str(data.get("availableBalance", 0)),

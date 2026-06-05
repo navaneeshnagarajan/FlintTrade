@@ -114,6 +114,7 @@ class UpstoxClient:
         self._market = upstox_client.MarketQuoteApi(api)
         self._history = upstox_client.HistoryV3Api(api)
         self._options = upstox_client.OptionsApi(api)
+        self._charge = upstox_client.ChargeApi(api)
 
     def place_order(self, params: dict[str, Any]) -> dict[str, Any]:
         body = self._upstox.PlaceOrderRequest(**params)
@@ -151,6 +152,12 @@ class UpstoxClient:
 
     def option_chain(self, instrument_key: str, expiry_date: str) -> dict[str, Any]:
         return self._options.get_put_call_option_chain(instrument_key, expiry_date).to_dict()
+
+    def margin(self, instruments: list[dict[str, Any]]) -> dict[str, Any]:
+        body = self._upstox.MarginRequest(
+            instruments=[self._upstox.Instrument(**i) for i in instruments]
+        )
+        return self._charge.post_margin(body).to_dict()
 
 
 class UpstoxAdapter(BrokerAdapter):
@@ -275,6 +282,16 @@ class UpstoxAdapter(BrokerAdapter):
     async def funds(self, session: Session) -> dict:
         resp = await self._call(self._client(session).funds)
         return M.from_upstox_funds(resp)
+
+    async def margin_calculator(self, session: Session, order: Order) -> dict:
+        """Pre-trade margin estimate for ``order`` (Upstox ``/charges/margin``).
+
+        Read-only — places nothing, so it needs no gate.
+        """
+        token = self._resolve_instrument(order.symbol, order.exchange)
+        instrument = M.to_margin_instrument(order, token)
+        resp = await self._call(self._client(session).margin, [instrument])
+        return M.from_upstox_margin(resp)
 
     # ---------- market data ----------
 
