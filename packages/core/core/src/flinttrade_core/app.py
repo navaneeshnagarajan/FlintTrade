@@ -1080,6 +1080,15 @@ def create_flask_app(
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Cron scheduler wiring failed (%s); strategy scheduling will 503", exc)
 
+    # Execution-quality analytics (POST /api/v1/analytics/execution) and strategy
+    # comparison (POST /api/v1/backtest/compare) — both fully built + tested but were
+    # never registered (404 in production; feature audit H6/M2). Their blueprints
+    # carry no prefix, so register under /api/v1 to match the frontend convention.
+    from flinttrade_journal.order_analytics import order_analytics_bp  # noqa: PLC0415
+    app.register_blueprint(order_analytics_bp, url_prefix="/api/v1")
+    from flinttrade_backtest.strategy_comparison import strategy_comparison_bp  # noqa: PLC0415
+    app.register_blueprint(strategy_comparison_bp, url_prefix="/api/v1")
+
     # Register Engine Sandbox blueprint (/v1/sandbox-config/*) — config/leverage/squareoff.
     # Uses the /v1/sandbox-config prefix to avoid collision with the data sandbox
     # blueprint below, which owns /v1/sandbox.
