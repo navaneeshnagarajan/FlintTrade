@@ -1,26 +1,29 @@
-"""Upstox adapter skeleton for wave-2 broker support.
+"""Upstox v2 native adapter (doc-grounded against upstox-python).
 
-The full ``BrokerAdapter`` async surface (contract §5) is declared here, but
-every live broker call is gated behind SDK attestation until the Upstox wave
-lands. ``broker_id`` and ``capabilities`` return real values so the registry,
-router, capability-routing, and broker-recommendation layers can be exercised
-ahead of live trading.
+Implements the BrokerAdapter contract for Upstox: auth, the gated write surface
+(place/modify/cancel), and the portfolio reads (order book / trade book /
+positions / holdings / funds). Request/response translation lives in
+``upstox_mapping`` and is unit-tested.
 
-Capability values are grounded in the local Upstox reference docs
-(``.local/reference/broker-docs/upstox/``). Fields not stated in those docs are
-left at their dataclass defaults (``None``/``0``/``[]``) rather than guessed.
+The Upstox SDK is OpenAPI-generated (typed request/response models), so the
+adapter talks to a small dict-based facade (``UpstoxClient``) that owns the SDK
+models; ``login`` builds the live facade and tests inject a mock one. The adapter
+itself only depends on the facade's dict interface, so it is fully mock-testable
+without the SDK.
 
-Auth model (for the future ``login``/``refresh``): standard OAuth 2.0
-authorization-code flow against ``api.upstox.com`` — ``client_id`` is the API
-key, ``client_secret`` the API secret; the access token is single-day (expires
-at the next ~03:30 IST, no programmatic refresh token, re-auth required). An
-optional read-only Extended Token is valid for one year.
+Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8). The
+adapter is NOT registered in ``build_broker_router`` — it stays dormant until SDK
+attestation + credentials. Market data (quotes/historical/option_chain/stream) is
+a separate wave.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncIterator
+import asyncio
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.exceptions import BrokerError
 from flinttrade_gateway.capabilities import (
     AuthModel,
     Capabilities,
@@ -30,60 +33,35 @@ from flinttrade_gateway.capabilities import (
     TickProtocol,
 )
 
+from . import upstox_mapping as M
 from ._base import BrokerAdapter, Session
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
     from flinttrade_gateway.reconciliation import ReconciliationReport
 
-_GATED = "Upstox {0} is gated behind broker SDK attestation (wave 2)"
+_PENDING = "Upstox {0} — market-data/streaming wave pending live SDK verification"
 
 UPSTOX_CAPABILITIES = Capabilities(
-    # NCDEX not supported; MF and currency (CDS/BCD) are.
     segments=(
-        Segments.NSE_EQ
-        | Segments.BSE_EQ
-        | Segments.NFO
-        | Segments.BFO
-        | Segments.CDS
-        | Segments.BCD
-        | Segments.MCX
-        | Segments.MF
+        Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO
+        | Segments.CDS | Segments.BCD | Segments.MCX | Segments.MF
     ),
-    # Product enum is Intraday / Delivery / CO / OCO — no native bracket (BO).
-    # Iceberg is offered via order slicing; GTT via the GTT Orders API.
     order_types=(
-        OrderTypes.MARKET
-        | OrderTypes.LIMIT
-        | OrderTypes.SL
-        | OrderTypes.SLM
-        | OrderTypes.MIS
-        | OrderTypes.CNC
-        | OrderTypes.NRML
-        | OrderTypes.AMO
-        | OrderTypes.GTT
-        | OrderTypes.ICEBERG
-        | OrderTypes.CO
+        OrderTypes.MARKET | OrderTypes.LIMIT | OrderTypes.SL | OrderTypes.SLM
+        | OrderTypes.MIS | OrderTypes.CNC | OrderTypes.NRML | OrderTypes.AMO
+        | OrderTypes.GTT | OrderTypes.ICEBERG | OrderTypes.CO
     ),
-    # REST quote and WS full_d5 give L5 depth; full_d30 (>L20) needs the paid
-    # Upstox Plus Pack, so the freely-available depth is L5.
     depth_levels=DepthLevels.L5,
-    # Wire format is actually protobuf (MarketDataFeedV3.proto), decoded to dict
-    # by the SDK; UPSTOX_JSON is the registry's protocol identifier for Upstox.
     tick_protocol=TickProtocol.UPSTOX_JSON,
     auth_model=AuthModel.OAUTH_DAILY,
-    # Daily token cycle (expires ~03:30 IST next day); precise hours not stated
-    # in the local docs — 24h is the daily-cycle ceiling, used for refresh timing.
     session_lifetime_hours=24.0,
     sandbox=True,
-    # Rate limits per the SEBI-2025 two-tier model: 10/sec for unregistered
-    # ("Regular") algos (50/sec once SEBI-registered).
     rate_limit_orders_per_sec=10,
     rate_limit_orders_per_min=500,
     rate_limit_data_per_sec=50,
     rate_limit_quote_per_sec=50,
     rate_limit_non_trading_per_sec=50,
-    # Algo name is optional (X-Algo-Name); registration only lifts the rate tier.
     algo_tag_required=False,
     cost_paid=False,
     historical_intraday_intervals_minutes=[1, 3, 5, 15, 30],
@@ -97,8 +75,72 @@ UPSTOX_CAPABILITIES = Capabilities(
 )
 
 
+class UpstoxClient:
+    """Dict-based facade over the upstox-python OpenAPI SDK (lazy import).
+
+    Owns the SDK request/response models so the adapter stays SDK-free. Built by
+    ``UpstoxAdapter.login`` for live use; tests inject a mock with the same
+    method surface instead.
+    """
+
+    _V = "v2"
+
+    def __init__(self, access_token: str) -> None:
+        import upstox_client  # noqa: PLC0415
+
+        cfg = upstox_client.Configuration()
+        cfg.access_token = access_token
+        api = upstox_client.ApiClient(cfg)
+        self._upstox = upstox_client
+        self._order = upstox_client.OrderApi(api)
+        self._portfolio = upstox_client.PortfolioApi(api)
+        self._user = upstox_client.UserApi(api)
+
+    def place_order(self, params: dict[str, Any]) -> dict[str, Any]:
+        body = self._upstox.PlaceOrderRequest(**params)
+        return self._order.place_order(body, self._V).to_dict()
+
+    def modify_order(self, params: dict[str, Any]) -> dict[str, Any]:
+        body = self._upstox.ModifyOrderRequest(**params)
+        return self._order.modify_order(body, self._V).to_dict()
+
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
+        return self._order.cancel_order(order_id, self._V).to_dict()
+
+    def order_book(self) -> dict[str, Any]:
+        return self._order.get_order_book(self._V).to_dict()
+
+    def trade_book(self) -> dict[str, Any]:
+        return self._order.get_trade_history(self._V).to_dict()
+
+    def positions(self) -> dict[str, Any]:
+        return self._portfolio.get_positions(self._V).to_dict()
+
+    def holdings(self) -> dict[str, Any]:
+        return self._portfolio.get_holdings(self._V).to_dict()
+
+    def funds(self) -> dict[str, Any]:
+        return self._user.get_user_fund_margin(self._V).to_dict()
+
+
 class UpstoxAdapter(BrokerAdapter):
-    # ---------- identity + capabilities ----------
+    """Native Upstox adapter.
+
+    Args:
+        client_factory: ``session -> UpstoxClient``-like facade (tests inject a
+            mock). When omitted, ``login`` builds the live facade.
+        instrument_resolver: ``(symbol, exchange) -> instrument_token`` — Upstox
+            trades by instrument token (e.g. ``"NSE_EQ|INE002A01018"``).
+    """
+
+    def __init__(
+        self,
+        *,
+        client_factory: Callable[[Session], Any] | None = None,
+        instrument_resolver: Callable[[str, str], str] | None = None,
+    ) -> None:
+        self._client_factory = client_factory
+        self._instrument_resolver = instrument_resolver
 
     @property
     def broker_id(self) -> str:
@@ -108,78 +150,124 @@ class UpstoxAdapter(BrokerAdapter):
     def capabilities(self) -> Capabilities:
         return UPSTOX_CAPABILITIES
 
+    # ---------- helpers ----------
+
+    def _client(self, session: Session) -> Any:
+        if self._client_factory is not None:
+            return self._client_factory(session)
+        client = session.extra.get("client")
+        if client is None:
+            raise BrokerError("Upstox client not initialised — call login() first")
+        return client
+
+    def _resolve_instrument(self, symbol: str, exchange: str) -> str:
+        if self._instrument_resolver is not None:
+            return str(self._instrument_resolver(symbol, exchange))
+        raise BrokerError(
+            f"Cannot resolve Upstox instrument_token for {symbol}/{exchange} — "
+            "configure an instrument resolver"
+        )
+
+    @staticmethod
+    async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+
+    @staticmethod
+    def _rows(resp: Any) -> list[dict[str, Any]]:
+        data = resp.get("data", []) if isinstance(resp, dict) else []
+        return data if isinstance(data, list) else []
+
     # ---------- auth lifecycle ----------
 
     async def login(self, credentials: dict) -> Session:
-        raise NotImplementedError(_GATED.format("login"))
+        access_token = str(credentials.get("access_token") or "")
+        if not access_token:
+            raise BrokerError("Upstox login requires an access_token")
+        client = None if self._client_factory is not None else UpstoxClient(access_token)
+        return Session(
+            access_token=access_token,
+            expires_at=datetime.now(tz=timezone.utc).timestamp() + 24 * 3600,
+            account_id=str(credentials.get("client_id", "")),
+            adapter_id="upstox",
+            extra={"client": client},
+        )
 
     async def refresh(self, session: Session) -> Session:
-        raise NotImplementedError(_GATED.format("refresh"))
+        # Upstox tokens are single-day (expire ~03:30 IST next day, no refresh
+        # token) — a fresh login() is required at expiry.
+        return session
 
     async def logout(self, session: Session) -> None:
-        raise NotImplementedError(_GATED.format("logout"))
+        session.extra.pop("client", None)
+        return None
 
     # ---------- trading: writes (router-only) ----------
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        raise NotImplementedError(_GATED.format("order placement"))
+        token = self._resolve_instrument(order.symbol, order.exchange)
+        tag = session.algo_id or None
+        params = M.to_place_order_params(order, token, tag=tag)
+        resp = await self._call(self._client(session).place_order, params)
+        return M.extract_order_id(resp)
 
     async def modify_order(
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        raise NotImplementedError(_GATED.format("order modification"))
+        params = M.to_modify_order_params(order_id, changes)
+        await self._call(self._client(session).modify_order, params)
 
     async def cancel_order(
         self, session: Session, order_id: str, *, _router_token: object | None = None
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        raise NotImplementedError(_GATED.format("order cancellation"))
+        await self._call(self._client(session).cancel_order, str(order_id))
 
     # ---------- trading: reads ----------
 
     async def order_book(self, session: Session) -> list[Order]:
-        raise NotImplementedError(_GATED.format("order_book"))
+        resp = await self._call(self._client(session).order_book)
+        return [M.from_upstox_order(r) for r in self._rows(resp)]  # type: ignore[misc]
 
     async def trade_book(self, session: Session) -> list[Trade]:
-        raise NotImplementedError(_GATED.format("trade_book"))
+        resp = await self._call(self._client(session).trade_book)
+        return [M.from_upstox_trade(r) for r in self._rows(resp)]  # type: ignore[misc]
 
     async def positions(self, session: Session) -> list[Position]:
-        raise NotImplementedError(_GATED.format("positions"))
+        resp = await self._call(self._client(session).positions)
+        return [M.from_upstox_position(r) for r in self._rows(resp)]  # type: ignore[misc]
 
     async def holdings(self, session: Session) -> list[dict]:
-        raise NotImplementedError(_GATED.format("holdings"))
+        resp = await self._call(self._client(session).holdings)
+        return [M.from_upstox_holding(r) for r in self._rows(resp)]
 
     async def funds(self, session: Session) -> dict:
-        raise NotImplementedError(_GATED.format("funds"))
+        resp = await self._call(self._client(session).funds)
+        return M.from_upstox_funds(resp)
 
-    # ---------- market data: rest ----------
+    # ---------- market data + streaming (separate wave) ----------
 
     async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
-        raise NotImplementedError(_GATED.format("quotes"))
+        raise NotImplementedError(_PENDING.format("quotes"))
 
     async def historical(self, session: Session, req: dict) -> Candles:
-        raise NotImplementedError(_GATED.format("historical"))
+        raise NotImplementedError(_PENDING.format("historical"))
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
-        raise NotImplementedError(_GATED.format("option_chain"))
-
-    # ---------- market data: streaming ----------
+        raise NotImplementedError(_PENDING.format("option_chain"))
 
     def stream(self, session: Session) -> AsyncIterator[Any]:
-        raise NotImplementedError(_GATED.format("stream"))
+        raise NotImplementedError(_PENDING.format("stream"))
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:
-        raise NotImplementedError(_GATED.format("subscribe"))
+        raise NotImplementedError(_PENDING.format("subscribe"))
 
     async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
-        raise NotImplementedError(_GATED.format("unsubscribe"))
-
-    # ---------- reconciliation ----------
+        raise NotImplementedError(_PENDING.format("unsubscribe"))
 
     async def reconcile(self, session: Session) -> ReconciliationReport:
-        raise NotImplementedError(_GATED.format("reconcile"))
+        raise NotImplementedError(_PENDING.format("reconcile"))
 
 
 _ROUTER_TOKEN = object()
