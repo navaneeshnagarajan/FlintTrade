@@ -51,7 +51,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | OpenClaw agents | ✅ | Control-plane widget (deploy / stop / logs) |
 | Obsidian vault | ✅ | Read-only browser widget + agent vault context |
 | Create strategies | ✅ | StrategyBuilder (legs / payoff / margin / Pine) |
-| Backtest strategies (single + portfolio) | ✅ | Lab Backtest + Portfolio tabs; 132 reachable strategies |
+| Backtest strategies (single + portfolio) | ✅ | Lab Backtest + Portfolio tabs (132 runnable by name; 41 selectable in the Lab picker) |
 | Optimise overnight + reports + suggestions | ✅ | OvernightOptimiser + report store + Lab Optimize section |
 | Pick strategy per market regime | ✅ | `regime_detector` `_REGIME_STRATEGY` → RegimePanel "Suggested Strategy" |
 
@@ -66,9 +66,9 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | TradingView professional charts + indicators | ✅ | `components/tradingview/` + lightweight-charts |
 | Native sandbox + virtual capital + paper orders | ✅ | `SandboxControls` (capital + place paper order) |
 | Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
-| Multiple built-in strategies | ✅ | 132 reachable (BUILTIN + ALL_STRATEGIES + STRATEGY_REGISTRY) |
+| Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains via OpenAlgo; honest sample fallback |
-| Analytics widgets (VWAP bands / multi-timeframe / correlation pairs) | ✅ | Live via `/api/v1/history` + screener analysers; honest "Live"/"Sample data" badge |
+| Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | Live via `/api/v1/history` + screener analysers (`/v1/analytics/*`, `/api/v1/analytics/correlation`); honest "Live"/"Sample data" badge |
 | Vol-surface, straddle-PnL analysis | 🟡 | Honest sample only (need multi-expiry / candle source) |
 
 ## Data & Infra
@@ -80,7 +80,9 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Daily DB optimise + tick retention | ✅ | Nightly cron (CHECKPOINT/ANALYZE + prune); scheduler started |
 | Per-broker customisable API rate limits | ✅ | Config + live-apply UI |
 | Live order-flow footprint | ✅ | Aggregator fed from the tick stream (Lee-Ready side classification); honest synthetic fallback |
-| Latency optimisation / formal benchmark | 🟡 | Gated execution is the hot path; no published benchmark suite yet |
+| Latency observability (per-broker p50/p95/p99) | ✅ | In-memory `LatencyTracker` fed by the live order path → `/api/v1/latency/stats` → MonitoringSection `LatencyPanel` + ObservabilityDashboard; regression-tested |
+| Gated-order-path latency benchmark | ✅ | Tripwire test measures `gate_order → BrokerRouter` overhead against a mocked broker (real measured ms, generous ceiling) |
+| Persisted DuckDB latency store (histogram + slowest-N) | 🟡 | `LatencyMonitor` built + unit-tested, admin endpoints dev-only; not yet fed by the production order path (`PLAN.md` two-store dedup) |
 
 ## System Components
 
@@ -89,7 +91,15 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Account Manager (brokers + daily reauth + OpenAlgo state) | ✅ | `AccountStatusPanel` ↔ `/accounts/status` (live ping); tested |
 | Profile Manager (in unified settings, quick-settings + profile button) | ✅ | `ProfileSection`; both entry points tested |
 | Notification System (central manager, drives action) | ✅ | NotificationCentre + dispatchers + remediation actions + e2e test |
-| Unified Settings | ✅ | `SettingsRoute`, 20 sections, deep-linkable |
+| Unified Settings | ✅ | `SettingsRoute`, 19 sections, deep-linkable |
+
+## Automation & Multi-Account
+
+| Item | Status | Notes |
+|---|---|---|
+| Automate pillar (webhooks / flow builder / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (TradingView/ChartInk webhooks, flow builder, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
+| Ditto multi-account mirror (copy-trading / margin / trailing SL / risk manager) | ✅ | `/ditto` route + backend `/ditto/*` (`operations_routes.py`); natively reimplemented AlgoMirror patterns |
+| Invest & Learn routes | ✅ | `/invest` (mutual funds / SIP / net worth) and `/learn` (guided learning) protected routes |
 
 ## Known backlog (built-but-unreachable / referenced-not-built / blocked)
 
