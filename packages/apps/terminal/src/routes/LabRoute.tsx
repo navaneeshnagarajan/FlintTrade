@@ -12,6 +12,7 @@ import { type BacktestResult } from "@/services/ftApi";
 import { type TabId, TABS } from "./LabRoute/types";
 import { LabTabBar } from "./LabRoute/LabTabBar";
 import { BacktestSection } from "./LabRoute/BacktestSection";
+import { PortfolioBacktestSection } from "./LabRoute/PortfolioBacktestSection";
 import { ForwardTestSection } from "./LabRoute/ForwardTest";
 import { OptimizeSection } from "./LabRoute/OptimizeSection";
 import { ResultsSection } from "./LabRoute/ResultsSection";
@@ -25,8 +26,8 @@ export default function LabRoute() {
 
   const visibleTabIds: TabId[] = (() => {
     if (level === "beginner") return ["backtest", "results", "pine-editor"];
-    if (level === "intermediate") return ["backtest", "forward-test", "results", "pine-editor"];
-    return ["backtest", "forward-test", "optimize", "results", "pine-editor"];
+    if (level === "intermediate") return ["backtest", "portfolio", "forward-test", "results", "pine-editor"];
+    return ["backtest", "portfolio", "forward-test", "optimize", "results", "pine-editor"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
@@ -37,6 +38,8 @@ export default function LabRoute() {
         return (
           <BacktestSection onResult={setLastResult} lastResult={lastResult} />
         );
+      case "portfolio":
+        return <PortfolioBacktestSection />;
       case "forward-test":
         return <ForwardTestSection />;
       case "optimize":
