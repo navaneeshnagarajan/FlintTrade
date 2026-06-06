@@ -109,7 +109,8 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | SmartOrderRouter (liquidity-aware TWAP slicing) | 🟡 | Built + unit-tested; not routed — wiring it is a **safety-critical** new order path (must mint a `SafetyContext` through the gate) |
 | Analytics endpoints: VWAP bands / pairs / MTF | ✅ | Compute endpoints built + tested **and now reached by their widgets** — live intraday/daily bars via `getHistory`, honest sample fallback |
 | Excel export (browser download) | ✅ | Streaming `/export/download` + `downloadExcel` + "Export to Excel" button in the Positions widget (Notification System feedback) |
-| Excel import / portfolio report (`importFromExcel`, `createPortfolioReport`) | 🟡 | Backend built + tested; server-side file path — no UI surface yet |
+| Excel portfolio report (browser download) | ✅ | Streaming `/portfolio/report/download` + `downloadPortfolioReport` + "Portfolio Report" button in the Holdings widget (Positions+Holdings+Summary; Notification System feedback) |
+| Excel import (`importFromExcel`) | 🟡 | Backend built + tested; needs a browser file-upload surface — no UI yet |
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | ✅ | "Historical Chain" widget — archived expiries → grouped CE/PE chain; honest empty state |
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
