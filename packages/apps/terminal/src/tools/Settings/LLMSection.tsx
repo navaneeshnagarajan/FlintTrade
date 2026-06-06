@@ -10,6 +10,7 @@ import { LLM_PROVIDERS, LOCAL_PROVIDERS } from "@/lib/llmProviders";
 type LlmProvider =
   | "lmstudio"
   | "ollama"
+  | "hermes"
   | "openai"
   | "anthropic"
   | "gemini"
@@ -41,6 +42,7 @@ function buildTestUrl(provider: LlmProvider, host: string): string | null {
   switch (provider) {
     case "lmstudio":
     case "ollama":
+    case "hermes":
     case "custom":
       return host ? `${host.replace(/\/$/, "")}/v1/models` : null;
     case "openai":
