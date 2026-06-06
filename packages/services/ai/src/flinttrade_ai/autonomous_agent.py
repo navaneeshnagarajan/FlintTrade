@@ -225,6 +225,7 @@ class AutonomousTrader:
         llm_client: Any,
         openalgo_client: Any,
         config: AgentConfig | None = None,
+        vault: Any | None = None,
     ) -> None:
         """Initialise the autonomous trader.
 
@@ -232,10 +233,16 @@ class AutonomousTrader:
             llm_client:       FlintTrade LLMClient instance.
             openalgo_client:  FlintTrade OpenAlgoClient instance.
             config:           Agent configuration. Uses safe defaults if None.
+            vault:            Optional :class:`~flinttrade_ai.obsidian_bridge.ObsidianVault`.
+                When supplied (and available), the agent reads the operator's
+                notes as decision context and journals each decision back. Pure
+                vault I/O — never on the order path; any vault error degrades to
+                "no context / no journal" rather than disrupting trading.
         """
         self.llm = llm_client
         self.broker = openalgo_client
         self.config = config or AgentConfig()
+        self.vault = vault
         self.state = AgentState(
             trade_counts={sym: 0 for sym in self.config.symbols},
             last_signals={sym: TradeSignal.HOLD for sym in self.config.symbols},
@@ -450,7 +457,10 @@ class AutonomousTrader:
             logger.warning("Invalid data for %s, defaulting to HOLD", market_data.symbol)
             return TradeSignal.HOLD
 
-        prompt = _build_signal_prompt(market_data, self.state, self.config)
+        vault_notes = self._vault_context(market_data.symbol)
+        prompt = _build_signal_prompt(
+            market_data, self.state, self.config, vault_notes=vault_notes,
+        )
 
         try:
             # LLMClient.chat() is synchronous — run in thread to avoid blocking
@@ -479,6 +489,66 @@ class AutonomousTrader:
         except Exception as exc:
             logger.error("LLM decision failed for %s: %s", market_data.symbol, exc)
             return TradeSignal.HOLD
+
+    # ------------------------------------------------------------------
+    # Obsidian vault — operator-knowledge context + decision journal
+    #
+    # Both are pure vault I/O and NEVER touch the order path: the context read
+    # only shapes the LLM prompt, and the journal write only records a decision
+    # after it is made. Any vault error degrades to "no context / no journal"
+    # so the knowledge base can never disrupt a trading cycle.
+    # ------------------------------------------------------------------
+
+    def _vault_context(self, symbol: str) -> str:
+        """Return a short block of operator notes for ``symbol`` from the vault.
+
+        Searches the configured Obsidian vault for notes mentioning the symbol
+        and returns their matching snippets, newline-joined and bulleted, for
+        injection into the decision prompt. Returns ``""`` when no vault is
+        configured/available or on any error.
+        """
+        vault = self.vault
+        if vault is None or not getattr(vault, "available", False):
+            return ""
+        try:
+            hits = vault.search(symbol, limit=3)
+        except Exception as exc:  # vault must never break a decision
+            logger.debug("Obsidian context lookup failed for %s: %s", symbol, exc)
+            return ""
+        snippets = [
+            str(h.get("snippet", "")).strip()
+            for h in hits
+            if str(h.get("snippet", "")).strip()
+        ]
+        return "\n".join(f"  - {s}" for s in snippets)
+
+    def _journal_decision(
+        self,
+        symbol: str,
+        signal: str,
+        risk: RiskAssessment,
+        exec_result: dict[str, Any] | None,
+    ) -> None:
+        """Append this cycle's decision to the operator's Obsidian journal.
+
+        Writes one bullet per decision to ``FlintTrade/Journal/<date>.md`` —
+        a post-decision record only. No-ops without an available vault and
+        swallows any vault error so journalling can't disrupt the cycle.
+        """
+        vault = self.vault
+        if vault is None or not getattr(vault, "available", False):
+            return
+        try:
+            now = self._ist_now()
+            status = (exec_result or {}).get("status", "n/a")
+            entry = (
+                f"- {now.strftime('%Y-%m-%d %H:%M:%S')} IST | {symbol} | "
+                f"signal={signal} | risk_allowed={risk.allowed} ({risk.reason}) | "
+                f"order={status}"
+            )
+            vault.append_note(f"FlintTrade/Journal/{now.strftime('%Y-%m-%d')}", entry)
+        except Exception as exc:  # journalling must never disrupt the cycle
+            logger.debug("Obsidian journal write failed for %s: %s", symbol, exc)
 
     # ------------------------------------------------------------------
     # Step 4: Risk assessment
@@ -725,6 +795,7 @@ class AutonomousTrader:
                 "risk_reason": risk.reason,
                 "order": exec_result,
             }
+            self._journal_decision(symbol, signal, risk, exec_result)
 
         return cycle_result
 
@@ -789,11 +860,14 @@ def _build_signal_prompt(
     data: MarketData,
     state: AgentState,
     config: AgentConfig,
+    vault_notes: str = "",
 ) -> str:
     """Build a structured LLM prompt from market data and agent state.
 
     Produces a compact, token-efficient prompt suitable for a local LLM with
-    a 4096-token context window. Includes all 7 indicators.
+    a 4096-token context window. Includes all 7 indicators. When ``vault_notes``
+    is supplied (operator notes pulled from the Obsidian vault) they are added
+    as an extra context block ahead of the question.
     """
     lines = [
         f"Symbol: {data.symbol} | Exchange: {config.exchange}",
@@ -812,9 +886,10 @@ def _build_signal_prompt(
         f"  Daily P&L: {state.daily_pnl:.0f}",
         f"  Trades today for this symbol: {state.trade_counts.get(data.symbol, 0)}",
         f"  Last signal: {state.last_signals.get(data.symbol, 'NONE')}",
-        "",
-        "Based on the above, should I BUY, SELL, or HOLD this instrument?",
     ]
+    if vault_notes:
+        lines += ["", "Operator notes (from your Obsidian vault):", vault_notes]
+    lines += ["", "Based on the above, should I BUY, SELL, or HOLD this instrument?"]
     return "\n".join(lines)
 
 

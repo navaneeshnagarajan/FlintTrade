@@ -468,3 +468,101 @@ def test_to_float_list_empty() -> None:
 
 def test_to_float_list_none() -> None:
     assert _to_float_list(None) == []
+
+
+# ---------------------------------------------------------------------------
+# Obsidian vault integration
+#
+# The agent reads operator notes as decision context and journals each decision
+# back. Both are pure vault I/O, off the order path — and a vault error must
+# never disrupt a decision or a cycle.
+# ---------------------------------------------------------------------------
+
+
+def _vault_mock(snippet: str | None = None, available: bool = True) -> MagicMock:
+    vault = MagicMock()
+    vault.available = available
+    vault.search.return_value = (
+        [{"path": "ideas/nifty.md", "snippet": snippet}] if snippet else []
+    )
+    vault.append_note.return_value = "FlintTrade/Journal/2026-06-06.md"
+    return vault
+
+
+@pytest.mark.asyncio
+async def test_decide_injects_obsidian_context_into_the_prompt() -> None:
+    agent = make_agent(llm_response="HOLD")
+    agent.vault = _vault_mock(snippet="NIFTY: bullish above 22000, watch breakout")
+
+    await agent.decide(MarketData(symbol="NIFTY", ltp=22000.0))
+
+    agent.vault.search.assert_called_once()
+    assert agent.vault.search.call_args.args[0] == "NIFTY"
+    messages = agent.llm.chat.call_args.args[0]
+    user_content = messages[1].content
+    assert "Operator notes (from your Obsidian vault):" in user_content
+    assert "bullish above 22000" in user_content
+
+
+@pytest.mark.asyncio
+async def test_decide_without_a_vault_omits_the_notes_block() -> None:
+    agent = make_agent(llm_response="HOLD")  # no vault configured (default None)
+
+    await agent.decide(MarketData(symbol="NIFTY", ltp=22000.0))
+
+    messages = agent.llm.chat.call_args.args[0]
+    assert "Operator notes" not in messages[1].content
+
+
+@pytest.mark.asyncio
+async def test_vault_failure_never_breaks_a_decision() -> None:
+    agent = make_agent(llm_response="BUY")
+    agent.vault = MagicMock()
+    agent.vault.available = True
+    agent.vault.search.side_effect = RuntimeError("vault offline")
+
+    signal = await agent.decide(MarketData(symbol="NIFTY", ltp=22000.0))
+
+    assert signal in ("BUY", "SELL", "HOLD")  # degraded to no-context, still decided
+    assert "Operator notes" not in agent.llm.chat.call_args.args[0][1].content
+
+
+def test_journal_decision_appends_to_the_vault() -> None:
+    agent = make_agent()
+    agent.vault = _vault_mock(snippet="x")
+
+    agent._journal_decision(
+        "RELIANCE", "BUY",
+        RiskAssessment(allowed=True, reason="ok", position_qty=1),
+        {"status": "success"},
+    )
+
+    agent.vault.append_note.assert_called_once()
+    note_path, content = agent.vault.append_note.call_args.args
+    assert note_path.startswith("FlintTrade/Journal/")
+    assert "RELIANCE" in content
+    assert "signal=BUY" in content
+    assert "order=success" in content
+
+
+def test_journal_decision_noops_without_an_available_vault() -> None:
+    agent = make_agent()
+    agent.vault = MagicMock()
+    agent.vault.available = False
+
+    agent._journal_decision("RELIANCE", "HOLD", RiskAssessment(), {"status": "n/a"})
+
+    agent.vault.append_note.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_cycle_journals_each_decision(monkeypatch) -> None:
+    agent = make_agent(llm_response="HOLD")
+    agent.vault = _vault_mock(snippet="note")
+    monkeypatch.setattr(agent, "_is_market_open", lambda: True)
+
+    await agent.run_cycle()
+
+    agent.vault.append_note.assert_called()
+    _, content = agent.vault.append_note.call_args.args
+    assert "RELIANCE" in content
