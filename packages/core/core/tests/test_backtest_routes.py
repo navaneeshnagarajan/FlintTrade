@@ -165,6 +165,92 @@ class TestBacktestRun:
         data = resp.get_json()
         assert data["status"] == "error"
 
+    def test_successful_run_persists_metrics_to_the_store(self, flask_app, client, monkeypatch, tmp_path):
+        """A successful backtest writes its metrics to the result store, with the
+        engine's ``sharpe``/``sortino`` aliased to the refiner's ``*_ratio`` keys.
+
+        This is the populating half of the overnight-optimiser loop: without it
+        the optimiser refines on an empty dict.
+        """
+        import flinttrade_core.backtest_routes as br
+        from flinttrade_backtest.result_store import BacktestResultStore
+
+        store = BacktestResultStore(tmp_path)
+        flask_app.config["BACKTEST_RESULT_STORE"] = store
+
+        class _FakeConfig:
+            def __init__(self, **_kwargs):
+                pass
+
+        class _FakeStrategy:
+            def __init__(self, **_kwargs):
+                pass
+
+        class _FakeResult:
+            trades: list = []
+            equity_curve: list = []
+            total_bars = 10
+            final_equity = 1_050_000.0
+            total_return_pct = 5.0
+
+        class _FakeSim:
+            def __init__(self, _config):
+                pass
+
+            def run(self, _strategy, _bars):
+                return _FakeResult()
+
+        class _FakeData:
+            success = True
+            error = None
+            bars = [1, 2, 3]
+
+        class _FakeDataConnector:
+            def load(self, *_a, **_k):
+                return _FakeData()
+
+        class _Drawdown:
+            max_drawdown_pct = -0.1
+
+        class _TradeStats:
+            win_rate = 0.6
+            profit_factor = 1.8
+            total_trades = 12
+
+        class _FakeReport:
+            total_return_pct = 5.0
+            cagr = 0.12
+            sharpe_ratio = 1.5
+            sortino_ratio = 2.0
+            drawdown = _Drawdown
+            trade_stats = _TradeStats
+
+        class _FakeMetrics:
+            @staticmethod
+            def compute(_result):
+                return _FakeReport()
+
+        def _fake_engine():
+            return (_FakeConfig, _FakeSim, {"EMACrossover": _FakeStrategy}, _FakeDataConnector, _FakeMetrics)
+
+        monkeypatch.setattr(br, "_load_backtest_engine", _fake_engine)
+        try:
+            resp = client.post("/api/v1/backtest/run", json={
+                "symbol": "RELIANCE", "exchange": "NSE", "interval": "5m",
+                "start_date": "2025-01-01", "end_date": "2025-02-01",
+                "strategy": "EMACrossover",
+            }, headers=_auth_headers())
+            assert resp.status_code == 200
+
+            saved = store.latest("EMACrossover")
+            assert saved is not None
+            assert saved["sharpe_ratio"] == 1.5  # aliased from the engine's `sharpe`
+            assert saved["sortino_ratio"] == 2.0
+            assert saved["max_drawdown"] == -0.1
+            assert saved["win_rate"] == 0.6
+        finally:
+            flask_app.config["BACKTEST_RESULT_STORE"] = None
+
 
 class TestStrategiesRunning:
     """GET /api/v1/backtest/strategies/running — running strategy status."""

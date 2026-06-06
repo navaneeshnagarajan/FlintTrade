@@ -2300,22 +2300,45 @@ class FlintTradeApp:
         # job unregistered (as before) rather than failing boot.
         try:
             from flinttrade_ai.optimiser_report_store import OptimiserReportStore  # noqa: PLC0415
-            from flinttrade_ai.overnight_optimiser import OvernightOptimiser  # noqa: PLC0415
+            from flinttrade_ai.overnight_optimiser import (  # noqa: PLC0415
+                OvernightOptimiser,
+                enrich_strategies,
+            )
             from flinttrade_ai.strategy_refiner import StrategyRefiner  # noqa: PLC0415
+            from flinttrade_backtest.result_store import BacktestResultStore  # noqa: PLC0415
 
             # The report store is created unconditionally so the Lab UI can read
             # past reports even when the optimiser isn't wired this boot.
             _report_store = OptimiserReportStore(_workspace_dir() / "optimiser-reports")
             flask_app.config["OPTIMISER_REPORT_STORE"] = _report_store
 
+            # Per-strategy backtest-results store: written on every backtest run
+            # (backtest_routes), read here so the optimiser refines on REAL
+            # metrics instead of an empty dict. Before this the refiner only ever
+            # saw {} and produced generic rule-based output (R16).
+            _bt_result_store = BacktestResultStore(_workspace_dir() / "backtest-results")
+            flask_app.config["BACKTEST_RESULT_STORE"] = _bt_result_store
+
             _runner = flask_app.config.get("STRATEGY_RUNNER")
-            if _runner is not None and hasattr(_runner, "list_strategies"):
-                _optimiser = OvernightOptimiser(
-                    strategy_provider=_runner.list_strategies,
-                    refiner=StrategyRefiner(),  # rule-based by default (no LLM required)
-                    report_sink=_report_store.write,  # persist each night's report
-                )
-                self.cron.overnight_optimiser = _optimiser.run
+
+            def _strategy_provider() -> list[dict[str, Any]]:
+                """Live roster joined to each strategy's latest backtest metrics."""
+                roster: list[dict[str, Any]] = []
+                if _runner is not None and hasattr(_runner, "list_strategies"):
+                    try:
+                        roster = _runner.list_strategies()
+                    except Exception:  # noqa: BLE001 - a broken runner falls back to stored-only
+                        roster = []
+                return enrich_strategies(roster, _bt_result_store)
+
+            # Wired unconditionally now: even with no uploaded strategies, any
+            # strategy that has been backtested gets refined overnight.
+            _optimiser = OvernightOptimiser(
+                strategy_provider=_strategy_provider,
+                refiner=StrategyRefiner(),  # rule-based by default (no LLM required)
+                report_sink=_report_store.write,  # persist each night's report
+            )
+            self.cron.overnight_optimiser = _optimiser.run
         except Exception as exc:
             logger.warning("Overnight optimiser not wired (%s); nightly optimisation will not run", exc)
 

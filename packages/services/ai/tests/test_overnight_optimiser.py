@@ -6,9 +6,61 @@ from datetime import datetime, timezone
 
 import pytest
 
-from flinttrade_ai.overnight_optimiser import OvernightOptimiser
+from flinttrade_ai.overnight_optimiser import OvernightOptimiser, enrich_strategies
 
 pytestmark = pytest.mark.unit
+
+
+class _FakeStore:
+    """Duck-typed stand-in for BacktestResultStore."""
+
+    def __init__(self, results: dict[str, dict]):
+        self._results = results
+
+    def latest(self, name):
+        return self._results.get(name)
+
+    def names(self):
+        return sorted(self._results)
+
+
+def test_enrich_joins_roster_to_stored_metrics():
+    store = _FakeStore({"ema_cross": {"sharpe_ratio": 1.4}})
+    roster = [{"name": "ema_cross", "params": {"lookback": 14}}, {"name": "rsi_mr"}]
+    enriched = {s["name"]: s for s in enrich_strategies(roster, store)}
+    # The backtested strategy carries its real metrics...
+    assert enriched["ema_cross"]["backtest_results"] == {"sharpe_ratio": 1.4}
+    assert enriched["ema_cross"]["params"] == {"lookback": 14}
+    # ...and the un-backtested one degrades to an empty dict, not a crash.
+    assert enriched["rsi_mr"]["backtest_results"] == {}
+
+
+def test_enrich_surfaces_backtested_strategies_absent_from_the_roster():
+    # A strategy backtested in the Lab but not in the live roster must still be
+    # refined overnight — otherwise the store is wired but unused.
+    store = _FakeStore({"breakout": {"sharpe_ratio": 0.3}})
+    enriched = {s["name"]: s for s in enrich_strategies([], store)}
+    assert enriched["breakout"]["backtest_results"] == {"sharpe_ratio": 0.3}
+
+
+def test_enrich_dedupes_and_skips_nameless_entries():
+    store = _FakeStore({})
+    roster = [{"name": "x"}, {"strategy_id": "y"}, {"params": {}}]  # third has no name
+    names = sorted(s["name"] for s in enrich_strategies(roster, store))
+    assert names == ["x", "y"]
+
+
+def test_enrich_feeds_real_metrics_through_the_optimiser():
+    # End-to-end: enrich -> provider -> optimiser -> refiner receives metrics.
+    store = _FakeStore({"ema_cross": {"sharpe_ratio": 1.4}})
+    refiner = _MockRefiner()
+    opt = OvernightOptimiser(
+        lambda: enrich_strategies([{"name": "ema_cross", "params": {"p": 1}}], store),
+        refiner,
+        clock=_FIXED_CLOCK,
+    )
+    opt.run()
+    assert refiner.calls[0] == ("ema_cross", {"sharpe_ratio": 1.4}, {"p": 1})
 
 
 class _Suggestion:

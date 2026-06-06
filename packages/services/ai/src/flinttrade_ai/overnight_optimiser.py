@@ -24,6 +24,51 @@ import logging
 logger = logging.getLogger("flinttrade.ai.overnight_optimiser")
 
 
+def enrich_strategies(
+    strategies: list[dict[str, Any]],
+    result_store: Any,
+) -> list[dict[str, Any]]:
+    """Attach each strategy's latest stored backtest metrics for the refiner.
+
+    The live roster (uploaded strategies) carries no performance metrics, so the
+    refiner saw an empty ``backtest_results`` for every strategy. This joins each
+    strategy to its most recent stored backtest result by name, AND surfaces
+    strategies that have been backtested but aren't in the live roster — so a
+    strategy you backtested in the Lab still gets refined overnight.
+
+    Args:
+        strategies: The live roster (each a dict with ``name``/``id`` + optional
+            ``params``), e.g. ``UserStrategyRunner.list_strategies()``.
+        result_store: Object exposing ``latest(name) -> dict | None`` and
+            ``names() -> list[str]`` (a :class:`BacktestResultStore`). Duck-typed
+            so this module stays independent of the backtest package.
+
+    Returns:
+        One enriched dict per distinct strategy, each carrying ``name``,
+        ``params`` and a ``backtest_results`` dict (empty when none stored).
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for strat in strategies or []:
+        name = str(strat.get("name") or strat.get("strategy_id") or strat.get("id") or "").strip()
+        if not name:
+            continue
+        merged[name] = {**strat, "name": name, "backtest_results": result_store.latest(name) or {}}
+
+    try:
+        stored_names = result_store.names()
+    except Exception as exc:  # a broken store must not sink the pass
+        logger.warning("backtest result store names() failed — %s", exc)
+        stored_names = []
+    for name in stored_names:
+        if name not in merged:
+            merged[name] = {
+                "name": name,
+                "params": {},
+                "backtest_results": result_store.latest(name) or {},
+            }
+    return list(merged.values())
+
+
 class OvernightOptimiser:
     """Run a refinement pass over the registered strategies and report.
 

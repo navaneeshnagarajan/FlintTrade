@@ -154,6 +154,32 @@ def backtest_run() -> tuple[Any, int]:
         logger.warning("Metrics computation error: %s", exc)
         metrics = {"total_return": result.total_return_pct}
 
+    # Persist this run's metrics keyed by strategy so the overnight optimiser can
+    # refine on real performance instead of an empty dict. Best-effort:
+    # persistence must never fail the backtest response. Alias sharpe/sortino to
+    # the refiner's expected ``*_ratio`` keys — its rule-based path reads
+    # ``sharpe_ratio``/``max_drawdown``/``win_rate``, so a raw ``sharpe`` would be
+    # silently read as 0 and skew every suggestion.
+    _bt_store = current_app.config.get("BACKTEST_RESULT_STORE")
+    if _bt_store is not None:
+        try:
+            refiner_metrics = dict(metrics)
+            refiner_metrics["sharpe_ratio"] = metrics.get("sharpe")
+            refiner_metrics["sortino_ratio"] = metrics.get("sortino")
+            _bt_store.save(
+                strategy_name,
+                refiner_metrics,
+                context={
+                    "symbol": symbol,
+                    "exchange": exchange,
+                    "interval": interval,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+            logger.warning("Could not persist backtest result for %s: %s", strategy_name, exc)
+
     trades = [
         {
             "entry_timestamp": t.entry_timestamp,
