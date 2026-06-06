@@ -40,6 +40,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from collections.abc import Awaitable
 from typing import Any, Callable
 
 from flinttrade_core.db import open_sqlite
@@ -428,10 +429,52 @@ class HistorifyDownloader:
 
 
 class _AsyncDownloader:
-    """Runs the synchronous HistoricalDownloader in a thread-pool executor."""
+    """Runs the synchronous HistoricalDownloader in a thread-pool executor.
 
-    def __init__(self, client: OpenAlgoClient) -> None:
+    Args:
+        client: OpenAlgo client used to fetch history chunks.
+        throttle: Optional ``() -> Awaitable[None]`` awaited before each history
+            call — bind it to a rate limiter (e.g. ``BrokerRateLimiter.acquire``)
+            to stay under the broker's data rate and avoid a ban on a large
+            backfill. ``None`` disables throttling.
+        max_retries: Attempts per chunk before it is recorded as a failure.
+        base_backoff: First retry delay in seconds; doubles each attempt.
+        sleep: Async sleep (injectable so tests run without real delay).
+    """
+
+    def __init__(
+        self,
+        client: OpenAlgoClient,
+        *,
+        throttle: Callable[[], Awaitable[None]] | None = None,
+        max_retries: int = 3,
+        base_backoff: float = 0.5,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
         self._client = client
+        self._throttle = throttle
+        self._max_retries = max(1, max_retries)
+        self._base_backoff = base_backoff
+        self._sleep = sleep
+
+    async def _fetch_chunk_with_retry(self, **kwargs: Any) -> list:
+        """Fetch one history chunk, throttled, with bounded exponential backoff.
+
+        Retries transient failures rather than dropping the chunk on the first
+        error. Re-raises the last exception once all attempts are exhausted.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries):
+            if self._throttle is not None:
+                await self._throttle()
+            try:
+                return await self._client.history(**kwargs)
+            except Exception as exc:  # noqa: BLE001 - retried below, re-raised if exhausted
+                last_exc = exc
+                if attempt < self._max_retries - 1:
+                    await self._sleep(self._base_backoff * (2 ** attempt))
+        assert last_exc is not None  # loop ran at least once
+        raise last_exc
 
     async def download(
         self,
@@ -477,7 +520,7 @@ class _AsyncDownloader:
             c_start_str = c_start.isoformat()
             c_end_str = c_end.isoformat()
             try:
-                bars = await self._client.history(
+                bars = await self._fetch_chunk_with_retry(
                     symbol=symbol,
                     exchange=exchange,
                     interval=canonical,
@@ -487,7 +530,7 @@ class _AsyncDownloader:
                 all_bars.extend(bars)
                 result.chunks_fetched += 1
             except Exception as exc:
-                msg = f"Chunk {i} ({c_start_str} to {c_end_str}) failed: {exc}"
+                msg = f"Chunk {i} ({c_start_str} to {c_end_str}) failed after retries: {exc}"
                 result.errors.append(msg)
                 logger.warning("_AsyncDownloader: %s", msg)
 

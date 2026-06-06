@@ -290,3 +290,58 @@ class TestDeltaSync:
             downloader.delta_sync([("RELIANCE", "NSE")], "1d")
         )
         assert isinstance(result, int)
+
+
+# ---------------------------------------------------------------------------
+# _AsyncDownloader — chunk retry/backoff + throttle (R24)
+# ---------------------------------------------------------------------------
+
+
+def test_async_downloader_retries_transient_chunk_failures() -> None:
+    from flinttrade_historical.historify import _AsyncDownloader
+
+    calls = {"n": 0}
+
+    async def history(**_kw):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("transient")
+        return []
+
+    client = MagicMock()
+    client.history = history
+
+    dl = _AsyncDownloader(client, max_retries=3, base_backoff=0.0, sleep=AsyncMock())
+    result = asyncio.run(dl.download("NIFTY", "NSE", "1d", "2026-01-01", "2026-01-02"))
+
+    assert calls["n"] == 3          # failed twice, succeeded on the 3rd
+    assert result.errors == []       # the chunk was retried, NOT dropped
+    assert result.chunks_fetched == 1
+
+
+def test_async_downloader_records_error_only_after_retries_exhausted() -> None:
+    from flinttrade_historical.historify import _AsyncDownloader
+
+    client = MagicMock()
+    client.history = AsyncMock(side_effect=RuntimeError("permanent"))
+
+    dl = _AsyncDownloader(client, max_retries=3, base_backoff=0.0, sleep=AsyncMock())
+    result = asyncio.run(dl.download("NIFTY", "NSE", "1d", "2026-01-01", "2026-01-02"))
+
+    assert client.history.await_count == 3   # all attempts used before giving up
+    assert len(result.errors) == 1
+    assert "failed after retries" in result.errors[0]
+
+
+def test_async_downloader_awaits_throttle_before_each_fetch() -> None:
+    from flinttrade_historical.historify import _AsyncDownloader
+
+    throttle = AsyncMock()
+    client = MagicMock()
+    client.history = AsyncMock(return_value=[])
+
+    dl = _AsyncDownloader(client, throttle=throttle, sleep=AsyncMock())
+    asyncio.run(dl.download("NIFTY", "NSE", "1d", "2026-01-01", "2026-01-02"))
+
+    assert throttle.await_count >= 1         # rate-limited before the fetch
+    assert client.history.await_count >= 1
