@@ -295,3 +295,74 @@ class TestStrategyLibrary:
         body = resp.get_json()
         # Whatever the outcome (data/engine), it must NOT be the unknown-strategy 400.
         assert not (resp.status_code == 400 and "Unknown strategy" in body.get("message", ""))
+
+
+class TestRegistryStrategies:
+    """The ~29 STRATEGY_REGISTRY strategies (BaseBacktestStrategy on BacktestEngine)
+    are reachable via /backtest/run through a faithful result conversion."""
+
+    @staticmethod
+    def _sine_bars(n: int = 360):
+        import math
+        return [
+            {
+                "timestamp": f"2025-{(i // 30) + 1:02d}-{(i % 30) + 1:02d}T09:15:00",
+                "open": 200.0 + 60.0 * math.sin(i / 14.0),
+                "high": 201.0 + 60.0 * math.sin(i / 14.0),
+                "low": 199.0 + 60.0 * math.sin(i / 14.0),
+                "close": 200.0 + 60.0 * math.sin(i / 14.0),
+                "volume": 5000,
+            }
+            for i in range(n)
+        ]
+
+    def test_registry_strategy_is_resolvable(self):
+        from flinttrade_core.backtest_routes import _registry_strategy
+
+        assert _registry_strategy("RSIStrategy") is not None
+        assert _registry_strategy("EMACrossoverStrategy") is not None
+        assert _registry_strategy("definitely-not-a-strategy") is None
+
+    def test_registry_backtest_produces_faithful_trades_and_metrics(self):
+        from flinttrade_core.backtest_routes import _registry_strategy, _run_registry_backtest
+        from flinttrade_backtest.metrics import PerformanceMetrics
+        from flinttrade_backtest.simulator import BacktestConfig, BacktestResult
+
+        config = BacktestConfig(
+            symbol="RELIANCE", exchange="NSE", interval="1d",
+            start_date="2025-01-01", end_date="2025-12-01",
+            initial_capital=1_000_000, position_size_pct=20,
+        )
+        result = _run_registry_backtest(_registry_strategy("EMACrossoverStrategy"), config, self._sine_bars())
+
+        # Returns a simulator BacktestResult the existing response code can consume.
+        assert isinstance(result, BacktestResult)
+        assert result.total_bars == 360
+        assert len(result.trades) > 0  # the oscillating series forces round-trips
+        assert result.error == ""
+
+        # First trade carries faithfully-converted (Decimal -> float) fields.
+        first = result.trades[0]
+        assert first.symbol == "RELIANCE"
+        assert first.entry_price > 0 and first.exit_price > 0
+        assert isinstance(first.net_pnl, float)
+
+        # The TESTED metrics run on the converted result and agree on the count.
+        report = PerformanceMetrics.compute(result)
+        assert report.trade_stats.total_trades == len(result.trades)
+
+    def test_strategies_endpoint_lists_registry_strategies(self, client):
+        resp = client.get("/api/v1/backtest/strategies", headers=_auth_headers())
+        names = [s["name"] for s in resp.get_json()["data"]["strategies"]]
+        assert "RSIStrategy" in names  # a STRATEGY_REGISTRY entry, now discoverable
+        assert "MACDStrategy" in names
+
+    def test_run_accepts_a_registry_strategy_name(self, client):
+        # Must pass the strategy lookup (may then fail on data, but not "Unknown").
+        resp = client.post("/api/v1/backtest/run", json={
+            "symbol": "RELIANCE", "exchange": "NSE", "interval": "1d",
+            "start_date": "2025-01-01", "end_date": "2025-02-01",
+            "strategy": "RSIStrategy",
+        }, headers=_auth_headers())
+        body = resp.get_json()
+        assert not (resp.status_code == 400 and "Unknown strategy" in body.get("message", ""))

@@ -52,6 +52,90 @@ def _load_backtest_engine() -> tuple[Any, Any, Any, Any]:
     )
 
 
+def _registry_strategy(name: str) -> Any | None:
+    """Return a STRATEGY_REGISTRY strategy class, or None.
+
+    These are kept separate from the BacktestSimulator's strategy map because
+    they subclass ``BaseBacktestStrategy`` and run on ``BacktestEngine`` (a
+    different engine), not the simulator.
+    """
+    try:
+        from flinttrade_backtest.strategies import STRATEGY_REGISTRY  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 - registry import must not break the route
+        return None
+    return STRATEGY_REGISTRY.get(name)
+
+
+def _run_registry_backtest(strategy_cls: Any, config: Any, bars: list[dict[str, Any]]) -> Any:
+    """Run a STRATEGY_REGISTRY strategy on BacktestEngine; return a simulator
+    ``BacktestResult`` so the existing metrics/response code works unchanged.
+
+    These strategies use ``BaseBacktestStrategy`` (OrderIntent + Decimal
+    accounting) on ``BacktestEngine``. The engine does the (tested) accounting;
+    this only maps its ``EngineResult`` onto the simulator's result shape
+    (Decimal -> float) so the tested ``PerformanceMetrics`` computes the metrics —
+    no accounting is reimplemented here.
+    """
+    from decimal import Decimal  # noqa: PLC0415
+
+    from flinttrade_backtest.engine import BacktestEngine, EngineConfig  # noqa: PLC0415
+    from flinttrade_backtest.simulator import BacktestResult, EquityPoint, SimTrade  # noqa: PLC0415
+
+    engine = BacktestEngine(EngineConfig(
+        symbol=config.symbol,
+        exchange=config.exchange,
+        initial_capital=Decimal(str(config.initial_capital)),
+        position_size_pct=Decimal(str(config.position_size_pct)),
+    ))
+    # The strategy must know its symbol — enter_long/short fall back to
+    # ``self.symbol`` for the OrderIntent, so a symbol-less strategy emits orders
+    # for "" that the engine cannot fill (zero trades). Pass it; tolerate the rare
+    # strategy whose constructor doesn't accept a symbol kwarg.
+    try:
+        strategy = strategy_cls(symbol=config.symbol)
+    except TypeError:
+        strategy = strategy_cls()
+        if hasattr(strategy, "symbol"):
+            strategy.symbol = config.symbol
+    engine.set_strategy(strategy)
+    er = engine.run(bars)
+
+    trades = [
+        SimTrade(
+            entry_timestamp=str(t.entry_time),
+            exit_timestamp=str(t.exit_time),
+            symbol=t.symbol,
+            side=str(t.side),
+            quantity=int(t.quantity),
+            entry_price=float(t.entry_price),
+            exit_price=float(t.exit_price),
+            pnl=float(t.gross_pnl),
+            commission=float(t.charges),
+            net_pnl=float(t.net_pnl),
+        )
+        for t in er.trades
+    ]
+    equity_curve = [
+        EquityPoint(
+            timestamp=str(p.timestamp),
+            equity=float(p.equity),
+            cash=float(p.cash),
+            positions_value=float(p.positions_value),
+            drawdown=float(p.drawdown_pct),
+        )
+        for p in er.equity_curve
+    ]
+    return BacktestResult(
+        config=config,
+        trades=trades,
+        equity_curve=equity_curve,
+        orders=[],
+        final_equity=float(er.final_equity),
+        total_bars=er.total_bars,
+        error=er.error,
+    )
+
+
 @backtest_bp.route("/backtest/run", methods=["POST"])
 def backtest_run() -> tuple[Any, int]:
     """Run a backtest for a given symbol and strategy.
@@ -102,9 +186,12 @@ def backtest_run() -> tuple[Any, int]:
     if not strategy_name:
         return jsonify({"status": "error", "message": "strategy is required"}), 400
 
+    # Simulator strategies (BUILTIN + ALL_STRATEGIES) first; otherwise a
+    # STRATEGY_REGISTRY strategy that runs on the separate BacktestEngine.
     strategy_cls = BUILTIN_STRATEGIES.get(strategy_name)
-    if strategy_cls is None:
-        available = list(BUILTIN_STRATEGIES.keys())
+    registry_cls = None if strategy_cls is not None else _registry_strategy(strategy_name)
+    if strategy_cls is None and registry_cls is None:
+        available = sorted(BUILTIN_STRATEGIES.keys())
         return jsonify({
             "status": "error",
             "message": f"Unknown strategy '{strategy_name}'. Available: {available}",
@@ -133,13 +220,16 @@ def backtest_run() -> tuple[Any, int]:
             initial_capital=initial_capital,
             position_size_pct=position_size_pct,
         )
-        sim = BacktestSimulator(config)
-        strategy_instance = strategy_cls(
-            name=strategy_name,
-            exchange=exchange,
-            symbol=symbol,
-        )
-        result = sim.run(strategy_instance, data_result.bars)
+        if registry_cls is not None:
+            result = _run_registry_backtest(registry_cls, config, data_result.bars)
+        else:
+            sim = BacktestSimulator(config)
+            strategy_instance = strategy_cls(
+                name=strategy_name,
+                exchange=exchange,
+                symbol=symbol,
+            )
+            result = sim.run(strategy_instance, data_result.bars)
     except Exception:
         logger.exception("Backtest simulation error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -411,9 +501,19 @@ def list_strategies() -> tuple[Any, int]:
     """
     try:
         _, _, BUILTIN_STRATEGIES, _, _ = _load_backtest_engine()
+        registry = {}
+        try:
+            from flinttrade_backtest.strategies import STRATEGY_REGISTRY  # noqa: PLC0415
+            registry = STRATEGY_REGISTRY
+        except Exception:  # noqa: BLE001 - registry import must not break the listing
+            registry = {}
+        # Simulator strategies + the registry strategies (run on BacktestEngine);
+        # both are runnable via /backtest/run, so both are listed. BUILTIN wins a
+        # name clash (so its curated description shows).
+        merged = {**registry, **BUILTIN_STRATEGIES}
         strategies = [
             {"name": name, "description": cls.__doc__.split("\n")[0].strip() if cls.__doc__ else name}
-            for name, cls in BUILTIN_STRATEGIES.items()
+            for name, cls in merged.items()
         ]
     except Exception as exc:
         logger.warning("Could not load BUILTIN_STRATEGIES: %s", exc)
