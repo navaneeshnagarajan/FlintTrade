@@ -508,18 +508,24 @@ class AutonomousTrader:
         configured/available or on any error.
         """
         vault = self.vault
-        if vault is None or not getattr(vault, "available", False):
+        if vault is None:
             return ""
+        # The ENTIRE body is guarded: a vault must never break a decision, so a
+        # raising ``available`` property OR a malformed ``search`` return (None,
+        # an int, a list of non-dicts) degrades to no context, not an exception
+        # propagating out of decide()/run_cycle().
         try:
+            if not getattr(vault, "available", False):
+                return ""
             hits = vault.search(symbol, limit=3)
-        except Exception as exc:  # vault must never break a decision
+            snippets = [
+                str(h.get("snippet", "")).strip()
+                for h in hits
+                if isinstance(h, dict) and str(h.get("snippet", "")).strip()
+            ]
+        except Exception as exc:
             logger.debug("Obsidian context lookup failed for %s: %s", symbol, exc)
             return ""
-        snippets = [
-            str(h.get("snippet", "")).strip()
-            for h in hits
-            if str(h.get("snippet", "")).strip()
-        ]
         return "\n".join(f"  - {s}" for s in snippets)
 
     def _journal_decision(
@@ -536,9 +542,13 @@ class AutonomousTrader:
         swallows any vault error so journalling can't disrupt the cycle.
         """
         vault = self.vault
-        if vault is None or not getattr(vault, "available", False):
+        if vault is None:
             return
+        # Fully guarded (incl. the ``available`` check) so journalling — like the
+        # context read — can never raise into the trading cycle.
         try:
+            if not getattr(vault, "available", False):
+                return
             now = self._ist_now()
             status = (exec_result or {}).get("status", "n/a")
             entry = (

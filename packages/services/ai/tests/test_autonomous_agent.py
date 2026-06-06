@@ -566,3 +566,55 @@ async def test_run_cycle_journals_each_decision(monkeypatch) -> None:
     agent.vault.append_note.assert_called()
     _, content = agent.vault.append_note.call_args.args
     assert "RELIANCE" in content
+
+
+class _RaisingAvailableVault:
+    """A vault whose ``available`` property raises — simulates a vault that does
+    real I/O in its availability check and fails. Must never break the agent."""
+
+    @property
+    def available(self) -> bool:
+        raise RuntimeError("vault availability check did I/O and failed")
+
+    def search(self, *_a: object, **_k: object) -> list:
+        raise AssertionError("search must not be reached when available raises")
+
+    def append_note(self, *_a: object, **_k: object) -> str:
+        raise AssertionError("append_note must not be reached when available raises")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_return", [None, 42, ["just a string"], [None], {"snippet": "x"}])
+async def test_malformed_vault_search_return_never_breaks_a_decision(bad_return) -> None:
+    # The adversarial-verification finding: a malformed search() RETURN (not a
+    # raise) must still degrade to no-context, never propagate out of decide().
+    agent = make_agent(llm_response="BUY")
+    agent.vault = MagicMock()
+    agent.vault.available = True
+    agent.vault.search.return_value = bad_return
+
+    signal = await agent.decide(MarketData(symbol="NIFTY", ltp=22000.0))
+
+    assert signal in ("BUY", "SELL", "HOLD")  # decided, did not raise
+    assert "Operator notes" not in agent.llm.chat.call_args.args[0][1].content
+
+
+@pytest.mark.asyncio
+async def test_raising_available_property_never_breaks_a_decision() -> None:
+    agent = make_agent(llm_response="HOLD")
+    agent.vault = _RaisingAvailableVault()
+
+    signal = await agent.decide(MarketData(symbol="NIFTY", ltp=22000.0))
+
+    assert signal in ("BUY", "SELL", "HOLD")
+    assert "Operator notes" not in agent.llm.chat.call_args.args[0][1].content
+
+
+def test_journal_decision_swallows_a_raising_available_property() -> None:
+    agent = make_agent()
+    agent.vault = _RaisingAvailableVault()
+
+    # Must not raise — journalling can never disrupt the cycle.
+    agent._journal_decision(
+        "RELIANCE", "BUY", RiskAssessment(allowed=True, reason="ok"), {"status": "success"},
+    )
