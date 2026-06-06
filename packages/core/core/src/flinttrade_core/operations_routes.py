@@ -1127,6 +1127,58 @@ def ai_openclaw_agents() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
+@operations_bp.route("/ai/openclaw/agents", methods=["POST"])
+def ai_openclaw_deploy() -> tuple[Any, int]:
+    """Deploy a trading agent on OpenClaw.
+
+    Control-plane relay to the external OpenClaw gateway — the agent runs on
+    OpenClaw with its OWN broker connection, so this does not traverse
+    FlintTrade's gated order path. A 502 is returned when OpenClaw is
+    unreachable (the bridge returns an error dict rather than raising).
+    """
+    try:
+        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
+
+        config = request.get_json(silent=True) or {}
+        if not config.get("name"):
+            return jsonify({"status": "error", "message": "agent 'name' is required"}), 400
+        result = OpenClawBridge().deploy_agent(config)
+        if isinstance(result, dict) and result.get("status") == "error":
+            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), 502
+        return jsonify({"status": "success", "data": result}), 200
+    except Exception:
+        logger.exception("ai_openclaw_deploy error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/ai/openclaw/agents/<agent_id>/stop", methods=["POST"])
+def ai_openclaw_stop(agent_id: str) -> tuple[Any, int]:
+    """Stop a running OpenClaw agent. 502 when OpenClaw is unreachable."""
+    try:
+        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
+
+        result = OpenClawBridge().stop_agent(agent_id)
+        if isinstance(result, dict) and result.get("status") == "error":
+            return jsonify({"status": "error", "message": result.get("message", "OpenClaw unreachable")}), 502
+        return jsonify({"status": "success", "data": result}), 200
+    except Exception:
+        logger.exception("ai_openclaw_stop error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/ai/openclaw/agents/<agent_id>/logs", methods=["GET"])
+def ai_openclaw_logs(agent_id: str) -> tuple[Any, int]:
+    """Fetch logs for an OpenClaw agent — an empty list when unreachable."""
+    try:
+        from flinttrade_ai.openclaw_bridge import OpenClawBridge  # noqa: PLC0415
+
+        logs = OpenClawBridge().get_agent_logs(agent_id)
+        return jsonify({"status": "success", "data": {"logs": logs}}), 200
+    except Exception:
+        logger.exception("ai_openclaw_logs error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
 # ------------------------------------------------------------------
 # Frontend error reporting (H6)
 # ------------------------------------------------------------------

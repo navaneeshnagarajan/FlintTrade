@@ -60,3 +60,62 @@ def test_openclaw_agents_route_returns_listed_agents(client) -> None:
     body = resp.get_json()
     assert body["status"] == "success"
     assert body["data"]["agents"] == agents
+
+
+def test_deploy_route_delegates_to_the_bridge(client) -> None:
+    with patch("flinttrade_ai.openclaw_bridge.OpenClawBridge") as bridge_cls:
+        bridge_cls.return_value.deploy_agent.return_value = {"status": "success", "agent_id": "a-9"}
+        resp = client.post(
+            "/api/v1/ai/openclaw/agents",
+            json={"name": "scalper-nifty", "strategy": "momentum", "symbols": ["NIFTY"]},
+        )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["agent_id"] == "a-9"
+    bridge_cls.return_value.deploy_agent.assert_called_once()
+
+
+def test_deploy_route_requires_a_name(client) -> None:
+    resp = client.post("/api/v1/ai/openclaw/agents", json={"strategy": "momentum"})
+    assert resp.status_code == 400
+
+
+def test_deploy_route_502_when_openclaw_unreachable(client) -> None:
+    with patch("flinttrade_ai.openclaw_bridge.OpenClawBridge") as bridge_cls:
+        # The bridge returns an error dict (it never raises) when OpenClaw is down.
+        bridge_cls.return_value.deploy_agent.return_value = {"status": "error", "message": "ConnectError"}
+        resp = client.post("/api/v1/ai/openclaw/agents", json={"name": "x"})
+
+    assert resp.status_code == 502
+
+
+def test_stop_route_delegates_to_the_bridge(client) -> None:
+    with patch("flinttrade_ai.openclaw_bridge.OpenClawBridge") as bridge_cls:
+        bridge_cls.return_value.stop_agent.return_value = {"status": "success"}
+        resp = client.post("/api/v1/ai/openclaw/agents/a-9/stop")
+
+    assert resp.status_code == 200
+    bridge_cls.return_value.stop_agent.assert_called_once_with("a-9")
+
+
+def test_stop_route_502_when_openclaw_unreachable(client) -> None:
+    with patch("flinttrade_ai.openclaw_bridge.OpenClawBridge") as bridge_cls:
+        bridge_cls.return_value.stop_agent.return_value = {"status": "error", "message": "ConnectError"}
+        resp = client.post("/api/v1/ai/openclaw/agents/a-9/stop")
+
+    assert resp.status_code == 502
+
+
+def test_logs_route_returns_lines_and_degrades_to_empty(client) -> None:
+    with patch("flinttrade_ai.openclaw_bridge.OpenClawBridge") as bridge_cls:
+        bridge_cls.return_value.get_agent_logs.return_value = ["line 1", "line 2"]
+        resp = client.get("/api/v1/ai/openclaw/agents/a-9/logs")
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["logs"] == ["line 1", "line 2"]
+
+    with patch("flinttrade_ai.openclaw_bridge.OpenClawBridge") as bridge_cls:
+        # Unreachable → the bridge returns [] → still a clean 200, empty logs.
+        bridge_cls.return_value.get_agent_logs.return_value = []
+        resp = client.get("/api/v1/ai/openclaw/agents/a-9/logs")
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["logs"] == []
