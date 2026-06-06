@@ -188,7 +188,7 @@ export default function AITeamWidget() {
           </div>
 
           {/* Per-agent reports */}
-          {result.analysis.agent_analyses.map((rep) => (
+          {(result.analysis.agent_analyses ?? []).map((rep) => (
             <div
               key={rep.agent_name}
               className="rounded-lg border border-border-default bg-surface-base p-3"
@@ -207,7 +207,7 @@ export default function AITeamWidget() {
             </div>
           ))}
 
-          {result.analysis.errors.length > 0 && (
+          {(result.analysis.errors?.length ?? 0) > 0 && (
             <p className="text-xxs text-loss">
               {result.analysis.errors.length} agent error
               {result.analysis.errors.length > 1 ? "s" : ""} during analysis.

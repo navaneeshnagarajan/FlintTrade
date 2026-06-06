@@ -46,6 +46,13 @@ describe("ObsidianWidget", () => {
     expect(screen.getByText("FlintTrade/Journal/2026-06-06.md")).toBeInTheDocument();
   });
 
+  it("shows a connecting state while the vault status is loading (no empty flash)", () => {
+    mockStatus.mockReturnValue(new Promise(() => {})); // never resolves
+    renderWidget();
+    expect(screen.getByText(/Connecting to vault/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Vault is empty/i)).not.toBeInTheDocument();
+  });
+
   it("shows a setup hint and no notes when the vault is not configured", async () => {
     mockStatus.mockResolvedValue({ configured: false, available: false, vault_path: null });
     renderWidget();

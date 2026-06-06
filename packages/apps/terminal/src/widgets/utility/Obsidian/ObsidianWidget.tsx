@@ -48,6 +48,15 @@ export default function ObsidianWidget() {
     enabled: selected !== null,
   });
 
+  // --- Initial status load: don't flash "empty" before we know the vault state. ---
+  if (statusQuery.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <p className="text-xs text-text-muted">Connecting to vault…</p>
+      </div>
+    );
+  }
+
   // --- Not configured / unavailable: honest setup hints, no fake notes. ---
   if (statusQuery.isSuccess && !statusQuery.data.configured) {
     return (

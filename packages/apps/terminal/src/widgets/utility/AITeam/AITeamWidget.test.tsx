@@ -84,6 +84,38 @@ describe("AITeamWidget", () => {
     await waitFor(() => expect(mockAnalyse).toHaveBeenCalledWith("NIFTY", "NSE_INDEX"));
   });
 
+  it("renders without crashing when the analysis omits agent_analyses/errors", async () => {
+    mockAnalyse.mockResolvedValue({
+      analysis: {
+        symbol: "NIFTY",
+        exchange: "NSE_INDEX",
+        consensus_signal: "HOLD",
+        consensus_confidence: 0.5,
+        consensus_reasoning: "",
+        timestamp: "",
+        // agent_analyses + errors deliberately omitted (malformed/partial backend response)
+      },
+      recommendation: {
+        symbol: "NIFTY",
+        exchange: "NSE_INDEX",
+        action: "HOLD",
+        confidence: 0.5,
+        reasoning: "",
+        agent_count: 0,
+        bullish_count: 0,
+        bearish_count: 0,
+        neutral_count: 0,
+        timestamp: "",
+      },
+    });
+    renderWidget();
+    await screen.findByText("Technical Analyst");
+
+    fireEvent.click(screen.getByRole("button", { name: /run team analysis/i }));
+
+    expect(await screen.findByText("Consensus")).toBeInTheDocument();
+  });
+
   it("surfaces a configure-LLM message when analysis fails", async () => {
     mockAnalyse.mockRejectedValue(new Error("LLM not configured"));
     renderWidget();
