@@ -25,13 +25,16 @@ interface AccountStatus {
 }
 
 interface StatusResponse {
-  data: {
-    accounts: AccountStatus[];
-    summary: { total: number; connected: number; authenticated: number; needs_reauth: number };
-  };
+  accounts: AccountStatus[];
+  summary: { total: number; connected: number; authenticated: number; needs_reauth: number };
 }
 
 export function AccountStatusPanel() {
+  // `get()` unwraps the backend's `{status, data: {...}}` envelope (parseResponse
+  // returns `json.data`), so the resolved value is already `{accounts, summary}`.
+  // Reading `data.data.*` here was a second unwrap that left accounts/summary
+  // permanently undefined — the panel was stuck on "No broker accounts connected
+  // yet." and the re-auth badge + deep-links never rendered.
   const { data, isLoading, isError } = useQuery({
     queryKey: ["accounts", "status"],
     queryFn: () => get<StatusResponse>("accounts/status"),
@@ -39,8 +42,8 @@ export function AccountStatusPanel() {
     staleTime: 15_000,
   });
 
-  const accounts = data?.data?.accounts ?? [];
-  const summary = data?.data?.summary;
+  const accounts = data?.accounts ?? [];
+  const summary = data?.summary;
 
   return (
     <section

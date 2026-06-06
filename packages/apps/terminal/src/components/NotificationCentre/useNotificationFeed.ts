@@ -105,7 +105,20 @@ export function useNotificationFeed(): void {
         detail.category && VALID_CATEGORIES.includes(detail.category)
           ? detail.category
           : "system";
-      addNotification({ category, title: detail.title, body: detail.body });
+      // Forward the remediation CTA so emitted notifications keep their action
+      // (e.g. the kill-switch "Reset kill switch" and order-failure "Back to
+      // terminal" links). Guard against a malformed bus payload by requiring a
+      // string label before passing it to the (unvalidated) store.
+      const action =
+        detail.action && typeof detail.action === "object" && typeof detail.action.label === "string"
+          ? detail.action
+          : undefined;
+      addNotification({
+        category,
+        title: detail.title,
+        body: detail.body,
+        ...(action ? { action } : {}),
+      });
     };
     window.addEventListener("flinttrade:notify", handler);
     return () => window.removeEventListener("flinttrade:notify", handler);

@@ -14,6 +14,12 @@ import { get } from "@/services/ftApi";
 
 const mockGet = get as unknown as ReturnType<typeof vi.fn>;
 
+// NOTE: `get()` UNWRAPS the backend's `{status, data: {...}}` envelope
+// (parseResponse returns `json.data`), so it resolves to the inner
+// `{accounts, summary}` — NOT a doubly-wrapped `{data: {...}}`. These mocks must
+// mirror that real contract; an earlier version wrapped them in an extra `data`
+// key, which matched a double-unwrap bug in the component and hid it.
+
 function renderPanel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -30,13 +36,11 @@ describe("AccountStatusPanel", () => {
 
   it("renders per-account connection + reauth state", async () => {
     mockGet.mockResolvedValue({
-      data: {
-        accounts: [
-          { account_id: "A1", name: "Primary", enabled: true, connected: true, authenticated: true, needs_reauth: false, latency_ms: 12, error: "" },
-          { account_id: "A2", name: "Secondary", enabled: true, connected: true, authenticated: false, needs_reauth: true, latency_ms: 20, error: "HTTP 403" },
-        ],
-        summary: { total: 2, connected: 2, authenticated: 1, needs_reauth: 1 },
-      },
+      accounts: [
+        { account_id: "A1", name: "Primary", enabled: true, connected: true, authenticated: true, needs_reauth: false, latency_ms: 12, error: "" },
+        { account_id: "A2", name: "Secondary", enabled: true, connected: true, authenticated: false, needs_reauth: true, latency_ms: 20, error: "HTTP 403" },
+      ],
+      summary: { total: 2, connected: 2, authenticated: 1, needs_reauth: 1 },
     });
     renderPanel();
     expect(await screen.findByText("Primary")).toBeInTheDocument();
@@ -47,12 +51,10 @@ describe("AccountStatusPanel", () => {
 
   it("makes the Re-auth badge an actionable link to the Broker Gateway settings", async () => {
     mockGet.mockResolvedValue({
-      data: {
-        accounts: [
-          { account_id: "A2", name: "Secondary", enabled: true, connected: true, authenticated: false, needs_reauth: true, latency_ms: 20, error: "HTTP 403" },
-        ],
-        summary: { total: 1, connected: 1, authenticated: 0, needs_reauth: 1 },
-      },
+      accounts: [
+        { account_id: "A2", name: "Secondary", enabled: true, connected: true, authenticated: false, needs_reauth: true, latency_ms: 20, error: "HTTP 403" },
+      ],
+      summary: { total: 1, connected: 1, authenticated: 0, needs_reauth: 1 },
     });
     renderPanel();
 
@@ -62,7 +64,7 @@ describe("AccountStatusPanel", () => {
   });
 
   it("shows an empty state when no accounts are connected", async () => {
-    mockGet.mockResolvedValue({ data: { accounts: [], summary: { total: 0, connected: 0, authenticated: 0, needs_reauth: 0 } } });
+    mockGet.mockResolvedValue({ accounts: [], summary: { total: 0, connected: 0, authenticated: 0, needs_reauth: 0 } });
     renderPanel();
     expect(await screen.findByText(/no broker accounts connected/i)).toBeInTheDocument();
   });

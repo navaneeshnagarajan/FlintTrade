@@ -66,6 +66,36 @@ describe("useNotificationFeed", () => {
     });
   });
 
+  it("forwards the remediation action through the event bus", () => {
+    // The bus handler must preserve detail.action so emitted notifications keep
+    // their CTA (kill-switch reset, order-failure "Back to terminal", etc.).
+    renderHook(() => useNotificationFeed());
+    act(() =>
+      emitNotification({
+        category: "system",
+        title: "Kill switch ACTIVATED",
+        body: "All live order routing is halted.",
+        action: { label: "Reset kill switch", href: "/automate" },
+      }),
+    );
+    expect(store.getSnapshot()[0].action).toEqual({
+      label: "Reset kill switch",
+      href: "/automate",
+    });
+  });
+
+  it("drops a malformed action (no string label) from the event bus", () => {
+    renderHook(() => useNotificationFeed());
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:notify", {
+          detail: { title: "T", body: "B", action: { href: "/x" } },
+        }),
+      ),
+    );
+    expect(store.getSnapshot()[0].action).toBeUndefined();
+  });
+
   it("coerces an invalid event-bus category to 'system'", () => {
     renderHook(() => useNotificationFeed());
     act(() =>
