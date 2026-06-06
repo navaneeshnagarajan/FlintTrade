@@ -7,17 +7,25 @@
  *   - Default instruments: NIFTY, BANKNIFTY, RELIANCE, TCS, HDFCBANK, INFY, ICICIBANK, GOLD
  *   - Hover tooltip showing exact coefficient and pair name
  *
- * DATA SOURCE: sample only. The matrix is computed from `SAMPLE_MATRIX` and a
- * deterministic `pseudoCorr` fallback — there is no live correlation endpoint
- * wired yet (a future `/ft-api/v1/correlation` route is planned). The "Sample
- * data" badge is therefore shown unconditionally so a connected (live) trader
- * is never misled into reading these coefficients as real market data.
+ * DATA HONESTY: when a broker is connected, the widget fetches the live Pearson
+ * correlation matrix from `/api/v1/analytics/correlation` (real `np.corrcoef`
+ * over the backend's instrument set) and shows a "Live" badge — provided the
+ * backend reports `is_sample_data: false`. Otherwise (disconnected, or the
+ * backend itself falls back) it renders the deterministic `SAMPLE_MATRIX` +
+ * `pseudoCorr` fallback with an amber "Sample data" badge so a trader is never
+ * misled into reading sample coefficients as real market data. The live matrix
+ * uses the backend's fixed instrument set, so the add/remove controls apply to
+ * the sample (explore) matrix only and are disabled while live.
  */
 
 import { useState, useMemo, useCallback, useRef, memo } from "react";
 import { Grid2x2, Plus, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getCorrelationMatrix } from "@/services/ftApi.analysis";
+import type { CorrelationResponse } from "@/services/ftApi.analysis";
 
 // ---------------------------------------------------------------------------
 // Default symbols and sample correlation data
@@ -91,23 +99,61 @@ interface TooltipState {
 }
 
 // ---------------------------------------------------------------------------
+// Live matrix shaping
+// ---------------------------------------------------------------------------
+
+/** Convert the backend's symbols + 2-D matrix into the widget's nested map. */
+function liveMatrixFrom(resp: CorrelationResponse): {
+  symbols: string[];
+  matrix: Record<string, Record<string, number>>;
+} {
+  const syms = resp.symbols ?? [];
+  const m: Record<string, Record<string, number>> = {};
+  syms.forEach((a, i) => {
+    m[a] = {};
+    syms.forEach((b, j) => {
+      m[a][b] = resp.matrix?.[i]?.[j] ?? 0;
+    });
+  });
+  return { symbols: syms, matrix: m };
+}
+
+// ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
 
 function CorrelationMatrixWidget() {
-  // NOTE: We deliberately do NOT read `useBrokerConnected()` here. There is no
-  // live correlation endpoint, so the data is sample-only regardless of broker
-  // connection — gating anything on connection state would only let the UI
-  // pretend the figures are live. The "Sample data" badge stays visible always.
   const track = useTrackBehavior();
+  const isConnected = useBrokerConnected();
 
   const [symbols, setSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
   const [searchInput, setSearchInput] = useState("");
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Correlation matrix (memoised)
-  const matrix = useMemo(() => {
+  // Live correlation matrix — only fetched once a broker is connected.
+  const { data: liveResp } = useQuery({
+    queryKey: ["correlation-matrix"],
+    queryFn: () => getCorrelationMatrix(),
+    enabled: isConnected,
+    staleTime: 5 * 60_000,
+    refetchInterval: isConnected ? 5 * 60_000 : false,
+    retry: false,
+  });
+
+  // Live only when the backend reports genuinely-live data (not its own sample
+  // fallback) and returns a usable matrix.
+  const live = useMemo(
+    () =>
+      liveResp && liveResp.is_sample_data === false && (liveResp.matrix?.length ?? 0) > 0
+        ? liveMatrixFrom(liveResp)
+        : null,
+    [liveResp],
+  );
+  const isLive = isConnected && live !== null;
+
+  // Sample matrix (memoised) — the editable explore view.
+  const sampleMatrix = useMemo(() => {
     const m: Record<string, Record<string, number>> = {};
     for (const a of symbols) {
       m[a] = {};
@@ -117,6 +163,10 @@ function CorrelationMatrixWidget() {
     }
     return m;
   }, [symbols]);
+
+  // What the table actually renders: backend set when live, editable set otherwise.
+  const displaySymbols = isLive && live ? live.symbols : symbols;
+  const matrix = isLive && live ? live.matrix : sampleMatrix;
 
   const addSymbol = useCallback(() => {
     const sym = searchInput.trim().toUpperCase();
@@ -166,36 +216,49 @@ function CorrelationMatrixWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Grid2x2 size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Correlation Matrix</span>
-        {/* Honest disclosure — the matrix is computed from `SAMPLE_MATRIX` and
-            the `pseudoCorr` fallback; no live correlation endpoint is wired yet.
-            The badge previously hid in `isConnected` mode, which masked the fact
-            that a connected trader was still reading sample coefficients. Keep
-            visible at all times. */}
-        <span
-          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-          role="status"
-          aria-label="Showing sample data; no live correlation source is wired yet"
-          title="No live data wired yet — showing a sample correlation matrix so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        {/* Data-source badge — flips to "Live" only when a broker is connected
+            AND the backend returns a genuinely-live matrix (is_sample_data
+            false). Otherwise it stays on the honest amber "Sample data"
+            affordance so a connected trader is never misled into reading the
+            sample coefficients as real market data. */}
+        {isLive ? (
+          <span
+            className="ml-1 px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
+            role="status"
+            aria-label="Showing the live correlation matrix from the connected broker"
+            title="Live Pearson correlation matrix from /api/v1/analytics/correlation."
+          >
+            Live
+          </span>
+        ) : (
+          <span
+            className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            role="status"
+            aria-label="Showing sample data; no live correlation source is wired yet"
+            title="No live data wired yet — showing a sample correlation matrix so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
       </div>
 
-      {/* Symbol add bar */}
+      {/* Symbol add bar — editing applies to the sample (explore) matrix only;
+          disabled while the live backend matrix (fixed instrument set) is shown. */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 border-b border-border-default bg-surface-base">
         <Input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
           onKeyDown={handleKeyDown}
-          placeholder="Add symbol (e.g. SBIN)"
+          placeholder={isLive ? "Live matrix uses the broker instrument set" : "Add symbol (e.g. SBIN)"}
           className="flex-1 h-7 text-xs font-mono"
           maxLength={20}
+          disabled={isLive}
           aria-label="Add instrument to correlation matrix"
         />
         <button
           onClick={addSymbol}
-          disabled={!searchInput.trim() || symbols.length >= 12}
+          disabled={isLive || !searchInput.trim() || symbols.length >= 12}
           aria-label="Add instrument"
           className="flex items-center gap-1 px-2 py-1 rounded bg-accent/10 text-accent border border-accent/30 text-xs hover:bg-accent/20 disabled:opacity-40 transition-colors"
         >
@@ -206,19 +269,21 @@ function CorrelationMatrixWidget() {
 
       {/* Active symbols chips */}
       <div className="flex-none flex flex-wrap gap-1 px-2 py-1.5 border-b border-border-default min-h-8">
-        {symbols.map((sym) => (
+        {displaySymbols.map((sym) => (
           <span
             key={sym}
             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xxs font-mono bg-surface-card border border-border-default text-text-secondary"
           >
             {sym}
-            <button
-              onClick={() => removeSymbol(sym)}
-              aria-label={`Remove ${sym} from matrix`}
-              className="text-text-muted hover:text-loss transition-colors ml-0.5"
-            >
-              <X size={9} aria-hidden="true" />
-            </button>
+            {!isLive && (
+              <button
+                onClick={() => removeSymbol(sym)}
+                aria-label={`Remove ${sym} from matrix`}
+                className="text-text-muted hover:text-loss transition-colors ml-0.5"
+              >
+                <X size={9} aria-hidden="true" />
+              </button>
+            )}
           </span>
         ))}
       </div>
@@ -228,14 +293,14 @@ function CorrelationMatrixWidget() {
         <table
           className="text-xxs border-collapse"
           aria-label="Correlation matrix table"
-          style={{ minWidth: `${symbols.length * 56 + 72}px` }}
+          style={{ minWidth: `${displaySymbols.length * 56 + 72}px` }}
         >
           <thead className="sticky top-0 z-10">
             <tr>
               <th className="bg-surface-card border border-border-default px-1 py-1.5 text-left w-16 font-medium text-text-muted">
                 Symbol
               </th>
-              {symbols.map((sym) => (
+              {displaySymbols.map((sym) => (
                 <th
                   key={sym}
                   className="bg-surface-card border border-border-default px-1 py-1.5 text-center font-medium text-text-muted whitespace-nowrap w-14"
@@ -246,12 +311,12 @@ function CorrelationMatrixWidget() {
             </tr>
           </thead>
           <tbody>
-            {symbols.map((rowSym) => (
+            {displaySymbols.map((rowSym) => (
               <tr key={rowSym}>
                 <td className="sticky left-0 bg-surface-card border border-border-default px-1 py-1.5 font-mono font-semibold text-text-primary whitespace-nowrap z-10">
                   {rowSym.length > 8 ? rowSym.slice(0, 8) : rowSym}
                 </td>
-                {symbols.map((colSym) => {
+                {displaySymbols.map((colSym) => {
                   const v = matrix[rowSym]?.[colSym] ?? 0;
                   const colourClass = corrToColour(v);
                   return (
@@ -281,7 +346,7 @@ function CorrelationMatrixWidget() {
           <span className="px-1 bg-surface-base text-text-muted rounded">0</span>
           <span className="px-1 bg-blue-500/20 text-blue-400 rounded">+0.5</span>
           <span className="px-1 bg-blue-500/30 text-blue-300 rounded">+1.0</span>
-          <span className="ml-auto text-text-muted">20-day rolling returns</span>
+          <span className="ml-auto text-text-muted">Pearson correlation of returns</span>
         </div>
       </div>
 
