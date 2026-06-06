@@ -485,3 +485,21 @@ class TestLiveOptionChain:
     def test_ivsmile_uses_live_chain(self, app, client):
         _, body = self._post_with_client(app, client, "/api/v1/ivsmile")
         assert body["is_sample_data"] is False
+
+    def test_ivsmile_curve_echoes_real_days_to_expiry(self, app, client):
+        """Integration tripwire: a real future expiry must yield days_to_expiry>0
+        in the returned curve. The terminal's Greeks widgets derive time-decay
+        greeks from this; a 0 (the old hardcode / unparsed-ISO bug) collapses
+        them. Guards the dte echo at the route boundary, not just in isolation."""
+        from datetime import date, timedelta
+
+        app.config["OPENALGO_CLIENT"] = self._FakeOpenAlgo()
+        future_iso = (date.today() + timedelta(days=20)).isoformat()  # YYYY-MM-DD
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry_dates": [future_iso]},
+        )
+        assert body["is_sample_data"] is False
+        curve = body["data"]["curves"][0]
+        assert curve["days_to_expiry"] > 0, "ISO expiry must yield a real positive DTE"

@@ -314,6 +314,11 @@ function GreeksHeatmapWidget() {
   // single-expiry endpoint is called once per expiry, so each carries a real
   // days-to-expiry and thus non-degenerate time-decay greeks) and derive the
   // aligned greek grid client-side. Only runs once a broker is connected.
+  //
+  // NB (honest approximation): OpenAlgo's option-chain feed takes no expiry, so
+  // every per-expiry request reads the SAME (nearest) IV snapshot. The rows
+  // therefore share one IV surface and differ only by time-decay (dte) — this
+  // is a greeks-by-time view, not a true per-expiry IV term structure.
   const { data: liveRows } = useQuery({
     queryKey: ["greeks-heatmap", symbol, symDef.exchange],
     queryFn: async () => {
