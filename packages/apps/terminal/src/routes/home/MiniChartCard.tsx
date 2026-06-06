@@ -1,17 +1,28 @@
 /**
- * MiniChartCard — NIFTY core mini sparkline with timeframe pills.
+ * MiniChartCard — NIFTY 50 headline (live atom) + an illustrative sparkline.
+ *
+ * The headline price/change read the live NIFTY atom — the simulated demo feed
+ * in Explore, the broker WebSocket in Live. With no tick yet they show a dash,
+ * never a fabricated number. The sparkline is illustrative SHAPE data only (a
+ * real history hook lands in a later wave), so it carries a visible "Demo"
+ * badge: no unguarded placeholder price may render on a live surface (the
+ * no-mock-data house rule — a card that shows a fake price next to a real order
+ * button is a safety bug).
  */
 
 import { useState } from "react";
+import { useAtomValue } from "jotai";
 import { BentoCard } from "@/components/bento/BentoCard";
 import { TrendingUp } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
+import { niftyAtom } from "@/atoms/marketAtoms";
 
 type Timeframe = "1D" | "1W" | "1M" | "3M";
 const TIMEFRAMES: Timeframe[] = ["1D", "1W", "1M", "3M"];
 
-// Placeholder sparkline data — will be replaced by real API data in Phase 2
-const PLACEHOLDER: Record<Timeframe, number[]> = {
+// Illustrative sparkline SHAPE only — NOT real history and NOT a real price. The
+// headline number never comes from here; the visible "Demo" badge marks it.
+const SAMPLE_SHAPE: Record<Timeframe, number[]> = {
   "1D": [22100, 22150, 22090, 22200, 22180, 22250, 22230, 22300, 22280, 22350, 22320, 22400],
   "1W": [21800, 21950, 22100, 22050, 22200, 22150, 22300],
   "1M": [21000, 21200, 21500, 21300, 21700, 22000, 22200, 22400],
@@ -20,18 +31,18 @@ const PLACEHOLDER: Record<Timeframe, number[]> = {
 
 export function MiniChartCard() {
   const [timeframe, setTimeframe] = useState<Timeframe>("1D");
+  const tick = useAtomValue(niftyAtom);
 
-  const data = PLACEHOLDER[timeframe];
-  const lastValue = data[data.length - 1];
-  const firstValue = data[0];
-  const change = lastValue - firstValue;
-  const changePct = ((change / firstValue) * 100).toFixed(2);
-  const positive = change >= 0;
+  const shape = SAMPLE_SHAPE[timeframe];
+  const ltp = tick?.ltp ?? null;
+  const change = tick?.change ?? null;
+  const changePct = tick?.pct ?? null;
+  const positive = (change ?? 0) >= 0;
 
   return (
     <BentoCard size="wide" label="NIFTY Chart" data-testid="mini-chart-card">
       <div className="p-4 h-full flex flex-col gap-3">
-        {/* Header */}
+        {/* Header — live LTP/change, or a dash when no tick has arrived */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <TrendingUp size={13} className="text-text-muted" aria-hidden="true" />
@@ -40,24 +51,37 @@ export function MiniChartCard() {
             </p>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="font-mono text-sm font-semibold text-text-primary">
-              {lastValue.toLocaleString("en-IN")}
+            <span
+              className="font-mono text-sm font-semibold text-text-primary"
+              data-testid="mini-chart-ltp"
+            >
+              {ltp !== null ? ltp.toLocaleString("en-IN") : "—"}
             </span>
             <span
               className="font-mono text-xs"
               style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
             >
-              {positive ? "+" : ""}{change.toFixed(0)} ({positive ? "+" : ""}{changePct}%)
+              {change !== null && changePct !== null
+                ? `${positive ? "+" : ""}${change.toFixed(0)} (${positive ? "+" : ""}${changePct.toFixed(2)}%)`
+                : "—"}
             </span>
           </div>
         </div>
 
-        {/* Sparkline */}
+        {/* Sparkline — illustrative shape, badged so it cannot read as live data */}
         <div className="flex-1 relative">
+          <span
+            className="absolute right-1 top-1 z-10 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide"
+            style={{ background: "var(--color-surface-active)", color: "var(--color-text-muted)" }}
+            data-testid="mini-chart-demo-badge"
+            title="Illustrative shape only — not live price history"
+          >
+            Demo
+          </span>
           <FlintMiniSparkline
-            points={data}
+            points={shape}
             positive={positive}
-            ariaLabel={`NIFTY 50 ${timeframe} sparkline`}
+            ariaLabel={`NIFTY 50 ${timeframe} illustrative sparkline (demo data)`}
             className="h-full w-full"
           />
         </div>
