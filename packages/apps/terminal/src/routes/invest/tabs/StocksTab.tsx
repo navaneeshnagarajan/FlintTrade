@@ -260,8 +260,9 @@ export function StocksTab() {
             Stock Screener
           </h3>
           <p className="text-xs text-text-muted mt-0.5">
-            Fundamental analysis of 30 Indian large-cap stocks. Filter by
-            sector and sort by key metrics.
+            Curated snapshot of Indian large-cap stocks — fundamental figures are
+            a fixed point-in-time dataset, not live. Filter by sector and sort by
+            key metrics.
           </p>
         </div>
         <div className="flex items-center gap-1">
