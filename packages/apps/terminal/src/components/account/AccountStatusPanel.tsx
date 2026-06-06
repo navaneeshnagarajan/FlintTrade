@@ -9,6 +9,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Wifi, WifiOff, ShieldAlert, ShieldCheck } from "lucide-react";
 import { get } from "@/services/ftApi";
 
@@ -90,9 +91,16 @@ export function AccountStatusPanel() {
                   </span>
                 )}
                 {a.needs_reauth ? (
-                  <span className="inline-flex items-center gap-1 rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-xxs font-medium text-warning">
+                  // Actionable: deep-link to the Broker Gateway settings where the
+                  // operator re-authenticates — the panel must DRIVE the action,
+                  // not just report it.
+                  <Link
+                    to="/settings#api"
+                    aria-label={`Re-authenticate ${a.name || a.account_id}`}
+                    className="inline-flex items-center gap-1 rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-xxs font-medium text-warning transition-colors hover:bg-warning/20 hover:border-warning/50"
+                  >
                     <ShieldAlert size={10} /> Re-auth
-                  </span>
+                  </Link>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-xxs text-profit">
                     <ShieldCheck size={11} /> Authed
