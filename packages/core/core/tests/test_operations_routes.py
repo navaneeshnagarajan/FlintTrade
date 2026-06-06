@@ -520,3 +520,64 @@ class TestDittoMirrorStart:
         assert data["status"] == "deferred"
         assert data["data"]["active"] is False
         assert data["data"]["source_account"] == "acc_1"
+
+
+class TestAccountsStatus:
+    """GET /api/v1/accounts/status — Account Manager per-broker reauth summary."""
+
+    class _FakeStatus:
+        def __init__(self, connected: bool, authenticated: bool, needs_reauth: bool):
+            self._d = {
+                "connected": connected,
+                "authenticated": authenticated,
+                "needs_reauth": needs_reauth,
+            }
+
+        def to_dict(self) -> dict:
+            return self._d
+
+    class _FakeAM:
+        def __init__(self, statuses):
+            self._statuses = statuses
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def account_status_all(self):
+            return self._statuses
+
+    def test_returns_summary_and_per_account_status(self, client, monkeypatch):
+        statuses = [
+            self._FakeStatus(connected=True, authenticated=True, needs_reauth=False),
+            self._FakeStatus(connected=True, authenticated=False, needs_reauth=True),
+            self._FakeStatus(connected=False, authenticated=False, needs_reauth=False),
+        ]
+        monkeypatch.setattr(
+            "flinttrade_ditto.account_manager.AccountManager",
+            lambda: self._FakeAM(statuses),
+        )
+
+        resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert len(data["data"]["accounts"]) == 3
+        assert data["data"]["summary"] == {
+            "total": 3,
+            "connected": 2,
+            "authenticated": 1,
+            "needs_reauth": 1,
+        }
+
+    def test_returns_503_when_account_manager_unavailable(self, client, monkeypatch):
+        def _boom():
+            raise RuntimeError("credential vault locked")
+
+        monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _boom)
+
+        resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
+        assert resp.status_code == 503
+        assert resp.get_json()["status"] == "error"
