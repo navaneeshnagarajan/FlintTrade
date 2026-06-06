@@ -39,6 +39,24 @@ describe("useDemoFeed", () => {
     expect(typeof tick?.ltp).toBe("number");
   });
 
+  it("ticks the dashboard watchlist's VIX and GOLD rows in demo mode", () => {
+    // Previously the engine emitted no INDIAVIX/GOLD, so those WatchlistCard
+    // rows sat on a static dash in Explore. They must now tick too.
+    const store = getDefaultStore();
+    store.set(tickAtomFamily("NSE_INDEX:INDIAVIX"), null);
+    store.set(tickAtomFamily("MCX:GOLD"), null);
+
+    renderHook(() => useDemoFeed());
+    vi.advanceTimersByTime(1000);
+
+    const vix = store.get(tickAtomFamily("NSE_INDEX:INDIAVIX"));
+    const gold = store.get(tickAtomFamily("MCX:GOLD"));
+    expect(vix?.symbol).toBe("INDIAVIX");
+    expect(typeof vix?.ltp).toBe("number");
+    expect(gold?.symbol).toBe("GOLD");
+    expect(typeof gold?.ltp).toBe("number");
+  });
+
   it("does not run outside explore mode", () => {
     useModeStore.setState({ mode: "live" });
     renderHook(() => useDemoFeed());

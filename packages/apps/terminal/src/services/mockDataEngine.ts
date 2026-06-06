@@ -65,6 +65,10 @@ const BASE_PRICES: Record<string, number> = {
   NIFTY:    24150,
   BANKNIFTY: 51200,
   SENSEX:   79800,
+  // India VIX + MCX gold so the dashboard WatchlistCard's VIX and GOLD rows
+  // also tick in Explore/demo mode (they previously sat on a static dash).
+  INDIAVIX:  13.5,
+  GOLD:     72000,
   RELIANCE:  2850,
   TCS:       3720,
   HDFCBANK:  1680,
@@ -79,6 +83,8 @@ const EXCHANGES: Record<string, string> = {
   NIFTY:    "NSE_INDEX",
   BANKNIFTY: "NSE_INDEX",
   SENSEX:   "BSE_INDEX",
+  INDIAVIX: "NSE_INDEX",
+  GOLD:     "MCX",
   RELIANCE:  "NSE",
   TCS:       "NSE",
   HDFCBANK:  "NSE",
