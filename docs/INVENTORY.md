@@ -69,7 +69,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains via OpenAlgo; honest sample fallback |
 | Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | Live via `/api/v1/history` + screener analysers (`/v1/analytics/*`, `/api/v1/analytics/correlation`); honest "Live"/"Sample data" badge |
-| Chain-derived widgets (IV skew / Greeks heatmap) | ✅ | Derived client-side from the live option chain (per-strike IV/delta/greeks); pure unit-tested transforms; honest "Live"/"Sample data" badge |
+| IV-smile-derived widgets (IV skew / Greeks heatmap) | ✅ | Sourced from the live IV-smile feed (`getFtIVSmile`); greeks Black–Scholes-derived (shared with GreeksSurface); pure unit-tested transforms; honest "Live"/"Sample data" badge |
 | Vol-surface, straddle-PnL analysis | 🟡 | Honest sample only (need multi-expiry / candle source) |
 
 ## Data & Infra
