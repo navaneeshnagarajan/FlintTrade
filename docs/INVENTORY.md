@@ -108,7 +108,8 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 |---|---|---|
 | SmartOrderRouter (liquidity-aware TWAP slicing) | 🟡 | Built + unit-tested; not routed — wiring it is a **safety-critical** new order path (must mint a `SafetyContext` through the gate) |
 | Analytics endpoints: VWAP bands / pairs / MTF | ✅ | Compute endpoints built + tested **and now reached by their widgets** — live intraday/daily bars via `getHistory`, honest sample fallback |
-| Excel export / import (`exportToExcel`, `importFromExcel`, `createPortfolioReport`) | 🟡 | Backend built + tested; server-side file generation — no browser button yet |
+| Excel export (browser download) | ✅ | Streaming `/export/download` + `downloadExcel` + "Export to Excel" button in the Positions widget (Notification System feedback) |
+| Excel import / portfolio report (`importFromExcel`, `createPortfolioReport`) | 🟡 | Backend built + tested; server-side file path — no UI surface yet |
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | 🟡 | Backend built; no widget consumes it |
 | Fundamentals screener (search / screen / detail) | 🟡 | Backend built + tested; no UI surface |
 | Native-SDK **order execution** (R13/R14) | ⛔ | **Externally blocked** — real broker SDKs absent |
