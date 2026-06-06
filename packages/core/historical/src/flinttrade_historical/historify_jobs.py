@@ -37,6 +37,11 @@ STATUS_RUNNING = "running"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
 STATUS_REFUSED = "refused"
+STATUS_ABORTED = "aborted"  # disk filled mid-run; stopped to protect the disk
+
+
+class _DiskAbort(Exception):
+    """Raised from the progress callback to stop a run when the disk fills."""
 
 
 @dataclass
@@ -53,6 +58,9 @@ class DownloadJob:
     free_disk_mb: float | None = None
     error: str | None = None
     message: str = ""
+    # Filesystem path being written to — kept so the disk-safety check can be
+    # re-run mid-flight (not only at start).
+    storage_path: str | None = None
 
     @property
     def progress_pct(self) -> float:
@@ -72,18 +80,23 @@ class HistorifyJobManager:
     Args:
         min_free_disk_mb: Refuse to start a job when free disk is below this.
         clock: Monotonic clock (injectable for tests).
+        recheck_every: Re-run the disk-safety check every N completed items
+            during the run (0 disables mid-run re-checks). ``shutil.disk_usage``
+            is one cheap syscall, so this keeps latency tight.
     """
 
     def __init__(
         self,
         min_free_disk_mb: float = 500.0,
         clock: Callable[[], float] = time.monotonic,
+        recheck_every: int = 200,
     ) -> None:
         self._jobs: dict[str, DownloadJob] = {}
         self._lock = threading.Lock()
         self._counter = 0
         self._min_free_disk_mb = min_free_disk_mb
         self._clock = clock
+        self._recheck_every = recheck_every
 
     # ------------------------------------------------------------------
     # Safety
@@ -144,6 +157,7 @@ class HistorifyJobManager:
                 updated_at=self._clock(),
                 free_disk_mb=round(free_mb, 1),
                 message="Queued",
+                storage_path=storage_path,
             )
             self._jobs[job_id] = job
 
@@ -165,6 +179,10 @@ class HistorifyJobManager:
         try:
             asyncio.run(runner(on_progress))
             self._update(job_id, status=STATUS_DONE, message="Complete")
+        except _DiskAbort:
+            # Status was already set to ABORTED in the progress callback; the
+            # runner stopped because the disk filled mid-run. Not an error.
+            logger.warning("Download job %s aborted: disk safety breached mid-run", job_id)
         except Exception as exc:  # noqa: BLE001 - surface any failure to the job
             logger.exception("Download job %s failed", job_id)
             self._update(job_id, status=STATUS_ERROR, error=str(exc), message="Failed")
@@ -175,6 +193,7 @@ class HistorifyJobManager:
 
     def _record_progress(self, job_id: str, completed: int, total: int) -> None:
         now = self._clock()
+        recheck_path: str | None = None
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
@@ -190,6 +209,30 @@ class HistorifyJobManager:
                 job.eta_seconds = round((total - completed) / rate, 1)
             elif total > 0 and completed >= total:
                 job.eta_seconds = 0.0
+            # Decide (under the lock) whether this tick re-checks the disk.
+            if (
+                self._recheck_every > 0
+                and completed > 0
+                and completed % self._recheck_every == 0
+            ):
+                recheck_path = job.storage_path
+
+        # The disk check (a syscall) runs OUTSIDE the lock. A long backfill that
+        # passed the start-time threshold can still fill the disk; abort the run
+        # rather than exhaust it.
+        if recheck_path is not None:
+            ok, free_mb = self.check_disk_safety(recheck_path)
+            if not ok:
+                self._update(
+                    job_id,
+                    status=STATUS_ABORTED,
+                    free_disk_mb=round(free_mb, 1),
+                    message=(
+                        f"Aborted mid-run: only {free_mb:.0f} MB free "
+                        f"(need {self._min_free_disk_mb:.0f} MB). Free up disk and retry."
+                    ),
+                )
+                raise _DiskAbort(job_id)
 
     def _update(self, job_id: str, **fields: Any) -> None:
         with self._lock:

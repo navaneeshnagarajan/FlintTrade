@@ -104,4 +104,27 @@ describe("HistoricalDownloadPanel", () => {
 
     await waitFor(() => expect(screen.getByText(/free up disk and retry/i)).toBeInTheDocument());
   });
+
+  it("surfaces the mid-run disk-abort message", async () => {
+    // The job starts fine (202) but a status poll reports it aborted because the
+    // disk filled mid-run — the panel shows the abort message, not a progress bar.
+    const aborted = {
+      ...RUNNING,
+      status: "aborted",
+      message: "Aborted mid-run: only 50 MB free (need 500 MB). Free up disk and retry.",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        String(url).includes("/download/status")
+          ? jsonResponse({ data: aborted })
+          : jsonResponse({ data: RUNNING }, 202),
+      ),
+    );
+
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /download 30d/i }));
+
+    await waitFor(() => expect(screen.getByText(/aborted mid-run/i)).toBeInTheDocument());
+  });
 });

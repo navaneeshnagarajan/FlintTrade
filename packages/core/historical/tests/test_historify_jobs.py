@@ -7,6 +7,7 @@ import time
 import pytest
 
 from flinttrade_historical.historify_jobs import (
+    STATUS_ABORTED,
     STATUS_DONE,
     STATUS_ERROR,
     STATUS_REFUSED,
@@ -67,6 +68,41 @@ def test_error_status_on_runner_failure() -> None:
     final = _wait_terminal(mgr, job.job_id)
     assert final.status == STATUS_ERROR
     assert final.error == "boom"
+
+
+def test_aborts_mid_run_when_disk_fills() -> None:
+    # The start-time check passes, but a mid-run re-check fails — a long backfill
+    # must abort rather than exhaust the disk.
+    mgr = HistorifyJobManager(min_free_disk_mb=500.0, recheck_every=2)
+    calls = {"n": 0}
+
+    def fake_check(_path: str) -> tuple[bool, float]:
+        calls["n"] += 1
+        # 1st call = start() → pass; subsequent (mid-run) → fail.
+        return (calls["n"] == 1, 5000.0 if calls["n"] == 1 else 50.0)
+
+    mgr.check_disk_safety = fake_check  # type: ignore[method-assign]
+
+    progressed: list[int] = []
+
+    async def runner(progress):
+        for i in range(1, 11):
+            progress(i, 10)  # raises the disk-abort at i=2 (recheck_every=2)
+            progressed.append(i)
+
+    job = mgr.start(total=10, runner=runner, storage_path="/data")
+
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        snap = mgr.get(job.job_id)
+        if snap and snap.status == STATUS_ABORTED:
+            break
+        time.sleep(0.02)
+
+    final = mgr.get(job.job_id)
+    assert final.status == STATUS_ABORTED
+    assert "Aborted mid-run" in final.message
+    assert progressed == [1]  # stopped: i=2 raised before its append
 
 
 def test_eta_estimated_from_rate() -> None:

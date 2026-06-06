@@ -19,7 +19,7 @@ const BASE = "/ft-api/v1/historify";
 
 interface DownloadJob {
   job_id: string;
-  status: "queued" | "running" | "done" | "error" | "refused";
+  status: "queued" | "running" | "done" | "error" | "refused" | "aborted";
   total: number;
   completed: number;
   progress_pct: number;
@@ -110,14 +110,16 @@ export function HistoricalDownloadPanel() {
           </p>
         )}
 
-        {active && active.status === "refused" && (
+        {/* refused (start-time) and aborted (mid-run disk fill) both surface a
+            clear disk-safety message instead of a progress bar. */}
+        {active && (active.status === "refused" || active.status === "aborted") && (
           <div className="flex items-start gap-2 rounded border border-warning/30 bg-warning/10 px-3 py-2">
             <AlertTriangle size={14} className="text-warning flex-none mt-0.5" />
             <p className="text-xs text-warning">{active.message}</p>
           </div>
         )}
 
-        {active && active.status !== "refused" && (
+        {active && active.status !== "refused" && active.status !== "aborted" && (
           <div className="space-y-2">
             {/* Progress bar */}
             <div className="h-2 w-full overflow-hidden rounded-full bg-surface-base">
