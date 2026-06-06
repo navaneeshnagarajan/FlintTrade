@@ -375,7 +375,7 @@ function CorrelationPairsWidget() {
       {/* Footer note */}
       <div className="flex-none px-2 py-1.5 border-t border-border-default">
         <p className="text-xxs text-text-muted">
-          Z-score &gt; +1.5 = Diverging · Z &lt; -1.5 = Converging · Correlation based on 20-day rolling returns
+          |Z| &gt; 1.5 = Diverging · |Z| &lt; 0.5 = Converging · Pearson correlation over ~120 trading days of daily returns
         </p>
       </div>
     </div>

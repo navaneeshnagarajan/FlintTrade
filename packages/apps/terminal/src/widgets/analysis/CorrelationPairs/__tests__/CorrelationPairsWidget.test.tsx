@@ -160,7 +160,7 @@ describe("CorrelationPairsWidget", () => {
 
   it("renders footer note about z-score and correlation", () => {
     renderWidget();
-    expect(screen.getAllByText(/Z-score/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/20-day rolling returns/i)).toBeTruthy();
+    expect(screen.getAllByText(/Diverging/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/Pearson correlation over ~120 trading days/i)).toBeTruthy();
   });
 });

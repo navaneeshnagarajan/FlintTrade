@@ -327,6 +327,43 @@ class TestMACDHistogram:
 
 
 # ---------------------------------------------------------------------------
+# JSON safety at the insufficient-data boundary (regression)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonSafeBoundary:
+    """A timeframe with 30–34 bars clears _MIN_BARS=30 (so it is analysed, not
+    skipped) but is below the MACD (35) / RSI (16) windows. The analyser must
+    NOT emit ``NaN`` — Flask ``jsonify`` would serialise a bare ``NaN`` token,
+    which is invalid JSON and makes the frontend ``JSON.parse`` throw, silently
+    breaking the live multi-timeframe path. Values must stay finite.
+    """
+
+    @pytest.mark.parametrize("n", [_MIN_BARS, _MIN_BARS + 2, 34])
+    def test_signal_values_are_finite_near_min_bars(self, analyser, n):
+        bars = _make_trending_bars(n, start=24000.0, direction=1.0, seed=7)
+        result = analyser.analyse("THIN", {"5m": bars})
+        assert len(result.signals) == 1, "30+ bars should be analysed, not skipped"
+        sig = result.signals[0]
+        assert math.isfinite(sig.rsi), f"RSI must be finite, got {sig.rsi}"
+        assert math.isfinite(sig.macd_histogram), f"MACD must be finite, got {sig.macd_histogram}"
+        assert math.isfinite(sig.strength)
+
+    def test_model_dump_is_strict_json_serialisable(self, analyser):
+        """The dumped model must round-trip through strict JSON (allow_nan=False).
+
+        ``json.dumps(..., allow_nan=False)`` raises ``ValueError`` on NaN/Inf —
+        the exact failure mode that produced invalid JSON from the live route.
+        """
+        import json
+
+        bars = _make_trending_bars(_MIN_BARS + 1, start=100.0, direction=1.0, seed=3)
+        result = analyser.analyse("THIN", {"5m": bars})
+        # Must not raise — proves no NaN/Inf leaks into the serialised payload.
+        json.dumps(result.model_dump(), allow_nan=False)
+
+
+# ---------------------------------------------------------------------------
 # Strength
 # ---------------------------------------------------------------------------
 

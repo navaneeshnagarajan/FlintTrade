@@ -79,8 +79,8 @@ class TimeframeSignal(BaseModel):
     Attributes:
         timeframe:       Label, e.g. ``"5m"``, ``"15m"``, ``"1h"``, ``"1D"``.
         trend:           ``"bullish"``, ``"bearish"``, or ``"neutral"``.
-        rsi:             14-period RSI value (0–100). ``NaN`` when insufficient data.
-        macd_histogram:  MACD (12,26,9) histogram value. ``NaN`` when insufficient data.
+        rsi:             14-period RSI value (0–100). ``50.0`` (neutral) when insufficient data — kept finite so the JSON response stays valid.
+        macd_histogram:  MACD (12,26,9) histogram value. ``0.0`` (flat) when insufficient data — kept finite so the JSON response stays valid.
         ema_position:    ``"above"`` or ``"below"`` (close vs EMA20).
         strength:        Direction strength in [0, 1] derived from MACD histogram.
     """
@@ -227,11 +227,21 @@ class MultiTimeframeAnalyser:
 
         strength = self._compute_strength(macd_hist_val, close)
 
+        # JSON-safe sentinels for insufficient-data timeframes. A timeframe with
+        # 30–34 bars clears the _MIN_BARS=30 floor (so it is not skipped) but is
+        # below the MACD (35) / RSI (16) windows, leaving these values NaN. Flask
+        # ``jsonify`` serialises a bare ``NaN`` token, which is invalid JSON and
+        # makes the frontend ``JSON.parse`` throw — silently breaking the live
+        # multi-timeframe path. Substitute neutral, finite values instead:
+        # RSI 50.0 (midline) and MACD histogram 0.0 (flat → ``macdSign='flat'``).
+        rsi_out = round(rsi_val, 4) if math.isfinite(rsi_val) else 50.0
+        macd_out = round(macd_hist_val, 6) if math.isfinite(macd_hist_val) else 0.0
+
         return TimeframeSignal(
             timeframe=timeframe,
             trend=trend,
-            rsi=round(rsi_val, 4) if math.isfinite(rsi_val) else math.nan,
-            macd_histogram=round(macd_hist_val, 6) if math.isfinite(macd_hist_val) else math.nan,
+            rsi=rsi_out,
+            macd_histogram=macd_out,
             ema_position=ema_position,
             strength=round(strength, 4),
         )
