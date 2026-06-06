@@ -82,12 +82,17 @@ class BrokerRateLimiter:
         overrides = overrides or {}
         limits: dict[str, dict[str, float]] = {}
         for broker_id, cap in capabilities.items():
-            ov = overrides.get(broker_id, {})
+            ov_raw = overrides.get(broker_id, {})
+            ov = ov_raw if isinstance(ov_raw, dict) else {}
             order = ov.get("order", cap.rate_limit_orders_per_sec or 0)
             data = ov.get("data", cap.rate_limit_data_per_sec or 0)
             limits[broker_id] = {"order": float(order), "data": float(data)}
-        # Allow overrides for brokers not in the capability map too.
+        # Allow overrides for brokers not in the capability map too. Skip any
+        # non-dict values so a documentation key (e.g. a "_comment" string — the
+        # workspace.json convention) is tolerated rather than crashing the build.
         for broker_id, ov in overrides.items():
+            if not isinstance(ov, dict):
+                continue
             limits.setdefault(broker_id, {"order": float(ov.get("order", 0)), "data": float(ov.get("data", 0))})
         return cls(limits, **kwargs)
 

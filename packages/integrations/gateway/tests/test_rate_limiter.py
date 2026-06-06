@@ -81,3 +81,17 @@ def test_from_capabilities_applies_overrides():
     assert rl._rate("dhan", "data") == 10.0  # capability default kept
     assert rl._rate("kotakneo", "order") == 10.0
     assert rl._rate("kotakneo", "data") == 0.0  # no data limit → unlimited
+
+
+def test_from_capabilities_tolerates_comment_keys():
+    # workspace.json documents config blocks with a "_comment" string key. The
+    # rate_limits override block carries one too, so from_capabilities must skip
+    # non-dict override values instead of crashing on `"_comment".get(...)`.
+    caps = {"dhan": _cap(order=25, data=10)}
+    overrides = {
+        "_comment": "Per-broker rate-limit overrides in requests/sec.",
+        "dhan": {"order": 5},
+    }
+    rl = BrokerRateLimiter.from_capabilities(caps, overrides=overrides)
+    assert rl._rate("dhan", "order") == 5.0  # real override still applied
+    assert rl._rate("_comment", "order") == 0.0  # comment key ignored, no crash

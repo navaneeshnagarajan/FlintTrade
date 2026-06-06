@@ -28,6 +28,9 @@
       "enabled": false,
       "order": []
     },
+    "rate_limits": {
+      "_comment": "Optional per-broker API rate-limit overrides in requests/sec. Keys are broker ids (e.g. 'dhan:main'), each mapping to { \"order\": N, \"data\": M }. Omitted brokers/keys fall back to the adapter's built-in capability defaults; 0 means unlimited. Example: \"dhan:main\": { \"order\": 8, \"data\": 4 }."
+    },
     "registered": [
       "openalgo:default"
     ]
