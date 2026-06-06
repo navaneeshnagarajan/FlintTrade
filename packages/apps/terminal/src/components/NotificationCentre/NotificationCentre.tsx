@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { layerClassNames } from "@flinttrade/design-system";
 import {
@@ -63,9 +64,10 @@ interface NotificationRowProps {
   notification: Notification;
   onRead: (id: string) => void;
   onDismiss: (id: string) => void;
+  onAction: (notification: Notification) => void;
 }
 
-function NotificationRow({ notification, onRead, onDismiss }: NotificationRowProps) {
+function NotificationRow({ notification, onRead, onDismiss, onAction }: NotificationRowProps) {
   const { Icon, iconClass } = CATEGORY_META[notification.category];
 
   const handleClick = useCallback(() => {
@@ -78,6 +80,14 @@ function NotificationRow({ notification, onRead, onDismiss }: NotificationRowPro
       onDismiss(notification.id);
     },
     [notification.id, onDismiss],
+  );
+
+  const handleAction = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onAction(notification);
+    },
+    [notification, onAction],
   );
 
   return (
@@ -115,6 +125,16 @@ function NotificationRow({ notification, onRead, onDismiss }: NotificationRowPro
         <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">
           {notification.body}
         </p>
+        {notification.action && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-1.5 h-6 px-2 text-xxs"
+            onClick={handleAction}
+          >
+            {notification.action.label}
+          </Button>
+        )}
       </div>
 
       {/* Dismiss button — shown on hover */}
@@ -141,6 +161,25 @@ function NotificationPanel({ onClose }: NotificationPanelProps) {
   const { notifications, read, readAll, clear, dismiss } = useNotifications();
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
   const panelRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+
+  // A notification CTA drives a real action: navigate to the remediation route
+  // or dispatch its event, mark it read, and close the panel so the operator
+  // lands on the fix.
+  const handleAction = useCallback(
+    (n: Notification) => {
+      if (!n.action) return;
+      if (n.action.event) {
+        window.dispatchEvent(new CustomEvent(n.action.event));
+      }
+      if (n.action.href) {
+        navigate(n.action.href);
+      }
+      read(n.id);
+      onClose();
+    },
+    [navigate, read, onClose],
+  );
 
   // Close on Escape
   useEffect(() => {
@@ -324,6 +363,7 @@ function NotificationPanel({ onClose }: NotificationPanelProps) {
               notification={n}
               onRead={read}
               onDismiss={dismiss}
+              onAction={handleAction}
             />
           ))
         )}

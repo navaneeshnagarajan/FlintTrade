@@ -28,6 +28,9 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", () => ({ useNavigate: () => mockNavigate }));
+
 import { NotificationBell, NotificationPanel } from "../NotificationCentre";
 import * as store from "../notificationStore";
 
@@ -258,6 +261,56 @@ describe("NotificationPanel", () => {
     fireEvent.click(screen.getByLabelText("Close notification centre"));
 
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("renders an action CTA that navigates, marks read, and closes the panel", () => {
+    const onCloseLocal = vi.fn();
+    act(() => {
+      store.addNotification({
+        category: "system",
+        title: "Broker gateway disconnected",
+        body: "Live data and order routing are paused.",
+        action: { label: "Reconnect", href: "/settings#api" },
+      });
+    });
+
+    render(<NotificationPanel onClose={onCloseLocal} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+    expect(mockNavigate).toHaveBeenCalledWith("/settings#api");
+    expect(store.unreadCount()).toBe(0); // marked read
+    expect(onCloseLocal).toHaveBeenCalledOnce(); // panel closed so the operator lands on the fix
+  });
+
+  it("an action CTA can dispatch a window event instead of navigating", () => {
+    act(() => {
+      store.addNotification({
+        category: "system",
+        title: "Kill switch ACTIVATED",
+        body: "Halted.",
+        action: { label: "Reset kill switch", event: "flinttrade:reset-kill-switch" },
+      });
+    });
+
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:reset-kill-switch", listener);
+    render(<NotificationPanel onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset kill switch" }));
+
+    expect(listener).toHaveBeenCalledOnce();
+    window.removeEventListener("flinttrade:reset-kill-switch", listener);
+  });
+
+  it("renders no CTA when a notification has no action", () => {
+    act(() => {
+      store.addNotification({ category: "alert", title: "Price alert", body: "NIFTY 24000" });
+    });
+
+    render(<NotificationPanel onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
   });
 });
 

@@ -79,6 +79,7 @@ export function useNotificationFeed(): void {
             ? "Broker gateway error"
             : "Broker gateway disconnected",
         body: "Live data and order routing are paused until the connection is restored.",
+        action: { label: "Reconnect", href: "/settings#api" },
       });
     }
   }, [status]);

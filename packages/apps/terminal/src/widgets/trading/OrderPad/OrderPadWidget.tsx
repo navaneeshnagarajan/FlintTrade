@@ -626,11 +626,15 @@ function OrderPadWidget(_props: WidgetProps) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Order failed";
-      showToast("error", msg, 6000, isRetryableError(msg));
+      const retryable = isRetryableError(msg);
+      showToast("error", msg, 6000, retryable);
       emitNotification({
         category: "order",
         title: `Order failed: ${params.action} ${params.symbol}`,
         body: msg,
+        // A retryable failure (timeout, transient connection) sends the operator
+        // back to the trade terminal to re-place; a hard rejection does not.
+        ...(retryable ? { action: { label: "Back to terminal", href: "/trade" } } : {}),
       });
     } finally {
       setLoading(false);

@@ -79,6 +79,9 @@ function KillSwitchPill() {
         category: "system",
         title: "Kill switch ACTIVATED",
         body: "All live order routing is halted. Reset the kill switch to resume trading.",
+        // Send the operator to the Automate settings, where the kill switch is
+        // reset (the sidebar highlights that section while it is active).
+        action: { label: "Reset kill switch", href: "/automate" },
       });
     } catch {
       // Silent — the pill remains visible so the user can retry

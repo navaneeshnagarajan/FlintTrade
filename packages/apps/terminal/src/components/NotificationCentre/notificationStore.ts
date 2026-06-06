@@ -18,6 +18,15 @@ const MAX_STORED = 200;
 // Zod schema for persistence validation
 // ---------------------------------------------------------------------------
 
+// A one-click remediation attached to a notification. `href` navigates to an
+// app route; `event` dispatches a window CustomEvent. Both optional + the whole
+// action optional, so older persisted notifications still parse.
+const notificationActionSchema = z.object({
+  label: z.string(),
+  href: z.string().optional(),
+  event: z.string().optional(),
+});
+
 const notificationSchema = z.object({
   id: z.string(),
   category: z.enum(["alert", "order", "system", "ai"]),
@@ -25,6 +34,7 @@ const notificationSchema = z.object({
   body: z.string(),
   timestamp: z.string(),
   read: z.boolean(),
+  action: notificationActionSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -32,6 +42,16 @@ const notificationSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export type NotificationCategory = "alert" | "order" | "system" | "ai";
+
+/** A one-click remediation that turns an alert into an action the operator can take. */
+export interface NotificationAction {
+  /** Button label, e.g. "Reconnect", "Reset kill switch", "Retry". */
+  label: string;
+  /** Navigate to this app route on click. */
+  href?: string;
+  /** Dispatch this window CustomEvent on click (the handler lives elsewhere). */
+  event?: string;
+}
 
 export interface Notification {
   id: string;
@@ -41,6 +61,8 @@ export interface Notification {
   /** ISO timestamp string. */
   timestamp: string;
   read: boolean;
+  /** Optional remediation CTA — the Notification System driving user action. */
+  action?: NotificationAction;
 }
 
 export type CreateNotificationPayload = Omit<Notification, "id" | "timestamp" | "read">;
