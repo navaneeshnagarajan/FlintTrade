@@ -17,11 +17,11 @@ describe("widgetFactory catalogue wiring", () => {
       return acc;
     }, {});
 
-    expect(widgetCatalog).toHaveLength(84);
+    expect(widgetCatalog).toHaveLength(85);
     expect(counts).toEqual({
       Analysis: 39,
       Trading: 22,
-      Utility: 23,
+      Utility: 24,
     });
   });
 });
