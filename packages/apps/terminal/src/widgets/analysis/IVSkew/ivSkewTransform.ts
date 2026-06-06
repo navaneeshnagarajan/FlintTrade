@@ -16,25 +16,43 @@ import type { IVSmileData } from "@/types/api";
 import type { IVSkewCurve, IVSkewData, IVSkewPoint } from "./IVSkewWidget";
 
 /**
- * Normalise an implied-volatility figure to a 0–1 decimal.
+ * Normalise a single implied-volatility figure to a 0–1 decimal.
  *
- * The screener reports IV as a decimal (e.g. `0.148`), but guard defensively:
- * a value above 1.5 is unambiguously a percentage (Indian index-option IVs sit
- * in the 5–60 % band) and is divided by 100.
+ * The screener reports IV in PERCENT (e.g. `14.8` = 14.8 %), so a value above
+ * 1.5 is divided by 100; a value already in decimal form (≤ 1.5) is left as-is.
  */
 export function normaliseIv(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return value > 1.5 ? value / 100 : value;
 }
 
-/** Map one IV-smile curve to a skew curve, or null when it has no points. */
+/**
+ * Map one IV-smile curve to a skew curve, or null when it has no points.
+ *
+ * IV figures from the screener are in PERCENT (call_iv/put_iv/atm_iv ≈ 14.8) and
+ * the 25Δ skew is in percentage POINTS (≈ 2.0). The widget renders all of these
+ * by multiplying the stored value by 100, so a single ÷100 scale (detected from
+ * the curve's IV magnitude) is applied UNIFORMLY to the IVs AND the skew — a
+ * per-value `>1.5` test would correctly scale a 2.0 skew but wrongly leave a
+ * small 0.5 percentage-point skew, so the curve-level scale keeps them coherent.
+ */
 function mapCurve(curve: IVSmileData["curves"][number]): IVSkewCurve | null {
-  const points: IVSkewPoint[] = (curve.points ?? [])
+  const raw = (curve.points ?? []).filter((p) => p.call_iv > 0 || p.put_iv > 0);
+  if (raw.length === 0) return null;
+
+  // Detect percent vs decimal from the largest IV the curve carries.
+  const maxIv = Math.max(
+    Number.isFinite(curve.atm_iv) ? curve.atm_iv : 0,
+    ...raw.flatMap((p) => [p.call_iv, p.put_iv]),
+  );
+  const scale = maxIv > 1.5 ? 1 / 100 : 1;
+
+  const points: IVSkewPoint[] = raw
     .map((p) => ({
       strike: p.strike,
       moneyness: p.moneyness,
-      call_iv: normaliseIv(p.call_iv),
-      put_iv: normaliseIv(p.put_iv),
+      call_iv: Math.max(0, p.call_iv) * scale,
+      put_iv: Math.max(0, p.put_iv) * scale,
     }))
     .filter((p) => p.call_iv > 0 || p.put_iv > 0);
 
@@ -43,9 +61,10 @@ function mapCurve(curve: IVSmileData["curves"][number]): IVSkewCurve | null {
   return {
     expiry: curve.expiry,
     atm_strike: curve.atm_strike,
-    atm_iv: normaliseIv(curve.atm_iv),
-    // skew_25delta is computed server-side (decimal, can be negative) — pass through.
-    skew_25delta: Number.isFinite(curve.skew_25delta) ? curve.skew_25delta : 0,
+    atm_iv: (Number.isFinite(curve.atm_iv) ? Math.max(0, curve.atm_iv) : 0) * scale,
+    // skew shares the IVs' units (percentage points) — apply the same scale so
+    // it renders as e.g. +2.00 %, not +200 %. Can be negative (call premium).
+    skew_25delta: (Number.isFinite(curve.skew_25delta) ? curve.skew_25delta : 0) * scale,
     points,
   };
 }

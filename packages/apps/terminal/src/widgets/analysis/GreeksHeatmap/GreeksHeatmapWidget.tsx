@@ -32,7 +32,9 @@ import {
 } from "@/components/ui/select";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getExpiry } from "@/services/api";
 import { getFtIVSmile } from "@/services/ftApi.analysis";
+import type { IVSmileData } from "@/types/api";
 import { SYMBOLS as OPTION_SYMBOLS } from "@/widgets/analysis/OptionChain/types";
 import { buildGreeksHeatmap } from "./greeksHeatmapTransform";
 import type { ExpiryRow, HeatCell } from "./greeksHeatmapTransform";
@@ -308,13 +310,26 @@ function GreeksHeatmapWidget() {
     [symbol],
   );
 
-  // Live greeks grid — fetch the screener IV smile and derive the aligned greek
-  // grid client-side. Only runs once a broker is connected.
+  // Live greeks grid — fetch the IV smile for the nearest expiries (the
+  // single-expiry endpoint is called once per expiry, so each carries a real
+  // days-to-expiry and thus non-degenerate time-decay greeks) and derive the
+  // aligned greek grid client-side. Only runs once a broker is connected.
   const { data: liveRows } = useQuery({
     queryKey: ["greeks-heatmap", symbol, symDef.exchange],
     queryFn: async () => {
-      const smile = await getFtIVSmile(symDef.label, symDef.exchange);
-      return buildGreeksHeatmap(smile);
+      const expResp = await getExpiry(symDef.label, symDef.exchange, "options");
+      const expiries = (expResp?.expiry ?? []).slice(0, 3);
+      if (expiries.length === 0) return null;
+      const smiles = await Promise.all(
+        expiries.map((expiry) => getFtIVSmile(symDef.label, symDef.exchange, [expiry])),
+      );
+      const curves = smiles.flatMap((s) => s?.curves ?? []);
+      const merged: IVSmileData = {
+        underlying: symbol,
+        spot_price: smiles.find((s) => s?.spot_price)?.spot_price ?? 0,
+        curves,
+      };
+      return buildGreeksHeatmap(merged);
     },
     enabled: isConnected,
     staleTime: 30_000,
@@ -353,8 +368,8 @@ function GreeksHeatmapWidget() {
           <span
             className="px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
             role="status"
-            aria-label="Showing live Greeks derived from the connected broker's option chain"
-            title="Live Greeks derived from the connected broker's option chain."
+            aria-label="Showing live Greeks derived from the connected broker's IV smile"
+            title="Live Greeks Black–Scholes-derived from the connected broker's IV smile."
           >
             Live
           </span>

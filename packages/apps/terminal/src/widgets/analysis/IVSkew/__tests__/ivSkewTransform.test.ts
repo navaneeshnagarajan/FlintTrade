@@ -66,9 +66,11 @@ describe("mapIVSmileToSkew", () => {
     expect(atm.call_iv).toBeCloseTo(0.148, 6);
   });
 
-  it("normalises percentage IVs to decimals", () => {
+  it("normalises a percentage-points payload (IVs AND skew) to decimals", () => {
+    // Screener live shape: IVs in percent (14.8), skew in percentage points (2.0).
     const pct = smile();
     pct.curves[0].atm_iv = 14.8;
+    pct.curves[0].skew_25delta = 2.0;
     pct.curves[0].points = pct.curves[0].points.map((p) => ({
       ...p,
       call_iv: p.call_iv * 100,
@@ -77,6 +79,27 @@ describe("mapIVSmileToSkew", () => {
     const data = mapIVSmileToSkew(pct, "t")!;
     expect(data.curves[0].atm_iv).toBeCloseTo(0.148, 6);
     expect(data.curves[0].points[0].call_iv).toBeLessThan(1);
+    // skew must be scaled with the IVs → 2.0 percentage points → 0.02 (renders +2 %).
+    expect(data.curves[0].skew_25delta).toBeCloseTo(0.02, 6);
+  });
+
+  it("leaves an already-decimal payload (incl. skew) unscaled", () => {
+    const data = mapIVSmileToSkew(smile(), "t")!;
+    // smile() is decimal: skew 0.032 stays 0.032 (renders +3.2 %).
+    expect(data.curves[0].skew_25delta).toBeCloseTo(0.032, 6);
+  });
+
+  it("preserves a negative skew sign through scaling", () => {
+    const pct = smile();
+    pct.curves[0].atm_iv = 14.8;
+    pct.curves[0].skew_25delta = -1.5;
+    pct.curves[0].points = pct.curves[0].points.map((p) => ({
+      ...p,
+      call_iv: p.call_iv * 100,
+      put_iv: p.put_iv * 100,
+    }));
+    const data = mapIVSmileToSkew(pct, "t")!;
+    expect(data.curves[0].skew_25delta).toBeCloseTo(-0.015, 6);
   });
 
   it("returns null when there are no curves", () => {

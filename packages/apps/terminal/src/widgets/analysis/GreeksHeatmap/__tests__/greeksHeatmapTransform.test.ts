@@ -93,6 +93,12 @@ describe("buildGreeksHeatmap", () => {
     expect(buildGreeksHeatmap({ underlying: "X", spot_price: 0, curves: [] })).toBeNull();
   });
 
+  it("returns null when every expiry is degenerate (dte <= 0)", () => {
+    const zeroDte = smile();
+    zeroDte.curves = zeroDte.curves.map((c) => ({ ...c, days_to_expiry: 0 }));
+    expect(buildGreeksHeatmap(zeroDte)).toBeNull();
+  });
+
   it("returns null when curves share no IV-bearing strike", () => {
     const noOverlap: IVSmileData = {
       underlying: "NIFTY",

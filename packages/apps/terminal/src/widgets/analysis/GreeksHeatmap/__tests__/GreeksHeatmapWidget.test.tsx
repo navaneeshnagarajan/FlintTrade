@@ -6,9 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // Mocks
 // ---------------------------------------------------------------------------
 //
-// When connected, the widget fetches the live IV smile (getFtIVSmile) and
-// derives the aligned greek grid. We mock it so we can exercise the live
-// ("Live" badge) and sample ("Sample data") paths.
+// When connected, the widget fetches expiries (getExpiry) and the IV smile per
+// expiry (getFtIVSmile), then derives the aligned greek grid. We mock both so
+// we can exercise the live ("Live" badge) and sample ("Sample data") paths.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -18,16 +18,22 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+vi.mock("@/services/api", () => ({
+  getExpiry: vi.fn(),
+}));
+
 vi.mock("@/services/ftApi.analysis", () => ({
   getFtIVSmile: vi.fn(),
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getExpiry } from "@/services/api";
 import { getFtIVSmile } from "@/services/ftApi.analysis";
 import GreeksHeatmapWidget from "../GreeksHeatmapWidget";
 import { SAMPLE_GREEKS_HEATMAP_DATA } from "../GreeksHeatmapWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
+const mockGetExpiry = getExpiry as ReturnType<typeof vi.fn>;
 const mockGetSmile = getFtIVSmile as ReturnType<typeof vi.fn>;
 
 function liveSmile() {
@@ -51,6 +57,11 @@ function liveSmile() {
   };
 }
 
+/** Empty single-expiry smile (e.g. for a degenerate/zero-dte fixture). */
+function emptySmile() {
+  return { underlying: "NIFTY", spot_price: 0, curves: [] };
+}
+
 function renderWidget() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -71,7 +82,8 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   mockConnected.mockReturnValue(false);
-  mockGetSmile.mockResolvedValue({ underlying: "NIFTY", spot_price: 0, curves: [] });
+  mockGetExpiry.mockResolvedValue({ expiry: [] });
+  mockGetSmile.mockResolvedValue(emptySmile());
 });
 
 // ---------------------------------------------------------------------------
@@ -90,14 +102,16 @@ describe("GreeksHeatmapWidget", () => {
     expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not fetch the IV smile when disconnected", () => {
+  it("does not fetch when disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
+    expect(mockGetExpiry).not.toHaveBeenCalled();
     expect(mockGetSmile).not.toHaveBeenCalled();
   });
 
   it("flips to a Live badge once the IV smile yields a greek grid", async () => {
     mockConnected.mockReturnValue(true);
+    mockGetExpiry.mockResolvedValue({ expiry: ["17-APR-26"] });
     mockGetSmile.mockResolvedValue(liveSmile());
     renderWidget();
 
@@ -106,9 +120,21 @@ describe("GreeksHeatmapWidget", () => {
     expect(mockGetSmile).toHaveBeenCalled();
   });
 
-  it("falls back to Sample data when connected but the IV smile has no curves", async () => {
+  it("falls back to Sample data when connected but no expiries are available", async () => {
     mockConnected.mockReturnValue(true);
-    mockGetSmile.mockResolvedValue({ underlying: "NIFTY", spot_price: 0, curves: [] });
+    mockGetExpiry.mockResolvedValue({ expiry: [] });
+    renderWidget();
+
+    await waitFor(() => expect(mockGetExpiry).toHaveBeenCalled());
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(mockGetSmile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to Sample data when every expiry is degenerate (dte <= 0)", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetExpiry.mockResolvedValue({ expiry: ["01-JAN-20"] });
+    mockGetSmile.mockResolvedValue({ ...liveSmile(), curves: [{ ...liveSmile().curves[0], days_to_expiry: 0 }] });
     renderWidget();
 
     await waitFor(() => expect(mockGetSmile).toHaveBeenCalled());

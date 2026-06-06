@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict
+from datetime import date
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -78,6 +79,25 @@ def _body_expiries(body: dict[str, Any], default: list[str]) -> list[str]:
         return value
     single = body.get("expiry") or body.get("expiry_date")
     return [single] if single else default
+
+
+def _days_to_expiry(expiry: str) -> int:
+    """Whole calendar days from today to an ``DDMMMYY`` expiry (>= 0).
+
+    Returns 0 when the expiry cannot be parsed, so callers degrade gracefully
+    rather than raising. Consumers that derive time-decay greeks (the terminal's
+    GreeksSurface and Greeks-heatmap widgets) need a real time-to-expiry — a
+    hardcoded 0 collapses gamma/theta/vega to zero.
+    """
+    from .symbol_converter import parse_expiry_date  # noqa: PLC0415
+
+    # Accept both the strict ``DDMMMYY`` form and the dashed ``DD-MMM-YY`` the
+    # expiry API returns.
+    cleaned = expiry.replace("-", "").replace(" ", "").upper() if isinstance(expiry, str) else expiry
+    try:
+        return max(0, (parse_expiry_date(cleaned) - date.today()).days)
+    except (ValueError, TypeError):
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +479,7 @@ def iv_smile_endpoint() -> Any:
     # (The widget read `curves`/`points` and got undefined from the raw dataclass.)
     curve = {
         "expiry": result.expiry_date or expiry,
-        "days_to_expiry": 0,  # not derived for a single-expiry smile
+        "days_to_expiry": _days_to_expiry(result.expiry_date or expiry),
         "atm_iv": result.atm_iv,
         "atm_strike": result.atm_strike,
         "skew_25delta": result.skew,

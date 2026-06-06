@@ -356,6 +356,39 @@ class TestExpiryParamNormalisation:
         assert resp.status_code == 200
 
 
+class TestDaysToExpiry:
+    """`_days_to_expiry` must yield a real time-to-expiry so the terminal's
+    Greeks widgets get non-degenerate (T>0) greeks — a hardcoded 0 collapses
+    gamma/theta/vega to zero."""
+
+    def test_future_expiry_is_positive_and_accurate(self):
+        from datetime import date, timedelta
+
+        from flinttrade_screener.analysis_routes import _days_to_expiry
+        from flinttrade_screener.symbol_converter import format_expiry_date
+
+        future = date.today() + timedelta(days=30)
+        assert _days_to_expiry(format_expiry_date(future)) == 30
+
+    def test_accepts_dashed_form_from_the_expiry_api(self):
+        from datetime import date, timedelta
+
+        from flinttrade_screener.analysis_routes import _days_to_expiry
+        from flinttrade_screener.symbol_converter import format_expiry_date
+
+        future = date.today() + timedelta(days=10)
+        dashed = format_expiry_date(future)  # e.g. 16JUN26
+        dashed = f"{dashed[:2]}-{dashed[2:5]}-{dashed[5:]}"  # 16-JUN-26
+        assert _days_to_expiry(dashed) == 10
+
+    def test_past_or_unparseable_expiry_is_zero(self):
+        from flinttrade_screener.analysis_routes import _days_to_expiry
+
+        assert _days_to_expiry("01JAN20") == 0   # well in the past
+        assert _days_to_expiry("garbage") == 0
+        assert _days_to_expiry("") == 0
+
+
 class TestSampleDataHonesty:
     """No broker is connected in tests, so every option-chain analysis endpoint
     serves sample data and MUST say so (is_sample_data=True). Before this, several

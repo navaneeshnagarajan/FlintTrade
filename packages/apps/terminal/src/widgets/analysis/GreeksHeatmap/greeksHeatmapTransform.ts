@@ -50,7 +50,9 @@ export function approxGreeks(
   ivDecimal: number,
   dte: number,
 ): Greeks {
-  if (!(ivDecimal > 0) || !(atmStrike > 0)) {
+  // Guard strike > 0 too: gamma divides by `strike`, so a 0 strike would emit
+  // Infinity into the grid.
+  if (!(ivDecimal > 0) || !(atmStrike > 0) || !(strike > 0)) {
     return { delta: 0, gamma: 0, theta: 0, vega: 0 };
   }
   const mv = (strike - atmStrike) / atmStrike; // log-moneyness proxy
@@ -75,6 +77,7 @@ export function approxGreeks(
   };
 }
 
+/** Normalise a percent IV (≈14.8) or decimal IV (≤1.5) to a 0–1 decimal. */
 function normaliseIv(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return value > 1.5 ? value / 100 : value;
@@ -134,6 +137,11 @@ export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRo
       cells,
     };
   });
+
+  // Time-decay greeks (gamma/theta/vega) collapse to zero when T <= 0, so a
+  // grid with no positive days-to-expiry is degenerate — refuse it rather than
+  // badge an all-zero grid as "Live"; the caller falls back to sample data.
+  if (rows.every((r) => !(r.dte > 0))) return null;
 
   return rows;
 }
