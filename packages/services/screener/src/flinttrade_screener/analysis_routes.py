@@ -94,6 +94,33 @@ def _get_registry() -> Any:
     return current_app.config.get("REGISTRY")
 
 
+def _live_option_chain(symbol: str, exchange: str) -> dict[str, Any] | None:
+    """Fetch a REAL option chain via the OpenAlgo bridge client (the functional
+    adapter), shaped for :func:`_snapshot_from_registry_data`.
+
+    The OpenAlgo client's ``OptionChainStrike`` fields (strike_price, ce/pe ltp,
+    oi, iv, greeks) match the keys the snapshot builder reads, so a ``model_dump``
+    per strike is a direct fit. The client is async; we drive it from this sync
+    route with a fresh event loop. Returns ``None`` when no client is configured
+    or the fetch fails (no OpenAlgo connection, empty chain, running-loop
+    conflict) — the caller then falls back to honest sample data.
+    """
+    client = current_app.config.get("OPENALGO_CLIENT")
+    if client is None:
+        return None
+    try:
+        import asyncio  # noqa: PLC0415
+
+        chain = asyncio.run(client.option_chain(symbol, exchange))
+    except Exception as exc:  # noqa: BLE001 - any failure degrades to sample
+        logger.warning("Live option chain via OpenAlgo failed for %s %s: %s", symbol, exchange, exc)
+        return None
+    strikes = getattr(chain, "strikes", None) or []
+    if not strikes:
+        return None
+    return {"strikes": [s.model_dump() for s in strikes]}
+
+
 # ---------------------------------------------------------------------------
 # Sample data helpers (dev/fallback when no broker connected)
 # ---------------------------------------------------------------------------
@@ -256,17 +283,11 @@ def gex_endpoint() -> Any:
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
-    # Attempt live data via registry
-    registry = _get_registry()
-    if registry and registry.is_connected():
-        try:
-            chain_data = registry.get_option_chain(
-                symbol=symbol, exchange=exchange, expiry=expiry
-            )
-            spot = float(chain_data.get("spot", spot))
-            snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
-        except Exception as exc:
-            logger.warning("Live GEX data unavailable, using sample: %s", exc)
+    # Live data via the OpenAlgo bridge (the functional adapter).
+    chain_data = _live_option_chain(symbol, exchange)
+    if chain_data:
+        spot = float(chain_data.get("spot", spot))
+        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
 
     used_sample = snapshot is None
     if snapshot is None:
@@ -421,16 +442,10 @@ def iv_smile_endpoint() -> Any:
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
-    registry = _get_registry()
-    if registry and registry.is_connected():
-        try:
-            chain_data = registry.get_option_chain(
-                symbol=symbol, exchange=exchange, expiry=expiry
-            )
-            spot = float(chain_data.get("spot", spot))
-            snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
-        except Exception as exc:
-            logger.warning("Live IV smile data unavailable, using sample: %s", exc)
+    chain_data = _live_option_chain(symbol, exchange)
+    if chain_data:
+        spot = float(chain_data.get("spot", spot))
+        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
 
     used_sample = snapshot is None
     if snapshot is None:
@@ -609,26 +624,14 @@ def oi_profile_endpoint() -> Any:
     symbol = body.get("symbol", "NIFTY")
     exchange = body.get("exchange", "NFO")
     expiry = _body_expiry(body, "26MAR26")
-    interval = body.get("interval", "5m")
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
     futures_candles: list[dict[str, Any]] = []
 
-    registry = _get_registry()
-    if registry and registry.is_connected():
-        try:
-            chain_data = registry.get_option_chain(
-                symbol=symbol, exchange=exchange, expiry=expiry
-            )
-            spot = float(chain_data.get("spot", spot))
-            snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
-            hist = registry.get_history(
-                symbol=symbol + "FUT", exchange=exchange,
-                interval=interval, days=1,
-            )
-            futures_candles = hist.get("candles", [])
-        except Exception as exc:
-            logger.warning("Live OI profile data unavailable, using sample: %s", exc)
+    chain_data = _live_option_chain(symbol, exchange)
+    if chain_data:
+        spot = float(chain_data.get("spot", spot))
+        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
 
     used_sample = snapshot is None
     if snapshot is None:
@@ -705,16 +708,10 @@ def max_pain_endpoint() -> Any:
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
-    registry = _get_registry()
-    if registry and registry.is_connected():
-        try:
-            chain_data = registry.get_option_chain(
-                symbol=symbol, exchange=exchange, expiry=expiry
-            )
-            spot = float(chain_data.get("spot", spot))
-            snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
-        except Exception as exc:
-            logger.warning("Live max pain data unavailable, using sample: %s", exc)
+    chain_data = _live_option_chain(symbol, exchange)
+    if chain_data:
+        spot = float(chain_data.get("spot", spot))
+        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
 
     used_sample = snapshot is None
     if snapshot is None:

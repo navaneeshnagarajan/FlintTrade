@@ -388,3 +388,55 @@ class TestSampleDataHonesty:
     def test_maxpain_reports_sample(self, client):
         _, body = _post(client, "/api/v1/maxpain", self._BODY)
         assert body["is_sample_data"] is True
+
+
+class TestLiveOptionChain:
+    """With an OpenAlgo client configured, the option-chain endpoints fetch a REAL
+    chain (via OpenAlgoClient.option_chain) and report is_sample_data=False — the
+    other half of the honesty fix: sample only when genuinely unavailable."""
+
+    class _Strike:
+        def __init__(self, **kw):
+            self._kw = kw
+
+        def model_dump(self):
+            return self._kw
+
+    class _Chain:
+        def __init__(self, strikes):
+            self.strikes = strikes
+
+    class _FakeOpenAlgo:
+        async def option_chain(self, symbol, exchange="NFO"):
+            S = TestLiveOptionChain._Strike
+            return TestLiveOptionChain._Chain([
+                S(strike_price=23800, ce_ltp=260, ce_oi=30000, ce_iv=13.5, ce_delta=0.72,
+                  pe_ltp=40, pe_oi=70000, pe_iv=14.0, pe_delta=-0.28),
+                S(strike_price=23900, ce_ltp=190, ce_oi=40000, ce_iv=13.2, ce_delta=0.63,
+                  pe_ltp=65, pe_oi=65000, pe_iv=13.6, pe_delta=-0.37),
+                S(strike_price=24000, ce_ltp=130, ce_oi=80000, ce_iv=13.0, ce_delta=0.52,
+                  pe_ltp=110, pe_oi=82000, pe_iv=13.1, pe_delta=-0.48),
+                S(strike_price=24100, ce_ltp=85, ce_oi=60000, ce_iv=13.4, ce_delta=0.41,
+                  pe_ltp=160, pe_oi=45000, pe_iv=13.9, pe_delta=-0.59),
+                S(strike_price=24200, ce_ltp=55, ce_oi=35000, ce_iv=13.8, ce_delta=0.31,
+                  pe_ltp=230, pe_oi=28000, pe_iv=14.3, pe_delta=-0.69),
+            ])
+
+    def _post_with_client(self, app, client, path):
+        app.config["OPENALGO_CLIENT"] = self._FakeOpenAlgo()
+        return _post(client, path, {"symbol": "NIFTY", "exchange": "NFO"})
+
+    def test_gex_uses_live_chain(self, app, client):
+        _, body = self._post_with_client(app, client, "/api/v1/gex")
+        assert body["status"] == "success"
+        assert body["is_sample_data"] is False  # real chain via OpenAlgo, not sample
+        assert body["data"]["strikes"]
+
+    def test_maxpain_uses_live_chain(self, app, client):
+        _, body = self._post_with_client(app, client, "/api/v1/maxpain")
+        assert body["is_sample_data"] is False
+        assert body["data"]["max_pain_strike"] > 0
+
+    def test_ivsmile_uses_live_chain(self, app, client):
+        _, body = self._post_with_client(app, client, "/api/v1/ivsmile")
+        assert body["is_sample_data"] is False

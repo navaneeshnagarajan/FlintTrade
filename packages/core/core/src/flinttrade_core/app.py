@@ -1052,6 +1052,10 @@ def create_flask_app(
         _brokers_cfg = _read_workspace_brokers()
         _effective_brokers = _brokers_cfg or default_workspace_config()["brokers"]
         _native_attest_ok, _native_has_credentials = _native_activation_checks(credential_store)
+        # Expose the OpenAlgo client so sync analysis routes (the screener) can
+        # fetch a real option chain through the functional bridge adapter rather
+        # than always falling back to sample data.
+        app.config["OPENALGO_CLIENT"] = client
         app.config["BROKER_ROUTER"] = build_broker_router(
             registry,
             _effective_brokers,
