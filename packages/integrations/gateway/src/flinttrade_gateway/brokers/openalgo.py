@@ -103,7 +103,11 @@ OPENALGO_CAPABILITIES = Capabilities(
     bracket_order_native=False,
     cover_order_native=False,
     iceberg_native=False,
-    gtt_native=True,
+    # Honesty: this bridge's place_order forwards a plain order to OpenAlgo's
+    # /placeorder — there is no GTT/standing-order path here, and order_types
+    # above omits GTT. Advertising gtt_native=True would have a `gtt` variety
+    # silently placed as a plain order (losing the trigger). Keep it False.
+    gtt_native=False,
     modify_qty_supported=True,
     modify_after_partial_fill=False,
 )

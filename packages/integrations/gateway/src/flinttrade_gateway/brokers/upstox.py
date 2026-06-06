@@ -91,9 +91,14 @@ UPSTOX_CAPABILITIES = Capabilities(
     option_chain_supported=True,
     option_chain_greeks_supported=True,
     streaming_supported=True,
-    cover_order_native=True,
-    iceberg_native=True,
-    gtt_native=True,
+    # Honesty: Upstox v2 exposes cover/GTT via SEPARATE endpoints (not place_order)
+    # and retired bracket orders — upstox_mapping.to_place_order_params REFUSES any
+    # non-regular variety. Advertising these as native made the recommendation
+    # engine credit advanced-order work the adapter physically rejects. Keep them
+    # False until those endpoints are actually wired (a later wave).
+    cover_order_native=False,
+    iceberg_native=False,
+    gtt_native=False,
     modify_qty_supported=True,
 )
 

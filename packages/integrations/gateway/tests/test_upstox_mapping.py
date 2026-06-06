@@ -71,6 +71,23 @@ def test_place_order_unmapped_product_raises():
         to_place_order_params(order, "NSE_EQ|X")
 
 
+@pytest.mark.parametrize(
+    ("variety", "flag"),
+    [("cover", "cover_order_native"), ("iceberg", "iceberg_native"), ("gtt", "gtt_native")],
+)
+def test_capabilities_do_not_advertise_a_variety_the_mapping_refuses(variety, flag):
+    # Capability honesty: Upstox must NOT advertise an advanced order type as
+    # native while the mapping refuses to place it (the recommendation engine
+    # scores on these flags). Asserts both halves stay consistent.
+    from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
+
+    assert getattr(UPSTOX_CAPABILITIES, flag) is False
+    order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
+                  product="MIS", quantity="5", price="2900", variety=variety)
+    with pytest.raises(UpstoxMappingError, match="variety"):
+        to_place_order_params(order, "NSE_EQ|X")
+
+
 def test_modify_order_params():
     p = to_modify_order_params("OID1", {"pricetype": "LIMIT", "quantity": 50, "price": 101.25})
     assert p["order_id"] == "OID1" and p["order_type"] == "LIMIT" and p["quantity"] == 50
