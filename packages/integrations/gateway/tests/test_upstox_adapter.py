@@ -72,6 +72,12 @@ class MockUpstox:
             ["2025-01-02T00:00:00+05:30", 100.0, 110.0, 95.0, 105.0, 1500, 0],
         ]}}
 
+    def intra_day(self, instrument_key, unit, interval):
+        self.calls.append(("intra_day", (instrument_key, unit, interval)))
+        return {"status": "success", "data": {"candles": [
+            ["2025-01-02T09:15:00+05:30", 100.0, 110.0, 95.0, 105.0, 1500, 0],
+        ]}}
+
     def margin(self, instruments):
         self.calls.append(("margin", instruments))
         return {"status": "success", "data": {"required_margin": 14500, "final_margin": 14000}}
@@ -188,6 +194,35 @@ async def test_historical_builds_candles():
     # v3 history called with (unit, interval) = (minutes, 15)
     _, args = [c for c in mock.calls if c[0] == "historical"][0]
     assert args[1] == "minutes" and args[2] == "15"
+
+
+@pytest.mark.asyncio
+async def test_intraday_request_routes_to_the_intraday_endpoint():
+    # The v3 historical endpoint excludes the current trading day, so an explicit
+    # intraday request must use the intra-day endpoint (no dates).
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    candles = await adapter.historical(session, {
+        "symbol": "RELIANCE", "exchange": "NSE", "interval": "15m",
+        "from_date": "2025-01-01", "to_date": "2025-01-02", "intraday": True,
+    })
+    kinds = [c[0] for c in mock.calls]
+    assert "intra_day" in kinds and "historical" not in kinds
+    assert len(candles.bars) == 1 and candles.bars[0].close == 105.0
+
+
+@pytest.mark.asyncio
+async def test_non_intraday_request_uses_the_historical_endpoint():
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    await adapter.historical(session, {
+        "symbol": "RELIANCE", "exchange": "NSE", "interval": "1d",
+        "from_date": "2025-01-01", "to_date": "2025-01-02",
+    })
+    kinds = [c[0] for c in mock.calls]
+    assert "historical" in kinds and "intra_day" not in kinds
 
 
 @pytest.mark.asyncio

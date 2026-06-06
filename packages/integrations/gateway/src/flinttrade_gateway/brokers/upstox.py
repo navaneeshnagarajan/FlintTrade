@@ -162,6 +162,15 @@ class UpstoxClient:
             instrument_key, unit, interval, to_date, from_date
         ).to_dict()
 
+    def intra_day(self, instrument_key: str, unit: str, interval: str) -> dict[str, Any]:
+        # Upstox v2 HistoryApi.get_intra_day_candle_data — the CURRENT trading
+        # day's candles. The historical endpoint above EXCLUDES today, so this is
+        # the only way to fetch intraday bars for the live session. Mirrors the
+        # historical facade; the exact SDK method is confirmed at live activation.
+        return self._history.get_intra_day_candle_data(
+            instrument_key, unit, interval
+        ).to_dict()
+
     def option_chain(self, instrument_key: str, expiry_date: str) -> dict[str, Any]:
         return self._options.get_put_call_option_chain(instrument_key, expiry_date).to_dict()
 
@@ -328,11 +337,20 @@ class UpstoxAdapter(BrokerAdapter):
         interval = str(req.get("interval", req.get("timeframe", "1d")))
         instrument_key = str(req.get("instrument_key") or self._resolve_instrument(symbol, exchange))
         params = M.to_history_params({**req, "instrument_key": instrument_key})
-        resp = await self._call(
-            self._client(session).historical,
-            params["instrument_key"], params["unit"], params["interval"],
-            params["to_date"], params["from_date"],
-        )
+        # The v3 historical endpoint excludes the current trading day, so an
+        # explicit intraday request routes to the intra-day endpoint (today's
+        # candles); everything else uses the dated historical endpoint.
+        if req.get("intraday"):
+            resp = await self._call(
+                self._client(session).intra_day,
+                params["instrument_key"], params["unit"], params["interval"],
+            )
+        else:
+            resp = await self._call(
+                self._client(session).historical,
+                params["instrument_key"], params["unit"], params["interval"],
+                params["to_date"], params["from_date"],
+            )
         cd = M.from_upstox_candles(symbol, exchange, interval, resp)
         return Candles(
             symbol=cd["symbol"], exchange=cd["exchange"], interval=cd["interval"],
