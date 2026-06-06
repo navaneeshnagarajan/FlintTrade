@@ -21,6 +21,7 @@ def _mock_bridge() -> MagicMock:
     bridge.export_to_excel.return_value = "/tmp/export.xlsx"
     bridge.create_portfolio_report.return_value = "/tmp/portfolio.xlsx"
     bridge.import_from_excel.return_value = [{"symbol": "NIFTY", "qty": 50}]
+    bridge.export_to_bytes.return_value = b"PK\x03\x04fake-xlsx-bytes"
     return bridge
 
 
@@ -74,6 +75,61 @@ def test_export_bridge_error(app):
     with app.test_client() as c:
         resp = c.post(
             "/api/v1/integration/excel/export",
+            json={"data": [{"a": 1}]},
+        )
+    assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/integration/excel/export/download
+# ---------------------------------------------------------------------------
+
+
+def test_export_download_streams_attachment(client):
+    """Streams the .xlsx bytes with an attachment Content-Disposition header."""
+    rows = [{"symbol": "NIFTY", "qty": 50}]
+    resp = client.post(
+        "/api/v1/integration/excel/export/download",
+        json={"data": rows, "sheet_name": "Positions", "filename": "positions.xlsx"},
+    )
+    assert resp.status_code == 200
+    assert resp.mimetype == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert "attachment" in resp.headers["Content-Disposition"]
+    assert "positions.xlsx" in resp.headers["Content-Disposition"]
+    assert resp.data == b"PK\x03\x04fake-xlsx-bytes"
+
+
+def test_export_download_appends_xlsx_and_strips_traversal(client):
+    """A filename without extension gets .xlsx; path traversal is stripped."""
+    resp = client.post(
+        "/api/v1/integration/excel/export/download",
+        json={"data": [{"a": 1}], "filename": "../../etc/passwd"},
+    )
+    assert resp.status_code == 200
+    disp = resp.headers["Content-Disposition"]
+    assert "passwd.xlsx" in disp
+    assert ".." not in disp and "/" not in disp.split("filename=")[1]
+
+
+def test_export_download_data_not_list(client):
+    """400 when data is not a list."""
+    resp = client.post(
+        "/api/v1/integration/excel/export/download",
+        json={"data": "bad"},
+    )
+    assert resp.status_code == 400
+
+
+def test_export_download_bridge_error(app):
+    """500 on ExcelBridgeError (e.g. openpyxl missing)."""
+    bridge = _mock_bridge()
+    bridge.export_to_bytes.side_effect = ExcelBridgeError("openpyxl not installed")
+    mod.init_excel_routes(bridge)
+    with app.test_client() as c:
+        resp = c.post(
+            "/api/v1/integration/excel/export/download",
             json={"data": [{"a": 1}]},
         )
     assert resp.status_code == 500

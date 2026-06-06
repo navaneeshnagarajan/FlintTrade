@@ -113,6 +113,62 @@ def export_data() -> tuple[Response, int]:
     }), 200
 
 
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@excel_bp.route("/export/download", methods=["POST"])
+def export_download() -> Response:
+    """Export rows and stream the ``.xlsx`` straight back as a browser download.
+
+    Unlike ``/export`` (which writes a server-side file and returns its path),
+    this builds the workbook in memory and returns the bytes with a
+    ``Content-Disposition: attachment`` header, so the terminal can trigger a
+    real download that works in the browser and the desktop shell alike — no
+    server-side file to locate.
+
+    Request JSON:
+        data       (list[dict], required): Rows to export.
+        sheet_name (str, optional):        Worksheet name (default ``"Data"``).
+        filename   (str, optional):        Download filename (default ``"export.xlsx"``).
+
+    Returns:
+        The ``.xlsx`` bytes as an attachment, or a JSON error.
+    """
+    bridge = _get_bridge()
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+
+    data: list[dict[str, Any]] = body.get("data", [])
+    if not isinstance(data, list):
+        return Response(
+            '{"status": "error", "message": "data must be a list"}',
+            status=400,
+            mimetype="application/json",
+        )
+
+    sheet_name: str = body.get("sheet_name", "Data")
+    raw_name = Path(str(body.get("filename", "export.xlsx"))).name  # strip traversal
+    filename = raw_name if raw_name.endswith(".xlsx") else f"{raw_name}.xlsx"
+
+    try:
+        payload = bridge.export_to_bytes(data, sheet_name)
+    except ExcelBridgeError as exc:
+        return Response(
+            f'{{"status": "error", "message": "{exc}"}}',
+            status=500,
+            mimetype="application/json",
+        )
+
+    logger.info("Excel download: %s (%d rows, %d bytes)", filename, len(data), len(payload))
+    return Response(
+        payload,
+        mimetype=_XLSX_MIME,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(payload)),
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Portfolio report
 # ---------------------------------------------------------------------------

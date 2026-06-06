@@ -29,7 +29,7 @@ export function isDemoAuthSession(): boolean {
  *
  * @param includeJson — add ``Content-Type: application/json`` (true for POST/PUT).
  */
-function buildHeaders(includeJson: boolean): Record<string, string> {
+export function buildHeaders(includeJson: boolean): Record<string, string> {
   const headers: Record<string, string> = {};
   if (includeJson) headers["Content-Type"] = "application/json";
 

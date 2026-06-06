@@ -55,6 +55,47 @@ class TestExcelBridgeExportImport:
             returned_path = bridge.export_to_excel([], "EmptySheet", path)
             assert os.path.exists(returned_path)
 
+    def test_export_to_bytes_round_trips_via_openpyxl(self):
+        """export_to_bytes must yield a valid .xlsx that re-imports losslessly."""
+        self._skip_if_no_openpyxl()
+        import io
+
+        from openpyxl import load_workbook
+
+        from flinttrade_webhooks.excel_bridge import ExcelBridge
+
+        data = [
+            {"symbol": "RELIANCE", "qty": 10, "pnl": 1200.5},
+            {"symbol": "TCS", "qty": 5, "pnl": -300.0},
+        ]
+        bridge = ExcelBridge()
+        payload = bridge.export_to_bytes(data, "Positions")
+
+        assert isinstance(payload, bytes)
+        # Valid .xlsx files are ZIP archives → start with the PK magic bytes.
+        assert payload[:2] == b"PK"
+
+        wb = load_workbook(io.BytesIO(payload))
+        ws = wb["Positions"]
+        # Header row + 2 data rows.
+        assert ws.max_row == 3
+        assert ws.cell(row=1, column=1).value == "symbol"
+        assert ws.cell(row=2, column=1).value == "RELIANCE"
+
+    def test_export_to_bytes_empty_data_is_valid(self):
+        """export_to_bytes with no rows still produces a valid workbook."""
+        self._skip_if_no_openpyxl()
+        import io
+
+        from openpyxl import load_workbook
+
+        from flinttrade_webhooks.excel_bridge import ExcelBridge
+
+        payload = ExcelBridge().export_to_bytes([], "Empty")
+        assert payload[:2] == b"PK"
+        wb = load_workbook(io.BytesIO(payload))
+        assert "Empty" in wb.sheetnames
+
     def test_import_raises_on_missing_file(self):
         """import_from_excel raises ExcelBridgeError if file does not exist."""
         self._skip_if_no_openpyxl()

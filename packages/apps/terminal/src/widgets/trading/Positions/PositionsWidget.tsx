@@ -1,9 +1,11 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getPositionbook() call with usePositions() TanStack Query hook.
 // Uses TanStack Table v8 + shadcn Table for sortable positions grid.
-import { useMemo, useState, memo } from "react";
-import { Clock, Layers } from "lucide-react";
+import { useMemo, useState, useCallback, memo } from "react";
+import { Clock, Layers, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { downloadExcel } from "@/services/ftApi.data";
+import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import {
   type ColumnDef,
   flexRender,
@@ -52,6 +54,33 @@ function PositionsWidget(_props: WidgetProps) {
   }, [positionsData]);
 
   const totalPnl = useMemo(() => rows.reduce((s, r) => s + r.pnl, 0), [rows]);
+
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = useCallback(async () => {
+    if (rows.length === 0) return;
+    setIsExporting(true);
+    try {
+      const count = await downloadExcel(
+        rows as unknown as Record<string, unknown>[],
+        "Positions",
+        "positions.xlsx",
+      );
+      emitNotification({
+        category: "system",
+        title: "Positions exported",
+        body: `Downloaded ${count} position${count === 1 ? "" : "s"} to positions.xlsx.`,
+      });
+    } catch (err) {
+      emitNotification({
+        category: "alert",
+        title: "Export failed",
+        body: err instanceof Error ? err.message : "Could not export positions to Excel.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  }, [rows]);
 
   const lastFetch = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
@@ -130,6 +159,18 @@ function PositionsWidget(_props: WidgetProps) {
               <Clock size={8} />
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
+          )}
+          {rows.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleExport()}
+              disabled={isExporting}
+              aria-label="Export positions to Excel"
+              title="Export positions to Excel"
+              className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-40"
+            >
+              <FileDown size={12} className={isExporting ? "animate-pulse" : ""} />
+            </button>
           )}
         </div>
       </div>

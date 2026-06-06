@@ -104,25 +104,57 @@ class ExcelBridge:
             ExcelBridgeError: If openpyxl is not installed or file write fails.
         """
         _require_openpyxl()
+        wb = self._build_data_workbook(data, sheet_name)
+        self._save(wb, file_path)
+        logger.info("Exported %d rows to %s (sheet=%s)", len(data), file_path, sheet_name)
+        return os.path.abspath(file_path)
 
+    def _build_data_workbook(self, data: list[dict[str, Any]], sheet_name: str) -> Any:
+        """Build a single-sheet workbook from ``data`` (shared by file + bytes export)."""
         wb = Workbook()
         ws = wb.active
         ws.title = sheet_name[:31]  # Excel worksheet name limit
 
-        if not data:
-            self._save(wb, file_path)
-            return os.path.abspath(file_path)
+        if data:
+            headers = list(data[0].keys())
+            self._write_header_row(ws, headers)
+            for row_dict in data:
+                ws.append([row_dict.get(h) for h in headers])
+            self._autosize_columns(ws)
+        return wb
 
-        headers = list(data[0].keys())
-        self._write_header_row(ws, headers)
+    def export_to_bytes(
+        self,
+        data: list[dict[str, Any]],
+        sheet_name: str = "Data",
+    ) -> bytes:
+        """Build the same workbook as :meth:`export_to_excel` but return the raw
+        ``.xlsx`` bytes instead of writing a server-side file.
 
-        for row_dict in data:
-            ws.append([row_dict.get(h) for h in headers])
+        This is the streaming path: the terminal POSTs rows and the backend
+        streams the workbook straight back as a browser download, so the file
+        never has to live on the server's disk.
 
-        self._autosize_columns(ws)
-        self._save(wb, file_path)
-        logger.info("Exported %d rows to %s (sheet=%s)", len(data), file_path, sheet_name)
-        return os.path.abspath(file_path)
+        Args:
+            data: List of row dicts (all should share the same keys).
+            sheet_name: Worksheet name (max 31 chars, Excel limit).
+
+        Returns:
+            The ``.xlsx`` file content as bytes.
+
+        Raises:
+            ExcelBridgeError: If openpyxl is not installed or the build fails.
+        """
+        _require_openpyxl()
+        from io import BytesIO  # noqa: PLC0415
+
+        wb = self._build_data_workbook(data, sheet_name)
+        buf = BytesIO()
+        try:
+            wb.save(buf)
+        except Exception as exc:
+            raise ExcelBridgeError(f"Failed to build Excel workbook: {exc}") from exc
+        return buf.getvalue()
 
     # ------------------------------------------------------------------
     # Import

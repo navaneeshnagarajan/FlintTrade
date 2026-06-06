@@ -27,6 +27,16 @@ vi.mock("@/stores/tradingStore", () => ({
   }),
 }));
 
+const mockDownloadExcel = vi.fn();
+vi.mock("@/services/ftApi.data", () => ({
+  downloadExcel: (...args: unknown[]) => mockDownloadExcel(...args),
+}));
+
+const mockEmitNotification = vi.fn();
+vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
+  emitNotification: (...args: unknown[]) => mockEmitNotification(...args),
+}));
+
 // ---------------------------------------------------------------------------
 // Import component under test
 // ---------------------------------------------------------------------------
@@ -193,5 +203,56 @@ describe("PositionsWidget", () => {
 
     const retryBtn = screen.getByRole("button", { name: /retrying/i });
     expect(retryBtn).toBeDisabled();
+  });
+
+  // ── Excel export ─────────────────────────────────────────────────────────
+
+  it("does not show the export button when there are no positions", () => {
+    mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    render(<PositionsWidget {...defaultProps} />);
+    expect(screen.queryByRole("button", { name: /export positions to excel/i })).toBeNull();
+  });
+
+  it("exports the positions and emits a success notification", async () => {
+    mockDownloadExcel.mockResolvedValue(2);
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY", pnl: 500, quantity: 50, ltp: 100, average_price: 90 },
+          { symbol: "BANKNIFTY", pnl: -200, quantity: 25, ltp: 200, average_price: 190 },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /export positions to excel/i }));
+
+    await vi.waitFor(() => expect(mockDownloadExcel).toHaveBeenCalledTimes(1));
+    // Exports the mapped rows under the "Positions" sheet.
+    expect(mockDownloadExcel.mock.calls[0][1]).toBe("Positions");
+    expect(mockDownloadExcel.mock.calls[0][0]).toHaveLength(2);
+    await vi.waitFor(() =>
+      expect(mockEmitNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ category: "system", title: "Positions exported" }),
+      ),
+    );
+  });
+
+  it("emits an alert notification when the export fails", async () => {
+    mockDownloadExcel.mockRejectedValue(new Error("backend down"));
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [{ symbol: "NIFTY", pnl: 500, quantity: 50, ltp: 100, average_price: 90 }],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /export positions to excel/i }));
+
+    await vi.waitFor(() =>
+      expect(mockEmitNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ category: "alert", title: "Export failed", body: "backend down" }),
+      ),
+    );
   });
 });

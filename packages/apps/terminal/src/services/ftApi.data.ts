@@ -1,4 +1,4 @@
-import { get, post } from "./ftApi.helpers";
+import { get, post, getBase, buildHeaders } from "./ftApi.helpers";
 
 // ─── Order Flow ───────────────────────────────────────────────────────────────
 
@@ -248,3 +248,41 @@ export const importFromExcel = (filePath: string, sheetName = "Sheet1") =>
     file_path: filePath,
     sheet_name: sheetName,
   });
+
+/**
+ * Export rows to Excel and trigger a real browser download.
+ *
+ * Unlike {@link exportToExcel} (which writes a server-side file and returns its
+ * path), this hits the streaming `/export/download` endpoint and saves the
+ * `.xlsx` straight to the user's machine via a Blob — working in the browser
+ * and the desktop shell alike. Returns the number of rows exported.
+ *
+ * @throws Error when the request fails or there are no rows to export.
+ */
+export async function downloadExcel(
+  data: Record<string, unknown>[],
+  sheetName = "Data",
+  filename = "export.xlsx",
+): Promise<number> {
+  if (data.length === 0) throw new Error("Nothing to export — no rows.");
+  const name = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+
+  const resp = await fetch(`${getBase()}/api/v1/integration/excel/export/download`, {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify({ data, sheet_name: sheetName, filename: name }),
+  });
+  if (!resp.ok) {
+    const msg = await resp.json().then((b) => b?.message).catch(() => null);
+    throw new Error(msg ?? `Excel export failed (HTTP ${resp.status})`);
+  }
+
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  return data.length;
+}
