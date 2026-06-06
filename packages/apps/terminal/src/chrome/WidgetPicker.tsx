@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   Map,
   Box,
+  Archive,
   Lock,
   Eye,
   X,
@@ -71,6 +72,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   ShieldAlert,
   Map,
   Box,
+  Archive,
 };
 
 interface WidgetPickerProps {

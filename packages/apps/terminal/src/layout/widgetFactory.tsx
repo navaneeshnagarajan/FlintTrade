@@ -136,6 +136,9 @@ const lazyWidgets = {
   // Wave 35 — order flow visualisation
   footprint: lazy(() => import("@/widgets/analysis/Footprint/FootprintWidget")),
   domheatmap: lazy(() => import("@/widgets/analysis/DOMHeatmap/DOMHeatmapWidget")),
+
+  // Wave 36 — historical option-chain archive
+  historicalchain: lazy(() => import("@/widgets/analysis/HistoricalChain/HistoricalChainWidget")),
 };
 
 // ---------------------------------------------------------------------------
@@ -170,6 +173,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "chart", name: "Chart", icon: "CandlestickChart", category: "Analysis", description: "Interactive candlestick chart with indicators, drawing tools, and replay" },
   { id: "chartgrid", name: "Multi Chart", icon: "LayoutGrid", category: "Analysis", description: "1×1, 1×2, 2×1, or 2×2 grid of independent charts with per-cell symbol and interval" },
   { id: "optionchain", name: "Option Chain", icon: "Grid3x3", category: "Analysis", description: "Live option chain with strike-level OI, volume, IV, and Greek data" },
+  { id: "historicalchain", name: "Historical Chain", icon: "Archive", category: "Analysis", description: "Browse archived (expired) option chains — strike-level OI, volume, LTP, and IV per past expiry" },
   { id: "oichart", name: "OI Chart", icon: "BarChart3", category: "Analysis", description: "Open interest change chart across strikes for a selected expiry" },
   { id: "straddle", name: "Straddle", icon: "Activity", category: "Analysis", description: "Straddle and strangle builder with premium, breakeven, and IV display" },
   { id: "depth", name: "Depth", icon: "Layers", category: "Analysis", description: "Level-2 market depth showing top 5 or 50 bid/ask levels" },
