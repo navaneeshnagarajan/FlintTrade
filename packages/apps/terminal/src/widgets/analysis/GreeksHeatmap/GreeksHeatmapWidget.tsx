@@ -8,10 +8,18 @@
  *
  * Useful for identifying delta-neutral zones, high-theta strikes, or
  * gamma-concentrated expiries at a glance.
+ *
+ * DATA HONESTY: when a broker is connected, the widget fetches the nearest
+ * expiries' option chains (`getExpiry` + `getOptionChain`), builds the aligned
+ * CE-greek grid client-side (`greeksHeatmapTransform`), and shows a "Live"
+ * badge. When disconnected — or no greek-bearing strike is shared across
+ * expiries — it falls back to deterministic sample data with an amber "Sample
+ * data" badge so the figures are never mistaken for live market data.
  */
 
-import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
-import { Grid3x3, RefreshCw, Loader2 } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback, memo } from "react";
+import { Grid3x3 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -22,28 +30,17 @@ import {
 } from "@/components/ui/select";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getExpiry, getOptionChain } from "@/services/api";
+import { SYMBOLS as OPTION_SYMBOLS } from "@/widgets/analysis/OptionChain/types";
+import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
+import { buildGreeksHeatmap } from "./greeksHeatmapTransform";
+import type { ExpiryRow, HeatCell } from "./greeksHeatmapTransform";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type GreekKey = "delta" | "gamma" | "theta" | "vega";
-
-interface HeatCell {
-  strike: number;
-  moneyness: "OTM" | "ATM" | "ITM";
-  delta: number;
-  gamma: number;
-  theta: number;
-  vega: number;
-}
-
-interface ExpiryRow {
-  expiry: string;
-  label: string;
-  dte: number;
-  cells: HeatCell[];
-}
 
 // ---------------------------------------------------------------------------
 // Sample data — 3 expiries × 9 strikes
@@ -299,29 +296,41 @@ function GreeksHeatmapWidget() {
 
   const [symbol, setSymbol] = useState("NIFTY");
   const [greek, setGreek] = useState<GreekKey>("delta");
-  const [isLoading, setIsLoading] = useState(false);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     track("trade", "widget_view_greeks_heatmap");
   }, [track]);
 
-  useEffect(() => {
-    return () => {
-      if (refreshTimerRef.current !== null) {
-        clearTimeout(refreshTimerRef.current);
-      }
-    };
-  }, []);
+  // Resolve the option-chain exchange (NFO/BFO/…) for the selected underlying.
+  const symDef = useMemo(
+    () => OPTION_SYMBOLS.find((s) => s.label === symbol) ?? { label: symbol, exchange: "NFO" },
+    [symbol],
+  );
 
-  // Simulate refresh without live API wiring (data from option chain endpoint in live mode)
-  const handleRefresh = useCallback(() => {
-    if (!isConnected) return;
-    setIsLoading(true);
-    refreshTimerRef.current = setTimeout(() => setIsLoading(false), 600);
-  }, [isConnected]);
+  // Live greeks grid — fetch the nearest expiries' chains and build the aligned
+  // CE-greek grid client-side. Only runs once a broker is connected.
+  const { data: liveRows } = useQuery({
+    queryKey: ["greeks-heatmap", symbol],
+    queryFn: async () => {
+      const expResp = await getExpiry(symDef.label, symDef.exchange, "options");
+      const expiries = (expResp?.expiry ?? []).slice(0, 3);
+      if (expiries.length === 0) return null;
+      const chains = await Promise.all(
+        expiries.map(async (expiry) => {
+          const raw = await getOptionChain(symDef.label, symDef.exchange, expiry);
+          return { expiry, raw: raw as unknown as RawOptionChain };
+        }),
+      );
+      return buildGreeksHeatmap(chains, Date.now());
+    },
+    enabled: isConnected,
+    staleTime: 30_000,
+    refetchInterval: isConnected ? 30_000 : false,
+    retry: false,
+  });
 
-  const data = SAMPLE_GREEKS_HEATMAP_DATA;
+  const isLive = isConnected && liveRows != null && liveRows.length > 0;
+  const data: ExpiryRow[] = isLive && liveRows ? liveRows : SAMPLE_GREEKS_HEATMAP_DATA;
 
   const { minVal, maxVal } = useMemo(() => {
     let min = Infinity;
@@ -343,30 +352,30 @@ function GreeksHeatmapWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Grid3x3 size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Greeks Heatmap</span>
-        {/* Honest disclosure — the widget renders SAMPLE_GREEKS_HEATMAP_DATA
-            unconditionally because no backend `/api/v1/analysis/greeks-heatmap`
-            endpoint exists yet. The badge previously hid in `isConnected` mode,
-            which masked the fact that we were still showing sample data even
-            after a broker connection. Until the endpoint lands, keep the
-            badge visible at all times. */}
-        <span
-          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-          role="status"
-          aria-label="Showing sample data; no live backend endpoint yet"
-          title="No live data wired yet — showing a sample Greeks heatmap so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        {/* Data-source badge — flips to "Live" only when a broker is connected
+            AND the chain yielded an aligned greek grid. Otherwise it stays on
+            the honest amber "Sample data" affordance so the figures are never
+            mistaken for live market data. */}
+        {isLive ? (
+          <span
+            className="px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
+            role="status"
+            aria-label="Showing live Greeks derived from the connected broker's option chain"
+            title="Live Greeks derived from the connected broker's option chain."
+          >
+            Live
+          </span>
+        ) : (
+          <span
+            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            role="status"
+            aria-label="Showing sample data; no live backend endpoint yet"
+            title="No live data wired yet — showing a sample Greeks heatmap so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
-        <button
-          onClick={handleRefresh}
-          disabled={isLoading || !isConnected}
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
-          aria-label="Refresh Greeks heatmap"
-          title="Refresh"
-        >
-          <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} />
-        </button>
       </div>
 
       {/* Controls */}
@@ -413,16 +422,8 @@ function GreeksHeatmapWidget() {
       {/* ATM indicator legend */}
       <div className="flex-none flex items-center gap-2 px-2 pb-1">
         <span className="text-xxs text-text-muted">▲ = ATM strike</span>
-        <span className="text-xxs text-text-muted">· Rows: near → far expiry · Cols: OTM → ITM</span>
+        <span className="text-xxs text-text-muted">· Rows: near → far expiry · Cols: low → high strike · CE greeks</span>
       </div>
-
-      {/* Loading overlay */}
-      {isLoading && (
-        <div className="flex-none flex items-center gap-2 px-2 py-1 text-text-muted text-xs">
-          <Loader2 size={11} className="animate-spin" aria-hidden="true" />
-          Refreshing…
-        </div>
-      )}
 
       {/* Grid */}
       <div className="flex-1 min-h-0 overflow-auto">

@@ -1,9 +1,15 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+//
+// When connected, the widget fetches the nearest expiries' option chains
+// (getExpiry + getOptionChain) and builds the aligned CE-greek grid. We mock
+// both so we can exercise the live ("Live" badge) and sample ("Sample data")
+// paths.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -13,11 +19,40 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+vi.mock("@/services/api", () => ({
+  getExpiry: vi.fn(),
+  getOptionChain: vi.fn(),
+}));
+
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getExpiry, getOptionChain } from "@/services/api";
 import GreeksHeatmapWidget from "../GreeksHeatmapWidget";
 import { SAMPLE_GREEKS_HEATMAP_DATA } from "../GreeksHeatmapWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
+const mockGetExpiry = getExpiry as ReturnType<typeof vi.fn>;
+const mockGetChain = getOptionChain as ReturnType<typeof vi.fn>;
+
+function liveChain() {
+  return {
+    underlying_ltp: 22000,
+    atm_strike: 22000,
+    chain: [
+      { strike: 21800, ce: { delta: 0.7, gamma: 0.002, theta: -0.3, vega: 0.1 }, pe: null },
+      { strike: 22000, ce: { delta: 0.5, gamma: 0.003, theta: -0.4, vega: 0.12 }, pe: null },
+      { strike: 22200, ce: { delta: 0.3, gamma: 0.002, theta: -0.3, vega: 0.1 }, pe: null },
+    ],
+  };
+}
+
+function renderWidget() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <GreeksHeatmapWidget />
+    </QueryClientProvider>,
+  );
+}
 
 beforeAll(() => {
   global.ResizeObserver = class {
@@ -27,36 +62,60 @@ beforeAll(() => {
   };
 });
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockConnected.mockReturnValue(false);
+  mockGetExpiry.mockResolvedValue({ expiry: [] });
+  mockGetChain.mockResolvedValue({ chain: [] });
+});
+
 // ---------------------------------------------------------------------------
 // Widget render tests
 // ---------------------------------------------------------------------------
 
 describe("GreeksHeatmapWidget", () => {
   it("renders header with widget title", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
+    renderWidget();
     expect(screen.getByText("Greeks Heatmap")).toBeTruthy();
   });
 
   it("shows Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
+    renderWidget();
     expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("still shows Sample data badge when connected — no live endpoint yet", () => {
-    // Per the widget header comment, the /api/v1/analysis/greeks-heatmap
-    // backend route doesn't exist; the badge stays visible at all times
-    // to avoid lying about the source of the data once a broker connects.
+  it("does not fetch chains when disconnected", () => {
+    mockConnected.mockReturnValue(false);
+    renderWidget();
+    expect(mockGetExpiry).not.toHaveBeenCalled();
+    expect(mockGetChain).not.toHaveBeenCalled();
+  });
+
+  it("flips to a Live badge once the chain yields a greek grid", async () => {
     mockConnected.mockReturnValue(true);
-    render(<GreeksHeatmapWidget />);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    mockGetExpiry.mockResolvedValue({ expiry: ["17-APR-26", "24-APR-26"] });
+    mockGetChain.mockResolvedValue(liveChain());
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(mockGetChain).toHaveBeenCalled();
+  });
+
+  it("falls back to Sample data when connected but the chain carries no greeks", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetExpiry.mockResolvedValue({ expiry: ["17-APR-26"] });
+    mockGetChain.mockResolvedValue({ chain: [{ strike: 22000, ce: { ltp: 100 }, pe: null }] });
+    renderWidget();
+
+    await waitFor(() => expect(mockGetChain).toHaveBeenCalled());
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("renders Greek toggle buttons", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
-    // Greek toggle group is role=group; check button roles inside it
+    renderWidget();
     const group = screen.getByRole("group", { name: "Select Greek" });
     expect(group.querySelector("button[aria-pressed]")).toBeTruthy();
     expect(screen.getAllByText("Delta").length).toBeGreaterThan(0);
@@ -66,16 +125,14 @@ describe("GreeksHeatmapWidget", () => {
   });
 
   it("Delta button is pressed by default", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
+    renderWidget();
     const group = screen.getByRole("group", { name: "Select Greek" });
     const deltaBtn = group.querySelector("button[aria-pressed='true']");
     expect(deltaBtn?.textContent).toBe("Delta");
   });
 
   it("clicking Gamma toggles its pressed state", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
+    renderWidget();
     const group = screen.getByRole("group", { name: "Select Greek" });
     const gammaBtn = Array.from(group.querySelectorAll("button")).find(
       (b) => b.textContent === "Gamma",
@@ -85,34 +142,27 @@ describe("GreeksHeatmapWidget", () => {
     expect(gammaBtn.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("renders heatmap grid cells for all expiries and strikes", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
+  it("renders heatmap grid cells for all expiries and strikes (sample mode)", () => {
+    renderWidget();
     const cells = screen.getAllByRole("gridcell");
     // 3 expiries × 9 strikes = 27 cells
     expect(cells.length).toBe(27);
   });
 
   it("renders symbol selector with expected options", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
+    renderWidget();
     const trigger = screen.getByLabelText("Select symbol");
     expect(trigger).toBeTruthy();
-    // shadcn Select trigger shows current value; default is NIFTY
     expect(trigger.textContent).toContain("NIFTY");
   });
 
-  it("refresh button is disabled when disconnected", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
-    const btn = screen.getByLabelText("Refresh Greeks heatmap");
-    expect(btn).toBeTruthy();
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
+  it("does not render a dead refresh button (removed deceptive affordance)", () => {
+    renderWidget();
+    expect(screen.queryByLabelText("Refresh Greeks heatmap")).toBeNull();
   });
 
-  it("footer shows expiry and strike counts", () => {
-    mockConnected.mockReturnValue(false);
-    render(<GreeksHeatmapWidget />);
+  it("footer shows expiry and strike counts (sample mode)", () => {
+    renderWidget();
     expect(screen.getByText(/3 expiries/i)).toBeTruthy();
     expect(screen.getByText(/9 strikes/i)).toBeTruthy();
   });
