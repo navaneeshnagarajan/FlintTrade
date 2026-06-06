@@ -262,3 +262,36 @@ class TestStrategiesRunning:
         data = resp.get_json()
         assert data["status"] == "success"
         assert data["data"]["strategies"] == []
+
+
+class TestStrategyLibrary:
+    """The full strategy library (ALL_STRATEGIES) is reachable, not just the 12 builtins."""
+
+    def test_load_backtest_engine_exposes_the_full_library(self):
+        from flinttrade_core.backtest_routes import _load_backtest_engine
+
+        _, _, strategies, _, _ = _load_backtest_engine()
+        # ALL_STRATEGIES (~88) merged with the 12 curated BUILTINs.
+        assert len(strategies) >= 50
+        assert "SMACrossover" in strategies  # an ALL_STRATEGIES entry, previously unreachable
+        assert "EMACrossover" in strategies  # a BUILTIN, still present (wins on clash)
+
+    def test_strategies_endpoint_lists_the_full_library(self, client):
+        resp = client.get("/api/v1/backtest/strategies", headers=_auth_headers())
+        assert resp.status_code == 200
+        names = [s["name"] for s in resp.get_json()["data"]["strategies"]]
+        assert len(names) >= 50
+        assert "SMACrossover" in names
+        assert "EMACrossover" in names
+
+    def test_run_accepts_a_previously_unreachable_strategy(self, client):
+        # A strategy from ALL_STRATEGIES must pass the strategy lookup (it may
+        # later fail on data availability, but it is no longer "Unknown").
+        resp = client.post("/api/v1/backtest/run", json={
+            "symbol": "RELIANCE", "exchange": "NSE", "interval": "1d",
+            "start_date": "2025-01-01", "end_date": "2025-02-01",
+            "strategy": "SMACrossover",
+        }, headers=_auth_headers())
+        body = resp.get_json()
+        # Whatever the outcome (data/engine), it must NOT be the unknown-strategy 400.
+        assert not (resp.status_code == 400 and "Unknown strategy" in body.get("message", ""))
