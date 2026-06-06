@@ -264,3 +264,28 @@ export interface TickerSentiment {
 
 export const getTickerSentiments = () =>
   get<{ tickers: TickerSentiment[] }>("ai/sentiment/tickers");
+
+// ---------------------------------------------------------------------------
+// Overnight optimiser reports (overnight_optimiser.py -> OptimiserReportStore)
+// ---------------------------------------------------------------------------
+
+export interface OptimiserSuggestion {
+  strategy_name: string;
+  analysis: string;
+  suggested_params: Record<string, unknown>;
+  reasoning: string;
+  confidence: number;
+  timestamp?: string;
+}
+
+export interface OptimiserReport {
+  timestamp: string;
+  strategies_seen: number;
+  strategies_optimised: number;
+  suggestions: OptimiserSuggestion[];
+  errors: Array<{ strategy: string; error: string }>;
+}
+
+/** The most recent overnight optimisation report, or null when none exist yet. */
+export const getLatestOptimiserReport = () =>
+  get<{ report: OptimiserReport | null }>("ai/optimiser/reports/latest");

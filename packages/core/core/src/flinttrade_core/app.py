@@ -2299,14 +2299,21 @@ class FlintTradeApp:
         # run() as the job. Best-effort: a missing runner/refiner just leaves the
         # job unregistered (as before) rather than failing boot.
         try:
+            from flinttrade_ai.optimiser_report_store import OptimiserReportStore  # noqa: PLC0415
             from flinttrade_ai.overnight_optimiser import OvernightOptimiser  # noqa: PLC0415
             from flinttrade_ai.strategy_refiner import StrategyRefiner  # noqa: PLC0415
+
+            # The report store is created unconditionally so the Lab UI can read
+            # past reports even when the optimiser isn't wired this boot.
+            _report_store = OptimiserReportStore(_workspace_dir() / "optimiser-reports")
+            flask_app.config["OPTIMISER_REPORT_STORE"] = _report_store
 
             _runner = flask_app.config.get("STRATEGY_RUNNER")
             if _runner is not None and hasattr(_runner, "list_strategies"):
                 _optimiser = OvernightOptimiser(
                     strategy_provider=_runner.list_strategies,
                     refiner=StrategyRefiner(),  # rule-based by default (no LLM required)
+                    report_sink=_report_store.write,  # persist each night's report
                 )
                 self.cron.overnight_optimiser = _optimiser.run
         except Exception as exc:

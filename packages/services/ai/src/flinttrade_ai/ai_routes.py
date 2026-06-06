@@ -270,6 +270,35 @@ def market_regime() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
+@ai_bp.route("/ai/optimiser/reports", methods=["GET"])
+def optimiser_reports() -> tuple[Any, int]:
+    """List overnight optimisation reports, newest first — the Lab Optimise tab.
+
+    Returns an empty list (not an error) when none exist yet, so the UI shows a
+    'no reports yet' state rather than a failure.
+    """
+    store = current_app.config.get("OPTIMISER_REPORT_STORE")
+    if store is None:
+        return jsonify({"status": "success", "data": {"reports": []}}), 200
+    try:
+        return jsonify({"status": "success", "data": {"reports": store.list_reports()}}), 200
+    except Exception:
+        logger.exception("optimiser_reports error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@ai_bp.route("/ai/optimiser/reports/latest", methods=["GET"])
+def optimiser_report_latest() -> tuple[Any, int]:
+    """Return the most recent overnight optimisation report, or ``null`` when none."""
+    store = current_app.config.get("OPTIMISER_REPORT_STORE")
+    try:
+        report = store.latest() if store is not None else None
+        return jsonify({"status": "success", "data": {"report": report}}), 200
+    except Exception:
+        logger.exception("optimiser_report_latest error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
 @ai_bp.route("/ai/refine-strategy", methods=["POST"])
 def refine_strategy() -> tuple[Any, int]:
     """Analyse backtest results and suggest parameter improvements.
