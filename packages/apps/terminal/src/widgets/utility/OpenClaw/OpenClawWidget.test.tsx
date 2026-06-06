@@ -8,12 +8,14 @@ vi.mock("@/services/ftApi.ai", () => ({
   getOpenClawAgents: vi.fn(),
   deployOpenClawAgent: vi.fn(),
   stopOpenClawAgent: vi.fn(),
+  getOpenClawAgentLogs: vi.fn(),
 }));
 import {
   getOpenClawStatus,
   getOpenClawAgents,
   deployOpenClawAgent,
   stopOpenClawAgent,
+  getOpenClawAgentLogs,
 } from "@/services/ftApi.ai";
 import OpenClawWidget from "./OpenClawWidget";
 
@@ -21,6 +23,7 @@ const mockStatus = getOpenClawStatus as unknown as ReturnType<typeof vi.fn>;
 const mockAgents = getOpenClawAgents as unknown as ReturnType<typeof vi.fn>;
 const mockDeploy = deployOpenClawAgent as unknown as ReturnType<typeof vi.fn>;
 const mockStop = stopOpenClawAgent as unknown as ReturnType<typeof vi.fn>;
+const mockLogs = getOpenClawAgentLogs as unknown as ReturnType<typeof vi.fn>;
 
 function renderWidget() {
   const qc = new QueryClient({
@@ -49,12 +52,25 @@ describe("OpenClawWidget", () => {
     mockAgents.mockResolvedValue({ agents: [] });
     mockDeploy.mockResolvedValue({ status: "success", agent_id: "a-1" });
     mockStop.mockResolvedValue({ status: "success" });
+    mockLogs.mockResolvedValue({ logs: [] });
   });
 
   it("lists running agents from the gateway", async () => {
     mockAgents.mockResolvedValue({ agents: [AGENT] });
     renderWidget();
     expect(await screen.findByText("scalper-nifty")).toBeInTheDocument();
+  });
+
+  it("fetches and shows an agent's logs on demand", async () => {
+    mockAgents.mockResolvedValue({ agents: [AGENT] });
+    mockLogs.mockResolvedValue({ logs: ["09:15 entered NIFTY", "09:20 took profit"] });
+    renderWidget();
+
+    fireEvent.click(await screen.findByRole("button", { name: /view logs for scalper-nifty/i }));
+
+    expect(await screen.findByText(/entered NIFTY/i)).toBeInTheDocument();
+    expect(screen.getByText(/took profit/i)).toBeInTheDocument();
+    expect(mockLogs).toHaveBeenCalledWith("a-1");
   });
 
   it("stops an agent via the gateway", async () => {

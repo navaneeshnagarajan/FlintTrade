@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, Play, Square, Wifi, WifiOff } from "lucide-react";
+import { Bot, Play, Square, Wifi, WifiOff, ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,6 +18,7 @@ import {
   getOpenClawAgents,
   deployOpenClawAgent,
   stopOpenClawAgent,
+  getOpenClawAgentLogs,
 } from "@/services/ftApi.ai";
 
 export default function OpenClawWidget() {
@@ -25,6 +26,14 @@ export default function OpenClawWidget() {
   const [name, setName] = useState("");
   const [strategy, setStrategy] = useState("momentum");
   const [symbols, setSymbols] = useState("NIFTY");
+  const [logsFor, setLogsFor] = useState<string | null>(null);
+
+  const logsQuery = useQuery({
+    queryKey: ["openclaw", "logs", logsFor],
+    queryFn: () => getOpenClawAgentLogs(logsFor as string),
+    enabled: logsFor !== null,
+    refetchInterval: logsFor !== null ? 5_000 : false,
+  });
 
   const statusQuery = useQuery({
     queryKey: ["openclaw", "status"],
@@ -140,26 +149,54 @@ export default function OpenClawWidget() {
           agents.map((a) => (
             <div
               key={a.id}
-              className="flex items-center justify-between gap-2 rounded border border-border-default bg-surface-base px-3 py-2"
+              className="rounded border border-border-default bg-surface-base"
             >
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-text-primary truncate">
-                  {a.name || a.id}
-                </p>
-                <p className="text-xxs text-text-muted truncate">
-                  {a.strategy} · {a.status}
-                </p>
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-text-primary truncate">
+                    {a.name || a.id}
+                  </p>
+                  <p className="text-xxs text-text-muted truncate">
+                    {a.strategy} · {a.status}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xxs"
+                    onClick={() => setLogsFor(logsFor === a.id ? null : a.id)}
+                    aria-expanded={logsFor === a.id}
+                    aria-label={`${logsFor === a.id ? "Hide" : "View"} logs for ${a.name || a.id}`}
+                  >
+                    <ScrollText size={10} className="mr-1" aria-hidden="true" /> Logs
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xxs"
+                    onClick={() => stop.mutate(a.id)}
+                    disabled={stop.isPending}
+                    aria-label={`Stop ${a.name || a.id}`}
+                  >
+                    <Square size={10} className="mr-1" aria-hidden="true" /> Stop
+                  </Button>
+                </div>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 px-2 text-xxs shrink-0"
-                onClick={() => stop.mutate(a.id)}
-                disabled={stop.isPending}
-                aria-label={`Stop ${a.name || a.id}`}
-              >
-                <Square size={10} className="mr-1" aria-hidden="true" /> Stop
-              </Button>
+
+              {logsFor === a.id && (
+                <div className="border-t border-border-default px-3 py-2" data-testid="openclaw-logs">
+                  {logsQuery.isLoading ? (
+                    <p className="text-xxs text-text-muted">Loading logs…</p>
+                  ) : (logsQuery.data?.logs?.length ?? 0) === 0 ? (
+                    <p className="text-xxs text-text-muted">No logs available.</p>
+                  ) : (
+                    <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap text-xxs font-mono text-text-secondary">
+                      {logsQuery.data?.logs?.join("\n")}
+                    </pre>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}
