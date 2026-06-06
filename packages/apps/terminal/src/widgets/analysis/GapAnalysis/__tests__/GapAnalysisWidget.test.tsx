@@ -107,11 +107,14 @@ describe("GapAnalysisWidget", () => {
     expect(trigger.textContent).toContain("NIFTY");
   });
 
-  it("refresh button is disabled when disconnected", () => {
-    mockConnected.mockReturnValue(false);
+  it("does not render a deceptive refresh affordance", () => {
+    // The previous refresh button only slept 700ms and span a loader while the
+    // sample data never changed — it falsely implied a live fetch. It has been
+    // removed; the honest "Sample data" badge is the sole disclosure.
+    mockConnected.mockReturnValue(true);
     render(<GapAnalysisWidget />);
-    const btn = screen.getByLabelText("Refresh gap analysis") as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
+    expect(screen.queryByLabelText("Refresh gap analysis")).toBeNull();
+    expect(screen.queryByLabelText("Loading")).toBeNull();
   });
 });
 

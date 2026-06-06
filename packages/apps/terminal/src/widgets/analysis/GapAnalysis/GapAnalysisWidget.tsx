@@ -6,11 +6,16 @@
  *   - Aggregate statistics: avg gap size, gap fill %, avg fill time
  *   - Scatter chart: gap size (X) vs fill probability (Y) with colour-coded dots
  *   - Symbol selector (NSE indices)
- *   - Sample data shown when disconnected; live data uses /api/v1/history
+ *
+ * DATA HONESTY: gap fill statistics (fill rate, fill time) require per-day
+ * INTRADAY history that isn't cheaply available, so the widget shows
+ * deterministic SAMPLE gap events with an always-visible "Sample data" badge.
+ * It carries NO refresh control — a previous one only slept 700 ms and spun a
+ * loader while the data never changed, which dishonestly implied a live fetch.
  */
 
-import { useState, useMemo, useEffect, useCallback, useRef, memo } from "react";
-import { ArrowUpFromLine, RefreshCw, Loader2 } from "lucide-react";
+import { useState, useMemo, useEffect, memo } from "react";
+import { ArrowUpFromLine } from "lucide-react";
 import { FlintScatterChart } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import {
@@ -21,7 +26,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -166,30 +170,13 @@ function ScatterChart({ events }: ScatterProps) {
 
 function GapAnalysisWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
 
   const [symbol, setSymbol] = useState("NIFTY");
-  const [isLoading, setIsLoading] = useState(false);
   const [filter, setFilter] = useState<"all" | "gap-up" | "gap-down">("all");
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     track("trade", "widget_view_gap_analysis");
   }, [track]);
-
-  useEffect(() => {
-    return () => {
-      if (refreshTimerRef.current !== null) {
-        clearTimeout(refreshTimerRef.current);
-      }
-    };
-  }, []);
-
-  const handleRefresh = useCallback(() => {
-    if (!isConnected) return;
-    setIsLoading(true);
-    refreshTimerRef.current = setTimeout(() => setIsLoading(false), 700);
-  }, [isConnected]);
 
   const filteredEvents = useMemo(
     () =>
@@ -220,15 +207,6 @@ function GapAnalysisWidget() {
           Sample data
         </span>
         <div className="flex-1" />
-        <button
-          onClick={handleRefresh}
-          disabled={isLoading || !isConnected}
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
-          aria-label="Refresh gap analysis"
-          title="Refresh"
-        >
-          <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} />
-        </button>
       </div>
 
       {/* Controls */}
@@ -262,8 +240,6 @@ function GapAnalysisWidget() {
             </button>
           ))}
         </div>
-
-        {isLoading && <Loader2 size={11} className="animate-spin text-text-muted ml-auto" aria-label="Loading" />}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
