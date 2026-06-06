@@ -2378,7 +2378,15 @@ class FlintTradeApp:
                 # recorder writes on the async loop, the nightly db_optimise job
                 # CHECKPOINTs it on the scheduler thread. Both must serialise.
                 tick_lock = threading.Lock()
-                recorder = TickRecorder(storage=tick_storage, storage_lock=tick_lock)
+                # Live order-flow aggregator: fed from each tick and exposed to
+                # the orderflow route so the footprint widget shows REAL buy/sell
+                # delta (not synthetic) while tick capture is running.
+                from flinttrade_data.orderflow_aggregator import OrderFlowAggregator  # noqa: PLC0415
+                orderflow = OrderFlowAggregator()
+                flask_app.config["ORDERFLOW_AGGREGATOR"] = orderflow
+                recorder = TickRecorder(
+                    storage=tick_storage, storage_lock=tick_lock, orderflow_aggregator=orderflow
+                )
                 # Hand the tick store to the cron so nightly maintenance keeps the
                 # highest-volume DuckDB file from growing unbounded. register_
                 # builtin_jobs already ran, but the job resolves this lazily.

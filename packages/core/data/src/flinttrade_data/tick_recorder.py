@@ -67,8 +67,11 @@ class TickRecorder:
         reconnect_delay: float = 5.0,
         max_reconnect_delay: float = 60.0,
         storage_lock: Any | None = None,
+        orderflow_aggregator: Any | None = None,
     ) -> None:
         self._storage = storage
+        # Optional live order-flow aggregator fed from each tick (None = off).
+        self._orderflow = orderflow_aggregator
         self._ws_url = ws_url or _DEFAULT_WS_URL
         self._batch_size = batch_size
         self._flush_interval = flush_interval
@@ -239,6 +242,26 @@ class TickRecorder:
         )
         self._buffer.append(row)
         self._tick_count += 1
+
+        # Feed the live order-flow aggregator (best-effort — must never break
+        # tick recording). LTP + cumulative volume drive the footprint; bid/ask
+        # sharpen the aggressor classification when present.
+        if self._orderflow is not None:
+            ltp = data.get("ltp")
+            volume = data.get("volume")
+            if ltp is not None and volume is not None:
+                bid = data.get("bid")
+                ask = data.get("ask")
+                try:
+                    self._orderflow.feed_market_tick(
+                        symbol,
+                        float(ltp),
+                        int(volume),
+                        bid=float(bid) if bid is not None else None,
+                        ask=float(ask) if ask is not None else None,
+                    )
+                except Exception as exc:  # noqa: BLE001 - feeding never breaks recording
+                    logger.debug("order-flow feed skipped for %s: %s", symbol, exc)
 
     @staticmethod
     def _detect_mode(data: dict[str, Any]) -> str:

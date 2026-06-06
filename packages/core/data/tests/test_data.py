@@ -682,6 +682,23 @@ class TestTickRecorder:
         recorder._process_tick({"exchange": "NSE", "ltp": 2500.0})
         assert recorder.tick_count == 0
 
+    def test_process_tick_feeds_orderflow_aggregator(self):
+        # The recorder feeds the live order-flow aggregator so the footprint is
+        # real, not synthetic. First tick = baseline; second = a buyer-initiated
+        # trade (price up, +300 volume).
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+        from flinttrade_data.storage import StorageManager
+        from flinttrade_data.tick_recorder import TickRecorder
+        storage = StorageManager(":memory:")
+        storage.initialise()
+        agg = OrderFlowAggregator()
+        recorder = TickRecorder(storage=storage, orderflow_aggregator=agg)
+        recorder._process_tick({"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2500.0, "volume": 1000})
+        recorder._process_tick({"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2505.0, "volume": 1300})
+        buckets = agg.get_footprint("RELIANCE")
+        assert sum(b.buy_volume for b in buckets) == 300
+        assert sum(b.sell_volume for b in buckets) == 0
+
     def test_flush_writes_to_duckdb(self):
         storage, recorder = self._make_recorder()
         recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})

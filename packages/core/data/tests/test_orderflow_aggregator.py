@@ -451,3 +451,45 @@ class TestIntegration:
         cd = agg.cumulative_delta(bins)
         # Bin 1: net +200, Bin 2: net +200 → cumulative [200, 400]
         assert cd[-1] == 400.0
+
+
+class TestFeedMarketTick:
+    """feed_market_tick derives incremental volume + aggressor side from raw
+    market ticks (cumulative volume, no side) — the glue that makes the live
+    order-flow footprint real instead of synthetic."""
+
+    _TS = 1_700_000_000.0
+
+    @staticmethod
+    def _agg():
+        from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
+        return OrderFlowAggregator()
+
+    def test_first_tick_is_a_baseline_noop(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
+        assert agg.get_footprint("NIFTY") == []  # need a baseline first
+
+    def test_uptick_records_incremental_buy_volume(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 24505.0, 1250, timestamp=self._TS + 1)  # +250, price up -> BUY
+        buckets = agg.get_footprint("NIFTY")
+        assert buckets
+        assert sum(b.buy_volume for b in buckets) == 250
+        assert sum(b.sell_volume for b in buckets) == 0
+
+    def test_quote_rule_overrides_tick_direction(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
+        # Price ticked UP but the trade printed AT the bid -> seller-initiated.
+        agg.feed_market_tick("NIFTY", 24505.0, 1100, bid=24505.0, ask=24506.0, timestamp=self._TS + 1)
+        buckets = agg.get_footprint("NIFTY")
+        assert sum(b.sell_volume for b in buckets) == 100
+        assert sum(b.buy_volume for b in buckets) == 0
+
+    def test_no_volume_change_is_a_noop(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 24500.0, 1000, timestamp=self._TS)
+        agg.feed_market_tick("NIFTY", 24505.0, 1000, timestamp=self._TS + 1)  # no trade
+        assert agg.get_footprint("NIFTY") == []

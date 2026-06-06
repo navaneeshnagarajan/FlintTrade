@@ -200,6 +200,10 @@ class OrderFlowAggregator:
 
         # symbol → {bin_start → _BinState}
         self._state: dict[str, dict[int, _BinState]] = {}
+        # Per-symbol baseline for deriving incremental volume + aggressor side
+        # from raw market ticks (which carry cumulative volume and no side).
+        self._last_tick: dict[str, tuple[float, int]] = {}
+        self._last_side: dict[str, Side] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -255,6 +259,61 @@ class OrderFlowAggregator:
             symbol, price_level, volume, side, bin_start,
         )
         return bin_start
+
+    def _classify_side(self, symbol: str, ltp: float, prev_ltp: float,
+                       bid: float | None, ask: float | None) -> Side:
+        """Aggressor side via the quote rule (preferred) or the tick rule.
+
+        Lee-Ready style: a trade at or above the ask is buyer-initiated; at or
+        below the bid is seller-initiated; otherwise (or with no quote) the tick
+        rule — up-trade = buy, down-trade = sell, unchanged = carry the previous
+        side. Not a guess: the standard trade-side classification.
+        """
+        if bid is not None and ask is not None and ask >= bid > 0:
+            if ltp >= ask:
+                self._last_side[symbol] = "BUY"
+                return "BUY"
+            if ltp <= bid:
+                self._last_side[symbol] = "SELL"
+                return "SELL"
+        if ltp > prev_ltp:
+            side: Side = "BUY"
+        elif ltp < prev_ltp:
+            side = "SELL"
+        else:
+            side = self._last_side.get(symbol, "BUY")
+        self._last_side[symbol] = side
+        return side
+
+    def feed_market_tick(
+        self,
+        symbol: str,
+        ltp: float,
+        cumulative_volume: int,
+        *,
+        bid: float | None = None,
+        ask: float | None = None,
+        timestamp: float | None = None,
+    ) -> None:
+        """Feed a raw market tick (LTP + cumulative day volume, no aggressor).
+
+        Derives the incremental traded volume (this tick's cumulative minus the
+        symbol's last cumulative) and the aggressor side (see
+        :meth:`_classify_side`), then records it via :meth:`add_tick`. A no-op
+        until a second tick establishes a baseline, and when no volume traded
+        between ticks. This is the glue that turns the live tick stream into a
+        real order-flow footprint instead of synthetic data.
+        """
+        prev = self._last_tick.get(symbol)
+        self._last_tick[symbol] = (ltp, int(cumulative_volume))
+        if prev is None:
+            return
+        prev_ltp, prev_vol = prev
+        inc_volume = max(0, int(cumulative_volume) - prev_vol)
+        if inc_volume <= 0:
+            return
+        side = self._classify_side(symbol, ltp, prev_ltp, bid, ask)
+        self.add_tick(symbol, ltp, inc_volume, side, timestamp=timestamp)
 
     def get_footprint(
         self,
