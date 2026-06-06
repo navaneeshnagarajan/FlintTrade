@@ -4,10 +4,15 @@
 
 import { BentoCard } from "@/components/bento/BentoCard";
 import { useOrders } from "@/hooks/useOrders";
+import { getDemoOrders } from "@/hooks/useModeData";
+import { useModeStore } from "@/stores/modeStore";
 import { ClipboardList, Loader2 } from "lucide-react";
 
 export function OrdersCard() {
-  const { data: orders, isLoading } = useOrders();
+  const isExplore = useModeStore((s) => s.mode === "explore");
+  const query = useOrders();
+  const orders = isExplore ? getDemoOrders() : query.data;
+  const isLoading = isExplore ? false : query.isLoading;
   const recentOrders = orders?.slice(0, 3) ?? [];
 
   return (

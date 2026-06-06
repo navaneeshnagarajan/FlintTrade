@@ -5,6 +5,8 @@
 import { BentoCard } from "@/components/bento/BentoCard";
 import { useFunds } from "@/hooks/useFunds";
 import { useHoldings } from "@/hooks/useHoldings";
+import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
+import { useModeStore } from "@/stores/modeStore";
 
 interface AllocationSlice {
   label: string;
@@ -20,8 +22,12 @@ const ALLOCATION: AllocationSlice[] = [
 ];
 
 export function PortfolioCard() {
-  const { data: funds } = useFunds();
-  const { data: holdings } = useHoldings();
+  const isExplore = useModeStore((s) => s.mode === "explore");
+  const fundsQuery = useFunds();
+  const holdingsQuery = useHoldings();
+
+  const funds = isExplore ? getDemoFunds() : fundsQuery.data;
+  const holdings = isExplore ? getDemoHoldings() : holdingsQuery.data;
 
   const holdingsValue = holdings?.reduce(
     (sum, h) => sum + h.ltp * Math.abs(h.quantity),

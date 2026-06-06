@@ -158,8 +158,10 @@ describe("useModeData — explore mode", () => {
       wrapper: createWrapper(),
     });
 
-    const funds = result.current.data as { available_balance: number };
-    expect(funds.available_balance).toBe(250_000);
+    // Explore funds are mapped to the canonical Funds shape (availableCash),
+    // not the engine's internal naming — so widgets read the same field as live.
+    const funds = result.current.data as { availableCash: number };
+    expect(funds.availableCash).toBe(250_000);
   });
 
   it("returns mock watchlist", () => {
@@ -271,11 +273,11 @@ describe("useModeData — mode switching", () => {
     });
 
     await waitFor(() => {
-      const funds = result.current.data as { available_balance: number };
-      return funds.available_balance === 250_000;
+      const funds = result.current.data as { availableCash: number };
+      return funds.availableCash === 250_000;
     });
 
-    const funds = result.current.data as { available_balance: number };
-    expect(funds.available_balance).toBe(250_000); // mock value
+    const funds = result.current.data as { availableCash: number };
+    expect(funds.availableCash).toBe(250_000); // canonical explore mock value
   });
 });

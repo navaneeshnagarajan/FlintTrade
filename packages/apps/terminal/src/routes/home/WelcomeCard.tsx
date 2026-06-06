@@ -5,6 +5,8 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { usePositions } from "@/hooks/usePositions";
+import { getDemoPositions } from "@/hooks/useModeData";
+import { useModeStore } from "@/stores/modeStore";
 import { BentoCard } from "@/components/bento/BentoCard";
 
 function getGreeting(): string {
@@ -16,9 +18,18 @@ function getGreeting(): string {
 
 export function WelcomeCard() {
   const name = useSettingsStore((s) => s.name);
-  const totalPnl = useTradingStore((s) => s.totalPnl);
-  const { data: positions } = usePositions();
-  const positionCount = positions?.filter((p) => p.quantity !== 0).length ?? 0;
+  const isExplore = useModeStore((s) => s.mode === "explore");
+  const storePnl = useTradingStore((s) => s.totalPnl);
+  const query = usePositions();
+
+  // Demo mode: simulated positions + a P&L derived from them (the trading-store
+  // mirror isn't fed in explore).
+  const positions = isExplore ? getDemoPositions() : query.data;
+  const openPositions = positions?.filter((p) => p.quantity !== 0) ?? [];
+  const positionCount = openPositions.length;
+  const totalPnl = isExplore
+    ? openPositions.reduce((sum, p) => sum + p.pnl, 0)
+    : storePnl;
 
   const pnlPositive = totalPnl >= 0;
 

@@ -22,6 +22,68 @@ import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
 import { useTradebook } from "@/hooks/useTradebook";
 import type { AppMode } from "@/stores/modeStore";
+import type { Position, Order, Holding, Funds } from "@/types/api";
+
+// ---------------------------------------------------------------------------
+// Canonical demo data — maps the MockDataEngine's internal shapes onto the
+// REST contract types (types/api.ts) the widgets actually read. The engine's
+// fields differ (avgPrice vs averagePrice, side vs action, pnlPct vs
+// pnlPercent), so feeding its raw output to a widget would render `undefined`.
+// Exported so dashboard cards can show demo data without the useModeData
+// fan-out (which calls every query hook). KEEP these in sync with types/api.ts.
+// ---------------------------------------------------------------------------
+
+/** Demo positions in the canonical {@link Position} shape (explore mode). */
+export function getDemoPositions(): Position[] {
+  return mockDataEngine.getMockPositions().map((p) => {
+    const cost = Math.abs(p.avgPrice * p.quantity);
+    return {
+      symbol: p.symbol,
+      exchange: p.exchange,
+      product: p.product,
+      quantity: p.quantity,
+      averagePrice: p.avgPrice,
+      ltp: p.ltp,
+      pnl: p.pnl,
+      pnlPercent: cost !== 0 ? (p.pnl / cost) * 100 : 0,
+    };
+  });
+}
+
+/** Demo orders in the canonical {@link Order} shape (explore mode). */
+export function getDemoOrders(): Order[] {
+  return mockDataEngine.getMockOrders().map((o) => ({
+    orderId: o.orderId,
+    symbol: o.symbol,
+    exchange: o.exchange,
+    action: o.side,
+    quantity: o.quantity,
+    price: o.price,
+    orderType: o.orderType,
+    status: o.status,
+    product: o.product,
+    strategy: "demo",
+    timestamp: o.timestamp,
+  }));
+}
+
+/** Demo holdings in the canonical {@link Holding} shape (explore mode). */
+export function getDemoHoldings(): Holding[] {
+  return mockDataEngine.getMockHoldings().map((h) => ({
+    symbol: h.symbol,
+    exchange: h.exchange,
+    quantity: h.quantity,
+    averagePrice: h.avgPrice,
+    ltp: h.ltp,
+    pnl: h.pnl,
+    pnlPercent: h.pnlPct,
+  }));
+}
+
+/** Demo funds in the canonical {@link Funds} shape (explore mode). */
+export function getDemoFunds(): Funds {
+  return { availableCash: 250_000, usedMargin: 48_500, totalBalance: 298_500 };
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,13 +110,6 @@ export interface ModeDataResult<T> {
 // Mock data helpers
 // ---------------------------------------------------------------------------
 
-/** Static mock funds for explore mode (MockDataEngine doesn't provide funds). */
-const MOCK_FUNDS = {
-  available_balance: 250_000,
-  utilized_margin: 48_500,
-  total_balance: 298_500,
-};
-
 /** Static mock watchlist for explore mode. */
 const MOCK_WATCHLIST = mockDataEngine.getSnapshot().map((t) => ({
   symbol: t.symbol,
@@ -67,16 +122,16 @@ const MOCK_WATCHLIST = mockDataEngine.getSnapshot().map((t) => ({
 function getMockData(key: ModeDataKey): unknown {
   switch (key) {
     case "positions":
-      return mockDataEngine.getMockPositions();
+      return getDemoPositions();
     case "orders":
-      return mockDataEngine.getMockOrders();
+      return getDemoOrders();
     case "holdings":
-      return mockDataEngine.getMockHoldings();
+      return getDemoHoldings();
     case "funds":
-      return MOCK_FUNDS;
+      return getDemoFunds();
     case "tradebook":
       // Re-use orders as trades for explore mode (same shape is close enough)
-      return mockDataEngine.getMockOrders();
+      return getDemoOrders();
     case "watchlist":
       return MOCK_WATCHLIST;
   }

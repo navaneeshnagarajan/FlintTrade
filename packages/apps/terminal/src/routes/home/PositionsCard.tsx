@@ -4,14 +4,24 @@
 
 import { BentoCard } from "@/components/bento/BentoCard";
 import { usePositions } from "@/hooks/usePositions";
+import { getDemoPositions } from "@/hooks/useModeData";
+import { useModeStore } from "@/stores/modeStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { Loader2 } from "lucide-react";
 
 export function PositionsCard() {
-  const { data: positions, isLoading } = usePositions();
-  const totalPnl = useTradingStore((s) => s.totalPnl);
+  const isExplore = useModeStore((s) => s.mode === "explore");
+  const query = usePositions();
+  const storePnl = useTradingStore((s) => s.totalPnl);
 
+  // Demo mode shows simulated positions; the trading-store P&L mirror isn't fed
+  // in explore, so derive the header total from the demo positions themselves.
+  const positions = isExplore ? getDemoPositions() : query.data;
+  const isLoading = isExplore ? false : query.isLoading;
   const openPositions = positions?.filter((p) => p.quantity !== 0) ?? [];
+  const totalPnl = isExplore
+    ? openPositions.reduce((sum, p) => sum + p.pnl, 0)
+    : storePnl;
   const totalPnlPositive = totalPnl >= 0;
 
   return (

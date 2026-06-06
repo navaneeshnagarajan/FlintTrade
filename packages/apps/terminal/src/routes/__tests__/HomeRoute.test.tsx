@@ -148,6 +148,7 @@ vi.mock("@/atoms/marketAtoms", () => ({
 // ---------------------------------------------------------------------------
 import HomeRoute from "../HomeRoute";
 import { DEFAULT_CARDS, useBentoStore } from "@/stores/bentoStore";
+import { useModeStore } from "@/stores/modeStore";
 
 function createDataTransfer() {
   const data = new Map<string, string>();
@@ -161,6 +162,10 @@ function createDataTransfer() {
 
 beforeEach(() => {
   localStorage.clear();
+  // These tests assert against the mocked REST hook fixtures; the dashboard
+  // cards now branch on mode (explore => demo data), so pin to a non-explore
+  // mode so the fixtures flow. Demo-mode behaviour is covered separately.
+  useModeStore.setState({ mode: "live" });
   useBentoStore.setState({
     cards: DEFAULT_CARDS.map((card) => ({ ...card })),
     presets: [],
