@@ -354,3 +354,37 @@ class TestExpiryParamNormalisation:
             {"symbol": "NIFTY", "exchange": "NFO", "expiry_date": "26MAR26"},
         )
         assert resp.status_code == 200
+
+
+class TestSampleDataHonesty:
+    """No broker is connected in tests, so every option-chain analysis endpoint
+    serves sample data and MUST say so (is_sample_data=True). Before this, several
+    endpoints omitted the flag or computed it from ``registry is None`` — which
+    mislabelled the sample fallback as live whenever a (disconnected) registry was
+    present, presenting fabricated data as real (a house-rule violation)."""
+
+    _BODY = {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"}
+
+    def test_gex_reports_sample(self, client):
+        _, body = _post(client, "/api/v1/gex", self._BODY)
+        assert body["is_sample_data"] is True
+
+    def test_volsurface_reports_sample(self, client):
+        _, body = _post(client, "/api/v1/volsurface", {**self._BODY, "expiries": ["26MAR26"]})
+        assert body["is_sample_data"] is True
+
+    def test_ivsmile_reports_sample(self, client):
+        _, body = _post(client, "/api/v1/ivsmile", self._BODY)
+        assert body["is_sample_data"] is True
+
+    def test_straddlepnl_reports_sample(self, client):
+        _, body = _post(client, "/api/v1/straddlepnl", self._BODY)
+        assert body["is_sample_data"] is True
+
+    def test_oiprofile_reports_sample(self, client):
+        _, body = _post(client, "/api/v1/oiprofile", self._BODY)
+        assert body["is_sample_data"] is True
+
+    def test_maxpain_reports_sample(self, client):
+        _, body = _post(client, "/api/v1/maxpain", self._BODY)
+        assert body["is_sample_data"] is True

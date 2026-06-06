@@ -268,6 +268,7 @@ def gex_endpoint() -> Any:
         except Exception as exc:
             logger.warning("Live GEX data unavailable, using sample: %s", exc)
 
+    used_sample = snapshot is None
     if snapshot is None:
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("GEX: using sample data for %s %s", symbol, exchange)
@@ -321,7 +322,7 @@ def gex_endpoint() -> Any:
         "spot": spot,
         "lot_size": lot_size,
         "data": gex_data,
-        "is_sample_data": snapshot.underlying == symbol and registry is None,
+        "is_sample_data": used_sample,
     })
 
 
@@ -365,6 +366,7 @@ def vol_surface_endpoint() -> Any:
             logger.warning("Live vol surface data unavailable, using sample: %s", exc)
             chains_by_expiry = {}
 
+    used_sample = not chains_by_expiry
     if not chains_by_expiry:
         chains_by_expiry = _make_sample_chains_by_expiry(spot=spot, expiries=expiries)
         logger.info("VolSurface: using sample data for %s %s", symbol, exchange)
@@ -390,6 +392,7 @@ def vol_surface_endpoint() -> Any:
         "symbol": symbol,
         "exchange": exchange,
         "spot": spot,
+        "is_sample_data": used_sample,
         "data": vol_surface_data,
     })
 
@@ -429,6 +432,7 @@ def iv_smile_endpoint() -> Any:
         except Exception as exc:
             logger.warning("Live IV smile data unavailable, using sample: %s", exc)
 
+    used_sample = snapshot is None
     if snapshot is None:
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("IVSmile: using sample data for %s %s", symbol, exchange)
@@ -466,6 +470,7 @@ def iv_smile_endpoint() -> Any:
         "exchange": exchange,
         "expiry": expiry,
         "spot": spot,
+        "is_sample_data": used_sample,
         "data": iv_smile_data,
     })
 
@@ -518,6 +523,7 @@ def straddle_pnl_endpoint() -> Any:
         except Exception as exc:
             logger.warning("Live straddle candle data unavailable, using sample: %s", exc)
 
+    used_sample = not candles
     if not candles:
         candles = _make_sample_candles(spot=spot)
         logger.info("StraddlePnL: using sample candle data for %s", symbol)
@@ -576,6 +582,7 @@ def straddle_pnl_endpoint() -> Any:
         "expiry": expiry,
         "interval": interval,
         "spot": spot,
+        "is_sample_data": used_sample,
         "data": data,
     })
 
@@ -623,6 +630,7 @@ def oi_profile_endpoint() -> Any:
         except Exception as exc:
             logger.warning("Live OI profile data unavailable, using sample: %s", exc)
 
+    used_sample = snapshot is None
     if snapshot is None:
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("OIProfile: using sample data for %s %s", symbol, exchange)
@@ -668,6 +676,7 @@ def oi_profile_endpoint() -> Any:
         "exchange": exchange,
         "expiry": expiry,
         "spot": spot,
+        "is_sample_data": used_sample,
         "data": data,
     })
 
@@ -707,6 +716,7 @@ def max_pain_endpoint() -> Any:
         except Exception as exc:
             logger.warning("Live max pain data unavailable, using sample: %s", exc)
 
+    used_sample = snapshot is None
     if snapshot is None:
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("MaxPain: using sample data for %s %s", symbol, exchange)
@@ -719,6 +729,7 @@ def max_pain_endpoint() -> Any:
         "exchange": exchange,
         "expiry": expiry,
         "spot": spot,
+        "is_sample_data": used_sample,
         "data": {
             "max_pain_strike": result.max_pain_strike,
             "total_loss_at_max_pain": result.total_loss_at_max_pain,
