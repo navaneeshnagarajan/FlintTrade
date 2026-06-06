@@ -50,25 +50,23 @@ export function approxGreeks(
   ivDecimal: number,
   dte: number,
 ): Greeks {
-  // Guard strike > 0 too: gamma divides by `strike`, so a 0 strike would emit
-  // Infinity into the grid.
-  if (!(ivDecimal > 0) || !(atmStrike > 0) || !(strike > 0)) {
+  // Guard strike > 0 (gamma divides by `strike` → Infinity otherwise) and
+  // dte > 0: with no time value the time-decay greeks collapse to 0, so the
+  // whole cell is reported inert (delta 0 too) rather than a lone delta that
+  // would look meaningful inside a "Live" grid.
+  if (!(ivDecimal > 0) || !(atmStrike > 0) || !(strike > 0) || !(dte > 0)) {
     return { delta: 0, gamma: 0, theta: 0, vega: 0 };
   }
   const mv = (strike - atmStrike) / atmStrike; // log-moneyness proxy
   const T = dte / 365;
   // d1: ITM call (strike below ATM, mv<0) → positive d1 → high delta.
-  const d1 =
-    T > 0 ? (-mv + 0.5 * ivDecimal * ivDecimal * T) / (ivDecimal * Math.sqrt(T)) : mv < 0 ? 3 : -3;
+  const d1 = (-mv + 0.5 * ivDecimal * ivDecimal * T) / (ivDecimal * Math.sqrt(T));
   const delta = 1 / (1 + Math.exp(-1.7 * d1)); // logistic approximation
   const pdf = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
-  const gamma = T > 0 ? (pdf / (strike * ivDecimal * Math.sqrt(T))) * 1000 : 0;
+  const gamma = (pdf / (strike * ivDecimal * Math.sqrt(T))) * 1000;
   const theta =
-    T > 0
-      ? -(ivDecimal * atmStrike * Math.exp(-0.5 * mv * mv * 100)) /
-        Math.sqrt(365 * dte * 2 * Math.PI)
-      : 0;
-  const vega = T > 0 ? pdf * Math.sqrt(T) : 0;
+    -(ivDecimal * atmStrike * Math.exp(-0.5 * mv * mv * 100)) / Math.sqrt(365 * dte * 2 * Math.PI);
+  const vega = pdf * Math.sqrt(T);
   return {
     delta: Number(delta.toFixed(4)),
     gamma: Number(gamma.toFixed(6)),
@@ -101,7 +99,10 @@ function labelFor(expiry: string): string {
  * usable strike is shared, so the caller can fall back to sample data.
  */
 export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRow[] | null {
-  const curves = iv?.curves ?? [];
+  // Drop degenerate expiries upfront: a non-positive days-to-expiry produces
+  // all-zero time-decay greeks, so such a row must never appear in a "Live"
+  // grid (even alongside viable rows).
+  const curves = (iv?.curves ?? []).filter((c) => c.days_to_expiry > 0);
   if (curves.length === 0) return null;
 
   // Per-curve: strike → mid-IV (decimal), keeping only strikes with positive IV.
@@ -137,11 +138,6 @@ export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRo
       cells,
     };
   });
-
-  // Time-decay greeks (gamma/theta/vega) collapse to zero when T <= 0, so a
-  // grid with no positive days-to-expiry is degenerate — refuse it rather than
-  // badge an all-zero grid as "Live"; the caller falls back to sample data.
-  if (rows.every((r) => !(r.dte > 0))) return null;
 
   return rows;
 }

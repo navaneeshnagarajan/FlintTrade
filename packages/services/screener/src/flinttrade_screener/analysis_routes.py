@@ -24,6 +24,7 @@ is set up by ``create_flask_app()`` in packages/core/core/src/app.py.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict
 from datetime import date
 from typing import Any
@@ -81,19 +82,35 @@ def _body_expiries(body: dict[str, Any], default: list[str]) -> list[str]:
     return [single] if single else default
 
 
-def _days_to_expiry(expiry: str) -> int:
-    """Whole calendar days from today to an ``DDMMMYY`` expiry (>= 0).
+_ISO_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 
-    Returns 0 when the expiry cannot be parsed, so callers degrade gracefully
-    rather than raising. Consumers that derive time-decay greeks (the terminal's
-    GreeksSurface and Greeks-heatmap widgets) need a real time-to-expiry — a
-    hardcoded 0 collapses gamma/theta/vega to zero.
+
+def _days_to_expiry(expiry: str) -> int:
+    """Whole calendar days from today to an expiry (>= 0).
+
+    Accepts the three forms seen in the wild: ISO ``YYYY-MM-DD`` (what the
+    terminal's expiry API actually returns), the strict ``DDMMMYY`` form, and
+    the dashed ``DD-MMM-YY`` form. Returns 0 when the expiry cannot be parsed,
+    so callers degrade gracefully rather than raising. Consumers that derive
+    time-decay greeks (the terminal's GreeksSurface and Greeks-heatmap widgets)
+    need a real time-to-expiry — a hardcoded 0 collapses gamma/theta/vega to
+    zero.
     """
+    if not isinstance(expiry, str):
+        return 0
+
+    # ISO YYYY-MM-DD (the format getExpiry emits) — handled first.
+    iso = _ISO_DATE_RE.fullmatch(expiry.strip())
+    if iso:
+        try:
+            return max(0, (date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3))) - date.today()).days)
+        except (ValueError, TypeError):
+            return 0
+
+    # Strict DDMMMYY or dashed/spaced DD-MMM-YY.
     from .symbol_converter import parse_expiry_date  # noqa: PLC0415
 
-    # Accept both the strict ``DDMMMYY`` form and the dashed ``DD-MMM-YY`` the
-    # expiry API returns.
-    cleaned = expiry.replace("-", "").replace(" ", "").upper() if isinstance(expiry, str) else expiry
+    cleaned = expiry.replace("-", "").replace(" ", "").upper()
     try:
         return max(0, (parse_expiry_date(cleaned) - date.today()).days)
     except (ValueError, TypeError):

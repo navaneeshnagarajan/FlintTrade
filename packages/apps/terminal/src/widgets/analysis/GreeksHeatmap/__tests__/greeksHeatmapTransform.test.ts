@@ -3,9 +3,12 @@ import type { IVSmileData } from "@/types/api";
 import { approxGreeks, buildGreeksHeatmap } from "../greeksHeatmapTransform";
 
 describe("approxGreeks", () => {
-  it("returns zeros for non-positive IV or ATM", () => {
+  it("returns zeros for non-positive IV, ATM, strike or dte", () => {
     expect(approxGreeks(22000, 22000, 0, 7)).toEqual({ delta: 0, gamma: 0, theta: 0, vega: 0 });
     expect(approxGreeks(22000, 0, 0.15, 7)).toEqual({ delta: 0, gamma: 0, theta: 0, vega: 0 });
+    expect(approxGreeks(0, 22000, 0.15, 7)).toEqual({ delta: 0, gamma: 0, theta: 0, vega: 0 });
+    // dte<=0 → no time value → fully inert (delta 0 too, not a lone delta).
+    expect(approxGreeks(22000, 22000, 0.15, 0)).toEqual({ delta: 0, gamma: 0, theta: 0, vega: 0 });
   });
 
   it("gives an ATM call delta near 0.5", () => {

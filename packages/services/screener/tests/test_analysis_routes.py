@@ -370,6 +370,18 @@ class TestDaysToExpiry:
         future = date.today() + timedelta(days=30)
         assert _days_to_expiry(format_expiry_date(future)) == 30
 
+    def test_accepts_iso_form_the_expiry_api_returns(self):
+        # getExpiry emits ISO YYYY-MM-DD; this is what the live Greeks-heatmap
+        # path feeds straight through to the IV-smile route.
+        from datetime import date, timedelta
+
+        from flinttrade_screener.analysis_routes import _days_to_expiry
+
+        future = date.today() + timedelta(days=21)
+        assert _days_to_expiry(future.isoformat()) == 21
+        # A past ISO date clamps to 0.
+        assert _days_to_expiry("2020-01-01") == 0
+
     def test_accepts_dashed_form_from_the_expiry_api(self):
         from datetime import date, timedelta
 
