@@ -309,3 +309,37 @@ export interface OptimiserReport {
 /** The most recent overnight optimisation report, or null when none exist yet. */
 export const getLatestOptimiserReport = () =>
   get<{ report: OptimiserReport | null }>("ai/optimiser/reports/latest");
+
+// ---------------------------------------------------------------------------
+// Obsidian vault (obsidian_routes.py -> ObsidianVault). Read-only browsing.
+// All routes return an honest 503 when FLINTTRADE_OBSIDIAN_VAULT is unset.
+// ---------------------------------------------------------------------------
+
+export interface ObsidianStatus {
+  configured: boolean;
+  available: boolean;
+  vault_path: string | null;
+}
+
+export interface ObsidianSearchHit {
+  path: string;
+  snippet: string;
+}
+
+/** Vault configuration + availability (never 503 — reports configured=false). */
+export const getObsidianStatus = () =>
+  get<ObsidianStatus>("ai/obsidian/status");
+
+/** Every note's vault-relative path (sorted). */
+export const listObsidianNotes = () =>
+  get<string[]>("ai/obsidian/notes");
+
+/** Read a single note's markdown by its vault-relative path. */
+export const readObsidianNote = (path: string) =>
+  get<{ path: string; content: string }>(
+    "ai/obsidian/note?path=" + encodeURIComponent(path),
+  );
+
+/** Case-insensitive search across note names and bodies. */
+export const searchObsidianNotes = (query: string) =>
+  get<ObsidianSearchHit[]>("ai/obsidian/search?q=" + encodeURIComponent(query));

@@ -33,6 +33,7 @@ const lazyWidgets = {
   aiadvisor: lazy(() => import("@/widgets/utility/AIAdvisor/AIAdvisorWidget")),
   openclaw: lazy(() => import("@/widgets/utility/OpenClaw/OpenClawWidget")),
   aiteam: lazy(() => import("@/widgets/utility/AITeam/AITeamWidget")),
+  obsidian: lazy(() => import("@/widgets/utility/Obsidian/ObsidianWidget")),
 
   // New trading widgets
   intradaypnl: lazy(() => import("@/widgets/trading/IntradayPnL/IntradayPnLWidget")),
@@ -214,6 +215,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "aiadvisor", name: "AI Advisor", icon: "Bot", category: "Utility", description: "AI-powered trade assistant for strategy ideas, analysis, and Q&A" },
   { id: "openclaw", name: "OpenClaw Agents", icon: "Bot", category: "Utility", description: "Deploy, monitor, and stop autonomous trading agents on the OpenClaw gateway" },
   { id: "aiteam", name: "AI Team", icon: "Users", category: "Utility", description: "Multi-agent consensus analysis — technical, fundamental, sentiment, and risk specialists vote on a symbol" },
+  { id: "obsidian", name: "Obsidian Vault", icon: "BookText", category: "Utility", description: "Browse and search the Obsidian vault the AI agent reads for context and journals decisions into" },
   { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Pre-market gap scanner filtering by OI buildup, IV rank, and price action" },
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Price and indicator alerts with Telegram and in-app notifications" },
   { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "OpenAlgo connection status, WebSocket latency, and API health metrics" },
