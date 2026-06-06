@@ -49,6 +49,15 @@ class BrokerRouter:
         # never bypass safety. None → no throttle (unchanged behaviour).
         self._rate_limiter = rate_limiter
 
+    @property
+    def rate_limiter(self) -> Any | None:
+        """The per-broker rate limiter (or None when unthrottled).
+
+        Exposed read-only so the rate-limits settings API can snapshot the live
+        effective limits and apply runtime overrides.
+        """
+        return self._rate_limiter
+
     async def _throttle(self, adapter_id: str, kind: str) -> None:
         if self._rate_limiter is not None:
             await self._rate_limiter.acquire(adapter_id, kind)

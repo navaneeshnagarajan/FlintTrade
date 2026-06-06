@@ -45,9 +45,37 @@ async function del<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function put<T>(path: string, body?: object): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const msg = await extractErrorMessage(res);
+    throw new Error(`Gateway: ${msg}`);
+  }
+  return (await res.json()) as T;
+}
+
+/** Per-broker API rate limits in requests/sec (0 = unlimited). */
+export type BrokerRateLimits = Record<string, { order: number; data: number }>;
+
 export const gatewayApi = {
   listBrokers: () =>
     get<{ brokers: BrokerInfo[] }>("/brokers").then((r) => r.brokers),
+
+  /** Live effective per-broker API rate limits (requests/sec). */
+  getRateLimits: () =>
+    get<{ limits: BrokerRateLimits }>("/rate-limits").then((r) => r.limits),
+
+  /** Set a broker's order/data rate limit; applies live + persists. */
+  setRateLimit: (brokerId: string, order: number | undefined, data: number | undefined) =>
+    put<{ limits: BrokerRateLimits }>("/rate-limits", {
+      broker_id: brokerId,
+      ...(order !== undefined ? { order } : {}),
+      ...(data !== undefined ? { data } : {}),
+    }).then((r) => r.limits),
 
   listAccounts: () =>
     get<{ accounts: BrokerAccount[] }>("/accounts").then((r) => r.accounts),

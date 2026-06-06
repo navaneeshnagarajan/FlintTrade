@@ -95,3 +95,44 @@ def test_from_capabilities_tolerates_comment_keys():
     rl = BrokerRateLimiter.from_capabilities(caps, overrides=overrides)
     assert rl._rate("dhan", "order") == 5.0  # real override still applied
     assert rl._rate("_comment", "order") == 0.0  # comment key ignored, no crash
+
+
+def test_snapshot_returns_a_deep_copy():
+    rl = BrokerRateLimiter({"dhan": {"order": 5.0, "data": 2.0}})
+    snap = rl.snapshot()
+    assert snap == {"dhan": {"order": 5.0, "data": 2.0}}
+    snap["dhan"]["order"] = 999.0  # mutating the copy must not affect the limiter
+    assert rl._rate("dhan", "order") == 5.0
+
+
+def test_apply_override_updates_only_specified_kinds():
+    rl = BrokerRateLimiter({"dhan": {"order": 5.0, "data": 2.0}})
+    rl.apply_override("dhan", order=8.0)
+    assert rl._rate("dhan", "order") == 8.0
+    assert rl._rate("dhan", "data") == 2.0  # untouched
+    # A previously-unknown broker can be configured too.
+    rl.apply_override("newbroker", data=3.0)
+    assert rl._rate("newbroker", "data") == 3.0
+    assert rl._rate("newbroker", "order") == 0.0  # unset → unlimited
+
+
+@pytest.mark.asyncio
+async def test_override_takes_effect_on_the_next_acquire():
+    # Lowering a limit must change throttle behaviour live (acquire rebuilds the
+    # bucket when the configured rate changes).
+    t = {"now": 0.0}
+    slept: list[float] = []
+    rl = BrokerRateLimiter(
+        {"x": {"order": 100.0}},
+        clock=lambda: t["now"],
+        sleep=lambda s: slept.append(s) or _noop(),
+    )
+    await rl.acquire("x", "order")  # consumes from the 100/s bucket, no wait
+    rl.apply_override("x", order=1.0)  # throttle hard
+    await rl.acquire("x", "order")  # new 1/s bucket starts full → 1 token, no wait
+    await rl.acquire("x", "order")  # second within the same instant → must wait
+    assert slept and slept[-1] > 0
+
+
+async def _noop() -> None:
+    return None

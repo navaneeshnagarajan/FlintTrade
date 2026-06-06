@@ -117,3 +117,32 @@ class BrokerRateLimiter:
             wait = bucket.take(self._clock())
         if wait > 0:
             await self._sleep(wait)
+
+    def snapshot(self) -> dict[str, dict[str, float]]:
+        """Return the current effective per-broker limits (a deep copy).
+
+        ``{broker_id: {"order": per_sec, "data": per_sec}}``. Read by the
+        rate-limits settings API so the UI shows the live values.
+        """
+        return {broker_id: dict(kinds) for broker_id, kinds in self._limits.items()}
+
+    def apply_override(
+        self,
+        broker_id: str,
+        *,
+        order: float | None = None,
+        data: float | None = None,
+    ) -> None:
+        """Update a broker's order/data limit at runtime (0 = unlimited).
+
+        Only the supplied kinds change; the rest keep their current value. The
+        next :meth:`acquire` rebuilds the affected bucket automatically because
+        it recreates a bucket whenever the configured rate differs (see the
+        ``bucket.rate != rate`` check), so no bucket bookkeeping is needed here.
+        """
+        current = dict(self._limits.get(broker_id, {}))
+        if order is not None:
+            current["order"] = float(order)
+        if data is not None:
+            current["data"] = float(data)
+        self._limits[broker_id] = current

@@ -75,6 +75,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BrokerRecommendations } from "@/components/account/BrokerRecommendations";
 import { AccountStatusPanel } from "@/components/account/AccountStatusPanel";
+import { BrokerRateLimitsPanel } from "@/components/account/BrokerRateLimitsPanel";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -430,6 +431,9 @@ function AccountsTab() {
 
       {/* Smart routing suggestions — which native broker for which job */}
       <BrokerRecommendations />
+
+      {/* Per-broker API rate-limit controls */}
+      <BrokerRateLimitsPanel />
 
       {/* Actions row */}
       <div className="flex items-center justify-between">

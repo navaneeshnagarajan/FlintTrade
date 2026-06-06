@@ -463,3 +463,85 @@ def otp_verify() -> Any:
     except Exception:
         logger.exception("OTP verify failed for broker=%r account=%r", broker, account_id)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Per-broker API rate limits (Account Manager — customisable throttles)
+# ---------------------------------------------------------------------------
+
+
+def _live_rate_limiter() -> Any | None:
+    """The running BrokerRouter's rate limiter, or None when unthrottled."""
+    router = current_app.config.get("BROKER_ROUTER")
+    return getattr(router, "rate_limiter", None) if router is not None else None
+
+
+def _parse_rate(value: Any) -> tuple[bool, float | None]:
+    """Validate an optional non-negative rate. Returns (ok, value_or_None)."""
+    if value is None:
+        return True, None
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return False, None
+    return (rate >= 0, rate if rate >= 0 else None)
+
+
+@gateway_bp.route("/rate-limits", methods=["GET"])
+def get_rate_limits() -> Any:
+    """Return the live effective per-broker API rate limits (requests/sec).
+
+    Shape: ``{ "limits": { broker_id: { "order": N, "data": M } } }`` where 0
+    means unlimited. Empty when no limiter is active (no adapters with limits).
+    """
+    limiter = _live_rate_limiter()
+    limits = limiter.snapshot() if limiter is not None else {}
+    return jsonify({"status": "success", "limits": limits})
+
+
+@gateway_bp.route("/rate-limits", methods=["PUT"])
+def update_rate_limits() -> Any:
+    """Set a broker's order/data API rate limit (requests/sec; 0 = unlimited).
+
+    Body: ``{ "broker_id": str, "order"?: number, "data"?: number }``. The change
+    is applied live to the running limiter AND persisted to workspace.json
+    (``brokers.rate_limits``) so it survives a restart.
+    """
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    broker_id = str(body.get("broker_id", "")).strip()
+    if not broker_id:
+        return jsonify({"status": "error", "message": "broker_id is required"}), 400
+
+    ok_order, order = _parse_rate(body.get("order"))
+    ok_data, data = _parse_rate(body.get("data"))
+    if not ok_order or not ok_data:
+        return jsonify({"status": "error", "message": "order/data must be non-negative numbers"}), 400
+    if order is None and data is None:
+        return jsonify({"status": "error", "message": "provide at least one of order/data"}), 400
+
+    # Apply live to the running limiter (if any).
+    limiter = _live_rate_limiter()
+    if limiter is not None:
+        limiter.apply_override(broker_id, order=order, data=data)
+
+    # Persist as the permanent default in workspace.json.
+    try:
+        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
+
+        ws = Workspace()
+        overrides = ws.get("brokers.rate_limits", {})
+        overrides = dict(overrides) if isinstance(overrides, dict) else {}
+        existing = overrides.get(broker_id)
+        entry = dict(existing) if isinstance(existing, dict) else {}
+        if order is not None:
+            entry["order"] = order
+        if data is not None:
+            entry["data"] = data
+        overrides[broker_id] = entry
+        ws.set("brokers.rate_limits", overrides)
+        ws.save()
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+        logger.warning("Could not persist rate-limit override for %s: %s", broker_id, exc)
+
+    limits = limiter.snapshot() if limiter is not None else {}
+    return jsonify({"status": "success", "limits": limits})
