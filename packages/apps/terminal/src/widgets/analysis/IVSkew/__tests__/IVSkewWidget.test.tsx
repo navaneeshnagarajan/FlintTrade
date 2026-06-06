@@ -6,9 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // Mocks
 // ---------------------------------------------------------------------------
 //
-// When connected, the widget fetches the nearest expiries' option chains
-// (getExpiry + getOptionChain) and derives the skew curves. We mock both so we
-// can exercise the live ("Live" badge) and sample ("Sample data") paths.
+// When connected, the widget fetches the live IV smile (getFtIVSmile) and maps
+// it to skew curves. We mock it so we can exercise the live ("Live" badge) and
+// sample ("Sample data") paths.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -18,30 +18,37 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
-vi.mock("@/services/api", () => ({
-  getExpiry: vi.fn(),
-  getOptionChain: vi.fn(),
+vi.mock("@/services/ftApi.analysis", () => ({
+  getFtIVSmile: vi.fn(),
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { getExpiry, getOptionChain } from "@/services/api";
+import { getFtIVSmile } from "@/services/ftApi.analysis";
 import IVSkewWidget, {
   SAMPLE_IV_SKEW_DATA,
   type IVSkewCurve,
 } from "../IVSkewWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
-const mockGetExpiry = getExpiry as ReturnType<typeof vi.fn>;
-const mockGetChain = getOptionChain as ReturnType<typeof vi.fn>;
+const mockGetSmile = getFtIVSmile as ReturnType<typeof vi.fn>;
 
-function liveChain() {
+function liveSmile() {
   return {
-    underlying_ltp: 22400,
-    atm_strike: 22400,
-    chain: [
-      { strike: 22200, ce: { iv: 15.5, delta: 0.65 }, pe: { iv: 16.0, delta: -0.35 } },
-      { strike: 22400, ce: { iv: 14.8, delta: 0.5 }, pe: { iv: 14.8, delta: -0.5 } },
-      { strike: 22600, ce: { iv: 14.1, delta: 0.25 }, pe: { iv: 14.3, delta: -0.75 } },
+    underlying: "NIFTY",
+    spot_price: 22400,
+    curves: [
+      {
+        expiry: "10-APR-26",
+        days_to_expiry: 1,
+        atm_iv: 0.148,
+        atm_strike: 22400,
+        skew_25delta: 0.03,
+        points: [
+          { strike: 22200, call_iv: 0.155, put_iv: 0.16, moneyness: 0.991 },
+          { strike: 22400, call_iv: 0.148, put_iv: 0.148, moneyness: 1.0 },
+          { strike: 22600, call_iv: 0.141, put_iv: 0.143, moneyness: 1.009 },
+        ],
+      },
     ],
   };
 }
@@ -66,8 +73,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   mockConnected.mockReturnValue(false);
-  mockGetExpiry.mockResolvedValue({ expiry: [] });
-  mockGetChain.mockResolvedValue({ chain: [] });
+  mockGetSmile.mockResolvedValue({ underlying: "NIFTY", spot_price: 0, curves: [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -86,31 +92,28 @@ describe("IVSkewWidget", () => {
     expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not fetch chains when disconnected", () => {
+  it("does not fetch the IV smile when disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(mockGetExpiry).not.toHaveBeenCalled();
-    expect(mockGetChain).not.toHaveBeenCalled();
+    expect(mockGetSmile).not.toHaveBeenCalled();
   });
 
-  it("flips to a Live badge once the option chain yields a skew curve", async () => {
+  it("flips to a Live badge once the IV smile yields a skew curve", async () => {
     mockConnected.mockReturnValue(true);
-    mockGetExpiry.mockResolvedValue({ expiry: ["10-APR-26", "24-APR-26"] });
-    mockGetChain.mockResolvedValue(liveChain());
+    mockGetSmile.mockResolvedValue(liveSmile());
     renderWidget();
 
     await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
-    expect(mockGetChain).toHaveBeenCalled();
+    expect(mockGetSmile).toHaveBeenCalled();
   });
 
-  it("falls back to Sample data when connected but the chain is empty", async () => {
+  it("falls back to Sample data when connected but the IV smile has no curves", async () => {
     mockConnected.mockReturnValue(true);
-    mockGetExpiry.mockResolvedValue({ expiry: ["10-APR-26"] });
-    mockGetChain.mockResolvedValue({ chain: [] });
+    mockGetSmile.mockResolvedValue({ underlying: "NIFTY", spot_price: 0, curves: [] });
     renderWidget();
 
-    await waitFor(() => expect(mockGetChain).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetSmile).toHaveBeenCalled());
     expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });

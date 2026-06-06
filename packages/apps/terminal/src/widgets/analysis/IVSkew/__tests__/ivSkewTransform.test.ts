@@ -1,121 +1,105 @@
 import { describe, it, expect } from "vitest";
-import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
-import {
-  normaliseIv,
-  skew25Delta,
-  curveFromChain,
-  buildIVSkewData,
-} from "../ivSkewTransform";
+import type { IVSmileData } from "@/types/api";
+import { normaliseIv, mapIVSmileToSkew } from "../ivSkewTransform";
 
 describe("normaliseIv", () => {
-  it("returns 0 for missing/empty rows", () => {
-    expect(normaliseIv(null)).toBe(0);
-    expect(normaliseIv(undefined)).toBe(0);
-    expect(normaliseIv({})).toBe(0);
+  it("returns 0 for non-positive / non-finite values", () => {
+    expect(normaliseIv(0)).toBe(0);
+    expect(normaliseIv(-5)).toBe(0);
+    expect(normaliseIv(Number.NaN)).toBe(0);
   });
 
-  it("passes through a decimal IV unchanged", () => {
-    expect(normaliseIv({ iv: 0.148 })).toBeCloseTo(0.148, 6);
+  it("passes a decimal IV through unchanged", () => {
+    expect(normaliseIv(0.148)).toBeCloseTo(0.148, 6);
   });
 
   it("converts a percentage IV (>1.5) to a decimal", () => {
-    expect(normaliseIv({ iv: 14.8 })).toBeCloseTo(0.148, 6);
-  });
-
-  it("prefers iv over implied_volatility, falling back when absent", () => {
-    expect(normaliseIv({ implied_volatility: 16.0 })).toBeCloseTo(0.16, 6);
-    expect(normaliseIv({ iv: 12.0, implied_volatility: 99 })).toBeCloseTo(0.12, 6);
-  });
-
-  it("ignores non-positive / non-finite IV", () => {
-    expect(normaliseIv({ iv: 0 })).toBe(0);
-    expect(normaliseIv({ iv: -5 })).toBe(0);
-    expect(normaliseIv({ iv: Number.NaN })).toBe(0);
+    expect(normaliseIv(14.8)).toBeCloseTo(0.148, 6);
   });
 });
 
-describe("skew25Delta", () => {
-  it("returns put25IV - call25IV using the strikes closest to 0.25 delta", () => {
-    const chain = [
-      { strike: 100, ce: { delta: 0.7, iv: 20 }, pe: { delta: -0.3, iv: 24 } },
-      { strike: 110, ce: { delta: 0.25, iv: 18 }, pe: { delta: -0.75, iv: 30 } }, // 25Δ call → 18%
-      { strike: 90, ce: { delta: 0.9, iv: 26 }, pe: { delta: -0.25, iv: 27 } },   // 25Δ put  → 27%
-    ];
-    // 0.27 - 0.18 = 0.09
-    expect(skew25Delta(chain)).toBeCloseTo(0.09, 6);
-  });
-
-  it("returns 0 (flat) when deltas are absent", () => {
-    const chain = [
-      { strike: 100, ce: { iv: 20 }, pe: { iv: 24 } },
-      { strike: 110, ce: { iv: 18 }, pe: { iv: 30 } },
-    ];
-    expect(skew25Delta(chain)).toBe(0);
-  });
-});
-
-describe("curveFromChain", () => {
-  const raw: RawOptionChain = {
-    underlying_ltp: 22400,
-    atm_strike: 22400,
-    chain: [
-      { strike: 22200, ce: { iv: 15.5, delta: 0.65 }, pe: { iv: 16.0, delta: -0.35 } },
-      { strike: 22400, ce: { iv: 14.8, delta: 0.5 }, pe: { iv: 14.8, delta: -0.5 } },
-      { strike: 22600, ce: { iv: 14.1, delta: 0.25 }, pe: { iv: 14.3, delta: -0.75 } },
+function smile(): IVSmileData {
+  return {
+    underlying: "NIFTY",
+    spot_price: 22400,
+    curves: [
+      {
+        expiry: "10-Apr-2026",
+        days_to_expiry: 1,
+        atm_iv: 0.148,
+        atm_strike: 22400,
+        skew_25delta: 0.032,
+        points: [
+          { strike: 22200, call_iv: 0.155, put_iv: 0.16, moneyness: 0.991 },
+          { strike: 22400, call_iv: 0.148, put_iv: 0.148, moneyness: 1.0 },
+          { strike: 22600, call_iv: 0.141, put_iv: 0.143, moneyness: 1.009 },
+        ],
+      },
+      {
+        expiry: "24-Apr-2026",
+        days_to_expiry: 15,
+        atm_iv: 0.162,
+        atm_strike: 22400,
+        skew_25delta: 0.024,
+        points: [
+          { strike: 22400, call_iv: 0.162, put_iv: 0.162, moneyness: 1.0 },
+          { strike: 22600, call_iv: 0.156, put_iv: 0.158, moneyness: 1.009 },
+        ],
+      },
     ],
   };
+}
 
-  it("builds points with moneyness and normalised decimal IVs", () => {
-    const curve = curveFromChain("10-Apr-2026", raw);
-    expect(curve).not.toBeNull();
-    expect(curve!.points).toHaveLength(3);
-    const atm = curve!.points.find((p) => p.strike === 22400)!;
-    expect(atm.moneyness).toBeCloseTo(1.0, 4);
-    expect(atm.call_iv).toBeCloseTo(0.148, 4);
+describe("mapIVSmileToSkew", () => {
+  it("maps curves, points, spot and symbol from the IV-smile payload", () => {
+    const data = mapIVSmileToSkew(smile(), "2026-04-09T10:15:00")!;
+    expect(data.symbol).toBe("NIFTY");
+    expect(data.spot).toBe(22400);
+    expect(data.curves).toHaveLength(2);
+    const c0 = data.curves[0];
+    expect(c0.atm_strike).toBe(22400);
+    expect(c0.atm_iv).toBeCloseTo(0.148, 6);
+    expect(c0.skew_25delta).toBeCloseTo(0.032, 6);
+    expect(c0.points).toHaveLength(3);
+    const atm = c0.points.find((p) => p.strike === 22400)!;
+    expect(atm.moneyness).toBeCloseTo(1.0, 6);
+    expect(atm.call_iv).toBeCloseTo(0.148, 6);
   });
 
-  it("uses the chain's atm_strike and its IV", () => {
-    const curve = curveFromChain("10-Apr-2026", raw);
-    expect(curve!.atm_strike).toBe(22400);
-    expect(curve!.atm_iv).toBeCloseTo(0.148, 4);
+  it("normalises percentage IVs to decimals", () => {
+    const pct = smile();
+    pct.curves[0].atm_iv = 14.8;
+    pct.curves[0].points = pct.curves[0].points.map((p) => ({
+      ...p,
+      call_iv: p.call_iv * 100,
+      put_iv: p.put_iv * 100,
+    }));
+    const data = mapIVSmileToSkew(pct, "t")!;
+    expect(data.curves[0].atm_iv).toBeCloseTo(0.148, 6);
+    expect(data.curves[0].points[0].call_iv).toBeLessThan(1);
   });
 
-  it("returns null for an empty chain", () => {
-    expect(curveFromChain("x", { chain: [] })).toBeNull();
-    expect(curveFromChain("x", {})).toBeNull();
+  it("returns null when there are no curves", () => {
+    expect(mapIVSmileToSkew(null, "t")).toBeNull();
+    expect(mapIVSmileToSkew(undefined, "t")).toBeNull();
+    expect(mapIVSmileToSkew({ underlying: "X", spot_price: 0, curves: [] }, "t")).toBeNull();
   });
 
-  it("falls back to the nearest strike when atm_strike is absent", () => {
-    const noAtm: RawOptionChain = { underlying_ltp: 22410, chain: raw.chain };
-    const curve = curveFromChain("x", noAtm);
-    expect(curve!.atm_strike).toBe(22400); // nearest to 22410
-  });
-});
-
-describe("buildIVSkewData", () => {
-  const raw: RawOptionChain = {
-    underlying_ltp: 22400,
-    atm_strike: 22400,
-    chain: [{ strike: 22400, ce: { iv: 14.8, delta: 0.5 }, pe: { iv: 14.8, delta: -0.5 } }],
-  };
-
-  it("assembles curves and spot from per-expiry chains", () => {
-    const data = buildIVSkewData(
-      "NIFTY",
-      [
-        { expiry: "10-Apr-2026", raw },
-        { expiry: "24-Apr-2026", raw },
+  it("drops curves whose points carry no positive IV", () => {
+    const empty: IVSmileData = {
+      underlying: "NIFTY",
+      spot_price: 22400,
+      curves: [
+        {
+          expiry: "x",
+          days_to_expiry: 1,
+          atm_iv: 0,
+          atm_strike: 22400,
+          skew_25delta: 0,
+          points: [{ strike: 22400, call_iv: 0, put_iv: 0, moneyness: 1 }],
+        },
       ],
-      "2026-04-09T10:15:00",
-    );
-    expect(data).not.toBeNull();
-    expect(data!.symbol).toBe("NIFTY");
-    expect(data!.spot).toBe(22400);
-    expect(data!.curves).toHaveLength(2);
-  });
-
-  it("returns null when no expiry yields a usable curve", () => {
-    const empty: RawOptionChain = { chain: [] };
-    expect(buildIVSkewData("NIFTY", [{ expiry: "x", raw: empty }], "t")).toBeNull();
+    };
+    expect(mapIVSmileToSkew(empty, "t")).toBeNull();
   });
 });

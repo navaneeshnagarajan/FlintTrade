@@ -1,15 +1,18 @@
 /**
- * greeksHeatmapTransform — pure helpers that turn live OpenAlgo option chains
- * into the `ExpiryRow[]` grid the GreeksHeatmap widget renders.
+ * greeksHeatmapTransform — pure helper that turns the screener IV-smile response
+ * (`IVSmileData`) into the `ExpiryRow[]` grid the GreeksHeatmap widget renders.
+ *
+ * IMPORTANT: greeks are NOT carried in the OpenAlgo `optionchain` feed (that
+ * payload has only ltp/bid/ask/oi). The live IV smile is the dedicated source;
+ * the per-strike greeks are derived from it with the SAME Black–Scholes
+ * approximation the GreeksSurface widget uses (`buildSurfaceFromIVSmile`), so
+ * the two widgets stay consistent.
  *
  * Kept separate from the widget so the chain→grid maths (strike alignment, ATM
- * classification, days-to-expiry) is unit-tested without a broker connection.
- *
- * Greeks are taken from the CALL (CE) leg — the widget shows a single greek per
- * (strike, expiry) cell, and call greeks (delta ~0→1) match the existing scale.
+ * classification, greek derivation) is unit-tested without a broker connection.
  */
 
-import type { ChainEntry, RawOptionChain, RawOptionRow } from "@/widgets/analysis/OptionChain/types";
+import type { IVSmileData } from "@/types/api";
 
 export type Moneyness = "OTM" | "ATM" | "ITM";
 
@@ -29,120 +32,107 @@ export interface ExpiryRow {
   cells: HeatCell[];
 }
 
-const MONTHS: Record<string, number> = {
-  JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-  JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
-};
+interface Greeks {
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+}
 
-/** Parse an expiry string to epoch ms, or null when the format is unknown.
- *  Handles "DD-MON-YY", "DD-MON-YYYY" and ISO "YYYY-MM-DD". */
-export function parseExpiry(expiry: string): number | null {
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry);
-  if (iso) {
-    return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+/**
+ * Approximate option greeks from an IV figure (decimal) and time to expiry,
+ * mirroring GreeksSurface's `buildSurfaceFromIVSmile`. Call-side greeks; vega is
+ * the standard BS sensitivity `φ(d1)·√T`. Returns zeros for non-positive IV.
+ */
+export function approxGreeks(
+  strike: number,
+  atmStrike: number,
+  ivDecimal: number,
+  dte: number,
+): Greeks {
+  if (!(ivDecimal > 0) || !(atmStrike > 0)) {
+    return { delta: 0, gamma: 0, theta: 0, vega: 0 };
   }
-  const dmy = /^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/.exec(expiry);
-  if (dmy) {
-    const month = MONTHS[dmy[2].toUpperCase()];
-    if (month === undefined) return null;
-    const yearRaw = Number(dmy[3]);
-    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
-    return Date.UTC(year, month, Number(dmy[1]));
-  }
-  return null;
+  const mv = (strike - atmStrike) / atmStrike; // log-moneyness proxy
+  const T = dte / 365;
+  // d1: ITM call (strike below ATM, mv<0) → positive d1 → high delta.
+  const d1 =
+    T > 0 ? (-mv + 0.5 * ivDecimal * ivDecimal * T) / (ivDecimal * Math.sqrt(T)) : mv < 0 ? 3 : -3;
+  const delta = 1 / (1 + Math.exp(-1.7 * d1)); // logistic approximation
+  const pdf = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
+  const gamma = T > 0 ? (pdf / (strike * ivDecimal * Math.sqrt(T))) * 1000 : 0;
+  const theta =
+    T > 0
+      ? -(ivDecimal * atmStrike * Math.exp(-0.5 * mv * mv * 100)) /
+        Math.sqrt(365 * dte * 2 * Math.PI)
+      : 0;
+  const vega = T > 0 ? pdf * Math.sqrt(T) : 0;
+  return {
+    delta: Number(delta.toFixed(4)),
+    gamma: Number(gamma.toFixed(6)),
+    theta: Number(theta.toFixed(2)),
+    vega: Number(vega.toFixed(4)),
+  };
 }
 
-/** Whole days from `nowMs` to the expiry (>= 0), or 0 when unparseable. */
-export function daysToExpiry(expiry: string, nowMs: number): number {
-  const target = parseExpiry(expiry);
-  if (target == null) return 0;
-  return Math.max(0, Math.round((target - nowMs) / 86_400_000));
-}
-
-/** Short display label from an expiry, falling back to the raw string. */
-export function labelFor(expiry: string): string {
-  const ms = parseExpiry(expiry);
-  if (ms == null) return expiry.length > 9 ? expiry.slice(0, 9) : expiry;
-  const d = new Date(ms);
-  const day = d.getUTCDate();
-  const mon = Object.keys(MONTHS)[d.getUTCMonth()];
-  const monTitle = mon.charAt(0) + mon.slice(1).toLowerCase();
-  return `${day} ${monTitle}`;
-}
-
-function num(v: number | undefined): number {
-  return v != null && Number.isFinite(v) ? v : 0;
-}
-
-/** A CE row is usable for the heatmap only if it carries at least one greek. */
-function hasGreeks(row: RawOptionRow | null): boolean {
-  if (!row) return false;
-  return [row.delta, row.gamma, row.theta, row.vega].some(
-    (v) => v != null && Number.isFinite(v) && v !== 0,
-  );
+function normaliseIv(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value > 1.5 ? value / 100 : value;
 }
 
 function classifyMoneyness(strike: number, atm: number): Moneyness {
   if (strike === atm) return "ATM";
-  // Call convention: a strike below spot/ATM is in-the-money for a call.
+  // Call convention: a strike below ATM is in-the-money for a call.
   return strike < atm ? "ITM" : "OTM";
 }
 
-/** Map a raw chain to (strike → CE greeks) for strikes that carry greeks. */
-function ceGreeksByStrike(entries: ChainEntry[]): Map<number, RawOptionRow> {
-  const map = new Map<number, RawOptionRow>();
-  for (const entry of entries) {
-    if (hasGreeks(entry.ce)) map.set(entry.strike, entry.ce as RawOptionRow);
-  }
-  return map;
+/** Short display label from an expiry string (truncated when long). */
+function labelFor(expiry: string): string {
+  return expiry.length > 11 ? expiry.slice(0, 11) : expiry;
 }
 
 /**
- * Build the aligned heatmap grid from per-expiry raw chains.
- *
- * Every expiry row is rendered against the SAME strike set (the intersection of
- * strikes that carry CE greeks across all expiries), so the grid columns stay
- * aligned. Returns null when no common greek-bearing strike exists, so the
- * caller can fall back to sample data.
+ * Build the aligned greeks grid from a live IV smile. Every expiry row is
+ * rendered against the SAME strike set (the intersection of strikes present
+ * across all curves) so the grid columns stay aligned. Returns null when no
+ * usable strike is shared, so the caller can fall back to sample data.
  */
-export function buildGreeksHeatmap(
-  chains: ReadonlyArray<{ expiry: string; raw: RawOptionChain }>,
-  nowMs: number,
-): ExpiryRow[] | null {
-  if (chains.length === 0) return null;
+export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRow[] | null {
+  const curves = iv?.curves ?? [];
+  if (curves.length === 0) return null;
 
-  const perExpiry = chains.map(({ expiry, raw }) => ({
-    expiry,
-    raw,
-    greeks: ceGreeksByStrike(raw.chain ?? []),
-  }));
+  // Per-curve: strike → mid-IV (decimal), keeping only strikes with positive IV.
+  const perCurve = curves.map((curve) => {
+    const ivByStrike = new Map<number, number>();
+    for (const p of curve.points ?? []) {
+      const mid = (normaliseIv(p.call_iv) + normaliseIv(p.put_iv)) / 2;
+      if (mid > 0) ivByStrike.set(p.strike, mid);
+    }
+    return { curve, ivByStrike };
+  });
 
-  // Intersection of strikes carrying greeks across every expiry.
-  const [first, ...rest] = perExpiry;
-  let common = [...first.greeks.keys()];
-  for (const e of rest) {
-    common = common.filter((s) => e.greeks.has(s));
-  }
+  // Intersection of strikes carrying IV across every expiry.
+  const [first, ...rest] = perCurve;
+  let common = [...first.ivByStrike.keys()];
+  for (const e of rest) common = common.filter((s) => e.ivByStrike.has(s));
   common.sort((a, b) => a - b);
   if (common.length === 0) return null;
 
-  const rows: ExpiryRow[] = perExpiry.map(({ expiry, raw, greeks }) => {
+  const rows: ExpiryRow[] = perCurve.map(({ curve, ivByStrike }) => {
     const atm =
-      raw.atm_strike && raw.atm_strike > 0
-        ? raw.atm_strike
+      curve.atm_strike && curve.atm_strike > 0
+        ? curve.atm_strike
         : common[Math.floor(common.length / 2)];
     const cells: HeatCell[] = common.map((strike) => {
-      const g = greeks.get(strike) as RawOptionRow;
-      return {
-        strike,
-        moneyness: classifyMoneyness(strike, atm),
-        delta: num(g.delta),
-        gamma: num(g.gamma),
-        theta: num(g.theta),
-        vega: num(g.vega),
-      };
+      const g = approxGreeks(strike, atm, ivByStrike.get(strike) ?? 0, curve.days_to_expiry);
+      return { strike, moneyness: classifyMoneyness(strike, atm), ...g };
     });
-    return { expiry, label: labelFor(expiry), dte: daysToExpiry(expiry, nowMs), cells };
+    return {
+      expiry: curve.expiry,
+      label: labelFor(curve.expiry),
+      dte: curve.days_to_expiry,
+      cells,
+    };
   });
 
   return rows;

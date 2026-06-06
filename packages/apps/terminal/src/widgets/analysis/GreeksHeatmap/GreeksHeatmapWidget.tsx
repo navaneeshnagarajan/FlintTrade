@@ -9,12 +9,14 @@
  * Useful for identifying delta-neutral zones, high-theta strikes, or
  * gamma-concentrated expiries at a glance.
  *
- * DATA HONESTY: when a broker is connected, the widget fetches the nearest
- * expiries' option chains (`getExpiry` + `getOptionChain`), builds the aligned
- * CE-greek grid client-side (`greeksHeatmapTransform`), and shows a "Live"
- * badge. When disconnected — or no greek-bearing strike is shared across
- * expiries — it falls back to deterministic sample data with an amber "Sample
- * data" badge so the figures are never mistaken for live market data.
+ * DATA HONESTY: greeks are NOT in the OpenAlgo option-chain feed, so when a
+ * broker is connected the widget fetches the live IV smile (`getFtIVSmile` —
+ * the same screener source GreeksSurface uses) and derives the aligned greek
+ * grid client-side via the shared Black–Scholes approximation
+ * (`greeksHeatmapTransform`), showing a "Live" badge. When disconnected — or no
+ * IV-bearing strike is shared across expiries — it falls back to deterministic
+ * sample data with an amber "Sample data" badge so the figures are never
+ * mistaken for live market data.
  */
 
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
@@ -30,9 +32,8 @@ import {
 } from "@/components/ui/select";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { getExpiry, getOptionChain } from "@/services/api";
+import { getFtIVSmile } from "@/services/ftApi.analysis";
 import { SYMBOLS as OPTION_SYMBOLS } from "@/widgets/analysis/OptionChain/types";
-import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
 import { buildGreeksHeatmap } from "./greeksHeatmapTransform";
 import type { ExpiryRow, HeatCell } from "./greeksHeatmapTransform";
 
@@ -307,21 +308,13 @@ function GreeksHeatmapWidget() {
     [symbol],
   );
 
-  // Live greeks grid — fetch the nearest expiries' chains and build the aligned
-  // CE-greek grid client-side. Only runs once a broker is connected.
+  // Live greeks grid — fetch the screener IV smile and derive the aligned greek
+  // grid client-side. Only runs once a broker is connected.
   const { data: liveRows } = useQuery({
-    queryKey: ["greeks-heatmap", symbol],
+    queryKey: ["greeks-heatmap", symbol, symDef.exchange],
     queryFn: async () => {
-      const expResp = await getExpiry(symDef.label, symDef.exchange, "options");
-      const expiries = (expResp?.expiry ?? []).slice(0, 3);
-      if (expiries.length === 0) return null;
-      const chains = await Promise.all(
-        expiries.map(async (expiry) => {
-          const raw = await getOptionChain(symDef.label, symDef.exchange, expiry);
-          return { expiry, raw: raw as unknown as RawOptionChain };
-        }),
-      );
-      return buildGreeksHeatmap(chains, Date.now());
+      const smile = await getFtIVSmile(symDef.label, symDef.exchange);
+      return buildGreeksHeatmap(smile);
     },
     enabled: isConnected,
     staleTime: 30_000,

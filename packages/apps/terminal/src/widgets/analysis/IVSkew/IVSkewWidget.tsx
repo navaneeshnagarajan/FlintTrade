@@ -9,12 +9,13 @@
  *   - Skew metric: 25Δ Put IV − 25Δ Call IV shown in header
  *   - Multi-expiry overlay (up to 3 nearest expiries) when live
  *
- * DATA HONESTY: when a broker is connected, the widget fetches the live option
- * chain for the nearest expiries (`getExpiry` + `getOptionChain`), derives the
- * per-strike IV-skew curves client-side (`ivSkewTransform`), and shows a "Live"
- * badge. When disconnected — or the chain yields no usable curve — it falls
- * back to deterministic sample curves with an amber "Sample data" badge so the
- * coefficients are never mistaken for live market data.
+ * DATA HONESTY: when a broker is connected, the widget fetches the live IV
+ * smile (`getFtIVSmile` — the same screener source the IVSmile and GreeksSurface
+ * widgets use) and maps it to skew curves (`ivSkewTransform`), showing a "Live"
+ * badge. Per-strike IV is NOT in the OpenAlgo option-chain feed, so it must come
+ * from the dedicated IV-smile endpoint. When disconnected — or no usable curve
+ * comes back — it falls back to deterministic sample curves with an amber
+ * "Sample data" badge so the figures are never mistaken for live market data.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
@@ -23,10 +24,9 @@ import { useQuery } from "@tanstack/react-query";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { getExpiry, getOptionChain } from "@/services/api";
+import { getFtIVSmile } from "@/services/ftApi.analysis";
 import { SYMBOLS as OPTION_SYMBOLS } from "@/widgets/analysis/OptionChain/types";
-import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
-import { buildIVSkewData } from "./ivSkewTransform";
+import { mapIVSmileToSkew } from "./ivSkewTransform";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -253,27 +253,19 @@ function IVSkewWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [xMode, setXMode] = useState<XMode>("Strike");
 
-  // Resolve the option-chain exchange (NFO/BFO/…) for the selected underlying.
+  // Resolve the option exchange (NFO/BFO/…) for the selected underlying.
   const symDef = useMemo(
     () => OPTION_SYMBOLS.find((s) => s.label === symbol) ?? { label: symbol, exchange: "NFO" },
     [symbol],
   );
 
-  // Live IV-skew — fetch the nearest expiries' chains and derive curves
-  // client-side. Only runs once a broker is connected.
+  // Live IV-skew — fetch the screener IV smile (the dedicated IV source) and
+  // map it to skew curves. Only runs once a broker is connected.
   const { data: liveData } = useQuery({
-    queryKey: ["ivskew", symbol],
+    queryKey: ["ivskew", symbol, symDef.exchange],
     queryFn: async () => {
-      const expResp = await getExpiry(symDef.label, symDef.exchange, "options");
-      const expiries = (expResp?.expiry ?? []).slice(0, 3);
-      if (expiries.length === 0) return null;
-      const chains = await Promise.all(
-        expiries.map(async (expiry) => {
-          const raw = await getOptionChain(symDef.label, symDef.exchange, expiry);
-          return { expiry, raw: raw as unknown as RawOptionChain };
-        }),
-      );
-      return buildIVSkewData(symbol, chains, new Date().toISOString());
+      const smile = await getFtIVSmile(symDef.label, symDef.exchange);
+      return mapIVSmileToSkew(smile, new Date().toISOString());
     },
     enabled: isConnected,
     staleTime: 30_000,
@@ -312,8 +304,8 @@ function IVSkewWidget() {
           <span
             className="inline-flex items-center rounded border border-profit/40 bg-profit/10 px-1.5 py-0.5 text-[10px] font-medium text-profit"
             role="status"
-            aria-label="Showing live IV skew derived from the connected broker's option chain"
-            title="Live IV skew derived from the connected broker's option chain."
+            aria-label="Showing the live IV smile from the connected broker"
+            title="Live IV skew from the connected broker's IV-smile feed."
           >
             Live
           </span>
