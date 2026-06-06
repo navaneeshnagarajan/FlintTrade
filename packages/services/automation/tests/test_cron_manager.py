@@ -608,3 +608,35 @@ class TestDbOptimiseJob:
         with_store = CronManager(trade_storage=storage)
         with_store.register_builtin_jobs()
         assert "db_optimise_job" in {j["name"] for j in with_store.list_jobs()}
+
+    def test_maintains_both_trade_and_tick_stores(self):
+        from flinttrade_automation.cron_manager import make_db_optimise_job
+
+        trade = MagicMock()
+        tick = MagicMock()
+        job = make_db_optimise_job(trade, None, extra_stores=lambda: [(tick, None, "tick")])
+        job()
+
+        for store in (trade, tick):
+            executed = [c.args[0] for c in store.connection.execute.call_args_list]
+            assert "CHECKPOINT" in executed and "ANALYZE" in executed
+
+    def test_tick_store_is_resolved_lazily_at_fire_time(self):
+        # The tick store is wired AFTER register_builtin_jobs runs, so the job
+        # must read it at fire time. Mirror that: provider returns None first,
+        # then the real store — only the second run maintains it.
+        from flinttrade_automation.cron_manager import make_db_optimise_job
+
+        holder: dict[str, object] = {"tick": None}
+        trade = MagicMock()
+        job = make_db_optimise_job(
+            trade, None, extra_stores=lambda: [(holder["tick"], None, "tick")],
+        )
+
+        job()  # tick not wired yet → only trade maintained, no crash
+        tick = MagicMock()
+        holder["tick"] = tick
+        job()  # tick now wired → maintained
+
+        executed = [c.args[0] for c in tick.connection.execute.call_args_list]
+        assert "CHECKPOINT" in executed and "ANALYZE" in executed

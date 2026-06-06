@@ -66,6 +66,7 @@ class TickRecorder:
         flush_interval: float = 1.0,
         reconnect_delay: float = 5.0,
         max_reconnect_delay: float = 60.0,
+        storage_lock: Any | None = None,
     ) -> None:
         self._storage = storage
         self._ws_url = ws_url or _DEFAULT_WS_URL
@@ -73,6 +74,14 @@ class TickRecorder:
         self._flush_interval = flush_interval
         self._reconnect_delay = reconnect_delay
         self._max_reconnect_delay = max_reconnect_delay
+        # Serialises access to the (single) DuckDB connection this recorder shares
+        # with the nightly maintenance job, which runs on the scheduler thread —
+        # DuckDB connections are not safe for concurrent use. None = no sharing.
+        self._storage_lock = storage_lock
+        # On a persistent write failure the buffer is RETAINED for retry (a
+        # transient lock/disk error must not silently lose ticks), but capped so
+        # it cannot grow without bound — drop the oldest beyond this.
+        self._max_buffer = max(batch_size * 100, 10_000)
 
         # Instruments keyed by mode
         self._subscriptions: dict[str, list[dict[str, str]]] = {
@@ -241,12 +250,31 @@ class TickRecorder:
         return MODE_LTP
 
     def _flush(self) -> None:
-        """Write buffered ticks to DuckDB."""
+        """Write buffered ticks to DuckDB.
+
+        Clears the buffer ONLY after a successful insert. On failure the batch is
+        retained for the next flush (so a transient lock/disk error cannot
+        silently discard captured ticks), bounded by ``_max_buffer`` so a
+        persistent failure cannot grow memory without limit.
+        """
         if not self._buffer:
             return
         try:
-            self._storage.insert_ticks_batch(self._buffer)
-            logger.debug("Flushed %d ticks to DuckDB", len(self._buffer))
+            if self._storage_lock is not None:
+                with self._storage_lock:
+                    self._storage.insert_ticks_batch(self._buffer)
+            else:
+                self._storage.insert_ticks_batch(self._buffer)
         except Exception as exc:
-            logger.error("Failed to flush %d ticks: %s", len(self._buffer), exc)
+            logger.error(
+                "Failed to flush %d ticks (retaining for retry): %s", len(self._buffer), exc,
+            )
+            if len(self._buffer) > self._max_buffer:
+                dropped = len(self._buffer) - self._max_buffer
+                del self._buffer[:dropped]
+                logger.warning(
+                    "Tick buffer exceeded %d; dropped %d oldest ticks", self._max_buffer, dropped,
+                )
+            return
+        logger.debug("Flushed %d ticks to DuckDB", len(self._buffer))
         self._buffer.clear()

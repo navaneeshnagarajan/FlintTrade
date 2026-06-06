@@ -636,6 +636,61 @@ class TestTickRecorder:
         result = storage.connection.execute("SELECT COUNT(*) FROM ticks").fetchone()
         assert result[0] == 2
 
+    def test_flush_retains_buffer_on_write_failure(self):
+        # A transient write error must NOT silently discard the batch (the old
+        # code cleared the buffer unconditionally). Keep it for the next flush.
+        from unittest.mock import MagicMock
+
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = RuntimeError("duckdb locked")
+        recorder = TickRecorder(storage=storage)
+        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+        assert len(recorder._buffer) == 1
+
+        recorder._flush()  # insert fails
+        assert len(recorder._buffer) == 1  # retained, not lost
+
+        storage.insert_ticks_batch.side_effect = None  # next flush succeeds
+        recorder._flush()
+        assert len(recorder._buffer) == 0  # persisted then cleared
+
+    def test_flush_acquires_the_storage_lock(self):
+        # The recorder shares its DuckDB connection with the nightly maintenance
+        # job; writes must take the shared lock so the two threads never race.
+        from unittest.mock import MagicMock
+
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        storage = MagicMock()
+        lock = MagicMock()
+        recorder = TickRecorder(storage=storage, storage_lock=lock)
+        recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0})
+        recorder._flush()
+
+        lock.__enter__.assert_called_once()
+        lock.__exit__.assert_called_once()
+        storage.insert_ticks_batch.assert_called_once()
+
+    def test_flush_caps_buffer_on_persistent_failure(self):
+        # A persistent write failure retains ticks for retry, but the buffer is
+        # bounded — the oldest are dropped past the cap so memory cannot grow.
+        from unittest.mock import MagicMock
+
+        from flinttrade_data.tick_recorder import TickRecorder
+
+        storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = RuntimeError("disk full")
+        recorder = TickRecorder(storage=storage)
+        recorder._max_buffer = 3  # tiny cap for a deterministic drop
+        for i in range(10):
+            recorder._process_tick({"symbol": "TCS", "exchange": "NSE", "ltp": float(i)})
+        assert len(recorder._buffer) == 10
+
+        recorder._flush()  # fails, 10 > cap 3 → drop 7 oldest
+        assert len(recorder._buffer) == 3
+
     def test_detect_mode(self):
         from flinttrade_data.tick_recorder import TickRecorder
         assert TickRecorder._detect_mode({"ltp": 100}) == "ltp"

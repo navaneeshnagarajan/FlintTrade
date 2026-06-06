@@ -207,44 +207,59 @@ def make_eod_logout_job(
 def make_db_optimise_job(
     storage: Any = None,
     storage_lock: Any = None,
+    *,
+    extra_stores: Callable[[], Any] | None = None,
 ) -> Callable[[], None]:
     """Create the db_optimise_job handler — nightly DuckDB maintenance.
 
     Runs ``CHECKPOINT`` (folds the write-ahead log back into the main database
     file, reclaiming space) and ``ANALYZE`` (refreshes the optimiser's column
-    statistics) on the shared trade/tick store, so analytical queries stay fast
-    and the file does not grow unbounded as ticks and trades accumulate.
+    statistics) on EVERY configured store — the trade journal AND the live tick
+    store — so analytical queries stay fast and neither file grows unbounded as
+    ticks and trades accumulate.
 
-    Uses the shared connection under its lock — DuckDB allows only one
-    read-write connection per file, so a fresh connection would fail the file
-    lock the live store already holds. Runs every day (maintenance is not
-    market-gated). Best-effort: any failure is logged, never raised.
+    Each store is maintained under its own lock — DuckDB allows only one
+    read-write connection per file and its connections are not thread-safe, so
+    the lock serialises against the store's live writer (e.g. the TickRecorder on
+    the async loop). Runs every day (maintenance is not market-gated).
+    Best-effort: a per-store failure is logged and the next store still runs.
 
     Args:
-        storage: The shared ``StorageManager`` (or ``None`` to skip).
-        storage_lock: A lock serialising access to the shared connection, since
-            DuckDB connections are not safe for concurrent use.
+        storage: The shared trade ``StorageManager`` (or ``None`` to skip).
+        storage_lock: A lock serialising access to ``storage``'s connection.
+        extra_stores: Optional zero-arg provider returning an iterable of
+            ``(storage, lock, label)`` tuples, resolved at FIRE time (so stores
+            wired after registration — e.g. the tick store — are picked up).
     """
 
     def db_optimise_job() -> None:
-        if storage is None:
-            logger.warning("db_optimise_job: no trade store configured; skipping")
+        targets: list[tuple[Any, Any, str]] = []
+        if storage is not None:
+            targets.append((storage, storage_lock, "trade"))
+        if extra_stores is not None:
+            try:
+                targets.extend(
+                    (s, lk, lbl) for s, lk, lbl in extra_stores() if s is not None
+                )
+            except Exception as exc:  # a bad provider must not abort maintenance
+                logger.error("db_optimise_job: extra-store provider failed — %s", exc)
+
+        if not targets:
+            logger.warning("db_optimise_job: no store configured; skipping")
             return
 
-        def _run() -> None:
-            conn = storage.connection
-            conn.execute("CHECKPOINT")
-            conn.execute("ANALYZE")
-
-        try:
-            if storage_lock is not None:
-                with storage_lock:
-                    _run()
-            else:
-                _run()
-            logger.info("db_optimise_job: DuckDB CHECKPOINT + ANALYZE complete")
-        except Exception as exc:
-            logger.error("db_optimise_job: maintenance failed — %s", exc)
+        for store, lock, label in targets:
+            try:
+                if lock is not None:
+                    with lock:
+                        store.connection.execute("CHECKPOINT")
+                        store.connection.execute("ANALYZE")
+                else:
+                    store.connection.execute("CHECKPOINT")
+                    store.connection.execute("ANALYZE")
+                logger.info("db_optimise_job: %s store CHECKPOINT + ANALYZE complete", label)
+            except Exception as exc:
+                logger.error("db_optimise_job: %s store maintenance failed — %s", label, exc)
 
     return db_optimise_job
 
@@ -344,6 +359,12 @@ class CronManager:
         # app factory, which runs after the CronManager is built).
         self.trade_storage = trade_storage
         self.trade_storage_lock = trade_storage_lock
+        # The live tick store (a SEPARATE DuckDB file written by TickRecorder on
+        # the async loop) + the lock it shares with that recorder. Set after
+        # construction, AFTER register_builtin_jobs runs — so the maintenance job
+        # reads these lazily (at fire time), not at registration time.
+        self.tick_storage = None
+        self.tick_storage_lock = None
         # Injected overnight strategy optimiser (a zero-arg callable). When set,
         # register_builtin_jobs schedules the "optimise overnight" trigger.
         self.overnight_optimiser: Callable[[], Any] | None = None
@@ -402,11 +423,19 @@ class CronManager:
             **DEFAULT_JOBS["eod_logout_job"],
         )
 
-        # Nightly DuckDB maintenance — only when a trade store is wired.
+        # Nightly DuckDB maintenance — only when a trade store is wired. The tick
+        # store is resolved lazily (it is created after this runs), so the job
+        # maintains it too once it exists.
         if self.trade_storage is not None:
             self.register(
                 "db_optimise_job",
-                handler=make_db_optimise_job(self.trade_storage, self.trade_storage_lock),
+                handler=make_db_optimise_job(
+                    self.trade_storage,
+                    self.trade_storage_lock,
+                    extra_stores=lambda: [
+                        (self.tick_storage, self.tick_storage_lock, "tick"),
+                    ],
+                ),
                 **DEFAULT_JOBS["db_optimise_job"],
             )
 

@@ -2340,7 +2340,16 @@ class FlintTradeApp:
                 tick_db = str(_workspace_dir() / "ticks.duckdb")
                 tick_storage = _TickStore(tick_db)
                 tick_storage.initialise()
-                recorder = TickRecorder(storage=tick_storage)
+                # One lock guards this tick store's single DuckDB connection: the
+                # recorder writes on the async loop, the nightly db_optimise job
+                # CHECKPOINTs it on the scheduler thread. Both must serialise.
+                tick_lock = threading.Lock()
+                recorder = TickRecorder(storage=tick_storage, storage_lock=tick_lock)
+                # Hand the tick store to the cron so nightly maintenance keeps the
+                # highest-volume DuckDB file from growing unbounded. register_
+                # builtin_jobs already ran, but the job resolves this lazily.
+                self.cron.tick_storage = tick_storage
+                self.cron.tick_storage_lock = tick_lock
                 # Default watchlist — the major indices in quote mode. Operators
                 # can extend this; an empty watchlist would capture nothing.
                 recorder.add_symbols(
