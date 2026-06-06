@@ -19,6 +19,7 @@ import { type BacktestResult } from "@/services/ftApi";
 import { fmtInr, fmtPct, fmtNum } from "./formatters";
 import { AnimatedMetricCard, MetricCard } from "./MetricCards";
 import { EquityCurve } from "./EquityCurve";
+import { RobustnessCard } from "./RobustnessCard";
 
 export interface BacktestResultDisplayProps {
   result: BacktestResult;
@@ -184,6 +185,8 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
           <EquityCurve curve={equity_curve} initialEquity={initialEquity} />
         </GlassCard>
       )}
+
+      {equity_curve.length > 0 && <RobustnessCard result={result} />}
 
       {monthlyPnl.length > 0 && (
         <GlassCard className="p-5 gap-3">

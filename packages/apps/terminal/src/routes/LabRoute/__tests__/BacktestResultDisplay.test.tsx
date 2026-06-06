@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { BacktestResult } from "@/services/ftApi";
 
 const chartMocks = vi.hoisted(() => {
@@ -165,7 +166,12 @@ describe("BacktestResultDisplay", () => {
   });
 
   it("routes the visible monthly P&L chart through the shared Flint histogram runtime", () => {
-    render(<BacktestResultDisplay result={result} />);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <BacktestResultDisplay result={result} />
+      </QueryClientProvider>,
+    );
 
     expect(chartMocks.histogramRuntime.addHistogramSeries).toHaveBeenCalledTimes(1);
     expect(chartMocks.chart.addSeries).not.toHaveBeenCalled();

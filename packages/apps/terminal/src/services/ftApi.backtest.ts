@@ -1,4 +1,4 @@
-import { get, getBase, isDemoAuthSession, post } from "./ftApi.helpers";
+import { get, getBase, isDemoAuthSession, post, postV1 } from "./ftApi.helpers";
 
 export interface BacktestConfig {
   symbol: string;
@@ -387,3 +387,35 @@ export const getStrategyLogs = (id: string) =>
 
 export const refineStrategy = (req: RefineStrategyRequest) =>
   post<RefinementSuggestion>("ai/refine-strategy", req);
+
+// ---------------------------------------------------------------------------
+// Permutation (Monte-Carlo) significance test — /v1/backtest/permutation.
+// Distinguishes a strategy's skill from luck by shuffling its return series and
+// measuring how often a random ordering beats the observed metric. Reachable
+// only via postV1 (the endpoint registers at /v1, not /api/v1).
+// ---------------------------------------------------------------------------
+
+export interface PermutationConfig {
+  n_permutations?: number;
+  confidence_level?: number;
+  metric?: string;
+  random_seed?: number;
+}
+
+export interface PermutationResult {
+  original_metric: number;
+  permutation_mean: number;
+  permutation_std: number;
+  p_value: number;
+  is_significant: boolean;
+  confidence_level: number;
+  n_permutations: number;
+  percentile_rank: number;
+}
+
+export const runPermutationTest = (returns: number[], config?: PermutationConfig) =>
+  postV1<PermutationResult>("backtest/permutation", {
+    mode: "returns",
+    returns,
+    ...(config ? { config } : {}),
+  });

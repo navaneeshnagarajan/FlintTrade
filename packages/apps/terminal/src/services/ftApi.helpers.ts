@@ -83,6 +83,25 @@ export async function get<T>(endpoint: string): Promise<T> {
   return parseResponse<T>(resp, endpoint);
 }
 
+/**
+ * POST against the backend's bare ``/v1/...`` blueprint family (e.g.
+ * ``/v1/backtest/permutation``, ``/v1/oi/...``) rather than the ``/api/v1/...``
+ * family the helpers above target. These blueprints register at ``/v1`` and are
+ * unreachable via {@link post} (which would 404 at ``/api/v1/...``); this helper
+ * makes them reachable with the SAME auth headers and error/data unwrapping, so
+ * the ``/v1`` family is no longer a dead end. ``getBase()`` resolves correctly in
+ * both dev (``/ft-api/v1/...`` → stripped to ``/v1/...``) and prod (``/v1/...``).
+ */
+export async function postV1<T>(endpoint: string, body: object = {}): Promise<T> {
+  const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(`FT API v1 ${endpoint}: HTTP ${resp.status}`);
+  return parseResponse<T>(resp, endpoint);
+}
+
 export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "PUT",
