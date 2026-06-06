@@ -166,6 +166,13 @@ class Capabilities:
     option_chain_supported: bool = False
     option_chain_greeks_supported: bool = False
     option_chain_rate_limit_seconds: int | None = None
+    # Historical options data. ``options_history_supported`` advertises a
+    # historical option-chain / options-OHLC API; ``options_history_rolling``
+    # adds rolling/continuous series stitched across expiries (Dhan's edge — you
+    # can pull a strike's history past its expiry rollover). Routing metadata for
+    # the "options_history" use-case; independent of adapter activation.
+    options_history_supported: bool = False
+    options_history_rolling: bool = False
     streaming_supported: bool = False
     streaming_max_connections_per_user: int | None = None
     streaming_max_symbols_per_connection: int | None = None

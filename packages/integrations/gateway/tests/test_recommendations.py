@@ -19,6 +19,7 @@ from flinttrade_gateway.recommendations import (
     best_broker_for,
     recommend,
     recommend_all,
+    _SCORERS,
 )
 
 pytestmark = pytest.mark.unit
@@ -64,6 +65,26 @@ def test_kotak_neo_scores_zero_for_options_and_historical() -> None:
     for use_case in (BrokerUseCase.OPTIONS_ANALYTICS, BrokerUseCase.HISTORICAL_DATA):
         by_broker = {r.broker_id: r for r in recommend(use_case)}
         assert by_broker["kotakneo"].raw_score == 0.0
+
+
+def test_dhan_wins_options_history() -> None:
+    # User's stated differentiator: Dhan = rolling-options history.
+    top = best_broker_for(BrokerUseCase.OPTIONS_HISTORY)
+    assert top is not None
+    assert top.broker_id == "dhan"
+    assert "rolling" in top.rationale.lower()
+
+
+def test_options_history_scorer_rewards_rolling_series() -> None:
+    rolling, _ = _SCORERS[BrokerUseCase.OPTIONS_HISTORY](
+        _bare(options_history_supported=True, options_history_rolling=True)
+    )
+    flat, _ = _SCORERS[BrokerUseCase.OPTIONS_HISTORY](
+        _bare(options_history_supported=True, options_history_rolling=False)
+    )
+    none, msg = _SCORERS[BrokerUseCase.OPTIONS_HISTORY](_bare())
+    assert rolling > flat > none == 0.0
+    assert "No historical options-data API" in msg
 
 
 def test_dhan_tops_streaming_and_advanced_orders() -> None:

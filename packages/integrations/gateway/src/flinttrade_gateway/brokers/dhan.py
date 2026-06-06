@@ -87,6 +87,10 @@ DHAN_CAPABILITIES = Capabilities(
     option_chain_supported=True,
     option_chain_greeks_supported=True,
     option_chain_rate_limit_seconds=3,
+    # Dhan's edge: historical option-chain / options-OHLC with rolling expiry
+    # series (a strike's history readable across its expiry rollover).
+    options_history_supported=True,
+    options_history_rolling=True,
     streaming_supported=True,
     streaming_max_connections_per_user=5,
     streaming_max_symbols_per_connection=5000,

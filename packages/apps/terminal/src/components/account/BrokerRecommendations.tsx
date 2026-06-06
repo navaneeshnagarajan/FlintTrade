@@ -32,6 +32,7 @@ const USE_CASE_LABELS: Record<string, string> = {
   market_depth: "Market depth",
   historical_data: "Historical data",
   options_analytics: "Options analytics",
+  options_history: "Rolling options history",
   order_throughput: "Order throughput",
   streaming: "Live streaming",
   advanced_orders: "Advanced orders",

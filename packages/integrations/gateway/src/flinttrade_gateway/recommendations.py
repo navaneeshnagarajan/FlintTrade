@@ -40,6 +40,7 @@ class BrokerUseCase(str, Enum):
     HISTORICAL_DATA = "historical_data"
     MARKET_DEPTH = "market_depth"
     OPTIONS_ANALYTICS = "options_analytics"
+    OPTIONS_HISTORY = "options_history"
     LOW_COST_EXECUTION = "low_cost_execution"
     ORDER_THROUGHPUT = "order_throughput"
     STREAMING = "streaming"
@@ -96,6 +97,17 @@ def _score_options(c: Capabilities) -> tuple[float, str]:
         score += 1.0 / c.option_chain_rate_limit_seconds
         bits.append(f"{c.option_chain_rate_limit_seconds}s chain refresh")
     return score, "Options analytics: " + ", ".join(bits) + "."
+
+
+def _score_options_history(c: Capabilities) -> tuple[float, str]:
+    if not c.options_history_supported:
+        return 0.0, "No historical options-data API."
+    score = 2.0
+    bits = ["historical options data"]
+    if c.options_history_rolling:
+        score += 2.0
+        bits.append("rolling/continuous expiry series")
+    return score, "Options history: " + ", ".join(bits) + "."
 
 
 def _score_low_cost(c: Capabilities) -> tuple[float, str]:
@@ -162,6 +174,7 @@ _SCORERS = {
     BrokerUseCase.HISTORICAL_DATA: _score_historical,
     BrokerUseCase.MARKET_DEPTH: _score_market_depth,
     BrokerUseCase.OPTIONS_ANALYTICS: _score_options,
+    BrokerUseCase.OPTIONS_HISTORY: _score_options_history,
     BrokerUseCase.LOW_COST_EXECUTION: _score_low_cost,
     BrokerUseCase.ORDER_THROUGHPUT: _score_throughput,
     BrokerUseCase.STREAMING: _score_streaming,
