@@ -64,6 +64,7 @@ Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade
 - [x] **Multi-broker suggestions** ("which broker for what"): `recommendations.py` ranks brokers per use-case from declared `Capabilities` (zero-brokerage, depth, options, historical, streaming, throughput, advanced orders); `GET /api/v1/broker/recommendations`. UI wiring into the multi-broker setup screen is TODO.
 - [ ] Live adapter bodies (login/refresh/place/modify/cancel/reads/quotes/historical/option_chain/stream) — gated behind SDK attestation; verifiable only against live SDKs/creds.
 - [ ] Build `flinttrade_gateway/reconciliation.py` (`ReconciliationReport` per contract §14; adapters' `reconcile()` currently `NotImplementedError`).
+- [ ] Implement real credential rotation + mount `rotation_routes`. `CredentialsRotator` + the `rotation/status|schedule|rotate-now` blueprint are built and tested, but `_do_refresh/_do_rotation` are SCAFFOLDS (record a timestamp only — no real token refresh / key rotation), so the blueprint is **intentionally left unmounted** (mounting it would surface a fake "rotated successfully"). Real rotation needs per-broker re-auth (native adapters → their SDKs). Then add an Account Manager UI to drive it.
 - [x] Add the functional `OpenAlgoAdapter` (+ upstox/kotakneo) to `tests/brokers/test_base.py` ABC-enforcement parametrisation.
 
 ### 3. AI / analytics backends (wire or keep demo-honest)

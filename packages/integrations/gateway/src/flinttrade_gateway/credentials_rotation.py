@@ -52,6 +52,16 @@ class RotationResult:
 class CredentialsRotator:
     """Rotate broker API credentials on a schedule.
 
+    SCAFFOLD — not yet a real rotation engine. The scheduling, status-tracking,
+    and route surface are complete and tested, but ``_do_refresh`` /
+    ``_do_rotation`` currently only record a timestamp; they do NOT perform a
+    genuine token refresh or API-key rotation (each calls a broker hook only if
+    the credentials manager exposes one, which ``CredentialStore`` does not).
+    For this reason the ``rotation_routes`` blueprint is intentionally left
+    unmounted (see its module docstring) so it can't present a fake "rotated
+    successfully". Implementing real rotation needs per-broker re-auth — for the
+    native adapters, their (currently absent) SDKs.
+
     Some brokers (e.g. Zerodha, Angel) require daily re-authentication to
     refresh the access token.  This class manages automatic token refreshes
     and periodic full API-key rotations via APScheduler.

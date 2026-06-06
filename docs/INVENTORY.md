@@ -114,6 +114,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | ✅ | "Historical Chain" widget — archived expiries → grouped CE/PE chain; honest empty state |
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
+| Credential rotation (`rotation/status|schedule|rotate-now`) | ⛔ | **Scaffold, intentionally NOT mounted** — `CredentialsRotator._do_refresh/_do_rotation` only record a timestamp (no real token refresh / key rotation); mounting it would surface a fake "rotated successfully". Real rotation needs per-broker re-auth (native adapters → absent SDKs). Tracked planned-but-not-built |
 | Native-SDK **order execution** (R13/R14) | ⛔ | **Externally blocked** — real broker SDKs absent |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), n8n client, QuestDB browser-REST, OTP pair — removal candidates |
 
