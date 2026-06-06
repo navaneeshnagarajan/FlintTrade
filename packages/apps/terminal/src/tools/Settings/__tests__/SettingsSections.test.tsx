@@ -93,6 +93,10 @@ vi.mock("@/services/ftApi", () => ({
   updateSafetyConfig: vi.fn(),
 }));
 
+// @/services/api (TelegramSection sendTelegram) + ftApi.automation (WhatsApp)
+vi.mock("@/services/api", () => ({ sendTelegram: vi.fn() }));
+vi.mock("@/services/ftApi.automation", () => ({ testWhatsAppAlert: vi.fn() }));
+
 // riskSchema (RiskSection)
 vi.mock("@/lib/schemas/riskSchema", () => ({
   RISK_HINTS: {
@@ -125,6 +129,11 @@ import { AboutSection } from "../AboutSection";
 import { SecuritySection } from "../SecuritySection";
 import { RiskSection } from "../RiskSection";
 import { GeneralSection } from "../GeneralSection";
+import { TradingSection } from "../TradingSection";
+import { LLMSection } from "../LLMSection";
+import { TelegramSection } from "../TelegramSection";
+import { WhatsAppSection } from "../WhatsAppSection";
+import { DataSection } from "../DataSection";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
@@ -234,5 +243,64 @@ describe("AboutSection", () => {
 
     expect(screen.getByText(`Version ${APP_VERSION_TAG}`)).toBeInTheDocument();
     expect(screen.getByText(APP_VERSION_TAG)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Smoke-render crash guard — the other prop-taking sections.
+//
+// SettingsRoute mocks every section, so a render-time crash in one of these is
+// otherwise uncaught. These prove each renders with a minimal settings object.
+// ---------------------------------------------------------------------------
+
+describe("Section smoke renders (crash guard)", () => {
+  it("TradingSection renders", () => {
+    const { container } = render(
+      <TradingSection
+        settings={{ exchange: "NSE", product: "MIS", orderType: "MARKET", quantity: "1" } as unknown as React.ComponentProps<typeof TradingSection>["settings"]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  it("LLMSection renders", () => {
+    const { container } = render(
+      <LLMSection
+        settings={{ provider: "openai", host: "", apiKey: "", model: "" } as unknown as React.ComponentProps<typeof LLMSection>["settings"]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  it("TelegramSection renders", () => {
+    const { container } = render(
+      <TelegramSection
+        settings={{ enabled: false, botToken: "", chatId: "" } as unknown as React.ComponentProps<typeof TelegramSection>["settings"]}
+        onChangeField={vi.fn()}
+      />,
+    );
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  it("WhatsAppSection renders", () => {
+    const { container } = render(
+      <WhatsAppSection
+        settings={{ enabled: false, phoneE164: "", adminUrl: "" } as unknown as React.ComponentProps<typeof WhatsAppSection>["settings"]}
+        onChangeField={vi.fn()}
+      />,
+    );
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  it("DataSection renders", () => {
+    const { container } = render(
+      <DataSection
+        settings={{ fastStoragePath: "/data", archiveStoragePath: "/archive" } as unknown as React.ComponentProps<typeof DataSection>["settings"]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(container.firstChild).toBeTruthy();
   });
 });
