@@ -327,12 +327,32 @@ class TestSentimentTickers:
 
 
 class TestMarketRegime:
-    """GET /api/v1/ai/regime — clear 503 (not 404) without market data."""
+    """GET /api/v1/ai/regime — broker OHLCV when connected, free daily-data
+    fallback when not; 503 only when NEITHER source has enough history."""
 
-    def test_no_market_data_returns_503(self, client) -> None:
+    def test_no_source_returns_503(self, client, monkeypatch) -> None:
+        # Disconnected AND the free fallback has no data → a clear 503.
+        monkeypatch.setattr(
+            "flinttrade_ai.ai_routes._free_daily_ohlcv", lambda *a, **k: ([], [], []),
+        )
         resp = client.get("/api/v1/ai/regime?symbol=NIFTY")
         assert resp.status_code == 503
-        assert "connected market-data" in resp.get_json()["message"]
+        assert "Not enough history" in resp.get_json()["message"]
+
+    def test_disconnected_falls_back_to_free_daily_data(self, client, monkeypatch) -> None:
+        # No broker connected, but free daily OHLCV is available → the regime
+        # panel still works for disconnected / Explore users.
+        highs = [102.0 + i for i in range(30)]
+        lows = [98.0 + i for i in range(30)]
+        closes = [100.0 + i for i in range(30)]
+        monkeypatch.setattr(
+            "flinttrade_ai.ai_routes._free_daily_ohlcv", lambda *a, **k: (highs, lows, closes),
+        )
+        resp = client.get("/api/v1/ai/regime?symbol=NIFTY")
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert "state" in data and data["suggested_strategy"]["strategy"]
+        assert data["data_source"] == "openchart"
 
     def test_connected_registry_returns_live_regime(self, app, client) -> None:
         """The LIVE branch was dead code: registry.is_connected() /
@@ -360,3 +380,33 @@ class TestMarketRegime:
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert "state" in data and "suggested_strategy" in data  # the regime loop closed
+        assert data["data_source"] == "broker"
+
+
+def test_free_daily_ohlcv_extracts_bars(monkeypatch) -> None:
+    from flinttrade_ai import ai_routes
+    from flinttrade_historical import free_data
+    from flinttrade_historical.free_data import FreeBar, FreeDataResult
+
+    bars = [FreeBar(timestamp="2026-01-01", open=100, high=102, low=99, close=101, volume=1000)]
+
+    class _FakeNSE:
+        def historical(self, *a, **k):
+            return FreeDataResult(symbol="NIFTY", exchange="NSE", source="openchart", bars=bars)
+
+    monkeypatch.setattr(free_data, "NSEData", _FakeNSE)
+    highs, lows, closes = ai_routes._free_daily_ohlcv("NIFTY")
+    assert highs == [102.0] and lows == [99.0] and closes == [101.0]
+
+
+def test_free_daily_ohlcv_empty_on_error(monkeypatch) -> None:
+    from flinttrade_ai import ai_routes
+    from flinttrade_historical import free_data
+    from flinttrade_historical.free_data import FreeDataResult
+
+    class _EmptyNSE:
+        def historical(self, *a, **k):
+            return FreeDataResult(symbol="NIFTY", exchange="NSE", source="openchart", bars=[], error="boom")
+
+    monkeypatch.setattr(free_data, "NSEData", _EmptyNSE)
+    assert ai_routes._free_daily_ohlcv("NIFTY") == ([], [], [])

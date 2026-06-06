@@ -226,44 +226,77 @@ def sentiment_tickers() -> tuple[Any, int]:
     return jsonify({"status": "success", "data": {"tickers": tickers}}), 200
 
 
+def _free_daily_ohlcv(
+    symbol: str, exchange: str = "NSE", lookback_days: int = 220,
+) -> tuple[list[float], list[float], list[float]]:
+    """Free daily OHLCV (OpenChart) for the disconnected / Explore regime fallback.
+
+    Returns ``([], [], [])`` when the source is unavailable (e.g. ``openchart``
+    not installed, or no data) so the caller surfaces a clear "not enough
+    history" message rather than a 500.
+    """
+    try:
+        from datetime import datetime, timedelta  # noqa: PLC0415
+
+        from flinttrade_historical.free_data import NSEData  # noqa: PLC0415
+
+        end = datetime.now()
+        start = end - timedelta(days=lookback_days)
+        result = NSEData().historical(
+            symbol, exchange, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), "1d",
+        )
+        if not result.success:
+            return [], [], []
+        return (
+            [float(b.high) for b in result.bars],
+            [float(b.low) for b in result.bars],
+            [float(b.close) for b in result.bars],
+        )
+    except Exception:
+        logger.exception("free OHLCV fallback failed for %s", symbol)
+        return [], [], []
+
+
 @ai_bp.route("/ai/regime", methods=["GET"])
 def market_regime() -> tuple[Any, int]:
     """Market regime (ADX/ATR/BB) for a symbol — the AI Regime panel.
 
-    Computes the regime from the symbol's recent OHLCV when a market-data source
-    is connected; returns a clear 503 otherwise so the panel renders a connect
-    prompt rather than a 404. (OHLCV fetch wiring is a tracked follow-up.)
+    Computes the regime from a connected broker's OHLCV when available, otherwise
+    falls back to free daily history (OpenChart) so the panel works for
+    disconnected / Explore users too. Only returns 503 when NEITHER source can
+    supply enough history.
     """
     symbol = (request.args.get("symbol") or "NIFTY").strip()
     registry = current_app.config.get("REGISTRY")
     connected = bool(registry) and bool(getattr(registry, "is_connected", lambda: False)())
-    if not connected:
-        return jsonify({
-            "status": "error",
-            "message": (
-                f"Regime analysis for {symbol} requires a connected market-data "
-                "source — connect a broker to enable it."
-            ),
-        }), 503
 
     try:
         from .regime_detector import detect_regime_detailed, select_strategy_for_regime  # noqa: PLC0415
 
-        params = {"symbol": symbol, "exchange": "NSE_INDEX", "interval": "D"}
-        history = registry.get_history(registry.get_primary_account_id(), params)
-        candles = history.get("data") or history.get("candles") or []
-        highs = [float(c["high"]) for c in candles]
-        lows = [float(c["low"]) for c in candles]
-        closes = [float(c["close"]) for c in candles]
+        if connected:
+            params = {"symbol": symbol, "exchange": "NSE_INDEX", "interval": "D"}
+            history = registry.get_history(registry.get_primary_account_id(), params)
+            candles = history.get("data") or history.get("candles") or []
+            highs = [float(c["high"]) for c in candles]
+            lows = [float(c["low"]) for c in candles]
+            closes = [float(c["close"]) for c in candles]
+            source = "broker"
+        else:
+            highs, lows, closes = _free_daily_ohlcv(symbol)
+            source = "openchart"
+
         if len(closes) < 20:
+            suffix = "" if connected else " — download daily data or connect a broker."
             return jsonify({
                 "status": "error",
-                "message": f"Not enough history for {symbol} to compute a regime.",
+                "message": f"Not enough history for {symbol} to compute a regime{suffix}",
             }), 503
+
         result = detect_regime_detailed(highs, lows, closes)
         data = result.to_dict()
         # Close the loop: recommend a regime-appropriate strategy style.
         data["suggested_strategy"] = select_strategy_for_regime(result.state).to_dict()
+        data["data_source"] = source
         return jsonify({"status": "success", "data": data}), 200
     except Exception:
         logger.exception("market_regime error")
