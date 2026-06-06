@@ -161,13 +161,13 @@ _BACKEND_ONLY_LEAVES: set[str] = {
     # consume the named-strategy endpoint directly today.
     "options-strategy",
     # `bracket` and `brackets` — bracket order endpoints (engine
-    # `bracket_routes.py`) are called from the frontend via
-    # `ftApi.trading.ts::placeBracketOrder` / `getActiveBrackets` /
-    # `cancelBracketOrder` using the generic `post()` / `get()` / `del()`
-    # ftApi helpers, NOT via the safety-proxy `postOrder()`. They are
-    # therefore not visible to this contract test's regex (which looks
-    # for `postOrder("...")` calls only), but they are properly wired
-    # from the React layer.
+    # `bracket_routes.py`). Frontend clients exist
+    # (`ftApi.trading.ts::placeBracketOrder` / `getActiveBrackets` /
+    # `cancelBracketOrder`) but are NOT YET consumed by any terminal
+    # component — there is no bracket-order entry/management UI today, so
+    # these endpoints currently have no frontend caller. Kept here as a
+    # known, intentional gap (the bracket UI is a planned follow-up); the
+    # backend + its gated path are fully tested in `test_bracket_routes.py`.
     "bracket",
     "brackets",
 }
