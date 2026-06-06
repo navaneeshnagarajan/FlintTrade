@@ -206,16 +206,31 @@ class StorageManager:
         )
 
     def insert_ticks_batch(self, rows: list[tuple]) -> None:
-        """Bulk insert ticks. Each tuple matches the ticks column order."""
+        """Bulk insert ticks ATOMICALLY. Each tuple matches the ticks column order.
+
+        The batch runs in an explicit transaction so a mid-batch failure (e.g. a
+        bad row, disk-full) rolls the WHOLE batch back rather than leaving a
+        partially-committed prefix. This is what lets the TickRecorder safely
+        retain-and-retry a failed buffer without duplicating already-committed
+        rows (the ticks table has no unique constraint, so a partial commit
+        followed by a full retry would otherwise double-insert the prefix).
+        """
         if not rows:
             return
-        self.connection.executemany(
-            """INSERT INTO ticks
-               (ts, symbol, exchange, mode, ltp, open, high, low, close,
-                volume, bid, ask, oi, prev_close, depth_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            rows,
-        )
+        conn = self.connection
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            conn.executemany(
+                """INSERT INTO ticks
+                   (ts, symbol, exchange, mode, ltp, open, high, low, close,
+                    volume, bid, ask, oi, prev_close, depth_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     def get_ticks(
         self,

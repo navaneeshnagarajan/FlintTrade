@@ -79,6 +79,31 @@ class TestStorageManager:
         storage.insert_ticks_batch([])  # Should not raise
         storage.close()
 
+    def test_insert_ticks_batch_is_atomic_on_partial_failure(self):
+        # The batch must be all-or-nothing: a mid-batch failure rolls the WHOLE
+        # batch back, leaving no committed prefix. This is what lets the
+        # TickRecorder retain-and-retry a failed buffer WITHOUT duplicating rows
+        # the failed attempt already wrote (the ticks table has no unique key).
+        storage = self._make_storage()
+        ts = datetime(2026, 3, 16, 10, 0, 0)
+
+        def good(ltp: float) -> tuple:
+            return (ts, "TCS", "NSE", "ltp", ltp, None, None, None, None, None, None, None, None, None, None)
+
+        # 3rd row has ts=None → violates TIMESTAMP NOT NULL partway through.
+        bad = (None, "TCS", "NSE", "ltp", 3.0, None, None, None, None, None, None, None, None, None, None)
+
+        with pytest.raises(Exception):
+            storage.insert_ticks_batch([good(1.0), good(2.0), bad, good(4.0)])
+
+        # Nothing committed — the prefix (rows 1-2) was rolled back, not left behind.
+        assert storage.connection.execute("SELECT COUNT(*) FROM ticks").fetchone()[0] == 0
+
+        # A clean retry of the corrected batch inserts exactly 3 — no duplicated prefix.
+        storage.insert_ticks_batch([good(1.0), good(2.0), good(4.0)])
+        assert storage.connection.execute("SELECT COUNT(*) FROM ticks").fetchone()[0] == 3
+        storage.close()
+
     def test_query_ticks_date_range_filters(self):
         storage = self._make_storage()
         storage.insert_tick(

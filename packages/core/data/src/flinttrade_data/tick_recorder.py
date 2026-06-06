@@ -261,6 +261,11 @@ class TickRecorder:
             return
         try:
             if self._storage_lock is not None:
+                # This blocking lock is shared with the nightly maintenance job
+                # (scheduler thread). If that job is mid-CHECKPOINT the event loop
+                # briefly parks here — bounded and acceptable: maintenance runs
+                # off-market (00:30 IST) when tick flow is idle, and the insert is
+                # atomic so a retained batch is safe to retry.
                 with self._storage_lock:
                     self._storage.insert_ticks_batch(self._buffer)
             else:
