@@ -104,6 +104,37 @@ class TestStorageManager:
         assert storage.connection.execute("SELECT COUNT(*) FROM ticks").fetchone()[0] == 3
         storage.close()
 
+    def test_prune_ticks_removes_old_keeps_recent(self):
+        from datetime import datetime, timedelta
+
+        storage = self._make_storage()
+        now = datetime.now()
+
+        def row(ts, ltp):
+            return (ts, "TCS", "NSE", "ltp", ltp, None, None, None, None, None, None, None, None, None, None)
+
+        storage.insert_ticks_batch([
+            row(now - timedelta(days=30), 1.0),   # old → pruned
+            row(now - timedelta(hours=1), 2.0),   # recent → kept
+        ])
+
+        removed = storage.prune_ticks(7)
+        assert removed == 1
+        kept = storage.connection.execute("SELECT ltp FROM ticks").fetchall()
+        assert [r[0] for r in kept] == [2.0]
+        storage.close()
+
+    def test_prune_ticks_noop_for_nonpositive_window(self):
+        from datetime import datetime
+
+        storage = self._make_storage()
+        row = (datetime.now(), "TCS", "NSE", "ltp", 1.0, None, None, None, None, None, None, None, None, None, None)
+        storage.insert_ticks_batch([row])
+
+        assert storage.prune_ticks(0) == 0
+        assert storage.connection.execute("SELECT COUNT(*) FROM ticks").fetchone()[0] == 1
+        storage.close()
+
     def test_query_ticks_date_range_filters(self):
         storage = self._make_storage()
         storage.insert_tick(

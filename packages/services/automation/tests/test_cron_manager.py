@@ -640,3 +640,45 @@ class TestDbOptimiseJob:
 
         executed = [c.args[0] for c in tick.connection.execute.call_args_list]
         assert "CHECKPOINT" in executed and "ANALYZE" in executed
+
+
+class TestTickRetentionJob:
+    """Nightly tick-store pruning job."""
+
+    def test_prunes_under_the_shared_lock(self):
+        import threading
+
+        from flinttrade_automation.cron_manager import make_tick_retention_job
+
+        storage = MagicMock()
+        storage.prune_ticks.return_value = 5
+        lock = threading.Lock()
+
+        make_tick_retention_job(lambda: (storage, lock, 30))()
+
+        storage.prune_ticks.assert_called_once_with(30)
+        assert not lock.locked()  # released after the job
+
+    def test_noop_without_a_store_or_a_positive_window(self):
+        from flinttrade_automation.cron_manager import make_tick_retention_job
+
+        storage = MagicMock()
+        make_tick_retention_job(lambda: (None, None, 30))()   # no store
+        make_tick_retention_job(lambda: (storage, None, 0))()  # disabled window
+        storage.prune_ticks.assert_not_called()
+
+    def test_failure_never_raises(self):
+        from flinttrade_automation.cron_manager import make_tick_retention_job
+
+        storage = MagicMock()
+        storage.prune_ticks.side_effect = RuntimeError("duckdb locked")
+        # Best-effort: a prune failure must be swallowed.
+        make_tick_retention_job(lambda: (storage, None, 30))()
+
+    def test_registered_alongside_db_optimise(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        with_store = CronManager(trade_storage=MagicMock())
+        with_store.register_builtin_jobs()
+        names = {j["name"] for j in with_store.list_jobs()}
+        assert "tick_retention_job" in names

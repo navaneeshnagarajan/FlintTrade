@@ -2357,6 +2357,9 @@ class FlintTradeApp:
                 # builtin_jobs already ran, but the job resolves this lazily.
                 self.cron.tick_storage = tick_storage
                 self.cron.tick_storage_lock = tick_lock
+                # Keep ~90 days of ticks by default so the store stays bounded;
+                # the nightly tick_retention_job prunes older rows.
+                self.cron.tick_retention_days = 90
                 # Default watchlist — the major indices in quote mode. Operators
                 # can extend this; an empty watchlist would capture nothing.
                 recorder.add_symbols(

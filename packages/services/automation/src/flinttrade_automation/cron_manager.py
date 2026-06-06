@@ -107,6 +107,11 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "trigger_type": "cron",
         "trigger_args": {"hour": 0, "minute": 30, "timezone": "Asia/Kolkata"},
     },
+    "tick_retention_job": {
+        "description": "Prune ticks older than the retention window at 12:45 AM IST",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 0, "minute": 45, "timezone": "Asia/Kolkata"},
+    },
     "overnight_optimise_job": {
         "description": "Overnight strategy optimisation at 2:00 AM IST (after EOD)",
         "trigger_type": "cron",
@@ -264,6 +269,37 @@ def make_db_optimise_job(
     return db_optimise_job
 
 
+def make_tick_retention_job(provider: Callable[[], Any]) -> Callable[[], None]:
+    """Create the tick_retention_job handler — nightly prune of the tick store.
+
+    ``provider`` is resolved at FIRE time and returns ``(storage, lock, days)``
+    so the tick store wired after registration is picked up. No-ops without a
+    store or a positive retention window. Runs under the store's shared lock
+    (the recorder writes the same DuckDB connection). Best-effort: any failure
+    is logged, never raised.
+    """
+
+    def tick_retention_job() -> None:
+        try:
+            storage, lock, days = provider()
+        except Exception as exc:  # a bad provider must not crash the scheduler
+            logger.error("tick_retention_job: provider failed — %s", exc)
+            return
+        if storage is None or days <= 0:
+            return
+        try:
+            if lock is not None:
+                with lock:
+                    removed = storage.prune_ticks(days)
+            else:
+                removed = storage.prune_ticks(days)
+            logger.info("tick_retention_job: pruned %d ticks older than %d days", removed, days)
+        except Exception as exc:
+            logger.error("tick_retention_job: prune failed — %s", exc)
+
+    return tick_retention_job
+
+
 def make_overnight_optimise_job(optimiser: Callable[[], Any]) -> Callable[[], None]:
     """Create the overnight strategy-optimisation handler.
 
@@ -365,6 +401,8 @@ class CronManager:
         # reads these lazily (at fire time), not at registration time.
         self.tick_storage = None
         self.tick_storage_lock = None
+        # Days of ticks to keep; 0 disables pruning. Set after construction.
+        self.tick_retention_days = 0
         # Injected overnight strategy optimiser (a zero-arg callable). When set,
         # register_builtin_jobs schedules the "optimise overnight" trigger.
         self.overnight_optimiser: Callable[[], Any] | None = None
@@ -437,6 +475,15 @@ class CronManager:
                     ],
                 ),
                 **DEFAULT_JOBS["db_optimise_job"],
+            )
+            # Nightly tick-store pruning — resolves the tick store + retention
+            # window lazily, so it no-ops until they are wired and configured.
+            self.register(
+                "tick_retention_job",
+                handler=make_tick_retention_job(
+                    lambda: (self.tick_storage, self.tick_storage_lock, self.tick_retention_days),
+                ),
+                **DEFAULT_JOBS["tick_retention_job"],
             )
 
         # Overnight strategy optimisation — only when an optimiser is injected.

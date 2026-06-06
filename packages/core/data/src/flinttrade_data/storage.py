@@ -10,7 +10,7 @@ import csv
 import io
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -231,6 +231,23 @@ class StorageManager:
         except Exception:
             conn.execute("ROLLBACK")
             raise
+
+    def prune_ticks(self, days_to_keep: int) -> int:
+        """Delete ticks older than ``days_to_keep`` days; return rows removed.
+
+        Keeps the append-only tick store bounded. A non-positive window is a
+        no-op — it never deletes everything by accident. The cut-off is computed
+        in Python (a naive datetime, matching the naive ``ts`` column) so the
+        comparison is timezone-consistent.
+        """
+        if days_to_keep <= 0:
+            return 0
+        cutoff = datetime.now() - timedelta(days=days_to_keep)
+        conn = self.connection
+        before = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
+        conn.execute("DELETE FROM ticks WHERE ts < ?", [cutoff])
+        after = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
+        return int(before - after)
 
     def get_ticks(
         self,
