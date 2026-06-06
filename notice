@@ -28,6 +28,21 @@ fully-original implementations is in progress.)
 - pyindicators — MIT — Copyright 2024 PyIndicators
 - OpenClaw — agent-pattern reference
 
+### Reference repositories (patterns studied / adapted)
+
+These upstreams are tracked in `scripts/check_absorption_drift.py` (ABSORBED_REPOS)
+as pattern references; FlintTrade's implementations are its own. Attribution to
+their authors is preserved here (see each repository for its licence terms):
+
+- TradingAgents (https://github.com/TradingAgents-AI/TradingAgents) — multi-agent research patterns
+- FinMem (https://github.com/pipiku915/FinMem-LLM-StockTrading) — LLM trading-memory patterns
+- AlgoTrading (https://github.com/StockSharp/AlgoTrading) — strategy reference
+- fluxscan (https://github.com/marketcalls/fluxscan) — screener patterns
+- pandas_signals_library (https://github.com/marketcalls/pandas_signals_library) — indicator-signal patterns
+- raptorbt (https://github.com/marketcalls/raptorbt) — backtest-engine patterns
+- AlgoMirror — multi-account mirror, trailing-SL and risk-event patterns; reimplemented
+  clean-room natively in `packages/services/ditto` (attribution preserved here)
+
 ## Bundled third-party libraries
 
 This product uses the following open-source libraries (their code IS distributed
