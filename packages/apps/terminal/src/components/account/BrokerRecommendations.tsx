@@ -112,6 +112,18 @@ export function BrokerRecommendations() {
           ))}
         </ul>
       )}
+
+      {top.length > 0 && (
+        // Honest scope note: these rankings are derived from each broker's
+        // ADVERTISED API capabilities, not a live execution test. The native
+        // Dhan/Upstox/Kotak adapters require their SDK + activation before they
+        // can place orders; until then orders route through the OpenAlgo bridge.
+        <p className="text-xxs text-text-muted leading-snug border-t border-border-default pt-2">
+          Capability-based suggestions. Native broker execution needs the broker
+          SDK and activation; until activated, orders route via the OpenAlgo
+          bridge.
+        </p>
+      )}
     </section>
   );
 }

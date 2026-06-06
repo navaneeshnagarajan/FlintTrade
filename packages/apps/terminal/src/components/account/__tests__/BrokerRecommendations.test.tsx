@@ -42,6 +42,10 @@ describe("BrokerRecommendations", () => {
     expect(screen.getByText("Dhan")).toBeInTheDocument();
     expect(screen.getByText("Lowest cost")).toBeInTheDocument();
     expect(screen.getByText("Zero brokerage.")).toBeInTheDocument();
+    // Honest scope note: the rankings are capability-derived, and native
+    // execution needs SDK activation (orders route via the OpenAlgo bridge).
+    expect(screen.getByText(/capability-based suggestions/i)).toBeInTheDocument();
+    expect(screen.getByText(/route via the OpenAlgo/i)).toBeInTheDocument();
   });
 
   it("shows an unavailable message on error", async () => {
