@@ -134,12 +134,13 @@ describe("AISuggestionsPanel", () => {
     expect(highRiskBadges.length).toBe(0);
   });
 
-  it("refresh button cycles market mood", () => {
+  it("the 'Next mood' control cycles the market-mood scenario (honestly labelled — not a data refresh)", () => {
     render(<AISuggestionsPanel />);
-    const refreshButton = screen.getByText("Refresh");
-    // Initial mood is volatile, clicking refresh should cycle to trending
-    fireEvent.click(refreshButton);
-    // Now trending strategies should be shown
+    // The control must NOT masquerade as a live "Refresh" — there is no AI
+    // suggestion backend; it only cycles the illustrative mood scenario.
+    expect(screen.queryByText("Refresh")).toBeNull();
+    const nextMood = screen.getByText("Next mood");
+    fireEvent.click(nextMood);
     const deployButtons = screen.getAllByText("Deploy to Strategy Lab");
     expect(deployButtons.length).toBeGreaterThan(0);
   });

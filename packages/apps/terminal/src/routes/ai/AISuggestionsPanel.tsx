@@ -19,7 +19,7 @@ import {
   Rocket,
   BarChart3,
   ShieldAlert,
-  RefreshCw,
+  Shuffle,
   AlertCircle,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -393,8 +393,10 @@ export default function AISuggestionsPanel() {
     navigate(`/lab?strategy=${registryKey}`);
   }
 
-  function handleRefresh() {
-    // Cycle to next mood for demo
+  // Cycles to the next market-mood scenario, re-deriving the illustrative
+  // suggestion set for that mood. There is no AI-suggestion backend, so this is
+  // NOT a data refresh — the control is labelled "Next mood" to reflect that.
+  function handleNextMood() {
     const moodIds = MOODS.map((m) => m.id);
     const idx = moodIds.indexOf(mood);
     setMood(moodIds[(idx + 1) % moodIds.length]);
@@ -411,11 +413,13 @@ export default function AISuggestionsPanel() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={handleRefresh}
+            onClick={handleNextMood}
             className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs"
+            aria-label="Show suggestions for the next market mood"
+            title="Cycle the market-mood scenario (illustrative suggestions — not a live fetch)"
           >
-            <RefreshCw className="w-3 h-3" />
-            Refresh
+            <Shuffle className="w-3 h-3" />
+            Next mood
           </Button>
         </div>
         <p className="text-xs text-text-secondary leading-relaxed">

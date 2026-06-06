@@ -22,8 +22,9 @@ import { useAuthStore } from "@/stores/authStore";
 interface NetworkIO {
   bytes_sent: number;
   bytes_recv: number;
-  packets_sent: number;
-  packets_recv: number;
+  // null when the backend does not report packet counts (it currently doesn't).
+  packets_sent: number | null;
+  packets_recv: number | null;
 }
 
 interface SystemMetrics {
@@ -37,9 +38,11 @@ interface SystemMetrics {
   uptime_seconds: number;
   network_io: NetworkIO;
   process_count: number;
-  load_avg_1m: number;
-  load_avg_5m: number;
-  load_avg_15m: number;
+  // null when the backend does not report load average (it currently doesn't,
+  // and it is unavailable on Windows hosts) — render as "—", never a fake 0.
+  load_avg_1m: number | null;
+  load_avg_5m: number | null;
+  load_avg_15m: number | null;
   collected_at: string;
 }
 
@@ -72,13 +75,15 @@ async function fetchSystemMetrics(): Promise<SystemMetrics> {
     network_io: {
       bytes_sent: d.network_bytes_sent ?? 0,
       bytes_recv: d.network_bytes_recv ?? 0,
-      packets_sent: 0,
-      packets_recv: 0,
+      // Not reported by the backend — null (render "—"), never a fabricated 0.
+      packets_sent: null,
+      packets_recv: null,
     },
     process_count: d.process_count,
-    load_avg_1m: 0,
-    load_avg_5m: 0,
-    load_avg_15m: 0,
+    // Not reported by the backend (unavailable on Windows) — null, render "—".
+    load_avg_1m: null,
+    load_avg_5m: null,
+    load_avg_15m: null,
     collected_at: new Date().toISOString(),
   };
 }
@@ -300,20 +305,32 @@ export function SystemMetricsPanel() {
         />
         <StatCard
           label="Load Avg"
-          value={data.load_avg_1m.toFixed(2)}
-          sub={`5m: ${data.load_avg_5m.toFixed(2)}  15m: ${data.load_avg_15m.toFixed(2)}`}
+          value={data.load_avg_1m != null ? data.load_avg_1m.toFixed(2) : "—"}
+          sub={
+            data.load_avg_5m != null && data.load_avg_15m != null
+              ? `5m: ${data.load_avg_5m.toFixed(2)}  15m: ${data.load_avg_15m.toFixed(2)}`
+              : "not reported on this host"
+          }
           icon={<Cpu className="w-3 h-3" />}
         />
         <StatCard
           label="Net Sent"
           value={formatBytes(data.network_io.bytes_sent)}
-          sub={`${data.network_io.packets_sent.toLocaleString()} pkts`}
+          sub={
+            data.network_io.packets_sent != null
+              ? `${data.network_io.packets_sent.toLocaleString()} pkts`
+              : undefined
+          }
           icon={<Network className="w-3 h-3" />}
         />
         <StatCard
           label="Net Recv"
           value={formatBytes(data.network_io.bytes_recv)}
-          sub={`${data.network_io.packets_recv.toLocaleString()} pkts`}
+          sub={
+            data.network_io.packets_recv != null
+              ? `${data.network_io.packets_recv.toLocaleString()} pkts`
+              : undefined
+          }
           icon={<Network className="w-3 h-3" />}
         />
       </div>
