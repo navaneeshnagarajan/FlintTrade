@@ -1,9 +1,14 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+//
+// When connected, the widget fetches the nearest expiries' option chains
+// (getExpiry + getOptionChain) and derives the skew curves. We mock both so we
+// can exercise the live ("Live" badge) and sample ("Sample data") paths.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -13,13 +18,42 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+vi.mock("@/services/api", () => ({
+  getExpiry: vi.fn(),
+  getOptionChain: vi.fn(),
+}));
+
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getExpiry, getOptionChain } from "@/services/api";
 import IVSkewWidget, {
   SAMPLE_IV_SKEW_DATA,
   type IVSkewCurve,
 } from "../IVSkewWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
+const mockGetExpiry = getExpiry as ReturnType<typeof vi.fn>;
+const mockGetChain = getOptionChain as ReturnType<typeof vi.fn>;
+
+function liveChain() {
+  return {
+    underlying_ltp: 22400,
+    atm_strike: 22400,
+    chain: [
+      { strike: 22200, ce: { iv: 15.5, delta: 0.65 }, pe: { iv: 16.0, delta: -0.35 } },
+      { strike: 22400, ce: { iv: 14.8, delta: 0.5 }, pe: { iv: 14.8, delta: -0.5 } },
+      { strike: 22600, ce: { iv: 14.1, delta: 0.25 }, pe: { iv: 14.3, delta: -0.75 } },
+    ],
+  };
+}
+
+function renderWidget() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <IVSkewWidget />
+    </QueryClientProvider>,
+  );
+}
 
 beforeAll(() => {
   global.ResizeObserver = class {
@@ -29,50 +63,75 @@ beforeAll(() => {
   };
 });
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockConnected.mockReturnValue(false);
+  mockGetExpiry.mockResolvedValue({ expiry: [] });
+  mockGetChain.mockResolvedValue({ chain: [] });
+});
+
 // ---------------------------------------------------------------------------
 // Widget render tests
 // ---------------------------------------------------------------------------
 
 describe("IVSkewWidget", () => {
   it("renders widget title", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     expect(screen.getByText("IV Skew")).toBeTruthy();
   });
 
-  it("shows Sample badge when disconnected", () => {
+  it("shows the Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    renderWidget();
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("does not show Sample badge when connected", () => {
+  it("does not fetch chains when disconnected", () => {
+    mockConnected.mockReturnValue(false);
+    renderWidget();
+    expect(mockGetExpiry).not.toHaveBeenCalled();
+    expect(mockGetChain).not.toHaveBeenCalled();
+  });
+
+  it("flips to a Live badge once the option chain yields a skew curve", async () => {
     mockConnected.mockReturnValue(true);
-    render(<IVSkewWidget />);
-    expect(screen.queryByText("Sample")).toBeNull();
+    mockGetExpiry.mockResolvedValue({ expiry: ["10-APR-26", "24-APR-26"] });
+    mockGetChain.mockResolvedValue(liveChain());
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(mockGetChain).toHaveBeenCalled();
+  });
+
+  it("falls back to Sample data when connected but the chain is empty", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetExpiry.mockResolvedValue({ expiry: ["10-APR-26"] });
+    mockGetChain.mockResolvedValue({ chain: [] });
+    renderWidget();
+
+    await waitFor(() => expect(mockGetChain).toHaveBeenCalled());
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("renders ATM IV metric", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     expect(screen.getByText("ATM IV")).toBeTruthy();
   });
 
   it("renders 25Δ Skew metric", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     expect(screen.getByText("25Δ Skew")).toBeTruthy();
   });
 
   it("renders the chart with aria label", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     expect(screen.getByLabelText("IV Skew chart")).toBeTruthy();
   });
 
   it("renders skew curves through the shared Flint banded-line primitive", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     const chart = screen.getByRole("img", { name: "IV Skew chart" });
     expect(chart).toHaveAttribute("data-flint-chart", "banded-line");
     expect(chart.querySelector("polyline")).not.toBeInTheDocument();
@@ -81,38 +140,33 @@ describe("IVSkewWidget", () => {
   });
 
   it("renders CE and PE legend swatches without local SVG", () => {
-    mockConnected.mockReturnValue(false);
-    const { container } = render(<IVSkewWidget />);
+    const { container } = renderWidget();
     expect(container.querySelector('svg[width="12"][height="4"]')).not.toBeInTheDocument();
   });
 
   it("symbol selector includes NIFTY", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     const trigger = screen.getByLabelText("Select symbol");
     expect(trigger).toBeTruthy();
     expect(trigger.textContent).toContain("NIFTY");
   });
 
   it("can switch to Moneyness X-axis", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     const btn = screen.getByRole("button", { name: /moneyness/i });
     fireEvent.click(btn);
     expect(btn.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("Strike button is initially pressed", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
+    renderWidget();
     const btn = screen.getByRole("button", { name: /^strike$/i });
     expect(btn.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("renders refresh button", () => {
-    mockConnected.mockReturnValue(false);
-    render(<IVSkewWidget />);
-    expect(screen.getByLabelText("Refresh IV skew")).toBeTruthy();
+  it("does not render a dead refresh button (removed deceptive affordance)", () => {
+    renderWidget();
+    expect(screen.queryByLabelText("Refresh IV skew")).toBeNull();
   });
 });
 

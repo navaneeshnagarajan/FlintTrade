@@ -7,16 +7,26 @@
  *   - Multi-expiry overlay (up to 3 curves, colour-coded)
  *   - ATM IV highlighted with a labelled dot
  *   - Skew metric: 25Δ Put IV − 25Δ Call IV shown in header
- *   - Term structure: select up to 3 expiry dates via comma-separated input
- *   - Auto-updates every 30 s when broker connected
- *   - Sample data shown when disconnected
+ *   - Multi-expiry overlay (up to 3 nearest expiries) when live
+ *
+ * DATA HONESTY: when a broker is connected, the widget fetches the live option
+ * chain for the nearest expiries (`getExpiry` + `getOptionChain`), derives the
+ * per-strike IV-skew curves client-side (`ivSkewTransform`), and shows a "Live"
+ * badge. When disconnected — or the chain yields no usable curve — it falls
+ * back to deterministic sample curves with an amber "Sample data" badge so the
+ * coefficients are never mistaken for live market data.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
-import { Activity, RefreshCw } from "lucide-react";
+import { Activity } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getExpiry, getOptionChain } from "@/services/api";
+import { SYMBOLS as OPTION_SYMBOLS } from "@/widgets/analysis/OptionChain/types";
+import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
+import { buildIVSkewData } from "./ivSkewTransform";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -243,8 +253,36 @@ function IVSkewWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [xMode, setXMode] = useState<XMode>("Strike");
 
-  // In live mode you would wire up a real query; for now use sample data always
-  const data = SAMPLE_IV_SKEW_DATA;
+  // Resolve the option-chain exchange (NFO/BFO/…) for the selected underlying.
+  const symDef = useMemo(
+    () => OPTION_SYMBOLS.find((s) => s.label === symbol) ?? { label: symbol, exchange: "NFO" },
+    [symbol],
+  );
+
+  // Live IV-skew — fetch the nearest expiries' chains and derive curves
+  // client-side. Only runs once a broker is connected.
+  const { data: liveData } = useQuery({
+    queryKey: ["ivskew", symbol],
+    queryFn: async () => {
+      const expResp = await getExpiry(symDef.label, symDef.exchange, "options");
+      const expiries = (expResp?.expiry ?? []).slice(0, 3);
+      if (expiries.length === 0) return null;
+      const chains = await Promise.all(
+        expiries.map(async (expiry) => {
+          const raw = await getOptionChain(symDef.label, symDef.exchange, expiry);
+          return { expiry, raw: raw as unknown as RawOptionChain };
+        }),
+      );
+      return buildIVSkewData(symbol, chains, new Date().toISOString());
+    },
+    enabled: isConnected,
+    staleTime: 30_000,
+    refetchInterval: isConnected ? 30_000 : false,
+    retry: false,
+  });
+
+  const isLive = isConnected && liveData != null && liveData.curves.length > 0;
+  const data = isLive && liveData ? liveData : SAMPLE_IV_SKEW_DATA;
   const firstCurve = data.curves[0];
 
   const skew25d = firstCurve?.skew_25delta ?? null;
@@ -266,19 +304,29 @@ function IVSkewWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
         <Activity size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">IV Skew</span>
-        {/* Honest disclosure — the widget renders SAMPLE_IV_SKEW_DATA unconditionally
-            because no backend `/api/v1/analysis/ivskew` endpoint exists yet
-            (see `services/ftApi.analysis.ts` — no `getIVSkew` defined). When
-            that endpoint lands, gate this badge on `isConnected && mode !== "live"`
-            and add a TanStack Query call alongside. */}
-        <span
-          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-          role="status"
-          aria-label="Showing sample data; no live backend endpoint yet"
-          title="No live data wired yet — showing sample IV skew curves so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        {/* Data-source badge — flips to "Live" only when a broker is connected
+            AND the chain yielded a usable skew curve. Otherwise it stays on the
+            honest amber "Sample data" affordance so the curves are never
+            mistaken for live market data. */}
+        {isLive ? (
+          <span
+            className="inline-flex items-center rounded border border-profit/40 bg-profit/10 px-1.5 py-0.5 text-[10px] font-medium text-profit"
+            role="status"
+            aria-label="Showing live IV skew derived from the connected broker's option chain"
+            title="Live IV skew derived from the connected broker's option chain."
+          >
+            Live
+          </span>
+        ) : (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample data; no live backend endpoint yet"
+            title="No live data wired yet — showing sample IV skew curves so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
 
         <Select value={symbol} onValueChange={setSymbol}>
           <SelectTrigger className="ml-auto h-6 w-32 text-xs bg-surface-hover border-border-default" aria-label="Select symbol">
@@ -310,19 +358,6 @@ function IVSkewWidget() {
           ))}
         </div>
 
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
-
-        <button
-          className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
-          title="Refresh"
-          aria-label="Refresh IV skew"
-        >
-          <RefreshCw size={11} />
-        </button>
       </div>
 
       {/* Metrics */}
