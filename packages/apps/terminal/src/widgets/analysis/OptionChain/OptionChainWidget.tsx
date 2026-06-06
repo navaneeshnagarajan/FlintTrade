@@ -54,14 +54,21 @@ import type {
   InstrumentRecord,
 } from "./types";
 import { SYMBOLS, VIEWS, OPTION_CHAIN_EXCHANGES } from "./types";
+import type { IDockviewPanelProps } from "dockview-react";
 
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
 
-function OptionChainWidget() {
+function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
   const glideTheme = useGlideTheme();
-  const [symDef, setSymDef]                     = useState<SymbolDef>(SYMBOLS[0]);
+  // Honour a pinned symbol from the Dockview panel params (e.g. the options-
+  // scalper preset pins `{ symbol: "NIFTY" }`). Falls back to the first known
+  // underlying. Previously the widget ignored params and only worked for the
+  // default by coincidence.
+  const pinnedSymbol = (props.params as { symbol?: string } | undefined)?.symbol;
+  const initialSymDef = SYMBOLS.find((s) => s.label === pinnedSymbol) ?? SYMBOLS[0];
+  const [symDef, setSymDef]                     = useState<SymbolDef>(initialSymDef);
   const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
   const [view, setView]                         = useState<ViewType>("LTP");
   const [basket, setBasket]                     = useState<BasketItem[]>([]);

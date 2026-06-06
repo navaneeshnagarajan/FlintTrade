@@ -94,6 +94,7 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 // ---------------------------------------------------------------------------
 
 import OptionChainWidget from "../OptionChainWidget";
+import { getSymbol } from "@/services/api";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -108,6 +109,14 @@ describe("OptionChainWidget", () => {
   it("renders without crashing", () => {
     const { container } = render(<OptionChainWidget />, { wrapper: Wrapper });
     expect(container.firstChild).toBeInTheDocument();
+  });
+
+  it("honours a pinned symbol from panel params (options-scalper preset pins NIFTY)", async () => {
+    // The widget must seed from props.params.symbol, not just SYMBOLS[0].
+    render(<OptionChainWidget params={{ symbol: "BANKNIFTY" }} />, { wrapper: Wrapper });
+    await vi.waitFor(() =>
+      expect(getSymbol).toHaveBeenCalledWith("BANKNIFTY", "NFO"),
+    );
   });
 
   it("shows expiry buttons from the data hook", () => {
