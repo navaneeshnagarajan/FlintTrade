@@ -165,6 +165,26 @@ export const getOpenClawStatus = () =>
 export const getOpenClawAgents = () =>
   get<{ agents: OpenClawAgentData[] }>("ai/openclaw/agents");
 
+export interface OpenClawDeployConfig {
+  name: string;
+  strategy: string;
+  symbols: string[];
+}
+
+export const deployOpenClawAgent = (config: OpenClawDeployConfig) =>
+  post<{ agent_id?: string; status?: string }>("ai/openclaw/agents", config);
+
+export const stopOpenClawAgent = (agentId: string) =>
+  post<Record<string, unknown>>(
+    `ai/openclaw/agents/${encodeURIComponent(agentId)}/stop`,
+    {},
+  );
+
+export const getOpenClawAgentLogs = (agentId: string) =>
+  get<{ logs: string[] }>(
+    `ai/openclaw/agents/${encodeURIComponent(agentId)}/logs`,
+  );
+
 export const parseVoiceCommand = (text: string): Promise<VoiceCommandResult> =>
   post<VoiceCommandResult>("voice/parse", { text });
 
