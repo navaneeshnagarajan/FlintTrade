@@ -1,4 +1,4 @@
-import { get, post } from "./ftApi.helpers";
+import { get, post, postV1 } from "./ftApi.helpers";
 import type {
   GEXData,
   VolSurfaceData,
@@ -220,6 +220,85 @@ export const computeIndicators = (
 
 export const compilePineScript = (code: string) =>
   post<PineCompileResult>("indicators/pine/compile", { code });
+
+// --- Multi-timeframe confluence (registered at the bare /v1 family) ---------
+
+/** OHLCV bar accepted by the multi-timeframe analyser. ``timestamp`` is
+ *  optional (epoch seconds); only OHLCV values drive the indicators. */
+export interface MtfBar {
+  timestamp?: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface MtfSignal {
+  timeframe: string;
+  trend: "bullish" | "bearish" | "neutral";
+  rsi: number;
+  macd_histogram: number;
+  ema_position: "above" | "below";
+  strength: number;
+}
+
+export interface MtfAnalysis {
+  symbol: string;
+  signals: MtfSignal[];
+  confluence: number;
+  overall: "bullish" | "bearish" | "neutral";
+}
+
+/**
+ * Compute multi-timeframe signal confluence for a symbol.
+ *
+ * The analyser (RSI / MACD / EMA per timeframe) lives in the screener service
+ * and is registered at the bare ``/v1`` blueprint family, so this must go
+ * through {@link postV1} (``/v1/analytics/mtf``) — the ``/api/v1`` `post`
+ * helper would 404. Callers supply live OHLCV bars per timeframe (typically
+ * fetched via ``getHistory``); the backend skips any timeframe with fewer than
+ * 30 bars.
+ */
+export const getMultiTimeframe = (
+  symbol: string,
+  data: Record<string, MtfBar[]>,
+) =>
+  postV1<MtfAnalysis>("analytics/mtf", { symbol, data });
+
+// --- Pair correlation (registered at the bare /v1 family) -------------------
+
+/** Per-symbol returns + prices series fed to the pair-correlation engine. */
+export interface PairSeries {
+  returns: number[];
+  prices: number[];
+}
+
+export interface PairSignal {
+  pair: [string, string];
+  correlation: number;
+  current_spread: number;
+  mean_spread: number;
+  std_spread: number;
+  z_score: number;
+  signal: "converging" | "diverging" | "neutral";
+}
+
+export interface PairCorrelationResponse {
+  signals: PairSignal[];
+}
+
+/**
+ * Analyse the engine's preset instrument pairs for spread divergence.
+ *
+ * Preset mode: the backend forms its own preset pairs and analyses only those
+ * whose BOTH legs are present in ``data`` (others are silently skipped). So a
+ * caller can drive it with just the symbols it can fetch live (e.g. NSE
+ * equities/indices), and the commodity/currency presets simply fall away.
+ * Registered at the bare ``/v1`` family → must use {@link postV1}.
+ */
+export const getPairCorrelation = (data: Record<string, PairSeries>) =>
+  postV1<PairCorrelationResponse>("analytics/pairs", { preset: true, data });
 
 export const getEtfScreener = () =>
   get<EtfScreenerResponse>("etf/screener");

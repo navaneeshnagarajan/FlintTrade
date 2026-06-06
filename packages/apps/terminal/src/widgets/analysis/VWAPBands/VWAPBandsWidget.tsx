@@ -6,19 +6,23 @@
  *   - Upper/lower bands at 1σ, 2σ, 3σ — filled between bands
  *   - Symbol selector
  *
- * DATA HONESTY: this widget renders deterministic SAMPLE bars only. No live
- * backend endpoint (e.g. /api/v1/history) is wired yet, so there is no live
- * mode — the previous 30s "auto-refresh" only slept and bumped a "last
- * updated" clock, making fake data look live. That deceptive affordance has
- * been removed and the "Sample data" badge is shown unconditionally (mirrors
- * the SessionStatsWidget precedent). Wiring a real intraday-bars endpoint is a
- * separate future task.
+ * DATA HONESTY: when a broker is connected, the widget fetches live intraday
+ * 5-minute bars via the shared `/api/v1/history` path (`getHistory`) and shows
+ * a "Live" badge; VWAP is computed from those real bars. When no broker is
+ * connected — or the broker returns no bars for the latest session (market
+ * closed, holiday) — the widget falls back to deterministic SAMPLE bars and
+ * shows an amber "Sample data" badge so the data is never mistaken for live.
+ * There is no deceptive "auto-refresh" clock; TanStack Query owns refetching.
  */
 
 import { useState, useMemo, memo } from "react";
 import { Waves, ChevronDown } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getHistory } from "@/services/api";
+import type { OHLCVBar as ApiBar } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,6 +89,58 @@ function computeVWAP(bars: OHLCVBar[]): VWAPPoint[] {
 }
 
 // ---------------------------------------------------------------------------
+// Live intraday bars (via /api/v1/history) → single-session widget bars
+// ---------------------------------------------------------------------------
+
+const IST_OFFSET_SECONDS = 5.5 * 3600; // +05:30, applied as a fixed wall-clock shift
+
+/**
+ * Collapse a multi-day history response into the most recent trading session,
+ * mapped to the widget's `{ time: "HH:MM", ... }` bar shape.
+ *
+ * VWAP resets each session, so we keep only the latest date present in the
+ * data — this also makes the widget usable outside market hours (it shows the
+ * last completed session rather than an empty chart).
+ *
+ * Epoch timestamps are shifted by a fixed +05:30 and formatted from the UTC
+ * fields so the displayed wall-clock is IST regardless of the viewer's local
+ * timezone (and deterministic under test).
+ */
+function toSessionBars(raw: ApiBar[] | undefined | null): OHLCVBar[] {
+  if (!raw || raw.length === 0) return [];
+
+  const dated = raw.map((bar) => {
+    const shifted = new Date((bar.timestamp + IST_OFFSET_SECONDS) * 1000);
+    const iso = shifted.toISOString();
+    return {
+      date: iso.slice(0, 10),   // YYYY-MM-DD (IST)
+      time: iso.slice(11, 16),  // HH:MM (IST)
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close,
+      volume: bar.volume,
+    };
+  });
+
+  const latestDate = dated.reduce((acc, bar) => (bar.date > acc ? bar.date : acc), dated[0].date);
+  return dated
+    .filter((bar) => bar.date === latestDate)
+    .map(({ date: _date, ...bar }) => bar);
+}
+
+/** Inclusive YYYY-MM-DD range covering ~the last week, so at least one full
+ *  trading session is present even across weekends and holidays. */
+function historyRange(): { start: string; end: string } {
+  const end = new Date();
+  const start = new Date(end.getTime() - 6 * 24 * 3600 * 1000);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Sample bars
 // ---------------------------------------------------------------------------
 
@@ -124,6 +180,12 @@ const BASE_PRICES: Record<string, number> = {
   HDFCBANK: 1_680,
   INFY: 1_410,
 };
+const INDEX_SYMBOLS = new Set(["NIFTY", "BANKNIFTY"]);
+
+/** OpenAlgo history needs the index exchange for index underlyings. */
+function exchangeFor(symbol: string): string {
+  return INDEX_SYMBOLS.has(symbol) ? "NSE_INDEX" : "NSE";
+}
 
 function buildVWAPChart(points: VWAPPoint[]) {
   if (points.length === 0) {
@@ -200,11 +262,32 @@ function buildVWAPChart(points: VWAPPoint[]) {
 
 function VWAPBandsWidget() {
   const track = useTrackBehavior();
+  const isConnected = useBrokerConnected();
 
   const [symbol, setSymbol] = useState("NIFTY");
   const [showSymbolMenu, setShowSymbolMenu] = useState(false);
 
-  const bars = useMemo(() => buildSampleBars(BASE_PRICES[symbol] ?? 22500), [symbol]);
+  // Live intraday bars — only fetched once a broker is connected. TanStack
+  // Query owns caching/refetching; we never fabricate a "live" refresh clock.
+  const { data: liveRaw } = useQuery({
+    queryKey: ["vwap-history", symbol],
+    queryFn: () => {
+      const { start, end } = historyRange();
+      return getHistory(symbol, exchangeFor(symbol), "5m", start, end);
+    },
+    enabled: isConnected,
+    staleTime: 60_000,
+    refetchInterval: isConnected ? 60_000 : false,
+    retry: false,
+  });
+
+  const liveBars = useMemo(() => toSessionBars(liveRaw), [liveRaw]);
+  const isLive = isConnected && liveBars.length >= 2;
+
+  const bars = useMemo(
+    () => (isLive ? liveBars : buildSampleBars(BASE_PRICES[symbol] ?? 22500)),
+    [isLive, liveBars, symbol],
+  );
   const points = useMemo(() => computeVWAP(bars), [bars]);
   const vwapChart = useMemo(() => buildVWAPChart(points), [points]);
 
@@ -222,19 +305,29 @@ function VWAPBandsWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Waves size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">VWAP Bands</span>
-        {/* Honest disclosure — `buildSampleBars(...)` is the only data source
-            today; no live intraday-bars endpoint is wired yet. The badge was
-            previously gated on `!isConnected`, which hid the fact that the
-            widget still showed sample data after a broker connection. Keep it
-            visible at all times (mirrors SessionStatsWidget). */}
-        <span
-          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-          role="status"
-          aria-label="Showing sample data; no live backend endpoint yet"
-          title="No live data wired yet — showing sample VWAP bands so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        {/* Data-source badge — flips to "Live" only when a broker is connected
+            AND the broker returned a usable session of intraday bars. Otherwise
+            it stays on the honest amber "Sample data" affordance so a viewer is
+            never misled into trusting fabricated prices. */}
+        {isLive ? (
+          <span
+            className="ml-1 px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
+            role="status"
+            aria-label="Showing live intraday data from the connected broker"
+            title="Live intraday 5-minute bars from the connected broker."
+          >
+            Live
+          </span>
+        ) : (
+          <span
+            className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            role="status"
+            aria-label="Showing sample data; no live backend endpoint yet"
+            title="No live data wired yet — showing sample VWAP bands so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
 
         {/* Symbol selector */}

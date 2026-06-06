@@ -68,6 +68,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
 | Multiple built-in strategies | ✅ | 132 reachable (BUILTIN + ALL_STRATEGIES + STRATEGY_REGISTRY) |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains via OpenAlgo; honest sample fallback |
+| Analytics widgets (VWAP bands / multi-timeframe / correlation pairs) | ✅ | Live via `/api/v1/history` + screener analysers; honest "Live"/"Sample data" badge |
 | Vol-surface, straddle-PnL analysis | 🟡 | Honest sample only (need multi-expiry / candle source) |
 
 ## Data & Infra
@@ -95,7 +96,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Item | Status | Notes |
 |---|---|---|
 | SmartOrderRouter (liquidity-aware TWAP slicing) | 🟡 | Built + unit-tested; not routed — wiring it is a **safety-critical** new order path (must mint a `SafetyContext` through the gate) |
-| Analytics endpoints: VWAP bands / pairs / MTF | 🟡 | Compute endpoints built + tested; widgets show honest sample (need live intraday bars wired into the widget) |
+| Analytics endpoints: VWAP bands / pairs / MTF | ✅ | Compute endpoints built + tested **and now reached by their widgets** — live intraday/daily bars via `getHistory`, honest sample fallback |
 | Excel export / import (`exportToExcel`, `importFromExcel`, `createPortfolioReport`) | 🟡 | Backend built + tested; server-side file generation — no browser button yet |
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | 🟡 | Backend built; no widget consumes it |
 | Fundamentals screener (search / screen / detail) | 🟡 | Backend built + tested; no UI surface |

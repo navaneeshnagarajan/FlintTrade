@@ -6,15 +6,24 @@
  *   - Row colour: all bullish = green, all bearish = red, mixed = amber
  *   - Confluence score: count of agreeing timeframes
  *   - Symbol selector
- *   - Sample data only: no live multi-timeframe endpoint is wired yet, so the
- *     widget renders sample signals at all times and discloses this honestly
- *     with an always-visible "Sample data" badge (see header comment below).
- *     Wiring a live source (e.g. /api/v1/history) is a separate future task.
+ *
+ * DATA HONESTY: when a broker is connected, the widget fetches live OHLCV bars
+ * for each timeframe via the shared `/api/v1/history` path and runs them
+ * through the screener's multi-timeframe analyser (`/v1/analytics/mtf`, which
+ * computes RSI/MACD/EMA server-side) — showing a "Live" badge. When no broker
+ * is connected, or the analyser returns no usable timeframes, it falls back to
+ * the deterministic SAMPLE map with an amber "Sample data" badge so signals are
+ * never mistaken for live.
  */
 
 import { useState, useMemo, memo } from "react";
 import { Layers, ChevronDown, ArrowUp, ArrowDown, Minus } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getHistory } from "@/services/api";
+import { getMultiTimeframe } from "@/services/ftApi.analysis";
+import type { MtfBar, MtfSignal } from "@/services/ftApi.analysis";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,6 +77,61 @@ const SAMPLE: Record<string, TimeframeSignal[]> = {
 };
 
 const SYMBOLS = Object.keys(SAMPLE);
+
+// ---------------------------------------------------------------------------
+// Live data (via /api/v1/history per timeframe → /v1/analytics/mtf analyser)
+// ---------------------------------------------------------------------------
+
+const INDEX_SYMBOLS = new Set(["NIFTY", "BANKNIFTY"]);
+
+/** OpenAlgo history needs the index exchange for index underlyings. */
+function exchangeFor(symbol: string): string {
+  return INDEX_SYMBOLS.has(symbol) ? "NSE_INDEX" : "NSE";
+}
+
+/** Per-timeframe lookback (calendar days) chosen so each timeframe clears the
+ *  analyser's 30-bar minimum even across weekends and holidays. */
+const TF_CONFIG: ReadonlyArray<{ tf: string; days: number }> = [
+  { tf: "5m", days: 7 },
+  { tf: "15m", days: 21 },
+  { tf: "1h", days: 90 },
+  { tf: "1D", days: 500 },
+];
+
+function isoDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** Fetch live bars for every configured timeframe and run the analyser. */
+async function fetchMtfAnalysis(symbol: string) {
+  const exchange = exchangeFor(symbol);
+  const end = new Date().toISOString().slice(0, 10);
+  const entries = await Promise.all(
+    TF_CONFIG.map(async ({ tf, days }) => {
+      const bars = await getHistory(symbol, exchange, tf, isoDaysAgo(days), end);
+      return [tf, (bars ?? []) as MtfBar[]] as const;
+    }),
+  );
+  const data = Object.fromEntries(entries) as Record<string, MtfBar[]>;
+  return getMultiTimeframe(symbol, data);
+}
+
+/** Map an analyser signal to the widget's display row. */
+function toDisplaySignal(sig: MtfSignal): TimeframeSignal {
+  const macdSign: TimeframeSignal["macdSign"] =
+    sig.macd_histogram > 1e-9 ? "positive" : sig.macd_histogram < -1e-9 ? "negative" : "flat";
+  const emaPosition: TimeframeSignal["emaPosition"] =
+    sig.ema_position === "above" ? "above" : sig.ema_position === "below" ? "below" : "at";
+  const trend: Direction =
+    sig.trend === "bullish" || sig.trend === "bearish" ? sig.trend : "neutral";
+  return {
+    tf: sig.timeframe,
+    trend,
+    rsi: Number.isFinite(sig.rsi) ? sig.rsi : 0,
+    macdSign,
+    emaPosition,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -167,15 +231,32 @@ function ConfluenceBadge({ bullish, bearish, total }: ConfluenceBadgeProps) {
 // ---------------------------------------------------------------------------
 
 function MultiTimeframeWidget() {
-  // NOTE: We previously read `isConnected = useBrokerConnected()` to gate the
-  // "Sample" badge on disconnect-only. Now the badge is unconditional (the
-  // widget always renders sample signals because no live multi-timeframe
-  // endpoint exists yet — see header comment), so the hook is no longer needed.
   const track = useTrackBehavior();
+  const isConnected = useBrokerConnected();
   const [symbol, setSymbol] = useState("NIFTY");
   const [showMenu, setShowMenu] = useState(false);
 
-  const signals = useMemo(() => SAMPLE[symbol] ?? SAMPLE["NIFTY"], [symbol]);
+  // Live multi-timeframe analysis — only fetched once a broker is connected.
+  const { data: liveAnalysis } = useQuery({
+    queryKey: ["mtf", symbol],
+    queryFn: () => fetchMtfAnalysis(symbol),
+    enabled: isConnected,
+    staleTime: 60_000,
+    refetchInterval: isConnected ? 60_000 : false,
+    retry: false,
+  });
+
+  const liveSignals = useMemo(
+    () => (liveAnalysis?.signals ?? []).map(toDisplaySignal),
+    [liveAnalysis],
+  );
+  // Require at least two timeframes for a meaningful confluence read.
+  const isLive = isConnected && liveSignals.length >= 2;
+
+  const signals = useMemo(
+    () => (isLive ? liveSignals : SAMPLE[symbol] ?? SAMPLE["NIFTY"]),
+    [isLive, liveSignals, symbol],
+  );
   const conf = useMemo(() => confluenceScore(signals), [signals]);
 
   const handleSymbolSelect = (s: string) => {
@@ -191,19 +272,29 @@ function MultiTimeframeWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Layers size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Multi-Timeframe</span>
-        {/* Honest disclosure — the `SAMPLE` map is the only data source today;
-            no live multi-timeframe endpoint exists. The badge previously hid in
-            `isConnected` mode, which masked the fact that we were still showing
-            sample signals even after a broker connection. Keep visible at all
-            times so a connected user is never misled into trusting fake data. */}
-        <span
-          className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-          role="status"
-          aria-label="Showing sample data; no live multi-timeframe source is wired yet"
-          title="No live data wired yet — showing sample multi-timeframe signals so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        {/* Data-source badge — flips to "Live" only when a broker is connected
+            AND the analyser returned at least two timeframes of real signals.
+            Otherwise it stays on the honest amber "Sample data" affordance so a
+            connected user is never misled into trusting fabricated signals. */}
+        {isLive ? (
+          <span
+            className="ml-1 px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
+            role="status"
+            aria-label="Showing live multi-timeframe signals from the connected broker"
+            title="Live multi-timeframe signals computed from the connected broker's intraday bars."
+          >
+            Live
+          </span>
+        ) : (
+          <span
+            className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            role="status"
+            aria-label="Showing sample data; no live multi-timeframe source is wired yet"
+            title="No live data wired yet — showing sample multi-timeframe signals so the widget is usable in explore mode."
+          >
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
 
         {/* Symbol selector */}

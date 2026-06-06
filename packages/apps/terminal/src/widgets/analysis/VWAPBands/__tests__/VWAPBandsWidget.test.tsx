@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 //
-// The widget renders deterministic SAMPLE data only — no live backend endpoint
-// is wired yet, so it no longer reads `useBrokerConnected`. The mock below is
-// kept (defensively) so a future broker-connection signal cannot silently
-// resurrect the old "hide the Sample badge when connected" deception.
+// The widget fetches live intraday bars via `getHistory` once a broker is
+// connected, and falls back to deterministic SAMPLE bars otherwise. We mock
+// both the connection signal and the history fetch so we can exercise the
+// live ("Live" badge) and disconnected ("Sample data" badge) paths.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -19,13 +20,47 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+vi.mock("@/services/api", () => ({
+  getHistory: vi.fn(),
+}));
+
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getHistory } from "@/services/api";
 import VWAPBandsWidget from "../VWAPBandsWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
+const mockGetHistory = getHistory as ReturnType<typeof vi.fn>;
+
+/** A single IST session (2024-01-15) of 5-minute bars, epoch seconds (UTC). */
+function liveSessionBars() {
+  // 2024-01-15 09:15 IST == 03:45 UTC == 1705289100
+  const base = 1705289100;
+  return Array.from({ length: 6 }, (_, i) => {
+    const close = 22500 + i * 5;
+    return {
+      timestamp: base + i * 300,
+      open: close - 2,
+      high: close + 4,
+      low: close - 4,
+      close,
+      volume: 100_000 + i * 1000,
+    };
+  });
+}
+
+function renderWidget() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <VWAPBandsWidget />
+    </QueryClientProvider>,
+  );
+}
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mockConnected.mockReturnValue(false);
+  mockGetHistory.mockResolvedValue([]);
   global.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -35,26 +70,45 @@ beforeEach(() => {
 
 describe("VWAPBandsWidget", () => {
   it("renders the widget title", () => {
-    render(<VWAPBandsWidget />);
+    renderWidget();
     expect(screen.getByText("VWAP Bands")).toBeTruthy();
   });
 
   it("shows the 'Sample data' badge in explore mode (disconnected)", () => {
     mockConnected.mockReturnValue(false);
-    render(<VWAPBandsWidget />);
+    renderWidget();
     expect(screen.getByText("Sample data")).toBeTruthy();
   });
 
-  it("keeps the 'Sample data' badge visible even when broker connected", () => {
-    // The widget has no live data source wired yet — it must NOT pretend the
-    // sample bars become real once a broker connects. The badge stays put.
+  it("does not fetch history when no broker is connected", () => {
+    mockConnected.mockReturnValue(false);
+    renderWidget();
+    expect(mockGetHistory).not.toHaveBeenCalled();
+  });
+
+  it("flips to a 'Live' badge once the broker returns intraday bars", async () => {
     mockConnected.mockReturnValue(true);
-    render(<VWAPBandsWidget />);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    mockGetHistory.mockResolvedValue(liveSessionBars());
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(mockGetHistory).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", "5m", expect.any(String), expect.any(String));
+  });
+
+  it("falls back to 'Sample data' when connected but the broker returns no bars", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetHistory.mockResolvedValue([]);
+    renderWidget();
+
+    // Give the (resolved-empty) query a tick, then assert the honest fallback.
+    await waitFor(() => expect(mockGetHistory).toHaveBeenCalled());
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("badge is an honest, screen-reader-announced status with an explanatory title", () => {
-    render(<VWAPBandsWidget />);
+    renderWidget();
     const badge = screen.getByText("Sample data");
     expect(badge).toHaveAttribute("role", "status");
     expect(badge).toHaveAttribute(
@@ -65,27 +119,24 @@ describe("VWAPBandsWidget", () => {
   });
 
   it("does not render a deceptive live-looking refresh affordance", () => {
-    // The old 30s "auto-refresh" only slept and bumped a clock — it implied
-    // the fake data was live. No refresh button / "last updated" clock now.
-    render(<VWAPBandsWidget />);
+    renderWidget();
     expect(screen.queryByRole("button", { name: /refresh VWAP data/i })).toBeNull();
   });
 
   it("renders VWAP stat labels", () => {
-    render(<VWAPBandsWidget />);
-    // "VWAP" and "Price" each appear in both the stat card and the band legend
+    renderWidget();
     expect(screen.getAllByText("VWAP").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Price").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/VWAP/i).length).toBeGreaterThan(0);
   });
 
   it("renders symbol selector button defaulting to NIFTY", () => {
-    render(<VWAPBandsWidget />);
+    renderWidget();
     expect(screen.getByRole("button", { name: /selected symbol: NIFTY/i })).toBeTruthy();
   });
 
   it("opens symbol dropdown and shows all symbols", () => {
-    render(<VWAPBandsWidget />);
+    renderWidget();
     fireEvent.click(screen.getByRole("button", { name: /selected symbol/i }));
     expect(screen.getByText("BANKNIFTY")).toBeTruthy();
     expect(screen.getByText("RELIANCE")).toBeTruthy();
@@ -93,14 +144,14 @@ describe("VWAPBandsWidget", () => {
   });
 
   it("renders band legend entries", () => {
-    render(<VWAPBandsWidget />);
+    renderWidget();
     expect(screen.getByText("± 1σ")).toBeTruthy();
     expect(screen.getByText("± 2σ")).toBeTruthy();
     expect(screen.getByText("± 3σ")).toBeTruthy();
   });
 
   it("renders VWAP through the shared Flint banded-line primitive", () => {
-    render(<VWAPBandsWidget />);
+    renderWidget();
     const chart = screen.getByRole("img", { name: /vwap bands chart/i });
     expect(chart).toHaveAttribute("data-flint-chart", "banded-line");
     expect(chart.querySelector("polyline")).not.toBeInTheDocument();
@@ -109,7 +160,7 @@ describe("VWAPBandsWidget", () => {
   });
 
   it("renders band legend swatches without local SVG", () => {
-    const { container } = render(<VWAPBandsWidget />);
+    const { container } = renderWidget();
     expect(container.querySelector('svg[width="16"][height="8"]')).not.toBeInTheDocument();
   });
 });
