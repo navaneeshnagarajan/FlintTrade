@@ -82,7 +82,7 @@ vi.mock("@tanstack/react-query", () => ({
   }),
 }));
 
-// ftApi services (SecuritySection + RiskSection)
+// ftApi services (SecuritySection + RiskSection + MonitoringSection)
 vi.mock("@/services/ftApi", () => ({
   getSecurityStats: vi.fn(),
   getBannedIPs: vi.fn(),
@@ -91,11 +91,56 @@ vi.mock("@/services/ftApi", () => ({
   getSecuritySettings: vi.fn(),
   updateSecuritySettings: vi.fn(),
   updateSafetyConfig: vi.fn(),
+  getHealth: vi.fn(),
+  getTrafficStats: vi.fn(),
+  getLatencyStats: vi.fn(),
 }));
 
-// @/services/api (TelegramSection sendTelegram) + ftApi.automation (WhatsApp)
-vi.mock("@/services/api", () => ({ sendTelegram: vi.fn() }));
+// @/services/api (TelegramSection sendTelegram, LeverageSection getLeverageSettings)
+vi.mock("@/services/api", () => ({
+  sendTelegram: vi.fn(),
+  getLeverageSettings: vi.fn(),
+}));
 vi.mock("@/services/ftApi.automation", () => ({ testWhatsAppAlert: vi.fn() }));
+
+// Store/hook deps for the heavier sections.
+vi.mock("@/hooks/useBrokerCapabilities", () => ({
+  useBrokerCapabilities: () => ({ data: undefined, isLoading: false, capabilities: null }),
+}));
+vi.mock("@/components/sandbox/SandboxControls", () => ({
+  default: () => <div data-testid="sandbox-controls" />,
+}));
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector?: unknown) =>
+    typeof selector === "function"
+      ? (selector as (s: Record<string, unknown>) => unknown)({ mode: "explore" })
+      : { mode: "explore" },
+}));
+vi.mock("@/stores/skillStore", () => {
+  const state = {
+    globalLevel: "intermediate",
+    routeOverrides: {},
+    helpPrefs: {},
+    metrics: {
+      trade: { ordersPlaced: 0, widgetsUsed: 0, daysActive: 0, lastActiveDate: "" },
+      invest: { holdingsViewed: 0, sipsCreated: 0, goalsSet: 0 },
+      learn: { lessonsCompleted: 0, quizzesPassed: 0, articlesRead: 0 },
+      lab: { backtestsRun: 0, strategiesCreated: 0, optimizationsRun: 0 },
+      automate: { flowsCreated: 0, alertsSet: 0, strategiesUploaded: 0 },
+      ai: { queriesRun: 0, agentsDeployed: 0 },
+    },
+    getEffectiveLevel: () => "intermediate",
+    setGlobalLevel: vi.fn(),
+    setRouteOverride: vi.fn(),
+    clearRouteOverride: vi.fn(),
+    setHelpPref: vi.fn(),
+    resetToDefaults: vi.fn(),
+  };
+  return {
+    useSkillStore: (selector?: (s: typeof state) => unknown) =>
+      typeof selector === "function" ? selector(state) : state,
+  };
+});
 
 // riskSchema (RiskSection)
 vi.mock("@/lib/schemas/riskSchema", () => ({
@@ -134,6 +179,11 @@ import { LLMSection } from "../LLMSection";
 import { TelegramSection } from "../TelegramSection";
 import { WhatsAppSection } from "../WhatsAppSection";
 import { DataSection } from "../DataSection";
+import { KeyboardSection } from "../KeyboardSection";
+import { LeverageSection } from "../LeverageSection";
+import { PracticeSection } from "../PracticeSection";
+import { MonitoringSection } from "../MonitoringSection";
+import { SkillSection } from "../SkillSection";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
@@ -301,6 +351,33 @@ describe("Section smoke renders (crash guard)", () => {
         onChange={vi.fn()}
       />,
     );
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  // Store/hook-heavy sections (no props) — rendered against their mocked deps.
+  it("KeyboardSection renders", () => {
+    const { container } = render(<KeyboardSection />);
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  it("LeverageSection renders without throwing", () => {
+    // Renders a null/empty state under the mocked (data-less) query — the guard
+    // is that it does not THROW during render.
+    expect(() => render(<LeverageSection />)).not.toThrow();
+  });
+
+  it("PracticeSection renders", () => {
+    const { container } = render(<PracticeSection />);
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  it("MonitoringSection renders", () => {
+    const { container } = render(<MonitoringSection />);
+    expect(container.firstChild).toBeTruthy();
+  });
+
+  it("SkillSection renders", () => {
+    const { container } = render(<SkillSection />);
     expect(container.firstChild).toBeTruthy();
   });
 });
