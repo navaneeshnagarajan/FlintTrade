@@ -15,6 +15,21 @@ code itself. If you are reading FlintTrade for the first time, start with the
 [Developer Guide](DEVELOPER_GUIDE.md) (if you want to extend it). Everything
 else here is reference material you reach for when a specific question arises.
 
+## Independence & attribution
+
+FlintTrade is native-first and **independently built**: its backend, native
+broker gateway contract, safety/gating layer, and most application code are
+original work by the FlintTrade authors. It is **not a fork** of another trading
+application — it interoperates with OpenAlgo only through an optional bridge
+adapter rather than bundling OpenAlgo's source. Reference projects were studied
+for inspiration; where a specific module was adapted from an open-source project
+it carries an in-source `Adapted from:` header and its licence and attribution
+are preserved in the repository's
+[NOTICE](https://github.com/navaneeshnagarajan/FlintTrade/blob/main/notice) file
+(see also [REFERENCES.md](REFERENCES.md)). Reducing the remaining adapted surface
+to fully-original implementations is ongoing. FlintTrade is licensed under
+[AGPL-3.0](https://github.com/navaneeshnagarajan/FlintTrade/blob/main/LICENSE).
+
 ## Index
 
 | File | Audience | One-line description |
