@@ -18,6 +18,22 @@ vi.mock("@/hooks/useHoldings", () => ({
   useHoldings: (...args: unknown[]) => mockUseHoldings(...args),
 }));
 
+// Positions are fetched for the portfolio-report export.
+const mockUsePositions = vi.fn();
+vi.mock("@/hooks/usePositions", () => ({
+  usePositions: (...args: unknown[]) => mockUsePositions(...args),
+}));
+
+const mockDownloadReport = vi.fn();
+vi.mock("@/services/ftApi.data", () => ({
+  downloadPortfolioReport: (...args: unknown[]) => mockDownloadReport(...args),
+}));
+
+const mockEmit = vi.fn();
+vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
+  emitNotification: (...args: unknown[]) => mockEmit(...args),
+}));
+
 import HoldingsWidget from "../HoldingsWidget";
 
 function queryResult(overrides = {}) {
@@ -53,7 +69,10 @@ const SAMPLE_HOLDINGS = [
 
 describe("HoldingsWidget", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    // clearAllMocks (not restoreAllMocks) so vi.fn() CALL HISTORY is reset
+    // between tests — the "nothing to export" assertion checks not-called.
+    vi.clearAllMocks();
+    mockUsePositions.mockReturnValue({ data: [] });
   });
 
   it("renders without crashing", () => {
@@ -111,5 +130,40 @@ describe("HoldingsWidget", () => {
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
     // TCS should be filtered out — it should not appear in the table
     expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+  });
+
+  // ── Portfolio report export ────────────────────────────────────────────
+
+  it("exports a portfolio report (positions + holdings) and notifies on success", async () => {
+    mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
+    mockUsePositions.mockReturnValue({
+      data: [{ symbol: "NIFTY", quantity: 50, ltp: 100, pnl: 500 }],
+    });
+    mockDownloadReport.mockResolvedValue(3);
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /export portfolio report to excel/i }));
+
+    await vi.waitFor(() => expect(mockDownloadReport).toHaveBeenCalledTimes(1));
+    // positions (arg 0) and holdings (arg 1) both passed.
+    expect(mockDownloadReport.mock.calls[0][0]).toHaveLength(1);
+    expect(mockDownloadReport.mock.calls[0][1]).toHaveLength(2);
+    await vi.waitFor(() =>
+      expect(mockEmit).toHaveBeenCalledWith(
+        expect.objectContaining({ category: "system", title: "Portfolio report exported" }),
+      ),
+    );
+  });
+
+  it("emits an alert when there is nothing to export", () => {
+    mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
+    mockUsePositions.mockReturnValue({ data: [] });
+    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /export portfolio report to excel/i }));
+    expect(mockEmit).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "alert", title: "Nothing to export" }),
+    );
+    expect(mockDownloadReport).not.toHaveBeenCalled();
   });
 });

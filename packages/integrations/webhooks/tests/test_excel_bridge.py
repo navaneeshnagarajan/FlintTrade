@@ -160,6 +160,25 @@ class TestExcelBridgePortfolioReport:
             assert "Holdings" in wb.sheetnames
             assert "Summary" in wb.sheetnames
 
+    def test_portfolio_report_bytes_round_trips(self):
+        """create_portfolio_report_bytes yields a valid multi-sheet .xlsx."""
+        self._skip_if_no_openpyxl()
+        import io
+
+        from openpyxl import load_workbook
+
+        from flinttrade_webhooks.excel_bridge import ExcelBridge
+
+        positions = [{"symbol": "NIFTY26APR24500CE", "qty": 75, "pnl": 1200.0}]
+        holdings = [{"symbol": "RELIANCE", "qty": 10, "buy_avg": 2900.0, "pnl": 800.0}]
+
+        payload = ExcelBridge().create_portfolio_report_bytes(positions, holdings)
+        assert isinstance(payload, bytes)
+        assert payload[:2] == b"PK"  # valid .xlsx (zip) magic
+
+        wb = load_workbook(io.BytesIO(payload))
+        assert {"Positions", "Holdings", "Summary"}.issubset(set(wb.sheetnames))
+
 
 class TestExcelBridgeGracefulFallback:
     """Graceful fallback when openpyxl is not installed."""

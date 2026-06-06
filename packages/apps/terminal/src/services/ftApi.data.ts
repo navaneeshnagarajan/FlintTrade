@@ -286,3 +286,43 @@ export async function downloadExcel(
   URL.revokeObjectURL(url);
   return data.length;
 }
+
+/**
+ * Build a multi-sheet portfolio report (Positions / Holdings / Summary) and
+ * trigger a browser download. Streams `/portfolio/report/download` — no
+ * server-side file. Returns the total row count exported.
+ *
+ * @throws Error when there is nothing to export or the request fails.
+ */
+export async function downloadPortfolioReport(
+  positions: Record<string, unknown>[],
+  holdings: Record<string, unknown>[],
+  filename = "portfolio.xlsx",
+): Promise<number> {
+  if (positions.length === 0 && holdings.length === 0) {
+    throw new Error("Nothing to export — no positions or holdings.");
+  }
+  const name = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+
+  const resp = await fetch(
+    `${getBase()}/api/v1/integration/excel/portfolio/report/download`,
+    {
+      method: "POST",
+      headers: buildHeaders(true),
+      body: JSON.stringify({ positions, holdings, filename: name }),
+    },
+  );
+  if (!resp.ok) {
+    const msg = await resp.json().then((b) => b?.message).catch(() => null);
+    throw new Error(msg ?? `Portfolio report failed (HTTP ${resp.status})`);
+  }
+
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  return positions.length + holdings.length;
+}

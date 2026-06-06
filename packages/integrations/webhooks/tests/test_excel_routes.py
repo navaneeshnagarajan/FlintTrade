@@ -22,6 +22,7 @@ def _mock_bridge() -> MagicMock:
     bridge.create_portfolio_report.return_value = "/tmp/portfolio.xlsx"
     bridge.import_from_excel.return_value = [{"symbol": "NIFTY", "qty": 50}]
     bridge.export_to_bytes.return_value = b"PK\x03\x04fake-xlsx-bytes"
+    bridge.create_portfolio_report_bytes.return_value = b"PK\x03\x04fake-portfolio-bytes"
     return bridge
 
 
@@ -160,6 +161,39 @@ def test_portfolio_report_empty(client):
     """200 with empty positions and holdings (uses defaults)."""
     resp = client.post("/api/v1/integration/excel/portfolio/report", json={})
     assert resp.status_code == 200
+
+
+def test_portfolio_report_download_streams_attachment(client):
+    """Streams the multi-sheet .xlsx bytes with an attachment header."""
+    resp = client.post(
+        "/api/v1/integration/excel/portfolio/report/download",
+        json={
+            "positions": [{"symbol": "NIFTY", "pnl": 1200}],
+            "holdings": [{"symbol": "TCS", "pnl": -300}],
+            "filename": "my-portfolio",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.mimetype == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert "attachment" in resp.headers["Content-Disposition"]
+    # filename without extension gets .xlsx appended
+    assert "my-portfolio.xlsx" in resp.headers["Content-Disposition"]
+    assert resp.data == b"PK\x03\x04fake-portfolio-bytes"
+
+
+def test_portfolio_report_download_bridge_error(app):
+    """500 on ExcelBridgeError (e.g. openpyxl missing)."""
+    bridge = _mock_bridge()
+    bridge.create_portfolio_report_bytes.side_effect = ExcelBridgeError("openpyxl not installed")
+    mod.init_excel_routes(bridge)
+    with app.test_client() as c:
+        resp = c.post(
+            "/api/v1/integration/excel/portfolio/report/download",
+            json={"positions": [], "holdings": []},
+        )
+    assert resp.status_code == 500
 
 
 # ---------------------------------------------------------------------------

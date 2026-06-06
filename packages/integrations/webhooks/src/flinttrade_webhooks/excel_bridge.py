@@ -244,7 +244,20 @@ class ExcelBridge:
             ExcelBridgeError: If openpyxl is not installed or file write fails.
         """
         _require_openpyxl()
+        wb = self._build_portfolio_workbook(positions, holdings)
+        self._save(wb, file_path)
+        logger.info(
+            "Portfolio report written: %s (%d positions, %d holdings)",
+            file_path, len(positions), len(holdings),
+        )
+        return os.path.abspath(file_path)
 
+    def _build_portfolio_workbook(
+        self,
+        positions: list[dict[str, Any]],
+        holdings: list[dict[str, Any]],
+    ) -> Any:
+        """Build the 3-sheet portfolio workbook (shared by file + bytes export)."""
         wb = Workbook()
 
         # -- Positions sheet --
@@ -259,13 +272,30 @@ class ExcelBridge:
         # -- Summary sheet --
         ws_sum = wb.create_sheet("Summary")
         self._write_summary(ws_sum, positions, holdings)
+        return wb
 
-        self._save(wb, file_path)
-        logger.info(
-            "Portfolio report written: %s (%d positions, %d holdings)",
-            file_path, len(positions), len(holdings),
-        )
-        return os.path.abspath(file_path)
+    def create_portfolio_report_bytes(
+        self,
+        positions: list[dict[str, Any]],
+        holdings: list[dict[str, Any]],
+    ) -> bytes:
+        """Build the same 3-sheet portfolio report as
+        :meth:`create_portfolio_report` but return the ``.xlsx`` bytes for
+        streaming a browser download (no server-side file).
+
+        Raises:
+            ExcelBridgeError: If openpyxl is not installed or the build fails.
+        """
+        _require_openpyxl()
+        from io import BytesIO  # noqa: PLC0415
+
+        wb = self._build_portfolio_workbook(positions, holdings)
+        buf = BytesIO()
+        try:
+            wb.save(buf)
+        except Exception as exc:
+            raise ExcelBridgeError(f"Failed to build portfolio report: {exc}") from exc
+        return buf.getvalue()
 
     # ------------------------------------------------------------------
     # Internal helpers

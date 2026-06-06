@@ -2,8 +2,8 @@
 // Replaces direct getHoldings() / getMultiQuotes() calls with useHoldings() hook.
 // PRESERVED: retry:false in useHoldings to suppress errors for brokers without holdings API.
 // Uses TanStack Table v8 + shadcn Table; search + sort are client-side derived state.
-import { useMemo, useState, memo } from "react";
-import { Clock, Search, RefreshCw, Briefcase } from "lucide-react";
+import { useMemo, useState, useCallback, memo } from "react";
+import { Clock, Search, RefreshCw, Briefcase, FileSpreadsheet } from "lucide-react";
 import {
   type ColumnDef,
   flexRender,
@@ -24,8 +24,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useHoldings } from "@/hooks/useHoldings";
+import { usePositions } from "@/hooks/usePositions";
+import { downloadPortfolioReport } from "@/services/ftApi.data";
+import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { WidgetProps } from "@/types/widgets";
-import type { RawHolding } from "@/types/rawApi";
+import type { RawHolding, RawPosition } from "@/types/rawApi";
 
 interface HoldingRow {
   symbol: string;
@@ -83,6 +86,48 @@ function HoldingsWidget(_props: WidgetProps) {
   );
 
   const lastFetch = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
+
+  // Positions are fetched so the portfolio report can span both books.
+  const { data: positionsData } = usePositions();
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handlePortfolioReport = useCallback(async () => {
+    const posRows = ((positionsData ?? []) as RawPosition[]).map((p) => ({
+      symbol: p.symbol,
+      qty: parseInt(String(p.quantity ?? 0), 10),
+      ltp: parseFloat(String(p.ltp ?? 0)),
+      pnl: parseFloat(String(p.pnl ?? 0)),
+    }));
+    if (posRows.length === 0 && rows.length === 0) {
+      emitNotification({
+        category: "alert",
+        title: "Nothing to export",
+        body: "No positions or holdings to include in the report.",
+      });
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const total = await downloadPortfolioReport(
+        posRows as unknown as Record<string, unknown>[],
+        rows as unknown as Record<string, unknown>[],
+        "portfolio.xlsx",
+      );
+      emitNotification({
+        category: "system",
+        title: "Portfolio report exported",
+        body: `Downloaded ${total} row${total === 1 ? "" : "s"} (positions + holdings) to portfolio.xlsx.`,
+      });
+    } catch (err) {
+      emitNotification({
+        category: "alert",
+        title: "Report export failed",
+        body: err instanceof Error ? err.message : "Could not export the portfolio report.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  }, [positionsData, rows]);
 
   const columns = useMemo<ColumnDef<HoldingRow>[]>(
     () => [
@@ -191,6 +236,18 @@ function HoldingsWidget(_props: WidgetProps) {
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => void handlePortfolioReport()}
+            disabled={isExporting}
+            className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
+            aria-label="Export portfolio report to Excel"
+            title="Export a Positions + Holdings + Summary Excel report"
+          >
+            <FileSpreadsheet size={11} className={isExporting ? "animate-pulse" : ""} />
+          </Button>
           <Button
             type="button"
             variant="ghost"

@@ -213,6 +213,51 @@ def portfolio_report() -> tuple[Response, int]:
     }), 200
 
 
+@excel_bp.route("/portfolio/report/download", methods=["POST"])
+def portfolio_report_download() -> Response:
+    """Build the multi-sheet portfolio report and stream it as a browser download.
+
+    The streaming counterpart of ``/portfolio/report`` (which writes a
+    server-side file) — builds Positions/Holdings/Summary in memory and returns
+    the ``.xlsx`` bytes with an attachment header, so the terminal triggers a
+    real download with no server-side file to locate.
+
+    Request JSON:
+        positions (list[dict], optional): Position rows (default ``[]``).
+        holdings  (list[dict], optional): Holdings rows (default ``[]``).
+        filename  (str, optional):        Download filename (default ``"portfolio.xlsx"``).
+    """
+    bridge = _get_bridge()
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+
+    positions: list[dict[str, Any]] = body.get("positions", [])
+    holdings: list[dict[str, Any]] = body.get("holdings", [])
+    raw_name = Path(str(body.get("filename", "portfolio.xlsx"))).name  # strip traversal
+    filename = raw_name if raw_name.endswith(".xlsx") else f"{raw_name}.xlsx"
+
+    try:
+        payload = bridge.create_portfolio_report_bytes(positions, holdings)
+    except ExcelBridgeError as exc:
+        return Response(
+            f'{{"status": "error", "message": "{exc}"}}',
+            status=500,
+            mimetype="application/json",
+        )
+
+    logger.info(
+        "Portfolio report download: %s (%d positions, %d holdings, %d bytes)",
+        filename, len(positions), len(holdings), len(payload),
+    )
+    return Response(
+        payload,
+        mimetype=_XLSX_MIME,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(payload)),
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Import
 # ---------------------------------------------------------------------------
