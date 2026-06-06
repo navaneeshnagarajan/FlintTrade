@@ -171,3 +171,32 @@ def test_custom_registry_independent_of_module_registry() -> None:
     reg = CapabilityRegistry()
     assert len(reg.all()) == 0
     assert reg.get("zerodha") is None
+
+
+def test_native_registry_flags_match_adapter_capabilities() -> None:
+    """The BrokerCapabilities registry (served by GET /broker/capabilities) must
+    agree with the authoritative per-adapter Capabilities (which feed the
+    recommendation engine) on bracket/cover support.
+
+    They diverged for Dhan: the registry said False while the adapter places
+    bracket/cover natively via super_order. This tripwire fails if any native
+    broker present in BOTH systems disagrees again.
+    """
+    from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
+    from flinttrade_gateway.brokers.kotakneo import KOTAKNEO_CAPABILITIES
+    from flinttrade_gateway.brokers.upstox import UPSTOX_CAPABILITIES
+
+    natives = {
+        "dhan": DHAN_CAPABILITIES,
+        "upstox": UPSTOX_CAPABILITIES,
+        "kotakneo": KOTAKNEO_CAPABILITIES,
+    }
+    checked = 0
+    for name, adapter_caps in natives.items():
+        reg_caps = REGISTRY.get(name)
+        if reg_caps is None:
+            continue  # not every native is seeded into the registry (e.g. kotakneo)
+        checked += 1
+        assert reg_caps.supports_bracket_orders == adapter_caps.bracket_order_native, name
+        assert reg_caps.supports_cover_orders == adapter_caps.cover_order_native, name
+    assert checked >= 2  # dhan + upstox are both seeded; guard the loop ran

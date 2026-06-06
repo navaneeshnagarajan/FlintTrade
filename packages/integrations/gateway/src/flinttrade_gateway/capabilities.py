@@ -385,8 +385,13 @@ def _build_default_registry() -> CapabilityRegistry:
         supports_limit_orders=True,
         supports_sl_orders=True,
         supports_sl_m_orders=True,
-        supports_bracket_orders=False,
-        supports_cover_orders=False,
+        # Dhan places bracket/cover natively via super_order (place_order
+        # dispatches variety bracket/cover -> place_super_order), matching the
+        # authoritative per-adapter DHAN_CAPABILITIES (bracket/cover_order_native
+        # = True). The registry previously said False — a contradiction the
+        # cross-validation test now guards against.
+        supports_bracket_orders=True,
+        supports_cover_orders=True,
         supports_basket_orders=True,
         supports_options=True,
         supports_futures=True,
