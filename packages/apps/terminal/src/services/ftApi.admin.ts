@@ -1,4 +1,4 @@
-import { get, isDemoAuthSession, post, put, del } from "./ftApi.helpers";
+import { get, isDemoAuthSession, post } from "./ftApi.helpers";
 
 export interface AuditLog {
   timestamp: string;
@@ -79,16 +79,6 @@ export interface BrokerLatency {
 }
 
 export type LatencyStats = Record<string, BrokerLatency>;
-
-export interface UserAccount {
-  id: number;
-  username: string;
-  email: string;
-  role: "admin" | "trader" | "viewer";
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
 
 export interface ActivityEntry {
   id: number;
@@ -175,35 +165,6 @@ export const getLatencyStats = () =>
     ? Promise.resolve({})
     : get<LatencyStats>("latency/stats");
 
-export const listUsers = () =>
-  get<{ users: UserAccount[] }>("users");
-
-export const createUser = (
-  username: string,
-  password: string,
-  email: string,
-  role?: "admin" | "trader" | "viewer",
-) =>
-  post<UserAccount>("users", {
-    username,
-    password,
-    email,
-    ...(role ? { role } : {}),
-  });
-
-export const updateUser = (
-  username: string,
-  fields: { email?: string; role?: string; is_active?: boolean },
-) =>
-  put<UserAccount>(
-    "users/" + encodeURIComponent(username),
-    fields,
-  );
-
-export const deleteUser = (username: string) =>
-  del<{ message: string }>(
-    "users/" + encodeURIComponent(username),
-  );
 
 export const getActivityLog = (params?: {
   action?: string;
