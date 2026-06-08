@@ -75,7 +75,6 @@ vi.mock("@/routes/ai/AISuggestionsPanel", () => ({
 }));
 
 vi.mock("@/services/ftApi", () => ({
-  getActiveSignals: vi.fn().mockResolvedValue([]),
   analyzeSentiment: vi.fn(),
   queryKnowledge: vi.fn(),
 }));

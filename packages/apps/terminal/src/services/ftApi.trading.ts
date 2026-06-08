@@ -36,23 +36,6 @@ export interface PendingOrder {
   reason: string;
 }
 
-export interface BracketOrder {
-  bracket_id: string;
-  symbol: string;
-  exchange: string;
-  action: "BUY" | "SELL";
-  quantity: number;
-  entry_price: number;
-  stoploss: number;
-  target: number;
-  trailing_sl?: number;
-  status: "PENDING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
-  entry_order_id: string | null;
-  sl_order_id: string | null;
-  target_order_id: string | null;
-  created_at: string;
-}
-
 export type PositionSizeMethod =
   | "from_capital"
   | "from_risk_percent"
@@ -137,27 +120,6 @@ export const rejectOrder = (id: string) =>
 
 export const approveAllOrders = () =>
   post<{ status: string; approved_count: number }>("action-center/approve-all");
-
-export const placeBracketOrder = (
-  entry: Record<string, unknown>,
-  stoploss: number,
-  target: number,
-  trailing_sl?: number,
-) =>
-  post<BracketOrder>("orders/bracket", {
-    ...entry,
-    stoploss,
-    target,
-    ...(trailing_sl !== undefined ? { trailing_sl } : {}),
-  });
-
-export const getActiveBrackets = () =>
-  get<{ brackets: BracketOrder[] }>("orders/brackets");
-
-export const cancelBracketOrder = (bracketId: string) =>
-  del<{ status: string }>(
-    "orders/bracket/" + encodeURIComponent(bracketId),
-  );
 
 export const calculatePositionSize = (req: PositionSizeRequest) =>
   post<PositionSizeResult>("position/size", req);

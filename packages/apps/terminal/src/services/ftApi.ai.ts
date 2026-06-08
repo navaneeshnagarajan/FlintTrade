@@ -122,8 +122,6 @@ export interface VoiceCommandResult {
   is_valid: boolean;
 }
 
-export const getActiveSignals = () => get<{ signals: Signal[] }>("signals/active");
-
 export const getRecentSignals = (limit?: number) => {
   const qs = limit !== undefined ? `?limit=${limit}` : "";
   return get<{ signals: LiveSignal[] }>("signals/recent" + qs);

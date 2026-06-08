@@ -21,8 +21,8 @@ export function isDemoAuthSession(): boolean {
  * This ensures server-side guards like :func:`require_live_unlocked` and
  * :func:`require_auth` see the auth context regardless of which helper a
  * caller picked — previously only :func:`api.postOrder` attached these,
- * which left helper-based callers (e.g. :func:`placeBracketOrder`)
- * unauthenticated and rejected by the new mode-guard.
+ * which left helper-based callers unauthenticated and rejected by the new
+ * mode-guard.
  *
  * The ``Content-Type`` is conditionally added only for body-bearing
  * methods (POST/PUT) so that GET/DELETE preflights are not affected.

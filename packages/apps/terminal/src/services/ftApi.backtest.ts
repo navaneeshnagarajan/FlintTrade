@@ -165,30 +165,6 @@ export interface StrategyLogEntry {
   message: string;
 }
 
-export interface RefinementSuggestion {
-  strategy_name: string;
-  analysis: string;
-  suggested_params: Record<string, unknown>;
-  reasoning: string;
-  confidence: number;
-  timestamp: string;
-}
-
-export interface RefineStrategyRequest {
-  strategy_name: string;
-  backtest_results: {
-    sharpe_ratio?: number;
-    max_drawdown?: number;
-    win_rate?: number;
-    total_trades?: number;
-    total_return?: number;
-    profit_factor?: number;
-    sortino_ratio?: number;
-    [key: string]: unknown;
-  };
-  current_params: Record<string, unknown>;
-}
-
 function parseDemoStartDate(startDate: string): Date {
   const parsed = new Date(`${startDate}T09:15:00.000Z`);
   return Number.isNaN(parsed.getTime()) ? new Date("2024-01-01T09:15:00.000Z") : parsed;
@@ -384,9 +360,6 @@ export const getStrategyLogs = (id: string) =>
       return { timestamp: "", level: "INFO", message: line };
     }),
   );
-
-export const refineStrategy = (req: RefineStrategyRequest) =>
-  post<RefinementSuggestion>("ai/refine-strategy", req);
 
 // ---------------------------------------------------------------------------
 // Permutation (Monte-Carlo) significance test — /v1/backtest/permutation.
