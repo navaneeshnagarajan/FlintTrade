@@ -5,6 +5,7 @@
 import { BentoCard } from "@/components/bento/BentoCard";
 import { RefreshCw } from "lucide-react";
 import { format, addDays } from "date-fns";
+import { DemoBadge } from "./DemoBadge";
 
 interface SIPItem {
   id: string;
@@ -22,12 +23,13 @@ const PLACEHOLDER_SIPS: SIPItem[] = [
 
 export function SIPCard() {
   return (
-    <BentoCard size="default" label="Active SIPs" data-testid="sip-card">
+    <BentoCard size="default" label="Example SIPs (not your tracked SIPs)" data-testid="sip-card">
+      <DemoBadge testId="sip-demo-badge" title="Illustrative example SIPs — not your real tracked SIPs. Track SIPs in the Invest tab." />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <RefreshCw size={13} className="text-text-muted" aria-hidden="true" />
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
-            Active SIPs
+            Example SIPs
           </p>
         </div>
 

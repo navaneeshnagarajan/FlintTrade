@@ -4,6 +4,7 @@
 
 import { BentoCard } from "@/components/bento/BentoCard";
 import { Globe } from "lucide-react";
+import { DemoBadge } from "./DemoBadge";
 
 interface GlobalIndex {
   name: string;
@@ -22,7 +23,8 @@ const GLOBAL_INDICES: GlobalIndex[] = [
 
 export function GlobalCard() {
   return (
-    <BentoCard size="default" label="Global Indices" data-testid="global-card">
+    <BentoCard size="default" label="Global Indices (placeholder data)" data-testid="global-card">
+      <DemoBadge testId="global-demo-badge" title="Placeholder world-index quotes — not live" />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Globe size={13} className="text-text-muted" aria-hidden="true" />

@@ -86,9 +86,14 @@ describe("ScannerWidget", () => {
     expect(screen.getByText("Banking")).toBeInTheDocument();
   });
 
-  it("renders refresh button", () => {
+  it("does not render a deceptive refresh button or live-looking clock over static sample data", () => {
+    // The scanner has no live feed (rows come from static sampleData, disclosed
+    // by the "Sample data" notice). The old "last refreshed" clock + manual
+    // refresh spinner only bumped a timestamp / slept over unchanging data —
+    // removed so nothing implies a live refresh that never happens.
     render(<ScannerWidget />);
-    expect(screen.getByLabelText("Refresh scanner")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Refresh scanner")).not.toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
   });
 
   it("renders Add to Watchlist buttons in Gap Scan", () => {

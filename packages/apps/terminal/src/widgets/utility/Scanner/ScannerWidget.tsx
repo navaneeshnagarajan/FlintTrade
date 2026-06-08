@@ -12,7 +12,7 @@
  * Ready to wire to OpenAlgo pre-market data when available.
  */
 
-import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
+import { useState, useMemo, useCallback, memo } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -29,7 +29,6 @@ import {
   Activity,
   Map,
   Plus,
-  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -531,9 +530,6 @@ function sectorColumns(): ColumnDef<SectorMoverEntry, unknown>[] {
 
 function ScannerWidget() {
   const [activeTab, setActiveTab] = useState<ScannerTab>("gap");
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Memoize columns
   const gapCols = useMemo(() => gapColumns(), []);
@@ -541,49 +537,11 @@ function ScannerWidget() {
   const volumeCols = useMemo(() => volumeColumns(), []);
   const sectorCols = useMemo(() => sectorColumns(), []);
 
-  // Simulated auto-refresh (60s interval — ready for real data)
-  useEffect(() => {
-    refreshTimerRef.current = setInterval(() => {
-      setLastRefresh(new Date());
-    }, 60_000);
-
-    return () => {
-      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-    };
-  }, []);
-
-  // Ref to track the manual-refresh timeout so it can be cancelled on unmount
-  const manualRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Clear the manual-refresh timeout on unmount to prevent state updates on
-  // an unmounted component
-  useEffect(() => {
-    return () => {
-      if (manualRefreshTimerRef.current) {
-        clearTimeout(manualRefreshTimerRef.current);
-      }
-    };
-  }, []);
-
-  const handleManualRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    // Simulate refresh delay
-    manualRefreshTimerRef.current = setTimeout(() => {
-      manualRefreshTimerRef.current = null;
-      setLastRefresh(new Date());
-      setIsRefreshing(false);
-    }, 500);
-  }, []);
-
-  const refreshTime = useMemo(() => {
-    return lastRefresh.toLocaleTimeString("en-IN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-      timeZone: "Asia/Kolkata",
-    });
-  }, [lastRefresh]);
+  // NOTE: there is no live scanner feed yet — the rows come from static
+  // sampleData (disclosed by the "Sample data" notice below). A "last
+  // refreshed" clock + manual-refresh spinner were removed because they only
+  // bumped a timestamp / slept 500ms over unchanging data, implying a live
+  // refresh that never happens. Wire a real fetch before reintroducing them.
 
   return (
     <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden">
@@ -595,21 +553,6 @@ function ScannerWidget() {
         </span>
 
         <div className="flex-1" />
-
-        {/* Auto-refresh indicator */}
-        <span className="text-xxs font-mono text-text-muted" title="Last refreshed">
-          {refreshTime}
-        </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleManualRefresh}
-          disabled={isRefreshing}
-          className="h-5 w-5 p-0 text-text-muted hover:text-text-primary"
-          aria-label="Refresh scanner"
-        >
-          <RefreshCw className={cn("size-3", isRefreshing && "animate-spin")} />
-        </Button>
       </div>
 
       {/* Tab bar */}

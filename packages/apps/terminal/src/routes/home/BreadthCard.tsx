@@ -4,6 +4,7 @@
 
 import { BentoCard } from "@/components/bento/BentoCard";
 import { BarChart2 } from "lucide-react";
+import { DemoBadge } from "./DemoBadge";
 
 // Placeholder data — will be replaced by real breadth API in Phase 2
 const BREADTH = {
@@ -19,7 +20,8 @@ export function BreadthCard() {
   const unchPct = (BREADTH.unchanged / total) * 100;
 
   return (
-    <BentoCard size="default" label="Market Breadth" data-testid="breadth-card">
+    <BentoCard size="default" label="Market Breadth (placeholder data)" data-testid="breadth-card">
+      <DemoBadge testId="breadth-demo-badge" title="Placeholder breadth — not live NSE data" />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <BarChart2 size={13} className="text-text-muted" aria-hidden="true" />
@@ -62,7 +64,7 @@ export function BreadthCard() {
         </div>
 
         <p className="text-[10px] text-text-muted text-center mt-auto">
-          NSE · {total.toLocaleString()} total
+          Sample · {total.toLocaleString()} total
         </p>
       </div>
     </BentoCard>

@@ -9,6 +9,7 @@
 
 import { BentoCard } from "@/components/bento/BentoCard";
 import { Newspaper } from "lucide-react";
+import { DemoBadge } from "./DemoBadge";
 
 type Sentiment = "positive" | "negative" | "neutral";
 
@@ -53,7 +54,8 @@ const PLACEHOLDER_NEWS: NewsItem[] = [
 
 export function NewsCard() {
   return (
-    <BentoCard size="wide" label="Top Stories" data-testid="news-card">
+    <BentoCard size="wide" label="Top Stories (placeholder headlines)" data-testid="news-card">
+      <DemoBadge testId="news-demo-badge" title="Placeholder headlines — not live news" />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Newspaper size={13} className="text-text-muted" aria-hidden="true" />
