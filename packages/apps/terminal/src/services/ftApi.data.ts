@@ -1,4 +1,4 @@
-import { get, post, getBase, buildHeaders } from "./ftApi.helpers";
+import { get, getBase, buildHeaders } from "./ftApi.helpers";
 
 // ─── Order Flow ───────────────────────────────────────────────────────────────
 
@@ -97,22 +97,6 @@ export interface HistoricalOptionRow {
   iv: number;
 }
 
-export interface QuestDBTick {
-  symbol: string;
-  exchange: string;
-  ltp: number;
-  open?: number;
-  high?: number;
-  low?: number;
-  close?: number;
-  volume?: number;
-  bid?: number;
-  ask?: number;
-  oi?: number;
-  timestamp?: string;
-  timestamp_ns?: number;
-}
-
 export interface OHLCVBar {
   timestamp: string;
   open: number;
@@ -174,36 +158,6 @@ export const getHistoricalChain = (
       (qs ? "?" + qs : ""),
   );
 };
-
-export const checkQuestDBHealth = () =>
-  get<{ running: boolean }>("data/questdb/health");
-
-export const insertQuestDBTicks = (ticks: QuestDBTick[]) =>
-  post<{ inserted: number }>("data/questdb/ticks", { ticks });
-
-export const queryQuestDB = (sql: string) =>
-  post<{ rows: Record<string, unknown>[]; count: number }>(
-    "data/questdb/query",
-    { sql },
-  );
-
-export const aggregateQuestDBOHLCV = (
-  symbol: string,
-  interval: string,
-  start: string,
-  end: string,
-) =>
-  post<{ bars: OHLCVBar[]; count: number }>("data/questdb/ohlcv", {
-    symbol,
-    interval,
-    start,
-    end,
-  });
-
-export const getQuestDBLatestTick = (symbol: string) =>
-  get<QuestDBTick>(
-    "data/questdb/tick/latest/" + encodeURIComponent(symbol),
-  );
 
 /**
  * Export rows to Excel and trigger a real browser download.
