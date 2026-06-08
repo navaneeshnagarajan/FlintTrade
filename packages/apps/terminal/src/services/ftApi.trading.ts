@@ -36,32 +36,6 @@ export interface PendingOrder {
   reason: string;
 }
 
-export type PositionSizeMethod =
-  | "from_capital"
-  | "from_risk_percent"
-  | "from_kelly"
-  | "max_lots";
-
-export interface PositionSizeRequest {
-  method: PositionSizeMethod;
-  capital: number;
-  ltp?: number;
-  lot_size?: number;
-  risk_pct?: number;
-  entry?: number;
-  sl?: number;
-  win_rate?: number;
-  avg_win?: number;
-  avg_loss?: number;
-  margin_per_lot?: number;
-}
-
-export interface PositionSizeResult {
-  quantity: number;
-  method: PositionSizeMethod;
-  inputs: PositionSizeRequest;
-}
-
 function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
   return {
     check_market_hours: raw.l1_order?.check_market_hours ?? true,
@@ -120,9 +94,6 @@ export const rejectOrder = (id: string) =>
 
 export const approveAllOrders = () =>
   post<{ status: string; approved_count: number }>("action-center/approve-all");
-
-export const calculatePositionSize = (req: PositionSizeRequest) =>
-  post<PositionSizeResult>("position/size", req);
 
 // NOTE: practice/sandbox mode is owned by the mode state machine
 // (ModeIndicator → POST /ft-api/v1/auth/mode + /auth/pin), not a standalone

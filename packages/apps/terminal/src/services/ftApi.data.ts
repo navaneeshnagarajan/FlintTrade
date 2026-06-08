@@ -122,22 +122,6 @@ export interface OHLCVBar {
   volume: number;
 }
 
-export interface ExcelExportResult {
-  file_path: string;
-  rows: number;
-}
-
-export interface ExcelPortfolioReportResult {
-  file_path: string;
-  positions: number;
-  holdings: number;
-}
-
-export interface ExcelImportResult {
-  rows: Record<string, unknown>[];
-  count: number;
-}
-
 export const getTradeJournal = (
   startDate?: string,
   endDate?: string,
@@ -221,41 +205,14 @@ export const getQuestDBLatestTick = (symbol: string) =>
     "data/questdb/tick/latest/" + encodeURIComponent(symbol),
   );
 
-export const exportToExcel = (
-  data: Record<string, unknown>[],
-  sheetName = "Data",
-  filename = "export.xlsx",
-) =>
-  post<ExcelExportResult>("integration/excel/export", {
-    data,
-    sheet_name: sheetName,
-    filename,
-  });
-
-export const createPortfolioReport = (
-  positions: Record<string, unknown>[],
-  holdings: Record<string, unknown>[],
-  filename = "portfolio.xlsx",
-) =>
-  post<ExcelPortfolioReportResult>("integration/excel/portfolio/report", {
-    positions,
-    holdings,
-    filename,
-  });
-
-export const importFromExcel = (filePath: string, sheetName = "Sheet1") =>
-  post<ExcelImportResult>("integration/excel/import", {
-    file_path: filePath,
-    sheet_name: sheetName,
-  });
-
 /**
  * Export rows to Excel and trigger a real browser download.
  *
- * Unlike {@link exportToExcel} (which writes a server-side file and returns its
- * path), this hits the streaming `/export/download` endpoint and saves the
- * `.xlsx` straight to the user's machine via a Blob — working in the browser
- * and the desktop shell alike. Returns the number of rows exported.
+ * Unlike a server-side file export (which writes an `.xlsx` on the host and
+ * returns its path — useless to a browser SPA), this hits the streaming
+ * `/export/download` endpoint and saves the `.xlsx` straight to the user's
+ * machine via a Blob — working in the browser and the desktop shell alike.
+ * Returns the number of rows exported.
  *
  * @throws Error when the request fails or there are no rows to export.
  */

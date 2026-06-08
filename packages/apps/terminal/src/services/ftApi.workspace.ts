@@ -44,9 +44,6 @@ export interface UpdatePresetPayload {
 export const listPresets = () =>
   get<{ presets: WorkspacePresetRecord[] }>("presets/");
 
-export const getPreset = (id: string) =>
-  get<WorkspacePresetRecord>(`presets/${encodeURIComponent(id)}`);
-
 export const createPreset = (payload: CreatePresetPayload) =>
   post<WorkspacePresetRecord>("presets/", payload);
 

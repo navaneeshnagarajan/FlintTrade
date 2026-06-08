@@ -10,14 +10,6 @@ import type {
 
 export type { GEXData, VolSurfaceData, IVSmileData, StraddlePnLData, StraddleLeg, OIProfileData };
 
-export interface IndicatorBar {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume?: number;
-}
 
 export interface PineCompileResult {
   python_code: string;
@@ -207,15 +199,6 @@ export const getFtOIProfile = (
     exchange,
     expiry_date,
     ...(strike_count !== undefined ? { strike_count } : {}),
-  });
-
-export const computeIndicators = (
-  bars: IndicatorBar[],
-  indicators: string[],
-) =>
-  post<Record<string, unknown>>("indicators/compute", {
-    bars: bars as IndicatorBar[],
-    indicators,
   });
 
 export const compilePineScript = (code: string) =>

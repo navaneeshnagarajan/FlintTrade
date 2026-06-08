@@ -107,21 +107,6 @@ export interface OpenClawAgentData {
   created_at: string;
 }
 
-export interface VoiceCommandResult {
-  intent: string;
-  action: "BUY" | "SELL" | null;
-  symbol: string | null;
-  exchange: string | null;
-  quantity: number | null;
-  price_type: "MARKET" | "LIMIT" | null;
-  price: number | null;
-  product: string;
-  confidence: number;
-  raw_text: string;
-  error: string;
-  is_valid: boolean;
-}
-
 export const getRecentSignals = (limit?: number) => {
   const qs = limit !== undefined ? `?limit=${limit}` : "";
   return get<{ signals: LiveSignal[] }>("signals/recent" + qs);
@@ -182,9 +167,6 @@ export const getOpenClawAgentLogs = (agentId: string) =>
   get<{ logs: string[] }>(
     `ai/openclaw/agents/${encodeURIComponent(agentId)}/logs`,
   );
-
-export const parseVoiceCommand = (text: string): Promise<VoiceCommandResult> =>
-  post<VoiceCommandResult>("voice/parse", { text });
 
 // ---------------------------------------------------------------------------
 // Market Sentiment Dashboard (structured_sentiment.py — MarketSummary schema)
