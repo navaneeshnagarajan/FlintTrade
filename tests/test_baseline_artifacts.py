@@ -94,7 +94,7 @@ def test_public_rollback_runbook_covers_safe_restore_topics() -> None:
     for required in [
         "git revert",
         "vercel rollback",
-        "license symlink",
+        "license file",
         "~/.flinttrade/",
         "broker credentials",
         "post-rollback verification",
