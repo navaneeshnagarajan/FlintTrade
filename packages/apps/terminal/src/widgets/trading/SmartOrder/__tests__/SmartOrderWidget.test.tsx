@@ -15,18 +15,20 @@ vi.mock("@/stores/modeStore", () => ({
 vi.mock("@/services/ftApi", () => ({
   startSmartRoute: vi.fn(),
   getSmartRouteJob: vi.fn(),
+  cancelSmartRoute: vi.fn(),
 }));
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
   emitNotification: vi.fn(),
 }));
 
-import SmartOrderWidget from "../SmartOrderWidget";
-import { startSmartRoute, getSmartRouteJob } from "@/services/ftApi";
+import SmartOrderWidget, { parseQuantity, parseSlippageBps } from "../SmartOrderWidget";
+import { startSmartRoute, getSmartRouteJob, cancelSmartRoute } from "@/services/ftApi";
 
 const DONE_JOB = {
   job_id: "j1",
   created_at: "2026-06-10T00:00:00Z",
   status: "done" as const,
+  cancel_requested: false,
   error: "",
   symbol: "RELIANCE",
   exchange: "NSE",
@@ -111,7 +113,8 @@ describe("SmartOrderWidget", () => {
     // The poll resolves to the completed job — children render as real rows.
     await waitFor(() => expect(screen.getByText("OID-1")).toBeInTheDocument());
     expect(screen.getByText("placed")).toBeInTheDocument();
-    expect(screen.getByText(/filled 10\/10/)).toBeInTheDocument();
+    // "accepted", not "filled" — order ids returned ≠ confirmed fills.
+    expect(screen.getByText(/accepted 10\/10/)).toBeInTheDocument();
     expect(screen.getByText("Complete")).toBeInTheDocument();
   });
 
@@ -142,5 +145,53 @@ describe("SmartOrderWidget", () => {
     fireEvent.click(sell);
     expect(sell).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "BUY" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("offers a Cancel control while running and calls the cancel endpoint", async () => {
+    const running = { ...DONE_JOB, status: "running" as const, completed: false };
+    vi.mocked(startSmartRoute).mockResolvedValue(running);
+    vi.mocked(getSmartRouteJob).mockResolvedValue(running);
+    vi.mocked(cancelSmartRoute).mockResolvedValue({ ...running, cancel_requested: true });
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText("Smart order symbol"), { target: { value: "RELIANCE" } });
+    fireEvent.change(screen.getByLabelText("Smart order quantity"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: /route order/i }));
+
+    const cancel = await screen.findByRole("button", { name: /cancel/i });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(cancelSmartRoute).toHaveBeenCalledOnce());
+    expect(vi.mocked(cancelSmartRoute).mock.calls[0][0]).toBe("j1");
+  });
+
+  it("stops pretending to route when the job poll fails (lost job)", async () => {
+    vi.mocked(startSmartRoute).mockResolvedValue({ ...DONE_JOB, status: "running", completed: false });
+    vi.mocked(getSmartRouteJob).mockRejectedValue(new Error("Unknown smart-route job j1"));
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText("Smart order symbol"), { target: { value: "RELIANCE" } });
+    fireEvent.change(screen.getByLabelText("Smart order quantity"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: /route order/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/no longer tracked/i)).toBeInTheDocument(),
+    );
+  });
+});
+
+describe("strict numeric parsers", () => {
+  it("keeps an explicit 0-bps budget as 0 (not the 20 default)", () => {
+    expect(parseSlippageBps("0")).toBe(0);
+    expect(parseSlippageBps("20")).toBe(20);
+    expect(parseSlippageBps("abc")).toBeNull();
+    expect(parseSlippageBps("")).toBeNull();
+  });
+
+  it("handles thousands separators and rejects garbage quantities", () => {
+    expect(parseQuantity("1,000")).toBe(1000);
+    expect(parseQuantity("10")).toBe(10);
+    expect(parseQuantity("0")).toBeNull();
+    expect(parseQuantity("1.5")).toBeNull();
+    expect(parseQuantity("ten")).toBeNull();
   });
 });

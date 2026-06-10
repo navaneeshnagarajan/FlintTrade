@@ -294,3 +294,93 @@ def test_strategy_tag_propagated_to_order(tmp_path) -> None:
     )
     asyncio.run(router.route("X", "NFO", 10, "BUY", urgency="high", strategy="MyStrat"))
     assert captured_orders[0].strategy == "MyStrat"
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed behaviour (audit hardening)
+# ---------------------------------------------------------------------------
+
+
+def test_medium_urgency_refuses_without_depth() -> None:
+    """Medium is depth-aware by definition — no depth must mean NO order,
+    not a silent full-size market order the operator did not ask for."""
+    base = _make_base_router(passed=True)
+    router = SmartOrderRouter(
+        base_router=base,
+        depth_provider=AsyncMock(return_value={"asks": [], "bids": []}),
+        volume_provider=AsyncMock(return_value=0),
+    )
+    result = asyncio.run(router.route("NIFTY25FUT", "NFO", 500, "BUY", urgency="medium"))
+    assert result.child_orders == []
+    assert "no market depth" in result.error
+    base.route_order.assert_not_awaited()
+
+
+def test_medium_urgency_enforces_slippage_budget() -> None:
+    """The slippage budget is a hard cap: an order whose estimated slippage
+    exceeds it is refused, not placed with a log line."""
+    # Two thin levels far apart → big estimated slippage for a large order.
+    depth = {
+        "asks": [
+            {"price": 100.0, "quantity": 10},
+            {"price": 110.0, "quantity": 1000},
+        ],
+        "bids": [],
+    }
+    base = _make_base_router(passed=True)
+    router = SmartOrderRouter(
+        base_router=base,
+        depth_provider=AsyncMock(return_value=depth),
+        volume_provider=AsyncMock(return_value=0),
+    )
+    result = asyncio.run(
+        router.route("NIFTY25FUT", "NFO", 500, "BUY", urgency="medium", max_slippage_bps=20)
+    )
+    assert result.child_orders == []
+    assert "exceeds" in result.error and "budget" in result.error
+    base.route_order.assert_not_awaited()
+
+
+def test_twap_never_uses_more_slices_than_units() -> None:
+    """3 units over 5 slices must place 3 × 1, not collapse into one late child."""
+    base = _make_base_router(passed=True)
+    router = SmartOrderRouter(
+        base_router=base,
+        depth_provider=AsyncMock(return_value=_make_depth()),
+        volume_provider=AsyncMock(return_value=0),
+        twap_slices=5,
+        twap_window_seconds=0,
+    )
+    result = asyncio.run(router.route("NIFTY25FUT", "NFO", 3, "BUY", urgency="low"))
+    assert [c.quantity for c in result.child_orders] == [1, 1, 1]
+
+
+def test_smart_route_abort_stops_the_whole_route() -> None:
+    """SmartRouteAbort from the executor must abort remaining children, unlike
+    an ordinary child failure which is recorded and routing continues."""
+    from flinttrade_engine.smart_router import SmartRouteAbort
+
+    calls = {"n": 0}
+
+    async def aborting_route_order(order):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return FakeDecision(passed=True, order_response=FakeOrderResponse())
+        raise SmartRouteAbort("session token revoked")
+
+    base = MagicMock()
+    base.route_order = aborting_route_order
+
+    router = SmartOrderRouter(
+        base_router=base,
+        depth_provider=AsyncMock(return_value=_make_depth()),
+        volume_provider=AsyncMock(return_value=0),
+        twap_slices=4,
+        twap_window_seconds=0,
+    )
+    result = asyncio.run(router.route("NIFTY25FUT", "NFO", 100, "BUY", urgency="low"))
+    # First child placed, the abort on the second stopped slices 3 and 4.
+    assert len(result.child_orders) == 1
+    assert calls["n"] == 2
+    assert "aborted" in result.error and "revoked" in result.error
+    assert result.completed is True

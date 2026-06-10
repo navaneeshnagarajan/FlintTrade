@@ -3,14 +3,20 @@
 
 Routes orders intelligently based on:
 1. Available depth at target price
-2. Recent volume profile
-3. Slippage budget (basis points)
-4. Time urgency (high/medium/low)
+2. Slippage budget (basis points) — ENFORCED on the medium-urgency path
+3. Time urgency (high/medium/low)
+
+(The ``volume_provider`` dependency is reserved for future volume-aware
+sizing; no routing decision consults it today.)
 
 Urgency mapping:
-- ``high``   → single MARKET order at best bid/ask, no splitting, no delay
-- ``medium`` → split across multiple child orders if qty exceeds depth at top-5
-               levels; randomised 1–5 s inter-order delay
+- ``high``   → single MARKET order at best bid/ask, no splitting, no delay.
+               The slippage budget is intentionally NOT enforced — the
+               operator chose immediacy over price.
+- ``medium`` → split across multiple child orders if qty exceeds depth at
+               top-5 levels; randomised 1–5 s inter-order delay. REFUSES the
+               route (no orders placed) when depth is unavailable or the
+               estimated slippage exceeds the budget.
 - ``low``    → TWAP: N equal child orders spread over a configurable window
 
 Usage::
@@ -43,6 +49,15 @@ from typing import Callable, Literal
 from flinttrade_core.models import Action, Exchange, Order, PriceType
 
 logger = logging.getLogger("flinttrade.engine.smart_router")
+
+
+class SmartRouteAbort(Exception):
+    """Raised by the base router/executor to abort a whole smart route.
+
+    Unlike an ordinary child failure (recorded and routing continues), an
+    abort stops the route immediately — no further children are attempted.
+    Used for mid-flight session revocation and operator cancellation.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +300,12 @@ class SmartOrderRouter:
                 await self._route_medium(result, product)
             else:
                 await self._route_low(result, product)
+        except SmartRouteAbort as exc:
+            logger.warning(
+                "SmartOrderRouter.route ABORTED for %s %s after %d children: %s",
+                action, symbol, len(result.child_orders), exc,
+            )
+            result.error = f"aborted: {exc}"
         except Exception as exc:
             logger.error(
                 "SmartOrderRouter.route failed for %s %s: %s",
@@ -323,6 +344,11 @@ class SmartOrderRouter:
     async def _route_medium(self, result: SmartRouteResult, product: str) -> None:
         """Medium urgency: depth-aware splitting with inter-order delay.
 
+        FAILS CLOSED (no orders placed, ``result.error`` set) when market
+        depth is unavailable — a "depth-aware" route without depth would just
+        be a full-size market order the operator did not ask for — and when
+        the estimated slippage for the full quantity exceeds the budget.
+
         Args:
             result: The in-progress :class:`SmartRouteResult` to populate.
             product: Product type string.
@@ -331,20 +357,38 @@ class SmartOrderRouter:
         available = _available_qty_top_n(depth, result.action, n=5)  # type: ignore[arg-type]
         best = _best_price(depth, result.action)  # type: ignore[arg-type]
 
+        if available <= 0:
+            result.error = (
+                "no market depth available — refusing depth-aware (medium) routing. "
+                "Use high urgency for an immediate full-size order, or low for TWAP."
+            )
+            logger.warning(
+                "SmartOrderRouter [MEDIUM] %s %s qty=%d REFUSED: %s",
+                result.action, result.symbol, result.total_quantity, result.error,
+            )
+            return
+
         slippage_bps = self._estimate_slippage(depth, result.action, result.total_quantity)
 
         if slippage_bps > result.slippage_budget_bps:
-            logger.warning(
-                "SmartOrderRouter [MEDIUM] %s %s: estimated slippage %.1f bps > budget %d bps",
-                result.action, result.symbol, slippage_bps, result.slippage_budget_bps,
+            # The budget is a hard cap, not advisory: refuse rather than place.
+            result.error = (
+                f"estimated slippage {slippage_bps:.1f} bps exceeds the "
+                f"{result.slippage_budget_bps} bps budget — order refused. "
+                "Raise the budget, reduce the quantity, or use low urgency (TWAP)."
             )
+            logger.warning(
+                "SmartOrderRouter [MEDIUM] %s %s qty=%d REFUSED: %s",
+                result.action, result.symbol, result.total_quantity, result.error,
+            )
+            return
 
         logger.info(
             "SmartOrderRouter [MEDIUM] %s %s qty=%d depth_avail=%d best_px=%s",
             result.action, result.symbol, result.total_quantity, available, best,
         )
 
-        if available == 0 or result.total_quantity <= available:
+        if result.total_quantity <= available:
             # Fits within top-5 depth — single order
             child = await self._place_child(
                 result=result,
@@ -357,7 +401,7 @@ class SmartOrderRouter:
         else:
             # Split into chunks that fit within available depth
             remaining = result.total_quantity
-            chunk = available if available > 0 else result.total_quantity
+            chunk = available
             first = True
             while remaining > 0:
                 qty = min(chunk, remaining)
@@ -382,7 +426,9 @@ class SmartOrderRouter:
             result: The in-progress :class:`SmartRouteResult` to populate.
             product: Product type string.
         """
-        slices = self._twap_slices
+        # Never more slices than units — a 3-unit order over 5 slices would
+        # otherwise collapse into one child placed after a dead interval.
+        slices = max(1, min(self._twap_slices, result.total_quantity))
         base_qty, remainder = divmod(result.total_quantity, slices)
         interval = self._twap_window_seconds / slices
 
@@ -464,6 +510,10 @@ class SmartOrderRouter:
                     error=err,
                     slippage_bps=slippage_bps,
                 )
+        except SmartRouteAbort:
+            # Session revoked / operator cancel — stop the WHOLE route, do not
+            # record-and-continue like an ordinary child failure.
+            raise
         except Exception as exc:
             logger.error("Child order placement error for %s: %s", result.symbol, exc)
             return ChildOrderResult(

@@ -351,3 +351,185 @@ async def test_executor_passes_real_gate_and_returns_orderid():
     assert decision.passed is True
     assert decision.order_response.orderid == "OID-1"
     assert len(adapter.orders) == 1
+
+
+async def test_executor_pre_dispatch_check_aborts_before_the_gate():
+    """A failing pre-dispatch check (revocation/cancel) raises SmartRouteAbort
+    BEFORE any safety/gate/broker work — the adapter must never be touched."""
+    from flinttrade_engine.smart_router import SmartRouteAbort
+
+    adapter = _NoIoAdapter()
+    executor = mod.GatedChildExecutor(
+        safety=_safety(),
+        router=BrokerRouter({"openalgo": adapter}, _session),
+        request_ctx=_ctx(),
+        adapter_id="openalgo",
+        account_id="default",
+        pre_dispatch_check=lambda: "session token revoked (logout or mode change)",
+    )
+    with pytest.raises(SmartRouteAbort, match="revoked"):
+        await executor.route_order(_child_order())
+    assert adapter.orders == []
+
+
+# ---------------------------------------------------------------------------
+# Mid-flight brakes: cancellation + revocation
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_endpoint_aborts_a_running_twap(live_auth):
+    """Cancelling between TWAP slices stops further children."""
+    app, adapter = _make_app()  # twap window 1s / 2 slices → ~1s between slices
+    client = app.test_client()
+
+    resp = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
+            "quantity": 10, "urgency": "low",
+        },
+    )
+    assert resp.status_code == 202
+    job_id = resp.get_json()["data"]["job_id"]
+
+    # Wait for the FIRST child to land, then cancel before the second slice.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and len(adapter.orders) == 0:
+        time.sleep(0.02)
+    assert len(adapter.orders) >= 1
+
+    cancel = client.post(f"/api/v1/orders/smart-route/{job_id}/cancel")
+    assert cancel.status_code == 200
+    assert cancel.get_json()["data"]["cancel_requested"] is True
+
+    final = _wait_done(client, job_id)
+    assert final["status"] == "cancelled"
+    assert "cancelled" in final["error"]
+    assert len(adapter.orders) == 1  # the second slice never dispatched
+
+
+def test_revoked_jti_aborts_mid_route(live_auth, monkeypatch):
+    """Logout / mode-downgrade revoke the jti — a running job must stop."""
+    import flinttrade_core.auth_routes as auth_routes_mod
+
+    monkeypatch.setattr(auth_routes_mod, "_is_jti_revoked", lambda jti: True)
+    app, adapter = _make_app()
+    client = app.test_client()
+
+    resp = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
+            "quantity": 10, "urgency": "high",
+        },
+    )
+    assert resp.status_code == 202
+    final = _wait_done(client, resp.get_json()["data"]["job_id"])
+    assert final["status"] == "error"
+    assert "revoked" in final["error"]
+    assert adapter.orders == []  # not a single child reached the broker
+
+
+def test_cancel_unknown_job_404(live_auth):
+    app, _ = _make_app()
+    resp = app.test_client().post("/api/v1/orders/smart-route/nope/cancel")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Concurrency cap + duplicate guard + eviction safety
+# ---------------------------------------------------------------------------
+
+
+def test_running_job_cap_409(live_auth):
+    app, _ = _make_app()
+    for i in range(mod._MAX_RUNNING_JOBS):  # noqa: SLF001
+        mod._store_job(mod._SmartJob(job_id=f"running-{i}", params={"symbol": f"S{i}", "action": "BUY"}))  # noqa: SLF001
+    resp = app.test_client().post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 5},
+    )
+    assert resp.status_code == 409
+    assert "Too many" in resp.get_json()["message"]
+
+
+def test_duplicate_symbol_action_409(live_auth):
+    app, _ = _make_app()
+    mod._store_job(mod._SmartJob(job_id="dup-1", params={"symbol": "RELIANCE", "action": "BUY"}))  # noqa: SLF001
+    resp = app.test_client().post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 5},
+    )
+    assert resp.status_code == 409
+    assert "already running" in resp.get_json()["message"]
+    # The OPPOSITE side is not a duplicate.
+    resp2 = app.test_client().post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "SELL", "quantity": 5, "urgency": "high"},
+    )
+    assert resp2.status_code == 202
+
+
+def test_store_eviction_never_drops_a_running_job():
+    """FIFO eviction must skip running jobs — deleting one orphans a live
+    worker whose children keep placing with no observability."""
+    running = mod._SmartJob(job_id="run-0", params={})  # status defaults to running
+    mod._store_job(running)  # noqa: SLF001
+    for i in range(mod._MAX_JOBS + 5):  # noqa: SLF001
+        done = mod._SmartJob(job_id=f"done-{i}", params={})
+        done.status = "done"
+        mod._store_job(done)  # noqa: SLF001
+    with mod._JOBS_LOCK:  # noqa: SLF001
+        assert "run-0" in mod._JOBS  # noqa: SLF001
+        assert len(mod._JOBS) <= mod._MAX_JOBS + 1  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Auth on read endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_status_endpoints_require_auth(monkeypatch):
+    monkeypatch.setattr(order_routes_mod, "_decode_request_payload", lambda: None)
+    app, _ = _make_app()
+    client = app.test_client()
+    assert client.get("/api/v1/orders/smart-route").status_code == 401
+    assert client.get("/api/v1/orders/smart-route/xyz").status_code == 401
+    assert client.post("/api/v1/orders/smart-route/xyz/cancel").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# One-shot gate: distinct mints per child (strengthened)
+# ---------------------------------------------------------------------------
+
+
+def test_twap_children_use_distinct_safety_contexts(live_auth):
+    """Each TWAP child must carry its OWN SafetyContext object — the one-shot
+    gate cannot be reused, so reuse would fail the second child."""
+    from flinttrade_engine.safety import SafetyContext
+
+    app, adapter = _make_app()
+    router = app.config["BROKER_ROUTER"]
+    seen_ctx: list[object] = []
+    orig_place = router.place_order
+
+    async def spying_place(ctx, **kwargs):
+        seen_ctx.append(kwargs.get("safety_ctx"))
+        return await orig_place(ctx, **kwargs)
+
+    router.place_order = spying_place
+    client = app.test_client()
+
+    resp = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL",
+            "quantity": 10, "urgency": "low",
+        },
+    )
+    assert resp.status_code == 202
+    final = _wait_done(client, resp.get_json()["data"]["job_id"])
+    assert final["status"] == "done"
+    assert len(seen_ctx) == 2
+    assert all(isinstance(c, SafetyContext) for c in seen_ctx)
+    assert seen_ctx[0] is not seen_ctx[1]

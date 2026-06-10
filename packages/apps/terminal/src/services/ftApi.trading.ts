@@ -119,13 +119,15 @@ export interface SmartRouteChild {
 export interface SmartRouteJob {
   job_id: string;
   created_at: string;
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "cancelled";
+  cancel_requested: boolean;
   error: string;
   symbol: string;
   exchange: string;
   action: string;
   urgency: string;
   total_quantity: number;
+  /** Broker-ACCEPTED quantity (order ids returned) — not confirmed fills. */
   filled_quantity: number;
   average_slippage_bps: number;
   completed: boolean;
@@ -170,3 +172,7 @@ export const getSmartRouteJob = (jobId: string) =>
   get<SmartRouteJob>("orders/smart-route/" + encodeURIComponent(jobId));
 
 export const listSmartRouteJobs = () => get<SmartRouteJob[]>("orders/smart-route");
+
+/** Request cancellation of a running smart-route job (honoured before the next child). */
+export const cancelSmartRoute = (jobId: string) =>
+  post<SmartRouteJob>("orders/smart-route/" + encodeURIComponent(jobId) + "/cancel");

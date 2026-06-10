@@ -17,6 +17,7 @@ are tested deterministically without real time.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from typing import Any, Awaitable, Callable
 
@@ -65,7 +66,15 @@ class BrokerRateLimiter:
         self._clock = clock or time.monotonic
         self._sleep = sleep or asyncio.sleep
         self._buckets: dict[tuple[str, str], _Bucket] = {}
-        self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # threading.Lock, NOT asyncio.Lock: the shared BrokerRouter is awaited
+        # from several thread domains with independent event loops (Flask
+        # request threads run asyncio.run per request; smart-route/agent job
+        # threads run their own loops for minutes). asyncio primitives bind to
+        # one loop and are not thread-safe — under cross-loop contention they
+        # either under-throttle or raise "bound to a different event loop".
+        # The held section is purely synchronous token accounting, so a plain
+        # threading.Lock is correct; only the (lock-free) sleep is async.
+        self._lock = threading.Lock()
 
     @classmethod
     def from_capabilities(
@@ -103,13 +112,14 @@ class BrokerRateLimiter:
         """Block until a token is available for ``(broker_id, kind)``.
 
         Returns immediately when no positive limit is configured (unlimited).
+        Safe to call from coroutines running on DIFFERENT event loops in
+        different threads (manual order requests vs background job threads).
         """
         rate = self._rate(broker_id, kind)
         if rate <= 0:
             return
         key = (broker_id, kind)
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        async with lock:  # serialise token accounting per (broker, kind)
+        with self._lock:  # serialise token accounting across threads/loops
             bucket = self._buckets.get(key)
             if bucket is None or bucket.rate != rate:
                 bucket = _Bucket(rate, self._clock)
@@ -140,9 +150,10 @@ class BrokerRateLimiter:
         it recreates a bucket whenever the configured rate differs (see the
         ``bucket.rate != rate`` check), so no bucket bookkeeping is needed here.
         """
-        current = dict(self._limits.get(broker_id, {}))
-        if order is not None:
-            current["order"] = float(order)
-        if data is not None:
-            current["data"] = float(data)
-        self._limits[broker_id] = current
+        with self._lock:
+            current = dict(self._limits.get(broker_id, {}))
+            if order is not None:
+                current["order"] = float(order)
+            if data is not None:
+                current["data"] = float(data)
+            self._limits[broker_id] = current

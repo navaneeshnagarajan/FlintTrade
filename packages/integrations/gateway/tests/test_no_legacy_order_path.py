@@ -168,17 +168,25 @@ def test_no_new_ungated_order_paths_in_services_and_webhooks():
     """Repo-wide §8.1 tripwire: no NEW raw broker order-write outside the gate.
 
     The gateway package self-guards (the tests above), but the order-placing
-    surfaces live in ``packages/services/*`` and ``packages/integrations/webhooks``.
-    This scans those for ``.place_order``/``.close_position`` (and the OpenAlgo
-    spellings) and asserts every occurrence either delegates to a ``*_router``
-    (the gate_order -> BrokerRouter chokepoint), targets the isolated sandbox
+    surfaces live in ``packages/services/*``, ``packages/integrations/webhooks``,
+    AND ``packages/core`` (the Flask route layer — order_routes,
+    smart_order_routes, agent_routes — plus the data sandbox). This scans them
+    for ``.place_order``/``.close_position`` (and the OpenAlgo spellings) and
+    asserts every occurrence either delegates to a ``*_router`` (the
+    gate_order -> BrokerRouter chokepoint), targets the isolated sandbox
     engine, or sits in a module on the explicit SHRINKING debt allowlist
     (``_RAW_ORDER_ALLOWLIST``). A new raw order call in any other module fails
     here — forcing it through the gate before it can ever go live.
     """
+    # The data sandbox's paper engine is order-shaped but broker-free: routes
+    # call ``engine.place_order`` on the SandboxEngine pulled from app config.
+    sandbox_receiver_re = re.compile(
+        r"((?<![\w.])engine\.place_order|SandboxEngine\.place_order)"
+    )
     scan_dirs = [
         _REPO_ROOT / "packages" / "services",
         _REPO_ROOT / "packages" / "integrations" / "webhooks",
+        _REPO_ROOT / "packages" / "core",
     ]
     offenders: list[str] = []
     for root in scan_dirs:
@@ -197,6 +205,8 @@ def test_no_new_ungated_order_paths_in_services_and_webhooks():
                     continue
                 if _GATED_RECEIVER_RE.search(line):
                     continue  # delegates to the router / sandbox — legitimate
+                if sandbox_receiver_re.search(line):
+                    continue  # the broker-free paper engine
                 if rel in _RAW_ORDER_ALLOWLIST:
                     continue  # known dormant/emergency debt
                 offenders.append(f"{rel}:{n}: {stripped}")

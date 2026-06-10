@@ -15,7 +15,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { GitFork, Loader2, Send } from "lucide-react";
+import { GitFork, Loader2, Send, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,11 +28,30 @@ import {
 import { cn } from "@/lib/utils";
 import { useModeStore } from "@/stores/modeStore";
 import {
+  cancelSmartRoute,
   getSmartRouteJob,
   startSmartRoute,
   type SmartRouteJob,
 } from "@/services/ftApi";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
+
+/**
+ * Strict numeric field parsers: an explicit 0-bps budget must stay 0 (not
+ * silently become the default), and a "1,000" quantity must mean 1000 — or
+ * be rejected — never parseInt-truncated to 1.
+ */
+export function parseQuantity(raw: string): number | null {
+  const digits = raw.trim().replace(/,/g, "");
+  if (!/^\d+$/.test(digits)) return null;
+  const value = Number.parseInt(digits, 10);
+  return value > 0 ? value : null;
+}
+
+export function parseSlippageBps(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  return Number.parseInt(trimmed, 10);
+}
 
 const EXCHANGES = ["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"] as const;
 
@@ -48,10 +67,20 @@ function StatusPill({ status }: { status: SmartRouteJob["status"] }) {
       ? "bg-profit/10 text-profit border-profit/30"
       : status === "error"
         ? "bg-loss/10 text-loss border-loss/30"
-        : "bg-accent/10 text-accent border-accent/30";
+        : status === "cancelled"
+          ? "bg-warning/10 text-warning border-warning/30"
+          : "bg-accent/10 text-accent border-accent/30";
+  const label =
+    status === "running"
+      ? "Routing…"
+      : status === "done"
+        ? "Complete"
+        : status === "cancelled"
+          ? "Cancelled"
+          : "Error";
   return (
     <span className={cn("text-xxs px-1.5 py-px rounded border font-medium", cls)}>
-      {status === "running" ? "Routing…" : status === "done" ? "Complete" : "Error"}
+      {label}
     </span>
   );
 }
@@ -84,25 +113,35 @@ export default function SmartOrderWidget() {
     queryKey: ["smartRoute", jobId],
     queryFn: () => getSmartRouteJob(jobId as string),
     enabled: !!jobId,
-    refetchInterval: (q) => (q.state.data?.status === "running" ? 1000 : false),
+    retry: false,
+    // Stop polling on error too — a lost job (e.g. backend restart) must not
+    // show "Routing…" forever.
+    refetchInterval: (q) =>
+      q.state.error == null && q.state.data?.status === "running" ? 1000 : false,
     initialData: () => startMutation.data,
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: cancelSmartRoute,
+    onSuccess: () => void jobQuery.refetch(),
+  });
+
   const job = jobQuery.data ?? startMutation.data ?? null;
-  const qty = parseInt(quantity, 10);
+  const qty = parseQuantity(quantity);
+  const bps = parseSlippageBps(maxSlippage);
   const canSubmit =
-    isLive && !startMutation.isPending && symbol.trim().length > 0 && Number.isFinite(qty) && qty > 0;
+    isLive && !startMutation.isPending && symbol.trim().length > 0 && qty !== null && bps !== null;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || qty === null || bps === null) return;
     startMutation.mutate({
       symbol: symbol.trim().toUpperCase(),
       exchange,
       action,
       quantity: qty,
       urgency,
-      max_slippage_bps: parseInt(maxSlippage, 10) || 20,
+      max_slippage_bps: bps,
     });
   }
 
@@ -222,6 +261,14 @@ export default function SmartOrderWidget() {
           </p>
         )}
 
+        {/* Poll failure — the job is gone (e.g. backend restart), say so. */}
+        {jobQuery.isError && (
+          <p role="alert" className="text-xs text-warning">
+            This job is no longer tracked by the backend (it may have
+            restarted). Check the broker order book for what was accepted.
+          </p>
+        )}
+
         {/* Live job state */}
         {job && (
           <div className="space-y-2">
@@ -229,10 +276,23 @@ export default function SmartOrderWidget() {
               <span className="font-mono text-text-primary">
                 {job.action} {job.total_quantity} {job.symbol}
               </span>
-              <span>filled {job.filled_quantity}/{job.total_quantity}</span>
+              {/* Broker-ACCEPTED quantity — fills are confirmed in the trade book. */}
+              <span>accepted {job.filled_quantity}/{job.total_quantity}</span>
               <span>urgency {job.urgency}</span>
               {job.average_slippage_bps > 0 && (
-                <span>avg slippage {job.average_slippage_bps.toFixed(1)} bps</span>
+                <span>est. slippage {job.average_slippage_bps.toFixed(1)} bps (pre-trade)</span>
+              )}
+              {job.status === "running" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => cancelMutation.mutate(job.job_id)}
+                  disabled={cancelMutation.isPending || job.cancel_requested}
+                  className="h-5 px-1.5 gap-1 text-xxs text-loss hover:text-loss"
+                >
+                  <XCircle size={11} />
+                  {job.cancel_requested ? "Cancelling…" : "Cancel"}
+                </Button>
               )}
             </div>
 
