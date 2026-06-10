@@ -1,4 +1,4 @@
-import { get, isDemoAuthSession, post } from "./ftApi.helpers";
+import { get, getV1, isDemoAuthSession, post } from "./ftApi.helpers";
 
 export interface AuditLog {
   timestamp: string;
@@ -89,6 +89,14 @@ export interface ActivityEntry {
   ip: string;
 }
 
+/**
+ * Fetch the gated-execution audit trail for a single day (newest-first).
+ *
+ * Reads the hash-chain audit logger via the bare ``/v1/audit/events`` route —
+ * the log whose rows carry the gated-execution shape the Execution Logs viewer
+ * renders (``event_type``/``strategy``/``layer``/``verdict``), distinct from the
+ * operator action log at ``/v1/audit/log``.
+ */
 export const getAuditLogs = (
   date?: string,
   limit?: number,
@@ -99,8 +107,8 @@ export const getAuditLogs = (
   if (limit !== undefined) params.set("limit", String(limit));
   if (offset !== undefined) params.set("offset", String(offset));
   const qs = params.toString();
-  return get<{ logs: AuditLog[]; total: number }>(
-    "audit/logs" + (qs ? "?" + qs : ""),
+  return getV1<{ logs: AuditLog[]; total: number }>(
+    "audit/events" + (qs ? "?" + qs : ""),
   );
 };
 

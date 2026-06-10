@@ -336,4 +336,16 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     // In test (DEV=true), base is /ft-api
     expect(url).toBe("/ft-api/api/v1/cron/jobs");
   });
+
+  it("getAuditLogs targets the bare /v1/audit/events route with date/limit/offset", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { logs: [], total: 0 } }),
+    );
+
+    await getAuditLogs("2026-04-19", 50, 100);
+
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    // Bare /v1 family (getV1), NOT /api/v1 — the route registers at /v1/audit.
+    expect(url).toBe("/ft-api/v1/audit/events?date=2026-04-19&limit=50&offset=100");
+  });
 });

@@ -129,6 +129,22 @@ export async function postV1<T>(endpoint: string, body: object = {}): Promise<T>
   return parseResponse<T>(resp, endpoint);
 }
 
+/**
+ * GET against the backend's bare ``/v1/...`` blueprint family rather than the
+ * ``/api/v1/...`` family {@link get} targets. The sibling of {@link postV1} for
+ * read endpoints (e.g. ``/v1/audit/events``) that register at ``/v1`` and are
+ * unreachable via {@link get} (which would 404 at ``/api/v1/...``). Same auth
+ * headers and ``{status, data}`` unwrapping; ``getBase()`` resolves in both dev
+ * (``/ft-api/v1/...`` → stripped to ``/v1/...``) and prod (``/v1/...``).
+ */
+export async function getV1<T>(endpoint: string): Promise<T> {
+  const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
+    headers: buildHeaders(false),
+  });
+  if (!resp.ok) await throwHttpError(resp, endpoint);
+  return parseResponse<T>(resp, endpoint);
+}
+
 export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "PUT",

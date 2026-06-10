@@ -1,21 +1,32 @@
-"""Flask blueprint for local audit-trail endpoints (the operator's own action log).
+"""Flask blueprint for local audit-trail endpoints.
+
+Two distinct logs are served here:
+
+* The operator's own **action log** (:class:`~flinttrade_data.activity_log.ActivityLog`,
+  read from ``current_app.config["ACTIVITY_LOG"]``) — login/logout, admin actions, with
+  ``{log_id, action, user, ip, details}`` rows. Served by ``/log``, ``/export``, ``/stats``.
+* The **gated-execution audit** (the hash-chain
+  :class:`~flinttrade_data.audit_logger.AuditLogger`, read from
+  ``current_app.config["AUDIT"]``) — order placements and per-layer safety verdicts, with
+  ``{event_type, strategy, symbol, exchange, action, layer, verdict, reason}`` rows. Served
+  by ``/events``; this is the source the Automate → Execution Logs viewer reads.
 
 External URLs (frontend / Vite proxy calls these):
-    GET /ft-api/v1/audit/log     — Paginated, filterable audit trail.
-    GET /ft-api/v1/audit/export  — CSV export of the audit log.
+    GET /ft-api/v1/audit/log     — Paginated, filterable operator action log.
+    GET /ft-api/v1/audit/export  — CSV export of the operator action log.
     GET /ft-api/v1/audit/stats   — Action-type counts for the admin dashboard.
+    GET /ft-api/v1/audit/events  — Gated-execution audit for a single day (newest-first).
 
 The WSGI prefix stripper in app.py translates /ft-api/v1/* → /v1/* before
 Flask dispatch, so the blueprint is registered at /v1/audit (not /ft-api/v1/audit).
 
-The :class:`~flinttrade_data.activity_log.ActivityLog` instance is read from
-``current_app.config["ACTIVITY_LOG"]``, which is populated at startup by
+Both config instances are populated at startup by
 :func:`~flinttrade_core.app.create_flask_app`.
 
 Response conventions:
 - All success responses: ``{"status": "success", "data": {...}}``
 - All error responses:   ``{"status": "error", "message": "..."}``
-- HTTP 503 when the activity log has not been initialised.
+- HTTP 503 when the requested log has not been initialised.
 """
 
 from __future__ import annotations
@@ -25,10 +36,13 @@ import io
 import logging
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, Response, current_app, jsonify, make_response, request
 
 from flinttrade_core.auth_scopes import require_scope
+
+_IST = ZoneInfo("Asia/Kolkata")
 
 logger = logging.getLogger("flinttrade.data.audit_routes")
 
@@ -46,6 +60,27 @@ def _get_log() -> Any:
         ActivityLog instance, or ``None`` if not configured.
     """
     return current_app.config.get("ACTIVITY_LOG")
+
+
+def _get_audit() -> Any:
+    """Return the hash-chain AuditLogger instance from the Flask app config.
+
+    Returns:
+        AuditLogger instance, or ``None`` if not configured.
+    """
+    return current_app.config.get("AUDIT")
+
+
+def _coerce_num(value: Any) -> float:
+    """Coerce a stored audit field to a float, falling back to ``0.0``.
+
+    Order events persist ``quantity``/``price`` as strings; the viewer's
+    contract types them as numbers, so coerce defensively.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -268,4 +303,89 @@ def audit_stats() -> tuple[Response, int]:
             "total": len(entries),
             "by_action": sorted_counts,
         },
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# GET /ft-api/v1/audit/events
+# ---------------------------------------------------------------------------
+
+
+@audit_bp.route("/events", methods=["GET"])
+@require_scope("admin.audit.read")
+def audit_events() -> tuple[Response, int]:
+    """Return the gated-execution audit trail for a single day, newest-first.
+
+    Serves the hash-chain :class:`~flinttrade_data.audit_logger.AuditLogger`
+    (order placements, per-layer safety verdicts, kill-switch events) — distinct
+    from the operator action log at :func:`audit_log`. This is the source the
+    Automate → Execution Logs viewer reads, so the rows carry the gated-execution
+    shape (``event_type``/``strategy``/``layer``/``verdict``) rather than the
+    action-log shape (``user``/``ip``/``details``).
+
+    Query parameters:
+        date    (str): Day to read (YYYY-MM-DD). Defaults to today (IST).
+        limit   (int): Page size, clamped to 1–500 (default 50).
+        offset  (int): 0-based offset into the newest-first list (default 0).
+
+    Returns:
+        JSON with the requested page and the day's total::
+
+            {
+                "status": "success",
+                "data": {
+                    "logs": [ { timestamp, event_type, strategy, symbol,
+                                exchange, action, quantity, price,
+                                layer, verdict, reason } ],
+                    "total": 128
+                }
+            }
+    """
+    audit = _get_audit()
+    if audit is None:
+        return jsonify({"status": "error", "message": "Audit log not initialised"}), 503
+
+    day = request.args.get("date") or datetime.now(_IST).strftime("%Y-%m-%d")
+
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", 50))))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "limit must be an integer"}), 400
+
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "offset must be an integer"}), 400
+
+    try:
+        events = audit.read_day(day)
+    except Exception:  # noqa: BLE001 — a corrupt/unreadable day file is empty, not a 500
+        logger.exception("Failed to read audit day %s", day)
+        events = []
+
+    # Newest-first: the viewer's "Load More" pages backwards from the latest event.
+    events = list(reversed(events))
+    total = len(events)
+    page = events[offset : offset + limit]
+
+    logs: list[dict[str, Any]] = [
+        {
+            "timestamp": e.get("ts", ""),
+            "event_type": e.get("event_type", ""),
+            "strategy": e.get("strategy", ""),
+            "symbol": e.get("symbol", ""),
+            "exchange": e.get("exchange", ""),
+            "action": e.get("action", ""),
+            "quantity": _coerce_num(e.get("quantity")),
+            "price": _coerce_num(e.get("price")),
+            "layer": e.get("layer", ""),
+            "verdict": e.get("verdict", ""),
+            "reason": e.get("reason", ""),
+        }
+        for e in page
+    ]
+
+    return jsonify({
+        "status": "success",
+        "data": {"logs": logs, "total": total},
     }), 200
