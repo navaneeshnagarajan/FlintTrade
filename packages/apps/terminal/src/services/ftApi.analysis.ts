@@ -283,6 +283,45 @@ export interface PairCorrelationResponse {
 export const getPairCorrelation = (data: Record<string, PairSeries>) =>
   postV1<PairCorrelationResponse>("analytics/pairs", { preset: true, data });
 
+// --- Volatility cone (registered at the bare /v1 family) --------------------
+
+/** One lookback row of the volatility cone (HV percentiles are decimals). */
+export interface VolConePoint {
+  lookback: number;
+  current_hv: number;
+  current_iv: number | null;
+  p10: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  min: number;
+  max: number;
+  iv_percentile: number | null;
+}
+
+/**
+ * Compute a historical-volatility cone from a daily-return series.
+ *
+ * The screener's {@link https VolatilityCone} engine (rolling-HV percentile
+ * stats) is registered at the bare ``/v1`` family, so this must use
+ * {@link postV1} (``/v1/analytics/volcone``). Callers supply the daily-return
+ * series (oldest first; derivable from ``getHistory`` closes) and optionally the
+ * current implied vol to overlay; ``parseResponse`` unwraps the envelope so this
+ * returns the per-lookback rows directly. The series must hold at least
+ * ``max(lookback_periods) + 1`` points or the backend returns 422.
+ */
+export const getVolatilityCone = (
+  returns: number[],
+  lookbackPeriods?: number[],
+  currentIv?: number,
+) =>
+  postV1<VolConePoint[]>("analytics/volcone", {
+    returns,
+    ...(lookbackPeriods ? { lookback_periods: lookbackPeriods } : {}),
+    ...(currentIv !== undefined ? { current_iv: currentIv } : {}),
+  });
+
 export const getEtfScreener = () =>
   get<EtfScreenerResponse>("etf/screener");
 

@@ -9,10 +9,13 @@
  *   - Pure SVG rendering — no external chart library
  */
 
-import { useState, useMemo, memo } from "react";
-import { Triangle, ChevronDown } from "lucide-react";
+import { useState, useEffect, useMemo, memo } from "react";
+import { Triangle, ChevronDown, Loader2 } from "lucide-react";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { getHistory } from "@/services/api";
+import { getVolatilityCone } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +46,17 @@ const SAMPLE_CONE: ConePoint[] = [
 
 const SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
 
+/** Cone lookback windows (trading days) — matches the backend default + SAMPLE_CONE. */
+const LOOKBACK_PERIODS = [5, 10, 20, 30, 60, 90];
+
+const EXCHANGES: Record<string, string> = {
+  NIFTY: "NSE_INDEX",
+  BANKNIFTY: "NSE_INDEX",
+  FINNIFTY: "NSE_INDEX",
+  MIDCPNIFTY: "NSE_INDEX",
+  SENSEX: "BSE_INDEX",
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -59,7 +73,7 @@ const STATUS_COLOUR: Record<string, string> = {
   expensive: "text-loss",
 };
 
-function buildConeChart(points: ConePoint[]) {
+function buildConeChart(points: ConePoint[], metricLabel: string) {
   const allValues = points.flatMap((p) => [p.p10, p.p90, p.currentIV]);
   const minValue = Math.min(...allValues) * 0.9;
   const maxValue = Math.max(...allValues) * 1.1;
@@ -107,7 +121,7 @@ function buildConeChart(points: ConePoint[]) {
       const status = ivStatus(point.currentIV, point.p25, point.p75);
       return {
         id: `iv-${point.period}`,
-        label: `${point.period}d IV: ${point.currentIV.toFixed(1)}% (${status})`,
+        label: `${point.period}d ${metricLabel}: ${point.currentIV.toFixed(1)}% (${status})`,
         x: index,
         y: point.currentIV,
         color: status === "cheap" ? "#22c55e" : status === "expensive" ? "#ef4444" : "#f59e0b",
@@ -169,12 +183,76 @@ function SymbolDropdown({ value, onChange }: SymbolDropdownProps) {
 
 function VolatilityConeWidget() {
   const track = useTrackBehavior();
+  const isConnected = useBrokerConnected();
   const [symbol, setSymbol] = useState("NIFTY");
+  const [liveCone, setLiveCone] = useState<ConePoint[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // In live mode this would fetch from /ft-api/v1/volcone?symbol=NIFTY
-  // For now we use sample data always (endpoint not yet implemented)
-  const coneData = SAMPLE_CONE;
-  const coneChart = useMemo(() => buildConeChart(coneData), [coneData]);
+  // When connected, build a REAL cone: daily-return series from history →
+  // /v1/analytics/volcone (rolling-HV percentiles). The overlay is current
+  // realised HV (honest — no live IV feed), so the marker is labelled "HV".
+  // Disconnected / on error → the synthetic SAMPLE_CONE (badged), never a
+  // fabricated "live" cone.
+  useEffect(() => {
+    if (!isConnected) {
+      setLiveCone(null);
+      setLoadError(null);
+      return;
+    }
+    let cancelled = false;
+    const exchange = EXCHANGES[symbol] ?? "NSE_INDEX";
+    setIsLoading(true);
+    setLoadError(null);
+
+    const today = new Date();
+    const endDate = today.toISOString().slice(0, 10);
+    // ~220 calendar days ≈ 150 trading bars → enough returns for the 90d window.
+    const startDate = new Date(today.getTime() - 220 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+    getHistory(symbol, exchange, "D", startDate, endDate)
+      .then((bars) => {
+        const closes = (Array.isArray(bars) ? bars : [])
+          .map((b) => Number(b.close))
+          .filter((c) => Number.isFinite(c) && c > 0);
+        if (closes.length < Math.max(...LOOKBACK_PERIODS) + 2) {
+          throw new Error("Not enough history to build a cone");
+        }
+        const returns = closes.slice(1).map((c, i) => (c - closes[i]) / closes[i]);
+        return getVolatilityCone(returns, LOOKBACK_PERIODS);
+      })
+      .then((rows) => {
+        if (cancelled) return;
+        const mapped: ConePoint[] = rows.map((r) => ({
+          period: r.lookback,
+          p10: r.p10 * 100,
+          p25: r.p25 * 100,
+          p50: r.p50 * 100,
+          p75: r.p75 * 100,
+          p90: r.p90 * 100,
+          currentIV: r.current_hv * 100,
+        }));
+        setLiveCone(mapped.length ? mapped : null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLiveCone(null);
+        setLoadError(err instanceof Error ? err.message : "Failed to load cone");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [symbol, isConnected]);
+
+  const isLive = liveCone !== null;
+  const coneData = liveCone ?? SAMPLE_CONE;
+  // Live overlay is realised HV; the sample carries a synthetic IV.
+  const metricLabel = isLive ? "HV" : "IV";
+  const coneChart = useMemo(() => buildConeChart(coneData, metricLabel), [coneData, metricLabel]);
 
   const handleSymbolChange = (v: string) => {
     setSymbol(v);
@@ -200,19 +278,30 @@ function VolatilityConeWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Triangle size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Volatility Cone</span>
-        {/* Honest disclosure — coneData is SAMPLE_CONE unconditionally; no
-            `/ft-api/v1/volcone` endpoint exists yet. The badge stays visible
-            even when connected (connecting a broker does not make this cone
-            live). When the endpoint lands, gate on `isConnected && mode !==
-            "live"` and add the fetch. */}
-        <span
-          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-          role="status"
-          aria-label="Showing sample data; no live volatility-cone endpoint is wired yet"
-          title="No live data wired yet — showing a sample IV cone so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        {isLive ? (
+          <span
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+            role="status"
+            aria-label="Live: HV cone computed from real price history"
+            title="Live — historical-volatility percentiles from real price history; the overlay is current realised HV."
+          >
+            Live
+          </span>
+        ) : (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample data; connect a broker for a live HV cone"
+            title={
+              loadError
+                ? `Showing sample data — live cone unavailable: ${loadError}`
+                : "Sample IV cone so the widget is usable in explore mode — connect a broker for a live HV cone from real price history."
+            }
+          >
+            Sample data
+          </span>
+        )}
+        {isLoading && <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />}
         <div className="flex-1" />
         <SymbolDropdown value={symbol} onChange={handleSymbolChange} />
       </div>
@@ -251,14 +340,14 @@ function VolatilityConeWidget() {
         </div>
         <div className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-warning" />
-          <span className="text-text-muted">Current IV</span>
+          <span className="text-text-muted">Current {metricLabel}</span>
         </div>
       </div>
 
       {/* Summary row */}
       <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1.5 flex items-center gap-4 flex-wrap text-xs">
         <div className="flex items-center gap-1.5">
-          <span className="text-text-muted">IV Regime:</span>
+          <span className="text-text-muted">{metricLabel} Regime:</span>
           <span className={`font-semibold capitalize ${STATUS_COLOUR[overallStatus]}`}>
             {overallStatus}
           </span>
