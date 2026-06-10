@@ -142,12 +142,28 @@ describe("useOrderFlow", () => {
     expect(url).toContain("bins=20");
   });
 
-  it("throws on HTTP error", async () => {
-    // ftApi.helpers.get() throws "FT API endpoint: HTTP <status>" on !ok
+  it("throws the backend's message on HTTP error", async () => {
+    // ftApi.helpers now extracts the backend's {message} body on !ok (the
+    // generic "HTTP <status>" remains only the no-JSON-body fallback).
     mockFetch.mockResolvedValue({
       ok: false,
       status: 500,
       json: () => Promise.resolve({ message: "Internal error" }),
+    });
+
+    const { result } = renderHook(() => useOrderFlow("NIFTY"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toContain("Internal error");
+  });
+
+  it("falls back to the status code when the error body is not JSON", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.reject(new Error("not json")),
     });
 
     const { result } = renderHook(() => useOrderFlow("NIFTY"), {

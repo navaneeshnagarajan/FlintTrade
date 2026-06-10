@@ -93,6 +93,24 @@ describe("post — HTTP error handling", () => {
     await expect(post("safety/config", {})).rejects.toThrow("FT API safety/config: HTTP 500");
   });
 
+  it("surfaces the backend's actionable message from a non-ok JSON body", async () => {
+    // The backend's {status, message} bodies tell the operator exactly what
+    // to fix (enable a flag, grant an ACL) — they must not collapse to a
+    // bare "HTTP 403".
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "error",
+          message: "Smart routing is disabled. Enable it via workspace.json brokers.smart_routing.enabled.",
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await expect(post("orders/smart-route", {})).rejects.toThrow(
+      "Smart routing is disabled",
+    );
+  });
+
   it("sends Content-Type application/json", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeJsonResponse({ data: { ok: true } }),
