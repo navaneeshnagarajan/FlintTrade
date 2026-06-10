@@ -57,14 +57,16 @@ promote the last known-good deployment while the repository fix is pushed.
 The expected rollback window is short; cached docs are acceptable during that
 window as long as the promoted deployment is from the same public repo.
 
-## LICENSE Symlink
+## LICENSE File
 
-This section covers the `LICENSE symlink` rollback path.
+This section covers the root `LICENSE` rollback path.
 
-The public repo keeps `LICENSE` as a symlink to `licenses/agpl-3.0.txt`. On
-Windows machines where symlink checkout fails, restore by checking out the
-tracked licence bundle and replacing the broken symlink with the AGPL text
-from the same commit. Do not invent a different licence file.
+The public repo keeps `LICENSE` as a regular text file whose contents match
+`licenses/agpl-3.0.txt`. This is intentionally not a symlink: macOS, Linux,
+and Windows clones should materialise the licence without relying on symlink
+support or path-target limits. If rollback changes the licence entry, restore
+both files from the same commit and verify the contents still match. Do not
+invent a different licence file.
 
 ## Operator Data
 

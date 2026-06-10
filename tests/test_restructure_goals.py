@@ -70,12 +70,14 @@ def test_root_documents_use_restructure_lowercase_names() -> None:
     assert still_present == []
 
 
-def test_root_license_points_at_tracked_license_bundle() -> None:
-    """Commit 1 keeps the GitHub licence entry while moving texts to licenses/."""
+def test_root_license_is_regular_file_and_matches_tracked_license_bundle() -> None:
+    """The GitHub licence entry must be clone-safe on every supported OS."""
     license_path = ROOT / "LICENSE"
     assert license_path.exists()
-    assert license_path.is_symlink()
-    assert license_path.readlink() == Path("licenses/agpl-3.0.txt")
+    assert not license_path.is_symlink()
+    assert license_path.read_text(encoding="utf-8") == (
+        ROOT / "licenses" / "agpl-3.0.txt"
+    ).read_text(encoding="utf-8")
 
     expected = {
         "agpl-3.0.txt",
