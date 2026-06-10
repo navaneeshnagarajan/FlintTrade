@@ -247,6 +247,33 @@ def test_L2_float_string_quantity_tolerated() -> None:
     assert resp.status_code == 200
 
 
+def test_L2_infinity_quantity_does_not_500() -> None:
+    """A pathological "Infinity" position quantity must be tolerated (treated
+    as unparseable → 0), not raise OverflowError out of L2 and 500 the order."""
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-3")
+    safety = _real_safety(max_positions=10)
+    client = _fake_client([_pos("INFY", "Infinity")])
+    app = _app_with_client(router, safety, client)
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 200  # not a 500
+
+
+def test_gather_l2_state_only_reads_openalgo_client() -> None:
+    """_gather_l2_state must NOT feed OpenAlgo's portfolio for a non-openalgo
+    selector — it would enforce L2 against the wrong account. For native
+    adapters it returns empty (L2 no-op) until a per-adapter gather ships."""
+    from flinttrade_core.order_routes import _gather_l2_state
+
+    app = _app(broker_router=MagicMock(), safety=_passing_safety())
+    app.config["OPENALGO_CLIENT"] = _fake_client([_pos("INFY", 50)], used_margin="9", total_balance="10")
+    with app.app_context():
+        assert _gather_l2_state("openalgo") != ([], 0.0, 0.0)  # openalgo: real state
+        assert _gather_l2_state("dhan") == ([], 0.0, 0.0)       # native: no-op, not OpenAlgo's
+
+
 def test_L2_state_fetch_failure_does_not_block_order() -> None:
     """A portfolio-state read hiccup must NOT block a live order — best-effort
     enrichment, never an availability regression."""

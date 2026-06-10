@@ -691,10 +691,15 @@ class PositionLimits:
 
     @staticmethod
     def _qty(value: object) -> int:
-        """Tolerant quantity parse — brokers return "0", "10", or even "10.0"."""
+        """Tolerant quantity parse — brokers return "0", "10", or even "10.0".
+
+        Catches OverflowError too: ``int(float("inf"))`` raises it (an
+        ArithmeticError, NOT a ValueError), and an uncaught OverflowError here
+        would 500 a live order on a pathologically malformed broker quantity.
+        """
         try:
             return int(float(str(value)))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 0
 
     def validate(

@@ -299,18 +299,28 @@ def _live_kill_switch_block() -> Any | None:
     return None if result.passed else result
 
 
-def _gather_l2_state() -> tuple[list[Any], float, float]:
+def _gather_l2_state(adapter_id: str) -> tuple[list[Any], float, float]:
     """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
 
     Reads the connected account's positionbook + funds through the OpenAlgo
-    client so SafetySystem L2 can enforce max-positions and margin% against
-    REAL exposure. Best-effort by design: any failure (no client, network,
-    auth) returns empty/zero state, so L2 simply enforces nothing for that
-    order — a state-read hiccup must never block a live order (L1/L4/L5 still
-    apply). Runs two reads on the human order path; acceptable latency for the
-    cumulative-exposure brake.
+    bridge client so SafetySystem L2 can enforce max-positions and margin%
+    against REAL exposure. Best-effort by design: any failure (no client,
+    network, auth) returns empty/zero state, so L2 simply enforces nothing for
+    that order — a state-read hiccup must never block a live order (L1/L4/L5
+    still apply). Runs two reads on the human order path; acceptable latency
+    for the cumulative-exposure brake.
+
+    Scoped to ``adapter_id == "openalgo"`` — the only functional adapter. The
+    routed ``/<broker>/place`` path accepts any broker, but OPENALGO_CLIENT
+    holds OpenAlgo's portfolio, not a native broker's; feeding it for a native
+    selector would enforce L2 against the WRONG account. Native adapters are
+    dormant today, so for them L2 simply no-ops (empty state) rather than
+    mis-enforcing; a per-adapter gather lands when native adapters ship.
     """
     import asyncio  # noqa: PLC0415
+
+    if adapter_id != "openalgo":
+        return [], 0.0, 0.0
 
     client = current_app.config.get("OPENALGO_CLIENT")
     if client is None:
@@ -406,7 +416,7 @@ def _dispatch_live_order(
     # fed from the hot path: greeks need option-chain data the bridge lacks,
     # and L4 latches its kill switch, so a noisy broker PNL must not drive it —
     # tracked in PLAN §3b.)
-    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state()
+    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id)
     safety = current_app.config.get("SAFETY")
     if safety is None:
         safety = SafetySystem(SafetyConfig())
