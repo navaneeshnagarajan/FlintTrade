@@ -1425,6 +1425,12 @@ def create_flask_app(
     from .smart_order_routes import smart_order_bp  # noqa: PLC0415
     app.register_blueprint(smart_order_bp)
 
+    # Register the autonomous-agent control plane (/api/v1/ai/agent/*).
+    # OFF by default (workspace ai.autonomous_agent.enabled); the agent runs
+    # as its own ACL'd principal and orders only via GatedChildExecutor.
+    from .agent_routes import agent_bp  # noqa: PLC0415
+    app.register_blueprint(agent_bp)
+
     # Register AI Team blueprint (/api/v1/ai/team/*)
     from flinttrade_ai.team_routes import team_bp  # noqa: PLC0415
     app.register_blueprint(team_bp)

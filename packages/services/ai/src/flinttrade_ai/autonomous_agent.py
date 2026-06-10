@@ -264,6 +264,8 @@ class AutonomousTrader:
         )
         self._status: AgentStatus = AgentStatus.IDLE
         self._state_lock = asyncio.Lock()
+        self._stop_requested = False
+        self._square_off_on_stop = True
 
     # ------------------------------------------------------------------
     # Status
@@ -877,13 +879,29 @@ class AutonomousTrader:
 
         return cycle_result
 
+    def request_stop(self, square_off: bool = True) -> None:
+        """Ask a running session to stop after the current cycle.
+
+        Thread-safe (a plain bool flip read by the session loop). When
+        ``square_off`` is True (the default — the safe choice for an
+        unattended agent), the loop exits via the square-off path so no
+        position is left unmanaged.
+
+        Args:
+            square_off: Square off all tracked positions before stopping.
+        """
+        self._square_off_on_stop = square_off
+        self._stop_requested = True
+
     async def run_session(self) -> None:
-        """Run the full trading session loop until market close.
+        """Run the full trading session loop until market close or stop.
 
         Runs cycles every config.cycle_interval_sec seconds. Automatically
-        squares off all positions at square-off time.
+        squares off all positions at square-off time, on cancellation, and
+        (by default) on an operator stop request.
         """
         self._status = AgentStatus.RUNNING
+        self._stop_requested = False
         logger.info(
             "Autonomous trader starting. Symbols: %s, Exchange: %s",
             self.config.symbols,
@@ -891,14 +909,25 @@ class AutonomousTrader:
         )
 
         try:
-            while self._is_market_open():
+            while self._is_market_open() and not self._stop_requested:
                 if self._is_square_off_time() and not self.state.squared_off:
                     await self._square_off_all()
                     self.state.squared_off = True
                     break
 
                 await self.run_cycle()
-                await asyncio.sleep(self.config.cycle_interval_sec)
+
+                # Sleep in 1s slices so a stop request takes effect promptly
+                # rather than after a full cycle interval.
+                for _ in range(max(1, int(self.config.cycle_interval_sec))):
+                    if self._stop_requested:
+                        break
+                    await asyncio.sleep(1)
+
+            if self._stop_requested and self._square_off_on_stop and not self.state.squared_off:
+                logger.info("Stop requested — squaring off positions")
+                await self._square_off_all()
+                self.state.squared_off = True
 
         except asyncio.CancelledError:
             logger.info("Session cancelled — squaring off positions")

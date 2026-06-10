@@ -323,3 +323,59 @@ export const readObsidianNote = (path: string) =>
 /** Case-insensitive search across note names and bodies. */
 export const searchObsidianNotes = (query: string) =>
   get<ObsidianSearchHit[]>("ai/obsidian/search?q=" + encodeURIComponent(query));
+
+// ---------------------------------------------------------------------------
+// Autonomous agent control plane (/ai/agent/*) — live mode, gated, OFF by
+// default (workspace ai.autonomous_agent.enabled). The agent runs as its own
+// ACL'd principal; every order traverses the full gated execution path.
+// ---------------------------------------------------------------------------
+
+export interface AgentPositionDetails {
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  action: string;
+  quantity: number;
+}
+
+export interface AgentSnapshot {
+  enabled: boolean;
+  running: boolean;
+  started_at: string;
+  params: Record<string, unknown>;
+  actor_id: string;
+  agent_status?: string;
+  daily_pnl?: number;
+  cycle_count?: number;
+  active_positions?: Record<string, number>;
+  position_details?: Record<string, AgentPositionDetails>;
+  trade_counts?: Record<string, number>;
+  last_signals?: Record<string, string>;
+  squared_off?: boolean;
+  stop_loss_hit?: boolean;
+}
+
+export interface AgentStartParams {
+  symbols: string[];
+  exchange?: string;
+  product?: string;
+  max_position_size?: number;
+  stop_loss_pct?: number;
+  take_profit_pct?: number;
+  daily_stop_loss?: number;
+  max_trades_per_symbol?: number;
+  cycle_interval_sec?: number;
+  broker?: string;
+  account_id?: string;
+}
+
+/** Live agent/session snapshot — honest `{running: false}` shape when idle. */
+export const getAgentStatus = () => get<AgentSnapshot>("ai/agent/status");
+
+/** Start a trading session (202). Backend refusals carry actionable messages. */
+export const startAgent = (params: AgentStartParams) =>
+  post<AgentSnapshot>("ai/agent/start", params);
+
+/** Request a stop; squares off tracked positions unless squareOff is false. */
+export const stopAgent = (squareOff = true) =>
+  post<AgentSnapshot>("ai/agent/stop", { square_off: squareOff });

@@ -1,4 +1,4 @@
-import { useAuthStore } from "@/stores/authStore";
+﻿import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 
 export function getBase(): string {
@@ -44,6 +44,33 @@ export function buildHeaders(includeJson: boolean): Record<string, string> {
   return headers;
 }
 
+/**
+ * Throw the backend's actionable error message for a non-2xx response.
+ *
+ * The backend returns ``{"status": "error", "message": "..."}`` bodies whose
+ * messages tell the operator exactly what to fix (enable a flag, grant an
+ * ACL, set an API key). Discarding them for a bare "HTTP 403" — as these
+ * helpers previously did — left every error surface generic, so the message
+ * is extracted here and the status code kept as a fallback only.
+ */
+async function throwHttpError(resp: Response, endpoint: string): Promise<never> {
+  let message: string | null = null;
+  try {
+    const body: unknown = await resp.json();
+    if (
+      body !== null &&
+      typeof body === "object" &&
+      "message" in body &&
+      typeof (body as { message: unknown }).message === "string"
+    ) {
+      message = (body as { message: string }).message;
+    }
+  } catch {
+    // Not a JSON body — fall through to the generic message.
+  }
+  throw new Error(message ?? `FT API ${endpoint}: HTTP ${resp.status}`);
+}
+
 export async function parseResponse<T>(res: Response, endpoint: string): Promise<T> {
   const json: unknown = await res.json();
   if (
@@ -71,7 +98,7 @@ export async function post<T>(endpoint: string, body: object = {}): Promise<T> {
     headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
-  if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
+  if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -79,7 +106,7 @@ export async function get<T>(endpoint: string): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     headers: buildHeaders(false),
   });
-  if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
+  if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -98,7 +125,7 @@ export async function postV1<T>(endpoint: string, body: object = {}): Promise<T>
     headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
-  if (!resp.ok) throw new Error(`FT API v1 ${endpoint}: HTTP ${resp.status}`);
+  if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -108,7 +135,7 @@ export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
     headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
-  if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
+  if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -117,6 +144,6 @@ export async function del<T>(endpoint: string): Promise<T> {
     method: "DELETE",
     headers: buildHeaders(false),
   });
-  if (!resp.ok) throw new Error(`FT API ${endpoint}: HTTP ${resp.status}`);
+  if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);
 }

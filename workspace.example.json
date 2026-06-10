@@ -48,6 +48,12 @@
     "static_ip": ""
   },
   "initialized": true,
+  "ai": {
+    "autonomous_agent": {
+      "_comment": "The LLM-driven trading agent (AI route → Agent panel; /api/v1/ai/agent/*). OFF by default — it places real orders in live mode. Enabling it also requires granting the 'autonomous-trader' actor access in brokers.account_acls; every agent order still traverses the full gated execution path.",
+      "enabled": false
+    }
+  },
   "llm": {
     "_comment": "Optional local or hosted LLM. provider/host/model are non-secret. api_key_ref names a keyring/env entry (e.g. 'env:ANTHROPIC_API_KEY') — never paste a real key here.",
     "api_key_ref": "",

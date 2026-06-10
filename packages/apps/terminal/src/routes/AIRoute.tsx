@@ -31,6 +31,7 @@ import AIAdvisorWidget from "@/widgets/utility/AIAdvisor/AIAdvisorWidget";
 import AISuggestionsPanel from "@/routes/ai/AISuggestionsPanel";
 import SentimentPanel from "@/routes/ai/SentimentPanel";
 import RegimePanel from "@/routes/ai/RegimePanel";
+import AgentPanel from "@/routes/ai/AgentPanel";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,7 +63,8 @@ type SectionId =
   | "knowledge"
   | "settings"
   | "market-sentiment"
-  | "regime";
+  | "regime"
+  | "agent";
 
 interface SectionDef {
   id: SectionId;
@@ -72,6 +74,7 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "agent", label: "Agent", icon: Bot },
   { id: "suggestions", label: "Suggest", icon: Lightbulb },
   { id: "signals", label: "Signals", icon: Zap },
   { id: "market-sentiment", label: "Market", icon: BarChart2 },
@@ -909,6 +912,7 @@ function OverlayPanel({ title, icon: Icon, onClose, children }: OverlayPanelProp
 
 const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   chat: <ChatSection />,
+  agent: <AgentPanel />,
   suggestions: <AISuggestionsPanel />,
   signals: <SignalsSection />,
   "market-sentiment": <SentimentPanel />,
@@ -920,6 +924,7 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
 
 const SECTION_LABELS: Record<SectionId, string> = {
   chat: "AI Chat",
+  agent: "Autonomous Agent",
   suggestions: "AI Strategy Suggestions",
   signals: "Signals",
   "market-sentiment": "Market Sentiment Dashboard",
