@@ -368,6 +368,39 @@ async def test_analyze_all_returns_all_symbols() -> None:
     assert "ICICIBANK" in results
 
 
+@pytest.mark.asyncio
+async def test_fetch_works_with_TYPED_openalgo_client() -> None:
+    """The agent must parse the modern OpenAlgoClient's TYPED Pydantic models
+    (Quote/Depth/list[OHLCV]) — not just dict envelopes. Before the fix it
+    only handled dicts, so the live-wired agent set data.error on every
+    symbol and could never trade (the control plane was dead on arrival)."""
+    from types import SimpleNamespace
+
+    # Typed Quote/Depth/OHLCV stand-ins (attribute access, NOT dicts).
+    quote = SimpleNamespace(ltp=2500.0, open=2480.0, high=2520.0, low=2470.0,
+                            volume=100000, prev_close=2490.0)
+    level = SimpleNamespace(price=2500.0, quantity=300)
+    depth = SimpleNamespace(bids=[level], asks=[SimpleNamespace(price=2501.0, quantity=200)])
+    bars = [
+        SimpleNamespace(close=2500.0 + i, high=2505.0 + i, low=2495.0 + i, volume=1000.0)
+        for i in range(40)
+    ]
+
+    agent = make_agent()
+    agent.broker.quotes = AsyncMock(return_value=quote)
+    agent.broker.depth = AsyncMock(return_value=depth)
+    agent.broker.history = AsyncMock(return_value=bars)
+
+    data = await agent.analyse("RELIANCE")
+    assert data.error == ""           # NOT "quotes failed: ..."
+    assert data.is_valid              # would be False if parsing failed
+    assert data.ltp == 2500.0
+    assert data.prev_close == 2490.0
+    assert data.bid_ask_ratio == pytest.approx(300 / 200)
+    # Indicators computed from the typed OHLCV bars (40 >= 30 minimum).
+    assert data.rsi is not None
+
+
 # ---------------------------------------------------------------------------
 # Monitor (async)
 # ---------------------------------------------------------------------------
@@ -492,12 +525,55 @@ async def test_square_off_all_places_gated_reverse_orders() -> None:
         "action": "BUY",
         "quantity": 1,
     }
-    await agent._square_off_all()
+    result = await agent._square_off_all()
     agent.order_executor.route_order.assert_awaited_once()
     order = agent.order_executor.route_order.await_args.args[0]
     assert order.action.value == "SELL"
     assert "RELIANCE" not in agent.state.active_positions
     assert "RELIANCE" not in agent.state.position_details
+    assert result is True  # genuinely flat
+
+
+@pytest.mark.asyncio
+async def test_square_off_all_returns_false_when_an_exit_is_refused() -> None:
+    """A refused exit leaves the position tracked and must report NOT-flat —
+    run_session relies on this to avoid a false squared_off state."""
+    agent = make_agent()
+    agent.order_executor = make_gated_executor(passed=False, error="kill switch")
+    agent.state.active_positions["RELIANCE"] = 100.0
+    agent.state.position_details["RELIANCE"] = {
+        "entry_price": 100.0, "stop_loss": 95.0, "take_profit": 110.0,
+        "action": "BUY", "quantity": 1,
+    }
+    result = await agent._square_off_all()
+    assert result is False
+    assert "RELIANCE" in agent.state.active_positions  # still open
+
+
+@pytest.mark.asyncio
+async def test_square_off_abort_stops_and_keeps_remaining_positions() -> None:
+    """A SmartRouteAbort (session revoked) mid-square-off stops the loop and
+    leaves remaining positions tracked — never a false flat."""
+
+    class _Abort(Exception):
+        pass
+
+    _Abort.__name__ = "SmartRouteAbort"  # matched by class name in the agent
+
+    executor = MagicMock()
+    executor.route_order = AsyncMock(side_effect=_Abort("session revoked"))
+    agent = make_agent()
+    agent.order_executor = executor
+    agent.state.active_positions = {"RELIANCE": 100.0, "TCS": 50.0}
+    agent.state.position_details = {
+        "RELIANCE": {"action": "BUY", "quantity": 1},
+        "TCS": {"action": "BUY", "quantity": 1},
+    }
+    result = await agent._square_off_all()
+    assert result is False
+    # The abort stopped after the first attempt — both positions remain.
+    assert agent.state.active_positions
+    assert executor.route_order.await_count == 1
 
 
 # ---------------------------------------------------------------------------

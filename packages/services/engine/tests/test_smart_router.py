@@ -208,9 +208,29 @@ def test_medium_urgency_single_order_when_fits_in_depth() -> None:
     assert result.child_orders[0].status == "placed"
 
 
-def test_medium_urgency_splits_when_exceeds_depth() -> None:
+def test_medium_urgency_splits_within_visible_depth() -> None:
+    # 10-level book of 100 each: top-5 available = 500, total visible = 1000.
+    # An 800-unit order exceeds the top-5 (so it splits) but fits within the
+    # full visible book (so slippage is bounded and finite) → it is placed.
     base = _make_base_router(passed=True)
-    # Only 200 available in top 5, order qty = 600 → splits
+    depth = _make_multi_level_depth(levels=10, qty_per_level=100)
+    router = SmartOrderRouter(
+        base_router=base,
+        depth_provider=AsyncMock(return_value=depth),
+        volume_provider=AsyncMock(return_value=1000),
+    )
+    result = asyncio.run(router.route("NIFTY25FUT", "NFO", 800, "BUY", urgency="medium"))
+    assert not result.error
+    assert len(result.child_orders) > 1
+    total_placed = sum(c.quantity for c in result.child_orders if c.status == "placed")
+    assert total_placed == 800
+
+
+def test_medium_urgency_refuses_order_larger_than_visible_book() -> None:
+    # 5-level book of 40 each = 200 total visible. A 600-unit order cannot be
+    # bounded by a single snapshot — splitting it would execute chunks 2..N
+    # against an unseen book (the old fail-open bug). Now refused.
+    base = _make_base_router(passed=True)
     depth = _make_multi_level_depth(levels=5, qty_per_level=40)  # 200 total
     router = SmartOrderRouter(
         base_router=base,
@@ -218,9 +238,9 @@ def test_medium_urgency_splits_when_exceeds_depth() -> None:
         volume_provider=AsyncMock(return_value=1000),
     )
     result = asyncio.run(router.route("NIFTY25FUT", "NFO", 600, "BUY", urgency="medium"))
-    assert len(result.child_orders) > 1
-    total_placed = sum(c.quantity for c in result.child_orders if c.status == "placed")
-    assert total_placed == 600
+    assert result.child_orders == []
+    assert "exceeds the visible priced depth" in result.error
+    base.route_order.assert_not_awaited()
 
 
 def test_medium_urgency_child_failure_recorded(tmp_path) -> None:

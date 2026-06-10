@@ -271,7 +271,9 @@ def import_data() -> tuple[Response, int]:
 
     Request JSON:
         file_path  (str, required):  Path to the ``.xlsx`` file.
-        sheet_name (str, optional):  Worksheet to read (default ``"Sheet1"``).
+        sheet_name (str, optional):  Worksheet to read. Omitted → the
+            workbook's FIRST sheet (most workbooks, incl. FlintTrade's own
+            exports, are not literally named "Sheet1").
 
     Returns:
         JSON ``{"status": "success", "data": {"rows": [...], "count": N}}``.
@@ -308,10 +310,12 @@ def import_upload() -> tuple[Response, int]:
 
     Form fields:
         file       (file, required):  The ``.xlsx`` upload.
-        sheet_name (str, optional):   Worksheet to read (default ``"Sheet1"``).
+        sheet_name (str, optional):   Worksheet to read. Omitted → the
+            workbook's FIRST sheet.
 
     Returns:
-        JSON ``{"status": "success", "data": {"rows": [...], "count": N}}``.
+        JSON ``{"status": "success", "data": {"rows": [...], "count": N,
+        "sheet_name": "<sheet actually read>"}}``.
     """
     upload = request.files.get("file")
     if upload is None or not (upload.filename or "").strip():
@@ -325,7 +329,7 @@ def import_upload() -> tuple[Response, int]:
         fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
         with os.fdopen(fd, "wb") as handle:
             upload.save(handle)
-        rows = _get_bridge().import_from_excel(tmp_path, sheet_name)
+        rows, resolved_sheet = _get_bridge().import_from_excel_named(tmp_path, sheet_name)
     except ExcelBridgeError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
     finally:
@@ -335,8 +339,11 @@ def import_upload() -> tuple[Response, int]:
             except OSError:
                 pass
 
-    logger.info("Excel upload import: %s rows from %s", len(rows), upload.filename)
+    logger.info(
+        "Excel upload import: %s rows from %s (sheet=%s)",
+        len(rows), upload.filename, resolved_sheet,
+    )
     return jsonify({
         "status": "success",
-        "data": {"rows": rows, "count": len(rows), "sheet_name": sheet_name},
+        "data": {"rows": rows, "count": len(rows), "sheet_name": resolved_sheet},
     }), 200

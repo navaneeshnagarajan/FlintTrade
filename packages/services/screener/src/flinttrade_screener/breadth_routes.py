@@ -15,6 +15,7 @@ available, so the terminal works in Explore mode without a broker connection.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -146,33 +147,43 @@ def breadth_current() -> Any:
             }
     """
     registry = current_app.config.get("REGISTRY")
-    is_sample_data = True
-    calc = _get_calculator()
 
     if registry and getattr(registry, "is_connected", lambda: False)():
         raw = _live_breadth_from_quotes(current_app.config.get("OPENALGO_CLIENT"))
         if raw is not None:
-            try:
-                calc.update(
-                    advances=raw["advances"],
-                    declines=raw["declines"],
-                    unchanged=raw["unchanged"],
-                )
-                is_sample_data = False
-                logger.info(
-                    "BreadthCurrent: live NIFTY 50 breadth %d/%d/%d",
-                    raw["advances"], raw["declines"], raw["unchanged"],
-                )
-            except Exception as exc:
-                logger.warning("BreadthCurrent: live update failed, using sample: %s", exc)
+            # Build the live point in ISOLATION — never mutate the shared
+            # sample-seeded calculator (doing so per 60s poll stacked
+            # future-dated duplicate days and recomputed the cumulative
+            # A-D line / McClellan / breadth-thrust over synthetic+live junk,
+            # presenting fabricated derived indicators as live). The live
+            # snapshot reports REAL advance/decline only; the multi-day
+            # derived indicators require the historical feed (still sample)
+            # and are left at neutral defaults rather than faked.
+            advances, declines = raw["advances"], raw["declines"]
+            live = BreadthData(
+                date=date.today(),
+                advances=advances,
+                declines=declines,
+                unchanged=raw["unchanged"],
+                ad_ratio=round(float(advances) / float(declines), 4) if declines > 0 else 1.0,
+                ad_line=float(advances - declines),
+            )
+            logger.info(
+                "BreadthCurrent: live NIFTY 50 breadth %d/%d/%d", advances, declines, raw["unchanged"],
+            )
+            return jsonify({
+                "status": "success",
+                "is_sample_data": False,
+                "data": _breadth_to_dict(live),
+            })
 
-    history = calc.get_history(days=1)
+    history = _get_calculator().get_history(days=1)
     if not history:
         return jsonify({"status": "error", "message": "No breadth data available"}), 500
 
     return jsonify({
         "status": "success",
-        "is_sample_data": is_sample_data,
+        "is_sample_data": True,
         "data": _breadth_to_dict(history[-1]),
     })
 

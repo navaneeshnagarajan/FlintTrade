@@ -75,6 +75,7 @@ Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade
 
 ### 3b. Safety depth (cross-path, found by the 2026-06-10 session audit)
 - [ ] Thread live portfolio state (open positions, used margin, daily P&L) into `SafetySystem.check_order` on BOTH the manual and smart-route order paths — today L2–L4 run with empty default state on every per-order check, so they validate shape/limits but cannot enforce cumulative exposure. (The smart-route path mitigates the worst aggregate case with a running-job cap + duplicate-(symbol, action) guard; real enforcement needs the state threaded.)
+- [ ] Multi-worker (gunicorn ≥2) story for the in-memory job/runner state: the smart-route `_JOBS` cap/dup-guard/cancel and the agent `_RUNNER` single-session slot are process-local, so under >1 worker they are per-worker (cancel can 404 on the non-owning worker). Single-process Waitress (the default) is correct; document or move to a shared store if multi-worker is adopted (auth_state already is DuckDB-backed for the same reason).
 
 ### 4. Data layer
 - [ ] Finish the journal DuckDB → SQLite + FTS5 migration (data-layer spec §1.1/§6): add `flinttrade_journal/db.py`, switch `trade_journal.py` off DuckDB (migration script + `disable_journal_triggers` already exist but have no runtime consumer).

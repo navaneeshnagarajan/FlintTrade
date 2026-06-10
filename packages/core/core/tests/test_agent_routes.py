@@ -178,6 +178,37 @@ def test_double_start_409(live_auth):
     assert resp.status_code == 409
 
 
+def test_start_claims_slot_atomically(live_auth, monkeypatch):
+    """A second /start that races in while the first is still constructing
+    (the 'starting' sentinel set, runner not yet registered) is refused —
+    not allowed to spawn a second live agent that orphans the first."""
+    # Simulate the in-construction window: claim the slot via the sentinel.
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER["starting"] = True  # noqa: SLF001
+    try:
+        resp = _make_app().test_client().post("/api/v1/ai/agent/start", json=_start_body())
+        assert resp.status_code == 409
+        assert _FakeTrader.instances == []  # no trader was constructed
+    finally:
+        mod._reset_runner_for_tests()  # noqa: SLF001
+
+
+def test_failed_construction_releases_the_slot(live_auth, monkeypatch):
+    """If trader construction raises, the 'starting' sentinel is rolled back so
+    the slot is not wedged forever."""
+    monkeypatch.setattr(
+        mod, "_trader_factory",
+        lambda **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    resp = _make_app().test_client().post("/api/v1/ai/agent/start", json=_start_body())
+    assert resp.status_code == 500
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert not mod._RUNNER.get("starting")  # noqa: SLF001
+    # A subsequent valid start is accepted (slot was released).
+    monkeypatch.setattr(mod, "_trader_factory", _FakeTrader)
+    assert _make_app().test_client().post("/api/v1/ai/agent/start", json=_start_body()).status_code == 202
+
+
 def test_stop_requests_square_off_and_status_reflects(live_auth):
     app = _make_app()
     client = app.test_client()

@@ -165,7 +165,16 @@ class ExcelBridge:
         file_path: str,
         sheet_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Import data from an Excel file.
+        """Import rows from an Excel file (see :meth:`import_from_excel_named`)."""
+        rows, _ = self.import_from_excel_named(file_path, sheet_name)
+        return rows
+
+    def import_from_excel_named(
+        self,
+        file_path: str,
+        sheet_name: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Import data from an Excel file, returning the sheet actually read.
 
         Reads the first row as column headers and converts each subsequent
         row into a dict. Empty rows are skipped.
@@ -178,7 +187,8 @@ class ExcelBridge:
                 called "Sheet1", so a hardcoded name failed the round-trip.
 
         Returns:
-            List of row dicts where keys are the column headers.
+            ``(rows, resolved_sheet_name)`` — the list of row dicts (keys are
+            the column headers) and the name of the sheet actually read.
 
         Raises:
             ExcelBridgeError: If openpyxl is not installed, the file does not
@@ -210,7 +220,7 @@ class ExcelBridge:
         rows = list(ws.iter_rows(values_only=True))
 
         if not rows:
-            return []
+            return [], sheet_name
 
         headers = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(rows[0])]
 
@@ -221,7 +231,7 @@ class ExcelBridge:
             result.append(dict(zip(headers, raw_row)))
 
         logger.info("Imported %d rows from %s (sheet=%s)", len(result), file_path, sheet_name)
-        return result
+        return result, sheet_name
 
     # ------------------------------------------------------------------
     # Portfolio report

@@ -500,6 +500,27 @@ def test_running_job_cap_409(live_auth):
     assert "Too many" in resp.get_json()["message"]
 
 
+def test_dup_guard_is_atomic_with_insert(live_auth):
+    """The cap/dup check and the job insert happen in ONE lock section, so a
+    job registered before the executor is built already blocks a duplicate —
+    closing the check-then-insert TOCTOU window."""
+    app, _ = _make_app()
+    client = app.test_client()
+    # First submit registers the job atomically (status "running").
+    r1 = client.post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "low"},
+    )
+    assert r1.status_code == 202
+    # An immediate duplicate sees the already-registered running job and is refused.
+    r2 = client.post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "low"},
+    )
+    assert r2.status_code == 409
+    _wait_done(client, r1.get_json()["data"]["job_id"])
+
+
 def test_duplicate_symbol_action_409(live_auth):
     app, _ = _make_app()
     mod._store_job(mod._SmartJob(job_id="dup-1", params={"symbol": "RELIANCE", "action": "BUY"}))  # noqa: SLF001

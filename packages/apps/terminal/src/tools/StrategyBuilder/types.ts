@@ -30,13 +30,17 @@ export interface PerfMetrics {
   sharpeApprox: number;
 }
 
-// Default underlyings for Indian F&O
+// Default underlyings for Indian F&O.
+// NOTE: lot sizes are the post-2024-revision values (the old 25/15/40/75/10
+// were pre-Nov-2024 and understated the margin estimate 2-3x). Exchanges
+// revise these periodically — the margin tab is an ESTIMATE (it says so) and
+// the operator confirms with the broker calculator; these are sensible seeds.
 export const UNDERLYINGS = [
-  { symbol: "NIFTY",      exchange: "NSE_INDEX", lotSize: 25, strikeGap: 50  },
-  { symbol: "BANKNIFTY",  exchange: "NSE_INDEX", lotSize: 15, strikeGap: 100 },
-  { symbol: "FINNIFTY",   exchange: "NSE_INDEX", lotSize: 40, strikeGap: 50  },
-  { symbol: "MIDCPNIFTY", exchange: "NSE_INDEX", lotSize: 75, strikeGap: 25  },
-  { symbol: "SENSEX",     exchange: "BSE_INDEX", lotSize: 10, strikeGap: 100 },
+  { symbol: "NIFTY",      exchange: "NSE_INDEX", lotSize: 75,  strikeGap: 50  },
+  { symbol: "BANKNIFTY",  exchange: "NSE_INDEX", lotSize: 35,  strikeGap: 100 },
+  { symbol: "FINNIFTY",   exchange: "NSE_INDEX", lotSize: 65,  strikeGap: 50  },
+  { symbol: "MIDCPNIFTY", exchange: "NSE_INDEX", lotSize: 140, strikeGap: 25  },
+  { symbol: "SENSEX",     exchange: "BSE_INDEX", lotSize: 20,  strikeGap: 100 },
 ];
 
 export type Underlying = {

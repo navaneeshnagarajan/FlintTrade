@@ -63,6 +63,13 @@ def _isolate_workspace() -> None:
         base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main"
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
+    # Per-package runs (uv run pytest packages/core/data/tests …) resolve
+    # rootdir to THIS package, so the repo-root conftest's DUCKDB_PATH pin is
+    # above --confcutdir and never loads. Pin it here too so the operator's
+    # machine-local .env DUCKDB_PATH cannot make parallel workers contend on
+    # one real DuckDB file (the recurring trade-store flake). This is the
+    # DuckDB-heaviest package; mirrors the root + core/core pins.
+    os.environ["DUCKDB_PATH"] = str(base / "data" / "flint.duckdb")
     _clean_legacy_scratch_dbs(base)
     _seed_test_master_password(base)
 

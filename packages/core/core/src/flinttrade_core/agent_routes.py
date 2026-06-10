@@ -240,17 +240,29 @@ def start_agent() -> tuple[Any, int]:
             ),
         }), 403
 
+    # Claim the single-session slot ATOMICALLY before any slow construction
+    # (LLM client, trader). Without the "starting" sentinel the alive-check and
+    # the later _RUNNER.update were two separate lock sections — two concurrent
+    # /start calls could both pass the check, both spawn live agents, and the
+    # second update would orphan the first (unreachable by /stop). The sentinel
+    # is rolled back on any failure below so a crashed start never wedges the slot.
     with _RUNNER_LOCK:
         thread = _RUNNER.get("thread")
-        if thread is not None and thread.is_alive():
+        if (thread is not None and thread.is_alive()) or _RUNNER.get("starting"):
             return jsonify({
                 "status": "error",
                 "message": "An agent session is already running — stop it first.",
             }), 409
+        _RUNNER["starting"] = True
+
+    def _release_slot() -> None:
+        with _RUNNER_LOCK:
+            _RUNNER.pop("starting", None)
 
     try:
         llm = _build_llm()
     except Exception as exc:
+        _release_slot()
         return jsonify({
             "status": "error",
             "message": f"LLM client unavailable — configure a provider in Settings ({exc})",
@@ -294,37 +306,45 @@ def start_agent() -> tuple[Any, int]:
             return "session revocation check unavailable"
         return None
 
-    executor = GatedChildExecutor(
-        safety=safety,
-        router=router,
-        request_ctx=request_ctx,
-        adapter_id=adapter_id,
-        account_id=account_id,
-        audit=current_app.config.get("AUDIT"),
-        journal_write=_journal_write,
-        pre_dispatch_check=_pre_dispatch_check,
-    )
+    try:
+        executor = GatedChildExecutor(
+            safety=safety,
+            router=router,
+            request_ctx=request_ctx,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            audit=current_app.config.get("AUDIT"),
+            journal_write=_journal_write,
+            pre_dispatch_check=_pre_dispatch_check,
+        )
 
-    from flinttrade_ai.autonomous_agent import AgentConfig  # noqa: PLC0415
+        from flinttrade_ai.autonomous_agent import AgentConfig  # noqa: PLC0415
 
-    config = AgentConfig(
-        symbols=symbols,
-        exchange=exchange,
-        product=product,
-        max_position_size=max_position_size,
-        stop_loss_pct=stop_loss_pct,
-        take_profit_pct=take_profit_pct,
-        daily_stop_loss=daily_stop_loss,
-        max_trades_per_symbol=max_trades,
-        cycle_interval_sec=cycle_interval,
-    )
-    trader = _trader_factory(
-        llm_client=llm,
-        openalgo_client=client,
-        config=config,
-        vault=_build_vault(),
-        order_executor=executor,
-    )
+        config = AgentConfig(
+            symbols=symbols,
+            exchange=exchange,
+            product=product,
+            max_position_size=max_position_size,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+            daily_stop_loss=daily_stop_loss,
+            max_trades_per_symbol=max_trades,
+            cycle_interval_sec=cycle_interval,
+        )
+        trader = _trader_factory(
+            llm_client=llm,
+            openalgo_client=client,
+            config=config,
+            vault=_build_vault(),
+            order_executor=executor,
+        )
+    except Exception as exc:
+        _release_slot()
+        logger.exception("Agent session construction failed")
+        return jsonify({
+            "status": "error",
+            "message": f"Could not start the agent session: {exc}",
+        }), 500
 
     def _run() -> None:
         try:
@@ -334,6 +354,7 @@ def start_agent() -> tuple[Any, int]:
 
     session_thread = threading.Thread(target=_run, name="autonomous-agent", daemon=True)
     with _RUNNER_LOCK:
+        _RUNNER.clear()  # replace the slot wholesale (drops the "starting" sentinel)
         _RUNNER.update({
             "trader": trader,
             "thread": session_thread,

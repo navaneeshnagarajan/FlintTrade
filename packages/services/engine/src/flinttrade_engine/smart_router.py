@@ -17,7 +17,9 @@ Urgency mapping:
                top-5 levels; randomised 1–5 s inter-order delay. REFUSES the
                route (no orders placed) when depth is unavailable or the
                estimated slippage exceeds the budget.
-- ``low``    → TWAP: N equal child orders spread over a configurable window
+- ``low``    → TWAP: N child orders spread over a configurable window
+               (each ``qty // N``; the final slice absorbs the remainder, so
+               they are equal only when N divides the quantity)
 
 Usage::
 
@@ -42,6 +44,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Literal
@@ -370,6 +373,20 @@ class SmartOrderRouter:
 
         slippage_bps = self._estimate_slippage(depth, result.action, result.total_quantity)
 
+        if not math.isfinite(slippage_bps):
+            # Order outsizes the visible priced book — a single snapshot cannot
+            # bound the real slippage. Refuse rather than place chunks blind.
+            result.error = (
+                f"order quantity {result.total_quantity} exceeds the visible "
+                f"priced depth — refusing medium routing (slippage cannot be "
+                "bounded). Use low urgency (TWAP) to work a large order over time."
+            )
+            logger.warning(
+                "SmartOrderRouter [MEDIUM] %s %s qty=%d REFUSED: outsizes visible book",
+                result.action, result.symbol, result.total_quantity,
+            )
+            return
+
         if slippage_bps > result.slippage_budget_bps:
             # The budget is a hard cap, not advisory: refuse rather than place.
             result.error = (
@@ -546,8 +563,13 @@ class SmartOrderRouter:
             quantity: Quantity to fill.
 
         Returns:
-            Estimated slippage in basis points (0.0 if depth is insufficient
-            or best price is zero).
+            Estimated slippage in basis points. Returns ``float("inf")`` when
+            the quantity cannot be fully filled from the visible book — a
+            single depth snapshot CANNOT bound the slippage of the part beyond
+            it (the book moves/refills between chunks), so an unfillable order
+            must be treated as over-budget rather than silently estimated from
+            the truncated visible VWAP. Returns 0.0 only for a genuinely empty
+            or zero-priced book (the caller refuses those on the depth check).
         """
         side = "asks" if action == "BUY" else "bids"
         levels: list[dict] = depth.get(side, [])
@@ -574,6 +596,12 @@ class SmartOrderRouter:
 
         if total_filled == 0:
             return 0.0
+
+        # The visible book cannot fully fill the order — the slippage of the
+        # unpriced remainder is unknowable from this snapshot. Saturate to
+        # infinity so any finite budget refuses (fail closed).
+        if remaining > 0:
+            return float("inf")
 
         vwap = weighted_sum / total_filled
         slippage = abs(vwap - best_px) / best_px * 10_000  # bps

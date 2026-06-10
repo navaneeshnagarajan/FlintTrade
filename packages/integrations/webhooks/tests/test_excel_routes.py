@@ -21,6 +21,7 @@ def _mock_bridge() -> MagicMock:
     bridge.export_to_excel.return_value = "/tmp/export.xlsx"
     bridge.create_portfolio_report.return_value = "/tmp/portfolio.xlsx"
     bridge.import_from_excel.return_value = [{"symbol": "NIFTY", "qty": 50}]
+    bridge.import_from_excel_named.return_value = ([{"symbol": "NIFTY", "qty": 50}], "Data")
     bridge.export_to_bytes.return_value = b"PK\x03\x04fake-xlsx-bytes"
     bridge.create_portfolio_report_bytes.return_value = b"PK\x03\x04fake-portfolio-bytes"
     return bridge
@@ -240,6 +241,8 @@ def test_import_upload_ok(client, app):
     """200 with rows parsed from the uploaded workbook via a temp file."""
     import io
 
+    # The named import echoes the sheet it actually read.
+    mod._bridge.import_from_excel_named.return_value = ([{"symbol": "NIFTY", "qty": 50}], "Symbols")  # noqa: SLF001
     resp = client.post(
         "/api/v1/integration/excel/import/upload",
         data={
@@ -254,25 +257,30 @@ def test_import_upload_ok(client, app):
     assert body["data"]["count"] == 1
     assert body["data"]["sheet_name"] == "Symbols"
     # The bridge was handed a real temp path that is removed afterwards.
-    called_path = mod._bridge.import_from_excel.call_args[0][0]  # noqa: SLF001
+    called_path = mod._bridge.import_from_excel_named.call_args[0][0]  # noqa: SLF001
     import os
 
     assert called_path.endswith(".xlsx")
     assert not os.path.exists(called_path)
 
 
-def test_import_upload_defaults_to_first_sheet(client):
-    """Omitting sheet_name reads the workbook's FIRST sheet (None → bridge
-    default) — most real workbooks are not literally named 'Sheet1'."""
+def test_import_upload_reports_the_sheet_actually_read(client):
+    """Omitting sheet_name reads the FIRST sheet, and the response echoes that
+    sheet's real name (not the request's null) — most workbooks are not
+    literally named 'Sheet1'."""
     import io
 
+    mod._bridge.import_from_excel_named.return_value = ([{"a": 1}], "Data")  # noqa: SLF001
     resp = client.post(
         "/api/v1/integration/excel/import/upload",
         data={"file": (io.BytesIO(b"PK\x03\x04fake-xlsx"), "export.xlsx")},
         content_type="multipart/form-data",
     )
     assert resp.status_code == 200
-    assert mod._bridge.import_from_excel.call_args[0][1] is None  # noqa: SLF001
+    # None was passed to the bridge (→ first sheet), and the resolved name
+    # "Data" is reported back, not null.
+    assert mod._bridge.import_from_excel_named.call_args[0][1] is None  # noqa: SLF001
+    assert resp.get_json()["data"]["sheet_name"] == "Data"
 
 
 def test_import_upload_missing_file(client):
@@ -291,7 +299,7 @@ def test_import_upload_bridge_error(app):
     import io
 
     bridge = _mock_bridge()
-    bridge.import_from_excel.side_effect = ExcelBridgeError("Invalid workbook")
+    bridge.import_from_excel_named.side_effect = ExcelBridgeError("Invalid workbook")
     mod.init_excel_routes(bridge)
     with app.test_client() as c:
         resp = c.post(

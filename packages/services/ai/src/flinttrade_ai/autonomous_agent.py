@@ -40,6 +40,88 @@ _SQUARE_OFF_TIME = time(15, 15)
 
 
 # ---------------------------------------------------------------------------
+# Response normalisation
+#
+# The agent reads market data through whatever client is injected. The modern
+# flinttrade_core.openalgo_client returns typed Pydantic models (Quote/Depth/
+# list[OHLCV]); older/mock brokers return dict envelopes ({"status", "data"}).
+# These helpers accept EITHER so the same agent works against the live typed
+# client AND the dict-mocked test brokers — the wiring boundary the smart-route
+# executor handles for orders, applied here for reads.
+# ---------------------------------------------------------------------------
+
+
+def _as_quote_fields(resp: Any) -> dict[str, Any] | None:
+    """Return ltp/open/high/low/volume/prev_close from a typed Quote or dict."""
+    if resp is None:
+        return None
+    # Typed Quote model — has an ltp attribute (not a dict).
+    if not isinstance(resp, dict) and hasattr(resp, "ltp"):
+        return {
+            "ltp": getattr(resp, "ltp", 0),
+            "open": getattr(resp, "open", 0),
+            "high": getattr(resp, "high", 0),
+            "low": getattr(resp, "low", 0),
+            "volume": getattr(resp, "volume", 0),
+            "prev_close": getattr(resp, "prev_close", 0),
+        }
+    if isinstance(resp, dict):
+        if resp.get("status") == "success" and isinstance(resp.get("data"), dict):
+            return resp["data"]
+        if resp.get("status") in (None, "success") and "ltp" in resp:
+            return resp
+    return None
+
+
+def _as_depth_sides(resp: Any) -> tuple[list[Any], list[Any]] | None:
+    """Return (bids, asks) level lists from a typed Depth or dict envelope."""
+    if resp is None:
+        return None
+    if not isinstance(resp, dict) and hasattr(resp, "bids"):
+        return list(getattr(resp, "bids", []) or []), list(getattr(resp, "asks", []) or [])
+    if isinstance(resp, dict):
+        data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
+        return list(data.get("bids", []) or []), list(data.get("asks", []) or [])
+    return None
+
+
+def _level_qty(level: Any) -> float:
+    """Quantity from a typed DepthLevel or a {'quantity': N} dict."""
+    if isinstance(level, dict):
+        return float(level.get("quantity", 0) or 0)
+    return float(getattr(level, "quantity", 0) or 0)
+
+
+def _as_ohlcv_series(resp: Any) -> dict[str, list[float]] | None:
+    """Return {close,high,low,volume} lists from list[OHLCV] or a dict envelope."""
+    if resp is None:
+        return None
+    # Typed list[OHLCV] — bars with .close attributes.
+    if isinstance(resp, list):
+        if not resp:
+            return {"close": [], "high": [], "low": [], "volume": []}
+        if hasattr(resp[0], "close"):
+            return {
+                "close": [float(getattr(b, "close", 0) or 0) for b in resp],
+                "high": [float(getattr(b, "high", 0) or 0) for b in resp],
+                "low": [float(getattr(b, "low", 0) or 0) for b in resp],
+                "volume": [float(getattr(b, "volume", 0) or 0) for b in resp],
+            }
+        return None
+    if isinstance(resp, dict):
+        if resp.get("status") == "error":
+            return None
+        src = resp.get("data") if isinstance(resp.get("data"), dict) else resp
+        return {
+            "close": _to_float_list(src.get("close", [])),
+            "high": _to_float_list(src.get("high", [])),
+            "low": _to_float_list(src.get("low", [])),
+            "volume": _to_float_list(src.get("volume", [])),
+        }
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
@@ -318,30 +400,31 @@ class AutonomousTrader:
         try:
             data = MarketData(symbol=symbol)
 
-            # Quotes
+            # Quotes — typed Quote model or dict envelope.
             quotes_resp = await self.broker.quotes(
                 symbol=symbol, exchange=self.config.exchange
             )
-            if isinstance(quotes_resp, dict) and quotes_resp.get("status") == "success":
-                q = quotes_resp.get("data", {})
-                data.ltp = float(q.get("ltp", 0))
-                data.open = float(q.get("open", 0))
-                data.high = float(q.get("high", 0))
-                data.low = float(q.get("low", 0))
-                data.volume = int(q.get("volume", 0))
-                data.prev_close = float(q.get("prev_close", 0))
+            q = _as_quote_fields(quotes_resp)
+            if q is not None:
+                data.ltp = float(q.get("ltp", 0) or 0)
+                data.open = float(q.get("open", 0) or 0)
+                data.high = float(q.get("high", 0) or 0)
+                data.low = float(q.get("low", 0) or 0)
+                data.volume = int(q.get("volume", 0) or 0)
+                data.prev_close = float(q.get("prev_close", 0) or 0)
             else:
                 data.error = f"quotes failed: {quotes_resp}"
                 return data
 
-            # Depth
+            # Depth — typed Depth model or dict envelope.
             depth_resp = await self.broker.depth(
                 symbol=symbol, exchange=self.config.exchange
             )
-            if isinstance(depth_resp, dict) and depth_resp.get("status") == "success":
-                d = depth_resp.get("data", {})
-                total_bid = sum(b.get("quantity", 0) for b in d.get("bids", []))
-                total_ask = sum(a.get("quantity", 0) for a in d.get("asks", []))
+            sides = _as_depth_sides(depth_resp)
+            if sides is not None:
+                bids, asks = sides
+                total_bid = sum(_level_qty(b) for b in bids)
+                total_ask = sum(_level_qty(a) for a in asks)
                 data.bid_ask_ratio = total_bid / total_ask if total_ask > 0 else 1.0
 
             # Technical indicators via history (5-minute bars, last 3 days)
@@ -384,14 +467,14 @@ class AutonomousTrader:
                 end_date=end_date,
             )
 
-            if not history_resp or isinstance(history_resp, dict) and history_resp.get("status") == "error":
+            # Accept list[OHLCV] (typed client) or a dict of OHLC lists (mock).
+            series = _as_ohlcv_series(history_resp)
+            if series is None:
                 return data
-
-            # Expect a dict with "close", "high", "low" lists (OpenAlgo format)
-            closes = _to_float_list(history_resp.get("close", []))
-            highs = _to_float_list(history_resp.get("high", []))
-            lows = _to_float_list(history_resp.get("low", []))
-            volumes = _to_float_list(history_resp.get("volume", []))
+            closes = series["close"]
+            highs = series["high"]
+            lows = series["low"]
+            volumes = series["volume"]
 
             if len(closes) < 30:
                 return data
@@ -911,8 +994,11 @@ class AutonomousTrader:
         try:
             while self._is_market_open() and not self._stop_requested:
                 if self._is_square_off_time() and not self.state.squared_off:
-                    await self._square_off_all()
-                    self.state.squared_off = True
+                    # Only mark squared_off when the broker ACTUALLY flattened
+                    # every position — a refused/aborted exit (e.g. the jti was
+                    # revoked) must NOT report a false flat state while real
+                    # positions remain open at the broker.
+                    self.state.squared_off = await self._square_off_all()
                     break
 
                 await self.run_cycle()
@@ -926,12 +1012,12 @@ class AutonomousTrader:
 
             if self._stop_requested and self._square_off_on_stop and not self.state.squared_off:
                 logger.info("Stop requested — squaring off positions")
-                await self._square_off_all()
-                self.state.squared_off = True
+                self.state.squared_off = await self._square_off_all()
 
         except asyncio.CancelledError:
             logger.info("Session cancelled — squaring off positions")
-            await self._square_off_all()
+            if await self._square_off_all():
+                self.state.squared_off = True
         except Exception as exc:
             self._status = AgentStatus.ERROR
             logger.error("Session error: %s", exc)
@@ -944,7 +1030,7 @@ class AutonomousTrader:
                 self.state.cycle_count,
             )
 
-    async def _square_off_all(self) -> None:
+    async def _square_off_all(self) -> bool:
         """Square off all active positions with gated reverse MARKET orders.
 
         Places one reverse order per tracked position through the gated
@@ -952,18 +1038,26 @@ class AutonomousTrader:
         regardless of strategy — quirk #2 — and which would bypass the gate).
         Fails closed without an executor; an executor-less agent can never
         have opened a position, so there is nothing to square off.
+
+        Returns:
+            ``True`` only when EVERY tracked position was successfully exited
+            (no positions remain). A refused/aborted exit leaves that position
+            tracked and returns ``False`` so the caller never reports a false
+            flat state. A revocation abort mid-square-off stops the loop and
+            returns ``False`` — positions stay tracked.
         """
         if self.order_executor is None:
             logger.warning("Square-off skipped — no gated order executor wired")
-            return
+            # No executor ⇒ no position could ever have been opened. "Flat" is
+            # honest only when nothing is tracked.
+            async with self._state_lock:
+                return not self.state.active_positions
 
         async with self._state_lock:
             details_snapshot = {
                 symbol: dict(details)
                 for symbol, details in self.state.position_details.items()
             }
-            # Positions tracked without details (externally injected state)
-            # fall back to last-signal direction and configured size.
             for symbol in self.state.active_positions:
                 details_snapshot.setdefault(symbol, {
                     "action": self.state.last_signals.get(symbol, "BUY"),
@@ -987,7 +1081,27 @@ class AutonomousTrader:
                     self.state.position_details.pop(symbol, None)
                 logger.info("Squared off position in %s", symbol)
             except Exception as exc:
+                # A SmartRouteAbort (session revoked mid-square-off) stops the
+                # whole loop — remaining positions stay tracked and unflattened,
+                # loudly. Matched by class name to avoid a hard flinttrade_ai →
+                # flinttrade_engine dependency. Ordinary per-symbol failures are
+                # logged and the loop continues.
+                if type(exc).__name__ == "SmartRouteAbort":
+                    logger.error(
+                        "Square-off ABORTED for %s (%s) — positions remain open at the broker",
+                        symbol, exc,
+                    )
+                    break
                 logger.error("Square-off failed for %s: %s", symbol, exc)
+
+        async with self._state_lock:
+            flat = not self.state.active_positions
+        if not flat:
+            logger.warning(
+                "Square-off incomplete — %d position(s) still open: %s",
+                len(self.state.active_positions), sorted(self.state.active_positions),
+            )
+        return flat
 
 
 # ---------------------------------------------------------------------------

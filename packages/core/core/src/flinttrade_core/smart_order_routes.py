@@ -235,18 +235,25 @@ _JOBS_LOCK = threading.Lock()
 _MAX_RUNNING_JOBS = 4
 
 
+def _evict_terminal_locked() -> None:
+    """Evict oldest TERMINAL jobs over the cap. Caller MUST hold _JOBS_LOCK.
+
+    Deleting a running job's snapshot would orphan a live worker (children
+    keep placing with no observability and the widget's polling 404s
+    mid-flight), so only finished jobs are evicted.
+    """
+    if len(_JOBS) > _MAX_JOBS:
+        for key in list(_JOBS):
+            if len(_JOBS) <= _MAX_JOBS:
+                break
+            if _JOBS[key].status != "running":
+                del _JOBS[key]
+
+
 def _store_job(job: _SmartJob) -> None:
     with _JOBS_LOCK:
         _JOBS[job.job_id] = job
-        # Evict oldest TERMINAL jobs only — deleting a running job's snapshot
-        # would orphan a live worker (children keep placing with no
-        # observability and the widget's polling 404s mid-flight).
-        if len(_JOBS) > _MAX_JOBS:
-            for key in list(_JOBS):
-                if len(_JOBS) <= _MAX_JOBS:
-                    break
-                if _JOBS[key].status != "running":
-                    del _JOBS[key]
+        _evict_terminal_locked()
 
 
 def _snapshot(job: _SmartJob) -> dict[str, Any]:
@@ -306,9 +313,11 @@ def _make_providers(client: Any) -> tuple[Any, Any]:
     """Build async depth/volume providers over the OpenAlgo client.
 
     The smart router consumes raw OpenAlgo-shaped dicts; the client returns
-    typed models — convert at this boundary. Failures return empty/zero so the
-    router degrades to a single order (its documented no-depth behaviour)
-    rather than crashing the job.
+    typed models — convert at this boundary. A depth-fetch failure returns an
+    empty book; medium urgency then FAILS CLOSED (refuses, no orders placed)
+    rather than blindly market-ordering, and high/low urgency do not consult
+    depth at all. Empty-on-failure keeps the job from crashing while the
+    router enforces the safe outcome.
     """
 
     async def depth_provider(symbol: str, exchange: str) -> dict[str, Any]:
@@ -421,7 +430,11 @@ def start_smart_route() -> tuple[Any, int]:
     account_id = str(body.get("account_id") or "default")
     try:
         quantity = int(body.get("quantity") or 0)
-        max_slippage_bps = int(body.get("max_slippage_bps") or 20)
+        # Distinguish an explicit 0 (a real "zero slippage tolerance" budget)
+        # from an omitted field — `int(x or 20)` would silently turn 0 into the
+        # default 20, undoing the widget's strict 0-stays-0 parsing.
+        raw_bps = body.get("max_slippage_bps")
+        max_slippage_bps = 20 if raw_bps is None else int(raw_bps)
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "quantity/max_slippage_bps must be integers"}), 400
 
@@ -463,9 +476,34 @@ def start_smart_route() -> tuple[Any, int]:
         }), 403
 
     # --- concurrency cap + duplicate-submission guard -------------------------
-    # A multi-minute unattended live-order job must not be silently duplicated
-    # (a re-click after the 202 would otherwise run 2x the quantity), and the
-    # number of simultaneous live-order worker threads must stay bounded.
+    jti = str(payload.get("jti") or "")
+    request_ctx = RequestContext(
+        jti=jti,
+        actor_type="human",
+        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
+        mode=_MODE_LIVE,
+        selector=f"{adapter_id}:{account_id}",
+    )
+
+    job = _SmartJob(
+        job_id=uuid.uuid4().hex[:12],
+        params={
+            "symbol": symbol, "exchange": exchange, "action": action,
+            "quantity": quantity, "urgency": urgency, "product": product,
+            "broker": adapter_id, "account_id": account_id,
+            "max_slippage_bps": max_slippage_bps,
+        },
+    )
+
+    # ATOMIC cap + duplicate guard + insert in ONE lock section. A multi-minute
+    # unattended live-order job must not be silently duplicated (a re-click
+    # after the 202 would otherwise run 2x the quantity), and the number of
+    # simultaneous live-order workers must stay bounded. Doing the check and
+    # the insert under the SAME _JOBS_LOCK closes the TOCTOU window two
+    # concurrent submits could drive between a check-then-insert split.
+    # (Cross-process note: _JOBS is process-local; under a multi-worker
+    # deployment the cap/dup-guard and cancel are per-worker — documented in
+    # the module docstring's operational caveat.)
     with _JOBS_LOCK:
         running = [j for j in _JOBS.values() if j.status == "running"]
         if len(running) >= _MAX_RUNNING_JOBS:
@@ -491,25 +529,10 @@ def start_smart_route() -> tuple[Any, int]:
                     f"(job {dup.job_id}). Cancel it first if you intend to replace it."
                 ),
             }), 409
-
-    jti = str(payload.get("jti") or "")
-    request_ctx = RequestContext(
-        jti=jti,
-        actor_type="human",
-        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
-        mode=_MODE_LIVE,
-        selector=f"{adapter_id}:{account_id}",
-    )
-
-    job = _SmartJob(
-        job_id=uuid.uuid4().hex[:12],
-        params={
-            "symbol": symbol, "exchange": exchange, "action": action,
-            "quantity": quantity, "urgency": urgency, "product": product,
-            "broker": adapter_id, "account_id": account_id,
-            "max_slippage_bps": max_slippage_bps,
-        },
-    )
+        # Insert NOW (status defaults to "running") so a concurrent submit sees
+        # it as an existing running job and is refused.
+        _JOBS[job.job_id] = job
+        _evict_terminal_locked()
 
     # Mid-flight brake, evaluated before EVERY child: the job thread outlives
     # this HTTP request, so logout and the live→practice downgrade (both of
@@ -560,7 +583,7 @@ def start_smart_route() -> tuple[Any, int]:
         twap_slices=int(cfg.get("twap_slices", 5)),
     )
 
-    _store_job(job)
+    # (job already registered atomically with the cap/dup guard above)
 
     def _observe(live_result: Any) -> None:
         job.result = live_result
@@ -581,7 +604,12 @@ def start_smart_route() -> tuple[Any, int]:
                 )
             )
             job.result = final
-            if job.cancel_requested:
+            # "cancelled" only when the cancel actually CURTAILED the route —
+            # a cancel that lands after the last child already placed (the
+            # route carries no abort error) is an honest "done", not a
+            # mislabelled cancellation.
+            cancel_took_effect = job.cancel_requested and bool(final.error)
+            if cancel_took_effect:
                 job.status = "cancelled"
             elif final.error:
                 job.status = "error"
