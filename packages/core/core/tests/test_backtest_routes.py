@@ -166,8 +166,8 @@ class TestBacktestRun:
         assert data["status"] == "error"
 
     def test_successful_run_persists_metrics_to_the_store(self, flask_app, client, monkeypatch, tmp_path):
-        """A successful backtest writes its metrics to the result store, with the
-        engine's ``sharpe``/``sortino`` aliased to the refiner's ``*_ratio`` keys.
+        """A successful backtest writes its metrics to the result store under the
+        refiner's ``sharpe_ratio``/``sortino_ratio`` keys.
 
         This is the populating half of the overnight-optimiser loop: without it
         the optimiser refines on an empty dict.
@@ -216,6 +216,7 @@ class TestBacktestRun:
             win_rate = 0.6
             profit_factor = 1.8
             total_trades = 12
+            expectancy = 0.35
 
         class _FakeReport:
             total_return_pct = 5.0
@@ -242,9 +243,18 @@ class TestBacktestRun:
             }, headers=_auth_headers())
             assert resp.status_code == 200
 
+            # Response metrics use the frontend's contract keys (sharpe_ratio /
+            # sortino_ratio / expectancy) — a rename here crashes the terminal's
+            # Performance Metrics card, so assert them directly.
+            body_metrics = resp.get_json()["data"]["metrics"]
+            assert body_metrics["sharpe_ratio"] == 1.5
+            assert body_metrics["sortino_ratio"] == 2.0
+            assert body_metrics["expectancy"] == 0.35
+            assert "sharpe" not in body_metrics and "sortino" not in body_metrics
+
             saved = store.latest("EMACrossover")
             assert saved is not None
-            assert saved["sharpe_ratio"] == 1.5  # aliased from the engine's `sharpe`
+            assert saved["sharpe_ratio"] == 1.5
             assert saved["sortino_ratio"] == 2.0
             assert saved["max_drawdown"] == -0.1
             assert saved["win_rate"] == 0.6

@@ -16,7 +16,9 @@ export interface WebhookConfig {
   name: string;
   type: "tradingview" | "chartink" | "custom";
   enabled: boolean;
-  secret: string;
+  /** Optional: supplied when creating a webhook; never echoed by the list/get
+   * endpoints (the backend does not leak HMAC secrets in responses). */
+  secret?: string;
 }
 
 export interface N8nWorkflow {

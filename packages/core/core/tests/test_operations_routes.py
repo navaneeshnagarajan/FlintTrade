@@ -581,3 +581,74 @@ class TestAccountsStatus:
         resp = client.get("/api/v1/accounts/status", headers=_auth_headers())
         assert resp.status_code == 503
         assert resp.get_json()["status"] == "error"
+
+
+class TestWebhooksManagement:
+    """GET/POST/DELETE /api/v1/webhooks — the endpoints behind the Flows panel.
+
+    The list must emit ``id`` and ``type`` per webhook: the panel keys its table
+    and its delete action off ``id`` (so a missing id breaks delete entirely) and
+    renders the source badge off ``type``.
+    """
+
+    @pytest.fixture()
+    def server(self, flask_app):
+        from flinttrade_webhooks.webhook_server import WebhookServer
+
+        srv = WebhookServer()
+
+        def _h(_body: bytes, _headers: dict) -> dict:
+            return {"status": "received"}
+
+        srv.register("/webhook/tradingview/algo1", "TV Algo", _h)
+        srv.register("/webhook/custom/my_signal", "My Signal", _h)
+        flask_app._webhook_server = srv
+        yield srv
+        flask_app._webhook_server = None
+
+    def test_list_emits_id_and_type(self, client, server):
+        resp = client.get("/api/v1/webhooks", headers=_auth_headers())
+        assert resp.status_code == 200
+        webhooks = resp.get_json()["data"]["webhooks"]
+        by_name = {w["name"]: w for w in webhooks}
+        tv = by_name["TV Algo"]
+        # id drops the leading slash (round-trips through encodeURIComponent);
+        # path keeps it for display.
+        assert tv["id"] == "webhook/tradingview/algo1"
+        assert tv["path"] == "/webhook/tradingview/algo1"
+        assert tv["type"] == "tradingview"
+        assert tv["enabled"] is True
+        assert by_name["My Signal"]["type"] == "custom"
+        # secret is never leaked in the list
+        assert "secret" not in tv
+
+    def test_create_returns_full_config(self, client, server):
+        resp = client.post(
+            "/api/v1/webhooks",
+            headers=_auth_headers(),
+            json={"path": "/webhook/chartink/scan1", "name": "Chartink Scan"},
+        )
+        assert resp.status_code == 201
+        data = resp.get_json()["data"]
+        assert data["id"] == "webhook/chartink/scan1"
+        assert data["path"] == "/webhook/chartink/scan1"
+        assert data["type"] == "chartink"
+        assert data["enabled"] is True
+
+    def test_list_id_round_trips_through_delete(self, client, server):
+        """The id the list emits must, URL-encoded as the frontend does, delete
+        that exact webhook — proving the encoded-path id survives routing."""
+        from urllib.parse import quote
+
+        listed = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
+        target = next(w for w in listed if w["name"] == "My Signal")
+
+        # mirror the frontend's encodeURIComponent(id)
+        resp = client.delete(
+            f"/api/v1/webhooks/{quote(target['id'], safe='')}",
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+
+        remaining = client.get("/api/v1/webhooks", headers=_auth_headers()).get_json()["data"]["webhooks"]
+        assert all(w["name"] != "My Signal" for w in remaining)

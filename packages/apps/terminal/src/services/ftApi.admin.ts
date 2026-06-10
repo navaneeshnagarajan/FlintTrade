@@ -131,10 +131,38 @@ export const getSecurityStats = () =>
   isDemoAuthSession()
     ? Promise.resolve({ total_ips: 0, banned_count: 0, top_offenders: [] })
     : get<SecurityStats>("security/stats");
-export const getBannedIPs = () =>
-  isDemoAuthSession()
-    ? Promise.resolve({ bans: [] })
-    : get<{ bans: BannedIP[] }>("security/bans");
+
+/** The raw per-IP row the security monitor serialises (IPRecord.to_dict). */
+interface RawBannedRow {
+  ip: string;
+  ban_reason: string | null;
+  ban_expires: number | null;
+  first_seen: number;
+  last_seen: number;
+}
+
+/**
+ * Fetch banned IPs, mapping the monitor's raw row to the table's contract.
+ *
+ * The route emits ``ban_reason`` and epoch-second timestamps; the table reads
+ * ``reason`` + an ISO ``banned_at``. Map here so a live (non-demo) bans table
+ * shows real reasons and ages instead of blanks and "NaNd ago".
+ */
+export const getBannedIPs = async (): Promise<{ bans: BannedIP[] }> => {
+  if (isDemoAuthSession()) return { bans: [] };
+  const raw = await get<{ bans: RawBannedRow[] }>("security/bans");
+  const bans: BannedIP[] = (raw.bans ?? []).map((r) => ({
+    ip: r.ip,
+    reason: r.ban_reason ?? "Auto-ban",
+    // last_seen (epoch seconds) marks the offending request that tripped the
+    // ban — the best available "banned around" timestamp the monitor records.
+    banned_at:
+      typeof r.last_seen === "number" && Number.isFinite(r.last_seen)
+        ? new Date(r.last_seen * 1000).toISOString()
+        : "",
+  }));
+  return { bans };
+};
 export const banIP            = (ip: string, reason: string) =>
   isDemoAuthSession()
     ? Promise.resolve({ status: "demo" })

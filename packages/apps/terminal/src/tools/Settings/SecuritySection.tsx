@@ -150,7 +150,9 @@ export function SecuritySection() {
   // Format ban time relative to now
   // ---------------------------------------------------------------------------
   function fmtAge(isoStr: string): string {
-    const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+    const ts = new Date(isoStr).getTime();
+    if (!Number.isFinite(ts)) return "—";
+    const diff = Math.floor((Date.now() - ts) / 1000);
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;

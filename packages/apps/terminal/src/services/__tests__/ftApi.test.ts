@@ -24,6 +24,7 @@ import {
   analyzeSentiment,
   getCronJobs,
   getAuditLogs,
+  getBannedIPs,
   activateKillSwitch,
   resetKillSwitch,
   getHealth,
@@ -335,6 +336,30 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     const url = fetchSpy.mock.calls[0]![0] as string;
     // In test (DEV=true), base is /ft-api
     expect(url).toBe("/ft-api/api/v1/cron/jobs");
+  });
+
+  it("getBannedIPs maps the monitor's raw row to the table contract", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          bans: [
+            { ip: "1.2.3.4", ban_reason: "404 flood", ban_expires: null, first_seen: 1700000000, last_seen: 1700000123 },
+            { ip: "5.6.7.8", ban_reason: null, ban_expires: 1700001000, first_seen: 1700000500, last_seen: 1700000600 },
+          ],
+        },
+      }),
+    );
+
+    const { bans } = await getBannedIPs();
+    // ban_reason -> reason; last_seen (epoch s) -> ISO banned_at
+    expect(bans[0]).toEqual({
+      ip: "1.2.3.4",
+      reason: "404 flood",
+      banned_at: new Date(1700000123 * 1000).toISOString(),
+    });
+    // null ban_reason falls back to a readable label
+    expect(bans[1].reason).toBe("Auto-ban");
   });
 
   it("getAuditLogs targets the bare /v1/audit/events route with date/limit/offset", async () => {

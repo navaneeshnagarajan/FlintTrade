@@ -236,35 +236,48 @@ def backtest_run() -> tuple[Any, int]:
 
     try:
         report = PerformanceMetrics.compute(result)
+        # Keys match the frontend BacktestMetrics contract (sharpe_ratio /
+        # sortino_ratio / expectancy). The terminal's BacktestResultDisplay reads
+        # these directly and formats them eagerly, so a renamed or missing key
+        # crashes the whole Performance Metrics card — keep them in lockstep.
         metrics = {
             "total_return": report.total_return_pct,
             "cagr": report.cagr,
-            "sharpe": report.sharpe_ratio,
-            "sortino": report.sortino_ratio,
+            "sharpe_ratio": report.sharpe_ratio,
+            "sortino_ratio": report.sortino_ratio,
             "max_drawdown": report.drawdown.max_drawdown_pct,
             "win_rate": report.trade_stats.win_rate,
             "profit_factor": report.trade_stats.profit_factor,
             "total_trades": report.trade_stats.total_trades,
+            "expectancy": report.trade_stats.expectancy,
         }
     except Exception as exc:
         logger.warning("Metrics computation error: %s", exc)
-        metrics = {"total_return": result.total_return_pct}
+        # Emit every key the frontend reads (zeroed) so the metrics card still
+        # renders instead of crashing on undefined when computation fails.
+        metrics = {
+            "total_return": result.total_return_pct,
+            "cagr": 0.0,
+            "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
+            "max_drawdown": 0.0,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_trades": 0,
+            "expectancy": 0.0,
+        }
 
     # Persist this run's metrics keyed by strategy so the overnight optimiser can
     # refine on real performance instead of an empty dict. Best-effort:
-    # persistence must never fail the backtest response. Alias sharpe/sortino to
-    # the refiner's expected ``*_ratio`` keys — its rule-based path reads
-    # ``sharpe_ratio``/``max_drawdown``/``win_rate``, so a raw ``sharpe`` would be
-    # silently read as 0 and skew every suggestion.
+    # persistence must never fail the backtest response. The metrics dict already
+    # uses the refiner's ``sharpe_ratio``/``sortino_ratio`` keys (its rule-based
+    # path reads those plus ``max_drawdown``/``win_rate``), so no aliasing needed.
     _bt_store = current_app.config.get("BACKTEST_RESULT_STORE")
     if _bt_store is not None:
         try:
-            refiner_metrics = dict(metrics)
-            refiner_metrics["sharpe_ratio"] = metrics.get("sharpe")
-            refiner_metrics["sortino_ratio"] = metrics.get("sortino")
             _bt_store.save(
                 strategy_name,
-                refiner_metrics,
+                dict(metrics),
                 context={
                     "symbol": symbol,
                     "exchange": exchange,

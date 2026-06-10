@@ -434,13 +434,48 @@ def kill_switch_reset() -> tuple[Any, int]:
 # Webhooks
 # ------------------------------------------------------------------
 
+_WEBHOOK_SOURCES = ("tradingview", "chartink", "custom")
+
+
+def _webhook_type(path: str) -> str:
+    """Derive a webhook's source type from its registration path.
+
+    Paths look like ``/webhook/<source>/<slug>`` (tradingview / chartink /
+    custom). Returns the source segment, defaulting to ``"custom"`` for any
+    path that does not follow the convention.
+    """
+    parts = [p for p in path.split("/") if p]
+    if len(parts) >= 2 and parts[0] == "webhook" and parts[1] in _WEBHOOK_SOURCES:
+        return parts[1]
+    return "custom"
+
+
+def _webhook_dict(path: str, name: str, enabled: bool) -> dict[str, Any]:
+    """Build the frontend WebhookConfig shape for one endpoint.
+
+    ``id`` is the registration path — the DELETE handler accepts the
+    (URL-encoded) path as its identifier, and the frontend round-trips it
+    through ``encodeURIComponent``. ``type`` drives the table's source badge.
+    """
+    return {
+        # id drops the leading slash so the frontend's encodeURIComponent(id)
+        # round-trips to a single <path:webhook_id> capture (no leading "//").
+        "id": path.lstrip("/"),
+        "path": path,
+        "name": name,
+        "type": _webhook_type(path),
+        "enabled": enabled,
+    }
+
+
 @operations_bp.route("/webhooks", methods=["GET"])
 def webhooks_list() -> tuple[Any, int]:
     """Return all registered webhook endpoints and their status.
 
     Returns:
-        JSON with ``status`` and ``data.webhooks`` — a list of objects
-        with ``path``, ``name``, and ``enabled`` fields.
+        JSON with ``status`` and ``data.webhooks`` — a list of objects with
+        ``id``, ``path``, ``name``, ``type``, and ``enabled`` fields (the
+        frontend WebhookConfig contract; the secret is never echoed).
     """
     try:
         from flinttrade_webhooks.webhook_server import (  # noqa: PLC0415
@@ -451,7 +486,7 @@ def webhooks_list() -> tuple[Any, int]:
             return jsonify({"status": "success", "data": {"webhooks": [], "info": "Webhook server not started"}}), 200
 
         webhooks = [
-            {"path": ep.path, "name": ep.name, "enabled": ep.enabled}
+            _webhook_dict(ep.path, ep.name, ep.enabled)
             for ep in server._endpoints.values()
         ]
         return jsonify({"status": "success", "data": {"webhooks": webhooks}}), 200
@@ -497,19 +532,24 @@ def webhooks_create() -> tuple[Any, int]:
         server.register(path, name, _noop_handler, secret=secret)
         return jsonify({
             "status": "success",
-            "data": {"path": path, "name": name, "enabled": True},
+            "data": _webhook_dict(path, name, True),
         }), 201
     except Exception:
         logger.exception("webhooks_create error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
-@operations_bp.route("/webhooks/<webhook_id>", methods=["DELETE"])
+@operations_bp.route("/webhooks/<path:webhook_id>", methods=["DELETE"])
 def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
     """Remove a registered webhook endpoint.
 
+    Uses a ``<path:...>`` converter because a webhook's id is its registration
+    path (e.g. ``webhook/custom/my_signal``) — multi-segment, so a plain
+    ``<webhook_id>`` ([^/]+) would 405 once the encoded slashes decode.
+
     Args:
-        webhook_id: The URL-encoded path or name identifying the webhook.
+        webhook_id: The path identifying the webhook (with or without a leading
+            slash), or its name.
 
     Returns:
         JSON with ``status`` and confirmation message.
