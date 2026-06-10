@@ -689,6 +689,14 @@ class PositionLimits:
         self.max_positions = max_positions
         self.max_margin_pct = max_margin_pct
 
+    @staticmethod
+    def _qty(value: object) -> int:
+        """Tolerant quantity parse — brokers return "0", "10", or even "10.0"."""
+        try:
+            return int(float(str(value)))
+        except (TypeError, ValueError):
+            return 0
+
     def validate(
         self,
         current_positions: list[Position],
@@ -696,7 +704,7 @@ class PositionLimits:
         total_balance: float,
     ) -> SafetyResult:
         # Count positions with non-zero quantity
-        active = [p for p in current_positions if int(p.quantity) != 0]
+        active = [p for p in current_positions if self._qty(p.quantity) != 0]
         if len(active) >= self.max_positions:
             return SafetyResult(
                 SafetyVerdict.FAIL, "L2_POSITION",

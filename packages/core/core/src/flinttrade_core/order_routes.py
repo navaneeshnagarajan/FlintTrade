@@ -299,6 +299,48 @@ def _live_kill_switch_block() -> Any | None:
     return None if result.passed else result
 
 
+def _gather_l2_state() -> tuple[list[Any], float, float]:
+    """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
+
+    Reads the connected account's positionbook + funds through the OpenAlgo
+    client so SafetySystem L2 can enforce max-positions and margin% against
+    REAL exposure. Best-effort by design: any failure (no client, network,
+    auth) returns empty/zero state, so L2 simply enforces nothing for that
+    order — a state-read hiccup must never block a live order (L1/L4/L5 still
+    apply). Runs two reads on the human order path; acceptable latency for the
+    cumulative-exposure brake.
+    """
+    import asyncio  # noqa: PLC0415
+
+    client = current_app.config.get("OPENALGO_CLIENT")
+    if client is None:
+        return [], 0.0, 0.0
+
+    async def _fetch() -> tuple[Any, Any]:
+        return await client.positionbook(), await client.funds()
+
+    try:
+        positions, funds = asyncio.run(_fetch())
+    except Exception:
+        logger.debug(
+            "L2 portfolio-state fetch failed — L2 limits not enforced this order",
+            exc_info=True,
+        )
+        return [], 0.0, 0.0
+
+    def _to_float(value: Any) -> float:
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return 0.0
+
+    return (
+        list(positions or []),
+        _to_float(getattr(funds, "used_margin", 0)),
+        _to_float(getattr(funds, "total_balance", 0)),
+    )
+
+
 def _dispatch_live_order(
     ft_action: str,
     body: dict[str, Any],
@@ -356,6 +398,15 @@ def _dispatch_live_order(
     )
 
     # --- 5-layer SafetySystem (L1 order, L2 positions, L3 greeks, L4 P&L, L5 kill) ---
+    # Gather live position + margin state so L2 enforces max-positions and
+    # margin% against REAL cumulative exposure (was always empty/zero → L2
+    # was a no-op). Best-effort: a fetch hiccup yields empty state (L2 enforces
+    # nothing this order) rather than blocking — availability is never degraded
+    # by a state read; L1/L4/L5 still apply. (L3 greeks + L4 daily-P&L are not
+    # fed from the hot path: greeks need option-chain data the bridge lacks,
+    # and L4 latches its kill switch, so a noisy broker PNL must not drive it —
+    # tracked in PLAN §3b.)
+    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state()
     safety = current_app.config.get("SAFETY")
     if safety is None:
         safety = SafetySystem(SafetyConfig())
@@ -363,7 +414,12 @@ def _dispatch_live_order(
         typed_order = _body_to_order(body)
         # check_order coerces quantity via int(...); a non-integer quantity must
         # surface as a clean 400, not an uncaught ValueError -> 500.
-        safety_results = safety.check_order(typed_order)
+        safety_results = safety.check_order(
+            typed_order,
+            positions=l2_positions,
+            used_margin=l2_used_margin,
+            total_balance=l2_total_balance,
+        )
     except (ValueError, ValidationError) as exc:
         logger.warning(
             "Live order rejected by order-model/safety validation | action=%s adapter=%s: %s",

@@ -134,6 +134,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
   showed sample data; now fetches the correct route and flags backend sample data.
 - Trade-journal analytics counted open legs (null P&L) as losing trades, distorting
   win-rate; open legs are now excluded until they have a realised P&L.
+- Safety layer L2 (position-count + margin %) now enforces against **live** portfolio
+  state on the manual order path — it previously ran on empty/zero state and never
+  fired. The live positions + funds are fetched best-effort (a read hiccup never blocks
+  an order), and L2's quantity parse tolerates float-strings.
 
 ### Removed
 

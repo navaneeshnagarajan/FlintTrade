@@ -171,6 +171,100 @@ def test_routed_happy_path_returns_200() -> None:
     assert dispatched.symbol == "RELIANCE"
 
 
+# ---------------------------------------------------------------------------
+# L2 enforcement from LIVE portfolio state (cumulative-exposure brake)
+# ---------------------------------------------------------------------------
+
+
+def _real_safety(**cfg):
+    from flinttrade_engine.safety import SafetyConfig, SafetySystem
+
+    return SafetySystem(SafetyConfig(check_market_hours=False, **cfg))
+
+
+def _app_with_client(router, safety, client):
+    app = _app(broker_router=router, safety=safety)
+    app.config["OPENALGO_CLIENT"] = client
+    return app
+
+
+def _fake_client(positions, used_margin="0", total_balance="0"):
+    from types import SimpleNamespace
+
+    c = MagicMock()
+    c.positionbook = AsyncMock(return_value=positions)
+    c.funds = AsyncMock(return_value=SimpleNamespace(used_margin=used_margin, total_balance=total_balance))
+    return c
+
+
+def _pos(symbol, qty):
+    from flinttrade_core.models import Position
+
+    return Position(symbol=symbol, exchange="NSE", quantity=str(qty))
+
+
+def test_L2_blocks_when_at_max_positions_from_live_state() -> None:
+    """With real live positions ≥ the configured max, L2 blocks the order —
+    previously L2 ran on an empty list and never fired."""
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="X")
+    safety = _real_safety(max_positions=1)
+    client = _fake_client([_pos("INFY", 50)])  # already 1 open position; max is 1
+    app = _app_with_client(router, safety, client)
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 403
+    assert "L2_POSITION" in resp.get_json()["message"]
+    router.place_order.assert_not_called()
+
+
+def test_L2_blocks_when_margin_over_limit_from_live_funds() -> None:
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="X")
+    safety = _real_safety(max_positions=10, max_margin_pct=60.0)
+    # 80% margin used → over the 60% cap.
+    client = _fake_client([], used_margin="80000", total_balance="100000")
+    app = _app_with_client(router, safety, client)
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 403
+    assert "Margin usage" in resp.get_json()["message"]
+    router.place_order.assert_not_called()
+
+
+def test_L2_float_string_quantity_tolerated() -> None:
+    """A position quantity like "50.0" must not 500 the order (L2 tolerant parse)."""
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-1")
+    safety = _real_safety(max_positions=10)
+    client = _fake_client([_pos("INFY", "50.0")])
+    app = _app_with_client(router, safety, client)
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    assert resp.status_code == 200
+
+
+def test_L2_state_fetch_failure_does_not_block_order() -> None:
+    """A portfolio-state read hiccup must NOT block a live order — best-effort
+    enrichment, never an availability regression."""
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-2")
+    safety = _real_safety(max_positions=1)
+    client = MagicMock()
+    client.positionbook = AsyncMock(side_effect=RuntimeError("broker down"))
+    client.funds = AsyncMock(return_value=None)
+    app = _app_with_client(router, safety, client)
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+    # L2 enforced nothing (empty state) → order proceeds through L1/L4/L5.
+    assert resp.status_code == 200
+    router.place_order.assert_awaited_once()
+
+
 def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
     """H5: a successful live dispatch records per-broker order RTT.
 

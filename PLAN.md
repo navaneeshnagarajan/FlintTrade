@@ -74,7 +74,11 @@ Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade
 - [x] Register or delete `order_analytics_bp` (`/analytics/execution`) and `strategy_comparison_bp` (`/backtest/compare`) — both registered.
 
 ### 3b. Safety depth (cross-path, found by the 2026-06-10 session audit)
-- [ ] Thread live portfolio state (open positions, used margin, daily P&L) into `SafetySystem.check_order` on BOTH the manual and smart-route order paths — today L2–L4 run with empty default state on every per-order check, so they validate shape/limits but cannot enforce cumulative exposure. (The smart-route path mitigates the worst aggregate case with a running-job cap + duplicate-(symbol, action) guard; real enforcement needs the state threaded.)
+- [~] Thread live portfolio state into `SafetySystem.check_order`:
+  - [x] **L2 (position count + margin %) on the manual order path** — `_dispatch_live_order` now gathers live positionbook + funds (`_gather_l2_state`, best-effort: a fetch hiccup yields empty state so L2 enforces nothing rather than blocking — availability never degraded) and feeds them in, so "already at max positions" and "margin usage exceeds limit" actually fire. L2's quantity parse hardened to tolerate float-strings.
+  - [ ] **L2 on the smart-route / agent (GatedChildExecutor) paths** — needs once-per-route gathering (not per-child) to avoid per-order latency; deliberately deferred from the per-child hot path.
+  - [ ] **L4 (daily P&L)** — NOT fed from the hot path on purpose: L4 *latches* its kill switch, and CLAUDE.md notes broker PNL is unreliable for some brokers, so a noisy per-order daily_pnl could spuriously latch the breaker. Needs a reliable LOCAL daily-P&L (computed from the tradebook) before it can drive L4.
+  - [ ] **L3 (net delta / vega)** — needs per-position option greeks (chain data the OpenAlgo bridge does not expose); stays 0 until a greeks source exists (L3 cannot enforce what it cannot measure).
 - [ ] Multi-worker (gunicorn ≥2) story for the in-memory job/runner state: the smart-route `_JOBS` cap/dup-guard/cancel and the agent `_RUNNER` single-session slot are process-local, so under >1 worker they are per-worker (cancel can 404 on the non-owning worker). Single-process Waitress (the default) is correct; document or move to a shared store if multi-worker is adopted (auth_state already is DuckDB-backed for the same reason).
 
 ### 4. Data layer
