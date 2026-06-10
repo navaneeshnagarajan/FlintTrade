@@ -209,3 +209,12 @@ def test_status_idle_shape(live_auth):
     data = resp.get_json()["data"]
     assert data["running"] is False
     assert data["enabled"] is True
+
+
+def test_stop_and_status_require_auth(monkeypatch):
+    """Snapshot exposes live positions; stop is an operator action — both
+    need a JWT (parity with the smart-route read endpoints)."""
+    monkeypatch.setattr(order_routes_mod, "_decode_request_payload", lambda: None)
+    client = _make_app().test_client()
+    assert client.get("/api/v1/ai/agent/status").status_code == 401
+    assert client.post("/api/v1/ai/agent/stop", json={}).status_code == 401

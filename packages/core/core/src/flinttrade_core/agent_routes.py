@@ -354,6 +354,22 @@ def start_agent() -> tuple[Any, int]:
     return jsonify({"status": "success", "data": _snapshot()}), 202
 
 
+def _require_auth() -> tuple[Any, int] | None:
+    """Return a 401 response when the request carries no valid JWT.
+
+    The session snapshot exposes live positions and P&L, and stopping a
+    session is an operator action — neither is a public surface.
+    """
+    from .order_routes import _decode_request_payload  # noqa: PLC0415
+
+    if _decode_request_payload() is None:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication required — provide a valid JWT",
+        }), 401
+    return None
+
+
 @agent_bp.route("/stop", methods=["POST"])
 def stop_agent() -> tuple[Any, int]:
     """Request a session stop (squares off tracked positions by default).
@@ -361,6 +377,9 @@ def stop_agent() -> tuple[Any, int]:
     Request JSON:
         square_off (bool, optional, default True).
     """
+    denied = _require_auth()
+    if denied is not None:
+        return denied
     body: dict[str, Any] = request.get_json(silent=True) or {}
     square_off = bool(body.get("square_off", True))
 
@@ -378,4 +397,7 @@ def stop_agent() -> tuple[Any, int]:
 @agent_bp.route("/status", methods=["GET"])
 def agent_status() -> tuple[Any, int]:
     """Return the live agent snapshot (honest 'not running' shape when idle)."""
+    denied = _require_auth()
+    if denied is not None:
+        return denied
     return jsonify({"status": "success", "data": _snapshot()}), 200

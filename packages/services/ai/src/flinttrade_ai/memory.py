@@ -417,6 +417,14 @@ class TradedMemory:
                 where={"symbol": symbol},
             )
         except Exception:
+            # Degrade to "no memories" rather than break the agent loop — but
+            # never silently: an unlogged swallow here masked an intermittent
+            # Chroma query failure as an empty result (a test flake whose cause
+            # was unobservable until this log line existed).
+            logger.warning(
+                "Memory query failed for %s/%s in %s — returning no memories",
+                symbol, query, layer.value, exc_info=True,
+            )
             return MemoryQueryResult(items=[], query=query, layer=layer)
 
         documents: list[str] = results.get("documents", [[]])[0]
