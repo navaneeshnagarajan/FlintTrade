@@ -25,6 +25,7 @@ import {
   Map,
   Box,
   Archive,
+  GitFork,
   Lock,
   Eye,
   X,
@@ -73,6 +74,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Map,
   Box,
   Archive,
+  GitFork,
 };
 
 interface WidgetPickerProps {

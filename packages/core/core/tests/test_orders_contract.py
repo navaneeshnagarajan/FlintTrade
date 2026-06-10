@@ -170,4 +170,11 @@ _BACKEND_ONLY_LEAVES: set[str] = {
     # backend + its gated path are fully tested in `test_bracket_routes.py`.
     "bracket",
     "brackets",
+    # `smart-route` — liquidity-aware order slicing. This is NOT backend-only:
+    # the terminal calls it via `ftApi.trading.ts::startSmartRoute` /
+    # `getSmartRouteJob` / `listSmartRouteJobs` (consumed by the SmartOrder
+    # widget). It lives here only because this scanner reads api.ts's
+    # postOrder(...) family, not the ftApi helper modules. The end-to-end
+    # contract is covered by `test_smart_order_routes.py` + the widget test.
+    "smart-route",
 }

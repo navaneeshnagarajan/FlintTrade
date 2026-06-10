@@ -230,6 +230,7 @@ class SmartOrderRouter:
         urgency: Literal["low", "medium", "high"] = "medium",
         strategy: str = "Flint",
         product: str = "MIS",
+        result_observer: Callable[[SmartRouteResult], None] | None = None,
     ) -> SmartRouteResult:
         """Route an order intelligently based on urgency and liquidity.
 
@@ -254,6 +255,10 @@ class SmartOrderRouter:
             urgency: Routing urgency — "high", "medium", or "low".
             strategy: Strategy tag forwarded to each child order.
             product: Product type (MIS/NRML/CNC).
+            result_observer: Optional callback invoked once with the live
+                :class:`SmartRouteResult` BEFORE dispatch starts, so a caller
+                (e.g. a background-job store) can snapshot progress mid-flight
+                — TWAP routes run for minutes.
 
         Returns:
             :class:`SmartRouteResult` with all child order results.
@@ -267,6 +272,11 @@ class SmartOrderRouter:
             strategy=strategy,
             slippage_budget_bps=max_slippage_bps,
         )
+        if result_observer is not None:
+            try:
+                result_observer(result)
+            except Exception:  # pragma: no cover — observation must never break routing
+                logger.debug("smart-route result observer failed", exc_info=True)
 
         try:
             if urgency == "high":

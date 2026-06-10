@@ -66,6 +66,9 @@ const lazyWidgets = {
   // Trade Copier (Ditto route)
   tradecopier: lazy(() => import("@/widgets/trading/TradeCopier/TradeCopierWidget")),
 
+  // Smart Order (liquidity-aware slicing through the gated path)
+  smartorder: lazy(() => import("@/widgets/trading/SmartOrder/SmartOrderWidget")),
+
   // Analysis widgets (Wave 24)
   greekssurface: lazy(() => import("@/widgets/analysis/GreeksSurface/GreeksSurfaceWidget")),
 
@@ -159,6 +162,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading", description: "One-click emergency actions: exit all, cancel all, flatten book" },
   { id: "positionheatmap", name: "Position Heat Map", icon: "SquareStack", category: "Trading", description: "Heat map of current positions coloured by unrealised P&L" },
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading", description: "Mirror trades across multiple accounts with configurable lot multipliers" },
+  { id: "smartorder", name: "Smart Order", icon: "GitFork", category: "Trading", description: "Liquidity-aware order slicing (market / depth chunks / TWAP) — every child order passes the full safety gate" },
   { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading", description: "Pie chart breakdown of portfolio allocation by sector and instrument" },
   { id: "quicktrade", name: "Quick Trade", icon: "Zap", category: "Trading", description: "Minimal order ticket for fast order placement without leaving the chart" },
   { id: "sessionstats", name: "Session Stats", icon: "Clock", category: "Trading", description: "Key statistics for the current trading session: trades, win rate, turnover" },

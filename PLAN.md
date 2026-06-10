@@ -68,10 +68,10 @@ Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade
 - [x] Add the functional `OpenAlgoAdapter` (+ upstox/kotakneo) to `tests/brokers/test_base.py` ABC-enforcement parametrisation.
 
 ### 3. AI / analytics backends (wire or keep demo-honest)
-- [ ] `ai/sentiment/summary`, `ai/sentiment/tickers`, `ai/regime` backend routes (panels currently 404 → honest demo state in the interim).
-- [ ] Wire `OrderFlowAggregator` (`ORDERFLOW_AGGREGATOR`) to the tick pipeline — Order Flow widget currently serves synthetic data.
-- [ ] Invoke `SmartOrderRouter` (liquidity-aware TWAP slicing) from the smart-order path, or label it experimental.
-- [ ] Register or delete `order_analytics_bp` (`/analytics/execution`) and `strategy_comparison_bp` (`/backtest/compare`).
+- [x] `ai/sentiment/summary`, `ai/sentiment/tickers`, `ai/regime` backend routes — registered and served; the regime route additionally falls back to free daily OHLCV for disconnected/Explore users.
+- [x] Wire `OrderFlowAggregator` (`ORDERFLOW_AGGREGATOR`) to the tick pipeline — instantiated in the app factory and fed per-tick by the TickRecorder (Lee–Ready aggressor classification); the Order Flow widget shows real delta while tick capture runs, honest synthetic otherwise.
+- [x] Invoke `SmartOrderRouter` (liquidity-aware TWAP slicing) — wired at `POST /api/v1/orders/smart-route` (background job + polling) with every child order independently gated (`GatedChildExecutor`: SafetySystem → `gate_order` → `BrokerRouter`); "Smart Order" widget in the terminal. OFF by default via `brokers.smart_routing.enabled`, live-mode only.
+- [x] Register or delete `order_analytics_bp` (`/analytics/execution`) and `strategy_comparison_bp` (`/backtest/compare`) — both registered.
 
 ### 4. Data layer
 - [ ] Finish the journal DuckDB → SQLite + FTS5 migration (data-layer spec §1.1/§6): add `flinttrade_journal/db.py`, switch `trade_journal.py` off DuckDB (migration script + `disable_journal_triggers` already exist but have no runtime consumer).

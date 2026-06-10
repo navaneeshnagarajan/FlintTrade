@@ -106,7 +106,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 
 | Item | Status | Notes |
 |---|---|---|
-| SmartOrderRouter (liquidity-aware TWAP slicing) | 🟡 | Built + unit-tested; not routed — wiring it is a **safety-critical** new order path (must mint a `SafetyContext` through the gate) |
+| SmartOrderRouter (liquidity-aware TWAP slicing) | ✅ | Wired end-to-end: `POST /api/v1/orders/smart-route` (background job + live polling) → every child order independently traverses SafetySystem → `gate_order` → `BrokerRouter` via `GatedChildExecutor`; "Smart Order" terminal widget; OFF by default (`brokers.smart_routing.enabled`), live-mode only |
 | Analytics endpoints: VWAP bands / pairs / MTF | ✅ | Compute endpoints built + tested **and now reached by their widgets** — live intraday/daily bars via `getHistory`, honest sample fallback |
 | Excel export (browser download) | ✅ | Streaming `/export/download` + `downloadExcel` + "Export to Excel" button in the Positions widget (Notification System feedback) |
 | Excel portfolio report (browser download) | ✅ | Streaming `/portfolio/report/download` + `downloadPortfolioReport` + "Portfolio Report" button in the Holdings widget (Positions+Holdings+Summary; Notification System feedback) |

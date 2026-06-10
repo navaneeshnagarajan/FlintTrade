@@ -1,4 +1,4 @@
-import { get, isDemoAuthSession, post, del } from "./ftApi.helpers";
+import { buildHeaders, get, getBase, isDemoAuthSession, post, del } from "./ftApi.helpers";
 
 export interface SafetyConfigRaw {
   l1_order: { price_deviation_pct: number; check_market_hours: boolean; qty_limits: Record<string, number> };
@@ -101,3 +101,72 @@ export const approveAllOrders = () =>
 // pointed at /api/v1/sandbox/config — a route that never existed (the engine
 // leverage config lives at /v1/sandbox-config/config with a different shape) —
 // and were removed in the usability-recovery campaign.
+
+// ---------------------------------------------------------------------------
+// Smart-order routing (liquidity-aware slicing through the gated path)
+// ---------------------------------------------------------------------------
+
+export interface SmartRouteChild {
+  quantity: number;
+  price_type: string;
+  status: "placed" | "skipped" | "failed";
+  order_id: string;
+  error: string;
+  slippage_bps: number;
+  placed_at: string;
+}
+
+export interface SmartRouteJob {
+  job_id: string;
+  created_at: string;
+  status: "running" | "done" | "error";
+  error: string;
+  symbol: string;
+  exchange: string;
+  action: string;
+  urgency: string;
+  total_quantity: number;
+  filled_quantity: number;
+  average_slippage_bps: number;
+  completed: boolean;
+  child_orders: SmartRouteChild[];
+}
+
+export interface SmartRouteParams {
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  quantity: number;
+  urgency: "low" | "medium" | "high";
+  max_slippage_bps?: number;
+  product?: string;
+  account_id?: string;
+  broker?: string;
+}
+
+/**
+ * Start a smart-routed order job (202 → initial job snapshot).
+ *
+ * Uses a direct fetch instead of the shared `post` helper so the backend's
+ * actionable 403 messages (feature disabled / wrong mode / safety block)
+ * reach the operator verbatim rather than collapsing to "HTTP 403".
+ */
+export async function startSmartRoute(params: SmartRouteParams): Promise<SmartRouteJob> {
+  const resp = await fetch(`${getBase()}/api/v1/orders/smart-route`, {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify(params),
+  });
+  const json = (await resp.json().catch(() => null)) as
+    | { data?: SmartRouteJob; message?: string }
+    | null;
+  if (!resp.ok || !json?.data) {
+    throw new Error(json?.message ?? `Smart route failed (HTTP ${resp.status})`);
+  }
+  return json.data;
+}
+
+export const getSmartRouteJob = (jobId: string) =>
+  get<SmartRouteJob>("orders/smart-route/" + encodeURIComponent(jobId));
+
+export const listSmartRouteJobs = () => get<SmartRouteJob[]>("orders/smart-route");

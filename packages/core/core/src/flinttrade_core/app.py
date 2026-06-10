@@ -1046,11 +1046,15 @@ def create_flask_app(
     # a clear 503 rather than dispatching. A successfully-parsed config is
     # snapshotted to workspace.brokers.bak.json for operator rollback (§13.3).
     app.config["BROKER_ROUTER"] = None
+    # Smart routing stays disabled when the brokers block fails to parse —
+    # the smart-route endpoint reads this and fails closed with a clear 403.
+    app.config["SMART_ROUTING"] = {}
     try:
         from .workspace_migrations import default_workspace_config  # noqa: PLC0415
 
         _brokers_cfg = _read_workspace_brokers()
         _effective_brokers = _brokers_cfg or default_workspace_config()["brokers"]
+        app.config["SMART_ROUTING"] = dict(_effective_brokers.get("smart_routing") or {})
         _native_attest_ok, _native_has_credentials = _native_activation_checks(credential_store)
         # Expose the OpenAlgo client so sync analysis routes (the screener) can
         # fetch a real option chain through the functional bridge adapter rather
@@ -1414,6 +1418,12 @@ def create_flask_app(
     # real-money order reaches OpenAlgo.
     from .order_routes import orders_bp  # noqa: PLC0415
     app.register_blueprint(orders_bp)
+
+    # Register smart-order routing blueprint (/api/v1/orders/smart-route).
+    # OFF by default (workspace brokers.smart_routing.enabled); every child
+    # order still traverses the full gated path via GatedChildExecutor.
+    from .smart_order_routes import smart_order_bp  # noqa: PLC0415
+    app.register_blueprint(smart_order_bp)
 
     # Register AI Team blueprint (/api/v1/ai/team/*)
     from flinttrade_ai.team_routes import team_bp  # noqa: PLC0415

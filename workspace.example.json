@@ -33,7 +33,13 @@
     },
     "registered": [
       "openalgo:default"
-    ]
+    ],
+    "smart_routing": {
+      "_comment": "Liquidity-aware order slicing (POST /api/v1/orders/smart-route + the Smart Order widget). OFF by default; live mode only. Every child order still traverses the full gated execution path. twap_window_seconds/twap_slices tune low-urgency TWAP.",
+      "enabled": false,
+      "twap_slices": 5,
+      "twap_window_seconds": 300
+    }
   },
   "compliance": {
     "_comment": "Personal-use open-source defaults. personal_use_mode true keeps FlintTrade in the single-user posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records — leave empty.",
