@@ -8,6 +8,30 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Smart order routing** — `POST /api/v1/orders/smart-route` slices a parent order by
+  urgency (high = single market order, medium = depth-aware chunks, low = TWAP over a
+  configurable window) as a background job with live polling, and a **Smart Order**
+  terminal widget drives it. Every child order independently traverses the full gated
+  execution path (SafetySystem L1–L5 → `gate_order` → `BrokerRouter`); the feature is
+  OFF by default (`brokers.smart_routing.enabled`) and live-mode only.
+- **Options Builder in the Lab** — the previously unreachable Strategy Builder tool
+  (legs / payoff / margin / Pine) is mounted as a Lab tab, and the Strategy Templates
+  widget now loads its option-only templates into it with explicit strike offsets
+  (an iron condor arrives as four distinct strikes, not two indistinguishable "OTM"
+  legs). Templates containing stock or multi-expiry legs are honestly marked
+  reference-only rather than loaded as degenerate approximations.
+- **Excel import** — `POST /api/v1/integration/excel/import/upload` accepts a browser
+  file upload (multipart), and Settings → Data gained a **download-watchlist manager**
+  (list / add / remove symbols, plus "Import from Excel" with skipped-row reporting) —
+  previously the bulk downloader's watchlist had no UI at all, so a fresh install could
+  never populate it.
+- **n8n bridge surface** — Automate → "n8n Bridge" section wires the existing backend
+  bridge end-to-end: connection health, workflow activate/deactivate, and a manual
+  webhook trigger, with honest offline and missing-API-key states. `N8N_HOST` /
+  `N8N_API_KEY` are documented in `.env.example`.
+- Home **Breadth card** now shows live market breadth when a broker is connected
+  (same `/v1/breadth/current` contract as the Market Breadth widget), with the demo
+  badge retained whenever the data is sample.
 - Native **Upstox** and **Kotak Neo** broker adapter skeletons (gated, doc-grounded
   capabilities) alongside Dhan, plus a **broker recommendation engine**
   ("which broker for what") and `GET /api/v1/broker/recommendations` ranking brokers
@@ -37,6 +61,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Parallel test runs no longer contend on a single machine-wide DuckDB file when the
+  local `.env` pins `DUCKDB_PATH` — the test harness isolates a per-worker scratch
+  database, fixing a recurring trade-store wiring flake.
+- The Windows `make test` target now includes the ditto (Account Manager) package
+  tests, matching the POSIX glob.
 - Terminal build restored — shadcn primitives imported undeclared `@radix-ui/react-*`
   packages; migrated to the unified `radix-ui` (87 TS errors → 0).
 - Welcome screen no longer hangs on "Checking workspace…" when the backend is

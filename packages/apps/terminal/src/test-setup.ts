@@ -56,6 +56,23 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 // ---------------------------------------------------------------------------
+// 3b. Element.prototype.scrollIntoView stub.
+//
+// jsdom does not implement scrollIntoView. HomeRoute's card-highlight effect
+// calls it inside a requestAnimationFrame, which fires AFTER the triggering
+// test finishes — so the TypeError escaped every test's error handling and
+// surfaced as an "Unhandled Error" failing the whole run (all tests green,
+// exit code 1). Stub it once here so any component may scroll safely.
+// ---------------------------------------------------------------------------
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    writable: true,
+    configurable: true,
+    value: () => {},
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 4. Web Storage globals.
 //
 // Newer Node runtimes expose their own Web Storage globals, but leave them
