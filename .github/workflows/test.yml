@@ -7,7 +7,10 @@ on:
       - '**.md'
       - 'docs/**'
       - 'packages/apps/site/**'
-      - 'flinttrade-design/**'
+      # NOTE: flinttrade-design/ is NOT ignored — its tracked content is the
+      # baselines/ artefacts that this workflow's baseline-verification job +
+      # test_baseline_artifacts.py consume, so a baseline change MUST trigger
+      # the matrix (ignoring it silently skipped the very job that guards it).
       - '.local/**'
       - 'notice'
       - 'LICENSE'
@@ -23,7 +26,7 @@ on:
       - '**.md'
       - 'docs/**'
       - 'packages/apps/site/**'
-      - 'flinttrade-design/**'
+      # (flinttrade-design/ not ignored — see the pull_request note above.)
       - '.local/**'
       - 'notice'
       - 'LICENSE'

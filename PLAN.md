@@ -92,7 +92,7 @@ Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade
 - [ ] Run `TradeIdeaWidget` tests in an isolated raised-heap CI step (currently excluded from all shards; OOMs at 4 GB).
 - [ ] Confirm `nightly-cross-platform.yml` exercises `test_secure_file.py` on `windows-latest` (Windows ACL hardening has no per-push guard; it is validated only on the weekly cross-platform run).
 - [ ] Begin tagging tests with `unit`/`integration`/`slow` markers (registered but used by zero tests) or drop the staged-execution language.
-- [ ] Drop `flinttrade-design/**` from `test.yml`/`supply-chain.yml` `paths-ignore` (it silently skips the baseline-verification job that consumes `flinttrade-design/baselines`).
+- [x] Drop `flinttrade-design/**` from `test.yml` `paths-ignore` — a baseline-only change no longer skips the baseline-verification job + `test_baseline_artifacts.py` that consume those artefacts. Left ignored in `supply-chain.yml` ON PURPOSE: a baseline-CSV change has zero supply-chain relevance, so running dependency scans on it is the waste the right-sized-CI policy forbids.
 
 ---
 
