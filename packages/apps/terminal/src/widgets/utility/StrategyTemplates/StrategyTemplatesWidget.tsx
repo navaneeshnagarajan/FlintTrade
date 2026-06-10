@@ -4,15 +4,25 @@
  * Features:
  *   - Grid of 12 option strategy template cards
  *   - Each card: name, legs summary, max profit, max loss, breakeven, market outlook
- *   - Click → dispatches "flinttrade:load-strategy-template" custom event
+ *   - Loadable cards stash the template via templateBridge, dispatch the
+ *     load event, and navigate to the Lab's Options Builder
+ *   - Templates with stock or multi-expiry legs are reference-only — the
+ *     options builder cannot faithfully represent them, and loading a
+ *     degenerate approximation (e.g. a covered call without the stock leg)
+ *     would misstate the strategy's risk
  *   - Filter by market outlook (bullish / bearish / neutral / all)
- *   - Compact card design with outlook badge
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import {
+  LOAD_TEMPLATE_EVENT,
+  stashPendingTemplate,
+  type BuilderTemplate,
+  type BuilderTemplateLeg,
+} from "@/tools/StrategyBuilder/templateBridge";
 
 // ---------------------------------------------------------------------------
 // Types & data
@@ -25,6 +35,8 @@ interface StrategyLeg {
   type: "call" | "put" | "stock";
   strike?: "ATM" | "OTM" | "ITM" | string;
   expiry?: "near" | "far";
+  /** Strike offset from ATM in strike-gap units — required for builder loading. */
+  strikeOffset?: number;
 }
 
 interface StrategyTemplate {
@@ -38,11 +50,32 @@ interface StrategyTemplate {
   description: string;
 }
 
+/**
+ * A template is loadable into the Options Builder only when every leg is a
+ * single-expiry option with an explicit strike offset. Stock legs and
+ * calendar (multi-expiry) legs have no representation in the builder.
+ */
+function builderLegsFor(template: StrategyTemplate): BuilderTemplateLeg[] | null {
+  const legs: BuilderTemplateLeg[] = [];
+  for (const leg of template.legs) {
+    if (leg.type === "stock" || leg.expiry !== undefined || leg.strikeOffset === undefined) {
+      return null;
+    }
+    legs.push({
+      action: leg.action === "buy" ? "BUY" : "SELL",
+      optionType: leg.type === "call" ? "CE" : "PE",
+      strikeOffset: leg.strikeOffset,
+      lots: 1,
+    });
+  }
+  return legs.length > 0 ? legs : null;
+}
+
 const TEMPLATES: StrategyTemplate[] = [
   {
     id: "long_call",
     name: "Long Call",
-    legs: [{ action: "buy", type: "call", strike: "ATM" }],
+    legs: [{ action: "buy", type: "call", strike: "ATM", strikeOffset: 0 }],
     maxProfit: "Unlimited",
     maxLoss: "Premium paid",
     breakeven: "Strike + Premium",
@@ -52,7 +85,7 @@ const TEMPLATES: StrategyTemplate[] = [
   {
     id: "long_put",
     name: "Long Put",
-    legs: [{ action: "buy", type: "put", strike: "ATM" }],
+    legs: [{ action: "buy", type: "put", strike: "ATM", strikeOffset: 0 }],
     maxProfit: "Strike − Premium",
     maxLoss: "Premium paid",
     breakeven: "Strike − Premium",
@@ -63,8 +96,8 @@ const TEMPLATES: StrategyTemplate[] = [
     id: "bull_call_spread",
     name: "Bull Call Spread",
     legs: [
-      { action: "buy", type: "call", strike: "ATM" },
-      { action: "sell", type: "call", strike: "OTM" },
+      { action: "buy", type: "call", strike: "ATM", strikeOffset: 0 },
+      { action: "sell", type: "call", strike: "OTM", strikeOffset: 1 },
     ],
     maxProfit: "Width − Net debit",
     maxLoss: "Net debit",
@@ -76,8 +109,8 @@ const TEMPLATES: StrategyTemplate[] = [
     id: "bear_put_spread",
     name: "Bear Put Spread",
     legs: [
-      { action: "buy", type: "put", strike: "ATM" },
-      { action: "sell", type: "put", strike: "OTM" },
+      { action: "buy", type: "put", strike: "ATM", strikeOffset: 0 },
+      { action: "sell", type: "put", strike: "OTM", strikeOffset: -1 },
     ],
     maxProfit: "Width − Net debit",
     maxLoss: "Net debit",
@@ -89,8 +122,8 @@ const TEMPLATES: StrategyTemplate[] = [
     id: "straddle",
     name: "Straddle",
     legs: [
-      { action: "buy", type: "call", strike: "ATM" },
-      { action: "buy", type: "put", strike: "ATM" },
+      { action: "buy", type: "call", strike: "ATM", strikeOffset: 0 },
+      { action: "buy", type: "put", strike: "ATM", strikeOffset: 0 },
     ],
     maxProfit: "Unlimited",
     maxLoss: "Total premium",
@@ -102,8 +135,8 @@ const TEMPLATES: StrategyTemplate[] = [
     id: "strangle",
     name: "Strangle",
     legs: [
-      { action: "buy", type: "call", strike: "OTM" },
-      { action: "buy", type: "put", strike: "OTM" },
+      { action: "buy", type: "call", strike: "OTM", strikeOffset: 1 },
+      { action: "buy", type: "put", strike: "OTM", strikeOffset: -1 },
     ],
     maxProfit: "Unlimited",
     maxLoss: "Total premium",
@@ -115,10 +148,10 @@ const TEMPLATES: StrategyTemplate[] = [
     id: "iron_condor",
     name: "Iron Condor",
     legs: [
-      { action: "sell", type: "call", strike: "OTM" },
-      { action: "buy", type: "call", strike: "OTM" },
-      { action: "sell", type: "put", strike: "OTM" },
-      { action: "buy", type: "put", strike: "OTM" },
+      { action: "sell", type: "call", strike: "OTM", strikeOffset: 1 },
+      { action: "buy", type: "call", strike: "OTM", strikeOffset: 2 },
+      { action: "sell", type: "put", strike: "OTM", strikeOffset: -1 },
+      { action: "buy", type: "put", strike: "OTM", strikeOffset: -2 },
     ],
     maxProfit: "Net credit",
     maxLoss: "Width − Net credit",
@@ -130,10 +163,10 @@ const TEMPLATES: StrategyTemplate[] = [
     id: "butterfly",
     name: "Butterfly",
     legs: [
-      { action: "buy", type: "call", strike: "ITM" },
-      { action: "sell", type: "call", strike: "ATM" },
-      { action: "sell", type: "call", strike: "ATM" },
-      { action: "buy", type: "call", strike: "OTM" },
+      { action: "buy", type: "call", strike: "ITM", strikeOffset: -1 },
+      { action: "sell", type: "call", strike: "ATM", strikeOffset: 0 },
+      { action: "sell", type: "call", strike: "ATM", strikeOffset: 0 },
+      { action: "buy", type: "call", strike: "OTM", strikeOffset: 1 },
     ],
     maxProfit: "Width − Net debit",
     maxLoss: "Net debit",
@@ -241,25 +274,34 @@ function LegsDisplay({ legs }: LegsProps) {
 
 interface StrategyCardProps {
   template: StrategyTemplate;
+  loadable: boolean;
   onSelect: (id: string) => void;
 }
 
-function StrategyCard({ template, onSelect }: StrategyCardProps) {
+function StrategyCard({ template, loadable, onSelect }: StrategyCardProps) {
   const outlook = OUTLOOK_CONFIG[template.outlook];
 
-  return (
-    <button
-      onClick={() => onSelect(template.id)}
-      className="text-left w-full rounded-lg border border-border-subtle bg-surface-elevated hover:bg-surface-hover hover:border-accent/40 transition-all p-2.5 space-y-2 group"
-      aria-label={`Load ${template.name} strategy template`}
-    >
+  const body = (
+    <>
       {/* Name + outlook */}
       <div className="flex items-start justify-between gap-1">
-        <span className="text-xs font-semibold text-text-primary group-hover:text-accent transition-colors leading-tight">
+        <span
+          className={cn(
+            "text-xs font-semibold text-text-primary leading-tight",
+            loadable && "group-hover:text-accent transition-colors",
+          )}
+        >
           {template.name}
         </span>
-        <span className={cn("text-xxs px-1.5 py-px rounded border shrink-0", outlook.className)}>
-          {outlook.label}
+        <span className="flex items-center gap-1 shrink-0">
+          {!loadable && (
+            <span className="text-xxs px-1.5 py-px rounded border bg-text-muted/10 text-text-muted border-border-subtle">
+              Reference
+            </span>
+          )}
+          <span className={cn("text-xxs px-1.5 py-px rounded border", outlook.className)}>
+            {outlook.label}
+          </span>
         </span>
       </div>
 
@@ -282,6 +324,30 @@ function StrategyCard({ template, onSelect }: StrategyCardProps) {
       <p className="text-xxs text-text-muted leading-relaxed line-clamp-2">
         {template.description}
       </p>
+    </>
+  );
+
+  if (!loadable) {
+    return (
+      <div
+        className="text-left w-full rounded-lg border border-border-subtle bg-surface-elevated p-2.5 space-y-2"
+        aria-label={`${template.name} strategy template (reference only)`}
+      >
+        {body}
+        <p className="text-xxs text-text-muted/80 italic">
+          Reference only — includes stock or multi-expiry legs the options builder cannot represent.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => onSelect(template.id)}
+      className="text-left w-full rounded-lg border border-border-subtle bg-surface-elevated hover:bg-surface-hover hover:border-accent/40 transition-all p-2.5 space-y-2 group"
+      aria-label={`Load ${template.name} strategy template`}
+    >
+      {body}
     </button>
   );
 }
@@ -311,9 +377,15 @@ function StrategyTemplatesWidget() {
   function handleSelect(id: string) {
     const tmpl = TEMPLATES.find((t) => t.id === id);
     if (!tmpl) return;
-    window.dispatchEvent(
-      new CustomEvent("flinttrade:load-strategy-template", { detail: tmpl }),
-    );
+    const legs = builderLegsFor(tmpl);
+    if (!legs) return;
+
+    const payload: BuilderTemplate = { id: tmpl.id, name: tmpl.name, legs };
+    // Stash for the Options Builder to pick up after navigation, dispatch the
+    // live event for any already-mounted builder, then head to the Lab.
+    stashPendingTemplate(payload);
+    window.dispatchEvent(new CustomEvent(LOAD_TEMPLATE_EVENT, { detail: payload }));
+    window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: { path: "/lab" } }));
     track("trade", `strategy_template_selected_${id}`);
   }
 
@@ -362,7 +434,12 @@ function StrategyTemplatesWidget() {
       <div className="flex-1 overflow-auto p-2">
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {filtered.map((tmpl) => (
-            <StrategyCard key={tmpl.id} template={tmpl} onSelect={handleSelect} />
+            <StrategyCard
+              key={tmpl.id}
+              template={tmpl}
+              loadable={builderLegsFor(tmpl) !== null}
+              onSelect={handleSelect}
+            />
           ))}
         </div>
 

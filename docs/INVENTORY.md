@@ -50,7 +50,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Local models — Ollama, LM Studio, Hermes | ✅ | First-class providers in backend + settings UI |
 | OpenClaw agents | ✅ | Control-plane widget (deploy / stop / logs) |
 | Obsidian vault | ✅ | Read-only browser widget + agent vault context |
-| Create strategies | ✅ | StrategyBuilder (legs / payoff / margin / Pine) |
+| Create strategies | ✅ | StrategyBuilder (legs / payoff / margin / Pine) — Lab "Options Builder" tab; loads templates from the StrategyTemplates widget via explicit strike offsets |
 | Backtest strategies (single + portfolio) | ✅ | Lab Backtest + Portfolio tabs (132 runnable by name; 41 selectable in the Lab picker) |
 | Optimise overnight + reports + suggestions | ✅ | OvernightOptimiser + report store + Lab Optimize section |
 | Pick strategy per market regime | ✅ | `regime_detector` `_REGIME_STRATEGY` → RegimePanel "Suggested Strategy" |

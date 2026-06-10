@@ -2,7 +2,7 @@
 //   openalgo-chart/src/components/OptionChainPicker/OptionChainPicker.jsx — multi-leg state, strategy templates, direction (buy/sell), net premium calc
 //   openalgo-chart/src/services/strategyTemplates.js — STRATEGY_TEMPLATES, calculateNetPremium, validateStrategy, formatStrategyName
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Brain, TrendingUp, Zap, Code2, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,11 @@ import { Button } from "@/components/ui/button";
 import { UNDERLYINGS, STRATEGY_TEMPLATES } from "./types";
 import type { Leg, Underlying } from "./types";
 import { calculateNetPremium, formatINR, genId } from "./utils";
+import {
+  LOAD_TEMPLATE_EVENT,
+  readAndClearPendingTemplate,
+  type BuilderTemplate,
+} from "./templateBridge";
 import { LegsTab } from "./LegsTab";
 import { PayoffTab } from "./PayoffTab";
 import { MarginTab } from "./MarginTab";
@@ -69,6 +74,42 @@ export default function StrategyBuilderTool({ onClose }: Props) {
     }));
     setLegs(newLegs);
   };
+
+  // Apply a hand-off template from the StrategyTemplates widget — same
+  // strike maths as handleTemplate, but the legs arrive via templateBridge.
+  // validateLegs caps at 6 legs, so trim anything longer.
+  const applyBridgeTemplate = (tmpl: BuilderTemplate) => {
+    const newLegs: Leg[] = tmpl.legs.slice(0, 6).map((lt) => ({
+      id: genId(),
+      action: lt.action,
+      optionType: lt.optionType,
+      strike: atm + lt.strikeOffset * strikeGap,
+      lots: Math.max(1, lt.lots),
+      premium: 0,
+    }));
+    setLegs(newLegs);
+  };
+
+  // Latest-ref so the mount-time stash read and the live event listener both
+  // see current ATM/strike-gap without re-registering on every change.
+  const applyBridgeTemplateRef = useRef(applyBridgeTemplate);
+  useEffect(() => {
+    applyBridgeTemplateRef.current = applyBridgeTemplate;
+  });
+
+  useEffect(() => {
+    const pending = readAndClearPendingTemplate();
+    if (pending) applyBridgeTemplateRef.current(pending);
+
+    const onLoad = (e: Event) => {
+      const detail = (e as CustomEvent).detail as BuilderTemplate | undefined;
+      if (detail && Array.isArray(detail.legs) && detail.legs.length > 0) {
+        applyBridgeTemplateRef.current(detail);
+      }
+    };
+    window.addEventListener(LOAD_TEMPLATE_EVENT, onLoad);
+    return () => window.removeEventListener(LOAD_TEMPLATE_EVENT, onLoad);
+  }, []);
 
   return (
     <div className="h-full flex flex-col bg-surface-base">

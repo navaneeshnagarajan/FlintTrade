@@ -1,6 +1,13 @@
-import { FlaskConical, PlayCircle, TrendingUp, BarChart3, Code2, Layers } from "lucide-react";
+import { FlaskConical, PlayCircle, TrendingUp, BarChart3, Code2, Layers, Brain } from "lucide-react";
 
-export type TabId = "backtest" | "portfolio" | "forward-test" | "optimize" | "results" | "pine-editor";
+export type TabId =
+  | "backtest"
+  | "portfolio"
+  | "forward-test"
+  | "optimize"
+  | "results"
+  | "options-builder"
+  | "pine-editor";
 
 export interface TabDef {
   id: TabId;
@@ -14,5 +21,6 @@ export const TABS: TabDef[] = [
   { id: "forward-test", label: "Forward Test", icon: PlayCircle },
   { id: "optimize", label: "Optimize", icon: TrendingUp },
   { id: "results", label: "Results", icon: BarChart3 },
+  { id: "options-builder", label: "Options Builder", icon: Brain },
   { id: "pine-editor", label: "Pine Editor", icon: Code2 },
 ];

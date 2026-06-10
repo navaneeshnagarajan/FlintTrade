@@ -16,18 +16,24 @@ import { PortfolioBacktestSection } from "./LabRoute/PortfolioBacktestSection";
 import { ForwardTestSection } from "./LabRoute/ForwardTest";
 import { OptimizeSection } from "./LabRoute/OptimizeSection";
 import { ResultsSection } from "./LabRoute/ResultsSection";
+import StrategyBuilderTool from "@/tools/StrategyBuilder/StrategyBuilderTool";
+import { hasPendingTemplate } from "@/tools/StrategyBuilder/templateBridge";
 
 export default function LabRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("lab", "daysActive"); }, []);
 
-  const [activeTab, setActiveTab] = useState<TabId>("backtest");
+  // A template stashed by the StrategyTemplates widget means the operator
+  // just clicked "Load" there — land them straight in the Options Builder.
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    hasPendingTemplate() ? "options-builder" : "backtest",
+  );
   const [lastResult, setLastResult] = useState<BacktestResult | null>(null);
   const level = useSkillLevel("lab");
 
   const visibleTabIds: TabId[] = (() => {
-    if (level === "beginner") return ["backtest", "results", "pine-editor"];
-    if (level === "intermediate") return ["backtest", "portfolio", "forward-test", "results", "pine-editor"];
-    return ["backtest", "portfolio", "forward-test", "optimize", "results", "pine-editor"];
+    if (level === "beginner") return ["backtest", "results", "options-builder", "pine-editor"];
+    if (level === "intermediate") return ["backtest", "portfolio", "forward-test", "results", "options-builder", "pine-editor"];
+    return ["backtest", "portfolio", "forward-test", "optimize", "results", "options-builder", "pine-editor"];
   })();
 
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
@@ -46,6 +52,8 @@ export default function LabRoute() {
         return <OptimizeSection />;
       case "results":
         return <ResultsSection lastResult={lastResult} />;
+      case "options-builder":
+        return <StrategyBuilderTool onClose={() => setActiveTab("backtest")} />;
       case "pine-editor":
         return <PineEditor />;
     }

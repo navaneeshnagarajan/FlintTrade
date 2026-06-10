@@ -32,6 +32,12 @@ vi.mock("../usePineRunner", () => ({
 // ---------------------------------------------------------------------------
 
 import StrategyBuilderTool from "../StrategyBuilderTool";
+import {
+  LOAD_TEMPLATE_EVENT,
+  PENDING_TEMPLATE_KEY,
+  type BuilderTemplate,
+} from "../templateBridge";
+import { act } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -40,6 +46,7 @@ import StrategyBuilderTool from "../StrategyBuilderTool";
 describe("StrategyBuilderTool", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    sessionStorage.clear();
   });
 
   it("renders without crashing", () => {
@@ -58,5 +65,50 @@ describe("StrategyBuilderTool", () => {
     expect(screen.getByText("Payoff")).toBeInTheDocument();
     expect(screen.getByText("Margin")).toBeInTheDocument();
     expect(screen.getByText("Pine Script")).toBeInTheDocument();
+  });
+
+  it("applies a stashed template on mount with real strikes", () => {
+    // Iron condor handed off by the StrategyTemplates widget. Default
+    // underlying is NIFTY (ATM 22500, gap 50) → -2/-1/+1/+2 offsets become
+    // 22400 / 22450 / 22550 / 22600.
+    const tmpl: BuilderTemplate = {
+      id: "iron_condor",
+      name: "Iron Condor",
+      legs: [
+        { action: "SELL", optionType: "CE", strikeOffset: 1, lots: 1 },
+        { action: "BUY", optionType: "CE", strikeOffset: 2, lots: 1 },
+        { action: "SELL", optionType: "PE", strikeOffset: -1, lots: 1 },
+        { action: "BUY", optionType: "PE", strikeOffset: -2, lots: 1 },
+      ],
+    };
+    sessionStorage.setItem(PENDING_TEMPLATE_KEY, JSON.stringify(tmpl));
+
+    render(<StrategyBuilderTool />);
+
+    for (const strike of ["22550", "22600", "22450", "22400"]) {
+      expect(screen.getByDisplayValue(strike)).toBeInTheDocument();
+    }
+    // The stash is one-shot — consumed on mount.
+    expect(sessionStorage.getItem(PENDING_TEMPLATE_KEY)).toBeNull();
+  });
+
+  it("applies a live load-template event while mounted", () => {
+    render(<StrategyBuilderTool />);
+
+    const tmpl: BuilderTemplate = {
+      id: "bull_call_spread",
+      name: "Bull Call Spread",
+      legs: [
+        { action: "BUY", optionType: "CE", strikeOffset: 0, lots: 1 },
+        { action: "SELL", optionType: "CE", strikeOffset: 1, lots: 1 },
+      ],
+    };
+    act(() => {
+      window.dispatchEvent(new CustomEvent(LOAD_TEMPLATE_EVENT, { detail: tmpl }));
+    });
+
+    // 22500 matches both the ATM config input and the new ATM leg strike.
+    expect(screen.getAllByDisplayValue("22500").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByDisplayValue("22550")).toBeInTheDocument();
   });
 });

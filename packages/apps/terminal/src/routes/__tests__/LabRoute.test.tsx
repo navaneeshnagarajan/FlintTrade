@@ -92,6 +92,10 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import LabRoute from "../LabRoute";
+import {
+  PENDING_TEMPLATE_KEY,
+  type BuilderTemplate,
+} from "@/tools/StrategyBuilder/templateBridge";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -109,6 +113,7 @@ function renderLab() {
 describe("LabRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
   });
 
   it("renders the Strategy Lab heading", () => {
@@ -135,5 +140,30 @@ describe("LabRoute", () => {
 
     expect(screen.getByTestId("backtest-layout")).toHaveClass("grid");
     expect(screen.getByTestId("backtest-layout").className).toContain("lg:grid-cols");
+  });
+
+  it("shows the Options Builder tab", () => {
+    renderLab();
+
+    expect(screen.getByRole("tab", { name: /options builder/i })).toBeInTheDocument();
+  });
+
+  it("lands on the Options Builder when a template was stashed by the widget", () => {
+    const tmpl: BuilderTemplate = {
+      id: "straddle",
+      name: "Straddle",
+      legs: [
+        { action: "BUY", optionType: "CE", strikeOffset: 0, lots: 1 },
+        { action: "BUY", optionType: "PE", strikeOffset: 0, lots: 1 },
+      ],
+    };
+    sessionStorage.setItem(PENDING_TEMPLATE_KEY, JSON.stringify(tmpl));
+
+    renderLab();
+
+    // The builder tool renders instead of the default Backtest tab…
+    expect(screen.getByText("Strategy Builder")).toBeInTheDocument();
+    // …with the stashed legs applied (ATM config input + two ATM leg strikes).
+    expect(screen.getAllByDisplayValue("22500").length).toBeGreaterThanOrEqual(3);
   });
 });

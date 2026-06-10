@@ -1,10 +1,11 @@
 /**
  * StrategyTemplatesWidget.test.tsx
  *
- * Tests: render, filter buttons, card count, custom event dispatch.
+ * Tests: render, filter buttons, loadable vs reference split, builder
+ * hand-off (event + sessionStorage stash + navigation).
  */
 
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -21,17 +22,36 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 }));
 
 import StrategyTemplatesWidget from "../StrategyTemplatesWidget";
+import {
+  LOAD_TEMPLATE_EVENT,
+  PENDING_TEMPLATE_KEY,
+  type BuilderTemplate,
+} from "@/tools/StrategyBuilder/templateBridge";
 
 describe("StrategyTemplatesWidget", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
   it("renders the widget header", () => {
     render(<StrategyTemplatesWidget />);
     expect(screen.getByText("Strategy Templates")).toBeTruthy();
   });
 
-  it("renders all 12 strategy template cards by default", () => {
+  it("renders 8 loadable cards and 4 reference-only cards (12 total)", () => {
     render(<StrategyTemplatesWidget />);
-    const cards = screen.getAllByRole("button", { name: /Load .* strategy template/i });
-    expect(cards).toHaveLength(12);
+    const loadable = screen.getAllByRole("button", { name: /Load .* strategy template/i });
+    expect(loadable).toHaveLength(8);
+    // Stock-leg and multi-expiry templates must NOT offer a load affordance —
+    // the options builder cannot represent them faithfully.
+    for (const name of ["Covered Call", "Protective Put", "Collar", "Calendar Spread"]) {
+      expect(
+        screen.getByLabelText(`${name} strategy template (reference only)`),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: `Load ${name} strategy template` }),
+      ).not.toBeInTheDocument();
+    }
   });
 
   it("renders outlook filter buttons", () => {
@@ -47,25 +67,58 @@ describe("StrategyTemplatesWidget", () => {
     render(<StrategyTemplatesWidget />);
     fireEvent.click(screen.getByRole("button", { name: "Bullish" }));
     const cards = screen.getAllByRole("button", { name: /Load .* strategy template/i });
-    // Long Call, Bull Call Spread, Protective Put = 3 bullish templates
     expect(cards.length).toBeGreaterThanOrEqual(1);
     cards.forEach((card) => {
       expect(card.getAttribute("aria-label")).toMatch(/Load .* strategy template/);
     });
   });
 
-  it("dispatches custom event when a card is clicked", () => {
+  it("hands a loadable template to the builder: event + stash + navigate", () => {
     render(<StrategyTemplatesWidget />);
-    const listener = vi.fn();
-    window.addEventListener("flinttrade:load-strategy-template", listener);
+    const loadListener = vi.fn();
+    const navListener = vi.fn();
+    window.addEventListener(LOAD_TEMPLATE_EVENT, loadListener);
+    window.addEventListener("flinttrade:navigate", navListener);
 
     fireEvent.click(screen.getByLabelText("Load Long Call strategy template"));
 
-    expect(listener).toHaveBeenCalledOnce();
-    const event = listener.mock.calls[0][0] as CustomEvent;
+    expect(loadListener).toHaveBeenCalledOnce();
+    const event = loadListener.mock.calls[0][0] as CustomEvent;
     expect(event.detail.id).toBe("long_call");
+    expect(event.detail.legs).toEqual([
+      { action: "BUY", optionType: "CE", strikeOffset: 0, lots: 1 },
+    ]);
 
-    window.removeEventListener("flinttrade:load-strategy-template", listener);
+    // Stash for the builder to read after the route change.
+    const stashed = JSON.parse(
+      sessionStorage.getItem(PENDING_TEMPLATE_KEY) ?? "null",
+    ) as BuilderTemplate;
+    expect(stashed.id).toBe("long_call");
+
+    // Navigates to the Lab where the Options Builder lives.
+    expect(navListener).toHaveBeenCalledOnce();
+    const nav = navListener.mock.calls[0][0] as CustomEvent;
+    expect(nav.detail.path).toBe("/lab");
+
+    window.removeEventListener(LOAD_TEMPLATE_EVENT, loadListener);
+    window.removeEventListener("flinttrade:navigate", navListener);
+  });
+
+  it("hands off the iron condor with four distinct strike offsets", () => {
+    render(<StrategyTemplatesWidget />);
+    fireEvent.click(screen.getByLabelText("Load Iron Condor strategy template"));
+
+    const stashed = JSON.parse(
+      sessionStorage.getItem(PENDING_TEMPLATE_KEY) ?? "null",
+    ) as BuilderTemplate;
+    expect(stashed.id).toBe("iron_condor");
+    // The old coarse ATM/OTM labels could not distinguish the short strikes
+    // from the protective wings — explicit offsets can.
+    expect(stashed.legs.map((l) => l.strikeOffset).sort((a, b) => a - b)).toEqual([-2, -1, 1, 2]);
+    expect(stashed.legs).toContainEqual({ action: "SELL", optionType: "CE", strikeOffset: 1, lots: 1 });
+    expect(stashed.legs).toContainEqual({ action: "BUY", optionType: "CE", strikeOffset: 2, lots: 1 });
+    expect(stashed.legs).toContainEqual({ action: "SELL", optionType: "PE", strikeOffset: -1, lots: 1 });
+    expect(stashed.legs).toContainEqual({ action: "BUY", optionType: "PE", strikeOffset: -2, lots: 1 });
   });
 
   it("shows correct card details for Iron Condor", () => {
