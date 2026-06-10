@@ -42,6 +42,76 @@ def test_breadth_current_ok(client):
     assert "advances" in data or "ad_ratio" in data
 
 
+class _Quote:
+    def __init__(self, ltp: float, prev_close: float) -> None:
+        self.ltp = ltp
+        self.prev_close = prev_close
+
+
+class _FakeBridgeClient:
+    """Returns a deterministic NIFTY-50 quote sweep (30 up / 18 down / 2 flat)."""
+
+    async def multi_quotes(self, payload):
+        quotes = []
+        for i in range(50):
+            if i < 30:
+                quotes.append(_Quote(ltp=101.0, prev_close=100.0))
+            elif i < 48:
+                quotes.append(_Quote(ltp=99.0, prev_close=100.0))
+            else:
+                quotes.append(_Quote(ltp=100.0, prev_close=100.0))
+        return quotes
+
+
+class _ConnectedRegistry:
+    @staticmethod
+    def is_connected() -> bool:
+        return True
+
+
+def test_breadth_current_live_from_quote_sweep(app):
+    """With a connected broker, breadth is COMPUTED from a real quote sweep —
+    the old live branch called a registry method that does not exist, so the
+    connected path was dead code and is_sample_data could never go false."""
+    app.config["REGISTRY"] = _ConnectedRegistry()
+    app.config["OPENALGO_CLIENT"] = _FakeBridgeClient()
+    with app.test_client() as c:
+        resp = c.get("/v1/breadth/current")
+    body = resp.get_json()
+    assert body["is_sample_data"] is False
+    assert body["data"]["advances"] == 30
+    assert body["data"]["declines"] == 18
+    assert body["data"]["unchanged"] == 2
+
+
+def test_breadth_current_falls_back_to_sample_when_sweep_fails(app):
+    class _FailingClient:
+        async def multi_quotes(self, payload):
+            raise RuntimeError("bridge down")
+
+    app.config["REGISTRY"] = _ConnectedRegistry()
+    app.config["OPENALGO_CLIENT"] = _FailingClient()
+    with app.test_client() as c:
+        resp = c.get("/v1/breadth/current")
+    body = resp.get_json()
+    assert resp.status_code == 200
+    assert body["is_sample_data"] is True
+
+
+def test_breadth_current_refuses_thin_sweep_as_live(app):
+    """A handful of quotes is not market breadth — stays honestly sample."""
+
+    class _ThinClient:
+        async def multi_quotes(self, payload):
+            return [_Quote(101.0, 100.0) for _ in range(3)]
+
+    app.config["REGISTRY"] = _ConnectedRegistry()
+    app.config["OPENALGO_CLIENT"] = _ThinClient()
+    with app.test_client() as c:
+        resp = c.get("/v1/breadth/current")
+    assert resp.get_json()["is_sample_data"] is True
+
+
 # ---------------------------------------------------------------------------
 # GET /ft-api/v1/breadth/history
 # ---------------------------------------------------------------------------

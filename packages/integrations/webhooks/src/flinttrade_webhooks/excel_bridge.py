@@ -163,7 +163,7 @@ class ExcelBridge:
     def import_from_excel(
         self,
         file_path: str,
-        sheet_name: str = "Sheet1",
+        sheet_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """Import data from an Excel file.
 
@@ -172,14 +172,18 @@ class ExcelBridge:
 
         Args:
             file_path: Path to the ``.xlsx`` file.
-            sheet_name: Worksheet name to read. Default ``"Sheet1"``.
+            sheet_name: Worksheet name to read. ``None`` (the default) reads
+                the workbook's FIRST sheet — most real workbooks (including
+                FlintTrade's own exports, whose sheet is named "Data") are not
+                called "Sheet1", so a hardcoded name failed the round-trip.
 
         Returns:
             List of row dicts where keys are the column headers.
 
         Raises:
             ExcelBridgeError: If openpyxl is not installed, the file does not
-                exist, or the sheet is not found.
+                exist, the workbook has no sheets, or a requested sheet is
+                not found.
         """
         _require_openpyxl()
 
@@ -191,7 +195,11 @@ class ExcelBridge:
         except Exception as exc:
             raise ExcelBridgeError(f"Failed to open {file_path}: {exc}") from exc
 
-        if sheet_name not in wb.sheetnames:
+        if sheet_name is None:
+            if not wb.sheetnames:
+                raise ExcelBridgeError(f"No sheets in {file_path}")
+            sheet_name = wb.sheetnames[0]
+        elif sheet_name not in wb.sheetnames:
             available = ", ".join(wb.sheetnames)
             raise ExcelBridgeError(
                 f"Sheet '{sheet_name}' not found in {file_path}. "

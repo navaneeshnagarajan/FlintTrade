@@ -250,6 +250,53 @@ def test_twap_splits_into_gated_slices(live_auth):
     assert sorted(int(o.quantity) for o in adapter.orders) == [5, 5]
 
 
+def test_status_shows_children_mid_flight(live_auth):
+    """The live snapshot must expose children WHILE the route runs — TWAP
+    jobs take minutes and the widget polls. Pins the result_observer wiring
+    (deleting it would keep every end-state test green while live polling
+    silently regressed to an empty list until completion)."""
+    app, _adapter = _make_app()  # twap window 1s / 2 slices
+    client = app.test_client()
+
+    resp = client.post(
+        "/api/v1/orders/smart-route",
+        json={
+            "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
+            "quantity": 10, "urgency": "low",
+        },
+    )
+    job_id = resp.get_json()["data"]["job_id"]
+
+    saw_mid_flight_child = False
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        data = client.get(f"/api/v1/orders/smart-route/{job_id}").get_json()["data"]
+        if data["status"] == "running" and len(data["child_orders"]) >= 1:
+            saw_mid_flight_child = True
+            break
+        if data["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert saw_mid_flight_child, "snapshot never showed children mid-flight (result_observer regressed)"
+    _wait_done(client, job_id)
+
+
+def test_app_factory_wires_smart_routing_from_workspace(monkeypatch):
+    """create_flask_app must carry workspace brokers.smart_routing into
+    app.config — a wiring typo would leave the feature permanently disabled
+    with every route test green (they set the config key directly)."""
+    import flinttrade_core.app as app_mod
+    from flinttrade_core.workspace_migrations import default_workspace_config
+
+    brokers = default_workspace_config()["brokers"]
+    brokers["smart_routing"] = {"enabled": True, "twap_slices": 3, "twap_window_seconds": 60}
+    monkeypatch.setattr(app_mod, "_read_workspace_brokers", lambda: brokers)
+
+    app = app_mod.create_flask_app()
+    assert app.config["SMART_ROUTING"]["enabled"] is True
+    assert app.config["SMART_ROUTING"]["twap_slices"] == 3
+
+
 def test_jobs_list_returns_snapshots(live_auth):
     app, _ = _make_app()
     client = app.test_client()

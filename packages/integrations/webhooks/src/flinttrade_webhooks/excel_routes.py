@@ -283,7 +283,9 @@ def import_data() -> tuple[Response, int]:
     if not file_path:
         return jsonify({"status": "error", "message": "file_path is required"}), 400
 
-    sheet_name: str = body.get("sheet_name", "Sheet1")
+    # None → the bridge reads the workbook's FIRST sheet (most workbooks are
+    # not literally named "Sheet1" — incl. FlintTrade's own exports).
+    sheet_name: str | None = body.get("sheet_name") or None
 
     try:
         rows = bridge.import_from_excel(file_path, sheet_name)
@@ -315,7 +317,8 @@ def import_upload() -> tuple[Response, int]:
     if upload is None or not (upload.filename or "").strip():
         return jsonify({"status": "error", "message": "file is required"}), 400
 
-    sheet_name: str = request.form.get("sheet_name", "Sheet1")
+    # None → first sheet (see /import).
+    sheet_name: str | None = request.form.get("sheet_name") or None
 
     tmp_path: str | None = None
     try:

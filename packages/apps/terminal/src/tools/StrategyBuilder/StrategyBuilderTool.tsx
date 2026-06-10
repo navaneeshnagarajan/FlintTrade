@@ -36,12 +36,17 @@ export default function StrategyBuilderTool({ onClose }: Props) {
     const u = UNDERLYINGS.find((u) => u.symbol === symbol) ?? UNDERLYINGS[0];
     setUnderlying(u);
     setStrikeGap(u.strikeGap);
-    setAtm(
-      symbol === "BANKNIFTY" ? 48000
-      : symbol === "SENSEX"   ? 80000
-      : symbol === "FINNIFTY" ? 22000
-      : 22500,
-    );
+    // Rough ballpark seeds only — the operator sets the real ATM from the
+    // live chain. Every catalogued underlying gets its OWN seed (MIDCPNIFTY
+    // previously inherited NIFTY's level, an order of magnitude off).
+    const ATM_SEEDS: Record<string, number> = {
+      NIFTY: 22500,
+      BANKNIFTY: 48000,
+      FINNIFTY: 22000,
+      MIDCPNIFTY: 12500,
+      SENSEX: 80000,
+    };
+    setAtm(ATM_SEEDS[symbol] ?? 22500);
     setLegs([]);
   };
 
@@ -130,7 +135,14 @@ export default function StrategyBuilderTool({ onClose }: Props) {
             </Badge>
           )}
         </div>
-        <Button variant="ghost" size="icon" onClick={onClose} className="h-6 w-6 text-text-muted hover:text-text-primary">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label="Close the builder (discards the current legs)"
+          title="Close the builder (discards the current legs)"
+          className="h-6 w-6 text-text-muted hover:text-text-primary"
+        >
           <X size={15} />
         </Button>
       </div>

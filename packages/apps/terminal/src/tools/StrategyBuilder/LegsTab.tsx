@@ -61,21 +61,23 @@ export function LegsTab({
         </Select>
 
         <div className="flex items-center gap-1">
-          <span className="text-xs text-text-muted">ATM</span>
+          <span className="text-xs text-text-muted" aria-hidden="true">ATM</span>
           <Input
             className="w-20 h-7 text-xs bg-surface-base border-border-default text-text-primary font-mono"
             type="number"
             value={atm}
+            aria-label="At-the-money strike price"
             onChange={(e) => onAtmChange(Number(e.target.value))}
           />
         </div>
 
         <div className="flex items-center gap-1">
-          <span className="text-xs text-text-muted">Gap</span>
+          <span className="text-xs text-text-muted" aria-hidden="true">Gap</span>
           <Input
             className="w-16 h-7 text-xs bg-surface-base border-border-default text-text-primary font-mono"
             type="number"
             value={strikeGap}
+            aria-label="Strike gap"
             onChange={(e) => onStrikeGapChange(Number(e.target.value))}
           />
         </div>

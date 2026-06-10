@@ -243,7 +243,11 @@ export async function downloadPortfolioReport(
  *
  * Streams the file to the multipart `/import/upload` endpoint (the server-path
  * `/import` variant is useless to a browser SPA) and returns the parsed rows —
- * first sheet row as headers, one object per data row.
+ * the sheet's first row as headers, one object per data row.
+ *
+ * When `sheetName` is omitted the backend reads the workbook's FIRST sheet,
+ * whatever it is called — so exports from FlintTrade (sheet "Data") and most
+ * real-world workbooks import without the operator knowing sheet names.
  *
  * No Content-Type header is set: the browser supplies the multipart boundary.
  *
@@ -251,11 +255,11 @@ export async function downloadPortfolioReport(
  */
 export async function uploadExcel(
   file: File,
-  sheetName = "Sheet1",
+  sheetName?: string,
 ): Promise<Record<string, unknown>[]> {
   const form = new FormData();
   form.append("file", file);
-  form.append("sheet_name", sheetName);
+  if (sheetName) form.append("sheet_name", sheetName);
 
   const resp = await fetch(`${getBase()}/api/v1/integration/excel/import/upload`, {
     method: "POST",

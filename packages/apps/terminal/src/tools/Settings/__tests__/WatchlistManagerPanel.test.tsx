@@ -57,19 +57,20 @@ describe("WatchlistManagerPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("lists watchlist symbols from the backend", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() =>
-        jsonResponse({
-          data: [{ symbol: "RELIANCE", exchange: "NSE", interval: "1d", enabled: true }],
-        }),
-      ),
+  it("lists watchlist symbols from the backend at the /ft-api/v1 prefix", async () => {
+    const fetchMock = vi.fn((_url: string) =>
+      jsonResponse({
+        data: [{ symbol: "RELIANCE", exchange: "NSE", interval: "1d", enabled: true }],
+      }),
     );
+    vi.stubGlobal("fetch", fetchMock);
 
     renderPanel();
 
     await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    // Pin the URL: the historify family registers at the bare /v1 prefix —
+    // a drift to /api/v1 (the recurring wiring bug) would 404 in production.
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/ft-api/v1/historify/watchlist");
     expect(
       screen.getByRole("button", { name: "Remove RELIANCE (NSE) from the watchlist" }),
     ).toBeInTheDocument();
@@ -100,12 +101,46 @@ describe("WatchlistManagerPanel", () => {
     await waitFor(() => {
       const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
       expect(postCall).toBeTruthy();
+      expect(String(postCall![0])).toBe("/ft-api/v1/historify/watchlist");
       expect(JSON.parse(String(postCall![1]!.body))).toEqual({
         symbol: "INFY",
         exchange: "NSE",
         interval: "1d",
       });
     });
+  });
+
+  it("reports a PARTIAL import honestly and still refreshes the list", async () => {
+    vi.mocked(uploadExcel).mockResolvedValue([
+      { symbol: "TCS", exchange: "NSE" },
+      { symbol: "BADSYM", exchange: "NSE" },
+    ]);
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { symbol: string };
+        return body.symbol === "BADSYM"
+          ? jsonResponse({ status: "error", message: "invalid symbol" }, 400)
+          : jsonResponse({ status: "success" }, 201);
+      }
+      return jsonResponse({ data: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPanel();
+    fireEvent.change(screen.getByLabelText("Import watchlist from Excel"), {
+      target: { files: [new File(["x"], "watchlist.xlsx")] },
+    });
+
+    await waitFor(() =>
+      expect(emitNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: "alert",
+          title: "Watchlist import partly failed",
+          body: expect.stringContaining("Added 1 symbol"),
+        }),
+      ),
+    );
+    expect(vi.mocked(emitNotification).mock.calls[0][0].body).toContain("1 failed: BADSYM");
   });
 
   it("imports an Excel watchlist: adds usable rows, reports skipped ones", async () => {

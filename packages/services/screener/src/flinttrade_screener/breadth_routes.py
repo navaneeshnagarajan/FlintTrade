@@ -46,6 +46,60 @@ def _get_calculator() -> MarketBreadthCalculator:
     return _calculator
 
 
+def _live_breadth_from_quotes(client: Any) -> dict[str, int] | None:
+    """Compute real NIFTY 50 advance/decline breadth from live bridge quotes.
+
+    The previous live branch called ``registry.get_market_breadth()`` — a
+    method that exists on no registry — so the connected path was dead code
+    and the card could never leave sample data. This computes breadth the
+    honest way: one multi-quote call over the NIFTY 50 universe, classifying
+    each constituent against its previous close.
+
+    ``new_highs``/``new_lows`` need 52-week data the bridge quote does not
+    carry, so they stay 0 on the live path (advance/decline is the breadth
+    headline; nothing is fabricated).
+
+    Args:
+        client: The async OpenAlgo bridge client (``app.config["OPENALGO_CLIENT"]``).
+
+    Returns:
+        ``{"advances": A, "declines": D, "unchanged": U}`` or ``None`` when no
+        usable live quotes are available (caller falls back to sample).
+    """
+    if client is None:
+        return None
+    import asyncio  # noqa: PLC0415
+
+    from .market_scanner import _NIFTY50_SYMBOLS  # noqa: PLC0415
+
+    payload = [{"symbol": s, "exchange": "NSE"} for s in _NIFTY50_SYMBOLS]
+    try:
+        quotes = asyncio.run(client.multi_quotes(payload))
+    except Exception as exc:
+        logger.warning("Live breadth quote sweep failed: %s", exc)
+        return None
+
+    advances = declines = unchanged = counted = 0
+    for quote in quotes or []:
+        ltp = float(getattr(quote, "ltp", 0) or 0)
+        prev = float(getattr(quote, "prev_close", 0) or 0)
+        if ltp <= 0 or prev <= 0:
+            continue
+        counted += 1
+        if ltp > prev:
+            advances += 1
+        elif ltp < prev:
+            declines += 1
+        else:
+            unchanged += 1
+
+    if counted < 10:
+        # Too few real quotes to honestly call it market breadth.
+        logger.warning("Live breadth: only %d usable quotes — falling back to sample", counted)
+        return None
+    return {"advances": advances, "declines": declines, "unchanged": unchanged}
+
+
 def _breadth_to_dict(d: BreadthData) -> dict[str, Any]:
     """Serialise a BreadthData model to a JSON-safe dict.
 
@@ -96,19 +150,21 @@ def breadth_current() -> Any:
     calc = _get_calculator()
 
     if registry and getattr(registry, "is_connected", lambda: False)():
-        try:
-            raw = registry.get_market_breadth()
-            calc.update(
-                advances=int(raw["advances"]),
-                declines=int(raw["declines"]),
-                unchanged=int(raw.get("unchanged", 0)),
-                new_highs=int(raw.get("new_highs", 0)),
-                new_lows=int(raw.get("new_lows", 0)),
-            )
-            is_sample_data = False
-            logger.info("BreadthCurrent: loaded live breadth data")
-        except Exception as exc:
-            logger.warning("BreadthCurrent: live data unavailable, using sample: %s", exc)
+        raw = _live_breadth_from_quotes(current_app.config.get("OPENALGO_CLIENT"))
+        if raw is not None:
+            try:
+                calc.update(
+                    advances=raw["advances"],
+                    declines=raw["declines"],
+                    unchanged=raw["unchanged"],
+                )
+                is_sample_data = False
+                logger.info(
+                    "BreadthCurrent: live NIFTY 50 breadth %d/%d/%d",
+                    raw["advances"], raw["declines"], raw["unchanged"],
+                )
+            except Exception as exc:
+                logger.warning("BreadthCurrent: live update failed, using sample: %s", exc)
 
     history = calc.get_history(days=1)
     if not history:

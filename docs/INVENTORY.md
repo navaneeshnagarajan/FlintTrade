@@ -117,7 +117,7 @@ real Dhan/Upstox/Kotak SDKs are not present — the pins in `brokers.lock` are
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
 | Credential rotation (`rotation/status|schedule|rotate-now`) | ⛔ | **Scaffold, intentionally NOT mounted** — `CredentialsRotator._do_refresh/_do_rotation` only record a timestamp (no real token refresh / key rotation); mounting it would surface a fake "rotated successfully". Real rotation needs per-broker re-auth (native adapters → absent SDKs). Tracked planned-but-not-built |
 | Native-SDK **order execution** (R13/R14) | ⛔ | **Externally blocked** — real broker SDKs absent |
-| n8n bridge (health / workflows / webhook trigger) | ✅ | Automate → "n8n Bridge" section wires all five clients (health badge, activate/deactivate, manual webhook trigger); honest offline + missing-API-key states; `N8N_HOST`/`N8N_API_KEY` documented in `.env.example` |
+| n8n bridge (health / workflows / webhook trigger) | ✅ | Automate → "n8n Bridge" section (advanced skill tier) wires all five clients (health badge, activate/deactivate with surfaced failures, manual webhook trigger); honest offline + missing-API-key states; `N8N_HOST` is read by the bridge and documented with `N8N_API_KEY` in `.env.example` |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 
 ---

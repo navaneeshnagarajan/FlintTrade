@@ -31,6 +31,7 @@ import {
 export default function N8nSection() {
   const queryClient = useQueryClient();
   const [pendingWorkflow, setPendingWorkflow] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const [webhookId, setWebhookId] = useState("");
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
 
@@ -53,7 +54,11 @@ export default function N8nSection() {
   const toggleMutation = useMutation({
     mutationFn: ({ id, active }: { id: string; active: boolean }): Promise<{ workflow_id: string; active: boolean }> =>
       active ? deactivateN8nWorkflow(id) : activateN8nWorkflow(id),
-    onMutate: ({ id }) => setPendingWorkflow(id),
+    onMutate: ({ id }) => {
+      setPendingWorkflow(id);
+      setToggleError(null);
+    },
+    onError: (err: Error) => setToggleError(err.message),
     onSettled: () => {
       setPendingWorkflow(null);
       void queryClient.invalidateQueries({ queryKey: ["n8n", "workflows"] });
@@ -62,6 +67,7 @@ export default function N8nSection() {
 
   const triggerMutation = useMutation({
     mutationFn: (id: string) => triggerN8nWebhook(id),
+    onMutate: () => setTriggerResult(null), // never re-show a stale message during a retry
     onSuccess: () => setTriggerResult("Webhook triggered — check the workflow's execution log in n8n."),
     onError: (err: Error) => setTriggerResult(err.message),
   });
@@ -116,6 +122,11 @@ export default function N8nSection() {
           {/* Workflows */}
           <GlassCard className="p-4 space-y-3">
             <h3 className="text-xs font-semibold text-text-primary">Workflows</h3>
+            {toggleError && (
+              <p role="alert" className="text-xs text-loss">
+                {toggleError}
+              </p>
+            )}
             {workflowsQuery.isLoading ? (
               <p className="text-xs text-text-muted">Loading workflows…</p>
             ) : workflowsQuery.isError ? (
@@ -200,7 +211,7 @@ export default function N8nSection() {
             </form>
             {triggerResult && (
               <p
-                role="status"
+                role={triggerMutation.isError ? "alert" : "status"}
                 className={triggerMutation.isError ? "text-xs text-loss" : "text-xs text-profit"}
               >
                 {triggerResult}

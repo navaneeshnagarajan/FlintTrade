@@ -73,6 +73,9 @@ Contract is `broker-adapter-contract` spec §3. Prerequisites: build `flinttrade
 - [x] Invoke `SmartOrderRouter` (liquidity-aware TWAP slicing) — wired at `POST /api/v1/orders/smart-route` (background job + polling) with every child order independently gated (`GatedChildExecutor`: SafetySystem → `gate_order` → `BrokerRouter`); "Smart Order" widget in the terminal. OFF by default via `brokers.smart_routing.enabled`, live-mode only.
 - [x] Register or delete `order_analytics_bp` (`/analytics/execution`) and `strategy_comparison_bp` (`/backtest/compare`) — both registered.
 
+### 3b. Safety depth (cross-path, found by the 2026-06-10 session audit)
+- [ ] Thread live portfolio state (open positions, used margin, daily P&L) into `SafetySystem.check_order` on BOTH the manual and smart-route order paths — today L2–L4 run with empty default state on every per-order check, so they validate shape/limits but cannot enforce cumulative exposure. (The smart-route path mitigates the worst aggregate case with a running-job cap + duplicate-(symbol, action) guard; real enforcement needs the state threaded.)
+
 ### 4. Data layer
 - [ ] Finish the journal DuckDB → SQLite + FTS5 migration (data-layer spec §1.1/§6): add `flinttrade_journal/db.py`, switch `trade_journal.py` off DuckDB (migration script + `disable_journal_triggers` already exist but have no runtime consumer).
 

@@ -43,7 +43,10 @@ class N8nBridge:
     the URL as the secret).
 
     Args:
-        host: n8n base URL, e.g. ``"http://127.0.0.1:5678"``.
+        host: n8n base URL, e.g. ``"http://127.0.0.1:5678"``. If omitted,
+            falls back to the ``N8N_HOST`` environment variable, then the
+            local default — so a non-default n8n host is configurable without
+            code changes (the lazily-built route singleton passes no args).
         api_key: n8n API key for workflow management. If omitted, falls back to
             the ``N8N_API_KEY`` environment variable.
         timeout: HTTP request timeout in seconds.
@@ -57,11 +60,11 @@ class N8nBridge:
 
     def __init__(
         self,
-        host: str = "http://127.0.0.1:5678",
+        host: str | None = None,
         api_key: str | None = None,
         timeout: float = 10.0,
     ) -> None:
-        self.host = host.rstrip("/")
+        self.host = (host or os.getenv("N8N_HOST", "") or "http://127.0.0.1:5678").rstrip("/")
         self.api_key = api_key or os.getenv("N8N_API_KEY", "")
         self._http = httpx.Client(timeout=timeout)
 

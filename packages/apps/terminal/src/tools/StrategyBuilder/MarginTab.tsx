@@ -70,9 +70,11 @@ export function MarginTab({ legs, underlying }: Props) {
             </TableHeader>
             <TableBody>
               {legs.map((leg, idx) => {
+                // Same per-leg formula as utils.estimateMargin: ~15% of the
+                // leg's REAL notional (its strike × lot size) when sold.
                 const legMargin =
                   leg.action === "SELL"
-                    ? 0.15 * 20000 * leg.lots * underlying.lotSize
+                    ? 0.15 * leg.strike * underlying.lotSize * leg.lots
                     : leg.premium * leg.lots * underlying.lotSize;
                 return (
                   <TableRow key={leg.id} className="border-border-subtle hover:bg-surface-base">

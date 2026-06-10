@@ -81,6 +81,28 @@ describe("N8nSection", () => {
     expect(screen.getByText("N8N_API_KEY")).toBeInTheDocument();
   });
 
+  it("surfaces a failed activate/deactivate instead of staying silent", async () => {
+    vi.mocked(checkN8nHealth).mockResolvedValue({ running: true });
+    vi.mocked(listN8nWorkflows).mockResolvedValue({
+      workflows: [{ id: "7", name: "Morning gap scan", active: true }],
+      count: 1,
+    });
+    vi.mocked(deactivateN8nWorkflow).mockRejectedValue(
+      new Error("Failed to deactivate workflow 7"),
+    );
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText("Morning gap scan")).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole("button", { name: "Deactivate workflow Morning gap scan" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/failed to deactivate workflow 7/i)).toBeInTheDocument(),
+    );
+  });
+
   it("triggers a webhook workflow and reports success", async () => {
     vi.mocked(checkN8nHealth).mockResolvedValue({ running: true });
     vi.mocked(listN8nWorkflows).mockResolvedValue({ workflows: [], count: 0 });

@@ -13,7 +13,7 @@
  * progress. Child rows are real job state polled from the backend.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { GitFork, Loader2, Send, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import { useModeStore } from "@/stores/modeStore";
 import {
   cancelSmartRoute,
   getSmartRouteJob,
+  listSmartRouteJobs,
   startSmartRoute,
   type SmartRouteJob,
 } from "@/services/ftApi";
@@ -108,6 +109,21 @@ export default function SmartOrderWidget() {
       });
     },
   });
+
+  // On mount with no tracked job, adopt a still-running route (the widget may
+  // have been closed/reopened mid-TWAP — the backend job keeps running and
+  // must not become invisible).
+  const recentQuery = useQuery({
+    queryKey: ["smartRoute", "recent"],
+    queryFn: listSmartRouteJobs,
+    enabled: isLive && !jobId,
+    retry: false,
+  });
+  useEffect(() => {
+    if (jobId) return;
+    const running = recentQuery.data?.find((j) => j.status === "running");
+    if (running) setJobId(running.job_id);
+  }, [jobId, recentQuery.data]);
 
   const jobQuery = useQuery({
     queryKey: ["smartRoute", jobId],

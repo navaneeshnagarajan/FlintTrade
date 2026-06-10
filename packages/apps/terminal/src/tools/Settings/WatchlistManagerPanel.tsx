@@ -118,28 +118,40 @@ export function WatchlistManagerPanel() {
 
   const importMutation = useMutation({
     mutationFn: async (file: File) => {
-      const rows = await uploadExcel(file);
+      const rows = await uploadExcel(file); // backend reads the FIRST sheet
       const { entries, skipped } = rowsToWatchlistEntries(rows);
       if (entries.length === 0) {
         throw new Error(
           "No usable rows — the sheet needs 'symbol' and 'exchange' columns.",
         );
       }
+      // Add each entry independently: one bad row must not report the whole
+      // import as failed after earlier rows already landed.
+      let added = 0;
+      const failures: string[] = [];
       for (const entry of entries) {
-        await addItem(entry);
+        try {
+          await addItem(entry);
+          added += 1;
+        } catch (err) {
+          failures.push(`${entry.symbol} (${err instanceof Error ? err.message : "failed"})`);
+        }
       }
-      return { added: entries.length, skipped };
+      return { added, skipped, failures };
     },
-    onSuccess: ({ added, skipped }) => {
-      setImportError(null);
-      refresh();
+    onSuccess: ({ added, skipped, failures }) => {
+      const parts = [
+        `Added ${added} symbol${added === 1 ? "" : "s"} to the download watchlist`,
+      ];
+      if (skipped > 0) parts.push(`${skipped} row${skipped === 1 ? "" : "s"} skipped (missing symbol/exchange)`);
+      if (failures.length > 0) parts.push(`${failures.length} failed: ${failures.join(", ")}`);
+      const body = parts.join("; ") + ".";
+
+      setImportError(failures.length > 0 ? body : null);
       emitNotification({
-        category: "system",
-        title: "Watchlist import complete",
-        body:
-          `Added ${added} symbol${added === 1 ? "" : "s"} to the download watchlist` +
-          (skipped > 0 ? ` (${skipped} row${skipped === 1 ? "" : "s"} skipped — missing symbol/exchange)` : "") +
-          ".",
+        category: failures.length > 0 ? "alert" : "system",
+        title: failures.length > 0 ? "Watchlist import partly failed" : "Watchlist import complete",
+        body,
       });
     },
     onError: (err: Error) => {
@@ -150,6 +162,8 @@ export function WatchlistManagerPanel() {
         body: err.message,
       });
     },
+    // Refresh regardless — a partial import HAS changed the list.
+    onSettled: refresh,
   });
 
   const items = watchlistQuery.data ?? [];

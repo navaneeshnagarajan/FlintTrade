@@ -48,7 +48,25 @@ export function hasPendingTemplate(): boolean {
   }
 }
 
-/** Read and remove the stashed template; null when absent or malformed. */
+function isValidLeg(leg: unknown): leg is BuilderTemplateLeg {
+  if (leg === null || typeof leg !== "object") return false;
+  const l = leg as Record<string, unknown>;
+  return (
+    (l.action === "BUY" || l.action === "SELL") &&
+    (l.optionType === "CE" || l.optionType === "PE") &&
+    typeof l.strikeOffset === "number" &&
+    Number.isFinite(l.strikeOffset) &&
+    typeof l.lots === "number" &&
+    Number.isFinite(l.lots) &&
+    l.lots >= 1
+  );
+}
+
+/** Read and remove the stashed template; null when absent or malformed.
+ *
+ * Every leg is shape-validated — a corrupted stash would otherwise reach the
+ * builder as `atm + NaN * gap` legs that `validateLegs` (which only checks
+ * strike > 0) cannot catch. */
 export function readAndClearPendingTemplate(): BuilderTemplate | null {
   try {
     const raw = sessionStorage.getItem(PENDING_TEMPLATE_KEY);
@@ -56,6 +74,7 @@ export function readAndClearPendingTemplate(): BuilderTemplate | null {
     sessionStorage.removeItem(PENDING_TEMPLATE_KEY);
     const parsed = JSON.parse(raw) as BuilderTemplate;
     if (!parsed || !Array.isArray(parsed.legs) || parsed.legs.length === 0) return null;
+    if (!parsed.legs.every(isValidLeg)) return null;
     return parsed;
   } catch {
     return null;

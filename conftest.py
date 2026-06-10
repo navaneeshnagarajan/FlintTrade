@@ -112,6 +112,13 @@ def _isolate_workspace() -> None:
         base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main"
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
+    # The operator's machine-local .env may pin DUCKDB_PATH at one real,
+    # shared DuckDB file (a single-writer engine). Full-app constructions on
+    # several xdist workers then contend on that file — losers boot with
+    # TRADE_STORAGE=None and store-wiring tests flake. Pin the variable to a
+    # per-worker scratch file FIRST: load_dotenv() never overrides an existing
+    # env var, so the .env value cannot leak into ANY package's test run.
+    os.environ["DUCKDB_PATH"] = str(base / "data" / "flint.duckdb")
     _clean_legacy_scratch_dbs(base)
     _seed_test_master_password(base)
 

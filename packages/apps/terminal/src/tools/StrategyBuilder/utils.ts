@@ -55,14 +55,18 @@ export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
   return points;
 }
 
-// SPAN margin estimate (simplified — adapted from openalgo-chart PositionTracker margin concept)
-// Use 15% of notional for sold options, 100% premium for bought
+// Rough SPAN-style margin estimate (simplified — adapted from openalgo-chart
+// PositionTracker margin concept): ~15% of the leg's REAL notional for sold
+// options, 100% of premium for bought. The notional derives from each leg's
+// own strike × lot size — previously a hardcoded ₹20,000 "NIFTY unit value"
+// was applied to every underlying, so a SENSEX (~80,000) collar and a
+// MIDCPNIFTY one showed the same number.
 export function estimateMargin(legs: Leg[], underlying: Underlying): number {
-  const notionalPerUnit = 20000; // approximate index unit value for NIFTY
   let margin = 0;
   for (const leg of legs) {
     if (leg.action === "SELL") {
-      margin += 0.15 * notionalPerUnit * leg.lots * underlying.lotSize;
+      const notionalPerLot = leg.strike * underlying.lotSize;
+      margin += 0.15 * notionalPerLot * leg.lots;
     } else {
       margin += leg.premium * leg.lots * underlying.lotSize;
     }

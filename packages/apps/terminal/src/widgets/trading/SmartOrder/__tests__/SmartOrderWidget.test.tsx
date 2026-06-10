@@ -16,13 +16,19 @@ vi.mock("@/services/ftApi", () => ({
   startSmartRoute: vi.fn(),
   getSmartRouteJob: vi.fn(),
   cancelSmartRoute: vi.fn(),
+  listSmartRouteJobs: vi.fn(),
 }));
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
   emitNotification: vi.fn(),
 }));
 
 import SmartOrderWidget, { parseQuantity, parseSlippageBps } from "../SmartOrderWidget";
-import { startSmartRoute, getSmartRouteJob, cancelSmartRoute } from "@/services/ftApi";
+import {
+  startSmartRoute,
+  getSmartRouteJob,
+  cancelSmartRoute,
+  listSmartRouteJobs,
+} from "@/services/ftApi";
 
 const DONE_JOB = {
   job_id: "j1",
@@ -64,6 +70,17 @@ describe("SmartOrderWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMode = "live";
+    vi.mocked(listSmartRouteJobs).mockResolvedValue([]);
+  });
+
+  it("adopts a still-running route on mount (widget reopened mid-TWAP)", async () => {
+    const running = { ...DONE_JOB, job_id: "j9", status: "running" as const, completed: false };
+    vi.mocked(listSmartRouteJobs).mockResolvedValue([running]);
+    vi.mocked(getSmartRouteJob).mockResolvedValue(running);
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Routing…")).toBeInTheDocument());
+    expect(getSmartRouteJob).toHaveBeenCalledWith("j9");
   });
 
   it("renders the header", () => {

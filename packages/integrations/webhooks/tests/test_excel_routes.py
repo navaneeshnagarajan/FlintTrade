@@ -261,6 +261,20 @@ def test_import_upload_ok(client, app):
     assert not os.path.exists(called_path)
 
 
+def test_import_upload_defaults_to_first_sheet(client):
+    """Omitting sheet_name reads the workbook's FIRST sheet (None → bridge
+    default) — most real workbooks are not literally named 'Sheet1'."""
+    import io
+
+    resp = client.post(
+        "/api/v1/integration/excel/import/upload",
+        data={"file": (io.BytesIO(b"PK\x03\x04fake-xlsx"), "export.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert mod._bridge.import_from_excel.call_args[0][1] is None  # noqa: SLF001
+
+
 def test_import_upload_missing_file(client):
     """400 when no file part is sent."""
     resp = client.post(

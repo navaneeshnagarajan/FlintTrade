@@ -8,6 +8,29 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 
+class TestN8nBridgeHostResolution:
+    """The host falls back N8N_HOST env → local default (audit: the env var
+    was documented in .env.example but nothing read it)."""
+
+    def test_explicit_host_wins(self, monkeypatch):
+        from flinttrade_automation.n8n_bridge import N8nBridge
+
+        monkeypatch.setenv("N8N_HOST", "http://n8n.lan:5678")
+        assert N8nBridge(host="http://explicit:1234/").host == "http://explicit:1234"
+
+    def test_env_host_used_when_not_passed(self, monkeypatch):
+        from flinttrade_automation.n8n_bridge import N8nBridge
+
+        monkeypatch.setenv("N8N_HOST", "http://n8n.lan:5678/")
+        assert N8nBridge().host == "http://n8n.lan:5678"
+
+    def test_default_host_without_env(self, monkeypatch):
+        from flinttrade_automation.n8n_bridge import N8nBridge
+
+        monkeypatch.delenv("N8N_HOST", raising=False)
+        assert N8nBridge().host == "http://127.0.0.1:5678"
+
+
 class TestN8nBridgeHealth:
     """check_health — returns True on 200, False on error."""
 
