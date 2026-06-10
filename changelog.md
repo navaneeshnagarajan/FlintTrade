@@ -8,11 +8,19 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Autonomous trading agent — control plane** — `POST /api/v1/ai/agent/{start,stop,status}`
+  runs the LLM-driven analyse → signal → risk-check → execute loop as a background
+  session, surfaced in the AI route's **Agent** panel (start form, live P&L / cycles /
+  positions, "Stop & square off"). OFF by default (`ai.autonomous_agent.enabled`),
+  live-mode only; the agent runs as its own ACL'd principal (`autonomous-trader`) and
+  every order — including SL/TP exits and end-of-day square-off — traverses the full
+  gated path. Logout / mode-downgrade revokes the agent's orders mid-session.
 - **Smart order routing** — `POST /api/v1/orders/smart-route` slices a parent order by
   urgency (high = single market order, medium = depth-aware chunks, low = TWAP over a
-  configurable window) as a background job with live polling, and a **Smart Order**
-  terminal widget drives it. Every child order independently traverses the full gated
-  execution path (SafetySystem L1–L5 → `gate_order` → `BrokerRouter`); the feature is
+  configurable window) as a background job with live polling and a cancel control, and a
+  **Smart Order** terminal widget drives it. Every child order independently traverses
+  the full gated execution path (SafetySystem L1–L5 → `gate_order` → `BrokerRouter`);
+  the budget is enforced and an order larger than the visible book is refused (use TWAP).
   OFF by default (`brokers.smart_routing.enabled`) and live-mode only.
 - **Options Builder in the Lab** — the previously unreachable Strategy Builder tool
   (legs / payoff / margin / Pine) is mounted as a Lab tab, and the Strategy Templates
@@ -61,11 +69,28 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Home market-breadth card showed sample data even with a broker connected — the live
+  branch called a registry method that does not exist. It now computes real NIFTY 50
+  advance/decline from a live quote sweep (and stays honestly "sample" when the sweep
+  is unavailable or too thin), without mutating the shared sample series.
+- Excel import required a worksheet literally named "Sheet1"; it now reads the
+  workbook's first sheet, so FlintTrade's own exports (sheet "Data") round-trip, and the
+  response reports the sheet actually read. A partial watchlist import is reported
+  honestly (added / skipped / failed) instead of as a total failure.
+- Strategy-builder margin estimates used a single hardcoded notional for every
+  underlying (a SENSEX spread priced like a NIFTY one); they now derive from each leg's
+  real strike × lot size, and the lot sizes were updated to current values.
 - Parallel test runs no longer contend on a single machine-wide DuckDB file when the
   local `.env` pins `DUCKDB_PATH` — the test harness isolates a per-worker scratch
-  database, fixing a recurring trade-store wiring flake.
+  database (at the repo root and the data package), fixing a recurring trade-store
+  wiring flake.
 - The Windows `make test` target now includes the ditto (Account Manager) package
   tests, matching the POSIX glob.
+- The Windows `make test` target now includes the ditto (Account Manager) package
+  tests, matching the POSIX glob.
+- ftApi helpers now surface the backend's actionable `{status, message}` body on a
+  non-2xx response instead of a bare "HTTP 403", so disabled-feature / missing-ACL /
+  missing-key errors reach the operator verbatim across every helper-based surface.
 - Terminal build restored — shadcn primitives imported undeclared `@radix-ui/react-*`
   packages; migrated to the unified `radix-ui` (87 TS errors → 0).
 - Welcome screen no longer hangs on "Checking workspace…" when the backend is
