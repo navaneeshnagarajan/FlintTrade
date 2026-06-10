@@ -160,21 +160,30 @@ def breadth_current() -> Any:
             # derived indicators require the historical feed (still sample)
             # and are left at neutral defaults rather than faked.
             advances, declines = raw["advances"], raw["declines"]
-            live = BreadthData(
-                date=date.today(),
-                advances=advances,
-                declines=declines,
-                unchanged=raw["unchanged"],
-                ad_ratio=round(float(advances) / float(declines), 4) if declines > 0 else 1.0,
-                ad_line=float(advances - declines),
-            )
             logger.info(
                 "BreadthCurrent: live NIFTY 50 breadth %d/%d/%d", advances, declines, raw["unchanged"],
             )
+            # Only the genuinely-live single-day fields are populated. The
+            # cumulative A-D line, McClellan oscillator, breadth thrust and
+            # 52-week new-high/low counts all need a real consecutive history
+            # (and 52w data) the live snapshot does not have — report them as
+            # null rather than as live 0s (a single-day advances-declines is
+            # NOT the cumulative ad_line the schema documents).
             return jsonify({
                 "status": "success",
                 "is_sample_data": False,
-                "data": _breadth_to_dict(live),
+                "data": {
+                    "date": date.today().isoformat(),
+                    "advances": advances,
+                    "declines": declines,
+                    "unchanged": raw["unchanged"],
+                    "ad_ratio": round(float(advances) / float(declines), 4) if declines > 0 else 1.0,
+                    "new_highs": None,
+                    "new_lows": None,
+                    "ad_line": None,
+                    "mcclellan_oscillator": None,
+                    "breadth_thrust": None,
+                },
             })
 
     history = _get_calculator().get_history(days=1)

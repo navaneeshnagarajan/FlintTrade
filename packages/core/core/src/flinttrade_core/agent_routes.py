@@ -268,45 +268,48 @@ def start_agent() -> tuple[Any, int]:
             "message": f"LLM client unavailable — configure a provider in Settings ({exc})",
         }), 503
 
-    safety = current_app.config.get("SAFETY")
-    if safety is None:
-        safety = SafetySystem(SafetyConfig())
-
-    request_ctx = RequestContext(
-        jti=str(payload.get("jti") or ""),
-        actor_type="agent",
-        actor_id=_AGENT_ACTOR_ID,
-        mode=_MODE_LIVE,
-        selector=f"{adapter_id}:{account_id}",
-    )
-
-    journal_store = current_app.config.get("TRADE_STORAGE")
-    app_obj = current_app._get_current_object()  # noqa: SLF001
-
-    def _journal_write(order: Any, orderid: str) -> None:
-        if journal_store is None:
-            return
-        with app_obj.app_context():
-            _record_trade_journal(order, orderid, strategy="AutonomousAgent")
-
-    # Mid-flight brake: the session outlives this HTTP request, so the
-    # operator's logout / live→practice downgrade (both revoke the starting
-    # jti) must stop the agent's ORDERS even while its analysis loop runs.
-    # An unavailable revocation store fails CLOSED — this is a live order path.
-    starting_jti = str(payload.get("jti") or "")
-
-    def _pre_dispatch_check() -> str | None:
-        try:
-            from .auth_routes import _is_jti_revoked  # noqa: PLC0415
-
-            if starting_jti and _is_jti_revoked(starting_jti):
-                return "operator session revoked (logout or mode change)"
-        except Exception:
-            logger.exception("agent revocation check failed — refusing order (fail closed)")
-            return "session revocation check unavailable"
-        return None
-
+    # Everything from here to registration runs under ONE try so ANY failure
+    # (config reads, RequestContext, the closures, executor/trader) releases
+    # the sentinel — the slot can never wedge "starting" forever.
     try:
+        safety = current_app.config.get("SAFETY")
+        if safety is None:
+            safety = SafetySystem(SafetyConfig())
+
+        request_ctx = RequestContext(
+            jti=str(payload.get("jti") or ""),
+            actor_type="agent",
+            actor_id=_AGENT_ACTOR_ID,
+            mode=_MODE_LIVE,
+            selector=f"{adapter_id}:{account_id}",
+        )
+
+        journal_store = current_app.config.get("TRADE_STORAGE")
+        app_obj = current_app._get_current_object()  # noqa: SLF001
+
+        def _journal_write(order: Any, orderid: str) -> None:
+            if journal_store is None:
+                return
+            with app_obj.app_context():
+                _record_trade_journal(order, orderid, strategy="AutonomousAgent")
+
+        # Mid-flight brake: the session outlives this HTTP request, so the
+        # operator's logout / live→practice downgrade (both revoke the starting
+        # jti) must stop the agent's ORDERS even while its analysis loop runs.
+        # An unavailable revocation store fails CLOSED — this is a live order path.
+        starting_jti = str(payload.get("jti") or "")
+
+        def _pre_dispatch_check() -> str | None:
+            try:
+                from .auth_routes import _is_jti_revoked  # noqa: PLC0415
+
+                if starting_jti and _is_jti_revoked(starting_jti):
+                    return "operator session revoked (logout or mode change)"
+            except Exception:
+                logger.exception("agent revocation check failed — refusing order (fail closed)")
+                return "session revocation check unavailable"
+            return None
+
         executor = GatedChildExecutor(
             safety=safety,
             router=router,

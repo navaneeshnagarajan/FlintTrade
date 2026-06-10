@@ -424,6 +424,25 @@ async def test_monitor_closes_on_stop_loss() -> None:
 
 
 @pytest.mark.asyncio
+async def test_monitor_closes_on_stop_loss_with_TYPED_quote() -> None:
+    """monitor() must read a TYPED Quote (the production client), not just a
+    dict envelope — else SL/TP is dead on arrival against the live client."""
+    from types import SimpleNamespace
+
+    agent = make_agent()
+    agent.broker.quotes = AsyncMock(return_value=SimpleNamespace(ltp=90.0, prev_close=100.0))
+    agent.state.active_positions["RELIANCE"] = 100.0
+    position = {
+        "symbol": "RELIANCE", "entry_price": 100.0, "stop_loss": 95.0,
+        "take_profit": 110.0, "action": "BUY", "quantity": 1,
+    }
+    await agent.monitor(position)
+    # SL hit (LTP 90 ≤ 95) → the gated reverse order fired and the position closed.
+    agent.order_executor.route_order.assert_awaited_once()
+    assert "RELIANCE" not in agent.state.active_positions
+
+
+@pytest.mark.asyncio
 async def test_monitor_closes_on_take_profit() -> None:
     agent = make_agent(quotes_ltp=112.0)
     agent.state.active_positions["RELIANCE"] = 100.0

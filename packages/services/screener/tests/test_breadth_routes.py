@@ -82,6 +82,10 @@ def test_breadth_current_live_from_quote_sweep(app):
     assert body["data"]["advances"] == 30
     assert body["data"]["declines"] == 18
     assert body["data"]["unchanged"] == 2
+    # Derived multi-day / 52-week indicators are NOT computable from a single
+    # live snapshot — reported null, never as live 0s (the audit's honesty fix).
+    for field in ("ad_line", "mcclellan_oscillator", "breadth_thrust", "new_highs", "new_lows"):
+        assert body["data"][field] is None
 
 
 def test_breadth_current_falls_back_to_sample_when_sweep_fails(app):

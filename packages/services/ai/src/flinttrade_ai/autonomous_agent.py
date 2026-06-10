@@ -842,13 +842,18 @@ class AutonomousTrader:
             return
 
         try:
+            # Parse via the shared normaliser — the production OpenAlgoClient
+            # returns a TYPED Quote, not a dict envelope. (The sibling readers
+            # _fetch_symbol_data/_compute_indicators were converted; this one
+            # was missed, leaving SL/TP dead against the live client.)
             quotes_resp = await self.broker.quotes(
                 symbol=symbol, exchange=self.config.exchange
             )
-            if not isinstance(quotes_resp, dict) or quotes_resp.get("status") != "success":
+            q = _as_quote_fields(quotes_resp)
+            if q is None:
                 return
 
-            ltp = float(quotes_resp.get("data", {}).get("ltp", 0))
+            ltp = float(q.get("ltp", 0) or 0)
             if ltp <= 0:
                 return
 
