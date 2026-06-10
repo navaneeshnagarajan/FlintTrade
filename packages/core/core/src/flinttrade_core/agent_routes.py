@@ -310,6 +310,15 @@ def start_agent() -> tuple[Any, int]:
                 return "session revocation check unavailable"
             return None
 
+        # L2 portfolio state, fetched FRESH per order — the agent session is
+        # long-lived (a cached snapshot would go stale across cycles) and its
+        # order frequency is low, so a per-order fetch is the freshest, cheapest
+        # correct choice. Best-effort: a failure yields empty state (L2 no-op).
+        from .smart_order_routes import gather_portfolio_state  # noqa: PLC0415
+
+        async def _agent_l2_provider() -> tuple[list[Any], float, float]:
+            return await gather_portfolio_state(client, adapter_id)
+
         executor = GatedChildExecutor(
             safety=safety,
             router=router,
@@ -319,6 +328,7 @@ def start_agent() -> tuple[Any, int]:
             audit=current_app.config.get("AUDIT"),
             journal_write=_journal_write,
             pre_dispatch_check=_pre_dispatch_check,
+            portfolio_state_provider=_agent_l2_provider,
         )
 
         from flinttrade_ai.autonomous_agent import AgentConfig  # noqa: PLC0415

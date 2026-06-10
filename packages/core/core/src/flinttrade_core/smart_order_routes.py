@@ -61,6 +61,42 @@ _MAX_JOBS = 50
 
 
 # ---------------------------------------------------------------------------
+# Portfolio state for SafetySystem L2 (position count + margin %)
+# ---------------------------------------------------------------------------
+
+
+async def gather_portfolio_state(client: Any, adapter_id: str) -> tuple[list[Any], float, float]:
+    """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
+
+    Async sibling of ``order_routes._gather_l2_state`` for the gated-executor
+    paths (smart route + agent), which run inside an event loop. Scoped to the
+    OpenAlgo bridge (the only functional adapter — feeding it for a native
+    selector would enforce L2 against the wrong account). Any failure returns
+    empty/zero state so L2 simply enforces nothing rather than blocking.
+    """
+    if adapter_id != "openalgo" or client is None:
+        return [], 0.0, 0.0
+    try:
+        positions = await client.positionbook()
+        funds = await client.funds()
+    except Exception:
+        logger.debug("L2 portfolio-state fetch failed — L2 limits not enforced", exc_info=True)
+        return [], 0.0, 0.0
+
+    def _to_float(value: Any) -> float:
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return 0.0
+
+    return (
+        list(positions or []),
+        _to_float(getattr(funds, "used_margin", 0)),
+        _to_float(getattr(funds, "total_balance", 0)),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Gated child executor — the ONLY broker access the smart router gets
 # ---------------------------------------------------------------------------
 
@@ -104,6 +140,13 @@ class GatedChildExecutor:
             outlives its HTTP request, so logout / live→practice downgrade
             (which revoke the jti) and operator cancellation must be
             re-checked per child, not just at submission.
+        portfolio_state_provider: Optional ``async () -> (positions,
+            used_margin, total_balance)`` awaited before each child so
+            SafetySystem L2 enforces max-positions and margin% against live
+            cumulative exposure. Best-effort (a failing provider yields empty
+            state → L2 no-op, never a blocked order). The provider owns its
+            caching policy: smart routes cache once (bounded duration); the
+            agent fetches fresh (low order frequency, freshest state).
     """
 
     def __init__(
@@ -117,6 +160,7 @@ class GatedChildExecutor:
         audit: Any = None,
         journal_write: Any = None,
         pre_dispatch_check: Any = None,
+        portfolio_state_provider: Any = None,
     ) -> None:
         self._safety = safety
         self._router = router
@@ -126,6 +170,7 @@ class GatedChildExecutor:
         self._audit = audit
         self._journal_write = journal_write
         self._pre_dispatch_check = pre_dispatch_check
+        self._portfolio_state_provider = portfolio_state_provider
 
     async def route_order(self, order: Any) -> _GatedDecision:
         """Run one child order through SafetySystem → gate_order → BrokerRouter.
@@ -152,9 +197,24 @@ class GatedChildExecutor:
             if reason:
                 raise SmartRouteAbort(reason)
 
+        # --- live L2 state (best-effort — never blocks on a fetch failure) --
+        l2_positions: list[Any] = []
+        l2_used_margin = 0.0
+        l2_total_balance = 0.0
+        if self._portfolio_state_provider is not None:
+            try:
+                l2_positions, l2_used_margin, l2_total_balance = await self._portfolio_state_provider()
+            except Exception:
+                logger.debug("portfolio-state provider failed — L2 not enforced this child", exc_info=True)
+
         # --- L1–L5 per child ------------------------------------------------
         try:
-            results = self._safety.check_order(order)
+            results = self._safety.check_order(
+                order,
+                positions=l2_positions,
+                used_margin=l2_used_margin,
+                total_balance=l2_total_balance,
+            )
         except Exception as exc:  # malformed child — refuse, never dispatch
             return _GatedDecision(False, error=f"Order validation failed: {exc}")
         blocked = next((r for r in results if not r.passed), None)
@@ -564,6 +624,16 @@ def start_smart_route() -> tuple[Any, int]:
         with app_obj.app_context():
             _record_trade_journal(order, orderid, strategy="smart-route")
 
+    # L2 portfolio state: gather ONCE for the whole route and cache (a route is
+    # bounded — a single market order or a few-minute TWAP — so a per-child
+    # re-fetch would just add latency for negligible freshness gain).
+    _l2_cache: dict[str, tuple[list[Any], float, float]] = {}
+
+    async def _route_l2_provider() -> tuple[list[Any], float, float]:
+        if "state" not in _l2_cache:
+            _l2_cache["state"] = await gather_portfolio_state(client, adapter_id)
+        return _l2_cache["state"]
+
     executor = GatedChildExecutor(
         safety=safety,
         router=router,
@@ -573,6 +643,7 @@ def start_smart_route() -> tuple[Any, int]:
         audit=current_app.config.get("AUDIT"),
         journal_write=_journal_write,
         pre_dispatch_check=_pre_dispatch_check,
+        portfolio_state_provider=_route_l2_provider,
     )
     depth_provider, volume_provider = _make_providers(client)
     smart_router = SmartOrderRouter(

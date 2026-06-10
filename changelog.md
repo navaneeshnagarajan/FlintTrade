@@ -135,9 +135,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - Trade-journal analytics counted open legs (null P&L) as losing trades, distorting
   win-rate; open legs are now excluded until they have a realised P&L.
 - Safety layer L2 (position-count + margin %) now enforces against **live** portfolio
-  state on the manual order path — it previously ran on empty/zero state and never
-  fired. The live positions + funds are fetched best-effort (a read hiccup never blocks
-  an order), and L2's quantity parse tolerates float-strings.
+  state on the manual order path AND the smart-route / autonomous-agent paths — it
+  previously ran on empty/zero state and never fired. Live positions + funds are
+  fetched best-effort (a read hiccup never blocks an order; smart routes cache once
+  per route, the agent fetches fresh per order), scoped to the functional OpenAlgo
+  adapter, and L2's quantity parse tolerates float-strings.
 
 ### Removed
 

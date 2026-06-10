@@ -341,11 +341,16 @@ def _ctx() -> RequestContext:
     )
 
 
+async def _async_value(value):
+    """Wrap a value in a coroutine (for portfolio_state_provider stubs)."""
+    return value
+
+
 async def test_executor_blocks_child_on_safety_layer():
     """A child failing L1–L5 returns a failed decision and never dispatches."""
 
     class _BlockingSafety:
-        def check_order(self, order):
+        def check_order(self, order, **kwargs):
             class _R:
                 passed = False
                 layer = "L2"
@@ -398,6 +403,68 @@ async def test_executor_passes_real_gate_and_returns_orderid():
     assert decision.passed is True
     assert decision.order_response.orderid == "OID-1"
     assert len(adapter.orders) == 1
+
+
+async def test_executor_enforces_l2_from_portfolio_provider():
+    """A portfolio_state_provider returning ≥ max positions blocks the child
+    at L2 (the gated-executor paths now enforce cumulative exposure too)."""
+    from flinttrade_core.models import Position
+
+    adapter = _NoIoAdapter()
+    executor = mod.GatedChildExecutor(
+        safety=SafetySystem(SafetyConfig(check_market_hours=False, max_positions=1)),
+        router=BrokerRouter({"openalgo": adapter}, _session),
+        request_ctx=_ctx(),
+        adapter_id="openalgo",
+        account_id="default",
+        portfolio_state_provider=lambda: _async_value(
+            ([Position(symbol="INFY", exchange="NSE", quantity="50")], 0.0, 0.0)
+        ),
+    )
+    decision = await executor.route_order(_child_order())
+    assert decision.passed is False
+    assert "L2_POSITION" in decision.error
+    assert adapter.orders == []  # blocked before any dispatch
+
+
+async def test_executor_l2_provider_failure_does_not_block():
+    """A failing provider yields empty L2 state → the child still dispatches."""
+    adapter = _NoIoAdapter()
+
+    async def _boom() -> tuple:
+        raise RuntimeError("broker down")
+
+    executor = mod.GatedChildExecutor(
+        safety=_safety(),
+        router=BrokerRouter({"openalgo": adapter}, _session),
+        request_ctx=_ctx(),
+        adapter_id="openalgo",
+        account_id="default",
+        portfolio_state_provider=_boom,
+    )
+    decision = await executor.route_order(_child_order())
+    assert decision.passed is True
+    assert len(adapter.orders) == 1
+
+
+async def test_gather_portfolio_state_scoped_to_openalgo():
+    """The async gatherer reads OpenAlgo state only — a native selector yields
+    empty (L2 no-op), never OpenAlgo's portfolio mis-applied."""
+    from types import SimpleNamespace
+
+    from flinttrade_core.models import Position
+
+    class _Client:
+        async def positionbook(self):
+            return [Position(symbol="INFY", exchange="NSE", quantity="10")]
+
+        async def funds(self):
+            return SimpleNamespace(used_margin="5", total_balance="10")
+
+    pos, used, total = await mod.gather_portfolio_state(_Client(), "openalgo")
+    assert len(pos) == 1 and used == 5.0 and total == 10.0
+    assert await mod.gather_portfolio_state(_Client(), "dhan") == ([], 0.0, 0.0)
+    assert await mod.gather_portfolio_state(None, "openalgo") == ([], 0.0, 0.0)
 
 
 async def test_executor_pre_dispatch_check_aborts_before_the_gate():
