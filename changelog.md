@@ -135,6 +135,15 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - Trade-journal analytics counted open legs (null P&L) as losing trades, distorting
   win-rate; open legs are now excluded until they have a realised P&L.
 
+### Removed
+
+- **Multi-user backend** (`/api/v1/users/*` CRUD + the `admin`/`trader`/`viewer`
+  account manager, previously opt-in behind `FLINTTRADE_MULTI_USER`) — removed as
+  overscope. FlintTrade is a single-operator personal-use tool (operator == user ==
+  data principal); a multi-user admin surface is out of scope. If ever needed it
+  should be redesigned around the gated-principal model, not a parallel user table.
+  The frontend admin user-CRUD clients were already removed.
+
 ## [0.6.0-alpha] - 2026-05-30
 
 Tag: `v0.6.0-alpha` · Type: SemVer alpha prerelease · Status: not

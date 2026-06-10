@@ -1602,13 +1602,9 @@ def create_flask_app(
     app.config["AUTH_SERVICE"] = _AuthService(db_path=_auth_db)
     app.register_blueprint(auth_bp)
 
-    # Register Multi-user blueprint (/api/v1/users/*) — opt-in via FLINTTRADE_MULTI_USER=1
-    if os.environ.get("FLINTTRADE_MULTI_USER", "").strip() in ("1", "true", "yes"):
-        from .user_manager import UserManager as _UserManager  # noqa: PLC0415
-        from .user_routes import users_bp  # noqa: PLC0415
-        app.config["USER_MANAGER"] = _UserManager(db_path=_auth_db)
-        app.register_blueprint(users_bp)
-        logger.info("Multi-user mode enabled — /api/v1/users/* endpoints registered")
+    # (Multi-user /api/v1/users/* CRUD removed 2026-06-10 as overscope — FlintTrade
+    # is a single-operator tool; operator == user == data principal. Archived to
+    # .local/archive/user-multi-2026-06-10/.)
 
     # Reconnect saved accounts (best-effort, don't block startup)
     try:

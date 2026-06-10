@@ -75,7 +75,7 @@ const setupDocs = [
   ['docs/setup/static-ip-setup.md', 'setup/static-ip-setup', 'Setup', 'Static IP setup notes for broker API access'],
   ['docs/setup/email.md', 'setup/email', 'Setup', 'SMTP and SES setup for recovery email'],
   ['docs/setup/backup.md', 'setup/backup', 'Setup', 'Local backup and restore guide'],
-  ['docs/setup/multi-user.md', 'setup/multi-user', 'Setup', 'Multi-user mode boundary and enablement notes'],
+  ['docs/setup/multi-user.md', 'setup/multi-user', 'Setup', 'Why multi-user mode was removed as overscope'],
 ];
 
 const releaseDocs = [

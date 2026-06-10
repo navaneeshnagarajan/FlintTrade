@@ -1,30 +1,17 @@
-# Multi-User Mode
+# Multi-User Mode — removed (out of scope)
 
-FlintTrade is primarily a personal-use, single-operator trading workstation.
-The multi-user code path exists as an opt-in scaffold for contributors and lab
-setups; it is not a hosted SaaS boundary.
+FlintTrade is a **personal-use, single-operator** trading workstation: the
+operator is the user is the data principal. The multi-user CRUD scaffold
+(`/api/v1/users/*`, an `admin`/`trader`/`viewer` account manager) was **removed
+on 2026-06-10 as overscope** — it added a hosted-SaaS surface this project
+deliberately does not have, and it was opt-in code that nothing enabled.
 
-## Enablement
+If multi-user / multi-tenant support is ever needed, it should be **redesigned
+around the gated-principal model** (the selector-bound `RequestContext` +
+broker `account_acls` that already authorise every order) rather than restored
+as a parallel user table — full per-user workspace, secret, and broker-credential
+isolation, plus audit review and operational runbooks, would be prerequisites
+before any live-broker multi-user deployment.
 
-Set:
-
-```bash
-FLINTTRADE_MULTI_USER=1
-```
-
-When enabled, the backend registers `/v1/users/*` routes and stores users in
-`~/.flinttrade/auth.db`.
-
-## Current Boundary
-
-| Area | Current state |
-|---|---|
-| Users and roles | `admin`, `trader`, and `viewer` records are supported. |
-| Passwords | Argon2 password hashes in SQLite. |
-| Broker credentials | Do not share a live broker account across multiple untrusted users. |
-| Data isolation | Full per-user workspace and broker-credential isolation is still a follow-up architecture item. |
-
-Use multi-user mode only when every user is trusted with the machine and its
-local data. For public or managed deployments, add per-user database isolation,
-secret isolation, audit review, and operational runbooks before enabling live
-broker support.
+The removed code is archived (in-repo history) at
+`.local/archive/user-multi-2026-06-10/` for reference.
