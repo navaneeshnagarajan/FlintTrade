@@ -322,6 +322,84 @@ export const getVolatilityCone = (
     ...(currentIv !== undefined ? { current_iv: currentIv } : {}),
   });
 
+// --- OI change analysis + unusual OI (bare /v1/oi family) -------------------
+
+/** One strike's OI-action classification (signal_short: LB/SC/SB/LU/OA/OR/N). */
+export interface OIChangeSignalRow {
+  strike: number;
+  option_type: "CE" | "PE";
+  oi: number;
+  oi_change: number;
+  price_change: string;
+  signal: string;
+  signal_short: string;
+}
+
+export interface OIChangeAnalysisData {
+  signals: OIChangeSignalRow[];
+  long_buildups: number[];
+  short_coverings: number[];
+  short_buildups: number[];
+  long_unwindings: number[];
+  summary: Record<string, number>;
+}
+
+/**
+ * Classify each strike's OI change as Long Build-up / Short Covering / Short
+ * Build-up / Long Unwinding given the underlying's price direction.
+ *
+ * Registered at the bare ``/v1/oi`` family → {@link postV1}. The backend uses
+ * the live option chain when a broker is connected, else a sample chain; the
+ * caller decides sample-vs-live presentation by connection state (the route's
+ * ``is_sample_data`` flag is a sibling of ``data`` and unwrapped away).
+ */
+export const getOIChangeAnalysis = (
+  symbol: string,
+  exchange: string,
+  expiry: string,
+  priceChange: "up" | "down" | "flat",
+) =>
+  postV1<OIChangeAnalysisData>("oi/analysis", {
+    symbol,
+    exchange,
+    expiry,
+    price_change: priceChange,
+  });
+
+/** One unusual-OI outlier (z-score over the strike OI-change distribution). */
+export interface UnusualOIRow {
+  strike: number;
+  option_type: "CE" | "PE";
+  oi: number;
+  oi_change: number;
+  change_pct: number;
+  z_score: number;
+  direction: "addition" | "reduction";
+}
+
+export interface UnusualOIData {
+  unusual: UnusualOIRow[];
+  count: number;
+  threshold: number;
+}
+
+/**
+ * Detect unusual OI activity — strikes whose OI change is a |z-score| ≥
+ * ``threshold`` outlier. Registered at the bare ``/v1/oi`` family → {@link postV1}.
+ */
+export const getUnusualOI = (
+  symbol: string,
+  exchange: string,
+  expiry: string,
+  threshold?: number,
+) =>
+  postV1<UnusualOIData>("oi/unusual", {
+    symbol,
+    exchange,
+    expiry,
+    ...(threshold !== undefined ? { threshold } : {}),
+  });
+
 export const getEtfScreener = () =>
   get<EtfScreenerResponse>("etf/screener");
 

@@ -63,6 +63,9 @@ const lazyWidgets = {
   // OI Heatmap
   oiheatmap: lazy(() => import("@/widgets/analysis/OIHeatmap/OIHeatmapWidget")),
 
+  // OI Signals (OI-action classification + unusual OI)
+  oisignals: lazy(() => import("@/widgets/analysis/OISignals/OISignalsWidget")),
+
   // Trade Copier (Ditto route)
   tradecopier: lazy(() => import("@/widgets/trading/TradeCopier/TradeCopierWidget")),
 
@@ -192,6 +195,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "depthheatmap", name: "Depth Heatmap", icon: "Flame", category: "Analysis", description: "Heatmap of order book depth changes over time" },
   { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis", description: "Three synchronised chart panels for multi-instrument comparison" },
   { id: "oiheatmap", name: "OI Heatmap", icon: "Grid2x2", category: "Analysis", description: "Heat map of open interest changes across strikes and expiries" },
+  { id: "oisignals", name: "OI Signals", icon: "Activity", category: "Analysis", description: "Per-strike OI-action signals (long build-up / short covering / unwinding) plus unusual-OI outliers" },
   { id: "greekssurface", name: "Greeks Surface", icon: "Box", category: "Analysis", description: "3-D surface plot of option Greeks across strikes and days to expiry" },
   { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Classic, Camarilla, and Woodie pivot levels for the current session" },
   { id: "orderbookreplay", name: "Order Book Replay", icon: "BarChart3", category: "Analysis", description: "Historical replay of the order book for post-session microstructure analysis" },
