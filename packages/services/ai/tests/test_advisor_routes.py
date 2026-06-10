@@ -174,6 +174,28 @@ class TestAdvisorChat:
             )
         assert resp.status_code == 200
 
+    def test_object_context_does_not_500(self, client) -> None:
+        """An object context (the help pill sends {route, activeWidget}) must be
+        accepted, not 500 on .strip(). Regression for the AITutorPill advisor."""
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = _make_llm_response()
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
+        ):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={
+                    "messages": [{"role": "user", "content": "What's my exposure?"}],
+                    "context": {"route": "/lab", "activeWidget": "OptionChain"},
+                },
+            )
+        assert resp.status_code == 200
+        # the object context is flattened into the system prompt the LLM sees
+        conversation = mock_llm.chat.call_args[0][0]
+        ctx_msgs = [m for m in conversation if "route: /lab" in getattr(m, "content", "")]
+        assert ctx_msgs, "object context should be injected as a system message"
+
 
 # ---------------------------------------------------------------------------
 # GET /api/v1/advisor/status

@@ -37,17 +37,34 @@ def _is_llm_configured() -> bool:
         return False
 
 
+def _coerce_context(raw: Any) -> str:
+    """Normalise the request's ``context`` field to a single string.
+
+    The frontend sends ``context`` either as a plain string (legacy) or as an
+    object describing the current UI state (e.g. ``{"route": "/lab",
+    "activeWidget": "OptionChain"}``). Calling ``.strip()`` on the object form
+    raised AttributeError and 500'd the advisor for the floating help pill,
+    which always sends an object — so accept both shapes here.
+    """
+    if isinstance(raw, dict):
+        return ", ".join(f"{k}: {v}" for k, v in raw.items() if v not in (None, "", []))
+    if isinstance(raw, str):
+        return raw.strip()
+    return ""
+
+
 @advisor_bp.route("/advisor", methods=["POST"])
 def advisor_chat() -> tuple[Any, int]:
     """Chat with the AI advisor via the configured LLM backend.
 
     Request JSON (conversation history — preferred):
         messages (list[dict]): Array of ``{role, content}`` dicts.
-        context (str, optional): Additional context (e.g. current positions).
+        context (str | dict, optional): Additional context (e.g. current
+            positions, or a UI-state object like ``{route, activeWidget}``).
 
     Request JSON (legacy single-message):
         message (str): User's message text.
-        context (str, optional): Additional context.
+        context (str | dict, optional): Additional context.
 
     Returns:
         JSON with ``status`` and ``data.response`` on success, or
@@ -62,7 +79,7 @@ def advisor_chat() -> tuple[Any, int]:
         }), 503
 
     body = request.get_json(silent=True) or {}
-    context: str = body.get("context", "").strip()
+    context: str = _coerce_context(body.get("context"))
 
     # Accept messages[] array (new) or message string (legacy)
     raw_messages = body.get("messages")
@@ -138,7 +155,7 @@ def advisor_stream() -> Response | tuple[Any, int]:
         }), 503
 
     body = request.get_json(silent=True) or {}
-    context: str = body.get("context", "").strip()
+    context: str = _coerce_context(body.get("context"))
 
     # Build conversation (same logic as /advisor)
     raw_messages = body.get("messages")
