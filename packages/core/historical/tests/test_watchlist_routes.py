@@ -101,11 +101,41 @@ class TestWatchlistRoutes:
         data = json.loads(resp.data)
         assert data["status"] == "success"
 
-    def test_download_trigger_returns_ok(self, app_client):
+    def test_download_trigger_starts_job(self, app_client, monkeypatch):
+        """POST /download starts a background job and returns its snapshot (202).
+
+        Self-contained: seeds an enabled watchlist item first (test ordering is
+        shuffled under pytest-randomly), and stubs the job manager so no real
+        download thread spawns.
+        """
+        import flinttrade_historical.watchlist_routes as wr
+
+        _post(app_client, "/v1/historify/watchlist",
+              {"symbol": "RELIANCE", "exchange": "NSE", "interval": "1d"})
+
+        captured: dict = {}
+
+        class _StubJob:
+            status = "running"
+
+            @staticmethod
+            def to_dict():
+                return {"job_id": "stub-1", "status": "running", "total": captured.get("total")}
+
+        class _StubManager:
+            @staticmethod
+            def start(*, total, runner, storage_path):
+                captured["total"] = total
+                captured["storage_path"] = storage_path
+                return _StubJob()
+
+        monkeypatch.setattr(wr, "_job_manager", _StubManager())
+
         resp = _post(app_client, "/v1/historify/download",
                      {"start_date": "2026-01-01", "end_date": "2026-01-31"})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = json.loads(resp.data)
         assert data["status"] == "success"
-        assert "triggered" in data["data"]
-        assert "items" in data["data"]
+        assert data["data"]["job_id"] == "stub-1"
+        assert data["data"]["status"] == "running"
+        assert captured["total"] >= 1

@@ -124,14 +124,14 @@ dev: ## Start terminal dev server + FlintTrade backend
 
 test: ## Run all tests
 ifeq ($(OS),Windows_NT)
-	@$(PYTHON) -m pytest packages/core/core/tests/ packages/services/engine/tests/ packages/integrations/gateway/tests/ packages/services/screener/tests/ packages/core/data/tests/ packages/core/historical/tests/ packages/core/indicators/tests/ packages/services/ai/tests/ packages/services/automation/tests/ packages/services/backtest/tests/ packages/services/journal/tests/ packages/integrations/webhooks/tests/ tests/ -v --tb=short --import-mode=importlib
+	@$(PYTHON) -m pytest packages/core/core/tests/ packages/services/engine/tests/ packages/integrations/gateway/tests/ packages/services/screener/tests/ packages/core/data/tests/ packages/core/historical/tests/ packages/core/indicators/tests/ packages/services/ai/tests/ packages/services/automation/tests/ packages/services/backtest/tests/ packages/services/ditto/tests/ packages/services/journal/tests/ packages/integrations/webhooks/tests/ tests/ -v --tb=short --import-mode=importlib
 else
 	@$(PYTHON) -m pytest packages/*/*/tests/ tests/ -v --tb=short --import-mode=importlib
 endif
 
 test-fast: ## Run tests, stop on first failure
 ifeq ($(OS),Windows_NT)
-	@$(PYTHON) -m pytest packages/core/core/tests/ packages/services/engine/tests/ packages/integrations/gateway/tests/ packages/services/screener/tests/ packages/core/data/tests/ packages/core/historical/tests/ packages/core/indicators/tests/ packages/services/ai/tests/ packages/services/automation/tests/ packages/services/backtest/tests/ packages/services/journal/tests/ packages/integrations/webhooks/tests/ tests/ -x --tb=short --import-mode=importlib
+	@$(PYTHON) -m pytest packages/core/core/tests/ packages/services/engine/tests/ packages/integrations/gateway/tests/ packages/services/screener/tests/ packages/core/data/tests/ packages/core/historical/tests/ packages/core/indicators/tests/ packages/services/ai/tests/ packages/services/automation/tests/ packages/services/backtest/tests/ packages/services/ditto/tests/ packages/services/journal/tests/ packages/integrations/webhooks/tests/ tests/ -x --tb=short --import-mode=importlib
 else
 	@$(PYTHON) -m pytest packages/*/*/tests/ tests/ -x --tb=short --import-mode=importlib
 endif
