@@ -237,3 +237,36 @@ export async function downloadPortfolioReport(
   URL.revokeObjectURL(url);
   return positions.length + holdings.length;
 }
+
+/**
+ * Import tabular rows from a user-selected `.xlsx` file.
+ *
+ * Streams the file to the multipart `/import/upload` endpoint (the server-path
+ * `/import` variant is useless to a browser SPA) and returns the parsed rows —
+ * first sheet row as headers, one object per data row.
+ *
+ * No Content-Type header is set: the browser supplies the multipart boundary.
+ *
+ * @throws Error when the request fails or the workbook cannot be parsed.
+ */
+export async function uploadExcel(
+  file: File,
+  sheetName = "Sheet1",
+): Promise<Record<string, unknown>[]> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("sheet_name", sheetName);
+
+  const resp = await fetch(`${getBase()}/api/v1/integration/excel/import/upload`, {
+    method: "POST",
+    headers: buildHeaders(false),
+    body: form,
+  });
+  if (!resp.ok) {
+    const msg = await resp.json().then((b) => b?.message).catch(() => null);
+    throw new Error(msg ?? `Excel import failed (HTTP ${resp.status})`);
+  }
+
+  const body = (await resp.json()) as { data?: { rows?: Record<string, unknown>[] } };
+  return body.data?.rows ?? [];
+}

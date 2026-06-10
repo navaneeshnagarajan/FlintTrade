@@ -229,3 +229,61 @@ def test_import_bridge_error(app):
             json={"file_path": "missing.xlsx"},
         )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/integration/excel/import/upload
+# ---------------------------------------------------------------------------
+
+
+def test_import_upload_ok(client, app):
+    """200 with rows parsed from the uploaded workbook via a temp file."""
+    import io
+
+    resp = client.post(
+        "/api/v1/integration/excel/import/upload",
+        data={
+            "file": (io.BytesIO(b"PK\x03\x04fake-xlsx"), "watchlist.xlsx"),
+            "sheet_name": "Symbols",
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "success"
+    assert body["data"]["count"] == 1
+    assert body["data"]["sheet_name"] == "Symbols"
+    # The bridge was handed a real temp path that is removed afterwards.
+    called_path = mod._bridge.import_from_excel.call_args[0][0]  # noqa: SLF001
+    import os
+
+    assert called_path.endswith(".xlsx")
+    assert not os.path.exists(called_path)
+
+
+def test_import_upload_missing_file(client):
+    """400 when no file part is sent."""
+    resp = client.post(
+        "/api/v1/integration/excel/import/upload",
+        data={},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    assert "file is required" in resp.get_json()["message"]
+
+
+def test_import_upload_bridge_error(app):
+    """400 on ExcelBridgeError (e.g. not a real workbook) — temp file still removed."""
+    import io
+
+    bridge = _mock_bridge()
+    bridge.import_from_excel.side_effect = ExcelBridgeError("Invalid workbook")
+    mod.init_excel_routes(bridge)
+    with app.test_client() as c:
+        resp = c.post(
+            "/api/v1/integration/excel/import/upload",
+            data={"file": (io.BytesIO(b"not-xlsx"), "bad.xlsx")},
+            content_type="multipart/form-data",
+        )
+    assert resp.status_code == 400
+    assert "Invalid workbook" in resp.get_json()["message"]

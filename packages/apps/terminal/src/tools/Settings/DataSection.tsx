@@ -4,6 +4,7 @@
 
 import { FieldRow, TextInput, SectionTitle } from "./shared";
 import { HistoricalDownloadPanel } from "./HistoricalDownloadPanel";
+import { WatchlistManagerPanel } from "./WatchlistManagerPanel";
 
 interface DataPathSettings {
   fastStoragePath: string;
@@ -50,6 +51,8 @@ export function DataSection({ settings, onChange }: DataSectionProps) {
           aria-label="Archive storage path"
         />
       </FieldRow>
+
+      <WatchlistManagerPanel />
 
       <HistoricalDownloadPanel />
     </div>

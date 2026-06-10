@@ -6,7 +6,8 @@ Endpoints
 ---------
 POST /api/v1/integration/excel/export           — export list[dict] to Excel
 POST /api/v1/integration/excel/portfolio/report — create portfolio report
-GET  /api/v1/integration/excel/import           — import data from an Excel file
+POST /api/v1/integration/excel/import           — import from a server-side file
+POST /api/v1/integration/excel/import/upload    — import from a browser upload
 
 Note on file paths:
     These endpoints operate on server-side file paths. In production they
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -291,4 +293,47 @@ def import_data() -> tuple[Response, int]:
     return jsonify({
         "status": "success",
         "data": {"rows": rows, "count": len(rows)},
+    }), 200
+
+
+@excel_bp.route("/import/upload", methods=["POST"])
+def import_upload() -> tuple[Response, int]:
+    """Import data from a browser-uploaded ``.xlsx`` (multipart/form-data).
+
+    Companion to ``/import`` (which reads a server-side path): the uploaded
+    workbook is spooled to a temporary file, parsed via the same bridge, and
+    the temp file removed.
+
+    Form fields:
+        file       (file, required):  The ``.xlsx`` upload.
+        sheet_name (str, optional):   Worksheet to read (default ``"Sheet1"``).
+
+    Returns:
+        JSON ``{"status": "success", "data": {"rows": [...], "count": N}}``.
+    """
+    upload = request.files.get("file")
+    if upload is None or not (upload.filename or "").strip():
+        return jsonify({"status": "error", "message": "file is required"}), 400
+
+    sheet_name: str = request.form.get("sheet_name", "Sheet1")
+
+    tmp_path: str | None = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+        with os.fdopen(fd, "wb") as handle:
+            upload.save(handle)
+        rows = _get_bridge().import_from_excel(tmp_path, sheet_name)
+    except ExcelBridgeError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    logger.info("Excel upload import: %s rows from %s", len(rows), upload.filename)
+    return jsonify({
+        "status": "success",
+        "data": {"rows": rows, "count": len(rows), "sheet_name": sheet_name},
     }), 200
