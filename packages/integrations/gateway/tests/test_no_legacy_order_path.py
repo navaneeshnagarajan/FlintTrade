@@ -38,7 +38,9 @@ _GATED_RECEIVER_RE = re.compile(
 # guard below — it must be gated through gate_order -> BrokerRouter instead.
 _RAW_ORDER_ALLOWLIST = {
     # Dormant — not wired to any live route/schedule (PLAN.md tracks the refactor):
-    "packages/services/ai/src/flinttrade_ai/autonomous_agent.py",
+    # (flinttrade_ai/autonomous_agent.py REMOVED 2026-06-10: its order writes now
+    #  go through an injected gated executor — SafetySystem → gate_order →
+    #  BrokerRouter — and it fails closed without one.)
     "packages/services/engine/src/flinttrade_engine/bracket_order.py",
     "packages/services/engine/src/flinttrade_engine/router.py",
     "packages/services/engine/src/flinttrade_engine/strategies/wheel_live.py",

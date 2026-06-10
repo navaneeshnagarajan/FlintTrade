@@ -33,13 +33,30 @@ from flinttrade_ai.autonomous_agent import (
 # ---------------------------------------------------------------------------
 
 
+class StubDecision:
+    """Decision shape the gated executor returns (passed/order_response/error)."""
+
+    def __init__(self, passed: bool = True, orderid: str = "ORD001", error: str = "") -> None:
+        self.passed = passed
+        self.order_response = MagicMock(orderid=orderid) if passed else None
+        self.error = error
+
+
+def make_gated_executor(passed: bool = True, error: str = "") -> MagicMock:
+    """Stub of the injected gated order executor (route_order coroutine)."""
+    executor = MagicMock()
+    executor.route_order = AsyncMock(return_value=StubDecision(passed=passed, error=error))
+    return executor
+
+
 def make_agent(
     symbols: list[str] | None = None,
     llm_response: str = "BUY",
     order_status: str = "success",
     quotes_ltp: float = 100.0,
+    with_executor: bool = True,
 ) -> AutonomousTrader:
-    """Build an AutonomousTrader with fully mocked LLM and broker."""
+    """Build an AutonomousTrader with fully mocked LLM, broker, and executor."""
     symbols = symbols or ["RELIANCE"]
     config = AgentConfig(
         symbols=symbols,
@@ -83,13 +100,19 @@ def make_agent(
         "status": "error",
         "message": "no data",
     })
-    mock_broker.place_order = AsyncMock(return_value={
-        "status": order_status,
-        "data": {"price": quotes_ltp, "orderid": "ORD001"},
-    })
-    mock_broker.close_position = AsyncMock(return_value={"status": "success"})
+    # The broker mock exposes NO order-write methods — the agent's only order
+    # path is the injected gated executor; a regression that reaches for
+    # broker.place_order would AttributeError loudly here.
+    del mock_broker.place_order
+    del mock_broker.close_position
 
-    return AutonomousTrader(llm_client=mock_llm, openalgo_client=mock_broker, config=config)
+    executor = make_gated_executor(passed=(order_status == "success")) if with_executor else None
+    return AutonomousTrader(
+        llm_client=mock_llm,
+        openalgo_client=mock_broker,
+        config=config,
+        order_executor=executor,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +249,50 @@ async def test_execute_updates_last_signal() -> None:
     assert agent.state.last_signals["RELIANCE"] == TradeSignal.SELL
 
 
+@pytest.mark.asyncio
+async def test_execute_fails_closed_without_executor() -> None:
+    """No gated executor wired → the agent must NOT place an order anywhere."""
+    agent = make_agent(with_executor=False)
+    risk = RiskAssessment(allowed=True, position_qty=1)
+    result = await agent.execute(TradeSignal.BUY, "RELIANCE", risk)
+    assert result["status"] == "blocked"
+    assert "gated" in result["reason"]
+    assert "RELIANCE" not in agent.state.active_positions
+    assert agent.state.trade_counts["RELIANCE"] == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_typed_order_via_executor() -> None:
+    """The executor receives a typed Order — the shape gate_order HMACs."""
+    agent = make_agent(order_status="success")
+    risk = RiskAssessment(allowed=True, position_qty=2, stop_loss=2450.0, take_profit=2600.0)
+    await agent.execute(TradeSignal.BUY, "RELIANCE", risk, entry_price=2500.0)
+
+    agent.order_executor.route_order.assert_awaited_once()
+    order = agent.order_executor.route_order.await_args.args[0]
+    assert order.symbol == "RELIANCE"
+    assert order.action.value == "BUY"
+    assert order.quantity == "2"
+    assert order.strategy == "AutonomousAgent"
+    # SL/TP monitoring context recorded for the in-cycle monitor.
+    details = agent.state.position_details["RELIANCE"]
+    assert details["stop_loss"] == 2450.0
+    assert details["take_profit"] == 2600.0
+    assert details["entry_price"] == 2500.0
+
+
+@pytest.mark.asyncio
+async def test_execute_refused_decision_is_an_error_not_a_position() -> None:
+    """A gate/router refusal records nothing and surfaces the error."""
+    agent = make_agent()
+    agent.order_executor = make_gated_executor(passed=False, error="Blocked by safety system [L2]")
+    risk = RiskAssessment(allowed=True, position_qty=1)
+    result = await agent.execute(TradeSignal.BUY, "RELIANCE", risk)
+    assert result["status"] == "error"
+    assert "L2" in result["error"]
+    assert "RELIANCE" not in agent.state.active_positions
+
+
 # ---------------------------------------------------------------------------
 # Decide (async)
 # ---------------------------------------------------------------------------
@@ -355,6 +422,82 @@ async def test_monitor_no_close_within_range() -> None:
     await agent.monitor(position)
     # Position should remain open
     assert "RELIANCE" in agent.state.active_positions
+
+
+@pytest.mark.asyncio
+async def test_monitor_square_off_goes_through_gated_executor() -> None:
+    """The SL exit is a gated reverse order, not a raw broker write."""
+    agent = make_agent(quotes_ltp=90.0)
+    agent.state.active_positions["RELIANCE"] = 100.0
+    position = {
+        "symbol": "RELIANCE",
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 110.0,
+        "action": "BUY",
+        "quantity": 1,
+    }
+    await agent.monitor(position)
+    agent.order_executor.route_order.assert_awaited_once()
+    order = agent.order_executor.route_order.await_args.args[0]
+    assert order.action.value == "SELL"  # reverse of the BUY position
+
+
+@pytest.mark.asyncio
+async def test_monitor_fails_closed_without_executor() -> None:
+    """SL hit but no executor → the position stays tracked, P&L untouched."""
+    agent = make_agent(quotes_ltp=90.0, with_executor=False)
+    agent.state.active_positions["RELIANCE"] = 100.0
+    position = {
+        "symbol": "RELIANCE",
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 110.0,
+        "action": "BUY",
+        "quantity": 1,
+    }
+    await agent.monitor(position)
+    assert "RELIANCE" in agent.state.active_positions
+    assert agent.state.daily_pnl == 0.0
+
+
+@pytest.mark.asyncio
+async def test_monitor_refused_square_off_keeps_position() -> None:
+    """A refused exit order must NOT mark the position closed."""
+    agent = make_agent(quotes_ltp=90.0)
+    agent.order_executor = make_gated_executor(passed=False, error="kill switch")
+    agent.state.active_positions["RELIANCE"] = 100.0
+    position = {
+        "symbol": "RELIANCE",
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 110.0,
+        "action": "BUY",
+        "quantity": 1,
+    }
+    await agent.monitor(position)
+    assert "RELIANCE" in agent.state.active_positions
+    assert agent.state.daily_pnl == 0.0
+
+
+@pytest.mark.asyncio
+async def test_square_off_all_places_gated_reverse_orders() -> None:
+    """End-of-day square-off exits each position through the gate."""
+    agent = make_agent()
+    agent.state.active_positions["RELIANCE"] = 100.0
+    agent.state.position_details["RELIANCE"] = {
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 110.0,
+        "action": "BUY",
+        "quantity": 1,
+    }
+    await agent._square_off_all()
+    agent.order_executor.route_order.assert_awaited_once()
+    order = agent.order_executor.route_order.await_args.args[0]
+    assert order.action.value == "SELL"
+    assert "RELIANCE" not in agent.state.active_positions
+    assert "RELIANCE" not in agent.state.position_details
 
 
 # ---------------------------------------------------------------------------

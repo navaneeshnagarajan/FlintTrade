@@ -162,6 +162,8 @@ class AgentState:
         daily_pnl:       Accumulated session P&L.
         trade_counts:    Number of completed trades per symbol.
         active_positions: Currently open positions {symbol: entry_price}.
+        position_details: Full per-symbol position context the SL/TP monitor
+            needs: ``{entry_price, stop_loss, take_profit, action, quantity}``.
         stop_loss_hit:   True if daily_stop_loss has been breached.
         squared_off:     True if all positions squared off for the day.
         last_signals:    Most recent signal per symbol.
@@ -171,6 +173,7 @@ class AgentState:
     daily_pnl: float = 0.0
     trade_counts: dict[str, int] = field(default_factory=dict)
     active_positions: dict[str, float] = field(default_factory=dict)
+    position_details: dict[str, dict[str, Any]] = field(default_factory=dict)
     stop_loss_hit: bool = False
     squared_off: bool = False
     last_signals: dict[str, str] = field(default_factory=dict)
@@ -213,8 +216,9 @@ class AutonomousTrader:
         )
         trader = AutonomousTrader(
             llm_client=LLMClient(),
-            openalgo_client=OpenAlgoClient(),
+            openalgo_client=OpenAlgoClient(),   # market-data reads only
             config=config,
+            order_executor=gated_executor,      # the ONLY order path (gated)
         )
         await trader.run_cycle()          # single cycle
         await trader.run_session()        # full session loop
@@ -226,23 +230,34 @@ class AutonomousTrader:
         openalgo_client: Any,
         config: AgentConfig | None = None,
         vault: Any | None = None,
+        order_executor: Any | None = None,
     ) -> None:
         """Initialise the autonomous trader.
 
         Args:
             llm_client:       FlintTrade LLMClient instance.
-            openalgo_client:  FlintTrade OpenAlgoClient instance.
+            openalgo_client:  FlintTrade OpenAlgoClient instance — used for
+                MARKET DATA reads only (quotes/depth/history). The agent never
+                places orders through it.
             config:           Agent configuration. Uses safe defaults if None.
             vault:            Optional :class:`~flinttrade_ai.obsidian_bridge.ObsidianVault`.
                 When supplied (and available), the agent reads the operator's
                 notes as decision context and journals each decision back. Pure
                 vault I/O — never on the order path; any vault error degrades to
                 "no context / no journal" rather than disrupting trading.
+            order_executor:   The agent's ONLY order path — an object exposing
+                ``async route_order(order) -> decision`` where every dispatch
+                runs the full gated execution chain (SafetySystem L1–L5 →
+                ``gate_order`` one-shot ``SafetyContext`` → ``BrokerRouter``),
+                e.g. :class:`flinttrade_core.smart_order_routes.GatedChildExecutor`.
+                When None (the default), order placement FAILS CLOSED — the
+                agent can analyse and signal but never reach a broker.
         """
         self.llm = llm_client
         self.broker = openalgo_client
         self.config = config or AgentConfig()
         self.vault = vault
+        self.order_executor = order_executor
         self.state = AgentState(
             trade_counts={sym: 0 for sym in self.config.symbols},
             last_signals={sym: TradeSignal.HOLD for sym in self.config.symbols},
@@ -631,16 +646,40 @@ class AutonomousTrader:
     # Step 5: Execute
     # ------------------------------------------------------------------
 
-    async def execute(self, signal: str, symbol: str, risk: RiskAssessment) -> dict[str, Any]:
-        """Place an order via OpenAlgo if risk assessment allows.
+    def _build_market_order(self, symbol: str, action: str, quantity: int) -> Any:
+        """Build a typed MARKET :class:`~flinttrade_core.models.Order` for the gate.
 
-        Uses placeorder (market order) for instant execution — avoids the
-        15-45s latency of limit order queue as noted in Agentic-Trader docs.
+        The gated executor (and the SafetyContext HMAC behind it) operates on
+        the canonical typed Order, not OpenAlgo kwargs.
+        """
+        from flinttrade_core.models import Action, Exchange, Order, PriceType  # noqa: PLC0415
+
+        return Order(
+            symbol=symbol,
+            exchange=Exchange(self.config.exchange),
+            action=Action(action),
+            pricetype=PriceType.MARKET,
+            quantity=str(quantity),
+            product=self.config.product,  # type: ignore[arg-type]
+            strategy="AutonomousAgent",
+        )
+
+    async def execute(
+        self, signal: str, symbol: str, risk: RiskAssessment, entry_price: float = 0.0
+    ) -> dict[str, Any]:
+        """Place a MARKET order through the gated executor if risk allows.
+
+        The agent's ONLY order path is the injected ``order_executor`` — every
+        child runs SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter``.
+        Without an executor this FAILS CLOSED (the agent can analyse but never
+        trade), rather than falling back to any raw broker client.
 
         Args:
             signal: "BUY" or "SELL".
             symbol: Instrument symbol.
             risk:   Pre-validated RiskAssessment.
+            entry_price: Last traded price at decision time — recorded so the
+                SL/TP monitor has a real entry reference.
 
         Returns:
             Dict with order response or error information.
@@ -649,36 +688,45 @@ class AutonomousTrader:
             logger.info("Execution blocked for %s: %s", symbol, risk.reason)
             return {"status": "blocked", "reason": risk.reason}
 
+        if self.order_executor is None:
+            logger.warning(
+                "Execution blocked for %s: no gated order executor wired — "
+                "the agent cannot place live orders without the "
+                "SafetySystem → gate_order → BrokerRouter path",
+                symbol,
+            )
+            return {
+                "status": "blocked",
+                "reason": (
+                    "no gated order executor wired — live trading from the agent "
+                    "requires the gated execution path"
+                ),
+            }
+
         action = "BUY" if signal == TradeSignal.BUY else "SELL"
         try:
-            order_resp = await self.broker.place_order(  # type: ignore[attr-defined]
-                symbol=symbol,
-                exchange=self.config.exchange,
-                action=action,
-                quantity=risk.position_qty,
-                pricetype="MARKET",
-                product=self.config.product,
-                price=0,
-                trigger_price=0,
-                disclosed_quantity=0,
-                strategy="AutonomousAgent",
-            )
+            order = self._build_market_order(symbol, action, risk.position_qty)
+            decision = await self.order_executor.route_order(order)
 
-            if isinstance(order_resp, dict) and order_resp.get("status") == "success":
-                # Track position and trade count
-                ltp_guess = 0.0
-                data = order_resp.get("data", {})
-                if isinstance(data, dict):
-                    ltp_guess = float(data.get("price", 0) or 0)
+            if getattr(decision, "passed", False):
+                orderid = str(getattr(decision.order_response, "orderid", "") or "")
                 async with self._state_lock:
-                    self.state.active_positions[symbol] = ltp_guess
+                    self.state.active_positions[symbol] = entry_price
+                    self.state.position_details[symbol] = {
+                        "entry_price": entry_price,
+                        "stop_loss": risk.stop_loss,
+                        "take_profit": risk.take_profit,
+                        "action": action,
+                        "quantity": risk.position_qty,
+                    }
                     self.state.trade_counts[symbol] = self.state.trade_counts.get(symbol, 0) + 1
                     self.state.last_signals[symbol] = signal
-                logger.info("Order placed: %s %s x%d", action, symbol, risk.position_qty)
-            else:
-                logger.warning("Order rejected for %s: %s", symbol, order_resp)
+                logger.info("Order placed: %s %s x%d (%s)", action, symbol, risk.position_qty, orderid)
+                return {"status": "success", "data": {"orderid": orderid, "price": entry_price}}
 
-            return order_resp or {}
+            error = str(getattr(decision, "error", "") or "order refused")
+            logger.warning("Order refused for %s: %s", symbol, error)
+            return {"status": "error", "error": error}
 
         except Exception as exc:
             logger.error("Execution error for %s: %s", symbol, exc)
@@ -740,21 +788,30 @@ class AutonomousTrader:
                     logger.info("Take-profit hit for %s: LTP %.2f <= TP %.2f", symbol, ltp, tp)
 
             if should_close:
+                if self.order_executor is None:
+                    # Fail closed: without the gated path no exit order can be
+                    # placed. (An executor-less agent can never have OPENED a
+                    # position either — execute() fails closed — so this only
+                    # fires if state was injected externally.)
+                    logger.warning(
+                        "SL/TP hit for %s but no gated order executor is wired — "
+                        "cannot square off", symbol,
+                    )
+                    return
+
                 exit_action = "SELL" if action == "BUY" else "BUY"
-                await self.broker.place_order(  # type: ignore[attr-defined]
-                    symbol=symbol,
-                    exchange=self.config.exchange,
-                    action=exit_action,
-                    quantity=qty,
-                    pricetype="MARKET",
-                    product=self.config.product,
-                    price=0,
-                    trigger_price=0,
-                    disclosed_quantity=0,
-                    strategy="AutonomousAgent",
-                )
+                order = self._build_market_order(symbol, exit_action, qty)
+                decision = await self.order_executor.route_order(order)
+                if not getattr(decision, "passed", False):
+                    logger.warning(
+                        "Square-off refused for %s: %s — position stays tracked",
+                        symbol, getattr(decision, "error", "") or "order refused",
+                    )
+                    return
+
                 async with self._state_lock:
                     self.state.active_positions.pop(symbol, None)
+                    self.state.position_details.pop(symbol, None)
                     self.state.daily_pnl += pnl
 
                     if self.state.daily_pnl <= self.config.daily_stop_loss:
@@ -798,7 +855,7 @@ class AutonomousTrader:
 
             signal = await self.decide(market_data)
             risk = self._assess_risk(signal, market_data)
-            exec_result = await self.execute(signal, symbol, risk)
+            exec_result = await self.execute(signal, symbol, risk, entry_price=market_data.ltp)
             cycle_result["actions"][symbol] = {
                 "signal": signal,
                 "risk_allowed": risk.allowed,
@@ -806,6 +863,17 @@ class AutonomousTrader:
                 "order": exec_result,
             }
             self._journal_decision(symbol, signal, risk, exec_result)
+
+        # SL/TP monitoring — previously defined but never invoked, so open
+        # positions went unmanaged until end-of-day square-off. Check every
+        # tracked position once per cycle against its stop/target.
+        async with self._state_lock:
+            monitored = [
+                {"symbol": symbol, **details}
+                for symbol, details in self.state.position_details.items()
+            ]
+        for position in monitored:
+            await self.monitor(position)
 
         return cycle_result
 
@@ -848,14 +916,46 @@ class AutonomousTrader:
             )
 
     async def _square_off_all(self) -> None:
-        """Square off all active positions at market price."""
+        """Square off all active positions with gated reverse MARKET orders.
+
+        Places one reverse order per tracked position through the gated
+        executor (rather than a broker-level close-all, which OpenAlgo applies
+        regardless of strategy — quirk #2 — and which would bypass the gate).
+        Fails closed without an executor; an executor-less agent can never
+        have opened a position, so there is nothing to square off.
+        """
+        if self.order_executor is None:
+            logger.warning("Square-off skipped — no gated order executor wired")
+            return
+
         async with self._state_lock:
-            positions_snapshot = list(self.state.active_positions.items())
-        for symbol, _entry_price in positions_snapshot:
+            details_snapshot = {
+                symbol: dict(details)
+                for symbol, details in self.state.position_details.items()
+            }
+            # Positions tracked without details (externally injected state)
+            # fall back to last-signal direction and configured size.
+            for symbol in self.state.active_positions:
+                details_snapshot.setdefault(symbol, {
+                    "action": self.state.last_signals.get(symbol, "BUY"),
+                    "quantity": self.config.max_position_size,
+                })
+
+        for symbol, details in details_snapshot.items():
             try:
-                await self.broker.close_position(strategy="AutonomousAgent")
+                exit_action = "SELL" if str(details.get("action", "BUY")) == "BUY" else "BUY"
+                qty = int(details.get("quantity", self.config.max_position_size) or 1)
+                order = self._build_market_order(symbol, exit_action, qty)
+                decision = await self.order_executor.route_order(order)
+                if not getattr(decision, "passed", False):
+                    logger.error(
+                        "Square-off refused for %s: %s",
+                        symbol, getattr(decision, "error", "") or "order refused",
+                    )
+                    continue
                 async with self._state_lock:
                     self.state.active_positions.pop(symbol, None)
+                    self.state.position_details.pop(symbol, None)
                 logger.info("Squared off position in %s", symbol)
             except Exception as exc:
                 logger.error("Square-off failed for %s: %s", symbol, exc)
