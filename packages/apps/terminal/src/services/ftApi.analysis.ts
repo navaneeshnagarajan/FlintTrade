@@ -400,6 +400,43 @@ export const getUnusualOI = (
     ...(threshold !== undefined ? { threshold } : {}),
   });
 
+// --- Portfolio optimiser (bare /v1/portfolio family) ------------------------
+
+export type OptimisationMethod =
+  | "markowitz" | "risk_parity" | "equal_weight" | "min_variance" | "max_sharpe";
+
+export interface PortfolioOptimiseConfig {
+  method?: OptimisationMethod;
+  risk_free_rate?: number;
+  max_weight?: number;
+  min_weight?: number;
+}
+
+export interface PortfolioResult {
+  weights: Record<string, number>;
+  expected_return: number;
+  expected_volatility: number;
+  sharpe_ratio: number;
+  diversification_ratio: number;
+}
+
+/**
+ * Mean-variance optimise portfolio weights over a basket's daily-return series.
+ *
+ * The numpy/scipy optimiser (`portfolio_optimiser.py`) is registered at the bare
+ * ``/v1/portfolio`` family → {@link postV1}. ``returns`` maps ticker → an
+ * EQUAL-LENGTH daily-return series (the backend builds a `pd.DataFrame` from it,
+ * so callers must align/truncate the per-ticker series to a common length).
+ */
+export const optimisePortfolio = (
+  returns: Record<string, number[]>,
+  config?: PortfolioOptimiseConfig,
+) =>
+  postV1<PortfolioResult>("portfolio/optimise", {
+    returns,
+    ...(config ? { config } : {}),
+  });
+
 export const getEtfScreener = () =>
   get<EtfScreenerResponse>("etf/screener");
 
